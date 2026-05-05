@@ -90,15 +90,24 @@
     category        TEXT NOT NULL,                   -- 'news','blog','social'
     bootstrap_tags  TEXT[] NOT NULL DEFAULT '{}',    -- fallback tags when LLM tagger fails
     status          TEXT NOT NULL DEFAULT 'active',  -- 'active','failed','disabled'
-    added_by        UUID REFERENCES users(id),
+    added_by        UUID REFERENCES users(id) ON DELETE SET NULL,
     added_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_fetch_at   TIMESTAMPTZ,
     last_success_at TIMESTAMPTZ,
     consecutive_failures INT NOT NULL DEFAULT 0,
+    deleted_at      TIMESTAMPTZ,                     -- soft-delete; NULL = active
+    deleted_by      UUID REFERENCES users(id) ON DELETE SET NULL,
     UNIQUE (fetcher, url)
   );
+
+  -- Soft-delete semantics: /remove-source sets deleted_at and stops the fetcher
+  -- for that source. Existing post rows remain (post.source_id is ON DELETE
+  -- RESTRICT, so saved_post references still resolve). Hard delete is forbidden;
+  -- the (fetcher, url) UNIQUE constraint means re-adding via /add-source clears
+  -- deleted_at on the existing row instead of inserting. Bootstrap loader skips
+  -- rows where deleted_at IS NOT NULL.
                                                                                                                                                                                                
-  CREATE INDEX idx_source_status ON source(status);
+  CREATE INDEX idx_source_status ON source(status) WHERE deleted_at IS NULL;
                                                                                                                                                                                                
   tag (Tier-1 controlled vocab)
                                                                                                                                                                                                
@@ -114,11 +123,11 @@
   source_subscription (which scopes follow which sources)
                               
   CREATE TABLE source_subscription (
-    scope_kind  TEXT NOT NULL,                       -- 'user' or 'group'
+    scope_kind  TEXT NOT NULL,                       -- 'dm' or 'group'; for 'dm', scope_id = users.id
     scope_id    UUID NOT NULL,
     source_id   UUID NOT NULL REFERENCES source(id) ON DELETE CASCADE,
     added_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-    added_by    UUID REFERENCES users(id),
+    added_by    UUID REFERENCES users(id) ON DELETE SET NULL,
     PRIMARY KEY (scope_kind, scope_id, source_id)
   );
                                                                                                                                                                                                
@@ -127,15 +136,7 @@
   scope_tag (which tags appear in periodic summaries)
                                                                                                                                                                                                
   CREATE TABLE scope_tag (
-    scope_kind  TEXT NOT NULL,
-    scope_id    UUID NOT NULL,
-    tag_id      UUID NOT NULL REFERENCES tag(id) ON DELETE CASCADE,
-    PRIMARY KEY (scope_kind, scope_id, tag_id)
-  );
-
-
-  CREATE TABLE scope_tag (
-    scope_kind  TEXT NOT NULL,
+    scope_kind  TEXT NOT NULL,                       -- 'dm' or 'group'
     scope_id    UUID NOT NULL,
     tag_id      UUID NOT NULL REFERENCES tag(id) ON DELETE CASCADE,
     PRIMARY KEY (scope_kind, scope_id, tag_id)
@@ -144,11 +145,16 @@
   scope_preferences
 
   CREATE TABLE scope_preferences (
-    scope_kind  TEXT NOT NULL,
+    scope_kind  TEXT NOT NULL,                       -- 'dm' or 'group'
     scope_id    UUID NOT NULL,
     language    TEXT NOT NULL DEFAULT 'en',          -- ISO 639-1; 'en','cs',...
     timezone    TEXT,                                -- override; defaults to groups.timezone or UTC
     digest_enabled BOOLEAN NOT NULL DEFAULT TRUE,    -- send 8am/8pm digest?
+    tag_follow_mode TEXT NOT NULL DEFAULT 'implicit_source_tags',
+                                                     -- 'implicit_source_tags' = digest covers tags
+                                                     -- carried by subscribed sources;
+                                                     -- 'explicit_scope_tags' = only tags listed in
+                                                     -- scope_tag are included.
     PRIMARY KEY (scope_kind, scope_id)
   );
 
@@ -159,17 +165,18 @@
 
   CREATE TABLE post (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    source_id       UUID NOT NULL REFERENCES source(id) ON DELETE CASCADE,
+    source_id       UUID NOT NULL REFERENCES source(id) ON DELETE RESTRICT,
     external_id     TEXT NOT NULL,                   -- guid, item link, tweet id, etc.
     url             TEXT,
     title           TEXT NOT NULL,
     body            TEXT,                            -- sanitized HTML→text
-    body_summary    TEXT,                            -- LLM-generated abstract if body length > threshold
+    body_summary    TEXT,                            -- LLM-generated abstract; populated when length(body) > 2000 chars (see 05-llm §5.4)
     author          TEXT,                            -- account or byline
     published_at    TIMESTAMPTZ,
     fetched_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     status          TEXT NOT NULL DEFAULT 'RAW',     -- 'RAW','EVALUATING','READY','QUARANTINED','FAILED'
     stage1_flagged  BOOLEAN NOT NULL DEFAULT FALSE,
+    stage2_failed   BOOLEAN NOT NULL DEFAULT FALSE,  -- true if Stage 2 LLM errored after retry; post released READY-with-redactions
     tagger_fallback BOOLEAN NOT NULL DEFAULT FALSE,  -- true if tags came from source.bootstrap_tags
     social_score    INT,                             -- 2*reposts + likes for social posts
     likes           INT,
@@ -191,7 +198,11 @@
 
   CREATE INDEX idx_post_user_tag_tag ON post_user_tag(tag_id);
 
-  socials tag is auto-assigned to any post whose source.category = 'social'.
+  The `socials` tag is a Tier-1 controlled-vocabulary tag (seeded by the bootstrap loader,
+  same as any other tag). It is auto-assigned by the tagger to every post whose
+  `source.category = 'social'`, in addition to whatever other tags the LLM tagger or
+  source.bootstrap_tags produce. Users and groups can follow/unfollow `socials` like any
+  other tag (e.g. `/follow socials`, `/unfollow socials`).
 
   ---
   2.4 Tier-2 cross-linking (TTL 4 days, partitioned)
@@ -221,7 +232,10 @@
     embedding        vector(768) NOT NULL,
     embedding_model  TEXT NOT NULL,                  -- e.g., 'nomic-embed-text:v1'
     fetched_at       TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (post_id)
+    -- Postgres requires the partition key column in every unique constraint on a
+    -- partitioned table. post_id remains globally unique by virtue of post.id PK,
+    -- so (post_id, fetched_at) is effectively per-post within the active 4-day window.
+    PRIMARY KEY (post_id, fetched_at)
   ) PARTITION BY RANGE (fetched_at);
                                                                                                                                                                                                                                                         
   -- Profile-driven index (created in same migration based on infochat.profile):
@@ -243,10 +257,13 @@
     link_type   TEXT NOT NULL,                       -- 'entity','semantic'
     score       REAL NOT NULL,                       -- shared-entity count or cosine similarity
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (from_post, to_post, link_type)
+    -- Partition key column required in PK; one row per (from,to,type) per day
+    -- is acceptable since LinkingJob runs once per partition window.
+    PRIMARY KEY (from_post, to_post, link_type, created_at)
   ) PARTITION BY RANGE (created_at);
                                           
-  CREATE INDEX idx_post_ref_to ON post_reference(to_post);
+  CREATE INDEX idx_post_ref_from ON post_reference(from_post, link_type);
+  CREATE INDEX idx_post_ref_to   ON post_reference(to_post);
                                        
   References are directional but always written in both directions by LinkingJob (A→B and B→A rows) to keep cluster-walk queries simple. Cap N=10 outbound links per post (highest score wins).
                                
@@ -327,8 +344,8 @@
                                                                                                                                                                                                                                                         
   CREATE TABLE chat_session (
     user_id      UUID NOT NULL,
-    scope_kind   TEXT NOT NULL,
-    scope_id     UUID NOT NULL,
+    scope_kind   TEXT NOT NULL,                      -- 'dm' or 'group'
+    scope_id     UUID NOT NULL,                      -- user_id for dm, group_id for group
     messages     JSONB NOT NULL DEFAULT '[]',        -- array of {role,content,ts,tokens}
     token_count  INT NOT NULL DEFAULT 0,
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -406,7 +423,7 @@
   ├─────────────────────────────────────┼────────────────────────────────────────────────────────────────┤
   │ /summary {tag} -w 24h (scope-aware) │ idx_post_user_tag_tag → idx_post_status_fetched                │
   ├─────────────────────────────────────┼────────────────────────────────────────────────────────────────┤
-  │ Cluster lookup by post graph        │ idx_post_ref_to and PK (from_post,to_post,link_type)           │
+  │ Cluster lookup by post graph        │ idx_post_ref_from and idx_post_ref_to                          │
   ├─────────────────────────────────────┼────────────────────────────────────────────────────────────────┤
   │ Tier-2 entity match                 │ idx_post_entity_text (within 4-day partition)                  │
   ├─────────────────────────────────────┼────────────────────────────────────────────────────────────────┤

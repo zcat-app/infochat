@@ -80,7 +80,13 @@ ENQUEUE post_id on `eval` channel  ──────────┐
                                               ▼
 Eval pipeline workers consume (per-stage failure policy):
   1. SecurityStage2Judge (LLM, only if Stage 1 flagged anything) → may quarantine
-       on failure: 1 retry → quarantine. Never falls through to READY.
+       on Stage 2 *verdict* of injection/exfiltration → QUARANTINED.
+       on Stage 2 *infrastructure failure* (LLM down, timeout, parse error after
+       1 retry) → release as READY with Stage 1 redactions in place.
+       Rationale: Stage 1 already substituted suspicious spans with placeholder IDs,
+       so the body is safe; downgrading to READY-with-redactions avoids growing a
+       quarantine backlog the human admin cannot drain when the LLM is unhealthy.
+       Sets post.stage2_failed=true and notifies admin (throttled). See 04-security §4.4.
   2. Tagger LLM → assigns 1+ Tier-1 tags from controlled vocab
        on failure: 1 retry → fallback to source.bootstrap_tags →
        admin notify (throttled). Sets post.tagger_fallback=true for audit.
@@ -206,12 +212,38 @@ Profile-aware fallback (pi profile):
   5. Audit-log the bootstrap run with file hash + entry count
 ```
 
+### Startup-bean ordering
+
+Both services use `io.quarkus.runtime.Startup` with explicit `@Priority` so a bean
+never observes uninitialised state from a peer bean. Lower priority numbers run first.
+
+Collector:
+
+| Priority | Bean              | Purpose                                                       |
+|---------:|-------------------|---------------------------------------------------------------|
+| 100      | (Flyway)          | Quarkus runs Flyway migrations before any `@Startup` bean.    |
+| 200      | BootstrapLoader   | Seeds `source` and `tag` from `bootstrap-sources.json`.       |
+| 300      | OutboxRehydrator  | Re-enqueues posts left in `RAW`/`EVALUATING` from prior crash.|
+| 400      | FetchScheduler    | Begins per-source polling.                                    |
+
+Provider:
+
+| Priority | Bean              | Purpose                                                       |
+|---------:|-------------------|---------------------------------------------------------------|
+| 100      | (Flyway)          | Idempotent re-run; same migration set as Collector.           |
+| 200      | AdminBootstrap    | Ensures `infochat.admin.contact-id` has `is_admin=true`.      |
+| 300      | AdapterRegistry   | Resolves and connects the configured `MessagingAdapter`.      |
+| 400      | CommandRouter     | Begins consuming inbound messages from the adapter.           |
+
+If any bean throws during startup, the service refuses to start (Quarkus default).
+Health endpoint `/q/health/ready` stays 503 until every priority < 500 bean is up.
+
 ## 1.5 Architectural principles
 
 1. **Determinism boundary.** All retrieval (which posts come back) is SQL. LLMs only generate prose or extract structured fields at ingest. The same `/summary security` call returns the same set of posts twice in a row.
 2. **Outbox + LISTEN/NOTIFY.** No external message broker in v1. Postgres provides durability (outbox) and push semantics (NOTIFY). Adding Kafka is a v2 swap, not a rewrite.
 3. **No LLM in the trust path.** Admin checks, source subscription, quarantine approval — all deterministic Java. LLM influence is downstream of authorization, never upstream.
-4. **Per-(user, scope) isolation by construction.** Every data row that holds user state has a `scope_type` and `scope_id` (or equivalent FKs). All queries filter on these. Prevents cross-user leaks at the storage layer.
+4. **Per-(user, scope) isolation by construction.** Every data row that holds user state has a `scope_kind` (`'dm'` or `'group'`) and `scope_id` (or equivalent FKs). All queries filter on these. Prevents cross-user leaks at the storage layer.
 5. **TTL by partitioning, not DELETE.** `post_embedding` and `post_reference` are partitioned by day. Old partitions are dropped wholesale. No row-level deletes, no index bloat.
 6. **Adapters are SPIs.** `LlmProvider`, `EmbeddingProvider`, `MessagingAdapter` are CDI-injected interfaces. Concrete impls picked by config. Test doubles slot in for CI.
 
@@ -221,7 +253,7 @@ Profile-aware fallback (pi profile):
 - **Per-user command throttle**: token bucket, default 30 commands/minute per user. Configurable. Returns a friendly "slow down" message on overflow.
 - **LLM client**: bounded concurrency via Quarkus `vertx` worker pool. Profile defaults: `laptop=4`, `vps=2`, `pi=1`, `remote=8`. Per-task overridable via `infochat.llm.<task>.max-concurrency`.
 - **Eval channel**: bounded queue size (configurable, profile-driven). If full, fetcher blocks (back-pressure to feed schedulers, which is the desired behavior — avoids unbounded memory growth on LLM slowness).
-- **Periodic summary worker**: 1 worker on `pi`, otherwise `max(2, groups/10)`. Generation requests are enqueued with stagger and processed serially per worker.
+- **Periodic summary worker**: count is profile-driven — `laptop=4`, `vps=2`, `pi=1`, `remote=8` (see §1.7 table). Generation requests are enqueued with stagger and processed serially per worker. Operators can override via `infochat.summary.workers`.
 
 ## 1.7 Hardware profiles
 
