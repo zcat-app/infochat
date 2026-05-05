@@ -146,20 +146,52 @@
   infochat.collector.ttl-prune-cron=0 0 4 * * ?                                                                                                                                                                                                         
   infochat.provider.digest-tick-cron=0 * * * * ?   # checks every minute for due groups                                                                                                                                                                 
                                                                                                                                                                                                                                                         
-  # ── HTTP / observability ───────────────────────────────────────────────                                                                                                                                                                             
-  quarkus.http.port=8080                           # collector                                                                                                                                                                                          
-  quarkus.http.port=8081                           # provider (override per-service)                                                                                                                                                                    
-  quarkus.management.enabled=true                  # /q/health, /q/metrics                                                                                                                                                                              
+  # ── HTTP / observability ───────────────────────────────────────────────
+  # quarkus.http.port is service-specific and lives in each service's own
+  # application.properties (see the two blocks below). Setting it here once
+  # would collide between collector and provider — they cannot share a port
+  # on a single host.
+  quarkus.management.enabled=true                  # /q/health, /q/metrics
   quarkus.log.level=INFO                                                                                                                                                                                                                                
                                                                                                                                                                                                                                                         
-  # ── Limits ─────────────────────────────────────────────────────────────                                                                                                                                                                             
-  infochat.rate.user-commands-per-min=30                                           
-  infochat.rate.user-add-source-per-hour=5                                                                                                                                                                                                              
-  infochat.rate.user-chat-per-min=60                                               
-                                                                                                                                                                                                                                                        
+  # ── Limits ─────────────────────────────────────────────────────────────
+  infochat.rate.user-commands-per-min=30
+  infochat.rate.user-add-source-per-hour=5
+  infochat.rate.user-chat-per-min=60
+  ```
+
+  ### Per-service `application.properties`
+
+  Each service ships its own `application.properties` (in `infochat-collector/src/main/resources/` and `infochat-provider/src/main/resources/`) that imports the canonical settings above and adds the service-specific HTTP port. Using two separate files is the cleanest way to keep ports from colliding when both services run on the same host.
+
+  Collector (`infochat-collector/src/main/resources/application.properties`):
+
+  ```properties
+  # Inherits keys from the canonical file above; only service-specific overrides here.
+  quarkus.http.port=8080
+  quarkus.application.name=infochat-collector
+  ```
+
+  Provider (`infochat-provider/src/main/resources/application.properties`):
+
+  ```properties
+  # Inherits keys from the canonical file above; only service-specific overrides here.
+  quarkus.http.port=8081
+  quarkus.application.name=infochat-provider
+  ```
+
+  If the operator prefers a single shared file at deploy time, the per-service port can instead be supplied at startup via system property:
+
+  ```bash
+  java -Dquarkus.http.port=8080 -jar infochat-collector.jar
+  java -Dquarkus.http.port=8081 -jar infochat-provider.jar
+  ```
+
+  Either approach works; what is **not** allowed is setting `quarkus.http.port` twice in the same properties file — Quarkus reads the last value wins, so the collector and provider would silently end up on the same port and the second service to start would fail to bind.
+
   Notes:                                                                           
                                                                                                                                                                                                                                                         
-  - Per-service quarkus.http.port is set in each service's own application.properties (collector listens on 8080 for /q/health; provider on 8081). The above is a copy-pasted reference.                                                                
+  - The canonical block above is shared keys only; per-service `quarkus.http.port` lives in each service's own `application.properties` (collector=8080, provider=8081) as shown in the two blocks immediately above.                                                                
   - DB credentials use service-specific roles (infochat_collector, infochat_provider). The infochat superuser is reserved for migrations and admin psql.
   - All secrets read from env vars; no plaintext secrets in the file.                                                                                                                                                                                   
                                                                                                                                                                                                                                                         
