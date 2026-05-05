@@ -18,25 +18,28 @@
   | `1h`, `12h`, `48h` | hours (1–168) |                                           
   | `1d`, `7d`, `30d` | days (1–30) |   
   | `1w`, `4w` | weeks (1–4) |                                                                                                                                                                                                                          
-  | `1m` | rolling 30 days |  
                                                                                                                                                                                                                                                         
+  The suffix `m` is intentionally not accepted (ambiguous between minutes and months: minutes are too small to be useful, and the longest meaningful window is `30d`, which equals the post TTL). Use `30d` if you want a 30-day window.
+
   Default `-w 24h` for `/summary` and similar commands.                                                                                                                                                                                                 
                                                                                                                                                                                                                                                         
   ### Tag arguments                                                                                                                                                                                                                                     
                                                                                                                                                                                                                                                         
   Tag arguments are exact-match against the controlled vocabulary. Case-insensitive lookup; output uses the canonical `display` casing. Unknown tag → friendly error with fuzzy suggestions.
+
+  **The `socials` tag** is part of the controlled vocabulary, seeded by `bootstrap-sources.json`. The tagger auto-assigns `socials` to every post coming from a source whose `category = 'social'` (Reddit, Bluesky, Nitter, Nostr, Odysee, YouTube). It otherwise behaves like any other tag: `/follow-tag socials`, `/unfollow-tag socials`, and `/summary socials [-w 24h]` all work. This gives users a one-shot way to opt into / out of social-feed noise without listing every social fetcher individually.
                                                                                                                                                                                                                                                         
   ### Confirmation for destructive commands                                        
                                                                                                                                                                                                                                                         
   Destructive commands (`/clear`, `/remove-source`, `/ban`, `/forget` v2) require confirmation:
                                                                                                                                                                                                                                                         
   ▎ /clear
-  ▎ This will wipe your active chat context. Type clear confirm within 30s.                                                                                                                                                                             
-                                                                                                                                                                                                                                                        
-  ▎ clear confirm
-  ▎ Context cleared.                                                                                                                                                                                                                                    
-                                                                                   
-  Confirmation tokens are scoped to (user, scope) and expire after 30 seconds. Sending any other input cancels the pending confirmation.
+  ▎ This will wipe your active chat context. Type `/clear confirm` within 30s.
+
+  ▎ /clear confirm
+  ▎ Context cleared.
+
+  The confirmation message MUST start with the same slash command as the original (so a bare `confirm` does not trigger anything, and a `confirm` typed in the wrong scope cannot accidentally fire a destructive action). Confirmation tokens are scoped to (user, scope) and expire after 30 seconds. Sending any other input cancels the pending confirmation.
                                                                                                                                                                                                                                                         
   ### Friendly errors
                                                                                                                                                                                                                                                         
@@ -55,7 +58,22 @@
   ### Output formatting                                                                                                                                                                                                                                 
                                                                                                                                                                                                                                                         
   Plain text. Inline code wrapped in single backticks. Multi-line code in triple backticks. URLs bare. Adapters with `supportsMarkdownCode = true` may render backticks as styled monospace.                                                            
-                                                                                                                                                                                                                                                        
+
+  ### Input length limits
+
+  Hard caps applied at the parser before any LLM or DB work. Inputs over the cap are rejected with a friendly error.
+
+  | Field | Cap |
+  |---|---|
+  | Chat message body | `profile.context_window / 8` chars (laptop=2048, vps=1024, pi=512, remote=4096) |
+  | `--name` | 200 chars |
+  | `--reason` / `--note` | 500 chars |
+  | Personal tags (sum of all `-t` values per `/save`) | 200 chars |
+  | Single tag value | 32 chars |
+  | Slash command line (whole input) | 4096 chars |
+
+  Limits are constants in `infochat-core`; not user-tunable.
+
   ---                                                                                                                                                                                                                                                   
                                                                                    
   ## 3.2 Permission matrix                                                                                                                                                                                                                              
@@ -78,8 +96,8 @@
   | `/saved [tag]` | ✅ | ✅ | ✅ | ✅ |                                                                                                                                                                                                                
   | `/unsave <uid>` | ✅ | ✅ | ✅ | ✅ |                                                                                                                                                                                                               
   | `/lang <code>` | ✅ self | ❌ | ✅ for group | ✅ |                                                                                                                                                                                                 
-  | `/clear` | ✅ self | ❌ | ✅ for group | ✅ |                                                                                                                                                                                                       
-  | `/compress` | ✅ self | ❌ | ✅ for group | ✅ |                                                                                                                                                                                                    
+  | `/clear` | ✅ self | ✅ self | ✅ self | ✅ self |
+  | `/compress` | ✅ self | ✅ self | ✅ self | ✅ self |                                                                                                                                                                                                    
   | `/promote <contact>` | ❌ | ❌ | ❌ | ✅ |                                                                                                                                                                                                          
   | `/demote <contact>` | ❌ | ❌ | ❌ | ✅ |                                                                                                                                                                                                           
   | `/grant-admin <contact>` | ❌ | ❌ | ❌ | ✅ |                                                                                                                                                                                                      
@@ -141,20 +159,32 @@
   [topic_id=t-9e02]                                                                                                                                                                                                                                     
   ...                                                                              
                                                                                                                                                                                                                                                         
-  `-w` defaults to 24h. Hard cap on number of posts processed: 200 (oldest dropped); if more match, response notes the cap.
+  `-w` defaults to 24h.
+
+  **Cluster cap is profile-driven** via `infochat.summary.cluster-cap`:
+
+  | Profile | Cap |
+  |---|---|
+  | `laptop` | 200 |
+  | `vps` | 100 |
+  | `pi` | 50 |
+  | `remote` | 500 |
+
+  When the deterministic SQL retrieval returns more posts than the cap, the **oldest** posts are dropped (the most recent within the window survive). The response notes both the cap and the excluded count, e.g. `Showing 100 of 137 posts (cap: vps=100; 37 oldest excluded)`. See [05-llm-and-embeddings.md §5.7](05-llm-and-embeddings.md) for how the cap interacts with cluster sizing and prompt budget.
                                                                                                                                                                                                                                                         
   ### `/save <uid>` / `/save <uid> -t tag1,tag2`                                                                                                                                                                                                        
                                                                                                                                                                                                                                                         
   Saves a post into the calling user's library. Always private to the user, even in groups. Personal tags are free-form and never become Tier-1 vocabulary. 1000-save cap per user.                                                                     
                                                                                    
-  ### `/saved [tag] [-w 7d]`                                                                                                                                                                                                                            
-                                                                                   
-  Lists saved posts. Optional positional tag filters by personal tag. Optional `-w` filters by saved-within window.                                                                                                                                     
-   
-  Saved posts (5 total, filter: ai)                                                                                                                                                                                                                     
-  - [p-a91] OpenSSL heap overflow — saved 2d ago — tags: security, read-later      
-  - [p-b04] LangChain4j 1.0 release — saved 5h ago — tags: java, read-later                                                                                                                                                                             
-  ...                                                                              
+  ### `/saved [tag] [-w 7d] [--page N]`
+
+  Lists saved posts. Optional positional tag filters by personal tag. Optional `-w` filters by saved-within window. Optional `--page N` selects the 1-indexed page; default `1`. **Page size is fixed at 20** and is not user-tunable.
+
+  Saved posts (5 of 47 total, page 1/3, filter: ai)
+  - [p-a91] OpenSSL heap overflow — saved 2d ago — tags: security, read-later
+  - [p-b04] LangChain4j 1.0 release — saved 5h ago — tags: java, read-later
+  ...
+  Tip: use `/saved ai --page 2` for the next page.                                                                              
                                                                                                                                                                                                                                                         
   ### `/unsave <uid>`                                                              
                                                                                                                                                                                                                                                         
@@ -199,14 +229,22 @@
   - Group: group admin only.                                                       
   - Bot admin: any scope.                                                                                                                                                                                                                               
                                                                                    
-  ### `/remove-source <id>` *(bot admin only, requires confirm)*                                                                                                                                                                                        
-   
-  Deletes the source globally. Cascades to all subscriptions and post records (posts are kept — only the source link is severed via `ON DELETE CASCADE`? **No**: posts are kept; `source_subscription` cascades but `post.source_id` becomes            
-  orphan-tolerant via a soft reference. See [02-schema.md](02-schema.md) for exact FK behavior.)
-                                                                                                                                                                                                                                                        
-  ▎ /remove-source 7f3a-...                                                        
-  ▎ This will remove the source Example AI Blog for ALL scopes. Affected subscribers: 12.
-  ▎ Type remove-source 7f3a-... confirm within 30s.                                                                                                                                                                                                     
+  ### `/remove-source <id>` *(bot admin only, requires confirm)*
+
+  **Soft-delete only.** Hard delete is forbidden in v1.
+
+  Behavior:
+  - Sets `source.deleted_at = now()` and stops the fetcher for this source on the next scheduler tick.
+  - `post` rows are kept untouched. `post.source_id` is `ON DELETE RESTRICT`, so post history (and any clusters / summaries derived from it) survives the removal.
+  - `saved_post` references continue to resolve normally — bookmarked posts remain readable for every user who saved them.
+  - All `source_subscription` rows referencing this source are removed (no scope continues to fetch a deleted source).
+  - Re-adding the same `(fetcher, url)` pair via `/add-source` clears `deleted_at` and reactivates the source (a "restore", not a duplicate row).
+
+  See [02-schema.md §2.2](02-schema.md) for the FK behavior and `deleted_at` column.
+
+  ▎ /remove-source 7f3a-...
+  ▎ This will soft-delete source Example AI Blog. Affected subscribers: 12. Posts and saves stay intact.
+  ▎ Type `/remove-source 7f3a-... confirm` within 30s.                                                                                                                                                                                                     
    
   ---                                                                                                                                                                                                                                                   
                                                                                    
@@ -226,14 +264,16 @@
    
   ### `/clear` *(requires confirm)*                                                                                                                                                                                                                     
                                                                                    
-  Wipes the active context window for (user, scope). Does NOT touch `chat_memory` (long-term).                                                                                                                                                          
-   
-  - DM: any user (own context).                                                                                                                                                                                                                         
-  - Group: group admin (clears the group's shared context for that user; **other users' per-(user, group) contexts are untouched**).
+  Wipes the active context window for the calling (user, scope). Does NOT touch `chat_memory` (long-term).
+
+  Every user has an independent (user, scope) session, even inside a group — there is no "shared" group context. `/clear` only ever affects the caller's own (user, scope) row; other users in the same group are untouched.
+
+  - DM: clears the calling user's DM context.
+  - Group: clears the calling user's context for *that group only*.
                                                                                                                                                                                                                                                         
   ### `/compress`                                                                                                                                                                                                                                       
                                                                                                                                                                                                                                                         
-  Forces an immediate `chat_memory` checkpoint. Auto-triggered at 75% of profile context window; this command lets users do it explicitly.                                                                                                              
+  Forces an immediate `chat_memory` checkpoint for the calling (user, scope). Auto-triggered at 75% of profile context window; this command lets users do it explicitly. Like `/clear`, it only ever affects the caller's own (user, scope) — there is no shared group memory.                                                                                                              
                                                                                    
   ▎ /compress                                                                                                                                                                                                                                           
   ▎ Compressed 47 messages into a memory entry (8 sentences, 12 keywords, 4 referenced posts).
@@ -280,13 +320,30 @@
                                                                                    
   ## 3.9 Onboarding
 
-  A user's first message to the bot triggers auto-registration:                                                                                                                                                                                         
-   
-  [bot] Welcome! You're registered as <contact_id_short>. I aggregate news and social posts.                                                                                                                                                            
-  [bot] Try /help to see commands, or just chat with me about a topic.             
-  [bot] Pro tip: /summary for the last 24h, /save <uid> to bookmark a post.                                                                                                                                                                             
-                                                                                                                                                                                                                                                        
-  In a group, the welcome only fires the first time a specific user `@mentions` the bot in that group.                                                                                                                                                  
+  A user's first interaction triggers auto-registration. The welcome message branches on three modes — each tuned so the user is not steered toward an action that will fail or feel empty.
+
+  ### Mode 1 — DM, fresh user (no sources subscribed yet)
+
+  Chat would be empty (no posts to ground on), so we steer the user to `/add-source` instead of inviting open-ended chat.
+
+  [bot] Welcome! You're registered as <contact_id_short>. I aggregate news and social posts.
+  [bot] You don't have any sources yet — I won't have anything to summarize or chat about until you add one.
+  [bot] Try: /add-source --type rss --url https://example.com/feed --tags news
+  [bot] Run /help any time to see what else I can do.
+
+  ### Mode 2 — DM, returning user (already has sources)
+
+  Short welcome-back, suggest the commands they're most likely to want first.
+
+  [bot] Welcome back. You have <N> sources subscribed.
+  [bot] Try /summary for the last 24h, /saved to revisit bookmarks, or just ask me about a topic.
+
+  ### Mode 3 — Group, first @mention by a specific user
+
+  Fires once per (user, group) pair. The bot is shared, so we point the user at `/help` rather than dumping setup advice into the channel.
+
+  [bot] Hi @<contact_id_short>! Use /help to see what I can do here.
+  [bot] (Group admins can /add-source and /follow-tag to curate the feed for everyone in this group.)                                                                                                                                                  
                                                                                                                                                                                                                                                         
   ---                                                                              
                                                                                                                                                                                                                                                         
