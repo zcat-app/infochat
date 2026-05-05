@@ -106,7 +106,7 @@
   ) {}                                                                                                                                                                                                                                                  
                                                                                                                                                                                                                                                         
   public enum AdapterTrustLevel { HIGH, LOW }                                                                                                                                                                                                           
-                                                                                   
+  ```                                                                                 
   The handler-style API (push from adapter to provider via InboundHandler) means each adapter manages its own connection lifecycle and event loop. Provider doesn't poll.                                                                               
                                                                                    
   ---                                                                                                                                                                                                                                                   
@@ -245,7 +245,7 @@
   Used by 08-verification.md end-to-end tests. No network, no SimpleX dependency. Lets us run full command flows in-process.                                                                                                                            
    
   Behavior                                                                                                                                                                                                                                              
-                                                                                   
+  ```java                                                                                 
   public final class InMemoryAdapter implements MessagingAdapter {
       private final List<OutboundMessage> sent = new CopyOnWriteArrayList<>();                                                                                                                                                                          
       private InboundHandler handler;
@@ -275,7 +275,7 @@
       public List<OutboundMessage> sentMessages() { return List.copyOf(sent); }    
       public void reset() { sent.clear(); }                                                                                                                                                                                                             
   }                                                                                
-                                                                                                                                                                                                                                                        
+  ```                                                                                                                                                                                                                                                      
   The test helpers (deliverDm, deliverGroupMention, sentMessages) aren't on the SPI; tests cast to the concrete type. This is fine because InMemoryAdapter is a test artifact.                                                                          
    
   Capabilities posture                                                                                                                                                                                                                                  
