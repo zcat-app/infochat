@@ -104,11 +104,18 @@ the last 15 min, last error: connection refused").
   │
   ▼
 LinkingJob (scheduled, every N minutes):
-  - Walks last 4 days of READY posts.
-  - For each post: find candidate links via:
+  - Driving set: posts where last_linked_at IS NULL OR last_linked_at < fetched_at,
+    bounded to the last 4 days. New runs no longer re-walk the full 4-day window;
+    they only process posts that arrived (or were re-evaluated) since the previous run.
+  - Candidate window for each driving post is still the last 4 days (so a fresh
+    post can link backward to older READY posts), but the bidirectional INSERT
+    pattern ensures both endpoints are written without a second pass.
+  - For each driving post: find candidate links via:
     - shared post_entity rows (exact-match) → link_type='entity', score=#shared
-    - cosine_distance < 0.18 within 48h window → link_type='semantic', score=cosine
+    - cosine_distance < infochat.linking.semantic-threshold within 48h window
+      → link_type='semantic', score=cosine
   - INSERTs into post_reference (capped at N per post)
+  - On success: UPDATE post.last_linked_at = now() for each driving post.
 ```
 
 ## 1.4 Key data flow: user request
@@ -232,6 +239,7 @@ Provider:
 |---------:|-------------------|---------------------------------------------------------------|
 | 100      | (Flyway)          | Idempotent re-run; same migration set as Collector.           |
 | 200      | AdminBootstrap    | Ensures `infochat.admin.contact-id` has `is_admin=true`.      |
+| 250      | NewPostReconciler | Replays `READY` posts since `provider_state.last_ready_post_at` to recover from missed `NOTIFY new_post` events. |
 | 300      | AdapterRegistry   | Resolves and connects the configured `MessagingAdapter`.      |
 | 400      | CommandRouter     | Begins consuming inbound messages from the adapter.           |
 
@@ -241,7 +249,15 @@ Health endpoint `/q/health/ready` stays 503 until every priority < 500 bean is u
 ## 1.5 Architectural principles
 
 1. **Determinism boundary.** All retrieval (which posts come back) is SQL. LLMs only generate prose or extract structured fields at ingest. The same `/summary security` call returns the same set of posts twice in a row.
-2. **Outbox + LISTEN/NOTIFY.** No external message broker in v1. Postgres provides durability (outbox) and push semantics (NOTIFY). Adding Kafka is a v2 swap, not a rewrite.
+2. **Outbox + LISTEN/NOTIFY + high-water mark.** No external message broker in v1. Postgres provides durability (outbox) and push semantics (NOTIFY). Adding Kafka is a v2 swap, not a rewrite. **NOTIFY is best-effort push; the high-water mark is the correctness guarantee.** Postgres LISTEN/NOTIFY does not buffer messages for disconnected listeners — if the Provider is restarting when `NOTIFY new_post` fires, the event is lost. To close this gap, every Provider instance maintains `provider_state.last_ready_post_at` (see 02-schema §2.8). On `@Startup` (priority 250, between AdminBootstrap and AdapterRegistry) the Provider runs:
+
+   ```sql
+   SELECT id FROM post
+    WHERE status='READY' AND ready_at > :last_ready_post_at
+    ORDER BY ready_at;
+   ```
+
+   and feeds those rows into the same handler the `NOTIFY new_post` listener uses. The listener also advances `last_ready_post_at` as it processes events, so steady-state work is unchanged. Reconciliation is bounded by the partition retention horizon (worst case: replay last 4 days of READY posts on a stale Provider).
 3. **No LLM in the trust path.** Admin checks, source subscription, quarantine approval — all deterministic Java. LLM influence is downstream of authorization, never upstream.
 4. **Per-(user, scope) isolation by construction.** Every data row that holds user state has a `scope_kind` (`'dm'` or `'group'`) and `scope_id` (or equivalent FKs). All queries filter on these. Prevents cross-user leaks at the storage layer.
 5. **TTL by partitioning, not DELETE.** `post_embedding` and `post_reference` are partitioned by day. Old partitions are dropped wholesale. No row-level deletes, no index bloat.

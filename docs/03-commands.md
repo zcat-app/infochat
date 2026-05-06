@@ -39,13 +39,28 @@
   ▎ /clear confirm
   ▎ Context cleared.
 
-  The confirmation message MUST start with the same slash command as the original (so a bare `confirm` does not trigger anything, and a `confirm` typed in the wrong scope cannot accidentally fire a destructive action). Confirmation tokens are scoped to (user, scope) and expire after 30 seconds. Sending any other input cancels the pending confirmation.
+  The confirmation message MUST start with the same slash command as the original (so a bare `confirm` does not trigger anything, and a `confirm` typed in the wrong scope cannot accidentally fire a destructive action). Confirmation tokens are scoped to (user, scope) and expire after 30 seconds.
+
+  Sending any other input cancels the pending confirmation. The bot replies with a one-line acknowledgement so a user who fat-fingers a follow-up message is never left guessing whether the original `/clear` (or `/ban`, etc.) "stuck":
+
+  ▎ /clear
+  ▎ This will wipe your active chat context. Type `/clear confirm` within 30s.
+
+  ▎ what's the weather?
+  ▎ Pending /clear cancelled.
+  ▎ (and the bot answers `what's the weather?` normally)
+
+  The cancellation reply names the original command so the user knows exactly what was rolled back.
                                                                                                                                                                                                                                                         
   ### Friendly errors
                                                                                                                                                                                                                                                         
-  Unknown command, unknown tag, unknown source ID, malformed flag → response includes:                                                                                                                                                                  
+  Unknown command, unknown tag, unknown source ID, malformed flag → response includes:
   1. What was wrong (specific token)
-  2. Up to 3 fuzzy suggestions (Levenshtein distance ≤ 2)                                                                                                                                                                                               
+  2. Up to 3 fuzzy suggestions, ranked by Levenshtein distance, capped at
+     `min(2, ceil(len(input) / 2))`. The adaptive bound prevents pathological
+     suggestions for short tokens — e.g. `/help` distance-2 from `/heap`/`/hold`/`/herd`
+     is correct, but a 3-character tag at distance 2 collapses into "any 3-letter
+     tag in the vocab" and the suggestions are noise.
   3. The exact help line for the command (or `/help` pointer)                                                                                                                                                                                           
                                                                                                                                                                                                                                                         
   Example:                                                                                                                                                                                                                                              
@@ -142,7 +157,13 @@
 
   ### `/summary [tag] [-w 24h]`                                                                                                                                                                                                                         
    
-  Generates an on-the-fly summary of posts matching the tag (or all followed tags if no arg) within the time window. Cluster grouping by `post_reference` graph; LLM writes prose per cluster.                                                          
+  Generates an on-the-fly summary of posts matching the tag (or all followed tags if no arg) within the time window. Cluster grouping by `post_reference` graph; LLM writes prose per cluster.
+
+  **No-arg behavior with many followed tags.** When `/summary` is called with no positional tag and the calling scope follows more than 5 tags, the retrieval is restricted to the **3 most-active tags in the window** (most posts in the requested `-w`). The reply is prefixed with:
+
+  ▎ Showing top 3 of N followed tags. Use `/summary <tag>` for a specific topic.
+
+  This avoids the failure mode where a user with 30 followed tags gets a summary that times out or quietly drops most of the content into the cluster cap. Scopes with ≤5 followed tags continue to summarize across all of them — the restriction only kicks in at 6+.                                                          
                                                                                    
   Output structure (plain text):                                                                                                                                                                                                                        
                                                                                    
@@ -217,13 +238,15 @@
   ▎ /add-source --type rss --url https://example.com/feed --tags ai,research --name "Example AI Blog"                                                                                                                                                   
   ▎ Added source Example AI Blog. First fetch in ~5 minutes. Use /list-sources to confirm.                                                                                                                                                              
                                                                                                                                                                                                                                                         
-  ### `/list-sources [--all]`                                                      
-                                                                                                                                                                                                                                                        
-  Without `--all`: sources the calling scope subscribes to. With `--all` (bot admin only): every source globally with subscriber count and status.                                                                                                      
+  ### `/list-sources [--all] [--page N]`
+
+  Without `--all`: sources the calling scope subscribes to. With `--all` (bot admin only): every source globally with subscriber count and status.
+
+  Paginated like `/saved`: `--page N` is 1-indexed, **page size fixed at 20**, total count + page indicator shown in the header. The footer suggests `/list-sources --page <N+1>` when more pages remain.                                                                                                      
    
-  ### `/unfollow-source <id>`                                                                                                                                                                                                                           
-                                                                                   
-  Removes the calling scope's `source_subscription`. The source itself remains globally if other scopes still subscribe.                                                                                                                                
+  ### `/unfollow-source <id>`
+
+  Removes the calling scope's `source_subscription`. The source itself remains globally if other scopes still subscribe. **Not the same as `/remove-source` below**: `/unfollow-source` is per-scope and available to non-admins; `/remove-source` is a global admin-only soft-delete.                                                                                                                                
                                                                                    
   - DM: any non-banned user (their own scope).                                                                                                                                                                                                          
   - Group: group admin only.                                                       
@@ -304,17 +327,19 @@
                                                                                    
   Bot-wide ban. Cannot ban self, cannot ban the last admin. Banned user's response after ban: `Your access has been revoked.` regardless of input.                                                                                                      
                                                                                    
-  ### `/quarantine list [-w 24h]`                                                                                                                                                                                                                       
-                                                                                   
-  Lists pending quarantine items in the window. Output includes `quarantine_id`, `post_id`, `flagged_by` (`stage1` or `stage2`), `rule_id`, `placeholder_id`, and a short context excerpt. Raw HTML is NOT shown via chat — admins use psql for that.   
+  ### `/quarantine list [-w 24h] [--page N]`
+
+  Lists pending quarantine items in the window. Output includes `quarantine_id`, `post_id`, `flagged_by` (`stage1` or `stage2`), `rule_id`, `placeholder_id`, and a short context excerpt. Raw HTML is NOT shown via chat — admins use psql for that.
+
+  Paginated like `/saved` and `/list-sources`: `--page N` 1-indexed, page size fixed at 20.   
    
   ### `/quarantine approve <id> [--note "..."]` / `/quarantine reject <id> [--note "..."]`                                                                                                                                                              
                                                                                    
   Approve = restores the original span in `post.body`, sets `post.status='READY'`, NOTIFY new_post. Reject = leaves the placeholder in place permanently.                                                                                               
                                                                                    
-  ### `/audit [-w 24h] [--actor <contact>] [--action <kind>]`                                                                                                                                                                                           
-                                                                                   
-  Reads from `audit_log`. Default window 24h. Optional filters.                                                                                                                                                                                         
+  ### `/audit [-w 24h] [--actor <contact>] [--action <kind>] [--page N]`
+
+  Reads from `audit_log`. Default window 24h. Optional filters. Paginated: `--page N` 1-indexed, page size fixed at 20.                                                                                                                                                                                         
    
   ---                                                                                                                                                                                                                                                   
                                                                                    

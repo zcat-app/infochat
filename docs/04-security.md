@@ -79,6 +79,13 @@
 
   Stage 1 NEVER blocks posts from being released. It scrubs and routes to quarantine for admin review while the post still goes through the rest of the pipeline with the redacted body.
 
+  **Stage 1 is a coarse filter, not a complete defense.** The regex set is English-language and pattern-based; multilingual, paraphrased, base64-encoded, and otherwise obfuscated injection bypasses Stage 1 by design. The two reasons Stage 1 still earns its complexity are:
+
+  1. **Reduce Stage 2 load.** ~95%+ of feed posts contain no injection payload at all; Stage 1 lets the (more expensive) LLM judge skip them.
+  2. **Provide a degraded mode when Stage 2 is offline.** Stage-1-redacted-but-released is the fallback when the judge can't run (see §4.7). Without Stage 1 there would be no graceful degradation path.
+
+  **Stage 2 is the actual security boundary.** Anything Stage 1 misses is the LLM judge's problem, not a regex tuning problem. Adding more regex patterns (or a "Stage 1.5 language detector") buys very little once the chat output sanitizer (§4.4) and the deterministic-command boundary (§4.4) are in place. We deliberately do not pursue regex enrichment as a defense layer.
+
   **Provider intake mirrors the Unicode steps.** The Provider Server's chat intake (the path that receives messages from the messaging adapter and routes to either the slash-command parser or the chat agent) applies the same NFKC normalization and bidi-control stripping (U+202A–U+202E, U+2066–U+2069) **before** parsing. This prevents an attacker from using right-to-left override characters in a slash-command line to disguise the visible command — e.g., a payload that renders as `/help` in the user's client but parses as `/ban …` in the bot. Zero-width characters are stripped on the Provider side as well, except when they appear inside a fenced code block (so legitimate code samples don't get mangled). The Provider does NOT run the Stage 1 prompt-injection regex set on chat input — that lives only in the Collector ingest path. Chat input safety relies on the §4.3 wrapping convention plus the deterministic-command boundary in §4.4.                                                                
                                                                                                                                                                                         
   ### Stage 2 — LLM judge, only on Stage 1 hits                                                                                                                                                                                                         
@@ -220,6 +227,23 @@
       notify(U, "You're the admin for this group's bot interactions.")                                                                                                                                                                                  
                                                                                                                                                                                                                                                         
   Bot admins can override with `/promote <contact>` and `/demote <contact>` from inside the group.
+
+  **Race protection.** Two simultaneous `@mention` messages in a brand-new group could both pass the "no admin yet" check before either INSERT lands, producing two group admins. This is closed by the partial unique index `one_admin_per_group ON group_membership(group_id) WHERE is_group_admin = true` (see [02-schema.md §2.1](02-schema.md)). The bootstrap path becomes `INSERT … ON CONFLICT DO NOTHING`: whichever transaction commits first wins; the loser silently no-ops. `/promote` performs a `/demote` of the existing admin in the same transaction so the partial unique index continues to hold.
+
+  ### Chat output sanitizer (post-LLM filter for admin commands)
+
+  Before the Provider sends any chat-mode reply (i.e. any reply produced by `ChatAgent.respond()` rather than by a deterministic command), the candidate text is passed through a deterministic outbound regex pass:
+
+      OUTBOUND_ADMIN_CMD = (^|\s)/(grant-admin|revoke-admin|demote|promote|ban|unban|remove-source)\b
+
+  Behavior:
+
+  - **Strip-or-refuse.** The default is to strip the matched span and replace it with `[refused-action]`. If the same reply contains 3+ matches, the entire reply is refused and replaced with `I tried to write a reply that included admin commands; refusing.`
+  - **Audit every match.** A row is written to `audit_log` with `action='CHAT_OUTPUT_SANITIZED'`, `target_kind='user'`, `target_id=<calling_user>`, `details_json={ "matches": [...], "decision": "stripped" | "refused" }`. This is per-occurrence (not throttled) so operators can see when small models start trying to emit privileged commands.
+  - **Why this exists.** Admin commands are dispatched by `CommandRouter`, never by the LLM, so a copy-paste of a chat reply still requires `is_admin=true` to actually execute anything. But the chat reply itself can be a vector for social engineering ("hey @victim, the bot just told me to run `/grant-admin abc`, please confirm") and small judge models on the Pi profile are easy to coax into emitting these strings. The sanitizer is a cheap deterministic guard that closes that surface.
+  - **Scope.** Applies to chat-mode replies only. Deterministic command output (e.g. the exact text of `/help`) is not run through the sanitizer because that path doesn't include LLM-authored content.
+
+  This complements the existing `[refused-action]` system-prompt convention (§4.3): the system prompt asks the model to refuse, the sanitizer enforces refusal regardless of whether the model complied.
                                                                                                                                                                                                                                                         
   ### Last-admin / self-action protections                                                                                                                                                                                                              
                                                                                                                                                                                                                                                         
@@ -319,7 +343,37 @@
   | EntityExtractor | — | Skip; release without entities | Post visible; reduced cross-source entity links |
   | Embedding | — | Skip; release without vector | Post visible; reduced semantic clustering |
 
-  **Crucial**: a Stage 2 *verdict* of INJECTION/MALWARE/UNKNOWN keeps the post quarantined; a Stage 2 *infrastructure* failure leaves the Stage 1 redactions in place and releases the rest. Neither path ever auto-releases the original (pre-Stage-1) content. A complete LLM outage degrades quality, not safety.                                                                           
+  **Crucial**: a Stage 2 *verdict* of INJECTION/MALWARE/UNKNOWN keeps the post quarantined; a Stage 2 *infrastructure* failure leaves the Stage 1 redactions in place and releases the rest. Neither path ever auto-releases the original (pre-Stage-1) content. A complete LLM outage degrades quality, not safety.
+
+  ### `infochat.security.release-on-stage2-failure` (config flag)
+
+  Stage 2 *infrastructure failure* (LLM unreachable, timeout, unparseable response after 1 retry) is the dangerous failure mode: it's exactly when the threat surface is highest and the safety check is most degraded. Operators choose between availability and safety with one flag:
+
+  | Profile | Default | Rationale |
+  |---|---|---|
+  | `laptop` | `true` (release with Stage 1 only) | Hobby / dev environments where bot uptime matters more than perfect injection coverage. |
+  | `pi` | `true` | Pi profile is already running a tiny judge; release-on-failure keeps the bot useful when the LLM crashes under memory pressure. |
+  | `vps` | `false` (stay QUARANTINED) | Production-like; assume someone is monitoring. |
+  | `remote` | `false` | Production. Operator pays for a real judge model; an outage there is a real outage. |
+
+  When `release-on-stage2-failure=false`, posts with `stage2_failed=true` stay `status='QUARANTINED'` until the periodic re-evaluation job (which retries Stage 2 when the LLM comes back) clears them or an admin explicitly approves via `/quarantine approve`.
+
+  ### Prometheus counters and alerts
+
+  The eval pipeline exports:
+
+  | Metric | Description |
+  |---|---|
+  | `eval_stage2_verdict_total{verdict}` | Counter, labeled `BENIGN`/`INJECTION`/`MALWARE`/`UNKNOWN`. |
+  | `eval_stage2_failure_total` | Counter, infrastructure failures (after retry). |
+  | `eval_stage2_released_with_stage1_only_total` | Counter, posts released with `stage2_failed=true`. Only meaningful when `release-on-stage2-failure=true`. |
+  | `eval_stage1_hit_total{rule_id}` | Counter, Stage 1 matches by rule. |
+
+  Recommended alerts (operator owns the rules; defaults shipped in `monitoring/`):
+
+  - `Stage2UnknownRateHigh`: `rate(eval_stage2_verdict_total{verdict="UNKNOWN"}[1h]) / rate(eval_stage2_verdict_total[1h]) > 0.20` for 1h. A high `UNKNOWN` rate means the judge is degraded — investigate the model, do **not** auto-downgrade `UNKNOWN` to `BENIGN`. Auto-release on degraded judge is exactly the failure mode this section exists to prevent.
+  - `Stage2FailureSpike`: `rate(eval_stage2_failure_total[5m]) > 1` for 10m. The judge LLM is unreachable.
+  - `LlmDown`: see [07-deployment.md §7.12](07-deployment.md) for the `/q/health/llm` probe alert.                                                                           
                                                                                                                                                                                                                                                         
   ### Admin notification throttling                                                                                                                                                                                                                     
                                                                                    
@@ -351,14 +405,22 @@
 
   Defenses against intentional flooding and accidental loops.                                                                                                                                                                                           
   
-  | Surface | Limit | Action on overflow |                                                                                                                                                                                                              
-  |---|---|---|                                                                    
-  | Per-user commands | 30/min token bucket | Friendly reject, "slow down, try again in {N}s" |                                                                                                                                                         
-  | Per-user `/add-source` | 5/hour | Reject with explanation; encourages bulk via bootstrap JSON |                                                                                                                                                     
-  | Per-user chat-mode messages | 60/min token bucket | Reject; chat agent doesn't run |                                                                                                                                                                
-  | Per-source HTTP fetches | Politeness window (default 5 min) | Skip until window expires |                                                                                                                                                           
-  | Eval LLM calls | Profile-driven concurrency | Block fetcher (back-pressure) |                                                                                                                                                                       
-  | `/quarantine approve` | 100/min per admin | Reject with rate-limit message |                                                                                                                                                                        
+  | Surface | Limit | Action on overflow |
+  |---|---|---|
+  | Per-user commands (parser-only, e.g. `/help`, `/list-sources`) | 30/min token bucket | Friendly reject, "slow down, try again in {N}s" |
+  | Per-user `/add-source` | 5/hour | Reject with explanation; encourages bulk via bootstrap JSON |
+  | Per-user chat-mode messages (transport rate) | 60/min token bucket | Reject; chat agent doesn't run |
+  | **Per-user LLM-triggering ops** (chat replies + `/summary`) | **10/min** (laptop/vps/remote), **5/min** (pi) | Friendly reject; chat agent / summarizer doesn't run |
+  | **Tool calls per chat turn** | **5** (all profiles) | After the 5th tool call, reply "I've hit my tool-use budget for this turn — please ask a more specific question." and stop the agent loop |
+  | Per-source HTTP fetches | Politeness window (default 5 min) | Skip until window expires |
+  | Eval LLM calls | Profile-driven concurrency | Block fetcher (back-pressure) |
+  | `/quarantine approve` | 100/min per admin | Reject with rate-limit message |
+
+  Notes on the LLM-triggering caps:
+
+  - The chat-mode transport limit (60/min) is intentionally higher than the LLM-triggering cap (10/min). A user can fire 60 short messages a minute (the bot will respond to up to 10 of them with the chat agent / summarizer; the rest get a quick rate-limit reply). This avoids burning the only LLM slot on a Pi when one user is hammering the bot — Mimo's flooding scenario.
+  - Tool-call results are cached **within a single conversation turn**: if the agent calls `getPostById(p-a91)` twice in the same turn, the second call returns the cached result instead of re-querying. The cache scope is one (user, scope, turn_id); the next user message starts a fresh cache.
+  - `infochat.ratelimit.llm-ops-per-minute` and `infochat.ratelimit.tool-calls-per-turn` are configurable but capped at the profile defaults — operators can lower, not raise.                                                                                                                                                                        
                                                                                                                                                                                                                                                         
   All rate-limit rejections are logged at INFO. Persistent overflow from one user logs at WARN with their `contact_id_redacted`.                                                                                                                        
                                                                                                                                                                                                                                                         

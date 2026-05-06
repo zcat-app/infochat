@@ -28,7 +28,10 @@
     banned_by       UUID REFERENCES users(id),
     ban_reason      TEXT,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    last_seen_at    TIMESTAMPTZ
+    last_seen_at    TIMESTAMPTZ,
+    save_count      INT NOT NULL DEFAULT 0          -- denormalized COUNT(*) of saved_post rows for this user;
+                                                    -- maintained by trigger; powers the 1000-save cap check
+                                                    -- in O(1) instead of a SELECT COUNT(*).
   );
                                                                                                                                                                                                
   CREATE INDEX idx_users_admin    ON users(is_admin)  WHERE is_admin;
@@ -59,6 +62,16 @@
   );
                                                                                    
   CREATE INDEX idx_group_membership_user ON group_membership(user_id);
+
+  -- Auto-promote race protection: at most one group admin can be created via the
+  -- "first @mention wins" bootstrap path. Two simultaneous @mention messages can
+  -- both pass the "no admin yet" check before either INSERT lands; this partial
+  -- unique index makes the second INSERT no-op on conflict instead of producing
+  -- two admins. Bot admins can still set is_group_admin=true via /promote because
+  -- the previous admin is demoted first inside the same transaction (see
+  -- 04-security §4.4).
+  CREATE UNIQUE INDEX one_admin_per_group
+    ON group_membership(group_id) WHERE is_group_admin = true;
                                
   audit_log
                             
@@ -166,19 +179,34 @@
   CREATE TABLE post (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     source_id       UUID NOT NULL REFERENCES source(id) ON DELETE RESTRICT,
-    external_id     TEXT NOT NULL,                   -- guid, item link, tweet id, etc.
+    external_id     TEXT NOT NULL CHECK (length(external_id) <= 2048),
+                                                     -- guid, item link, tweet id, etc.
+                                                     -- 2KB cap protects against malicious feeds
+                                                     -- pushing multi-MB GUIDs (TOAST DoS).
+                                                     -- Real-world GUIDs are URLs <256 chars.
+                                                     -- Beyond the cap, the fetcher hashes the
+                                                     -- raw value (sha256-hex) and stores the digest.
     url             TEXT,
     title           TEXT NOT NULL,
-    body            TEXT,                            -- sanitized HTML→text
+    body            TEXT,                            -- always plain text (HTML stripped at ingest);
+                                                     -- length(body) measures characters of plain text.
     body_summary    TEXT,                            -- LLM-generated abstract; populated when length(body) > 2000 chars (see 05-llm §5.4)
     author          TEXT,                            -- account or byline
     published_at    TIMESTAMPTZ,
     fetched_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    ready_at        TIMESTAMPTZ,                     -- set when status transitions to READY;
+                                                     -- drives Provider startup reconciliation
+                                                     -- (see 01-architecture §1.5 / provider_state).
+    last_linked_at  TIMESTAMPTZ,                     -- LinkingJob cursor: NULL => never linked.
+                                                     -- LinkingJob processes posts where
+                                                     -- last_linked_at IS NULL OR last_linked_at < fetched_at.
     status          TEXT NOT NULL DEFAULT 'RAW',     -- 'RAW','EVALUATING','READY','QUARANTINED','FAILED'
     stage1_flagged  BOOLEAN NOT NULL DEFAULT FALSE,
-    stage2_failed   BOOLEAN NOT NULL DEFAULT FALSE,  -- true if Stage 2 LLM errored after retry; post released READY-with-redactions
+    stage2_failed   BOOLEAN NOT NULL DEFAULT FALSE,  -- true if Stage 2 LLM errored after retry; post released READY-with-redactions (when release-on-stage2-failure is true; otherwise stays QUARANTINED)
     tagger_fallback BOOLEAN NOT NULL DEFAULT FALSE,  -- true if tags came from source.bootstrap_tags
-    social_score    INT,                             -- 2*reposts + likes for social posts
+    is_saved        BOOLEAN NOT NULL DEFAULT FALSE,  -- maintained by trigger on saved_post insert/delete;
+                                                     -- enables index-friendly TTL pruner (see 2.6 below).
+    social_score    INT,                             -- see 05-llm §5.4 for the formula (currently 2*reposts + likes)
     likes           INT,
     reposts         INT,
     UNIQUE (source_id, external_id)
@@ -187,6 +215,13 @@
   CREATE INDEX idx_post_status_fetched   ON post(status, fetched_at DESC);
   CREATE INDEX idx_post_source           ON post(source_id, fetched_at DESC);
   CREATE INDEX idx_post_published        ON post(published_at DESC);
+  -- Provider startup reconciler scan (see 01-architecture §1.5):
+  CREATE INDEX idx_post_ready_at         ON post(ready_at) WHERE status = 'READY';
+  -- LinkingJob driving-set scan (see 01-architecture §1.3):
+  CREATE INDEX idx_post_link_cursor      ON post(fetched_at)
+    WHERE status = 'READY' AND (last_linked_at IS NULL OR last_linked_at < fetched_at);
+  -- TTL pruner: index-only scan for non-saved posts past retention.
+  CREATE INDEX idx_post_prune_candidate  ON post(fetched_at) WHERE is_saved = false;
 
   post_user_tag (Tier-1 assignment, many-to-many)
 
@@ -312,14 +347,34 @@
     personal_tags    TEXT[] NOT NULL DEFAULT '{}',
     note             TEXT,
     PRIMARY KEY (user_id, post_id)
-  ); 
-                                       
+  );
+
   CREATE INDEX idx_saved_user_tags ON saved_post USING gin (personal_tags);
   CREATE INDEX idx_saved_user_at   ON saved_post(user_id, saved_at DESC);
-                                                                                                                                                                                                                                                        
-  -- Cap of 1000 saves per user enforced by trigger (BEFORE INSERT).
-                                                                                                                                                                                                                                                        
-  Note: ON DELETE RESTRICT on post_id is what makes the TTL pruner skip saved posts. The pruner runs DELETE FROM post WHERE fetched_at < now() - interval '30 days' AND id NOT IN (SELECT post_id FROM saved_post).
+
+  -- Denormalized counters maintained by trigger:
+  --   ON saved_post INSERT: UPDATE post SET is_saved = true WHERE id = NEW.post_id;
+  --                         UPDATE users.save_count = save_count + 1
+  --                                  WHERE id = NEW.user_id.
+  --   ON saved_post DELETE: UPDATE post SET is_saved = false IFF no other saved_post
+  --                         row references this post; UPDATE users.save_count = save_count - 1.
+  -- Cap of 1000 saves per user is enforced BEFORE INSERT by checking users.save_count
+  -- (O(1) instead of COUNT(*) on saved_post).
+  -- users.save_count is added to the users table (NOT NULL DEFAULT 0).
+
+  Note on TTL pruning: post.is_saved (denormalized via the trigger above) is what makes the
+  TTL pruner skip saved posts. The pruner runs:
+
+      DELETE FROM post
+       WHERE fetched_at < now() - interval '30 days'
+         AND is_saved = false;
+
+  This uses the partial index `idx_post_prune_candidate ON post(fetched_at) WHERE is_saved = false`
+  for an index-only scan. The previous `NOT IN (SELECT post_id FROM saved_post)` form
+  defeated the partial index and degraded to a full anti-join across the (eventually
+  partitioned) post table. ON DELETE RESTRICT on saved_post.post_id remains as a
+  belt-and-suspenders safety net so a stale `is_saved = false` row cannot be pruned
+  while a saved_post row still references it.
                                                                                    
   chat_memory (/compress long-term memory)
                                                                                                                                                                                                                                                         
@@ -339,6 +394,18 @@
   CREATE INDEX idx_chat_memory_keywords ON chat_memory USING gin (keywords);
                                                                                                                                                                                                                                                         
   Per-(user, scope) isolation: every chat_memory row is tied to one user. In a group, each user has their own memory of their own conversation with the bot. Users never see each other's memory.
+
+  Cap: at most 200 chat_memory rows per (user_id, scope_kind, scope_id). Enforced
+  by a BEFORE INSERT trigger that, when the cap is reached, deletes the oldest
+  row by created_at ASC (LRU eviction). Mirrors the 1000-save cap pattern for
+  saved_post. Documented as v1; richer eviction (recency-weighted, manual /forget)
+  is a v2 feature.
+
+  referenced_topics is intentionally ephemeral: topic IDs are computed at query
+  time from post_reference connected components (see §2.11) and are valid only
+  within the active 4-day partition window. A chat_memory row written today may
+  reference topic IDs that no longer resolve in five days. Consumers must treat
+  any unresolved entry as a soft miss (skip it) rather than an error.
                                                                                                                                                                                                                                                         
   chat_session (active context window)
                                                                                                                                                                                                                                                         
@@ -346,13 +413,52 @@
     user_id      UUID NOT NULL,
     scope_kind   TEXT NOT NULL,                      -- 'dm' or 'group'
     scope_id     UUID NOT NULL,                      -- user_id for dm, group_id for group
-    messages     JSONB NOT NULL DEFAULT '[]',        -- array of {role,content,ts,tokens}
-    token_count  INT NOT NULL DEFAULT 0,
+    next_seq     INT NOT NULL DEFAULT 0,             -- monotonic seq counter; assigned to each new chat_message row
+    token_count  INT NOT NULL DEFAULT 0,             -- denormalized SUM(chat_message.tokens) for this session
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (user_id, scope_kind, scope_id)
   );
+
+  chat_message (one row per turn — replaces the v0 JSONB messages array)
+
+  CREATE TABLE chat_message (
+    user_id     UUID NOT NULL,
+    scope_kind  TEXT NOT NULL,
+    scope_id    UUID NOT NULL,
+    seq         INT  NOT NULL,                       -- assigned from chat_session.next_seq at insert time
+    role        TEXT NOT NULL,                       -- 'system','user','assistant','tool'
+    content     TEXT NOT NULL,
+    tokens      INT  NOT NULL,
+    ts          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, scope_kind, scope_id, seq),
+    FOREIGN KEY (user_id, scope_kind, scope_id)
+      REFERENCES chat_session(user_id, scope_kind, scope_id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX idx_chat_message_session_seq
+    ON chat_message(user_id, scope_kind, scope_id, seq);
+
+  Rationale: the previous JSONB-array design rewrote the entire row (TOAST round-trip)
+  on every append. Sessions routinely sit at 50–100 messages × ~2KB each, so each
+  chat reply paid an O(n) cost in bytes. The child-table form makes append O(1),
+  /clear becomes a single DELETE on (user_id, scope_kind, scope_id), and token
+  bookkeeping is a SUM maintained by trigger. Auto-compress at 75% of context
+  still works the same — it reads the last N rows ORDER BY seq DESC, asks the LLM
+  to compress, and writes the result back into chat_memory.
+
+  Triggers:
+    ON chat_message INSERT:
+      UPDATE chat_session
+         SET token_count = token_count + NEW.tokens,
+             next_seq    = next_seq + 1,
+             updated_at  = now()
+       WHERE (user_id, scope_kind, scope_id) =
+             (NEW.user_id, NEW.scope_kind, NEW.scope_id);
+    ON chat_message DELETE (e.g., compaction):
+      UPDATE chat_session SET token_count = token_count - OLD.tokens ... ;
                                                                                                                                                                                                                                                         
-  /clear truncates messages and resets token_count for the (user, scope). It does NOT touch chat_memory.
+  /clear deletes chat_message rows and resets chat_session.token_count + next_seq for
+  the (user, scope). It does NOT touch chat_memory.
                                                                                                                                                                                                                                                         
   ---                                                                                                                                                                                                                                                   
   2.7 Embedding model migration
@@ -384,6 +490,40 @@
   └───────────────┴─────────────────────────────────────────────┴──────────────────────────────────────────┴───────────────────────────────────────────────┘
                                                                                    
   Provider's admin notifier coalesces messages of the same (channel, error_class) for 15 minutes before sending one summary message to all bot admins.
+
+  ### provider_state (high-water mark for missed `new_post` NOTIFY events)
+
+  ```sql
+  CREATE TABLE provider_state (
+    provider_instance    TEXT PRIMARY KEY,            -- e.g., "infochat-provider-0"; from infochat.provider.instance-id
+    last_ready_post_at   TIMESTAMPTZ NOT NULL DEFAULT 'epoch',
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+  ```
+
+  Postgres LISTEN/NOTIFY does not buffer events for disconnected listeners. If the
+  Provider is down or restarting when `NOTIFY new_post` fires, the event is gone.
+  The high-water mark closes the gap:
+
+  - On `@Startup` (priority 250) the Provider's `NewPostReconciler` reads
+    `last_ready_post_at` and runs:
+
+    ```sql
+    SELECT id FROM post
+     WHERE status = 'READY' AND ready_at > :last_ready_post_at
+     ORDER BY ready_at;
+    ```
+
+    Each row is fed into the same handler that processes live `NOTIFY new_post`
+    payloads. Reconciliation is bounded by partition retention (≤ 4 days).
+  - The live listener and the reconciler both advance `last_ready_post_at` to the
+    `ready_at` of the most recently processed row.
+  - Multiple Provider instances each have their own `provider_state` row keyed by
+    `provider_instance`; they do not interfere.
+
+  Note that the durability promise is "no missed `new_post` events," not "exactly-once
+  delivery to the user." Cache-invalidation and digest-prefetch handlers must be
+  idempotent, which they already are (the cache key includes the post id).
                                                                                                                                                                                                                                                         
   ---                                                                                                                                                                                                                                                   
   2.9 TTL policy summary
