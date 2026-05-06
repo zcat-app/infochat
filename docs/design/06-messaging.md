@@ -1,3 +1,8 @@
+> **Status: design notes, not spec.**
+> Implementation details below (DDL, class names, package layout, property keys,
+> retry counts, regex strings, etc.) are working notes that may change without a
+> spec amendment. The authoritative *what & why* lives in `docs/spec/`.
+
  ---
   # 06 — Messaging adapters                                                                                                                                                                                                                             
                            

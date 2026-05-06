@@ -70,6 +70,7 @@ These decisions inform every section. They are documented in detail in the linke
 | Group memory | Per-(user, group) — same privacy model as `/save` | [02](02-schema.md), [03](03-commands.md) |
 | Translation | `TranslationProvider` SPI. Default English everywhere; `/lang <code>` sets per-scope language (stored in `scope_preferences.language`). Direct generation in target language preferred (one LLM call) where the model supports it; post-translate fallback. Source post bodies are NEVER translated (deterministic retrieval and embeddings stay coherent). | [05](05-llm-and-embeddings.md), [03](03-commands.md) |
 | Output formatting | Plain text default. Inline code in single backticks (`` `CVE-2026-1234` ``); multi-line code in triple backticks. URLs bare (no markdown link syntax). `MessagingAdapter` exposes a `supportsMarkdownCode` capability flag — adapters that render markdown get nicer output, others show backticks (still readable). | [06](06-messaging.md) |
+| Progress notifications | `ProgressNotifier` cross-cutting service in Provider. Long-running requests (`/summary`, `/digest`, chat-mode) publish stage events (`STARTED`, `RETRIEVING`, `GENERATING`, `TRANSLATING`, `FINALIZING`); notifier renders them via adapter capabilities `supportsMessageEdit` (in-place updates) and `supportsTypingIndicator`. Edits coalesced ≥600ms; localized strings only, no user-input interpolation. Adapters without edit support fall back to a single final `send` — caller is unaware. | [01](01-architecture.md), [06](06-messaging.md) |
 
 ---
 
@@ -90,6 +91,7 @@ These decisions inform every section. They are documented in detail in the linke
 - Auto-compress at 75% of profile-defined context window
 - `TranslationProvider` SPI; English by default, opt-in per-scope language via `/lang`
 - Code-formatting convention (backticks) with adapter capability flag
+- In-place progress updates for long-running requests via `ProgressNotifier`, with adapter-capability-gated fallback (edit → typing-only → silent single send)
 
 ### Deferred to v2 (or later)
 
@@ -119,3 +121,6 @@ These decisions inform every section. They are documented in detail in the linke
 - **Hardware profile**: named bundle of settings keyed by `infochat.profile=laptop|vps|pi|remote`. Picks context-window size, default chat model, embedding model, eval concurrency, vector index type.
 - **Fetcher type**: implementation that ingests a source URL (`rss`, `nitter`, `bluesky`, `odysee`, `youtube`, `reddit`, `nostr`).
 - **Category**: coarse classification of a source (`news`, `blog`, `social`). Displayed in `/list-sources`. Distinct from tags.
+- **Progress notifier**: cross-cutting Provider component that turns business-logic stage events into `MessagingAdapter` calls (`update`, `finalize`, `setTyping`). Rate-limits and coalesces edits per `(scope, requestId)`; never interpolates user input into rendered strings.
+- **Message handle**: opaque token returned by `MessagingAdapter.send()`. Lets a caller subsequently `update` or `finalize` the same visible message. Adapter-defined contents — callers MUST NOT inspect or persist it.
+- **Live message**: SimpleX-specific rendering mode for messages still being updated (`APIUpdateChatItem` with `live=on`). Hidden behind the SimpleX adapter; not part of the SPI.

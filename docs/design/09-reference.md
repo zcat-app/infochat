@@ -1,3 +1,8 @@
+> **Status: design notes, not spec.**
+> Implementation details below (DDL, class names, package layout, property keys,
+> retry counts, regex strings, etc.) are working notes that may change without a
+> spec amendment. The authoritative *what & why* lives in `docs/spec/`.
+
 # 09 — Reference
 
 Quick-lookup tables that are useful across modules: the Maven module dependency graph, and the canonical error-code catalog. Both are intentionally small; if either grows past a screen, split it out.

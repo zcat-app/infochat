@@ -1,3 +1,8 @@
+> **Status: design notes, not spec.**
+> Implementation details below (DDL, class names, package layout, property keys,
+> retry counts, regex strings, etc.) are working notes that may change without a
+> spec amendment. The authoritative *what & why* lives in `docs/spec/`.
+
 # 01 — Architecture
 
 ## 1.1 Components
@@ -19,10 +24,10 @@
 │   tagger, entities, │         │ - Confirmation svc   │
 │   embeddings)       │         │ - Translation        │
 │ - Outbox rehydrator │         │ - Rate limiter       │
-│ - Linking job       │         │                      │
-│ - TTL pruner        │         │                      │
-│ - Admin notifier    │         │                      │
-│   (throttled)       │         │                      │
+│ - Linking job       │         │ - Progress notifier  │
+│ - TTL pruner        │         │   (coalesces in-     │
+│ - Admin notifier    │         │    flight progress   │
+│   (throttled)       │         │    updates per req.) │
 └──────────┬──────────┘         └──────────┬───────────┘
            │                               │
            │       ┌──────────────────┐    │
@@ -182,6 +187,27 @@ TranslationProvider.translate() if scope language ≠ 'en' →
 send via messaging adapter
 ```
 
+For long-running paths (`/summary`, `/digest`, chat-mode generation), the
+command handler acquires a `ProgressContext` from `ProgressNotifier` *before*
+the LLM call. The notifier:
+
+1. Calls `MessagingAdapter.send()` with a localized placeholder
+   (e.g., "Working on it…") and captures the returned `MessageHandle`.
+2. Calls `setTyping(scope, true)` if the adapter declares the capability.
+3. Receives stage events from the handler (`STARTED`, `RETRIEVING`,
+   `GENERATING`, `TRANSLATING`, `FINALIZING`) and renders each as a
+   localized string via `update(handle, text)`. Events are coalesced
+   per `(scope, requestId)` to honor `max(adapter.minEditInterval, 600ms)`;
+   the latest event wins.
+4. On terminal `COMPLETED` or `FAILED`, calls `finalize(handle, finalText)`
+   and `setTyping(scope, false)`. Both calls are guaranteed via
+   try/finally so the placeholder is never left dangling.
+
+Stage strings are looked up by enum from a localization bundle; user input
+is NEVER interpolated into progress strings (security: prevents reflective
+injection in screenshots / logs). Short-running deterministic SQL commands
+bypass `ProgressNotifier` entirely.
+
 ## 1.4.1 Group periodic summary (8am / 8pm)
 
 ```
@@ -270,6 +296,7 @@ Health endpoint `/q/health/ready` stays 503 until every priority < 500 bean is u
 4. **Per-(user, scope) isolation by construction.** Every data row that holds user state has a `scope_kind` (`'dm'` or `'group'`) and `scope_id` (or equivalent FKs). All queries filter on these. Prevents cross-user leaks at the storage layer.
 5. **TTL by partitioning, not DELETE.** `post_embedding` and `post_reference` are partitioned by day. Old partitions are dropped wholesale. No row-level deletes, no index bloat.
 6. **Adapters are SPIs.** `LlmProvider`, `EmbeddingProvider`, `MessagingAdapter` are CDI-injected interfaces. Concrete impls picked by config. Test doubles slot in for CI.
+7. **Progress is a presentation-layer concern.** Long-running user requests publish stage events to `ProgressNotifier`, which renders them via the messaging adapter's `update`/`finalize`/`setTyping` capabilities. Business logic does not reference the adapter, does not know about message handles, and does not interpolate user input into progress strings. Transport-specific affordances (e.g., SimpleX live messages, Telegram edit rate limits) live entirely inside their adapter — the SPI exposes only capability flags and a `minEditInterval` hint.
 
 ## 1.6 Concurrency and rate limiting
 
@@ -278,6 +305,7 @@ Health endpoint `/q/health/ready` stays 503 until every priority < 500 bean is u
 - **LLM client**: bounded concurrency via Quarkus `vertx` worker pool. Profile defaults: `laptop=4`, `vps=2`, `pi=1`, `remote=8`. Per-task overridable via `infochat.llm.<task>.max-concurrency`.
 - **Eval channel**: bounded queue size (configurable, profile-driven). If full, fetcher blocks (back-pressure to feed schedulers, which is the desired behavior — avoids unbounded memory growth on LLM slowness).
 - **Periodic summary worker**: count is profile-driven — `laptop=4`, `vps=2`, `pi=1`, `remote=8` (see §1.7 table). Generation requests are enqueued with stagger and processed serially per worker. Operators can override via `infochat.summary.workers`.
+- **Progress edits**: `ProgressNotifier` enforces `max(adapter.minEditInterval, 600ms)` between edits per `(scope, requestId)`. Excess events are coalesced; only the latest unsent text is transmitted at the next eligible tick. The terminal `finalize` is always sent regardless of the coalescing window so the placeholder is never left mid-flight. The 600ms floor is a deliberate UX choice — faster edits feel jittery and inflate transport cost without improving perceived responsiveness.
 
 ## 1.7 Hardware profiles
 
