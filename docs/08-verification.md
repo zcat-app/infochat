@@ -51,7 +51,8 @@
   - Negative: benign content with edge phrases ("In a previous email I asked...", "ignore the noise", code samples) does NOT flag. Corpus at `fixtures/security/prompt-injection-negative.txt`.
   - HTML sanitizer: malicious HTML becomes safe text; allowlist preserved (links, code, basic structure). Cases include `<script>`, `<iframe>`, `javascript:`, `data:`, `<a onclick>`, malformed HTML.                                                  
   - Unicode: NFKC normalization changes detection where expected; bidi controls stripped; zero-widths inside fenced code preserved.                                                                                                                     
-  - Span offsets: replaced placeholders are byte-accurate. Positive cases verify `(span_start, span_end)` round-trip.                                                                                                                                   
+  - Span offsets: replaced placeholders are byte-accurate. Positive cases verify `(span_start, span_end)` round-trip.
+  - **ReDoS resilience (F27):** an adversarial input crafted to trigger catastrophic backtracking (e.g., a long alternation tail like `"a" * 5000 + "!"` against a naive `(a|aa)+!` style pattern, plus the curated cases in `fixtures/security/redos-attacks.txt`) MUST either complete within 100 ms or fail fast via the configured RE2/J / `Pattern` timeout. The assertion is wall-clock-bounded with a generous margin (test fails if any single regex pass exceeds 250 ms, well below the 100 ms target plus CI jitter). This validates the protection required by [04-security.md §4.2](04-security.md).                                                                                                                                   
                                                                                                                                                                                                                                                         
   ### 8.3.2 Command parser                                                                                                                                                                                                                              
                                                                                                                                                                                                                                                         
@@ -210,11 +211,43 @@
   - `/grant-admin` / `/revoke-admin` with last-admin protection.
   - First `@mention` in a fresh group auto-promotes that user to group admin; audit row written.                                                                                                                                                        
   - `/promote` / `/demote` callable only by bot admin.                                                                                                                                                                                                  
-  - `/ban` blocks subsequent inbound from the target before the parser runs (no DB write past the ban check).                                                                                                                                           
-  - `/unban` restores access; previously held group-admin role still effective.                                                                                                                                                                         
+  - `/ban` blocks subsequent inbound from the target before the parser runs (no DB write past the ban check).
+  - `/unban` restores access; previously held group-admin role still effective.
+  - **Chat output sanitizer (F2):** `FakeLlmProvider` is configured to return the exact string `"Sure! Here's the command: /grant-admin abc123"` for a benign chat-mode prompt. Assert that:
+    1. The outbound `OutboundMessage.text` delivered to `InMemoryAdapter` does NOT contain `/grant-admin abc123` — the chat output sanitizer (see [04-security.md §4.4](04-security.md)) either replaces the matched span or refuses the entire reply with `[refused-action]`.
+    2. An `audit_log` row is written with action kind `chat_output_sanitized`, the actor's contact id, scope, and a redacted preview of the matched span.
+    3. The same flow for sibling commands (`/demote`, `/ban`, `/unban`, `/remove-source`, `/promote`) produces equivalent sanitization. Run as a parameterized test over the command list to prevent drift if §4.4's regex grows.
+    4. A control case where the LLM reply mentions `/help` or `/summary` (non-admin commands) passes through unchanged and writes NO sanitizer audit row.                                                                                                                                                                         
                                                                                                                                                                                                                                                         
-  ---                                                                                                                                                                                                                                                   
-                                                                                                                                                                                                                                                        
+  ### 8.4.12 Connection-pool discipline (F18)
+
+  `ConnectionPoolIT`:
+
+  Validates that the Provider releases its JDBC connection before every LLM call, as required by [07-deployment.md §7.4 "Connection-release discipline"](07-deployment.md). Without this, ~10 concurrent chat-mode requests could starve the Collector under the production-recommended pool sizes (provider=30, collector=15).
+
+  - Setup: Provider configured with `quarkus.datasource.jdbc.max-size=10` (deliberately low to make starvation easy to trigger if the discipline is broken). `FakeLlmProvider` configured to sleep 2 s before returning, simulating a slow LLM. A second connection consumer (a tight-loop Collector-side write) runs in parallel.
+  - Drive 20 concurrent chat-mode requests through `InMemoryAdapter`.
+  - **Assert (a) — pool gauge stays bounded:** the `agroal.connections.active{datasource=provider}` Micrometer gauge, sampled at 100 ms intervals during the run, never exceeds the pool size (10). If the Provider were holding a connection across the LLM call, 11+ requests would block waiting for the pool and the gauge would pin at 10 with a growing acquisition wait time — both observable.
+  - **Assert (b) — no LLM-induced starvation:** the parallel Collector writer completes its loop within `(2 s LLM time + 200 ms slack)`, NOT `(20 chats × 2 s)`. This is the tight-fitting failure signal: if connections were held across LLM calls, the Collector writer would block for the full chat-mode duration.
+  - **Assert (c) — connection-acquisition-wait stays low:** `agroal.connections.acquire.histogram{datasource=provider}` p99 < 50 ms across the run.
+  - **Assert (d) — no held-across-LLM connections:** an instrumentation aspect on `LlmProvider.respond()` / `LlmProvider.classify()` records the calling thread's `Connection`-handle count via a test-only `ThreadLocal<ConnectionTracker>`; assertion is that the count is 0 at every LLM entry. This catches the regression at the source rather than only its symptom.
+
+  ### 8.4.13 Same-(user, scope) chat concurrency (F26)
+
+  `ChatConcurrencyIT`:
+
+  Now that chat history lives in the `chat_message` child table (per [02-schema.md §2.6](02-schema.md), F3) keyed by `(session_id, seq)` — not as a JSONB array on `chat_session` — concurrent appends from the same `(user, scope)` are no longer at risk of lost-update via blob rewrite. This test enforces that property.
+
+  - Setup: one user, one DM scope, one `chat_session` row.
+  - Drive **two simultaneous** chat-mode messages from the same `(user, scope)` through `InMemoryAdapter`, started within 5 ms of each other (use a `CountDownLatch` to release both threads at once).
+  - **Assert (a):** exactly two `chat_message` rows exist for the session, with distinct `seq` values (no collision, no lost write).
+  - **Assert (b):** both rows reference the same `session_id`; no second `chat_session` row was created.
+  - **Assert (c):** `chat_session.token_count` (denormalized counter, maintained by trigger or app code per F3) equals the SUM of `chat_message.tokens` for the two rows. This validates that the counter update path is also concurrency-safe.
+  - **Assert (d):** the assistant replies sent to the adapter both reference the correct session — no cross-talk between the two chat turns. Each reply's `correlationId` matches its inbound message id.
+  - **Assert (e) — fuzz variant:** repeat with 10 simultaneous messages. All 10 `chat_message` rows land with strictly increasing `seq`; no duplicates, no gaps that would indicate a rolled-back insert.
+
+  ---
+
   ## 8.5 SPI contract suites                                                       
 
   Each SPI is verified with a parameterized suite that runs against every implementation registered. Adding a new impl auto-runs the same assertions.                                                                                                   
