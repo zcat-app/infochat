@@ -107,6 +107,10 @@ choices that shape every section.
 - Code-formatting convention (backticks) with adapter capability flag.
 - In-place progress updates for long-running requests, with                                                                                                                                                                                           
   adapter-capability-gated fallback.
+- `/stop` to cancel an in-flight chat-mode reply or user-issued
+  `/summary`; `/retry` to regenerate the prose of the last
+  summary-producing command (deterministic selection reused, LLM
+  prose re-rolled).
 
 ### Deferred to v2 (or later)
 

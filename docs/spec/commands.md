@@ -82,6 +82,30 @@ text, and output structure are in `docs/design/03-commands.md`.
   (decision D24).
 - `/lang <code>` — sets per-scope output language. v1 ships English and
   Czech. DM: own scope. Group: group admin only.
+- `/stop` — cancels the calling (user, scope)'s currently in-flight
+  interruptible request **immediately**, so the worker is freed for
+  others. Applies to chat-mode agent loops and user-issued `/summary`
+  prose generation; does not affect periodic group digests, the
+  ingest pipeline, or already-completed work. The in-flight LLM
+  stream is closed and any in-flight read-only tool call is
+  cancelled. Once outbound delivery has begun the message is not
+  unsent. Idempotent (no-op with a friendly reply when nothing is in
+  flight). Audit-before-effect still holds — any audit row written
+  before cancellation stays. The progress notifier (decision D31)
+  renders a final "stopped" state on the in-place message. See
+  decision D35.
+- `/retry` — regenerates the prose for the last summary-producing
+  command in the calling (user, scope). Re-runs the LLM stage only;
+  deterministic post selection and clustering are reused unchanged
+  (decision D19). Bounded by a small fixed retry cap (value in
+  design notes) anchored to that most-recent summary-producing
+  command. Any non-`/retry` input from the same (user, scope) clears
+  the anchor; `/retry` itself never advances or resets it. No effect
+  (friendly error) when no eligible anchor exists, when the anchor
+  has been cleared, when the prior command was cancelled by `/stop`,
+  or when the prior command was not summary-producing. For periodic
+  group digests, `/retry` is group-admin or bot-admin only and
+  replaces the cached digest (decision D17). See decision D36.
 
 ### Admin (bot admin)
 
@@ -117,6 +141,12 @@ strict, fixed tool surface (read-only, scope-filtered) — see `security.md`
 and decision D21. The agent is never allowed to mutate authorization state
 or perform admin actions; admin commands are dispatched by the
 deterministic command path only.
+
+Chat-mode replies and user-issued `/summary` runs can be interrupted by
+`/stop` (decision D35). Cancellation observes the same per-(user, scope)
+isolation as every other state in the system: a `/stop` from one user
+never affects another user's in-flight request, even within the same
+group.
 
 ## Onboarding
 
