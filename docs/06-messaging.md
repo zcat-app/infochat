@@ -54,9 +54,26 @@
       /** Lifecycle. Called on shutdown. Must be idempotent. */                                                                                                                                                                                         
       void stop() throws MessagingException;                                                                                                                                                                                                            
                                                                                                                                                                                                                                                         
-      /** Send one message. Synchronous from the caller's perspective; the adapter may queue internally. */                                                                                                                                             
-      void send(OutboundMessage msg) throws MessagingException;
-                                                                                                                                                                                                                                                        
+      /** Send one message. Returns an opaque handle the caller may later use to
+       *  update or finalize the same message. Synchronous from the caller's
+       *  perspective; the adapter may queue internally. */
+      SentMessage send(OutboundMessage msg) throws MessagingException;
+
+      /** Replace the visible text of a previously-sent message.
+       *  No-op for adapters with capabilities.supportsMessageEdit = false. */
+      void update(MessageHandle handle, String text) throws MessagingException;
+
+      /** Last update for a message; signals the operation is complete. After
+       *  finalize, further update calls on the same handle MUST throw. Adapters
+       *  may use this to clear "live" decorations (e.g., SimpleX live=off).
+       *  For adapters with supportsMessageEdit = false, finalize behaves as
+       *  a send() of the final text with the original correlationId. */
+      void finalize(MessageHandle handle, String text) throws MessagingException;
+
+      /** Show or clear a typing indicator for a scope.
+       *  No-op for adapters with capabilities.supportsTypingIndicator = false. */
+      void setTyping(ScopeRef scope, boolean typing);
+
       /** Strongly-typed identity assertion for an incoming message. NEVER trust display name. */                                                                                                                                                       
       Identity assertIdentity(InboundMessage msg);                                                                                                                                                                                                      
                                                                                                                                                                                                                                                         
@@ -83,7 +100,18 @@
       String text,
       Instant requestedAt,
       String correlationId   // matches an inbound message id, when this is a reply                                                                                                                                                                     
-  ) {}                                                                                                                                                                                                                                                  
+  ) {}
+
+  /** Returned by send(). Carries the original message plus an opaque handle
+   *  that the caller passes to update() / finalize() to mutate the same
+   *  visible message. The handle's contents are adapter-defined. */
+  public record SentMessage(MessageHandle handle, OutboundMessage original) {}
+
+  /** Opaque token. Adapters define their own implementations
+   *  (e.g., SimplexMessageHandle wraps chatItemId; InMemoryMessageHandle
+   *  wraps an in-memory id). Callers MUST NOT inspect or persist it. */
+  public sealed interface MessageHandle
+      permits SimplexMessageHandle, InMemoryMessageHandle /*, future adapter handles */ {}
                                                                                                                                                                                                                                                         
   public sealed interface ScopeRef {                                                                                                                                                                                                                    
       record Dm(String contactId) implements ScopeRef {}                           
@@ -105,9 +133,16 @@
       int     maxInflightSends,            // CONCURRENCY: max send() calls in flight at once
                                            //   (e.g. 4 means up to 4 outbound messages
                                            //    may be transmitting simultaneously)
-      int     maxSendsPerSecond            // RATE: token-bucket cap on sends per second
+      int     maxSendsPerSecond,           // RATE: token-bucket cap on sends per second
                                            //   averaged over a 1s window, regardless of
                                            //   how many are concurrently in flight
+      boolean supportsMessageEdit,         // adapter can update an already-sent message
+                                           //   (e.g., SimpleX APIUpdateChatItem)
+      boolean supportsTypingIndicator,     // adapter can show "bot is typing…"
+      Duration minEditInterval             // adapter's recommended floor between edits
+                                           //   on the same message; ProgressNotifier
+                                           //   uses max(this, 600ms). Duration.ZERO if
+                                           //   not applicable (e.g., InMemoryAdapter).
   ) {}                                                                                                                                                                                                                                                  
                                                                                                                                                                                                                                                         
   public enum AdapterTrustLevel { HIGH, LOW }                                                                                                                                                                                                           
@@ -166,7 +201,42 @@
   - The adapter SHOULD enqueue inbound messages with a bounded queue (default 1000). On overflow, the adapter MUST drop the **NEWEST** message — the one that just arrived — and MUST send a synchronous throttle reply to its sender. Older messages already in the queue are preserved because they have already been acknowledged to the user (the bot didn't reject them on arrival) and may carry context the user is still waiting on a reply for.
   - The throttle reply uses a fixed, friendly text: `you're sending faster than I can keep up; the most recent message was dropped — please retry in a moment.` It is emitted via the same `OutboundMessage` path with `correlationId = <dropped inbound message id>` so it lines up under the dropped message in the user's client, bypasses the inbound queue (it does not pass through `InboundHandler.onMessage`), and is treated as priority on the outbound queue (throttle replies themselves are never dropped).
   - Drops are recorded as `adapter.inbound.dropped{adapter, scope_kind, reason='queue_full'}` and logged at WARN with the dropped message's `adapterMessageId` and `sender.contactId` (redacted). Persistent overflow from a single user is a hint that rate-limiting (§4.9) needs tightening — the throttle reply alone is not a substitute for `LlmRateLimiter`.
-  - Per-user fairness: the adapter SHOULD NOT let one chatty user starve others. InMemoryAdapter and SimplexAdapter both implement a per-user-fair scheduler.                                                                                           
+  - Per-user fairness: the adapter SHOULD NOT let one chatty user starve others. InMemoryAdapter and SimplexAdapter both implement a per-user-fair scheduler.
+
+  6.3.8 Progress notifications
+
+  Long-running user requests (`/summary`, `/digest`, chat-mode generation) publish
+  progress events to the Provider's `ProgressNotifier` (see 01-architecture.md §1.5
+  principle 7), which renders them through this SPI's `update`/`finalize`/`setTyping`
+  methods. The contract:
+
+  - Adapters that declare `supportsMessageEdit = true` MUST honor the lifecycle:
+    - `update(handle, text)` may be called any number of times after `send` and
+      before `finalize`. Each call replaces the visible text of the original message.
+    - `finalize(handle, text)` is called exactly once per handle and represents the
+      operation's terminal state (success or error). After `finalize`, further
+      `update` calls on the same handle MUST throw `MessagingException`.
+    - Adapters MUST coalesce updates to satisfy `capabilities.minEditInterval` even
+      if the caller exceeds the rate. The latest update wins; intermediate texts may
+      be discarded silently. The terminal `finalize` is always sent regardless of
+      the coalescing window.
+  - On unrecoverable update failure (e.g., underlying message deleted by the user,
+    edit window expired in the protocol, adapter rejection), the adapter MUST fall
+    back to sending a NEW message via `send`, with `correlationId` matching the
+    original. The fallback is recorded in `adapter.outbound.update.total{outcome=fallback_send}`.
+  - Adapters with `supportsMessageEdit = false` MUST treat `update` as a no-op and
+    `finalize` as a `send` of the final text (with the original `correlationId`).
+    Provider-side logic relies on this fallback to remain transport-neutral —
+    callers MUST NOT condition on the capability flag themselves.
+
+  6.3.9 Typing indicators
+
+  - Adapters with `supportsTypingIndicator = true` SHOULD render the indicator while
+    a long-running operation is in progress. Provider invokes `setTyping(scope, true)`
+    at request start and `setTyping(scope, false)` at completion or error.
+  - `setTyping` calls are advisory: the adapter MAY ignore rapid toggles or apply
+    its own debouncing. The adapter MUST NOT block the caller.
+  - Adapters with the capability disabled MUST treat both calls as silent no-ops.
                                                                                                                                                                                                                                                         
   ---                                                                                                                                                                                                                                                   
   6.4 SimpleX Chat adapter                                                                                                                                                                                                                              
@@ -182,13 +252,16 @@
                                                                                                                                                                                                                                                         
   6.4.2 Capabilities (declared)                                                                                                                                                                                                                         
                                                                                                                                                                                                                                                         
-  supportsMarkdownCode   = false   // SimpleX renders backticks as literal characters
-  supportsMultilineCode  = false
-  supportsAttachments    = false   // v1 doesn't use them
-  supportsThreading      = false
-  maxMessageBytes        = 4000    // SimpleX hard limit; adapter chunks above this
-  maxInflightSends       = 4       // up to 4 outbound sends in flight concurrently
-  maxSendsPerSecond      = 5       // and at most 5/s averaged; conservative, raise after observing                                                                                                                                                                               
+  supportsMarkdownCode    = false   // SimpleX renders backticks as literal characters
+  supportsMultilineCode   = false
+  supportsAttachments     = false   // v1 doesn't use them
+  supportsThreading       = false
+  maxMessageBytes         = 4000    // SimpleX hard limit; adapter chunks above this
+  maxInflightSends        = 4       // up to 4 outbound sends in flight concurrently
+  maxSendsPerSecond       = 5       // and at most 5/s averaged; conservative, raise after observing
+  supportsMessageEdit     = true    // APIUpdateChatItem ("/_update item …") with live=on/off
+  supportsTypingIndicator = false   // SimpleX has no first-class typing indicator
+  minEditInterval         = 600ms   // conservative floor; refine after observation                                                                                                                                                                               
                                                                                                                                                                                                                                                         
   6.4.3 Lifecycle                                                                                                                                                                                                                                       
                                                                                                                                                                                                                                                         
@@ -223,7 +296,29 @@
   - DM: /_send @<contact> text=<base64-encoded text>                                                                                                                                                                                                    
   - Group: /_send #<group> text=<base64-encoded text>                              
                                                                                                                                                                                                                                                         
-  Chunking: messages over 4000 bytes are split at the nearest line break before the limit; if a single line is longer, it's split at the limit. Code-block fences are preserved across chunks.                                                          
+  Chunking: messages over 4000 bytes are split at the nearest line break before the limit; if a single line is longer, it's split at the limit. Code-block fences are preserved across chunks.
+
+  ### Update encoding
+
+  `update(handle, text)` and `finalize(handle, text)` both serialize to the SimpleX
+  `APIUpdateChatItem` command:
+
+      /_update item <chatRef> <chatItemId> live=<on|off> json {"msgContent": {"type": "text", "text": "<text>"}}
+
+  - `update` uses `live=on` so the recipient client renders the message with its
+    live-update affordance.
+  - `finalize` uses `live=off` so the message presents as a normal completed message.
+  - The `chatItemId` is captured from each `APISendMessages` response and stored
+    inside `SimplexMessageHandle`; callers never see it.
+
+  ### Update failure handling
+
+  A `CRChatCmdError` carrying `CEInvalidChatItemUpdate` (item too old, deleted, or
+  not the bot's own message) is non-recoverable for that handle. The adapter falls
+  back to a fresh `send` of the new text with the original `correlationId`,
+  increments `adapter.outbound.update.fail{reason=…}`, and increments
+  `adapter.outbound.update.total{outcome=fallback_send}`. Subsequent `update` calls
+  on the same handle continue to fall back; `finalize` clears the fallback path.                                                          
                                                                                                                                                                                                                                                         
   6.4.6 Reconnection
 
@@ -252,6 +347,9 @@
   │ Identity assertion fails                 │ Drop the inbound message; log WARN │ None (silent skip)                                        │
   ├──────────────────────────────────────────┼────────────────────────────────────┼───────────────────────────────────────────────────────────┤                                                                                                         
   │ Outbound chunking exceeds protocol limit │ Throw MessagingException           │ Provider retries 3x, then logs                            │
+  ├──────────────────────────────────────────┼────────────────────────────────────┼───────────────────────────────────────────────────────────┤
+  │ Update rejected (CEInvalidChatItemUpdate │ Fall back to new send() with orig. │ User sees a new message rather than an in-place update    │
+  │   — item too old, deleted, not owner)    │ correlationId; metric incremented  │                                                           │
   └──────────────────────────────────────────┴────────────────────────────────────┴───────────────────────────────────────────────────────────┘                                                                                                         
                                                                                    
   ---                                                                                                                                                                                                                                                   
@@ -272,9 +370,12 @@
       @Override public AdapterCapabilities capabilities() {
           return new AdapterCapabilities(
               true, true, false, false,
-              100_000,   // maxMessageBytes — generous for tests
-              1000,      // maxInflightSends — effectively unlimited concurrency
-              10_000     // maxSendsPerSecond — effectively unlimited rate
+              100_000,         // maxMessageBytes — generous for tests
+              1000,            // maxInflightSends — effectively unlimited concurrency
+              10_000,          // maxSendsPerSecond — effectively unlimited rate
+              true,            // supportsMessageEdit
+              true,            // supportsTypingIndicator
+              Duration.ZERO    // minEditInterval — tests assert exact event sequences
           );
       }                                                                                                                                                                                                                                                 
                                                                                                                                                                                                                                                         
@@ -283,7 +384,25 @@
       @Override public void start(InboundHandler h) { this.handler = h; }                                                                                                                                                                               
       @Override public void stop() { /* no-op */ }                                 
                                                                                                                                                                                                                                                         
-      @Override public void send(OutboundMessage m) { sent.add(m); }               
+      @Override public SentMessage send(OutboundMessage m) {
+          var handle = new InMemoryMessageHandle(nextId.incrementAndGet());
+          sent.add(m);
+          updateHistory.put(handle, new CopyOnWriteArrayList<>(List.of(
+              new UpdateEvent(Instant.now(), m.text(), false))));
+          return new SentMessage(handle, m);
+      }
+
+      @Override public void update(MessageHandle h, String text) {
+          updateHistory.get(h).add(new UpdateEvent(Instant.now(), text, false));
+      }
+
+      @Override public void finalize(MessageHandle h, String text) {
+          updateHistory.get(h).add(new UpdateEvent(Instant.now(), text, true));
+      }
+
+      @Override public void setTyping(ScopeRef scope, boolean typing) {
+          typingEvents.add(new TypingEvent(Instant.now(), scope, typing));
+      }                                                                                                                                                                                                                                                 
 
       @Override public Identity assertIdentity(InboundMessage m) { return m.sender(); }                                                                                                                                                                 
    
@@ -293,8 +412,13 @@
       public void deliverDm(String contactId, String text) { /* construct InboundMessage, dispatch */ }
       public void deliverGroupMention(String groupId, String contactId, String text) { /* same */ }                                                                                                                                                     
       public List<OutboundMessage> sentMessages() { return List.copyOf(sent); }    
-      public void reset() { sent.clear(); }                                                                                                                                                                                                             
-  }                                                                                
+      public List<UpdateEvent> updateHistory(MessageHandle h) { return List.copyOf(updateHistory.get(h)); }
+      public List<TypingEvent> typingEvents() { return List.copyOf(typingEvents); }
+      public void reset() { sent.clear(); updateHistory.clear(); typingEvents.clear(); }                                                                                                                                                                                                             
+  }
+
+  public record UpdateEvent(Instant at, String text, boolean isFinal) {}
+  public record TypingEvent(Instant at, ScopeRef scope, boolean typing) {}                                                                                
   ```                                                                                                                                                                                                                                                      
   The test helpers (deliverDm, deliverGroupMention, sentMessages) aren't on the SPI; tests cast to the concrete type. This is fine because InMemoryAdapter is a test artifact.                                                                          
    
@@ -377,7 +501,11 @@
   - adapter.connection.status{adapter} — gauge (1 connected, 0 disconnected)                                                                                                                                                                            
   - adapter.identity.assert.fail{adapter} — counter (per-message identity assertion failure; e.g., a malformed inbound payload whose sender ID can't be verified)
   - adapter.simplex.auth.fail{adapter} — counter (per-session auth failure on the SimpleX WebSocket — invalid or revoked session token; distinct from the per-message `identity.assert.fail` above. 3 consecutive increments transition the adapter to terminal `state=AUTH_FAILED`; see §6.4.6.)
-  - adapter.message.bytes{adapter, direction} — histogram                                                                                                                                                                                               
+  - adapter.message.bytes{adapter, direction} — histogram
+  - adapter.outbound.update.total{adapter, scope_kind, outcome} — counter, outcome ∈ {ok, coalesced, fail, fallback_send}
+  - adapter.outbound.update.fail{adapter, reason} — counter, reason ∈ {item_too_old, item_deleted, not_owner, transport, unknown}
+  - adapter.outbound.update.lag{adapter} — histogram (time between caller `update()` and edit actually transmitted, after coalescing)
+  - adapter.typing.toggle{adapter, scope_kind, value} — counter (value ∈ {on, off}); zero for adapters without `supportsTypingIndicator`                                                                                                                                                                                               
                                                                                                                                                                                                                                                         
   /status (admin) reports adapter name, trust level, connection status, and the inbound/outbound queue sizes.                                                                                                                                           
                                                                                                                                                                                                                                                         
@@ -403,6 +531,28 @@
   - Mention stripping: delivered text does NOT contain the bot's mention.                                                                                                                                                                               
   - Chunking: a 10K outbound message arrives as multiple inbound chunks at the recipient (when fixture supports it; for SimpleX it's a recorded-WS-fixture test).                                                                                       
   - Reconnection: simulated WS disconnect → adapter reconnects, queued outbounds eventually deliver.                                                                                                                                                    
-  - Trust gate: starting with trust=LOW and allow-low-trust=false fails fast with a clear error.                                                                                                                                                        
-                                                                                                                                                                                                                                                        
-  ---          
+  - Trust gate: starting with trust=LOW and allow-low-trust=false fails fast with a clear error.
+  - Edit lifecycle: on adapters with `supportsMessageEdit=true`, a `send` → 3× `update` → `finalize` sequence produces the expected coalesced edit count and the correct final visible text.
+  - Edit fallback (no-edit adapter): on adapters with `supportsMessageEdit=false`, the same call sequence produces a single `send` carrying the final text only — no intermediate sends.
+  - Edit rejection: a simulated `CEInvalidChatItemUpdate` (or equivalent adapter rejection) during `update` triggers a fallback `send` with the original `correlationId` and increments the `fallback_send` outcome counter.
+  - `finalize` exclusivity: any `update` call after `finalize` on the same handle throws `MessagingException`.
+  - Typing indicator: on adapters with `supportsTypingIndicator=true`, a request emits exactly one `setTyping(scope, true)` at start and exactly one `setTyping(scope, false)` at end — including on error paths.                                                                                                                                                        
+
+  ---
+
+  6.14 Capability matrix (non-normative)
+
+  Reference for future adapter authors. Captures how common messaging protocols
+  map onto the SPI capabilities introduced in §6.2 and §6.3.8/9. Non-normative —
+  an adapter that does better than this table is welcome to declare it.
+
+  | Platform   | supportsMessageEdit | supportsTypingIndicator | Notes                                                                            |
+  |------------|---------------------|-------------------------|----------------------------------------------------------------------------------|
+  | SimpleX    | yes (`APIUpdateChatItem`) | no                | Reference impl. `live=on/off` flag used internally to render live updates.       |
+  | Signal     | yes (edit message)  | yes                     | Edit window ~24h; not a concern for our request-scoped progress flow.            |
+  | Telegram   | yes (`editMessageText`) | yes                 | Per-chat edit rate ~1/sec; honour via `minEditInterval = 1000ms`.                |
+  | Matrix     | yes (`m.replace`)   | yes                     | Edits are first-class; no time window.                                           |
+  | XMPP       | partial (XEP-0308 LMC) | yes (XEP-0085)       | Only the *most recent* message can be corrected — fits our handle lifecycle.     |
+  | IRC / SMS  | no                  | no                      | Fall back to single-`send` finalize; consider deferred "still working…" message. |
+
+  ---
