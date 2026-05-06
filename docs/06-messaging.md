@@ -96,13 +96,18 @@
       Instant lastSeen                                                                                                                                                                                                                                  
   ) {}
                                                                                                                                                                                                                                                         
-  public record AdapterCapabilities(                                               
-      boolean supportsMarkdownCode,        // backticks render as monospace                                                                                                                                                                             
-      boolean supportsMultilineCode,       // triple-backtick blocks render                                                                                                                                                                             
+  public record AdapterCapabilities(
+      boolean supportsMarkdownCode,        // backticks render as monospace
+      boolean supportsMultilineCode,       // triple-backtick blocks render
       boolean supportsAttachments,         // future use
-      boolean supportsThreading,           // future use                                                                                                                                                                                                
-      int     maxMessageBytes,             // chunking threshold                   
-      int     maxRequestsPerSecond         // soft client-side rate limit                                                                                                                                                                               
+      boolean supportsThreading,           // future use
+      int     maxMessageBytes,             // chunking threshold
+      int     maxInflightSends,            // CONCURRENCY: max send() calls in flight at once
+                                           //   (e.g. 4 means up to 4 outbound messages
+                                           //    may be transmitting simultaneously)
+      int     maxSendsPerSecond            // RATE: token-bucket cap on sends per second
+                                           //   averaged over a 1s window, regardless of
+                                           //   how many are concurrently in flight
   ) {}                                                                                                                                                                                                                                                  
                                                                                                                                                                                                                                                         
   public enum AdapterTrustLevel { HIGH, LOW }                                                                                                                                                                                                           
@@ -147,11 +152,13 @@
   - The provider may retry send() after a transient failure. Adapters SHOULD deduplicate by OutboundMessage.correlationId over a 60-second window when the underlying protocol allows.                                                                  
   - If the adapter cannot deduplicate, the operator must accept occasional duplicate messages on retry. This is acceptable; bot output is not safety-critical.
                                                                                                                                                                                                                                                         
-  6.3.6 Delivery semantics                                                         
-                                                                                                                                                                                                                                                        
-  - send() returns when the adapter has accepted the message for transmission, NOT when the recipient has read it.                                                                                                                                      
-  - The adapter MUST NOT block the calling thread for more than capabilities.maxRequestsPerSecond worth of time; otherwise it must enqueue internally.
-  - On unrecoverable send failure, the adapter throws MessagingException. Provider logs and retries up to 3 times with exponential backoff; subsequent failures notify a bot admin (throttled).                                                         
+  6.3.6 Delivery semantics
+
+  - `send()` returns when the adapter has accepted the message for transmission, NOT when the recipient has read it.
+  - **Concurrency** is governed by `capabilities.maxInflightSends`: the adapter MUST NOT have more than that many `send()` calls actively transmitting at once. Excess callers either block briefly on an internal semaphore or are queued.
+  - **Rate** is governed independently by `capabilities.maxSendsPerSecond`: even if `maxInflightSends` is high, the adapter MUST NOT exceed this many sends per second averaged over a 1s window. The two limits compose — whichever is reached first applies. (Concurrency caps "how many at once"; rate caps "how many per second".)
+  - The adapter MUST NOT block the calling thread for more than a small bounded interval; if either cap would be violated, it must enqueue internally rather than stall the caller.
+  - On unrecoverable send failure, the adapter throws `MessagingException`. Provider logs and retries up to 3 times with exponential backoff; subsequent failures notify a bot admin (throttled).                                                         
                                                                                                                                                                                                                                                         
   6.3.7 Inbound back-pressure                                                                                                                                                                                                                           
                                                                                                                                                                                                                                                         
@@ -168,18 +175,20 @@
 
   SimpleX provides a self-hosted Chat CLI / SimpleX Chat server with a WebSocket-based bot API. The adapter speaks that WebSocket protocol.                                                                                                             
    
-  - Connection: WebSocket to simplex-cli (default ws://localhost:5225), configurable via infochat.adapter.simplex.url.                                                                                                                                  
+  - Connection: WebSocket to simplex-cli (default ws://localhost:5225), configurable via infochat.adapter.simplex.url.
   - Authentication: cookie-based session against the local simplex-cli; cookie configured via infochat.adapter.simplex.session-token (read from env in production).
-  - Identity: the SimpleX contact display ID (e.g., xftp://...); cryptographically bound. trustLevel = HIGH.                                                                                                                                            
+  - Identity: the SimpleX contact display ID (e.g., xftp://...); cryptographically bound. trustLevel = HIGH.
+  - **Auth-failure distinction:** the adapter classifies WebSocket close codes into two buckets — *auth failures* (401-equivalent codes from simplex-cli, e.g., revoked or invalid session token) and *network failures* (everything else: TCP reset, server unreachable, idle timeout). The two are handled with different reconnection policies; see §6.4.6. After 3 consecutive auth failures the adapter transitions to the terminal `state=AUTH_FAILED` and stops reconnecting until process restart.                                                                                                                                            
                                                                                                                                                                                                                                                         
   6.4.2 Capabilities (declared)                                                                                                                                                                                                                         
                                                                                                                                                                                                                                                         
-  supportsMarkdownCode   = false   // SimpleX renders backticks as literal characters                                                                                                                                                                   
-  supportsMultilineCode  = false                                                                                                                                                                                                                        
-  supportsAttachments    = false   // v1 doesn't use them                                                                                                                                                                                               
-  supportsThreading      = false                                                                                                                                                                                                                        
+  supportsMarkdownCode   = false   // SimpleX renders backticks as literal characters
+  supportsMultilineCode  = false
+  supportsAttachments    = false   // v1 doesn't use them
+  supportsThreading      = false
   maxMessageBytes        = 4000    // SimpleX hard limit; adapter chunks above this
-  maxRequestsPerSecond   = 5       // conservative; raise after observing                                                                                                                                                                               
+  maxInflightSends       = 4       // up to 4 outbound sends in flight concurrently
+  maxSendsPerSecond      = 5       // and at most 5/s averaged; conservative, raise after observing                                                                                                                                                                               
                                                                                                                                                                                                                                                         
   6.4.3 Lifecycle                                                                                                                                                                                                                                       
                                                                                                                                                                                                                                                         
@@ -216,12 +225,15 @@
                                                                                                                                                                                                                                                         
   Chunking: messages over 4000 bytes are split at the nearest line break before the limit; if a single line is longer, it's split at the limit. Code-block fences are preserved across chunks.                                                          
                                                                                                                                                                                                                                                         
-  6.4.6 Reconnection                                                                                                                                                                                                                                    
-                                                                                   
-  - WebSocket disconnect → exponential backoff reconnect (1s → 2s → 5s → 15s → 60s, then steady at 60s).                                                                                                                                                
+  6.4.6 Reconnection
+
+  - **Network failures** (TCP reset, server unreachable, idle timeout, etc.) → exponential backoff reconnect (1s → 2s → 5s → 15s → 60s, then steady at 60s).
   - Reconnect attempts are logged; first failure logged at WARN, subsequent at INFO.
-  - After 5 consecutive failures, the Provider's admin notifier is invoked (throttled).                                                                                                                                                                 
-  - Inbound queue continues accepting outbound enqueues during disconnect; messages are sent on reconnect.                                                                                                                                              
+  - After 5 consecutive network failures, the Provider's admin notifier is invoked (throttled).
+  - Inbound queue continues accepting outbound enqueues during disconnect; messages are sent on reconnect.
+  - **Auth failures** (401-equivalent close codes — invalid or revoked session token) are handled separately: the adapter does NOT use the network-failure backoff schedule, because retrying with the same revoked token is futile and produces a tight reconnect loop that fills the log and burns CPU.
+  - Auth-failure policy: each auth failure increments a counter; the adapter waits 5s then retries up to **3 consecutive auth failures**. On the 3rd consecutive auth failure the adapter transitions to **`state=AUTH_FAILED` (terminal)**, reports unhealthy via `adapter.connection.status=0`, stops reconnecting, and does NOT recover until the Provider process is restarted (typically with a new `infochat.adapter.simplex.session-token`). Each auth failure increments `adapter.simplex.auth.fail` (see §6.11) and is logged at ERROR; the terminal transition triggers the admin notifier (not throttled — operator must intervene).
+  - A successful authenticated reconnect at any point resets both the network-failure and auth-failure counters.                                                                                                                                              
                                                                                                                                                                                                                                                         
   6.4.7 Failure surfaces                                                                                                                                                                                                                                
                                                                                                                                                                                                                                                         
@@ -232,8 +244,11 @@
   ├──────────────────────────────────────────┼────────────────────────────────────┼───────────────────────────────────────────────────────────┤
   │ WS disconnect, > 5 min                   │ Auto-reconnect + admin notify      │ None to user; admin sees notification                     │                                                                                                         
   ├──────────────────────────────────────────┼────────────────────────────────────┼───────────────────────────────────────────────────────────┤                                                                                                         
-  │ simplex-cli down                         │ Reconnect loop indefinitely        │ Bot appears offline; recipient eventually sees no replies │                                                                                                         
-  ├──────────────────────────────────────────┼────────────────────────────────────┼───────────────────────────────────────────────────────────┤                                                                                                         
+  │ simplex-cli down                         │ Reconnect loop indefinitely        │ Bot appears offline; recipient eventually sees no replies │
+  ├──────────────────────────────────────────┼────────────────────────────────────┼───────────────────────────────────────────────────────────┤
+  │ Session token revoked / invalid (401)    │ 3 auth retries → state=AUTH_FAILED │ Bot offline until restart with new token; admin notified  │
+  │                                          │ (terminal); stop reconnecting      │                                                           │
+  ├──────────────────────────────────────────┼────────────────────────────────────┼───────────────────────────────────────────────────────────┤
   │ Identity assertion fails                 │ Drop the inbound message; log WARN │ None (silent skip)                                        │
   ├──────────────────────────────────────────┼────────────────────────────────────┼───────────────────────────────────────────────────────────┤                                                                                                         
   │ Outbound chunking exceeds protocol limit │ Throw MessagingException           │ Provider retries 3x, then logs                            │
@@ -254,10 +269,13 @@
                                                                                                                                                                                                                                                         
       @Override public String name() { return "inmemory"; }                        
                                                                                                                                                                                                                                                         
-      @Override public AdapterCapabilities capabilities() {                        
+      @Override public AdapterCapabilities capabilities() {
           return new AdapterCapabilities(
-              true, true, false, false, 100_000, 1000  // generous; capabilities for tests                                                                                                                                                              
-          );                                                                                                                                                                                                                                            
+              true, true, false, false,
+              100_000,   // maxMessageBytes — generous for tests
+              1000,      // maxInflightSends — effectively unlimited concurrency
+              10_000     // maxSendsPerSecond — effectively unlimited rate
+          );
       }                                                                                                                                                                                                                                                 
                                                                                                                                                                                                                                                         
       @Override public AdapterTrustLevel trustLevel() { return AdapterTrustLevel.HIGH; }                                                                                                                                                                
@@ -357,7 +375,8 @@
   - adapter.inbound.queue.size{adapter} — gauge                                                                                                                                                                                                         
   - adapter.outbound.queue.size{adapter} — gauge                                   
   - adapter.connection.status{adapter} — gauge (1 connected, 0 disconnected)                                                                                                                                                                            
-  - adapter.identity.assert.fail{adapter} — counter                                                                                                                                                                                                     
+  - adapter.identity.assert.fail{adapter} — counter (per-message identity assertion failure; e.g., a malformed inbound payload whose sender ID can't be verified)
+  - adapter.simplex.auth.fail{adapter} — counter (per-session auth failure on the SimpleX WebSocket — invalid or revoked session token; distinct from the per-message `identity.assert.fail` above. 3 consecutive increments transition the adapter to terminal `state=AUTH_FAILED`; see §6.4.6.)
   - adapter.message.bytes{adapter, direction} — histogram                                                                                                                                                                                               
                                                                                                                                                                                                                                                         
   /status (admin) reports adapter name, trust level, connection status, and the inbound/outbound queue sizes.                                                                                                                                           
