@@ -97,7 +97,12 @@
   quarkus.datasource.username=infochat                                             
   quarkus.datasource.password=${INFOCHAT_DB_PASSWORD}                                                                                                                                                                                                   
   quarkus.datasource.jdbc.url=jdbc:postgresql://localhost:5432/infochat
-  quarkus.datasource.jdbc.max-size=20                                                                                                                                                                                                                   
+  # Per-service pool sizes — provider holds connections across LLM calls and
+  # needs more headroom; collector is mostly short writes. SET PER-SERVICE,
+  # NOT SHARED — see the per-service application.properties blocks below for
+  # where each value belongs.
+  #   provider:  quarkus.datasource.jdbc.max-size=30
+  #   collector: quarkus.datasource.jdbc.max-size=15
                                                                                                                                                                                                                                                         
   # Service-specific role overrides (recommended for least-privilege)                                                                                                                                                                                   
   quarkus.datasource.collector.username=infochat_collector                                                                                                                                                                                              
@@ -170,6 +175,7 @@
   # Inherits keys from the canonical file above; only service-specific overrides here.
   quarkus.http.port=8080
   quarkus.application.name=infochat-collector
+  quarkus.datasource.jdbc.max-size=15
   ```
 
   Provider (`infochat-provider/src/main/resources/application.properties`):
@@ -178,7 +184,21 @@
   # Inherits keys from the canonical file above; only service-specific overrides here.
   quarkus.http.port=8081
   quarkus.application.name=infochat-provider
+  quarkus.datasource.jdbc.max-size=30
   ```
+
+  ### Connection-release discipline (Provider)
+
+  The Provider's pool size is intentionally larger than the Collector's because chat-mode and `/summary` invocations call the LLM, and LLM round-trips take 5–30 s. Even at 30 connections, holding a JDBC connection across an LLM call would let ~10 concurrent chats starve every other DB consumer (including the Collector's writes).
+
+  **The Provider MUST release the JDBC connection before any LLM call.** The required pattern:
+
+  1. Open a transaction; load the context the LLM needs (chat history, scope state, candidate posts).
+  2. **Close the connection / commit / return it to the pool** — explicitly. Do NOT keep an `EntityManager` or `Connection` reference open across the LLM call.
+  3. Call the LLM (`LlmProvider.respond(...)`, `LlmProvider.classify(...)`, etc.). This step holds zero DB connections.
+  4. Re-open a new connection / transaction for the write side (persisting the chat reply, updating memory, audit log).
+
+  This is enforced in code by passing typed value objects between the load and call steps — never `EntityManager`, `Connection`, or attached entities. A verification test in `08-verification.md` asserts the pool gauge stays bounded under concurrent chat load (see [08-verification.md §8.4 (F18 connection-pool test)](08-verification.md)).
 
   If the operator prefers a single shared file at deploy time, the per-service port can instead be supplied at startup via system property:
 
@@ -330,20 +350,33 @@
                                                                                    
   For tests/CI, swap infochat.adapter=inmemory to bypass SimpleX.                                                                                                                                                                                       
                                                                                    
-  docker/postgres-init.sql                                                                                                                                                                                                                              
-                                                                                   
-  Idempotent role/database/extension setup. Runs once on container init.                                                                                                                                                                                
-   
-  CREATE ROLE infochat WITH LOGIN PASSWORD 'changeme' SUPERUSER;                                                                                                                                                                                        
-  CREATE ROLE infochat_collector WITH LOGIN PASSWORD 'changeme';                                                                                                                                                                                        
-  CREATE ROLE infochat_provider WITH LOGIN PASSWORD 'changeme';                                                                                                                                                                                         
-  CREATE DATABASE infochat OWNER infochat;                                                                                                                                                                                                              
-  \c infochat                                                                                                                                                                                                                                           
-  CREATE EXTENSION IF NOT EXISTS vector;                                                                                                                                                                                                                
-  CREATE EXTENSION IF NOT EXISTS pgcrypto;     -- for gen_random_uuid()            
-  -- Grants are applied by Flyway migration V0001__roles.sql                                                                                                                                                                                            
-                                                                                                                                                                                                                                                        
-  In production the init script runs once with strong passwords from env-substituted secrets.                                                                                                                                                           
+  docker/postgres-init.sql
+
+  Idempotent role/database/extension setup. Runs once on container init. **No literal passwords in this file** — the official `postgres` image substitutes `${VAR}` references in `/docker-entrypoint-initdb.d/*.sql` from the container's environment, and the trailing `:?` makes the substitution **fail-loud at container start** if the variable is unset (the container exits non-zero rather than silently creating a role with an empty or default password).
+
+  ```sql
+  CREATE ROLE infochat WITH LOGIN PASSWORD '${INFOCHAT_DB_PASSWORD:?INFOCHAT_DB_PASSWORD is required}' SUPERUSER;
+  CREATE ROLE infochat_collector WITH LOGIN PASSWORD '${INFOCHAT_COLLECTOR_PASSWORD:?INFOCHAT_COLLECTOR_PASSWORD is required}';
+  CREATE ROLE infochat_provider WITH LOGIN PASSWORD '${INFOCHAT_PROVIDER_PASSWORD:?INFOCHAT_PROVIDER_PASSWORD is required}';
+  CREATE DATABASE infochat OWNER infochat;
+  \c infochat
+  CREATE EXTENSION IF NOT EXISTS vector;
+  CREATE EXTENSION IF NOT EXISTS pgcrypto;     -- for gen_random_uuid()
+  -- Grants are applied by Flyway migration V0001__roles.sql
+  ```
+
+  `docker-compose.yml` wires those variables to the Postgres container's environment. For local dev convenience, the compose file uses bash-style defaults that **only** apply in dev — production deployments MUST set the variables explicitly:
+
+  ```yaml
+  environment:
+    INFOCHAT_DB_PASSWORD:        ${INFOCHAT_DB_PASSWORD:-$(openssl rand -hex 24)}
+    INFOCHAT_COLLECTOR_PASSWORD: ${INFOCHAT_COLLECTOR_PASSWORD:-$(openssl rand -hex 24)}
+    INFOCHAT_PROVIDER_PASSWORD:  ${INFOCHAT_PROVIDER_PASSWORD:-$(openssl rand -hex 24)}
+  ```
+
+  Result: a fresh `docker compose up` on a developer laptop generates random per-container passwords (printable in `docker compose logs postgres` once, then irretrievable), while the same compose file on a production-like host with the env vars set picks up the operator's chosen secrets. There is no `'changeme'` baked anywhere in the repo — copy-paste cannot leak a known password.
+
+  In production the init script runs once with strong passwords from env-substituted secrets (e.g., a secrets manager, sealed-secret, or `EnvironmentFile` mounted at 0600).                                                                                                                                                           
                                                                                                                                                                                                                                                         
   ---                                                                                                                                                                                                                                                   
   7.8 Production deployment                                                        
@@ -372,18 +405,35 @@
       → infochat-provider.service                                                  
           → simplex-cli.service       (or operator runs SimpleX manually)                                                                                                                                                                               
                                                                                                                                                                                                                                                         
-  systemd unit fragment for the provider:                                                                                                                                                                                                               
-                                                                                                                                                                                                                                                        
-  [Service]                                                                                                                                                                                                                                             
-  EnvironmentFile=/opt/infochat/secrets.env                                        
+  systemd unit fragment for the provider:
+
+  ```ini
+  [Service]
+  # Run as a dedicated unprivileged service account, NOT root.
+  User=infochat
+  Group=infochat
+
+  EnvironmentFile=/opt/infochat/secrets.env
   WorkingDirectory=/opt/infochat/current
-  ExecStart=/usr/bin/java -jar infochat-provider.jar                                                                                                                                                                                                    
+  ExecStart=/usr/bin/java -jar infochat-provider.jar
   Restart=on-failure
-  RestartSec=5                                                                                                                                                                                                                                          
-  StartLimitBurst=10                                                               
-  StartLimitIntervalSec=300                                                                                                                                                                                                                             
-                                                                                   
-  /opt/infochat/secrets.env holds env vars (mode 0600, owned by service user).                                                                                                                                                                          
+  RestartSec=5
+  StartLimitBurst=10
+  StartLimitIntervalSec=300
+
+  # Hardening — defence in depth on top of running as a non-root user.
+  NoNewPrivileges=yes              # cannot regain privileges via setuid binaries
+  ProtectSystem=strict             # /, /usr, /boot mounted read-only for this unit
+  ProtectHome=true                 # /home, /root invisible
+  PrivateTmp=true                  # private /tmp and /var/tmp
+  # ProtectSystem=strict makes the FS read-only; explicitly grant write access
+  # to the data dirs the service needs (logs, working dir if it writes there).
+  ReadWritePaths=/opt/infochat/data /var/log/infochat
+  ```
+
+  Create the service account once: `useradd --system --home /opt/infochat --shell /usr/sbin/nologin infochat`.
+
+  `/opt/infochat/secrets.env` holds env vars (mode 0600, owned by `infochat:infochat`).                                                                                                                                                                          
    
   7.8.2 Native image (optional)                                                                                                                                                                                                                         
                                                                                    
@@ -465,15 +515,25 @@
                                                                                                                                                                                                                                                         
   Both services expose:
                                                                                                                                                                                                                                                         
-  - GET /q/health/live — process is up                                                                                                                                                                                                                  
-  - GET /q/health/ready — DB reachable; (provider) adapter connected; (collector) eval queue and scheduler healthy
-  - GET /q/metrics — Micrometer/Prometheus                                                                                                                                                                                                              
+  - `GET /q/health/live` — process is up.
+  - `GET /q/health/ready` — DB reachable; (provider) adapter connected; (collector) eval queue and scheduler healthy. **Does NOT probe the LLM.** This is deliberate: a slow LLM should degrade summary/chat quality, not flip the pod to NotReady and trigger an orchestrator restart loop that masks the underlying problem.
+  - `GET /q/health/llm` — **separate** endpoint that probes the configured chat-task LLM with a trivial prompt (e.g., "reply with the literal token `OK`") and a **5 s hard timeout**. Returns 200 on success, 503 otherwise. This endpoint is informational/observability-only and is **NOT wired to orchestrator health**: kubelet, systemd `WatchdogSec`, and load balancers MUST NOT consume it. It exists so Prometheus can blackbox-probe the LLM without that probe being on the restart path.
+  - `GET /q/metrics` — Micrometer/Prometheus.
                                                                                    
   Recommended monitoring:                                                                                                                                                                                                                               
                                                                                    
-  - Liveness: kill if /live fails 3× in 30s (systemd WatchdogSec).                                                                                                                                                                                      
-  - Readiness: alert if /ready returns non-200 for > 5 min.                        
-  - Metrics to watch (panel suggestions):                                                                                                                                                                                                               
+  - **Liveness:** kill if `/live` fails 3× in 30 s (systemd `WatchdogSec`). Probe `/live` only.
+  - **Readiness:** alert if `/ready` returns non-200 for > 5 min. Probe `/ready` only — never `/health/llm`.
+  - **LLM health** (Prometheus alert; explicitly NOT an orchestrator probe):
+    ```
+    - alert: LlmDown
+      expr: probe_success{job="infochat-llm"} == 0
+      for:  5m
+      annotations:
+        summary: "Provider's LLM probe has been failing for 5 minutes"
+    ```
+    The `for: 5m` window prevents a transient slow LLM from flapping into a restart. Operators get paged; the bot stays up serving non-LLM commands and falls back to the "raw post list" form for `/summary`.
+  - Metrics to watch (panel suggestions):
     - adapter.connection.status{adapter="simplex"} should be 1.                    
     - llm.calls.total{outcome="fail"} rate-of-change.                                                                                                                                                                                                   
     - eval.queue.size near infochat.eval.queue-size for too long → fetcher back-pressure.                                                                                                                                                               
@@ -573,6 +633,7 @@
   ---                                                                                                                                                                                                                                                   
   7.16 What's intentionally NOT in v1 deployment
                                                                                                                                                                                                                                                         
+  - **Persistent outbound queue** — the Provider's outbound message queue is in-memory only. On Provider restart, in-flight outbound messages (replies the bot had accepted but not yet handed to the messaging adapter, or that the adapter had not yet acknowledged to the messaging server) are lost. Users may need to re-issue commands whose replies were dropped. This is acceptable for v1: the inbound side is durable (commands that reached `InboundHandler.onMessage` either completed or will be re-driven by the Collector outbox), and bot output is not safety-critical. **Persistent outbound is a v2 feature**; the design is straightforward (an `outbound_message` table with `status` ∈ `{PENDING, SENT, FAILED}` drained by an adapter worker) but adds a write path on the hot reply loop that we explicitly chose to defer.
   - Kubernetes manifests — docker-compose and systemd cover v1. K8s is operator-extra-credit.
   - Auto-scaling — both services are stateless w.r.t. Postgres; horizontal scale is possible but unneeded for v1 footprint.                                                                                                                             
   - Multi-tenant deployments — one Provider serves one operator's user base. Multi-tenant is v2+ and requires schema-level tenant id.                                                                                                                   
