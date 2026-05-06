@@ -18,15 +18,23 @@ Two-service Quarkus application: a news and social-media aggregator chatbot.
 
 ## Where things live
 
-- Spec entry point: [docs/SPEC.md](docs/SPEC.md)
-- Architecture and module layout: [docs/01-architecture.md](docs/01-architecture.md)
-- Database schema and TTL rules: [docs/02-schema.md](docs/02-schema.md)
-- Slash commands reference: [docs/03-commands.md](docs/03-commands.md)
-- Security model and quarantine: [docs/04-security.md](docs/04-security.md)
-- LLM/embedding routing and prompts: [docs/05-llm-and-embeddings.md](docs/05-llm-and-embeddings.md)
-- Messaging adapters: [docs/06-messaging.md](docs/06-messaging.md)
-- Deployment and configuration: [docs/07-deployment.md](docs/07-deployment.md)
-- Verification and testing: [docs/08-verification.md](docs/08-verification.md)
+- Spec entry point (the map): [docs/SPEC.md](docs/SPEC.md)
+- Cross-cutting decisions log: [docs/spec/decisions.md](docs/spec/decisions.md)
+- Architecture (service split, pipelines, principles): [docs/spec/architecture.md](docs/spec/architecture.md)
+- Security model (threat model, trust boundaries, failure handling): [docs/spec/security.md](docs/spec/security.md)
+- Data model (entities, invariants — no DDL): [docs/spec/schema.md](docs/spec/schema.md)
+- Commands and chat (surface, catalogue, permissions): [docs/spec/commands.md](docs/spec/commands.md)
+- LLM and embeddings (SPI, routing, translation, determinism boundary): [docs/spec/llm.md](docs/spec/llm.md)
+- Messaging adapters (contract, capabilities, progress): [docs/spec/messaging.md](docs/spec/messaging.md)
+- Deployment and configuration (operator inputs, bootstrap, runtime): [docs/spec/deployment.md](docs/spec/deployment.md)
+- Verification strategy (what the test suite must prove): [docs/spec/verification.md](docs/spec/verification.md)
+- MVP slice (smallest end-to-end build): [docs/00-mvp.md](docs/00-mvp.md)
+
+**Implementation details** (DDL, class names, package layout, property keys,                                                                                                                                                                          
+retry counts, regex strings, per-profile values) live under                                                                                                                                                                                           
+[docs/design/](docs/design/) — one file per spec section. Design notes carry                                                                                                                                                                          
+a "Status: design notes, not spec" banner and may change without a spec                                                                                                                                                                               
+amendment.
 
 ## Key conventions
 
@@ -53,7 +61,7 @@ Two-service Quarkus application: a news and social-media aggregator chatbot.
 
 ## Build / run quick reference
 
-See [docs/07-deployment.md](docs/07-deployment.md) for full details.
+See [docs/spec/deployment.md](docs/spec/deployment.md) for the spec-level overview and [docs/design/07-deployment.md](docs/design/07-deployment.md) for full operational details.
 
 ```bash
 # build all modules
