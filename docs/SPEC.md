@@ -28,6 +28,7 @@ The system is two services:
 6. [06-messaging.md](06-messaging.md) — `MessagingAdapter` SPI, SimpleX impl notes, in-memory test adapter
 7. [07-deployment.md](07-deployment.md) — `docker-compose`, configuration, bootstrap, ops runbook
 8. [08-verification.md](08-verification.md) — test strategy, fixtures, end-to-end smoke
+9. [09-reference.md](09-reference.md) — module dependency DAG, error-code catalog, quick lookup
 
 ---
 

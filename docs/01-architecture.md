@@ -194,8 +194,16 @@ GroupSummaryWorker:
   - Same SQL retrieval path as /summary, scoped to group's followed tags
   - LLM summarization (with delimiter-wrapped untrusted content)
   - Optional translation per group's language preference
-  - Cache(group_id, slot) for 60 minutes (so a user's /summary
-    immediately after the digest is served from cache)
+  - Cache(group_id, slot, tag_subscription_version, source_subscription_version)
+    for 60 minutes (so a user's /summary immediately after the digest is
+    served from cache).
+    Including the two `*_subscription_version` counters in the cache key
+    means /follow-tag, /unfollow-tag, /add-source, /remove-source, and
+    /unfollow-source on the same scope yield a fresh cache miss without an
+    explicit invalidation pass. Stale entries age out naturally via the
+    existing 60-min TTL. The counters live on `scope_preferences` (see
+    [02-schema.md §2.5](02-schema.md)); each is incremented atomically in
+    the same transaction as the subscription change.
   - Send to messaging adapter
 
 Profile-aware fallback (pi profile):

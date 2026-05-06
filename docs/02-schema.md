@@ -168,6 +168,18 @@
                                                      -- carried by subscribed sources;
                                                      -- 'explicit_scope_tags' = only tags listed in
                                                      -- scope_tag are included.
+    tag_subscription_version    BIGINT NOT NULL DEFAULT 0,
+                                                     -- monotonically incremented in the same
+                                                     -- transaction as /follow-tag, /unfollow-tag,
+                                                     -- and any direct mutation of scope_tag.
+                                                     -- Folded into the periodic-digest cache key
+                                                     -- (group_id, slot, tag_v, src_v) so a tag-
+                                                     -- subscription change yields a fresh cache
+                                                     -- miss without an explicit invalidation pass.
+                                                     -- See [01-architecture.md §1.4.1](01-architecture.md).
+    source_subscription_version BIGINT NOT NULL DEFAULT 0,
+                                                     -- same pattern, incremented on /add-source,
+                                                     -- /remove-source, /unfollow-source for this scope.
     PRIMARY KEY (scope_kind, scope_id)
   );
 
@@ -524,6 +536,28 @@
   Note that the durability promise is "no missed `new_post` events," not "exactly-once
   delivery to the user." Cache-invalidation and digest-prefetch handlers must be
   idempotent, which they already are (the cache key includes the post id).
+
+  ### bootstrap_meta (last successful bootstrap-sources load)
+
+  ```sql
+  CREATE TABLE bootstrap_meta (
+    id                  SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+                                                     -- single-row table; CHECK (id = 1)
+                                                     -- forbids accidental second row.
+    last_loaded_sha256  TEXT        NOT NULL,        -- hex digest of bootstrap-sources.json
+    last_loaded_at      TIMESTAMPTZ NOT NULL,
+    last_entry_count    INT         NOT NULL,
+    last_loader_version TEXT        NOT NULL         -- the Collector build version that loaded it
+  );
+  ```
+
+  Recorded by `BootstrapLoader` after every successful idempotent load
+  (see [07-deployment.md §7.6](07-deployment.md)). `audit_log` already
+  carries the historical trail; `bootstrap_meta` is the cheap, current-state
+  view that `/status` (admin) reads — answering "are all instances running
+  the same bootstrap config?" without scanning audit history. The SHA also
+  lets a Provider sanity-check at startup that the Collector loaded the
+  same file the operator deployed.
                                                                                                                                                                                                                                                         
   ---                                                                                                                                                                                                                                                   
   2.9 TTL policy summary
