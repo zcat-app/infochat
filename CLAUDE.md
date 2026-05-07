@@ -52,7 +52,7 @@ amendment.
 
 - **Bot admin**: set via `infochat.admin.contact-id` (SimpleX contact ID) in `application.properties`. On startup, an `@Startup` bean ensures that contact has `is_admin=true` (creating the user if needed). Audit log records the bootstrap. Last-admin protection: cannot revoke admin from the only admin; cannot ban self or last admin.
 - **Group admin**: first user to `@mention` the bot in a new group is auto-promoted; bot admins can override with `/promote` and `/demote`.
-- **Sources**: seeded from `bootstrap-sources.json` (path configurable via `infochat.bootstrap.sources-file`). Loader is idempotent: upsert by `(fetcher, url)`; the union of `tags` across all bootstrap entries seeds the controlled vocabulary. `/add-source` requires `--tags` (≥1 tag) so every source has a deterministic fallback when LLM tagging fails.
+- **Sources**: seeded from `bootstrap-sources.json` (path configurable via `infochat.bootstrap.sources-file`). Loader is idempotent: upsert by `(kind, identifier)` — `kind` is the source type (`rss`, `bluesky`, `nostr`, etc.), `identifier` is the URL for HTTP-shaped sources or the filter spec for stream sources (decision D38). The union of `tags` across all bootstrap entries seeds the controlled vocabulary. `/add-source` requires `--tags` (≥1 tag) so every source has a deterministic fallback when LLM tagging fails.
 
 ## User registration & ban
 

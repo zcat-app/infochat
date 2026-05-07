@@ -40,16 +40,68 @@ Collector and Provider communicate only through the shared database:
 No external message broker in v1. Replacing the in-process channels with one
 later is a swap, not a rewrite (see decisions D3, D4).
 
+## Ingest SPIs
+
+The Collector exposes **two** ingest SPIs, separated because their
+lifecycles are fundamentally different (decision D38). Both feed the
+same outbox via the same normalized-post shape; downstream of the
+outbox, no other code in the Collector can tell which SPI a post came
+from.
+
+- **`Fetcher`** — *polled, request/response*. The scheduler ticks on a
+  per-source interval; the fetcher issues an HTTP `GET`/`HEAD`, parses
+  the response, and returns a list of normalized posts. Used by RSS,
+  Bluesky, Nitter, Reddit, YouTube, Odysee. The fetcher is stateless
+  between ticks; "what's new since last time" is a query against
+  `posts`, not in-memory state.
+- **`StreamSource`** — *long-lived, event-driven*. Started once at
+  Collector startup; runs as a supervised worker that maintains its
+  own connection (typically `wss://`, but the SPI is named around
+  event streams, not websockets, so future non-websocket transports
+  fit without rename). The implementation owns connection lifecycle,
+  reconnect with backoff, per-source trust verification (e.g. Nostr
+  signature checks), and dedup by stable upstream id **before** the
+  outbox. Used by Nostr in v1.
+
+Picking between the two is deterministic: if the source is "fetch a
+URL on a tick," it's a `Fetcher`; if the source is "subscribe and
+receive events as they happen," it's a `StreamSource`. Sources MUST
+NOT straddle.
+
+**Source identity** (decision D38) is `(kind, identifier, config)`:
+
+- `kind` — the ingest type (`rss`, `bluesky`, `nostr`, …). Picks both
+  the SPI shape and the implementation.
+- `identifier` — the URL for HTTP-shaped sources, the filter spec for
+  stream sources. Together with `kind` it forms the unique key for
+  `source` rows.
+- `config` — opaque per-kind JSON. Holds Nostr's relay list, kinds
+  filter, and any other per-source tuning that doesn't fit the
+  identifier.
+
+**Cross-source dedup** is the implementation's responsibility, not the
+outbox's. For stream sources where the same event can arrive from N
+relays (Nostr), the implementation MUST dedup by stable upstream id
+before enqueue; one event = one `posts` row regardless of how many
+relays delivered it.
+
+**Per-relay (or per-endpoint) degradation** is a `StreamSource`
+commitment: a single misbehaving relay (slow, spamming, repeatedly
+disconnecting, returning malformed events) MUST NOT block the
+StreamSource. The implementation marks the bad relay as unusable for a
+cooldown window and continues on the rest. Concrete failure threshold
+and cooldown values live in design notes.
+
 ## Pipelines
 
 Two pipelines must be reasoned about end-to-end:
 
-- **Ingest** (Collector) — Source → Fetcher → persist as `RAW` → enqueue →
-  Stage 1 → (Stage 2 only on hits) → tagger → entity extraction → embedding →
-  mark `READY` → NOTIFY. Each stage has its own failure policy (see
-  `security.md` and decision D22). The persist-before-enqueue step is the
-  outbox: a startup rehydrator re-enqueues anything left in `RAW` after a
-  crash.
+- **Ingest** (Collector) — Source → Fetcher *or* StreamSource → persist
+  as `RAW` → enqueue → Stage 1 → (Stage 2 only on hits) → tagger →
+  entity extraction → embedding → mark `READY` → NOTIFY. Each stage
+  has its own failure policy (see `security.md` and decision D22). The
+  persist-before-enqueue step is the outbox: a startup rehydrator
+  re-enqueues anything left in `RAW` after a crash.
 - **User request** (Provider) — Adapter → identity resolution → ban check →
   parse → permission check → execute. Slash commands run deterministic SQL
   (and may invoke the summarizer LLM). Chat-mode messages run the chat agent
@@ -73,8 +125,9 @@ intentionally describes the data flow without restating the trust rules.
    leakage is a schema-level invariant, not a query-level convention.
 5. **TTL by partitioning, not DELETE.** Post-derived bulk data ages out via
    partition drops. No row-level deletes, no index bloat.
-6. **Adapters are SPIs.** LLM, embedding, messaging, and translation
-   integrations are pluggable interfaces. Test doubles slot in for CI.
+6. **Adapters are SPIs.** LLM, embedding, messaging, translation,
+   `Fetcher`, and `StreamSource` integrations are pluggable interfaces.
+   Test doubles slot in for CI.
 7. **Progress is a presentation-layer concern.** Long-running handlers
    publish stage events to a cross-cutting notifier; business logic does not
    reference the messaging adapter or the concept of an editable message.

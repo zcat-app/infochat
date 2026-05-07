@@ -43,6 +43,19 @@ or `deployment.md`. Each one corresponds to at least one named test.
   fired processes the post on next startup via the high-water mark.
 - Per-(user, scope) isolation: 100-user fuzz of saves, memory, and                                                                                                                                                                                    
   subscriptions never leaks across scopes.
+- StreamSource reconnect (decision D38): kill the relay mid-stream;
+  the StreamSource reconnects with backoff and resumes. No duplicate
+  events emitted on resume — events delivered before disconnect that
+  are re-delivered after reconnect produce zero additional `posts`
+  rows (cross-relay/replay dedup combined).
+- Per-relay degradation (decision D38): one misbehaving relay (slow,
+  spamming malformed events, repeatedly disconnecting) is marked bad
+  for the cooldown window; the StreamSource keeps running on the
+  remaining relays. The bad relay is retried after cooldown, and a
+  successful reconnect clears the bad-relay state.
+- Cross-relay event dedup (decision D38): the same Nostr event
+  delivered from N relays in any interleaving produces exactly one
+  `posts` row.
 
 ### Schema
 
@@ -114,6 +127,21 @@ or `deployment.md`. Each one corresponds to at least one named test.
 - SSRF: every blocked range (`169.254.169.254`, RFC1918, loopback,                                                                                                                                                                                    
   link-local, multicast, CGNAT, host-own interfaces) refuses the fetch.                                                                                                                                                                               
   Redirect to a blocked range mid-fetch is also blocked (TOCTOU).
+- Websocket SSRF (decision D38): a `wss://` URL whose hostname
+  resolves to a blocked range is refused before the TCP connection is
+  established. The same blocklist applies on every reconnect — a
+  relay that resolved fine on connect but later resolves to a blocked
+  range during reconnect is rejected.
+- Nostr signature verification (decision D38): a fixture event with a
+  tampered signature is dropped before Stage 1; the failed-sig
+  counter increments; nothing reaches `posts`. A fixture event whose
+  pubkey doesn't match the claimed signature is dropped with the
+  same effect.
+- Nostr kind filter (decision D38): events of kind 4 (DM), kind 7
+  (reaction), or any other kind not on the v1 allowlist are dropped
+  without parsing. Verified by injecting a kind-4 fixture and
+  asserting the body is never read by the implementation (e.g. a
+  parsing-side counter does not increment).
 - Untrusted-content delimiter: a payload trying to forge the closing                                                                                                                                                                                  
   marker fails because the per-call random value differs.
 - Chat output sanitizer: a fake LLM emits a reply containing                                                                                                                                                                                          
@@ -193,6 +221,8 @@ or `deployment.md`. Each one corresponds to at least one named test.
 - Coverage targets per module
 - Long-running fuzz / property-test parameter values
 - The exact MVP smoke transcript
+- The fake-relay harness for StreamSource tests (canned `.jsonl`
+  event streams, scriptable disconnects, multi-relay topologies)
 
   ---                                                                              
 

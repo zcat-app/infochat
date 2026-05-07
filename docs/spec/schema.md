@@ -25,10 +25,13 @@ connect with (see decision D34 and `security.md`).
 
 ### Sources and tags
 
-- **Source.** A globally-unique feed, keyed by (fetcher type, URL). Carries
-  category, bootstrap tags (the tagger's deterministic fallback per decision
-  D22), status, and soft-delete state. Hard delete is forbidden in v1 so
-  saved-post references always resolve.
+- **Source.** A globally-unique feed, keyed by `(kind, identifier)` where
+  `kind` is the ingest type (e.g. `rss`, `bluesky`, `nostr`) and
+  `identifier` is the URL for HTTP-shaped sources or the filter spec for
+  stream sources (decision D38). Carries an opaque per-kind `config`
+  block, category, bootstrap tags (the tagger's deterministic fallback
+  per decision D22), status, and soft-delete state. Hard delete is
+  forbidden in v1 so saved-post references always resolve.
 - **Source subscription.** A (scope, source) link. DM scope is per user;
   group scope is shared.
 - **Tag.** A row in the controlled vocabulary (Tier 1, decision D5). Seeded

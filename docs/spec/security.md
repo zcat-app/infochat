@@ -77,24 +77,73 @@ delimiter convention plus the LLM tool boundary.
 mode (Stage-1-redacted-but-released) when the judge can't run. Stage 2 is                                                                                                                                                                             
 the actual security boundary.
 
-## SSRF and outbound fetch
+## SSRF and outbound connections
 
-Every outbound HTTP fetch (feeds, `/add-source` URL validation, redirects)                                                                                                                                                                            
-runs through a fail-closed allowlist (decision D20):
+Every outbound connection from the Collector (feeds, `/add-source` URL
+validation, redirects, and `StreamSource` connections) runs through a
+fail-closed allowlist (decision D20):
 
-- HTTP/HTTPS schemes only.
+- Allowed schemes: `http`, `https`, `ws`, `wss`. The IP-blocklist and
+  DNS-rebind defenses are **transport-agnostic** — a `wss://` relay
+  connection is gated by the same checks as an `https://` feed fetch
+  (decision D38).
 - DNS-resolved IPs are checked against a blocklist of private, loopback,                                                                                                                                                                              
   link-local, multicast, CGNAT, and cloud-metadata ranges (notably                                                                                                                                                                                    
   `169.254.169.254` and IPv6 equivalents) plus the host's own non-loopback       
   interfaces.
 - DNS is re-resolved after every redirect (TOCTOU defense); the IP               
-  blocklist re-applies each hop.
+  blocklist re-applies each hop. For long-lived `StreamSource`
+  connections the IP check applies on every reconnect.
 - Redirect, body-size, connect-timeout, and read-timeout caps are                
   enforced; an unset timeout is a configuration error.
-- Only `GET` and `HEAD`.
+- HTTP-shaped fetchers: `GET` and `HEAD` only. WebSocket-shaped stream
+  sources have no method concept; trust commitments instead live in
+  the per-source trust boundaries section below.
 
 The allowlist is not user-configurable. Operators with a legitimate need                                                                                                                                                                              
 to scrape an internal feed run a separate ingestion pipeline.
+
+## Per-source trust boundaries
+
+Some ingest sources sign their own payloads at the protocol layer.
+Verification of those signatures is a per-source trust boundary that
+runs **before** Stage 1 (decision D38). The SPI does not know about
+signatures; each implementation enforces its own boundary and is
+responsible for never emitting an unverified event into the outbox.
+
+### Nostr (StreamSource, v1)
+
+- **Signature verification.** Every received event MUST pass
+  signature verification against its claimed pubkey before reaching
+  Stage 1. The pubkey is the only identity the Collector trusts for
+  that event; the relay that delivered it is *not* a trust anchor.
+  This is the ingest-layer mirror of decision D10 (cryptographic
+  identity is the trust anchor).
+- **Failure mode.** Failed verification → drop, increment a counter,
+  never enqueue. Never released as `READY`, never visible to users.
+  No admin notification per failure (a hostile or buggy relay can
+  produce many) — the counter is the audit surface.
+- **Forever read-only.** The Collector never holds a Nostr private
+  key, never signs an event, never publishes. There is no
+  key-handling code path in the codebase, even disabled. Lifting this
+  requires a spec amendment and is out of scope for v1.
+- **Kind allowlist.** Only kinds 1 (text notes) and 6 (reposts) are
+  parsed in v1. All other kinds — including kind 4 (DMs), kind 7
+  (reactions), and any encrypted-content NIPs — are dropped without
+  parsing. The kind filter runs before signature verification (cheap
+  reject) and before any body interpretation.
+- **Repost handling.** Kind 6 reposts are stored with a reference to
+  the original event id; the original event is **not** auto-resolved
+  in v1 (no extra fetches, no relay round-trips). If the original is
+  later seen via a separate Nostr event delivery, normal cross-source
+  linking applies.
+- **Operator-configured relay list.** The relay set is configured via
+  `application.properties` and the bootstrap JSON; **NIP-65
+  auto-discovery is explicitly out of v1**. Trade-off: content posted
+  only to relays outside the operator's list is invisible to the bot.
+  This is a deliberate v1 simplification — the operator picks which
+  slice of the Nostr network the bot listens to. Surfacing this in
+  user-facing help is design-notes territory.
 
 ## Prompt-injection defenses (LLM call sites)
 
@@ -290,6 +339,17 @@ or quarantine entries.
 - Heuristic/anomaly-based banning — admin acts manually.
 - Sybil resistance — not feasible without adapter changes; operators                                                                                                                                                                                  
   control invite distribution.
+- **Nostr publishing / signing.** Forever out of scope for v1 (decision
+  D38). The Collector is read-only at the Nostr protocol layer: no key
+  storage, no signing, no `EVENT` publishes. A future posting bot is a
+  separate service with its own threat model.
+- **NIP-65 relay-list auto-discovery.** Out of v1 (decision D38). The
+  bot only sees content on the operator-configured relay list; content
+  posted exclusively to relays outside that list is invisible. This is
+  a deliberate trade-off, not a bug.
+- **Nostr kinds beyond 1 and 6.** Out of v1: DMs (kind 4), reactions
+  (kind 7), encrypted-content NIPs, relay-list events, and every other
+  kind are dropped without parsing.
 
 ## What lives in design notes
 
@@ -298,6 +358,11 @@ or quarantine entries.
 - Quarantine table columns and review-view shape
 - Per-tier rate-limit numbers
 - Per-profile "release on Stage 2 failure" defaults
+- Nostr default relay list, per-relay rate cap, mark-bad threshold
+  and cooldown values, reconnect backoff schedule
+- Nostr config-block JSON shape inside `bootstrap-sources.json`
+- The websocket library choice and the fake-relay test harness
+- The exact NIP subset and the kind-filter implementation
 - Prometheus counter names and recommended alert expressions
 - DB role grant statements
 - The `[refused-action]` marker convention 

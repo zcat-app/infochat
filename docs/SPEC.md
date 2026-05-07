@@ -116,6 +116,16 @@ choices that shape every section.
   log policy that keeps user-authored prose out of non-audit logs.
   Application-layer per-user encryption is explicitly deferred with
   rationale (server must read plaintext to do its job).
+- Nostr ingestion (decision D38): read-only, kinds 1 (text notes) and
+  6 (reposts) only, operator-configured relay list (no NIP-65
+  auto-discovery in v1), per-event signature verification before
+  Stage 1, cross-relay dedup, per-relay degradation handling.
+  Forever-no key handling: no signing, no publishing, no key
+  storage.
+- New `StreamSource` SPI (decision D38) alongside the existing
+  `Fetcher`: long-lived event-stream sources (Nostr in v1) with their
+  own connection lifecycle and per-source trust verification. Both
+  feed the same outbox.
 
 ### Deferred to v2 (or later)
 
@@ -160,8 +170,14 @@ choices that shape every section.
 - **Hardware profile**: named bundle of settings keyed by                                                                                                                                                                                             
   `infochat.profile=laptop|vps|pi|remote`. Picks context-window size,                                                                                                                                                                                 
   default chat / embedding model, eval concurrency, vector index type.
-- **Fetcher type**: implementation that ingests a source URL (`rss`,                                                                                                                                                                                  
-  `nitter`, `bluesky`, `odysee`, `youtube`, `reddit`, `nostr`).
+- **Source kind**: the ingest type discriminator on a `source` row,
+  picking both the SPI shape and the implementation. Fetcher-shaped
+  kinds (polled): `rss`, `nitter`, `bluesky`, `odysee`, `youtube`,
+  `reddit`. StreamSource-shaped kinds (long-lived): `nostr`. See
+  decision D38.
+- **StreamSource**: SPI for long-lived, event-driven ingest sources
+  (decision D38). Distinct from `Fetcher`; both feed the same outbox.
+  v1 implementations: Nostr.
 - **Category**: coarse classification of a source (`news`, `blog`,                                                                                                                                                                                    
   `social`). Distinct from tags.
 - **Progress notifier**: cross-cutting Provider component that turns                                                                                                                                                                                  
