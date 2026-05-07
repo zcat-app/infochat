@@ -59,7 +59,9 @@ connect with (see decision D34 and `security.md`).
   so retention TTL on the underlying post does not break the bookmark
   (decisions D13, D33).
 - **Chat memory.** Per-(user, scope) compressed memory entries created by
-  `/compress` and consumed by the chat agent's recall path.
+  `/compress` and consumed by the chat agent's recall path. Subject to a
+  fixed TTL (decision D37); `/save`d posts are independent and not
+  affected.
 - **Chat session / context window.** Per-(user, scope) live context state.
   `/clear` wipes only this; chat memory is independent (decision D25).
 
@@ -98,12 +100,19 @@ them together. They are tested in CI (see `verification.md`).
    (`users.is_admin`, `users.is_banned`, `group_membership.is_group_admin`)
    are not reachable from any LLM tool surface. Enforced at the SPI boundary
    (see `security.md`).
+9. **Chat-memory TTL.** `chat_memory` rows carry a fixed retention horizon
+   (value in design notes) after which they are removed by a scheduled
+   pruner. `/save`d posts are stored separately (decision D13) and are not
+   affected. `/forget` (decision D37) is a user-initiated immediate purge
+   of the caller's `(user, scope)` chat memory and saved-list and is
+   audit-logged like any other privileged action against user state.
 
 ## What lives in design notes
 
 - Every column type, default, and index
 - Trigger bodies and partial-index predicates
 - Partition cadence and pruner schedule
+- The exact `chat_memory` TTL value and pruner cadence
 - Denormalized counters and the triggers that maintain them
 - Profile-specific vector index choices and their build parameters
 - Migration-file layout

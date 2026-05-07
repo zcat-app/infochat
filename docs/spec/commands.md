@@ -82,6 +82,21 @@ text, and output structure are in `docs/design/03-commands.md`.
   (decision D24).
 - `/lang <code>` — sets per-scope output language. v1 ships English and
   Czech. DM: own scope. Group: group admin only.
+- `/forget` — immediate purge of the calling `(user, scope)`'s chat
+  memory and saved-post list. Per decision D37, this is the user-facing
+  privacy lever: anything kept on the user's behalf is removed. Does not
+  touch `users.is_admin`, `users.is_banned`, group membership, or any
+  audit row (the audit log is append-only by invariant). Audit-logged
+  before effect like every privileged action against user state.
+  Requires confirm. Idempotent: a second `/forget` with nothing to
+  remove returns a friendly no-op reply.
+- `/export` — returns the calling user's own data: their chat memory
+  for the current scope, their saved posts, their per-scope
+  preferences, and their `users` row (excluding fields derived from
+  authorization state of *other* users). DM: full self-export. Group:
+  scoped to the calling `(user, group)` only — never another user's
+  state, never group-wide content beyond the caller's own
+  contributions. Output format and size cap are in design notes.
 - `/stop` — cancels the calling (user, scope)'s currently in-flight
   interruptible request **immediately**, so the worker is freed for
   others. Applies to chat-mode agent loops and user-issued `/summary`
@@ -172,3 +187,5 @@ worker pool can't keep up (decision D17).
 - Welcome message text
 - Permission matrix rows
 - Friendly-error suggestion ranking and cap
+- `/export` output format (e.g. JSON shape, attachment vs. inline) and
+  size cap

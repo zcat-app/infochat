@@ -111,6 +111,11 @@ choices that shape every section.
   `/summary`; `/retry` to regenerate the prose of the last
   summary-producing command (deterministic selection reused, LLM
   prose re-rolled).
+- User data minimization (decision D37): fixed TTL on chat memory,
+  `/forget` for user-initiated purge, `/export` for self-export, and a
+  log policy that keeps user-authored prose out of non-audit logs.
+  Application-layer per-user encryption is explicitly deferred with
+  rationale (server must read plaintext to do its job).
 
 ### Deferred to v2 (or later)
 

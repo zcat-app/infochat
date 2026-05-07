@@ -54,6 +54,11 @@ or `deployment.md`. Each one corresponds to at least one named test.
 - Soft-delete only: a `/remove-source` followed by re-add flips                                                                                                                                                                                       
   `deleted_at` and reuses the row; no duplicate `(fetcher, url)` rows.
 - TTL by partition drop: ageing partitions don't take row-level deletes.
+- Chat-memory TTL pruner (decision D37): a `chat_memory` row older than
+  the configured horizon is removed by the scheduled pruner;
+  `/save`d posts in the same `(user, scope)` are untouched; rows newer
+  than the horizon are not pruned. Pruner is idempotent (a second run
+  on the same state is a no-op).
 - Audit-before-effect: a privileged command interrupted between audit
   and side effect leaves an audit row but no state change.
 
@@ -74,6 +79,23 @@ or `deployment.md`. Each one corresponds to at least one named test.
   produce the expected branch.
 - Pagination: page size honored, footer-suggested next page actually                                                                                                                                                                                  
   works.
+- `/forget` purge (decision D37): after confirm, the calling
+  `(user, scope)`'s `chat_memory` and `saved_post` rows are gone;
+  another user's data in the same group is untouched; the same user's
+  data in a *different* scope (e.g. their DM) is untouched;
+  `users.is_admin` / `users.is_banned` / `group_membership` /
+  `audit_log` rows are untouched (the audit log is append-only). An
+  audit row recording the `/forget` intent is written *before* the
+  purge.
+- `/forget` confirm + idempotency: late confirm rejected by the
+  confirmation state machine; a second `/forget` after the first
+  completes returns the friendly no-op reply (no audit row, no DB
+  writes beyond read).
+- `/export` scope isolation (decision D37): the export from inside a
+  group contains only the calling `(user, group)`'s data — no other
+  user's chat memory, no other user's saves, no group-wide content
+  beyond the caller's own contributions; a DM `/export` does not leak
+  any group-scoped state.
 
 ### Security
 
@@ -104,6 +126,14 @@ or `deployment.md`. Each one corresponds to at least one named test.
   window; per-turn tool-call cap stops the agent loop.
 - DB roles: a SQL-injection mutation attempt from the Provider role                                                                                                                                                                                   
   fails; the admin role can do it.
+- User-content log policy (decision D37): with the log capture set to
+  TRACE, a fixture that exercises a `/summary`, a chat-mode reply, a
+  `/save`, and a `/compress` produces no log line containing the
+  bodies of inbound chat messages, the contents of `chat_memory`
+  rows, or the body or annotations of `saved_post` rows. Stage
+  events, request IDs, scope IDs, and counts are present (positive
+  assertion). The audit log records command intent only; user-authored
+  prose is not in audit rows either.
 
 ### LLM and embeddings
 

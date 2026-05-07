@@ -258,14 +258,32 @@ or quarantine entries.
   matching common API-key shapes.
 - Contact IDs are logged in redacted form (prefix + ellipsis + suffix)                                                                                                                                                                                
   outside the audit log.
+- **User-content logging.** `chat_memory` content, `saved_post` bodies
+  and annotations, and the bodies of inbound chat-mode messages never
+  appear in non-audit logs, at any log level (decision D37). Stage
+  events, request IDs, scope IDs, and counts are loggable; the prose
+  itself is not. The audit log records *intent* (command name, actor,
+  scope, target), not user-authored prose.
 
 ## What's intentionally NOT in v1
 
 (Catalogued in `docs/design/04-security.md` §4.12; spec-level summary:)
 
-- DB-at-rest encryption — operator's responsibility.
+- DB-at-rest encryption — operator's responsibility (LUKS, managed-DB
+  transparent encryption, etc.).
+- **Per-user encryption with a user-supplied key.** Deferred (decision
+  D37). The Provider must read plaintext to generate periodic digests,
+  run the chat agent over `chat_memory`, and produce on-demand
+  summaries; encrypting under a server-held key is obfuscation against
+  casual DB dumps, not a real confidentiality boundary. Doing it
+  honestly (key derived from user secret, server cannot reconstruct)
+  would require disabling asynchronous features for opted-in users and
+  is gated on a future product decision. v1 relies on minimization
+  (chat-memory TTL, `/forget`, `/export`) instead.
 - Per-group bans — only bot-wide ban in v1.
-- User-controllable retention — TTL is fixed.
+- User-controllable retention values — the chat-memory TTL itself is
+  fixed (configured per profile, not per user). Users control purge
+  via `/forget` (decision D37), not by tuning TTL.
 - Two-factor confirmation for ban — single-step confirm-within-window                                                                                                                                                                                 
   is enough for v1.
 - CAPTCHAs / human verification — adapter-level identity is the gate.
