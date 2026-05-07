@@ -26,6 +26,7 @@ Two-service Quarkus application: a news and social-media aggregator chatbot.
 - Commands and chat (surface, catalogue, permissions): [docs/spec/commands.md](docs/spec/commands.md)
 - LLM and embeddings (SPI, routing, translation, determinism boundary): [docs/spec/llm.md](docs/spec/llm.md)
 - Messaging adapters (contract, capabilities, progress): [docs/spec/messaging.md](docs/spec/messaging.md)
+- Asset commands (`/zcash`, `/monero` etc., price/market data): [docs/spec/commands.md](docs/spec/commands.md) §"Asset commands" + design [docs/design/10-asset-commands.md](docs/design/10-asset-commands.md)
 - Deployment and configuration (operator inputs, bootstrap, runtime): [docs/spec/deployment.md](docs/spec/deployment.md)
 - Verification strategy (what the test suite must prove): [docs/spec/verification.md](docs/spec/verification.md)
 - MVP slice (smallest end-to-end build): [docs/00-mvp.md](docs/00-mvp.md)
@@ -47,6 +48,8 @@ amendment.
 - **Outbox pattern** for the evaluation queue: posts are persisted with `status='RAW'` before being enqueued; a startup rehydrator re-enqueues unfinished work.
 - **PostgreSQL LISTEN/NOTIFY** for collector→provider events (no Kafka dependency in v1).
 - **Hardware profile** drives sizing: `infochat.profile=laptop|vps|pi|remote` picks context window, default chat/embedding models, eval concurrency, and pgvector index type (`hnsw` or `ivfflat`). Individual settings can still be overridden per-property.
+- **Asset commands are not posts.** `/zcash`, `/monero` and future per-asset commands store snapshots in a dedicated `price_snapshot` table outside the ingest pipeline — no Stage 1/2, no tagging, no embedding. Every reply names its data source   
+  and includes the source URL bare (per-source ToS attribution). Public no-auth endpoints only in v1.
 
 ## Bootstrap admin & sources
 

@@ -55,6 +55,57 @@ text, and output structure are in `docs/design/03-commands.md`.
   filters and pagination.
 - `/unsave <uid>` — remove from library (no confirmation).
 
+### Asset commands
+
+Per-asset top-level commands expose price and market data for a fixed,
+operator-configured set of cryptocurrencies (decision D39). v1 ships
+`/zcash` and `/monero`; the per-asset sub-verb shape is the spec-level
+commitment so future asset-specific verbs (shielded-pool stats, ring
+size, on-chain queries) can land without a new top-level command per
+verb.
+
+- `/zcash [sub-verb] [--vs <currency>]` — Zcash market data. Sub-verbs
+  in v1: `coingecko` (default, aggregated snapshot), `kraken`,
+  `bitfinex`. Bare `/zcash` uses the operator-configured default
+  sub-verb. Optional `--vs` selects the quote currency (USD by default;
+  the per-source allowlist of accepted quote currencies lives in design
+  notes). DM and group; any non-banned user.
+- `/monero [sub-verb] [--vs <currency>]` — Monero market data. Same
+  shape as `/zcash`. The enabled sub-verb set is **not** the same:
+  exchanges that do not list XMR (Binance, Coinbase, Gemini) are not
+  exposed for `/monero`. Asymmetric availability across assets is
+  permitted by design — `bootstrap-assets.json` configures the
+  per-asset sub-verb allowlist.
+
+Cross-cutting rules for asset commands (D39):
+
+- **Data is not posts.** Snapshots are stored in a collector-owned
+  table outside the post pipeline. They never go through Stage 1/2,
+  tagging, entity extraction, or embedding, and they are never
+  surfaced via `/summary`, `/save`, or `/saved`.
+- **Polled, cached, refreshed on a tick.** Polled data sources reuse
+  the existing `Fetcher` SPI. The refresh interval is profile-driven
+  and lives in design notes. Repeated user calls within the cache
+  window are served from cache, not refetched per request.
+- **Mandatory attribution.** Every reply names the data source in the
+  header (e.g. `Zcash (kraken)`) and includes the source URL bare per
+  D30. This satisfies per-source ToS attribution and lets the user
+  reconcile small price differences between sub-verbs.
+- **Stale-data honesty.** Every reply includes the snapshot's
+  capture timestamp and the cache age. The bot does not pretend to
+  be live; the websocket "live" mode is deferred to v2.
+- **Public endpoints only in v1.** Only data sources reachable
+  without an API key or auth token are eligible (Kraken public REST,
+  Bitfinex public REST, CoinGecko free tier). Auth-gated exchanges
+  (KuCoin, Gemini for most endpoints) require the operator-secret
+  SPI and are out of v1.
+- **Friendly errors mirror the tag convention.** Unknown sub-verb,
+  asset not enabled, sub-verb not enabled for this asset, or
+  unsupported `--vs` currency → friendly error with fuzzy
+  suggestions (commands.md §Friendly errors).
+- **`/help` is context-aware.** Only operator-enabled assets appear
+  in `/help`; only enabled sub-verbs appear in per-command help.
+
 ### Source management
 
 - `/add-source --type … --url … --tags …` — DM: any non-banned user adds to
@@ -189,3 +240,12 @@ worker pool can't keep up (decision D17).
 - Friendly-error suggestion ranking and cap
 - `/export` output format (e.g. JSON shape, attachment vs. inline) and
   size cap
+- `bootstrap-assets.json` schema and example file
+- Per-asset sub-verb allowlist (which sub-verbs are enabled for `/zcash`
+  vs `/monero`)
+- Per-source allowlist of accepted `--vs` quote currencies
+- Per-profile snapshot refresh interval and cache TTL
+- `price_snapshot` table shape (column names, indexes, retention)
+- Reply layout (line ordering, BTC-denominated price, 7d Δ%, verbose
+  fields)
+- Per-exchange ToS-compliant attribution string and citation URL

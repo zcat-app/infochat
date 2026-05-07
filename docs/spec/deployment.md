@@ -39,10 +39,17 @@ An operator must provide:
    Loaded by the Collector on startup, idempotent on `(fetcher, url)`.           
    The union of `tags[]` across all entries seeds the Tier-1 controlled                                                                                                                                                                               
    vocabulary (decisions D5, D8).
-4. **DB credentials** for the three Postgres roles.
-5. **LLM provider configuration.** Endpoint URL, API key (from env                                                                                                                                                                                    
+4. **A bootstrap assets file** (optional). A JSON document listing the
+   set of enabled assets and per-asset enabled sub-verbs for the asset
+   commands (decision D39). Absent file → asset commands disabled.
+   Loaded by the Collector on startup, idempotent on `(asset)`. The
+   set of enabled assets gates which `/zcash`, `/monero`, … commands
+   the Provider exposes; the per-asset sub-verb allowlist gates which
+   data sources each command will accept.
+5. **DB credentials** for the three Postgres roles.
+6. **LLM provider configuration.** Endpoint URL, API key (from env                                                                                                                                                                                    
    var, not the DB), model names per task (or rely on profile defaults).
-6. **Messaging adapter configuration.** Adapter selection plus its                                                                                                                                                                                    
+7. **Messaging adapter configuration.** Adapter selection plus its                                                                                                                                                                                    
    transport-specific settings.
 
 Everything else has a profile default.
@@ -53,9 +60,14 @@ Both services run Flyway migrations first. Then:
 
 - **Collector** loads the bootstrap sources file and upserts `source`                                                                                                                                                                                 
   rows by `(fetcher, url)`; never deletes; updates name/category/tags                                                                                                                                                                                 
-  in place when entries differ. Then runs the outbox rehydrator                  
-  (re-enqueues anything left in `RAW`/intermediate states from a prior                                                                                                                                                                                
-  crash). Then starts the fetch scheduler.
+  in place when entries differ. Loads the bootstrap assets file if                                                                                                                                                                                    
+  configured and upserts the per-asset enabled-sub-verb allowlist                                                                                                                                                                                     
+  (decision D39); never deletes assets, so removing an asset from the                                                                                                                                                                                 
+  file is a soft-disable in the operator's runbook, not an automatic                                                                                                                                                                                  
+  drop. Then runs the outbox rehydrator (re-enqueues anything left in                                                                                                                                                                                 
+  `RAW`/intermediate states from a prior crash). Then starts the fetch                                                                                                                                                                                
+  scheduler — including the asset-snapshot fetchers, on the                                                                                                                                                                                           
+  profile-driven refresh interval.
 - **Provider** ensures the bot-admin user exists and has `is_admin =                                                                                                                                                                                  
     true` (audit-logged). Then runs the new-post reconciler — replays
   any `READY` posts since `last_ready_post_at` (the `LISTEN/NOTIFY`                                                                                                                                                                                   
@@ -78,6 +90,8 @@ property keys live in design notes:
   provider; translator provider.
 - **Messaging adapter.** Adapter id + adapter-specific settings.
 - **Source bootstrap.** Path to the JSON file.
+- **Asset bootstrap.** Path to the JSON file (optional; absent =                                                                                                                                                                                       
+  asset commands disabled).
 - **Admin bootstrap.** Bot-admin contact id.
 - **Security.** Release-on-Stage-2-failure default; SSRF allowlist (not
   user-tunable; see `security.md`); fetch caps (size, timeouts).
@@ -156,6 +170,7 @@ behind each profile are tuning.
 - `docker-compose.yml`
 - Example `application.properties`
 - Bootstrap sources JSON schema and example file
+- Bootstrap assets JSON schema and example file
 - Startup-bean priorities
 - Health endpoint paths and probe timeouts
 - Metrics names, labels, dashboard examples

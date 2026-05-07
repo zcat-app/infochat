@@ -126,6 +126,15 @@ choices that shape every section.
   `Fetcher`: long-lived event-stream sources (Nostr in v1) with their
   own connection lifecycle and per-source trust verification. Both
   feed the same outbox.
+- Asset commands (decision D39): per-asset top-level commands                                                                                                                                                                                         
+  (`/zcash`, `/monero` in v1) with sub-verbs that select the data                                                                                                                                                                                     
+  source (`coingecko`, `kraken`, `bitfinex`). Operator-configured via                                                                                                                                                                                 
+  `bootstrap-assets.json`; per-asset sub-verb allowlist (so                                                                                                                                                                                           
+  `/monero binance` is correctly rejected — XMR is not listed on                                                                                                                                                                                      
+  Binance). Public no-auth endpoints only in v1. Mandatory data-source
+  attribution per reply. Polled-and-cached via the existing `Fetcher`                                                                                                                                                                                 
+  SPI; data is **not** posts. Live websocket ticker mode and on-chain
+  verbs are explicitly deferred to v2. 
 
 ### Deferred to v2 (or later)
 
@@ -141,8 +150,17 @@ choices that shape every section.
 - Auto-detect language from user message; v1 requires opt-in via `/lang`.
 - Sybil resistance (requires adapter-level features SimpleX does not                                                                                                                                                                                  
   expose).
-
-  ---                                                                                                                                                                                                                                                   
+- Live ticker mode for asset commands (websocket-driven, in-place                                                                                                                                                                                     
+  edits). Needs a new `TickerStream` SPI and a "background                                                                                                                                                                                            
+  subscription" cross-cutting concept (decision D39).
+- On-chain verbs for asset commands (`/zcash blocknumber`,                                                                                                                                                                                            
+  `/monero hashrate`, etc.). Needs an explorer-adapter SPI.
+- Auth-gated price sources (KuCoin, Gemini for most endpoints,                                                                                                                                                                                        
+  CoinGecko Pro). Needs the operator-secret SPI. 
+- Public IPFS/IPNS publication of periodic summaries as a static
+  JS-free page, regenerated on the existing 12h cadence, intended as
+  an uncensorable demo of what the bot does. Design notes:
+  [design/future/public-ipfs-publishing.md](design/future/public-ipfs-publishing.md). 
 
 ## 5. Glossary
 
