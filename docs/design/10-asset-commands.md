@@ -135,36 +135,70 @@ flapping exchange does not block the user.
 
 ## 10.5 Reply layout
 
-Default (non-verbose) reply, plain text per D30:
+### Per-source field availability
 
-  ```                                                                                                                                                                                                                                                   
-  Zcash (coingecko)                        
-    $42.18  ·  0.000651 BTC                                                                                                                                                                                                                             
-    24h:   −2.4%  (high $43.91 / low $41.07)           
-    7d:    +5.1%                                                                                                                                                                                                                                        
-    1h:    +0.3%                                                                                                                                                                                                                                        
-    as of 14:32 UTC, cached 41s                         
-    source: coingecko.com/en/coins/zcash                                                                                                                                                                                                                
-  ```                                                  
+Exchanges do not expose a 7-day delta in their public ticker endpoints.
+CoinGecko does not expose an intra-day open price so a meaningful
+"today Δ%" is not available there. The renderer uses only what the
+source actually provides — it never invents zeros or estimates.
 
-Rules:
-- Header line: `<DisplayName> (<source>)` followed by an optional                                                                                                                                                                                     
-  ` ⚠ stale` marker. The data-source name is always lowercase to match                                                                                                                                                                                
+| Field            | coingecko | kraken | bitfinex |
+|------------------|-----------|--------|----------|
+| price (USD)      | ✅        | ✅     | ✅       |
+| price (BTC)      | ✅        | ❌     | ❌       |
+| high\_24h        | ✅        | ✅     | ✅       |
+| low\_24h         | ✅        | ✅     | ✅       |
+| change\_1h\_pct  | ✅        | ❌     | ❌       |
+| change\_24h\_pct | ✅        | ❌     | ❌       |
+| change\_7d\_pct  | ✅        | ❌     | ❌       |
+| volume\_24h      | ✅        | ✅     | ✅       |
+
+### Default reply examples (plain text, per D30)
+
+**coingecko** — shows 1h and 24h deltas plus the day spread:
+
+  ```
+  Zcash (coingecko)
+    $42.18  ·  0.000651 BTC
+    1h:    +0.3%
+    24h:   −2.4%  (high $43.91 / low $41.07)
+    as of 14:32 UTC, cached 41s
+    source: coingecko.com/en/coins/zcash
+  ```
+
+**kraken / bitfinex** — no delta available; shows day spread only:
+
+  ```
+  Zcash (kraken)
+    $42.15  ·  0.000650 BTC
+    24h:   high $43.88 / low $41.02
+    as of 14:32 UTC, cached 38s
+    source: kraken.com/prices/zec-usd-zcash-price-chart
+  ```
+
+### Rendering rules
+
+- Header line: `<DisplayName> (<source>)` followed by an optional
+  ` ⚠ stale` marker. The data-source name is always lowercase to match
   sub-verb input.
-- Price line: quote-currency price first, then BTC-denominated price                                                                                                                                                                                  
-  for crypto-vs-crypto context (privacy-coin audience anchors on BTC).                                                                                                                                                                                
+- Price line: quote-currency price first, then BTC-denominated price
+  for crypto-vs-crypto context (privacy-coin audience anchors on BTC).
   Skipped if `--vs btc` (would be redundant) or if the source did not
   return a BTC-denominated price.
-- 24h line: percentage change first (sign-bearing minus, not "−"
-  vs "-"; we normalize to U+2212 in the renderer), then the high/low                                                                                                                                                                                  
-  parenthetical.
-- 7d, 1h: percentage only. Skipped if the source did not return them.
+- Delta lines (coingecko only): 1h first, then 24h. Sign-bearing U+2212
+  minus (not ASCII hyphen) for negative values. Omitted entirely for
+  exchange sub-verbs since they do not provide delta.
+- Spread line: `24h: high $X / low $Y`. For coingecko the spread is
+  appended to the 24h delta line as a parenthetical. For exchange
+  sub-verbs it stands alone as the only 24h line.
+- Any field absent from the snapshot row is silently omitted — the
+  renderer never invents zeros.
 - Capture/cache line: capture timestamp in UTC, cache age in seconds.
 - Source URL on its own line, bare per D30.
 
 Verbose form (`/zcash --verbose`) adds:
 - `volume 24h: $XXM`
-- All other quote-currency snapshots cached for that asset (so a user                                                                                                                                                                                 
+- All other quote-currency snapshots cached for that asset (so a user
   can compare USD/EUR/CZK in one reply).
 
 ## 10.6 `bootstrap-assets.json` schema
