@@ -130,8 +130,13 @@ responsible for never emitting an unverified event into the outbox.
 - **Kind allowlist.** Only kinds 1 (text notes) and 6 (reposts) are
   parsed in v1. All other kinds — including kind 4 (DMs), kind 7
   (reactions), and any encrypted-content NIPs — are dropped without
-  parsing. The kind filter runs before signature verification (cheap
-  reject) and before any body interpretation.
+  parsing. **Ordering**: signature verification runs first (decision
+  D38 is the trust-boundary commitment — every received event MUST
+  pass signature verification against its claimed pubkey before
+  Stage 1, and the kind filter is part of Stage 1). The kind filter
+  applies after the signature check and before any body
+  interpretation; an unverified event of any kind is dropped at the
+  signature step and never reaches the kind filter.
 - **Repost handling.** Kind 6 reposts are stored with a reference to
   the original event id; the original event is **not** auto-resolved
   in v1 (no extra fetches, no relay round-trips). If the original is

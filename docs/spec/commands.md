@@ -108,9 +108,13 @@ Cross-cutting rules for asset commands (D39):
 
 ### Source management
 
-- `/add-source --type … --url … --tags …` — DM: any non-banned user adds to
+- `/add-source <url> --tags …` — DM: any non-banned user adds to
   their own scope. Group: group admin only. Tags are mandatory (decision
-  D14).
+  D14). The source `kind` (rss / bluesky / nostr / …) is inferred from
+  the URL shape; an explicit `--type <kind>` override is accepted but
+  not required, and defaults to `rss` when inference is ambiguous.
+  Identity is `(kind, identifier)` per decision D38; the per-kind
+  `config` block defaults to NULL when not supplied.
 - `/list-sources [--all] [--page N]` — sources subscribed by the calling
   scope; `--all` is bot-admin only.
 - `/unfollow-source <id>` — per-scope unsubscribe. Different from

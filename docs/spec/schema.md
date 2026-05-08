@@ -94,9 +94,12 @@ them together. They are tested in CI (see `verification.md`).
 5. **Outbox.** Posts are persisted before they are enqueued for evaluation.
    A startup rehydrator picks up any post left in `RAW` (or an intermediate
    evaluating state) after a crash.
-6. **TTL by partitioning.** `post_reference`, `post_embedding`, and similar
-   bulk-derived rows are partitioned and aged out by partition drop, not row
-   delete.
+6. **TTL by partitioning.** `post`, `post_reference`, `post_embedding`,
+   and similar bulk-derived rows are partitioned and aged out by
+   partition drop, not row delete. `post` carries a fixed, profile-driven
+   retention horizon (decision D33); saved-post snapshots (decision D13)
+   are exempt because the snapshot is copied into `saved_post` at
+   `/save` time and never re-resolved against `post`.
 7. **Audit-before-effect.** Privileged actions write to `audit_log` *before*
    their side effects, so an interrupted command leaves a record of intent.
 8. **No LLM-writable rows.** Tables that influence authorization
@@ -105,10 +108,11 @@ them together. They are tested in CI (see `verification.md`).
    (see `security.md`).
 9. **Chat-memory TTL.** `chat_memory` rows carry a fixed retention horizon
    (value in design notes) after which they are removed by a scheduled
-   pruner. `/save`d posts are stored separately (decision D13) and are not
-   affected. `/forget` (decision D37) is a user-initiated immediate purge
-   of the caller's `(user, scope)` chat memory and saved-list and is
-   audit-logged like any other privileged action against user state.
+   pruner (decisions D37, D40). `/save`d posts are stored separately
+   (decision D13) and are not affected. `/forget` (decision D37) is a
+   user-initiated immediate purge of the caller's `(user, scope)` chat
+   memory and saved-list and is audit-logged like any other privileged
+   action against user state.
 
 ## What lives in design notes
 

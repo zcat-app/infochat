@@ -28,10 +28,10 @@ Only the tables required by the MVP fetch → evaluate → store → query path.
 In scope:
 
 - `user` — minimal columns: `id`, `contact_id`, `created_at`, `is_admin`, `is_banned`. Ban columns (`banned_at`, `banned_by`, `ban_reason`) can stay NULL but the columns must exist so the schema doesn't have to be re-migrated.
-- `source` — `id`, `name`, `url`, `fetcher` (must equal `'rss'` in the MVP), `category`, `tags[]`, `created_at`, `deleted_at` (nullable; soft-delete column reserved even though `/remove-source` is deferred).
+- `source` — `id`, `name`, `kind` (must equal `'rss'` in the MVP), `identifier` (URL for `rss`), `config` (JSONB, NULL in MVP — reserved for per-kind options), `category`, `tags[]`, `created_at`, `deleted_at` (nullable; soft-delete column reserved even though `/remove-source` is deferred). Identity is `(kind, identifier)` per decision D38; the legacy `(fetcher, url)` shape is **not** used.
 - `source_subscription` — links a `(scope, source)` pair. DM scope only in MVP (no groups).
 - `post` — `id`, `uid`, `source_id` (FK with `ON DELETE RESTRICT`), `fetched_at`, `published_at`, `title`, `body`, `url`, `status` (`RAW` | `READY` | `QUARANTINED`), `stage2_failed` (bool), `tags[]`, `embedding` (vector).
-- `scope` / `scope_preferences` — minimal: a row per DM scope keyed by `user.id`. Language column defaults to `'en'` and is read-only in MVP.
+- `scope_preferences` — minimal: a row per DM scope keyed by `user.id`. "Scope" itself is a discriminator (`'dm'` / `'group'`) on user-state rows, **not** a separate table. Language column defaults to `'en'` and is read-only in MVP.
 - `tag` — controlled-vocabulary table seeded from `bootstrap-sources.json`.
 - `audit_log` — append-only table; only the bot-admin bootstrap and `/add-source` events are written in MVP.
 
@@ -81,7 +81,7 @@ Deferred from the pipeline:
 **Commands** — only the three needed to prove the slice works end-to-end:
 
 - `/help` — static text listing the three MVP commands.
-- `/add-source <url> --tags tag1,tag2[,...]` — DM only; non-banned user; `--tags` mandatory; idempotent on `(fetcher='rss', url)`.
+- `/add-source <url> --tags tag1,tag2[,...]` — DM only; non-banned user; `--tags` mandatory; idempotent on `(kind='rss', identifier=<url>)` (decision D38).
 - `/summary [-w 1h|24h|7d]` — DM only; on-the-fly summarization (no cache); deterministic SQL select of READY posts in the time window for the user's subscriptions; LLM produces prose; topic IDs are **not** included in MVP output.
 
 Everything else from [03-commands.md](03-commands.md) is deferred — see §5.
