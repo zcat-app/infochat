@@ -201,10 +201,33 @@ connect with (see decision D34 and `security.md`).
 - **Post reference.** Edges in the cross-source link graph
   (`link_type`, `score`). TTL'd by partition drop (decision D33).
 - **Quarantine.** One row per Stage-1 or Stage-2 hit, holding span offsets,
-  the verbatim original, and a review status `∈ {PENDING, APPROVED,
-  REJECTED}`. Original content is reachable only by the admin DB role
-  (decision D34). `/quarantine list` shows `PENDING` rows by default;
-  `--all` (bot-admin only) shows every status.
+  the verbatim original, and a review status `∈ {PENDING, BENIGN_CLOSED,
+  APPROVED, REJECTED}`. Original content is reachable only by the admin
+  DB role (decision D34). State machine:
+  - `PENDING` is the initial state; the row is awaiting either a Stage-2
+    verdict or admin action.
+  - `PENDING → BENIGN_CLOSED` fires automatically when Stage 2 returns
+    `BENIGN` (first-pass or re-eval, security.md §Quarantine workflow).
+    Stage 1 redactions remain in the post body — `BENIGN_CLOSED` is
+    "Stage 2 said benign, redactions still in place." Only
+    `/quarantine approve` lifts the redactions.
+  - `PENDING → APPROVED` and `BENIGN_CLOSED → APPROVED` fire on
+    `/quarantine approve`, restoring the original span (the only path
+    that lifts redactions, security.md §Quarantine workflow).
+  - `PENDING → REJECTED` fires on `/quarantine reject` (admin) or on
+    the admin-review TTL auto-reject (Invariant 6) for `PENDING` rows.
+    `BENIGN_CLOSED` rows are NOT subject to TTL auto-reject — they are
+    not in the admin queue and the placeholder is already final unless
+    an admin chooses to approve. `BENIGN_CLOSED → REJECTED` is reachable
+    only via an explicit `/quarantine reject` (forensic action; the row
+    is no longer a defaulted-pending entry but an admin can still mark
+    it permanently rejected).
+  `/quarantine list` defaults to `PENDING` rows only (the active admin
+  queue); `--all` (bot-admin only) lists every status for forensic /
+  audit workflows. `BENIGN_CLOSED` rows do not surface in the default
+  view — Stage 2 already cleared them and admin attention is not
+  required, but the row is preserved for audit and is reachable via
+  `--all`.
 
 #### UID derivation
 
@@ -307,6 +330,26 @@ regardless of how many quarantine cycles it has been through.
 
 ### Operational
 
+- **Audit log view.** A Postgres view (`audit_log_view`) over
+  `audit_log` exposing the same columns **with redaction applied to
+  user-content-bearing fields**. The Provider role has `SELECT` on
+  the view (never on the underlying table), so the view is the
+  Provider's only read path into audit history (`security.md` §DB
+  roles). The closed list of redacted columns is the spec-level
+  commitment:
+  - `actor_contact_id` — redacted to prefix + ellipsis + suffix
+    form (same redactor as non-audit log lines, `security.md`
+    §Secrets handling).
+  - `target_contact_id` — same redaction.
+  - `details_json` — passed through the secrets-catalogue redactor
+    (`security.md` §Secrets handling) so any matched API-key shape
+    or contact-id-shaped value is masked before the Provider sees
+    the row.
+  Non-redacted columns surface unchanged (timestamp, actor user id,
+  action verb, target kind, target id, scope id, request id). The
+  exact redactor regexes and the SQL view body live in
+  `docs/design/02-schema.md`; the redacted-column commitment above
+  is spec.
 - **Provider state.** Catch-up high-water marks for the
   `LISTEN/NOTIFY` reconciler (see `architecture.md`). **One row per
   channel** keyed by `channel`, holding `(channel, last_ready_at,
@@ -385,9 +428,23 @@ them together. They are tested in CI (see `verification.md`).
    bot admins. Enforced at the trigger layer, not just the command layer,
    on both the **UPDATE** path (revoking `is_admin`, setting `is_banned`
    on the only admin) and the **DELETE** path (a hard-delete that would
-   leave zero rows with `is_admin = true`). Hard-delete of users is a
-   privileged operator action and the trigger fails it with the same
-   error a `/revoke-admin` of the only admin produces.
+   leave zero rows with `is_admin = true`). The user-facing data-wipe
+   path is `/forget` (commands.md §Conversation control), which purges
+   the data held on the user's behalf (`chat_memory`, `chat_session`,
+   `summary_anchor`, `saved_post`) but does **not** delete the
+   `users` row — the row carries authorization state (admin flag,
+   ban flag, probation timestamp), not user-authored content, and
+   removing it would break ban continuity and last-admin counting.
+   No application path issues `DELETE` against `users` in v1; the
+   only DELETE source is an operator running raw SQL under the
+   Admin role, and the DELETE-path trigger above is the
+   defense-in-depth guard for that case (it fails the DELETE if it
+   would leave zero `is_admin = true` rows; FK behavior for
+   user-owned rows under that operator-only path lives in design
+   notes alongside the cascade rules). A v2 admin command for
+   hard-delete with explicit cascade semantics is a candidate; v1
+   commits to `/forget` as the user-facing purge and `/ban` as the
+   user-facing revoke.
    **The trigger MUST serialize concurrent revocation attempts** so
    two simultaneous `/revoke-admin` (or ban) operations against
    different admin rows cannot both observe the pre-state and both
@@ -427,9 +484,13 @@ them together. They are tested in CI (see `verification.md`).
    quarantine row survives until explicitly approved or rejected by
    an admin so a post awaiting review can never silently disappear.
    A separate, longer **admin-review TTL** (profile-driven; value in
-   design notes) bounds an indefinitely-pending queue: a quarantine
-   row aged past the admin-review TTL is **not** auto-released, it
-   auto-`reject`s and the placeholder becomes permanent. The
+   design notes) bounds an indefinitely-pending queue: a `PENDING`
+   quarantine row aged past the admin-review TTL is **not**
+   auto-released, it auto-`reject`s and the placeholder becomes
+   permanent. The admin-review TTL applies **only to `PENDING`** rows;
+   `BENIGN_CLOSED` rows have already received a Stage 2 verdict and
+   are not in the admin queue (their placeholders are already
+   permanent unless an admin issues `/quarantine approve`). The
    admin-review TTL is intentionally long enough that an attentive
    operator never trips it.
 7. **Audit-before-effect.** Privileged actions write to `audit_log` *before*

@@ -69,10 +69,24 @@ Every adapter implements:
   notifier's terminal state). For adapters with edit support this is                                                                                                                                                                                  
   one last `update`; for others it's the only `send` that ever happened.
 - **Typing indicator.** `setTyping(scope, bool)`. Optional.
+- **Membership events.** Optional. Adapters that can detect
+  group-membership changes surface them as
+  `user_joined_group(group_id, contact_id)` and
+  `user_left_group(group_id, contact_id)` events to Provider.
+  Provider applies the soft-clear / re-add semantics in
+  `schema.md` §Identity and access (Group membership) and §Failure
+  handling below. Adapters without a native left-group signal MUST
+  set `supportsMembershipEvents = false` (capability flag) and
+  MUST NOT synthesise a left-group event from inactivity; Provider
+  falls back to permanent-delivery-failure-driven cleanup
+  (§Failure handling — "User left group"). The bot-removed and
+  group-deleted events are separate from per-user membership
+  events and continue to flow through their existing adapter
+  signals.
 - **Capability flags.** A static description of what the adapter                                                                                                                                                                                      
   supports: identity trust level, markdown rendering, message edits,                                                                                                                                                                                  
-  edit minimum interval, typing indicator, and any future flag a new                                                                                                                                                                                  
-  transport needs.
+  edit minimum interval, typing indicator, membership events, and
+  any future flag a new transport needs.
 
 ## Capability flags (minimum set)
 
@@ -101,6 +115,12 @@ Every adapter implements:
   adapter with this flag false MUST disable its group SPI.
   Display-name string matching is never an acceptable fallback
   for mention recognition (see §Required SPI surface — Receive).
+- `supportsMembershipEvents` — true when the adapter exposes a
+  native `user_joined_group` / `user_left_group` signal at the
+  protocol layer. When false, Provider uses
+  permanent-delivery-failure-driven cleanup (§Failure handling —
+  "User left group") and does not synthesise membership events
+  from inactivity.
 
 Future flags (richer attachments, voice, reactions, etc.) extend this                                                                                                                                                                                 
 list; v1 ships only the above. Provider must treat an unknown flag as                                                                                                                                                                                 

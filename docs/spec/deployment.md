@@ -179,7 +179,12 @@ preserved for audit. The asset Fetchers schedule from
 
 A bean failure during startup refuses the service start (Quarkus
 default). The readiness probe stays unhealthy until every required
-startup bean is up. Exact priorities live in design notes.
+startup bean is up. **Exception: `StreamSource` connections** —
+relay reachability is not a startup gate; the supervised worker
+starts in the background and unreachable relays surface as
+per-relay degradation rather than a startup failure
+(`architecture.md` §Ingest SPIs — Asynchronous startup). Exact
+priorities live in design notes.
 
 ## Configuration surface (spec level)
 

@@ -34,8 +34,33 @@ The split exists for three reasons:
 
 Collector and Provider communicate only through the shared database:
 
-- **Push.** Postgres `LISTEN/NOTIFY` delivers ingest events (`new_post`,
-  quarantine state changes) to live Provider instances.
+- **Push.** Postgres `LISTEN/NOTIFY` delivers ingest events to live
+  Provider instances. The **closed list of v1 channels** is:
+  - `new_post` — fires on `post.status → READY`. Payload carries
+    the cursor key `(ready_at, post_id)` only. Correctness
+    mechanism: high-water mark on Provider side (see Catch-up
+    below).
+  - `new_price_snapshot` — fires on a successful Fetcher write to
+    `price_snapshot`. Payload carries `(asset, sub_verb)`.
+    Correctness mechanism: best-effort; the Provider's in-process
+    cache is **flushed entirely on every Postgres reconnect** so
+    a missed NOTIFY during a connection blip cannot serve a stale
+    row past the reconnect (`commands.md` §Asset commands —
+    Provider/Collector contract).
+  - `quarantine_review` — fires on quarantine state-machine
+    transitions reachable by Provider (`PENDING` insert,
+    `BENIGN_CLOSED`, `APPROVED`, `REJECTED`). Payload carries
+    `(quarantine_id, new_status)`. Correctness mechanism:
+    high-water mark on Provider side, same shape as `new_post`
+    but keyed on the quarantine row's monotonic cursor.
+  Adding a channel is a spec amendment.
+- **Payload-size bound.** NOTIFY payloads are bounded to the
+  cursor key for the channel; large payloads MUST NOT be
+  transmitted via NOTIFY. (Postgres NOTIFY has an 8KB hard
+  ceiling, but the spec-level rule is "cursor only" so a future
+  channel cannot grow the payload beyond what fits in a cursor
+  shape.) The receiving side reads the row from its base table
+  for the actual data — NOTIFY is purely the wake-up signal.
 - **Catch-up.** A high-water mark on the Provider side guarantees correctness
   across restarts, since `LISTEN/NOTIFY` is best-effort and does not buffer
   events for disconnected listeners. NOTIFY is the latency optimization; the
@@ -48,7 +73,10 @@ Collector and Provider communicate only through the shared database:
   making processing idempotent. The advance uses compare-and-swap
   (`schema.md` §Provider state) so a slow processor cannot roll back
   a fast one's mark; a duplicate NOTIFY or a repeated catch-up pass
-  for the same row produces no additional side effect.
+  for the same row produces no additional side effect. The
+  `quarantine_review` channel uses the same cursor mechanism on
+  its own `provider_state` row (per-channel `provider_state` keying,
+  `schema.md` §Operational).
 
 No external message broker in v1. Replacing the in-process channels with one
 later is a swap, not a rewrite (see decisions D3, D4).
@@ -89,11 +117,17 @@ outbox, no other code in the Collector can tell which SPI a post came
 from.
 
 - **`Fetcher`** — *polled, request/response*. The scheduler ticks on a
-  per-source interval; the fetcher issues an HTTP `GET`/`HEAD`, parses
-  the response, and returns a list of normalized posts. Used by RSS,
-  Bluesky, Nitter, Reddit, YouTube, Odysee. The fetcher is stateless
-  between ticks; "what's new since last time" is a query against
-  `posts`, not in-memory state. **Pagination.** When the upstream
+  **per-kind, profile-driven interval** (each `source.kind` carries
+  its own poll cadence — RSS, Bluesky, Reddit etc. each have their
+  own value in design notes); the fetcher issues an HTTP `GET`/`HEAD`,
+  parses the response, and returns a list of normalized posts. Used
+  by RSS, Bluesky, Nitter, Reddit, YouTube, Odysee. v1 has **no
+  per-source interval override** — the source row carries no
+  `refresh_interval` column; an operator who wants a faster cadence
+  for one feed adjusts the per-kind profile value, which applies to
+  every source of that kind. Per-source override is a v2 candidate.
+  The fetcher is stateless between ticks; "what's new since last
+  time" is a query against `posts`, not in-memory state. **Pagination.** When the upstream
   exposes a paginated feed (Bluesky, Reddit, Nitter, etc.), the
   Fetcher paginates **within a single tick** up to a per-source
   max-page cap (profile-driven, value in design notes). The cap
@@ -129,6 +163,21 @@ from.
   written to the outbox before the implementation considers it processed;
   duplicate deliveries (same event-id from multiple relays, or reconnect
   replays) are deduplicated by stable upstream id.
+
+  **Asynchronous startup.** StreamSource startup is asynchronous:
+  the supervised worker is registered at Collector boot and begins
+  its reconnect loop in the background. **A relay unreachable at
+  boot does not fail Collector startup or the readiness probe** —
+  it surfaces as the ordinary per-relay degradation path
+  (cooldown, throttled admin notification on the all-relays-bad
+  transition). The Collector readiness probe goes healthy when
+  the scheduler has accepted the StreamSource registration, not
+  when every relay is connected. This is the StreamSource-specific
+  exception to `deployment.md` §Bootstrap behavior's "bean failure
+  during startup refuses the service start" default — connection
+  failures are the normal failure mode for this SPI and gating
+  startup on every configured relay would mean a single dead
+  relay blocks the deployment.
 
   **Drain on shutdown.** On graceful shutdown the StreamSource
   implementation MUST aggressively flush in-flight events to the

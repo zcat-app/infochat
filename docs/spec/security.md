@@ -240,13 +240,18 @@ emits plausible-looking admin commands across any of the surfaces above.
 Every match is audit-logged (per-occurrence, not throttled).
 
 **Match-set derivation.** The sanitizer's match set is **derived
-from the permission matrix**, not hand-maintained: every command
-that appears in the bot-admin or group-admin rows of the matrix is
-in the sanitizer set. CI fails on a mismatch (a new admin command
-added without a matching sanitizer entry, or a sanitizer entry that
-no longer corresponds to a real admin command). This makes "admin
-commands never leak through LLM output" a structural property of
-the codebase rather than a discipline.
+from the closed privileged-tier list at spec level**
+(`commands.md` §Permission model — "Closed list of privileged-tier
+commands"), not from the design-tier per-actor matrix and not
+hand-maintained. Every command in the bot-admin and group-admin
+tiers of that closed list is in the sanitizer set. CI fails on a
+mismatch (a new admin command added without a matching sanitizer
+entry, or a sanitizer entry that no longer corresponds to a
+listed command). Because the closed list is spec, adding or
+removing a privileged-tier command is a spec amendment that
+forces a paired sanitizer update; this makes "admin commands
+never leak through LLM output" a structural property of the
+codebase rather than a discipline.
 
 ## Authorization model
 
@@ -309,16 +314,24 @@ Authorization evaluation order on every inbound message:
    `@mention`, auto-register (start probation per D45).
 4. **Ban check.** If `is_banned=true`: fixed reply, stop. No parser, no DB
    query past the ban check, no LLM.
-5. Parse command (or fall to chat-mode).
-6. **Permission check** against the matrix. Probation restrictions (D45)
+5. **Unicode-normalize the body** (NFKC + bidi-control strip +
+   zero-width strip outside fenced code) **before parsing**, so a
+   `/` cannot be disguised by homoglyphs or bidi overrides. This
+   mirrors the Stage 1 ingest normalization (§Ingest pipeline) and
+   is the chat-input parity step. Normalization runs after the ban
+   check (the ban check uses the cryptographic contact id, not the
+   message body, so order does not matter for ban) and before parse
+   so the slash detector sees the normalized form.
+6. Parse command (or fall to chat-mode).
+7. **Permission check** against the matrix. Probation restrictions (D45)
    are part of the permission matrix: blocked commands return a friendly
    "probation period" reply and never reach execution.
-7. Audit-log the intent.
-8. Execute.
-9. LLM only enters for chat-mode replies, summary prose, and the eval
-   pipeline.
+8. Audit-log the intent.
+9. Execute.
+10. LLM only enters for chat-mode replies, summary prose, and the eval
+    pipeline.
 
-Steps 1–8 never call the LLM. This is the determinism boundary that makes
+Steps 1–9 never call the LLM. This is the determinism boundary that makes
 privilege escalation via injection (T3) infeasible.
 
 ## Per-adapter admin threat profile
@@ -368,6 +381,14 @@ should pick admin placement deliberately:
 - Banned-user check is the first thing after identity resolution.
 - Banned user receives one fixed reply per inbound message, regardless of                                                                                                                                                                             
   input.
+- **Transport-level rate cap fires before the ban check.** The
+  per-`(adapter, contact_id)` inbound rate cap (§Rate limiting,
+  "Chat-mode message rate (transport-level)") is evaluated
+  **before** the banned-user check — a banned user hitting the
+  cap receives no reply at all (including no fixed ban reply)
+  until the cap resets. This bounds outbound cost from a hostile
+  banned user driving inbound floods that would otherwise produce
+  a fixed reply per inbound message.
 - **Banning a user who is a group admin.** Their `is_group_admin` rows
   remain but are unreachable. **On `/unban`, restored group-admin roles
   are explicitly disclosed** in the command's reply and in the
@@ -447,7 +468,7 @@ DM access, applied uniformly across all adapters:
   has a `users` row with `registration_state = 'group_only'` (see §User
   ban for the enum) and is **subject to the DM invite gate** on first
   DM interaction. The intake check is layered: step 2 fires only for
-  contacts with no `users` row, but the permission step (step 6) adds
+  contacts with no `users` row, but the permission step (step 7) adds
   a DM-only gate that rejects any DM from a `group_only` user with the
   same fixed `Access requires an invitation.` reply as step 2's
   invalid path. The user remains a registered group member; only DM
@@ -490,11 +511,17 @@ DM access, applied uniformly across all adapters:
     footgun. The global cap is set high enough that legitimate bulk
     onboarding works and low enough that an accidental loop cannot
     quietly create thousands of pending codes.
-  Codes transitioning to `USED`, `REVOKED`, or `EXPIRED` free a slot
-  immediately. The two caps prevent code-leakage attacks (a leaked
-  open code consumed by an adversary) from compounding through bulk
-  issuance and bound the operator's exposure if a single admin
-  account is compromised.
+  Codes that are `USED`, `REVOKED`, or whose `expires_at` has
+  passed do not count toward either cap. There is no stored
+  `EXPIRED` status (`schema.md` §Identity and access — Invite code):
+  the active-pending count query filters
+  `status = 'PENDING' AND (expires_at IS NULL OR expires_at > NOW())`,
+  so codes free their cap slot the instant their `expires_at`
+  elapses without a state transition ever being written. The two
+  caps prevent code-leakage attacks (a leaked open code consumed
+  by an adversary) from compounding through bulk issuance and
+  bound the operator's exposure if a single admin account is
+  compromised.
 - **`/invite list` disclosure.** The list output **must visually
   distinguish `--open` codes from `--contact` codes** (e.g., a
   prominent `OPEN` marker on open rows). Open codes are the
@@ -549,13 +576,17 @@ duration is profile-driven (value in design notes). During probation:
 
 - Every Stage 1 or Stage 2 hit creates a quarantine row holding span
   offsets, a placeholder id, the verbatim original, and a review
-  status `∈ {PENDING, APPROVED, REJECTED}`.
+  status `∈ {PENDING, BENIGN_CLOSED, APPROVED, REJECTED}`
+  (`schema.md` §Posts and derivatives).
 - Posts with PENDING quarantine entries can still be visible to users
   (with Stage 1 redactions in place). A Stage 2 `BENIGN` verdict keeps
   the post visible with **Stage 1 redactions retained** — the verdict
-  closes the quarantine row's PENDING state but does **not** lift
-  redactions. A Stage 2 `INJECTION`, `MALWARE`, or `UNKNOWN` verdict
-  hides the entire post (`QUARANTINED` status).
+  transitions the quarantine row from `PENDING` to `BENIGN_CLOSED` but
+  does **not** lift redactions. `BENIGN_CLOSED` is the durable signal
+  for "Stage 2 cleared this; redactions remain until admin chooses to
+  approve." A Stage 2 `INJECTION`, `MALWARE`, or `UNKNOWN` verdict
+  hides the entire post (`QUARANTINED` status); the quarantine row
+  stays `PENDING` (subject to admin review and the admin-review TTL).
 - **Redactions are lifted only by `/quarantine approve`.** This rule
   applies uniformly to first-pass and re-evaluation BENIGN verdicts:
   a re-eval BENIGN does not auto-lift first-pass redactions either.
@@ -564,8 +595,13 @@ duration is profile-driven (value in design notes). During probation:
   verdict-vs-redaction interpretations and avoids the "first pass
   keeps redactions, re-eval lifts them" inconsistency.
 - Admins review via `/quarantine list` and `/quarantine approve|reject`.
-  Approve restores the original span and re-NOTIFY's the post; reject
-  leaves the placeholder permanently. The Provider DB role
+  `/quarantine list` defaults to `PENDING` rows only — the active
+  review queue; `BENIGN_CLOSED` rows are not surfaced unless an admin
+  passes `--all` (forensic / audit view). Approve transitions
+  `PENDING → APPROVED` (or `BENIGN_CLOSED → APPROVED`), restores the
+  original span, and re-NOTIFY's the post; reject transitions
+  `PENDING → REJECTED` (and on `BENIGN_CLOSED` rows the same forensic
+  rejection is reachable, leaving the placeholder permanent). The Provider DB role
   (`security.md` §DB roles) does not have `SELECT` on the raw
   original column; approve and reject run as **stored procedures**
   (`approve_quarantine(quarantine_id, actor_id)` and
@@ -594,11 +630,11 @@ every stage: retry once, then apply the stage-specific failure path below.
 
 - **Stage 2 verdict** of `BENIGN` → post released to the tagger and
   embedding stage; Stage 1 redactions remain in the body (quarantine
-  spans are closed, not deleted — the original text is restorable
-  only via admin `/quarantine approve`). **Re-evaluation BENIGN follows
-  the same rule:** redactions are not auto-lifted on re-eval, only on
-  `/quarantine approve`. See §Quarantine workflow and §Re-evaluation
-  job.
+  rows transition `PENDING → BENIGN_CLOSED`, not deleted — the
+  original text is restorable only via admin `/quarantine approve`).
+  **Re-evaluation BENIGN follows the same rule:** redactions are not
+  auto-lifted on re-eval, only on `/quarantine approve`. See
+  §Quarantine workflow and §Re-evaluation job.
 - **Stage 2 verdict** of `INJECTION`, `MALWARE`, or `UNKNOWN` → post
   stays `QUARANTINED` until admin review. The judge model treating
   `UNKNOWN` as a soft injection signal is intentional: a degraded judge
@@ -645,6 +681,35 @@ every stage: retry once, then apply the stage-specific failure path below.
   short window so an outage produces one summary message, not 200 individual
   alerts.
 
+**Provider-side (user-facing) LLM failures.** The Provider's
+LLM-invoking surfaces — chat-mode replies, on-demand `/summary`
+prose generation, `/retry` re-rolls — degrade with the following
+rules:
+
+- **`/summary` (and `/retry --digest`) summarizer unreachable** →
+  fall back to the headlines + URLs + post UIDs degraded form (the
+  same fallback as a saturated periodic digest per decision D17).
+  No prose, deterministic post selection unchanged. The friendly
+  notice is a localization-bundle string (D43); the user is not
+  shown a hung response. `/retry` after recovery re-rolls the
+  prose with the original frozen post selection. See
+  `commands.md` §Content (`/summary`).
+- **Chat-mode replies** with the chat-agent LLM unreachable →
+  return a localized "chat assistant is unavailable, try again
+  later" friendly error from the bundle (D43); the message never
+  reaches the chat agent loop, no `chat_session` advance, no
+  `chat_memory` write, no tool invocation.
+- **No router-side fallback in v1.** When an operator configures
+  per-task providers (e.g. Anthropic for SUMMARIZER, Ollama for
+  SECURITY_JUDGE), a per-task provider that is unreachable
+  degrades **only that task** to its task-specific failure path
+  above; the router does NOT silently switch to a different
+  configured provider. Operators who require high availability
+  for a per-task LLM must over-provision that provider; v1's
+  per-task routing is a single resolution per call, not a
+  fallback chain. Adding a fallback chain is a v2 candidate
+  (`llm.md` §Per-task routing rules).
+
 A complete LLM outage degrades quality, not safety.
 
 ### Re-evaluation job
@@ -673,18 +738,19 @@ fires.
 
 Re-eval verdict handling:
 
-- `BENIGN` on a Stage-2-infra-failure post → quarantine row stays
-  closed, **Stage 1 redactions are not lifted** (only
-  `/quarantine approve` lifts them — this matches the §Quarantine
-  workflow rule above), the post continues through tagger and
-  embedding if those stages had not already run. The
+- `BENIGN` on a Stage-2-infra-failure post → quarantine row
+  transitions `PENDING → BENIGN_CLOSED`, **Stage 1 redactions are
+  not lifted** (only `/quarantine approve` lifts them — this matches
+  the §Quarantine workflow rule above), the post continues through
+  tagger and embedding if those stages had not already run. The
   `stage2_failed` cursor flag is **cleared** on this transition:
   the post now has a clean Stage 2 verdict and the cursor returns
   to its non-failed state. (Schema invariant 5: per-stage flags
   are the durable cursor for in-flight evaluation.)
 - `BENIGN` on an UNKNOWN post → post transitions
-  `QUARANTINED → READY` with Stage 1 redactions retained; same
-  rule as above for lifting (admin only). **The transition is
+  `QUARANTINED → READY` with Stage 1 redactions retained and the
+  quarantine row transitions `PENDING → BENIGN_CLOSED`; same rule
+  as above for lifting (admin only). **The transition is
   audit-logged** as `RE_EVAL_RELEASED` with `actor='re_eval_job'`,
   `target_kind='post'`, `target_id=<post_uid>`, and
   `details_json={ prior_verdict, new_verdict='BENIGN', attempt }`,
@@ -788,7 +854,8 @@ Three Postgres roles, least-privilege (decision D34):
   `approve_quarantine` and `reject_quarantine` stored procedures
   (no `SELECT` on the raw-original quarantine column);
   `LISTEN/NOTIFY` (consumes `new_post`, `new_price_snapshot`, and
-  quarantine state-change channels).
+  `quarantine_review` channels per `architecture.md`
+  §Inter-service communication).
 - **Admin role** — operator psql sessions only. Used for migrations,
   raw quarantine inspection, occasional bulk fixes.
 

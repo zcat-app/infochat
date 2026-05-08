@@ -131,6 +131,15 @@ property is set. Switching the embedding provider to a remote service
 emits an explicit confirmation log line on startup so operators see when                                                                                                                                                                              
 post bodies start leaving the host.
 
+**No fallback chain in v1.** The router resolves `(ModelTask,
+scope_language)` to **exactly one** `LlmProvider`; an unreachable
+provider degrades that task to its task-specific failure path
+(`security.md` §Failure handling — Provider-side LLM failures and
+ingest-side per-stage rules) and does NOT silently switch to a
+different configured provider. Operators who require HA on a
+per-task provider must over-provision that provider directly.
+Adding a fallback chain is a v2 candidate.
+
 ## Embedding pipeline
 
 - One embedding per post (title + summary, by convention).

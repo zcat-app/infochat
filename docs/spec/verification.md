@@ -50,7 +50,7 @@ or `deployment.md`. Each one corresponds to at least one named test.
   not surface a row whose scope key is `S' ≠ S`; DM memory never
   surfaces in any group; one group's memory never surfaces in
   another. Saves are excluded from the per-scope isolation assertion
-  because saves are per-user-globally (D13 / A10) — the `saved_post`
+  because saves are per-user-globally (D13) — the `saved_post`
   fuzz instead asserts that saves made in scope `S` are visible in
   every scope of the same user, and never to a different user in
   any scope.
@@ -83,7 +83,31 @@ or `deployment.md`. Each one corresponds to at least one named test.
   the configured horizon is removed by the scheduled pruner;
   `/save`d posts in the same `(user, scope)` are untouched; rows newer
   than the horizon are not pruned. Pruner is idempotent (a second run
-  on the same state is a no-op).
+  on the same state is a no-op). **The same pruner applies to
+  `chat_session` and `summary_anchor` rows** (schema.md Invariant 9
+  and §Per-scope state — Summary anchor): assert each is removed
+  past the horizon, untouched within. **Stale `chat_session` =
+  `/clear`-equivalent**: write one past-horizon `chat_session`
+  row, send a chat-mode message, assert the agent sees a fresh
+  window (no leakage of pre-horizon context). The chat-memory and
+  saved-post invariants from above still hold for `chat_session` /
+  `summary_anchor` (other users untouched, scope isolation
+  preserved).
+- **Admin-review TTL auto-reject** (schema.md Invariant 6): a
+  `PENDING` quarantine row whose age exceeds the admin-review TTL
+  transitions to `REJECTED`; the attached post (if `NEEDS_REVIEW`)
+  transitions to `QUARANTINED`; no admin notification fires (the
+  throttled notifier already paged when the post entered
+  `NEEDS_REVIEW`); the placeholder is permanent.
+  `BENIGN_CLOSED` rows are NOT subject to the TTL auto-reject —
+  assert a `BENIGN_CLOSED` row aged past the admin-review TTL
+  stays `BENIGN_CLOSED`, no transition fires.
+- **Bootstrap vocabulary persistence** (schema.md §Sources and
+  tags — Vocabulary lifecycle): load JSON A (tags = `{a, b, c}`),
+  assert vocabulary = `{a, b, c}`; load JSON B
+  (tags = `{a, b}`), assert vocabulary unchanged at
+  `{a, b, c}` (append-only — removing an entry from the JSON
+  must not remove its tag from the vocabulary).
 - Audit-before-effect: a privileged command interrupted between audit
   and side effect leaves an audit row but no state change.
 
@@ -116,7 +140,7 @@ or `deployment.md`. Each one corresponds to at least one named test.
   USED transition and one new user row; pre-banned contact + invite
   path is rejected at intake; brute-force rate limit triggers after
   the configured threshold and audit-logs the breach.
-- **Slow-start tier** (decision D45 + B8 + B35): every write command
+- **Slow-start tier** (decision D45): every write command
   and chat-mode rejected during probation with the localized
   probation reply; allowed list (read-only commands plus `/forget`
   and `/lang`) is fully unblocked; `/vouch` immediately graduates;
@@ -140,7 +164,7 @@ or `deployment.md`. Each one corresponds to at least one named test.
   retrieves missed events from a replay-supporting fake relay; a
   non-replay-supporting fake relay produces a measurable gap that
   is exposed via the per-relay loss counter.
-- **Sanitizer match-set derivation** (B41/C41): every command in the
+- **Sanitizer match-set derivation**: every command in the
   bot-admin and group-admin permission rows appears in the LLM
   output sanitizer match set; CI fails on a mismatch (test fixture
   adds an admin command without a sanitizer entry → CI red).
@@ -150,20 +174,24 @@ or `deployment.md`. Each one corresponds to at least one named test.
   pruner has fired at least once during a deployment-N controlled
   run; rows newer than the horizon and `/save`d posts are
   untouched.
-- **Single-instance lock** (B21): a second Collector or Provider
+- **Single-instance lock** (architecture.md §Deployment topology):
+  a second Collector or Provider
   startup against the same DB fails to acquire the named
   `pg_advisory_lock` and exits non-zero with a fatal log line that
   references the running instance's heartbeat host id.
-- **Stage 2 re-eval BENIGN parity** (B4): a re-eval BENIGN keeps
+- **Stage 2 re-eval BENIGN parity** (security.md §Quarantine
+  workflow): a re-eval BENIGN keeps
   Stage 1 redactions in place, matching first-pass behavior; only
   `/quarantine approve` lifts redactions.
-- **UNKNOWN re-eval** (B14): an UNKNOWN-verdict post is picked up by
-  the re-eval queue with the lower attempt cap; cap exhaustion
-  transitions to `NEEDS_REVIEW` and produces a coalesced admin
-  notification (B38).
-- **Stage-2 infra-failure → NEEDS_REVIEW exhaustion** (mirrors B14
-  for the parallel infra-failure path, security.md §Failure
-  handling): a post released as `READY` with `stage2_failed=true`
+- **UNKNOWN re-eval** (security.md §Re-evaluation job): an
+  UNKNOWN-verdict post is picked up by the re-eval queue with the
+  lower attempt cap; cap exhaustion transitions to `NEEDS_REVIEW`
+  and produces a coalesced admin notification (per the throttled
+  notifier in security.md §Failure handling).
+- **Stage-2 infra-failure → NEEDS_REVIEW exhaustion** (parallel
+  infra-failure path, security.md §Failure handling and
+  §Re-evaluation job): a post released as `READY` with
+  `stage2_failed=true`
   is picked up by the re-eval queue; repeated infrastructure
   failures or non-`BENIGN` verdicts up to the per-post attempt cap
   transition the post to `NEEDS_REVIEW` with a coalesced admin
@@ -187,17 +215,18 @@ or `deployment.md`. Each one corresponds to at least one named test.
   per channel is produced and exactly one instance owns the
   cursor. The losing instance proceeds without error and reads
   the winning instance's row on its next CAS update.
-- **Stage 1 / kind-filter ordering** (B3): a Nostr fixture event of
+- **Stage 1 / kind-filter ordering** (security.md §Per-source trust
+  boundaries — Nostr): a Nostr fixture event of
   a disallowed kind is dropped at the kind-filter step before
   Stage 1 runs (Stage 1 sanitizer counter does not increment); a
   signature-failed event is dropped before the kind filter
   (kind-filter counter does not increment).
 - Pagination: page size honored, footer-suggested next page actually                                                                                                                                                                                  
   works.
-- `/forget` purge (decision D37 + B7): after confirm, the calling
+- `/forget` purge (decision D37): after confirm, the calling
   `(user, scope)`'s `chat_memory`, `chat_session`, and
   `summary_anchor` rows are gone; the **caller's full `saved_post`
-  library** is gone (per A10/D13: saves are per-user-globally, so
+  library** is gone (per D13: saves are per-user-globally, so
   `/forget` from any scope wipes them all — verified by saving in
   DM, calling `/forget` from a group, and asserting the DM saves
   are gone too); another user's data in the same scope is
@@ -272,13 +301,15 @@ or `deployment.md`. Each one corresponds to at least one named test.
   the worker pool is free.
 - Re-evaluation job (security.md §Failure handling): a post with
   `stage2_failed=true` is picked up on the next re-eval tick once the
-  fake LLM is restored to a healthy verdict; verdict `BENIGN` lifts
-  Stage-1 redactions per the verdict-taxonomy commitment; verdict
-  `INJECTION`/`MALWARE`/`UNKNOWN` flips status to `QUARANTINED`; the
-  per-post attempt counter is bounded and a post that exhausts
-  attempts stays as-is with an admin-notification entry. Re-eval
-  cadence and max attempts are profile-driven; the test asserts the
-  cadence semantics, not the exact value.
+  fake LLM is restored to a healthy verdict; verdict `BENIGN` keeps
+  Stage-1 redactions in place (only `/quarantine approve` lifts them,
+  parity with first-pass behavior — security.md §Quarantine workflow)
+  and clears the `stage2_failed` flag with the post staying `READY`;
+  verdict `INJECTION`/`MALWARE`/`UNKNOWN` flips status to
+  `QUARANTINED`; the per-post attempt counter is bounded and a post
+  that exhausts attempts stays as-is with an admin-notification
+  entry. Re-eval cadence and max attempts are profile-driven; the
+  test asserts the cadence semantics, not the exact value.
 - End-to-end happy path (v1 integration): a single test drives the
   full first-time-user flow against the in-memory adapter and fake
   LLM — auto-registration on first DM, `/help` reply, `/add-source`

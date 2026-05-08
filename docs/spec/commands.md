@@ -94,6 +94,20 @@ text, and output structure are in `docs/design/03-commands.md`.
   one of the blocked commands; filtering keeps the welcome
   message, the `/help` listing, and the probation reply mutually
   consistent.
+
+  **Bundle composition.** `/help` output is **composed from
+  per-command bundle entries** (one localization-bundle key per
+  command, holding that command's short-help line), not a single
+  monolithic bundle string per actor tier. The header, the
+  probation-tier footer, and any inter-section dividers are
+  **separate bundle keys**; `/help` concatenates the header, then
+  the per-command lines for the caller's permitted set in a
+  fixed order, then the footer. CI's bundle-completeness check
+  asserts that every command in the catalogue has a help-line key
+  in every shipped language bundle (`en` and `cs` in v1 per
+  `llm.md` §Translation flow), and that the header / footer keys
+  exist. This commitment fixes the bundle structure so adding a
+  third language is a deterministic drop-in.
 - `/status` — runtime status (active profile, uptime, scope-specific
   counts; admin sees more). DM and group; any non-banned user.
 - `/get-tags` — controlled vocabulary, marking the scope's followed
@@ -108,7 +122,16 @@ text, and output structure are in `docs/design/03-commands.md`.
 - `/summary [tag] [-w …]` — on-the-fly summary of READY posts in the
   window (decision D18: on-the-fly for user `/summary`, distinct
   from the pre-generated cached path used for periodic group
-  digests). Clusters (connected components of the `post_reference`
+  digests). **Summarizer LLM unreachable** (provider down,
+  timeout, or schema-violating reply after retry per `llm.md`
+  §Failure handling) → `/summary` falls back to the same degraded
+  form as a saturated periodic digest (decision D17): headlines +
+  source URLs + post UIDs, no prose. The friendly degraded notice
+  (localization-bundle string per D43) replaces the prose block;
+  the deterministic post selection is unaffected. `/retry` against
+  this degraded run regenerates the prose if the LLM has recovered
+  (the deterministic post selection is reused per D19 / D36).
+  Clusters (connected components of the `post_reference`
   graph) are **computed by deterministic SQL traversal before any
   LLM call** — the LLM only writes prose per pre-computed cluster.
   This keeps `/summary` inside the determinism boundary (decision
@@ -296,15 +319,26 @@ shared across the group and writable only by group admins.
      - Host is `youtube.com`, `youtu.be`, or any subdomain
        thereof → `youtube`.
      - Host is `odysee.com` or any subdomain thereof → `odysee`.
-  3. URLs that match none of the rows above are **ambiguous**: the
+  3. **RSS auto-detection.** A URL whose path ends in `.xml`,
+     `.rss`, or contains `/feed` (or `/feed/`, `/feed.xml`, etc.)
+     resolves to `rss` without `--type`. The URL-validation probe
+     (below) inspects the response `Content-Type`; a probe that
+     returns `application/rss+xml`, `application/atom+xml`, or
+     `application/xml` confirms the inferred kind. A probe that
+     contradicts the URL-pattern hint (returns `text/html`) falls
+     through to the ambiguous-URL path below. This covers the
+     common case (a plain RSS URL with `--tags`) without forcing
+     `--type rss` in 95% of `/add-source` invocations.
+  4. URLs that match none of the rows above are **ambiguous**: the
      call is rejected with a friendly error that lists the supported
      kinds and instructs the caller to supply `--type`. There is
-     **no silent fallback to `rss`** — self-hosted Nitter instances
-     (no canonical host), non-canonical mirrors, and plain RSS feeds
-     therefore require an explicit `--type`. A URL silently routed
-     to the wrong SPI (Fetcher vs. StreamSource) and clashing with
-     an existing row on the `(kind, identifier)` unique key is a
-     worse failure mode than asking the caller for `--type`.
+     no silent fallback for self-hosted Nitter instances (no
+     canonical host), non-canonical mirrors, or other RSS-shaped
+     feeds without the path/Content-Type signal — those require an
+     explicit `--type`. A URL silently routed to the wrong SPI
+     (Fetcher vs. StreamSource) and clashing with an existing row
+     on the `(kind, identifier)` unique key is a worse failure
+     mode than asking the caller for `--type`.
 
   The host-pattern table above is **closed at spec level** —
   additions are spec amendments, not design tweaks — so two
@@ -473,7 +507,7 @@ and makes the digest query depend on row presence.
   - `summary_anchor` rows for `(caller, calling_scope)` (defensive
     — no leftover anchor pointing at posts from the prior session);
   - `saved_post` rows for the caller — **globally, regardless of
-    calling scope** (saves are per-user-globally per A10/D13;
+    calling scope** (saves are per-user-globally per D13;
     `/forget` from any scope wipes the whole library).
 
   Does **not** touch `users.is_admin`, `users.is_banned`,
@@ -481,7 +515,13 @@ and makes the digest query depend on row presence.
   append-only by invariant). Hard purge is the v1 contract; soft-
   delete tombstones would silently violate D37's privacy
   commitment. Audit-logged before effect like every privileged
-  action against user state. Requires confirm. Idempotent: a
+  action against user state. **The audit row records counts only**
+  — `chat_memory_count`, `chat_session_count`,
+  `summary_anchor_count`, `saved_post_count` — never UID lists,
+  personal tags, or any user-authored content. This satisfies the
+  append-only audit invariant without leaking user-content into
+  the audit surface (per `security.md` §Secrets handling
+  user-content rule). Requires confirm. Idempotent: a
   second `/forget` with nothing to remove returns a friendly
   no-op reply (no audit row written for the no-op).
 
@@ -511,7 +551,7 @@ and makes the digest query depend on row presence.
     scope key matches the calling scope;
   - `saved_post` rows for the caller — **the full library
     regardless of calling scope** (saves are per-user-globally per
-    A10/D13);
+    D13);
   - the caller's own `users` row in full **except** `is_admin`,
     `banned_by`, `ban_reason`, `banned_at`, `probation_until`
     (these are authorization-state fields about the user, not data
@@ -535,20 +575,26 @@ and makes the digest query depend on row presence.
   ingest pipeline, or already-completed work. The in-flight LLM
   stream is closed and any in-flight read-only tool call is
   abandoned: the worker discards the in-flight result, releases the
-  DB connection, and moves on. The released DB query is
-  **best-effort cancelled via `pg_cancel_backend(pid)`** at the
-  released connection so the connection pool is not drained by
-  long-running orphans; the cancellation is best-effort because
-  Postgres may complete the query before the cancel takes effect.
-  As an additional safety net, every interruptible read-only query
-  (chat-mode tool calls, on-demand `/summary`) runs under a
-  profile-driven `statement_timeout` that bounds the worst case
-  even when `pg_cancel_backend` fails. Once outbound delivery has
-  begun the message is not unsent. Idempotent (no-op with a
-  friendly reply when nothing is in flight). Audit-before-effect
-  still holds — any audit row written before cancellation stays.
-  The progress notifier (decision D31) renders a final "stopped"
-  state on the in-place message. See decision D35.
+  DB connection, and moves on. **In v1 every tool in the closed
+  allowlist (`security.md` §Prompt-injection defenses —
+  `searchPosts`, `getPost`, `getReferences`, `recallMemory`,
+  `listSaves`) is a read-only DB query**, so the cancellation
+  primitive is `pg_cancel_backend(pid)` at the released connection,
+  best-effort because Postgres may complete the query before the
+  cancel takes effect. Tools added in future spec amendments MUST
+  define their own cancellation primitive before being added to
+  the registry; `/stop` semantics are spec-load-bearing and a new
+  tool with no cancellation story would silently weaken the
+  guarantee. As an additional safety net, every interruptible
+  read-only query (chat-mode tool calls, on-demand `/summary`)
+  runs under a profile-driven `statement_timeout` that bounds the
+  worst case even when `pg_cancel_backend` fails. Once outbound
+  delivery has begun the message is not unsent. Idempotent (no-op
+  with a friendly reply when nothing is in flight).
+  Audit-before-effect still holds — any audit row written before
+  cancellation stays. The progress notifier (decision D31) renders
+  a final "stopped" state on the in-place message. See decision
+  D35.
 - `/retry` [`--digest`] — regenerates the prose for the last
   summary-producing command. Re-runs the LLM stage only;
   deterministic post selection and clustering are reused unchanged
@@ -594,6 +640,10 @@ and makes the digest query depend on row presence.
     explicitly when the admin wants the cached digest specifically.
   - Non-admin's `/retry --digest` → friendly error
     (group-admin or bot-admin only for digest replacement).
+  - **DM `/retry --digest`** → friendly error: digest replacement
+    applies in groups only (no group-wide cached digest exists in
+    DM). `/retry` without the flag operates against the user's
+    personal `/summary` anchor as usual.
 
   For periodic group digests, the retry replaces the cached digest
   (decision D17); the post selection is the **frozen** selection
@@ -607,13 +657,27 @@ and makes the digest query depend on row presence.
   persistence). After a Provider restart, a `/retry --digest`
   posts a *new* message (with prose noting it replaces the prior
   cached digest for subsequent reads); the original message is
-  not edited because the handle is gone. See decision D36 and B25
-  (delivery failure) for adjacent rules.
+  not edited because the handle is gone. See decision D36 and
+  `messaging.md` §Failure handling for adjacent delivery rules.
 
 ### Admin (bot admin)
 
 - `/promote <contact>` / `/demote <contact>` — group admin
-  promote/demote, used inside a group.
+  promote/demote, used inside a group. **Scoped to the inbound
+  adapter** — both the targeted user and the targeted group must be
+  on the inbound adapter; the `<contact>` argument resolves to a
+  `(adapter, contact_id)` row on the same adapter the command came
+  from. Cross-adapter group-admin operations are not exposed in v1
+  (same convention as `/grant-admin`, for the same blast-radius
+  reason). **Banned target rejection.** `/promote <X>` against a
+  `users.is_banned = true` target is rejected with a friendly error
+  directing the admin at `/unban` first; promoting a banned user
+  to group admin would be incoherent (the banned-user check
+  short-circuits every inbound message before any group-admin
+  permission would matter). The banned-admin lockout escape hatch
+  in `security.md` §Authorization model handles the orthogonal
+  case where the *current* group admin is banned and a *different*
+  member is being promoted to take the slot.
 - `/grant-admin <contact>` / `/revoke-admin <contact>` — **scoped to
   the inbound adapter** (one Provider may run multiple adapters per
   `deployment.md` §Topology, and admin grants do not cross adapters
@@ -625,7 +689,15 @@ and makes the digest query depend on row presence.
   contact on another. Last-admin protection applies **globally
   across adapters** — at least one `is_admin = true` row must
   exist anywhere on the deployment after any revoke.
-- `/ban <contact> [--reason …]` / `/unban <contact>` — bot-wide ban. Cannot
+- `/ban <contact> [--reason …]` / `/unban <contact>` — bot-wide ban
+  flag, but the `<contact>` argument is **scoped to the inbound
+  adapter** (same convention as `/grant-admin`): the targeted row is
+  the `(inbound_adapter, contact_id)` users row, and a contact with
+  the same byte value on a different adapter is a different `users`
+  row that this command does not touch. The ban itself is bot-wide
+  in the sense that the targeted row is blocked across every scope
+  (DM and groups) on its adapter; banning the same human on a
+  second adapter requires running `/ban` from that adapter. Cannot
   ban self or last admin. The `/unban` reply **must enumerate the
   side-effects** so the executing admin understands the post-condition:
   - if the row's `registration_state = 'preban'`, the reply states the
@@ -652,18 +724,27 @@ and makes the digest query depend on row presence.
 - `/invite revoke <code>` — immediately transition a PENDING code to REVOKED.
   Requires confirm.
 - `/vouch <contact>` — immediately graduate a user from the slow-start
-  probation tier to full access (decision D45). Audit-logged. No-op with a
-  friendly reply if the user is already past probation.
+  probation tier to full access (decision D45). **Scoped to the
+  inbound adapter** (same convention as `/grant-admin`): the
+  targeted row is `(inbound_adapter, contact_id)`. Vouching the
+  same human on a second adapter requires running `/vouch` from
+  that adapter. Audit-logged. No-op with a friendly reply if the
+  user is already past probation.
 - `/quarantine list [-w …] [--all] [--page N]` — review queue. The
-  review-status enum is `{PENDING, APPROVED, REJECTED}` (`schema.md`
-  §Posts and derivatives, Quarantine entry). Default lists `PENDING`
-  rows only; `--all` (bot-admin) lists every status for forensic /
+  review-status enum is `{PENDING, BENIGN_CLOSED, APPROVED, REJECTED}`
+  (`schema.md` §Posts and derivatives, Quarantine entry). Default
+  lists `PENDING` rows only — the active admin queue. `BENIGN_CLOSED`
+  rows (Stage 2 cleared, redactions retained) are not surfaced by
+  default; `--all` (bot-admin) lists every status for forensic /
   audit workflows.
 - `/quarantine approve <id>` / `/quarantine reject <id>` — review
   action. Both run as stored procedures (`security.md` §DB roles)
   so the Provider role does not need `SELECT` on the raw-original
-  column. Approve restores the redacted span and re-NOTIFY's the
-  post; reject leaves the placeholder permanently.
+  column. Approve transitions `PENDING → APPROVED` (or
+  `BENIGN_CLOSED → APPROVED`), restores the redacted span, and
+  re-NOTIFY's the post; reject transitions to `REJECTED` (from
+  `PENDING` for the routine path, from `BENIGN_CLOSED` for the
+  forensic path) and leaves the placeholder permanently.
 - `/audit [-w …] [--actor …] [--action …] [--page N]` — read
   `audit_log_view` (the redacted view; `security.md` §DB roles)
   with filters. **Unknown actor id** (`--actor <id>` against an id
@@ -685,6 +766,32 @@ lives in `docs/design/03-commands.md`. The spec-level commitment:
   inside the group). Bot-wide destructive operations require bot admin.
 - Any new command added to the system goes through the same permission
   matrix and the same audit-before-effect rule.
+
+**Closed list of privileged-tier commands (spec level).** The
+following enumeration is the load-bearing closed set used by the
+LLM output sanitizer (`security.md` §LLM output sanitizer
+"Match-set derivation") and the slow-start probation classifier
+(`security.md` §Slow-start tier). Adding a command to or removing
+one from these tiers is a **spec amendment**, not a design-tier
+edit, so the sanitizer match set and the probation deny set
+cannot silently shrink across versions.
+
+- **Bot-admin only:** `/grant-admin`, `/revoke-admin`, `/ban`,
+  `/unban`, `/promote`, `/demote`, `/vouch`, `/invite create`,
+  `/invite list`, `/invite revoke`, `/quarantine list`,
+  `/quarantine approve`, `/quarantine reject`, `/audit`,
+  `/remove-source`, `/source-enable`, `/list-sources --all`,
+  `/list-sources --include-deleted`.
+- **Group-admin (or bot admin acting in the group):**
+  `/add-source` in groups, `/unfollow-source` in groups,
+  `/lang` in groups, `/group-timezone`, `/follow-tag` in groups,
+  `/unfollow-tag` in groups.
+
+The full per-actor-tier matrix (which DM / group-member commands
+are allowed to non-privileged users, plus the per-flag splits like
+`/list-sources --all`) lives in `docs/design/03-commands.md`; the
+**closed set above** is the spec-level commitment that the
+sanitizer and probation classifier read from.
 
 ## Chat mode
 
@@ -735,6 +842,17 @@ race winner who is not the intended owner. The "first non-banned,
 non-probation `@mention` wins" rule (`security.md` §Authorization
 model) is correct for the common case but an attentive operator
 gives the rule no chance to fire on the wrong user.
+
+**Fresh group of unregistered users.** In a freshly-added group
+where every member is unregistered with the bot, **no
+first-mention auto-promote will fire** — every first-mention
+triggers a registration into the slow-start probation tier (D45),
+and probation users are ineligible for the auto-promote
+(`security.md` §Authorization model). The bot admin must
+`/promote` an intended group admin in this case. The
+auto-promote path is reserved for groups that already contain at
+least one registered, non-probation user who can win the
+first-mention race.
 
 ## Periodic group digests
 
