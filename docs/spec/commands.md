@@ -347,6 +347,18 @@ shared across the group and writable only by group admins.
   "subscribed; tags unchanged on existing source" (non-admin against
   existing row). The caller's `source_subscription` is upserted in
   the same transaction in all three cases.
+
+  **URL visibility disclosure.** On a fresh insert (the only outcome
+  that adds a URL the bot did not previously hold), the reply **must
+  surface that source URLs are visible to bot admins** — e.g.,
+  `"Note: source URLs are global state and are visible to bot admins
+  via /list-sources --all."` Without this, a user adding a private
+  feed for personal tracking has no signal that the URL is
+  operator-visible; the trust-boundary disclosure
+  (`security.md` §Source URL visibility) is too easy to miss in
+  documentation alone. The disclosure is omitted on the
+  already-existed paths because the URL was already in the global
+  set; subscribing to a known URL exposes nothing new.
 - `/list-sources [--all] [--include-deleted] [--page N]` — sources
   subscribed by the calling scope; `--all` is bot-admin only and
   lists **every source row globally where `deleted_at IS NULL`**
@@ -472,6 +484,23 @@ and makes the digest query depend on row presence.
   action against user state. Requires confirm. Idempotent: a
   second `/forget` with nothing to remove returns a friendly
   no-op reply (no audit row written for the no-op).
+
+  **Remaining-scopes disclosure.** Because `/forget` is per-scope
+  for `chat_memory` / `chat_session` / `summary_anchor` (and
+  global only for `saved_post`), a user in multiple scopes will
+  retain data outside the calling scope after the command runs.
+  The `/forget` reply **must explicitly disclose** the count of
+  other scopes (DM + groups) where chat-tier rows still exist for
+  the calling user, and instruct them to issue `/forget` from each
+  of those scopes to clear them — e.g., `"Cleared this conversation.
+  You still have data in N other conversations; run /forget from
+  each to clear them."` A user who treats `/forget` as a complete
+  privacy purge without this disclosure would otherwise believe
+  their data was fully removed when only the calling-scope slice
+  was. The reply does **not** name the other scopes (naming a DM
+  would leak existence to a co-admin running the command;
+  enumerating groups is unnecessary for the user's privacy
+  decision) — the count is sufficient.
 - `/export` — returns the calling user's own data. Group output is
   defined by an **explicit table list and a field-level positive
   list**, not by a vague "the user's contributions" rule, so the
@@ -532,6 +561,20 @@ and makes the digest query depend on row presence.
   the prior command was cancelled by `/stop`, or when the prior
   command was not summary-producing.
 
+  **Status filter on the frozen UID set.** The frozen UID set
+  recorded in `summary_anchor` is **filtered against current post
+  status** at retry time: any UID whose `post.status` is no longer
+  `READY` (e.g., the post has since been quarantined by an admin)
+  is excluded from the retry's prose input. This avoids two
+  failure modes — (a) regenerating prose that mentions content the
+  user can no longer see, and (b) leaving silent gaps with no
+  user-visible explanation. If the filtered set differs from the
+  original by more than a profile-driven threshold (or drops to
+  empty), the user is told that the retry result differs from the
+  original because content status changed since the prior run; the
+  threshold and exact reply text live in design notes. An empty
+  filtered set produces a friendly error and no LLM call.
+
   **Routing rules in groups.** A group has both per-member personal
   anchors (one per `(user, group)` from the user's last `/summary`)
   and a group-wide cached digest (per decision D17). The
@@ -583,7 +626,17 @@ and makes the digest query depend on row presence.
   across adapters** — at least one `is_admin = true` row must
   exist anywhere on the deployment after any revoke.
 - `/ban <contact> [--reason …]` / `/unban <contact>` — bot-wide ban. Cannot
-  ban self or last admin.
+  ban self or last admin. The `/unban` reply **must enumerate the
+  side-effects** so the executing admin understands the post-condition:
+  - if the row's `registration_state = 'preban'`, the reply states the
+    pre-ban-only row was deleted and a fresh invite is required for DM;
+  - otherwise, the reply lists every group whose `is_group_admin = true`
+    is being reinstated for this user, with a `/demote <contact>` hint
+    for cases where group-admin restoration was unintended (see
+    `security.md` §User ban). An `/unban` of a row with neither
+    pre-ban status nor restored group-admin rows produces the plain
+    "user unbanned" reply. The audit row carries the same details
+    under `details_json`.
 - `/invite create --adapter <name> --contact <id>` — generate a single-use
   UUID invite code bound to the given (contact\_id, adapter) pair (decision
   D44). The code is displayed once in the reply and stored as PENDING. No

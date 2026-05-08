@@ -368,12 +368,44 @@ should pick admin placement deliberately:
 - Banned-user check is the first thing after identity resolution.
 - Banned user receives one fixed reply per inbound message, regardless of                                                                                                                                                                             
   input.
-- Banning a user who is a group admin: their `is_group_admin` rows remain                                                                                                                                                                             
-  but are unreachable; `/unban` restores the role.
+- **Banning a user who is a group admin.** Their `is_group_admin` rows
+  remain but are unreachable. **On `/unban`, restored group-admin roles
+  are explicitly disclosed** in the command's reply and in the
+  audit-log entry: the reply lists every `(group_id, group_label)` for
+  which `is_group_admin = true` is being reinstated, with a hint
+  pointing at `/demote <contact>` for cases where the executing admin
+  did not intend to restore elevated privileges. The audit row
+  carries the same list under `details_json.restored_group_admin`.
+  Without this disclosure, an admin who issues `/unban` for a routine
+  reason can silently re-grant group-admin powers across every group
+  the unbanned user previously administered, with no signal in the
+  command output that this happened.
 - Banning a bot admin requires `/revoke-admin` first (last-admin protection                                                                                                                                                                           
   applies).
-- `/ban` against an unknown contact id creates the user row with
-  `is_banned=true` so the user is banned even on first attempt.
+- **Pre-ban against unknown contact.** `/ban <contact>` against a
+  contact id with no existing user row creates a row with
+  `is_banned = true` and **`registration_state = 'preban'`** (the
+  `users.registration_state` enum is the structural marker that the
+  row was minted purely for the ban and never carried a registration
+  ceremony). The contact is banned even on first attempt.
+- **Pre-ban → unban does NOT grant DM access.** `/unban` against a
+  `registration_state = 'preban'` row **deletes the row entirely**
+  rather than flipping `is_banned = false` on it. The contact's next
+  DM is therefore an unknown-contact DM and routes through the
+  invite-code gate (authorization step 2), as it would have without
+  the pre-ban. Without this rule a pre-ban → unban sequence would
+  silently bypass the invite gate, because step 2 fires only when no
+  `users` row exists — once a pre-ban has minted a row, a subsequent
+  `/unban` would leave the row in place and the contact would reach
+  the bot on next DM with no invite ever presented. The `/unban`
+  reply surfaces the deletion (`"Pre-ban-only row removed; contact
+  will require a fresh invite to DM."`) so the executing admin
+  understands the post-condition; the deletion is audit-logged as
+  `UNBAN_DELETED_PREBAN_ROW`. Pre-ban rows that have a non-`preban`
+  `registration_state` (i.e. an already-registered user later
+  banned, then unbanned) are **not** affected by this rule — their
+  ban flag is cleared in place and the group-admin restoration
+  rule above applies.
 
 ## Invite-code registration
 
@@ -410,6 +442,24 @@ DM access, applied uniformly across all adapters:
   used on another.
 - **Bot admin and bootstrap-seeded users are exempt** from the invite
   requirement; they are created directly by config at startup.
+- **Group-registered users do not get free DM access.** A user
+  auto-registered via the group `@mention` path (authorization step 3)
+  has a `users` row with `registration_state = 'group_only'` (see §User
+  ban for the enum) and is **subject to the DM invite gate** on first
+  DM interaction. The intake check is layered: step 2 fires only for
+  contacts with no `users` row, but the permission step (step 6) adds
+  a DM-only gate that rejects any DM from a `group_only` user with the
+  same fixed `Access requires an invitation.` reply as step 2's
+  invalid path. The user remains a registered group member; only DM
+  initiation is blocked. The two paths to lift the gate are: (a) a
+  bot admin issues `/invite create --contact <id>`, the user accepts
+  it, and the row's `registration_state` advances to `'invited'`; or
+  (b) a bot admin `/vouch <contact>` clears probation **and** lifts
+  the DM gate (the vouch is the explicit "I trust this contact"
+  signal, with audit). Without this rule the DM invite gate would be
+  trivially bypassable: any contact reachable in any group the bot
+  serves could pivot to DM at will, since group membership is
+  typically less tightly controlled than DM access.
 - **Pre-ban still works.** `/ban <contact>` against an unknown contact creates
   the user row with `is_banned=true` without requiring an invite. The ban check
   (step 4) fires before any command could succeed even if the contact later
@@ -426,6 +476,31 @@ DM access, applied uniformly across all adapters:
   an audit row records the threshold breach. The limit prevents a
   patient brute-force search of the UUID space; it does not change
   the per-failure user-visible reply.
+- **Caps on simultaneous PENDING invites.** The system enforces two
+  caps on outstanding `PENDING` codes (exact values are profile-driven
+  and live in design notes):
+  - A **per-adapter cap on `--open` invites**: an admin attempting to
+    mint an `--open` code while the cap is met receives a friendly
+    error listing the current open codes and a hint pointing at
+    `/invite revoke`. Open codes have the broadest blast radius (any
+    unknown contact on the adapter can consume them), so the cap is
+    deliberately small.
+  - A **global cap on `--contact` invites**: contact-bound codes are
+    safer (one identity each) but unbounded creation is still a
+    footgun. The global cap is set high enough that legitimate bulk
+    onboarding works and low enough that an accidental loop cannot
+    quietly create thousands of pending codes.
+  Codes transitioning to `USED`, `REVOKED`, or `EXPIRED` free a slot
+  immediately. The two caps prevent code-leakage attacks (a leaked
+  open code consumed by an adversary) from compounding through bulk
+  issuance and bound the operator's exposure if a single admin
+  account is compromised.
+- **`/invite list` disclosure.** The list output **must visually
+  distinguish `--open` codes from `--contact` codes** (e.g., a
+  prominent `OPEN` marker on open rows). Open codes are the
+  higher-blast-radius primitive and should not blend into a long
+  contact-bound list; an admin auditing exposure must be able to spot
+  them at a glance.
 - **Pre-banned contact + invite.** `/invite create --contact <id>`
   against a contact whose `users` row already has `is_banned=true`
   returns a friendly error pointing the admin at `/unban`; **no
@@ -609,7 +684,18 @@ Re-eval verdict handling:
   are the durable cursor for in-flight evaluation.)
 - `BENIGN` on an UNKNOWN post → post transitions
   `QUARANTINED → READY` with Stage 1 redactions retained; same
-  rule as above for lifting (admin only).
+  rule as above for lifting (admin only). **The transition is
+  audit-logged** as `RE_EVAL_RELEASED` with `actor='re_eval_job'`,
+  `target_kind='post'`, `target_id=<post_uid>`, and
+  `details_json={ prior_verdict, new_verdict='BENIGN', attempt }`,
+  and a throttled admin notification fires (coalesced per
+  `(channel, 're_eval_released')` on the same window as other admin
+  notifications). Without this, posts auto-released from
+  `QUARANTINED` after an UNKNOWN-then-BENIGN re-eval reach users
+  with no human reviewer ever having seen the row — an attacker who
+  crafts content that initially looks UNKNOWN to the judge but
+  flips to BENIGN on a model swap or warm-up could otherwise quietly
+  harvest user-visible state without an admin signal.
 - `INJECTION`, `MALWARE`, or `UNKNOWN` on either class → post stays
   `QUARANTINED`, the `stage2_failed` flag is **preserved** (or set,
   if the prior verdict was UNKNOWN) alongside the new verdict, and
@@ -621,8 +707,36 @@ Re-eval verdict handling:
 outage that exhausts retries on hundreds of posts produces one
 summary notification, not hundreds — mirroring the throttling
 already in place for Stage 2 infra-failure notifications. Sustained
-high UNKNOWN rate also triggers the existing `Stage2UnknownRateHigh`
-operator alert (`docs/design/04-security.md`).
+high UNKNOWN rate also triggers the operator alert
+`Stage2UnknownRateHigh` defined in design notes.
+
+**Per-source UNKNOWN auto-disable.** A source whose Stage 2 UNKNOWN
+rate exceeds a profile-driven threshold over a profile-driven rolling
+window has its `source.status` transitioned to `'failed'` (the same
+terminal status used for consecutive HTTP failures, decision D42),
+the scheduler skips it on subsequent ticks, and a throttled admin
+notification fires citing the source id, the observed UNKNOWN rate,
+and the threshold. This bounds the **quarantine-exhaustion** attack
+surface: an adversary controlling a feed (or able to inject into
+one) cannot drown admin review capacity by crafting borderline
+content that consistently triggers UNKNOWN — the system shifts the
+cost from "admins must triage every post indefinitely" to "admins
+re-enable a single source after diagnosis." The per-source cap is
+independent of the global `Stage2UnknownRateHigh` alert: the global
+alert fires on aggregate ratio (and can be evaded by mixing
+attack content with legitimate content from other sources), while
+the per-source cap fires on per-source ratio (which the attacker
+cannot dilute without losing control of their own input). An admin
+explicitly re-enables the source via `/source-enable <id>` after
+diagnosis, the same recovery path used for HTTP-failure sources.
+
+**Absolute NEEDS_REVIEW depth alert.** Operators also see an
+absolute-depth alert when the `NEEDS_REVIEW` queue exceeds a
+profile-driven threshold, **independent of any per-source ratio**.
+This guarantees the operator notices a sustained backlog even if
+the per-source UNKNOWN rate stays below the auto-disable threshold
+across many sources simultaneously (the "many small fountains"
+attack shape that ratio-based alerts miss).
 
 ## Rate limiting
 

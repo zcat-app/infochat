@@ -106,7 +106,7 @@
 
   **Stage 2 verdict outcomes:**
 
-  - On `BENIGN`: post released with redactions reverted (Stage 1 placeholder spans restored from quarantine row); `post.status='READY'`.
+  - On `BENIGN`: post released `post.status='READY'` with **Stage 1 redactions retained**. The quarantine row's PENDING state is closed (`status='RELEASED_WITH_REDACTIONS'`) but the `[REDACTED:<id>]` placeholders stay in `post.body`. Lifting redactions is admin-only via `/quarantine approve` — see [../spec/security.md](../spec/security.md) §Quarantine workflow. This rule is uniform across first-pass and re-evaluation BENIGN verdicts (a re-eval BENIGN does not auto-lift redactions either).
   - On `INJECTION` or `MALWARE`: `post.status='QUARANTINED'`, remains hidden until admin approval; quarantine row updated `flagged_by='stage2'`.
   - On `UNKNOWN` (the model returned the literal label `UNKNOWN`): treated as a soft INJECTION signal — `post.status='QUARANTINED'`, quarantine row gets `flagged_by='stage2'` with `verdict='UNKNOWN'`. Admin reviews.
 
@@ -136,7 +136,7 @@
      - Link-local: `169.254.0.0/16`, `fe80::/10`
      - Multicast: `224.0.0.0/4`, `ff00::/8`
      - CGNAT: `100.64.0.0/10`
-     - Cloud metadata IPs: `169.254.169.254` (AWS/GCP/Azure IMDS), `fd00:ec2::254` (AWS IMDSv2 IPv6)
+     - Cloud metadata IPs: `169.254.169.254` (AWS/GCP/Azure/Oracle/DigitalOcean IMDS), `fd00:ec2::254` (AWS IMDSv2 IPv6), `100.100.100.200` (Alibaba Cloud instance metadata). The Alibaba endpoint is **not** in the link-local `169.254.0.0/16` range, so it must be listed explicitly; missing it leaves the SSRF blocklist incomplete on Alibaba Cloud deployments. Operators on additional cloud providers should review their provider's metadata endpoint and add it here if it falls outside the existing ranges.
      - Any address that resolves to the host's own non-loopback interfaces
   3. **TOCTOU defense.** DNS is re-resolved after every redirect; the same IP blocklist is re-applied each hop. An attacker cannot point a hostname at a public IP at validation time, then flip DNS to `169.254.169.254` for the actual fetch.
   4. **Redirect cap.** Maximum 3 redirects per fetch. The 4th redirect aborts with an error.
@@ -235,18 +235,29 @@
 
   **Race protection.** Two simultaneous `@mention` messages in a brand-new group could both pass the "no admin yet" check before either INSERT lands, producing two group admins. This is closed by the partial unique index `one_admin_per_group ON group_membership(group_id) WHERE is_group_admin = true` (see [02-schema.md §2.1](02-schema.md)). The bootstrap path becomes `INSERT … ON CONFLICT DO NOTHING`: whichever transaction commits first wins; the loser silently no-ops. `/promote` performs a `/demote` of the existing admin in the same transaction so the partial unique index continues to hold.
 
-  ### Chat output sanitizer (post-LLM filter for admin commands)
+  ### LLM output sanitizer (post-LLM filter for admin commands)
 
-  Before the Provider sends any chat-mode reply (i.e. any reply produced by `ChatAgent.respond()` rather than by a deterministic command), the candidate text is passed through a deterministic outbound regex pass:
+  Before the Provider sends **any LLM-authored text** to a user, the candidate text is passed through a deterministic outbound regex pass. The sanitizer is implemented as a single shared post-LLM filter (`LlmOutputSanitizer.sanitize(text, ctx)`) invoked at every output emission point, **not** only inside `ChatAgent.respond()`. Per [../spec/security.md](../spec/security.md) §LLM output sanitizer, the covered surfaces are:
 
-      OUTBOUND_ADMIN_CMD = (^|\s)/(grant-admin|revoke-admin|demote|promote|ban|unban|remove-source)\b
+  - chat-mode replies (`ChatAgent.respond()`),
+  - on-the-fly `/summary` prose,
+  - periodic group digest prose (per slot, both full-prose and degraded-fallback prose if any LLM-authored string survives in the latter),
+  - `/retry` re-rolls (both `/retry` against a personal anchor and `/retry --digest`),
+  - any future LLM-emitted text.
+
+  Deterministic command output (`/help`, `/status`, `/list-sources`, `/get-tags`, etc.) is **not** run through the sanitizer because that text never passes through an LLM. CI asserts via a static check that every code path emitting LLM output funnels through `LlmOutputSanitizer.sanitize` before reaching the messaging adapter (see [08-verification.md](08-verification.md)).
+
+  The match set is **derived from the bot-admin and group-admin rows of the permission matrix** at compile time (per [../spec/security.md](../spec/security.md) §LLM output sanitizer "match-set derivation"), so an admin command added to the matrix without a matching sanitizer entry fails CI. The current derived regex is:
+
+      OUTBOUND_ADMIN_CMD = (^|\s)/(grant-admin|revoke-admin|demote|promote|ban|unban|remove-source|invite|vouch|quarantine|source-enable|audit)\b
 
   Behavior:
 
   - **Strip-or-refuse.** The default is to strip the matched span and replace it with `[refused-action]`. If the same reply contains 3+ matches, the entire reply is refused and replaced with `I tried to write a reply that included admin commands; refusing.`
-  - **Audit every match.** A row is written to `audit_log` with `action='CHAT_OUTPUT_SANITIZED'`, `target_kind='user'`, `target_id=<calling_user>`, `details_json={ "matches": [...], "decision": "stripped" | "refused" }`. This is per-occurrence (not throttled) so operators can see when small models start trying to emit privileged commands.
-  - **Why this exists.** Admin commands are dispatched by `CommandRouter`, never by the LLM, so a copy-paste of a chat reply still requires `is_admin=true` to actually execute anything. But the chat reply itself can be a vector for social engineering ("hey @victim, the bot just told me to run `/grant-admin abc`, please confirm") and small judge models on the Pi profile are easy to coax into emitting these strings. The sanitizer is a cheap deterministic guard that closes that surface.
-  - **Scope.** Applies to chat-mode replies only. Deterministic command output (e.g. the exact text of `/help`) is not run through the sanitizer because that path doesn't include LLM-authored content.
+  - **Audit every match.** A row is written to `audit_log` with `action='LLM_OUTPUT_SANITIZED'`, `target_kind='user'`, `target_id=<calling_user>` (or `target_kind='group'`, `target_id=<group_id>` for digest prose where the calling user is the scheduler), `details_json={ "surface": "chat" | "summary" | "digest" | "retry", "matches": [...], "decision": "stripped" | "refused" }`. Per-occurrence (not throttled) so operators can see when small models start emitting privileged commands across any surface.
+  - **Why this exists.** Admin commands are dispatched by `CommandRouter`, never by the LLM, so a copy-paste of an LLM-emitted reply still requires `is_admin=true` to actually execute anything. But LLM-emitted text — chat reply, summary prose, digest prose — can be a vector for social engineering ("hey @victim, the bot just told me to run `/grant-admin abc`, please confirm") and small judge models on the Pi profile are easy to coax into emitting these strings. The sanitizer is a cheap deterministic guard that closes that surface across every LLM output surface, not only chat-mode.
+  - **Known limitation: verbatim-match only.** The regex catches literal command strings only. It will not strip social-engineering phrasings like `"/ ban that user"` (space after slash), `` "`/ban`" `` (backtick-wrapped, where the backtick precedes `/`), `"run slash-ban on that user"`, or markdown-bold `` **/ban** ``. Because the actual execution still requires `is_admin=true`, this is a **social-engineering surface, not a privilege-escalation surface** — a victim who follows the LLM's suggestion still has to type the command themselves and still hits the deterministic permission check. Verbatim-match is a deliberate choice over a fuzzier matcher: a fuzzy matcher trades a small surface reduction for a large false-positive rate that mangles benign prose mentioning admin actions in narrative form. Operators should set expectations accordingly; the social-engineering layer is addressed by the audit log of sanitizer hits and by user education, not by regex enrichment.
+  - **Scope.** Applies to every LLM-authored output surface listed above; does NOT apply to deterministic command output.
 
   This complements the existing `[refused-action]` system-prompt convention (§4.3): the system prompt asks the model to refuse, the sanitizer enforces refusal regardless of whether the model complied.
                                                                                                                                                                                                                                                         
@@ -261,23 +272,38 @@
                                                                                                                                                                                                                                                         
   Trigger-level enforcement means even a buggy command can't delete the last admin.                                                                                                                                                                     
                                                                                                                                                                                                                                                         
-  ### Authorization evaluation order                                                                                                                                                                                                                    
-                                                                                   
-  For every incoming message:
+  ### Authorization evaluation order
 
-  1. Resolve identity (contact_id from adapter; never trust display name)                                                                                                                                                                               
-  2. Look up users(contact_id); if absent, auto-register (DM only; group: only on @mention)
-  3. If users.is_banned → reply with fixed string, drop message (no LLM, no DB queries)                                                                                                                                                                 
-  4. Parse command (or fall to chat-mode)                                                                                                                                                                                                               
-  5. Check command's permission row in the matrix (3.2):                                                                                                                                                                                                
-    - Resolve scope: DM(user) or Group(group_id)                                                                                                                                                                                                        
-    - For group: load group_membership.is_group_admin                                                                                                                                                                                                   
-    - For both: load users.is_admin                                                                                                                                                                                                                     
-  6. If denied → friendly error citing what permission is required                                                                                                                                                                                      
-  7. Execute command (admin actions audit-logged before any side-effect)                                                                                                                                                                                
-  8. LLM only enters the picture for chat-mode replies, summary prose, eval pipeline                                                                                                                                                                    
-                                                                                                                                                                                                                                                        
-  The LLM never participates in steps 1–7. This is the determinism boundary that makes T3 (privilege escalation via injection) infeasible.                                                                                                              
+  For every incoming message — this implements the spec evaluation order in [../spec/security.md](../spec/security.md) §Authorization model verbatim; any divergence is a bug:
+
+  1. **Resolve identity** (`contact_id` from adapter; never trust display name).
+  2. **DM, unknown contact.** If `users.findByContactId(contact_id, adapter)` returns no row AND the inbound is a DM:
+     - Treat the full message body as a candidate invite code. Look up `invite` table for `(contact_id, adapter, code, status='PENDING', expires_at > now())` (strict invite) OR `(adapter, code, status='PENDING', expires_at > now())` with no contact binding (open invite). Per-`(adapter, contact_id)` brute-force rate limit applies — see §4.9; over the cap, reject without checking.
+     - **Valid match**: create `users` row, set `probation_until = now() + slow_start_window`, mark code `USED`, audit-log `INVITE_ACCEPTED` and `USER_REGISTERED_VIA_INVITE`, send welcome. Stop processing this message (do NOT continue to ban check or command parser; the welcome IS the response).
+     - **Invalid / expired / absent**: send fixed `Access requires an invitation.` reply, increment `invite_drop_total` counter, drop. **No `users` row is created**, no LLM, no DB write beyond the counter and rate-limiter state.
+  3. **Group, unknown contact.** If no row exists AND the inbound is a group `@mention`: auto-register (insert `users` row with `probation_until = now() + slow_start_window`, mark `registration_state='group_only'` per §4.5 to support the DM-gate carve-out for group-registered users — see [../spec/security.md](../spec/security.md) §Slow-start tier and §Invite-code registration), insert `group_membership` row, run group-admin bootstrap if applicable. Continue to step 4.
+  4. **Ban check.** If `users.is_banned` → reply with fixed string, drop message (no parser, no DB queries past the ban check, no LLM).
+  5. Parse command (or fall to chat-mode).
+  6. Check command's permission row in the matrix (3.2):
+    - Resolve scope: DM(user) or Group(group_id).
+    - For group: load `group_membership.is_group_admin`.
+    - For both: load `users.is_admin`.
+    - **Probation gate** (D45): if `probation_until IS NOT NULL AND probation_until > now()`, the command must be in the probation-allowed set or the call is rejected with the friendly "probation period" reply.
+    - **Group-registered DM gate** (D44): if the inbound is a DM AND `users.registration_state = 'group_only'` AND no DM invite has been accepted for this user, the call is rejected with the same `Access requires an invitation.` reply as step 2's invalid path. The user remains registered (their group state is unaffected); they cannot initiate DM interaction without a `/invite create --contact` from a bot admin or a `/vouch`. See [../spec/security.md](../spec/security.md) §Invite-code registration for the rationale.
+  7. If denied → friendly error citing what permission is required.
+  8. Execute command (admin actions audit-logged before any side-effect).
+  9. LLM only enters the picture for chat-mode replies, summary prose, eval pipeline.
+
+  The LLM never participates in steps 1–8. This is the determinism boundary that makes T3 (privilege escalation via injection) infeasible.
+
+  **`users.registration_state` enum** (set on row creation, never demoted):
+
+  - `'preban'` — row created by `/ban <contact>` against an unknown contact (§4.5). On `/unban`, the row is **deleted** rather than flipping `is_banned=false`, so the next inbound message routes through step 2 (DM) or step 3 (group) and the contact must present a valid invite. See [../spec/security.md](../spec/security.md) §User ban for the full rule and rationale.
+  - `'group_only'` — auto-registered via group `@mention` (step 3). Subject to the DM gate above.
+  - `'invited'` — registered via DM invite acceptance (step 2). Full DM access (subject to probation + ban + permission matrix).
+  - `'bootstrap'` — created by the `@Startup` admin bootstrap. Never subject to invite gate.
+
+  The state is also written into the audit row at creation time so the registration path is reconstructible from the audit log alone.                                                                                                              
                                                                                                                                                                                                                                                         
   ---                                                                              
                                                                                                                                                                                                                                                         
@@ -363,6 +389,17 @@
 
   When `release-on-stage2-failure=false`, posts with `stage2_failed=true` stay `status='QUARANTINED'` until the periodic re-evaluation job (which retries Stage 2 when the LLM comes back) clears them or an admin explicitly approves via `/quarantine approve`.
 
+  **Startup warning when the flag is `true`.** Because the `true` default on `laptop` and `pi` is exactly the case where multilingual / paraphrased / obfuscated injection payloads (which Stage 1's English regex set is designed *not* to catch) can reach the summarizer or chat agent during a Stage 2 outage with only the partial Stage 1 redaction applied, the Provider emits a **prominent WARN-level startup line** whenever `infochat.security.release-on-stage2-failure=true` is in effect:
+
+      [WARN] infochat.security.release-on-stage2-failure=true: posts will be released
+             with Stage 1 redactions only when the Stage 2 judge is unavailable.
+             Stage 1 is an English-language coarse filter; multilingual or obfuscated
+             injection content can reach LLM call sites during a Stage 2 outage.
+             To prefer safety over availability, set the flag to false (default on
+             vps/remote profiles).
+
+  The warning is also written to the `audit_log` once per process start with `action='STARTUP_RELEASE_ON_STAGE2_FAILURE_TRUE'` so the operating posture is reconstructible from audit history. We deliberately do **not** invert the laptop/pi default to `false` because the original rationale (a hobby/dev/Pi deployment with a flaky local Ollama should remain useful when the judge crashes) still holds; the warning gives operators an explicit signal that their availability/safety choice is being honoured rather than letting it sit silently in the profile defaults.
+
   ### Prometheus counters and alerts
 
   The eval pipeline exports:
@@ -373,16 +410,31 @@
   | `eval_stage2_failure_total` | Counter, infrastructure failures (after retry). |
   | `eval_stage2_released_with_stage1_only_total` | Counter, posts released with `stage2_failed=true`. Only meaningful when `release-on-stage2-failure=true`. |
   | `eval_stage1_hit_total{rule_id}` | Counter, Stage 1 matches by rule. |
+  | `eval_stage2_unknown_per_source_total{source_id}` | Counter, per-source UNKNOWN verdicts. Drives the per-source UNKNOWN auto-disable rule from [../spec/security.md](../spec/security.md) §Re-evaluation job ("Per-source UNKNOWN auto-disable"). |
+  | `needs_review_queue_depth` | Gauge, current `NEEDS_REVIEW` post count. Drives the absolute-depth alert below. |
+  | `source_auto_disabled_unknown_total{source_id}` | Counter, sources transitioned to `failed` because their per-source UNKNOWN ratio crossed the threshold. |
+
+  **Per-source UNKNOWN auto-disable thresholds (profile-driven defaults).**
+
+  | Profile | Window | UNKNOWN ratio threshold | Min sample (verdicts in window) |
+  |---|---|---|---|
+  | `laptop` | 6h | 0.40 | 25 |
+  | `pi` | 12h | 0.50 | 15 |
+  | `vps` | 1h | 0.30 | 50 |
+  | `remote` | 1h | 0.25 | 50 |
+
+  When a source's UNKNOWN rate over its `Window` exceeds the threshold AND at least the minimum sample of verdicts has been observed for that source in the window, the Collector transitions `source.status` from `active` to `failed`, increments `source_auto_disabled_unknown_total{source_id}`, and emits a coalesced admin notification through the same throttled `(channel, error_class)` path as HTTP-failure auto-disables. The `min_sample` gate prevents a low-traffic source from being disabled by a single UNKNOWN verdict; the `pi` window is longer because Pi-tier deployments see lower per-source verdict volume.
 
   Recommended alerts (operator owns the rules; defaults shipped in `monitoring/`):
 
   - `Stage2UnknownRateHigh`: `rate(eval_stage2_verdict_total{verdict="UNKNOWN"}[1h]) / rate(eval_stage2_verdict_total[1h]) > 0.20` for 1h. A high `UNKNOWN` rate means the judge is degraded — investigate the model, do **not** auto-downgrade `UNKNOWN` to `BENIGN`. Auto-release on degraded judge is exactly the failure mode this section exists to prevent.
   - `Stage2FailureSpike`: `rate(eval_stage2_failure_total[5m]) > 1` for 10m. The judge LLM is unreachable.
+  - `NeedsReviewQueueDeep`: `needs_review_queue_depth > 200` for 30m (profile-tunable). Absolute-depth backstop for the per-source UNKNOWN auto-disable rule above — a "many small fountains" attack distributes UNKNOWN verdicts across many sources so no single source crosses the per-source threshold, but the queue still drowns the admin. The threshold is intentionally an absolute number, not a ratio, so it fires regardless of the legitimate-traffic baseline.
   - `LlmDown`: see [07-deployment.md §7.12](07-deployment.md) for the `/q/health/llm` probe alert.                                                                           
                                                                                                                                                                                                                                                         
   ### Admin notification throttling                                                                                                                                                                                                                     
                                                                                    
-  The Provider's `AdminNotifier` coalesces events on `(channel, error_class)` for 15 minutes. Output:                                                                                                                                                   
+  The Provider's `AdminNotifier` coalesces events on `(channel, error_class)` for 15 minutes. **Every coalesced line MUST include the absolute event count for the window** so the operator can gauge attack/outage scale from the notification alone — without it, "tagger failed" reads identically whether 5 posts or 5000 posts were affected. The count is mandatory, not optional, in the message template. Example output:                                                                                                                                                   
                                                                                    
   [bot, to admin]                                                                                                                                                                                                                                       
   [!] Eval failure summary (last 15 min)                                           
@@ -390,7 +442,7 @@
   - embedding: 47 posts (same root cause)                                                                                                                                                                                                               
   - source: hnrss.org consecutive_failures=12 (last error: HTTP 503)                                                                                                                                                                                    
                                                                                                                                                                                                                                                         
-  This stops admin from getting 200 individual messages during an outage.                                                                                                                                                                               
+  An additional `quarantine` line is added to the same coalesced summary when posts entered `NEEDS_REVIEW` during the window — e.g., `quarantine: 318 posts entered NEEDS_REVIEW (last UNKNOWN rate 35% across 4 sources)` — so the operator sees abuse-shaped backlogs in the same surface as infra-failure backlogs. This stops admin from getting 200 individual messages during an outage and ensures the "is this 50 events or 5000?" question is answered without opening Prometheus.                                                                                                                                                                               
                                                                                                                                                                                                                                                         
   ---                                                                                                                                                                                                                                                   
                                                                                                                                                                                                                                                         
@@ -402,7 +454,17 @@
   - **Future Telegram/Matrix adapters**: each adapter's SPI must implement `assertIdentity()` returning a stable, cryptographically-anchored ID. Adapters that can't (e.g., a hypothetical IRC adapter) MUST be marked `trustLevel=LOW` and the operator
    opts in explicitly.                                                                                                                                                                                                                                  
                                                                                    
-  The `display_name` field is purely informational and never used for authorization.                                                                                                                                                                    
+  The `display_name` field is purely informational and never used for authorization.
+
+  **`display_name` sanitization at storage time.** Even though display names never feed authorization, they DO appear in admin-facing surfaces — `/quarantine list` previews of the offending user, the `/audit` reader, `/list-sources --all` for sources contributed by named users, and the in-process audit-log views the operator opens with `psql`. A user with a display name that contains terminal escape sequences, Unicode RTL overrides, or embedded control characters could cause cosmetic confusion or, worse, manipulate a terminal-based admin session into hiding lines of audit output behind cursor-movement codes. We sanitize at storage time (not just at render time) so the same name is safe across every consumer:
+
+  1. **Strip control characters** (Unicode categories `Cc`, `Cf` — but keep `\t`/`\n` if they appear in a multi-line label, which the schema does not currently allow anyway).
+  2. **Strip bidi overrides** (U+202A–U+202E, U+2066–U+2069) — same set the chat-intake and Stage 1 paths already strip; reusing the same helper keeps the discipline uniform.
+  3. **NFKC normalize** so visually-identical homoglyphs collapse before the rest of the pipeline sees the name.
+  4. **Truncate** to a profile-driven character cap (`infochat.user.display-name-max-chars`; default `64`); names longer than the cap are truncated with no ellipsis (the truncation is byte-safe over the NFKC output).
+  5. The resulting string is what is written to `users.display_name`. The pre-sanitization value is **not** retained — display names are not security-load-bearing, and keeping the raw form would just be a second sanitization site that drifts.
+
+  The same sanitizer is invoked on every adapter event that proposes a display-name change (e.g., a SimpleX rename); there is no path that writes the column directly. CI asserts that the sanitizer is the only writer.                                                                                                                                                                    
                                                                                    
   ---                                                                                                                                                                                                                                                   
                                                                                    

@@ -26,17 +26,27 @@
   CREATE TABLE users (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     contact_id      TEXT NOT NULL UNIQUE,           -- SimpleX contact ID (cryptographic)
-    display_name    TEXT,                            -- last-seen display name from adapter (informational)
+    display_name    TEXT,                            -- last-seen display name from adapter (informational; sanitized at write time per 04-security.md §4.8)
     is_admin        BOOLEAN NOT NULL DEFAULT FALSE,
     is_banned       BOOLEAN NOT NULL DEFAULT FALSE,
     banned_at       TIMESTAMPTZ,
     banned_by       UUID REFERENCES users(id),
     ban_reason      TEXT,
+    -- Registration provenance. Drives the DM invite gate (§4.4 step 6) and
+    -- the pre-ban /unban delete rule (§4.5). Set on INSERT, never demoted.
+    --   'preban'      -- row minted by /ban against unknown contact; deleted on /unban
+    --   'group_only'  -- auto-registered via group @mention; DM blocked until invite or /vouch
+    --   'invited'     -- DM invite accepted; full DM access (subject to probation + ban)
+    --   'bootstrap'   -- created by @Startup admin bootstrap; exempt from invite gate
+    registration_state TEXT NOT NULL,
+    probation_until TIMESTAMPTZ,                     -- D45 slow-start; NULL = full access
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_seen_at    TIMESTAMPTZ,
-    save_count      INT NOT NULL DEFAULT 0          -- denormalized COUNT(*) of saved_post rows for this user;
+    save_count      INT NOT NULL DEFAULT 0,         -- denormalized COUNT(*) of saved_post rows for this user;
                                                     -- maintained by trigger; powers the 1000-save cap check
                                                     -- in O(1) instead of a SELECT COUNT(*).
+    CONSTRAINT users_registration_state_chk
+      CHECK (registration_state IN ('preban','group_only','invited','bootstrap'))
   );
                                                                                                                                                                                                
   CREATE INDEX idx_users_admin    ON users(is_admin)  WHERE is_admin;
@@ -44,6 +54,47 @@
                                                                                                                                                                                                
   -- Last-admin protection (cannot revoke last admin, cannot ban last admin):
   -- Enforced by trigger on UPDATE.
+  --
+  -- IMPORTANT: the trigger body MUST serialize concurrent revocations.
+  -- A naive `SELECT COUNT(*) FROM users WHERE is_admin = true` under
+  -- READ COMMITTED is unsafe: two simultaneous /revoke-admin (or ban)
+  -- transactions targeting different admin rows both read the pre-state
+  -- count of 2, both proceed, both commit, leaving zero admins.
+  --
+  -- Implementation (trg_last_admin_protection on users BEFORE UPDATE):
+  --
+  --   CREATE OR REPLACE FUNCTION trg_last_admin_protection()
+  --   RETURNS TRIGGER AS $$
+  --   DECLARE
+  --     remaining INT;
+  --   BEGIN
+  --     -- Lock the admin rows for the duration of this transaction so
+  --     -- a concurrent revoke against a different admin row sees this
+  --     -- transaction's pending change before computing its own count.
+  --     LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE;
+  --
+  --     IF (OLD.is_admin = true AND NEW.is_admin = false)
+  --        OR (OLD.is_banned = false AND NEW.is_banned = true AND OLD.is_admin = true) THEN
+  --       SELECT count(*) INTO remaining
+  --       FROM users
+  --       WHERE is_admin = true
+  --         AND is_banned = false
+  --         AND id <> NEW.id;
+  --       IF remaining < 1 THEN
+  --         RAISE EXCEPTION 'last_admin_protection: cannot leave the deployment with zero bot admins';
+  --       END IF;
+  --     END IF;
+  --     RETURN NEW;
+  --   END;
+  --   $$ LANGUAGE plpgsql;
+  --
+  -- The lock is released on transaction commit/rollback; held for the duration
+  -- of a single revoke (microseconds in practice) so it does not interfere with
+  -- normal read traffic. SHARE ROW EXCLUSIVE blocks other writers but allows
+  -- concurrent SELECT, which is the right trade-off for a trigger on the rare
+  -- privileged-mutation path.
+  --
+  -- The matching DELETE-path trigger uses the same lock + count pattern.
                                                                                                                                                                                                
   groups
                                           

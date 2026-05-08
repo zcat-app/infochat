@@ -388,6 +388,19 @@ them together. They are tested in CI (see `verification.md`).
    leave zero rows with `is_admin = true`). Hard-delete of users is a
    privileged operator action and the trigger fails it with the same
    error a `/revoke-admin` of the only admin produces.
+   **The trigger MUST serialize concurrent revocation attempts** so
+   two simultaneous `/revoke-admin` (or ban) operations against
+   different admin rows cannot both observe the pre-state and both
+   succeed, leaving zero admins. Acceptable implementations: take a
+   table-level lock on `users` covering the admin rows for the
+   duration of the trigger body (e.g., `LOCK TABLE users IN SHARE
+   ROW EXCLUSIVE MODE`), or read the count under `SELECT … FOR
+   UPDATE` against the admin rows. A naive `SELECT COUNT(*) WHERE
+   is_admin = true` without locking is **not** sufficient: under
+   READ COMMITTED isolation both transactions read 2, both proceed,
+   both commit, and the deployment ends with zero admins. The
+   serialization requirement is part of the invariant, not a
+   design-tier optimisation.
 3. **At most one group admin per group.** Enforced by a partial unique index
    so the "first @mention wins" auto-promote path is race-safe (decision D9).
 4. **Soft-delete only for sources.** `source` is never hard-deleted; FKs from
