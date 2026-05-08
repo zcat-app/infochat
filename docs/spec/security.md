@@ -174,9 +174,10 @@ considered untrusted (decision D21):
   block whose marker contains a per-call random value. Attackers cannot                                                                                                                                                                               
   pre-guess the marker and therefore cannot forge a closing tag inside the                                                                                                                                                                            
   body.
-- The system prompt instructs the model to never follow instructions                                                                                                                                                                                  
-  inside the wrapper, to refuse action requests with a `[refused-action]`        
-  marker, and to treat the content as data.
+- The system prompt instructs the model to never follow instructions
+  inside the wrapper, to refuse action requests with a **structured
+  refusal marker** (the literal token used in v1 lives in design notes),
+  and to treat the content as data.
 - The LLM tool surface is a strict allowlist (every name appears
   verbatim in the agent's tool registry; nothing else is callable):
   tag-filtered SQL, single-post fetch, reference lookup,
@@ -529,20 +530,32 @@ operator alert (`docs/design/04-security.md`).
 
 ## Rate limiting
 
-Per-user token buckets bound:
+Per-user token buckets bound, grouped explicitly so commands that
+share a cost profile share a bucket:
 
-- Parser-only command rate (cheap commands).
-- `/add-source` rate (encourage bulk via bootstrap JSON).
-- Chat-mode message rate (transport-level).
-- **LLM-triggering operations** (chat replies + `/summary`) — capped                                                                                                                                                                                  
-  lower, with a profile-driven cap. Transport rate is intentionally              
-  higher than the LLM-triggering cap so a flooding user gets quick                                                                                                                                                                                    
-  reject replies without burning the only LLM slot.
-- **Tool calls per chat turn** — fixed cap. Tool results are cached                                                                                                                                                                                   
+- **Parser-only + DB-read paginated commands** — `/help`,
+  `/status`, `/list-sources`, `/get-sources`, `/get-tags`,
+  `/saved`, `/audit`, `/export`, `/quarantine list` and similar.
+  One bucket; high cap; cheap.
+- **Asset commands** — `/zcash`, `/monero` and friends. Share a
+  cache-hit bucket (most calls within a freshness window are
+  served from cache, so the limit guards against a flood that
+  forces refetches).
+- **`/add-source`** — its own bucket (encourages bulk via
+  bootstrap JSON; surface for adding many sources in a short
+  window).
+- **Chat-mode message rate (transport-level)** — bounds inbound
+  message volume regardless of cost.
+- **LLM-triggering operations** (chat replies + on-demand
+  `/summary` + `/retry` re-rolls) — its own bucket, capped lower,
+  profile-driven. Transport rate is intentionally higher than this
+  cap so a flooding user gets quick reject replies without burning
+  the only LLM slot.
+- **Tool calls per chat turn** — fixed cap. Tool results are cached
   within a single turn so identical calls don't re-query.
-- `/quarantine approve` rate per admin.
+- **`/quarantine approve`** — per-admin bucket.
 
-Exact numbers are profile-driven (decision D27) and live in                                                                                                                                                                                           
+Exact numbers are profile-driven (decision D27) and live in
 `docs/design/04-security.md` §4.9.
 
 ## DB roles
@@ -667,6 +680,13 @@ operational complexity; v1 commits to global source rows.
   by the number of subscribers without a meaningful confidentiality
   benefit. Per-scope cache partitioning is a v2 candidate if a
   concrete attack surfaces.
+- **Boundless growth of soft-deleted source rows.** v1 never
+  hard-deletes a `source` row (invariant 4). Across years of
+  operation an operator can accumulate thousands of soft-deleted
+  rows. The cleanup path is operator-side `psql` under the Admin
+  role; the spec accepts this as bounded operational cost rather
+  than introducing an automatic GC. A future v2 admin command may
+  surface this in chat.
 
 ## What lives in design notes
 
@@ -682,7 +702,7 @@ operational complexity; v1 commits to global source rows.
 - The exact NIP subset and the kind-filter implementation
 - Prometheus counter names and recommended alert expressions
 - DB role grant statements
-- The `[refused-action]` marker convention
+- The structured refusal marker convention (literal token, prompt phrasing)
 - Re-evaluation job cadence, per-post attempt cap, and re-eval status values
 - Fetcher consecutive-failure threshold (*N*) and source re-enable procedure
 - Invite-code TTL default and the exact drop-counter metric name

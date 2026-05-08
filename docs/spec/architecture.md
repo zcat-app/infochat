@@ -180,6 +180,23 @@ StreamSource. The implementation marks the bad relay as unusable for a
 cooldown window and continues on the rest. Concrete failure threshold
 and cooldown values live in design notes.
 
+**All relays in cooldown.** When every configured relay is in
+cooldown the StreamSource waits until the **earliest cooldown
+expires** rather than tight-looping reconnect attempts; an admin
+notification fires once per all-relays-bad transition (throttled
+per `(channel, error_class)` like every other admin notification).
+The notification's recovery counterpart fires when the first relay
+returns to healthy.
+
+**Pagination cap saturation.** Fetchers expose a per-tick
+"pagination cap hit per source" counter. When a single source
+consistently saturates the cap across multiple ticks (operators
+choose the threshold; design notes), a throttled admin notification
+fires once per saturation transition — the source is correctly
+producing posts, just faster than a single tick can drain, and
+operators may want to lift the per-source cap or increase the
+fetch frequency.
+
 ## Pipelines
 
 Two pipelines must be reasoned about end-to-end:

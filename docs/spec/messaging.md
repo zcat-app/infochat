@@ -108,8 +108,13 @@ Constraints:
 
 - Stage strings are looked up by enum from the deterministic
   localization bundle (decision D43; `llm.md` §Translation flow).
-  **User input is never interpolated into progress strings** — security
-  requirement, prevents reflective injection in screenshots and logs.
+  **User input is never interpolated into progress strings** —
+  security requirement, prevents reflective injection in screenshots
+  and logs. Stage strings are template-parameterized only with
+  **deterministic, sanitized scalar values** (post counts,
+  controlled-vocabulary tag names, fixed enum labels). Free-form
+  user-authored text (custom personal tags, free-form chat) is
+  **never** interpolated, even via a "safe" placeholder.
 - Adapters without `supportsMessageEdit` collapse to a single final                                                                                                                                                                                   
   `send` of the completed text. Business logic does not change. The                                                                                                                                                                                   
   caller does not know which transport it has.

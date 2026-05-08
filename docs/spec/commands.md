@@ -26,7 +26,16 @@ live in `docs/design/03-commands.md`.
   a profile-driven value (design notes). A late `confirm` past the
   timeout is rejected with the same wording as a missing pending
   state. The confirmation is scoped to (user, scope) and any other
-  input cancels it with an explicit acknowledgement.
+  input cancels it with an explicit acknowledgement. (Per-command-
+  category split timeouts are recorded as a v2 candidate; v1's
+  one-timeout-fits-all keeps the state machine simple.)
+- **At most one in-flight interruptible request per (user,
+  scope).** A second request from the same caller while one is in
+  flight returns a localized "request already in progress; use
+  `/stop` to cancel" reply. This prevents a single user from
+  multiplying the LLM-trigger cost on shared workers; once the
+  first request completes (or is cancelled by `/stop`) the next is
+  accepted normally.
 - **Output formatting** follows decision D30 (plain text, backticks for
   code, bare URLs). Adapters with richer rendering get richer output via the
   capability flag.
@@ -147,10 +156,15 @@ Cross-cutting rules for asset commands (D39):
   `(asset, sub-verb)` directly from the table — a stale read here is
   acceptable and bounded by the freshness contract below. The
   Provider may keep an in-process cache keyed by `(asset, sub-verb)`
-  and warm/invalidate it from the `NOTIFY` payload, but the cache is
-  an optimization; correctness comes from the table read, not from
-  the notification. Asset Fetchers write **directly** to
-  `price_snapshot` and do **not** go through the post outbox.
+  and warm/invalidate it from the `NOTIFY` payload, but the cache
+  is an optimization; correctness comes from the table read, not
+  from the notification. **The Provider's in-process
+  `price_snapshot` cache is flushed entirely on every Postgres
+  reconnect** so a missed `NOTIFY` during a connection blip cannot
+  serve a stale row past the reconnect; this is the minimal fix
+  that does not require a high-water-mark scheme like `new_post`.
+  Asset Fetchers write **directly** to `price_snapshot` and do
+  **not** go through the post outbox.
 - **Freshness contract.** A reply uses the latest snapshot for
   `(asset, sub-verb)` whose age is within a profile-driven freshness
   window. If no row is within the window — Fetcher hasn't run yet,
@@ -335,7 +349,10 @@ and makes the digest query depend on row presence.
 ### Conversation control
 
 - `/clear` — wipes the calling (user, scope) active context window only.
-  Chat memory is untouched (decision D25). Requires confirm.
+  Chat memory is untouched (decision D25). Requires confirm — the live
+  window is the only bridging context for an evolving conversation,
+  so an accidental `/clear` is irrecoverable. The confirm step is the
+  operator-friendly equivalent of "are you sure?"
 - `/compress` — forces an immediate `chat_memory` checkpoint for the
   calling (user, scope). Auto-triggered near the context-window ceiling
   (decision D24).
@@ -577,9 +594,15 @@ gives the rule no chance to fire on the wrong user.
 ## Periodic group summaries
 
 Groups receive a morning and evening digest at per-group local times
-(decision D16). Generation is staggered, results are cached briefly, and a
-degraded fallback (headlines + sources, no LLM prose) kicks in when the
-worker pool can't keep up (decision D17).
+(decision D16). Each digest fires within a **profile-driven window
+centered on the scope's configured local hour**, so the worker pool
+isn't slammed by hundreds of groups all asking at the same minute.
+The overload fallback (headlines + sources, no LLM prose, decision
+D17) fires when the window-end is reached without the digest having
+started — the operator's "the worker pool is saturated" recovery
+path. Results are cached briefly so a follow-up `/summary` from the
+same group during the cache TTL is served from cache (no second
+LLM call).
 
 ## What lives in design notes
 
