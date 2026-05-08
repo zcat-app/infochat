@@ -156,9 +156,24 @@ Stated explicitly because everything else depends on it:
   pick the set of posts a query returns, run arbitrary SQL, fetch URLs,                                                                                                                                                                               
   send messages outside the current reply.
 
-`/summary security -w 24h` returns the same set of posts twice in a row          
-because the SQL doesn't depend on the LLM. The prose around them differs;                                                                                                                                                                             
-the *set* doesn't.
+**Temporal scope of "same set."** Determinism is *same DB state → same
+results*, not absolute determinism over wall-clock time. Between two
+invocations of `/summary security -w 24h` new posts may have been ingested
+or aged out, so the second call legitimately returns a different set; what
+the spec guarantees is that **given the same DB state**, the SQL returns
+the same rows in the same order — the LLM is not in that loop.
+
+**`/retry` does not re-query.** `/retry` (decision D36) reuses the
+deterministic post selection and clustering captured by the original
+summary-producing command; it does not re-execute the SQL against current
+DB state. This means `/retry` is also stable against ingest racing with the
+user: the cluster of posts the user is regenerating prose for is the same
+cluster they originally saw, even if a new post would now alter the
+selection. The only thing `/retry` re-rolls is the prose layer.
+
+`/summary security -w 24h` returns the same set of posts twice in a row
+**within the same DB state** because the SQL doesn't depend on the LLM.
+The prose around them differs; the *set* doesn't.
 
 ## Memory retrieval
 

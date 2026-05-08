@@ -35,10 +35,30 @@ Collector and Provider communicate only through the shared database:
 - **Catch-up.** A high-water mark on the Provider side guarantees correctness
   across restarts, since `LISTEN/NOTIFY` is best-effort and does not buffer
   events for disconnected listeners. NOTIFY is the latency optimization; the
-  high-water mark is the correctness guarantee.
+  high-water mark is the correctness guarantee. The catch-up query uses
+  `> last_ready_post_at`; the high-water mark is advanced **in the same DB
+  transaction** as the side effect it triggers, making processing idempotent:
+  a duplicate NOTIFY or a repeated catch-up pass for the same row produces
+  no additional side effect.
 
 No external message broker in v1. Replacing the in-process channels with one
 later is a swap, not a rewrite (see decisions D3, D4).
+
+## Deployment topology (v1)
+
+v1 runs **exactly one Collector and exactly one Provider** against a shared
+Postgres (decision D41). The `LISTEN/NOTIFY` + outbox + high-water-mark design
+is correct for that topology; running more than one of either service is **not
+supported in v1** and will produce duplicate fetches, duplicate periodic
+digests, and contention on `provider_state`. Multi-instance horizontal scaling
+is a v2 spec amendment that requires per-source leasing (or partitioned
+fetcher assignment), per-group digest leasing, and a coordination story for
+the high-water mark.
+
+The "independent scaling" benefit of the service split (above) is about
+deploying the two services on different hosts with different resource shapes,
+not about running N copies of either service. Operators who need more
+throughput in v1 pick a heavier hardware profile.
 
 ## Ingest SPIs
 
@@ -61,7 +81,13 @@ from.
   fit without rename). The implementation owns connection lifecycle,
   reconnect with backoff, per-source trust verification (e.g. Nostr
   signature checks), and dedup by stable upstream id **before** the
-  outbox. Used by Nostr in v1.
+  outbox. Delivery to the outbox is **at-least-once**: an event is
+  written to the outbox before the implementation considers it processed;
+  duplicate deliveries (same event-id from multiple relays, or reconnect
+  replays) are deduplicated by stable upstream id. On graceful Collector
+  shutdown the implementation drains in-flight events to the outbox within
+  a profile-driven timeout; events not drained within that window are
+  dropped and will reappear on the next relay connection. Used by Nostr in v1.
 
 Picking between the two is deterministic: if the source is "fetch a
 URL on a tick," it's a `Fetcher`; if the source is "subscribe and

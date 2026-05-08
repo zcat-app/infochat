@@ -87,6 +87,27 @@ Cross-cutting rules for asset commands (D39):
   the existing `Fetcher` SPI. The refresh interval is profile-driven
   and lives in design notes. Repeated user calls within the cache
   window are served from cache, not refetched per request.
+- **Provider/Collector contract.** The Collector owns
+  `price_snapshot`: its asset Fetchers `INSERT` new rows on every
+  successful poll and emit `NOTIFY new_price_snapshot` with `(asset,
+  source)` as the payload. The Provider has **`SELECT`-only**
+  permission on `price_snapshot` (least-privilege, decision D34); on
+  every `/zcash` / `/monero` invocation it reads the latest row for
+  `(asset, sub-verb)` directly from the table — a stale read here is
+  acceptable and bounded by the freshness contract below. The
+  Provider may keep an in-process cache keyed by `(asset, sub-verb)`
+  and warm/invalidate it from the `NOTIFY` payload, but the cache is
+  an optimization; correctness comes from the table read, not from
+  the notification. Asset Fetchers write **directly** to
+  `price_snapshot` and do **not** go through the post outbox.
+- **Freshness contract.** A reply uses the latest snapshot for
+  `(asset, sub-verb)` whose age is within a profile-driven freshness
+  window. If no row is within the window — Fetcher hasn't run yet,
+  source is failing, last successful poll is too old — the Provider
+  serves the most recent row available with an explicit "data is N
+  minutes old" line, and degrades to a friendly error only when no
+  row exists at all for that `(asset, sub-verb)`. The freshness
+  window value lives in design notes.
 - **Mandatory attribution.** Every reply names the data source in the
   header (e.g. `Zcash (kraken)`) and includes the source URL bare per
   D30. This satisfies per-source ToS attribution and lets the user
@@ -115,6 +136,16 @@ Cross-cutting rules for asset commands (D39):
   not required, and defaults to `rss` when inference is ambiguous.
   Identity is `(kind, identifier)` per decision D38; the per-kind
   `config` block defaults to NULL when not supplied.
+  **Tag-conflict resolution.** When the source `(kind, identifier)`
+  already exists (because of bootstrap seeding or a prior `/add-source`),
+  the call is idempotent on the source row but **the new call's `--tags`
+  replace the existing `bootstrap_tags`** for that source row. The
+  user-visible reply distinguishes the two outcomes: "source added" for
+  a fresh insert, "source already existed, tags updated" for a tag
+  replacement. The replaced tags are unioned into the controlled
+  vocabulary (decision D5) before the row write so they are addressable
+  by `/follow-tag` immediately. The caller's `source_subscription` is
+  upserted in the same transaction.
 - `/list-sources [--all] [--page N]` — sources subscribed by the calling
   scope; `--all` is bot-admin only.
 - `/unfollow-source <id>` — per-scope unsubscribe. Different from

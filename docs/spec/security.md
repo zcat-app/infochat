@@ -194,13 +194,25 @@ Two admin tiers (decision D9):
 
 Invariants (also enforced in `schema.md`):
 
-- **Last-admin protection.** Cannot revoke the only admin's `is_admin`,                                                                                                                                                                               
-  cannot ban the only admin, cannot ban self. Enforced at the trigger            
-  layer, not just the command layer, so a buggy command cannot bypass it.
-- **One group admin per group at any time.** Enforced by partial unique                                                                                                                                                                               
-  index. The "first @mention wins" auto-promote path is `INSERT … ON                                                                                                                                                                                  
-    CONFLICT DO NOTHING`; `/promote` demotes the existing admin in the same                                                                                                                                                                             
-  transaction.
+- **Last-admin protection (bot admin only).** Cannot revoke the only bot
+  admin's `is_admin`, cannot ban the only bot admin, cannot ban self.
+  Enforced at the trigger layer, not just the command layer, so a buggy
+  command cannot bypass it. **Group admin has no last-admin protection** —
+  a group can exist with zero admins (a banned or demoted group admin is
+  not auto-replaced; the next bot-admin `/promote` or first-mention path
+  refills the slot).
+- **One group admin per group at any time.** Enforced by partial unique
+  index. The "first @mention wins" auto-promote path is `INSERT … ON
+  CONFLICT DO NOTHING`; the row that loses the race produces no error and
+  no admin row — the user receives the standard non-admin response for
+  whatever command they sent. `/promote` demotes the existing group admin
+  in the same transaction.
+- **Banned-admin lockout escape hatch.** If the existing group admin is
+  banned (their `is_group_admin` row remains but is unreachable per §User
+  ban), a bot admin can `/promote` a different group member; the demote
+  side of the swap clears `is_group_admin` on the banned row in the same
+  transaction. This avoids a permanent group-admin lockout when the
+  current admin is banned and `/unban` is not desired.
 
 Authorization evaluation order on every inbound message:
 
@@ -331,16 +343,21 @@ Exact numbers are profile-driven (decision D27) and live in
 
 Three Postgres roles, least-privilege (decision D34):
 
-- **Collector role** — `INSERT/UPDATE` on ingest-owned tables; `SELECT` on                                                                                                                                                                            
-  the rest; `INSERT`-only on `audit_log`; `LISTEN/NOTIFY`.
-- **Provider role** — write access on user-state tables; `SELECT` on                                                                                                                                                                                  
-  collector-owned tables; `SELECT` on the quarantine review *view* (no
-  raw original content); `INSERT`-only on `audit_log`.
+- **Collector role** — `INSERT/UPDATE` on ingest-owned tables (including
+  `price_snapshot`); `SELECT` on the rest; `INSERT`-only on `audit_log`;
+  `LISTEN/NOTIFY`.
+- **Provider role** — write access on user-state tables; `SELECT` on
+  collector-owned tables (including **`SELECT`-only on `price_snapshot`**:
+  the Provider reads the latest snapshot per `(asset, sub-verb)` for
+  `/zcash` and `/monero` and never writes to it); `SELECT` on the
+  quarantine review *view* (no raw original content); `INSERT`-only on
+  `audit_log`; `LISTEN/NOTIFY` (consumes `new_post`,
+  `new_price_snapshot`, and quarantine state-change channels).
 - **Admin role** — operator psql sessions only. Used for migrations, raw                                                                                                                                                                              
   quarantine inspection, occasional bulk fixes.
 
-The split means a SQL-injection bug in the Provider cannot delete posts          
-or quarantine entries.
+The split means a SQL-injection bug in the Provider cannot delete posts,
+mutate price snapshots, or alter quarantine entries.
 
 ## Secrets handling
 
