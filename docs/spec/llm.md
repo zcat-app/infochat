@@ -85,9 +85,12 @@ Every prompt that includes user-derived text follows the wrapper
 convention from `security.md`:
 
 - A per-call random delimiter wraps untrusted blocks.
-- The system prompt instructs the model to treat the block as data, not          
-  commands; to refuse action requests with a `[refused-action]` marker;                                                                                                                                                                               
-  to never act on URL requests, message-send requests, or admin verbs.
+- The system prompt instructs the model to treat the block as data, not
+  commands; to refuse action requests with a **structured refusal
+  marker** (the literal token used in v1 lives in design notes — keeping
+  the literal out of the spec means changing it does not require a
+  spec amendment); to never act on URL requests, message-send requests,
+  or admin verbs.
 - The Stage 1 redaction step strips literal `<<<UNTRUSTED>>>` markers                                                                                                                                                                                 
   upstream so an attacker can't hard-code one inside the body.
 
@@ -175,10 +178,31 @@ post bodies start leaving the host.
   `/help` text through a model — is explicitly out of v1: it would
   introduce non-determinism into deterministic output and is a
   sanitizer-bypass risk.
-- Translated outputs are cached by `(hash(text), target_language)` for a                                                                                                                                                                              
-  short window so a digest sent to ten group members is not translated                                                                                                                                                                                
+- Translated outputs are cached by `(hash(text), target_language)` for a
+  short window so a digest sent to ten group members is not translated
   ten times.
 - Command parsing is English-only in v1.
+
+### Pipeline order (delivery direction)
+
+For LLM-authored output, the order from generation to delivery is:
+
+1. LLM prose (summarizer, chat agent, digest writer).
+2. **LLM output sanitizer** (`security.md` §LLM output sanitizer) —
+   strips admin command strings.
+3. `TranslationProvider` — skipped if the scope language is English.
+4. **LLM output sanitizer (re-run on translated text)** — the
+   translator is itself an LLM and can introduce admin-command-shaped
+   strings, so the sanitizer runs again on the translated output.
+   Double-sanitization is intentional, not duplicated work.
+5. **Translation cache write** (key:
+   `(hash(English source text), target_language)`, value:
+   post-sanitizer translated text). The cache stores the
+   already-sanitized form so cache hits skip step 4 too.
+6. Adapter delivery.
+
+Cache lookups occur between step 3 and step 4 — a hit short-circuits
+both the translator call and the second sanitizer pass.
 
 ## Determinism boundary
 
@@ -238,11 +262,36 @@ stage.
 - Entity extractor — on failure or schema-violating output, release without
   entities; cross-source linking degrades to embedding-only for that post.
 - Embedding — release without a vector (see Embedding pipeline above);
-  the post is otherwise fully visible.
-- Translation — sanity-check the output: if the response is identical to
-  the input, empty, or clearly not in the target language, fall back to
-  English with a one-line note. The user must never see a hung or garbled
-  response because translation flaked.
+  the post is otherwise fully visible. **Retry policy**: on a batch
+  failure the same batch is resubmitted as-is; the batch is **not
+  split** on retry. If batch size correlates with failures, operators
+  reduce the profile-driven batch size — the spec does not introduce
+  a per-retry split path.
+- **Compression (manual `/compress` or auto-compress).** LLM
+  unreachable, timeout, or schema-violating reply after retry → the
+  chat session is **held at the ceiling**: the user's next chat-mode
+  message returns a localized friendly error
+  ("memory checkpoint pending; please `/compress` manually or try
+  again later"), and the session is never silently truncated.
+  Manual `/compress` failure surfaces the same error and leaves the
+  session unchanged. The escape hatch is `/clear` (which discards
+  the live window — the user's choice, not the system's). The
+  auto-compress trigger fires when the chat session occupies a
+  profile-driven percentage of the context-window ceiling, leaving
+  headroom for the compress prompt and reply itself; the exact
+  percentage lives in design notes. (See also `security.md`
+  §Failure handling — same wording.)
+- Translation — sanity-check the output. The check fails when **(a)**
+  the provider returns an HTTP error, **(b)** the output is
+  byte-identical to the input, **(c)** the output is empty or
+  whitespace-only, or **(d)** for non-Latin target scripts the
+  output contains zero target-script characters; for Latin target
+  scripts the output is byte-identical to the input. The exact
+  threshold for (d) lives in design notes. On a sanity-check
+  failure the system falls back to English with a one-line
+  note. The fallback note itself is a localization-bundle string
+  (D43), not hardcoded English. The user must never see a hung or
+  garbled response because translation flaked.
 
 Admin notifications are throttled per error class.
 

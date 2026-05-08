@@ -16,7 +16,11 @@ A v1 deployment runs:
   router, chat agent.
 - **One LLM provider** (local Ollama / llama.cpp by default; remote                                                                                                                                                                                   
   optional per task).
-- **One messaging adapter backend** (SimpleX in v1).
+- **One messaging adapter backend per deployment.** v1 supports
+  **SimpleX** and **Signal** as production adapters (decision D32);
+  the operator picks one per deployment — both are first-class v1
+  targets and either is exercised in the v1 build. The in-memory
+  test adapter is for tests, not production.
 
 Both services connect to the same DB but use different DB roles
 (`security.md` and decision D34). Both services run Flyway on startup;
@@ -104,14 +108,35 @@ Both services run Flyway migrations first. Then:
   `RAW`/intermediate states from a prior crash). Then starts the fetch                                                                                                                                                                                
   scheduler — including the asset-snapshot fetchers, on the                                                                                                                                                                                           
   profile-driven refresh interval.
-- **Provider** ensures the bot-admin user exists and has `is_admin =                                                                                                                                                                                  
+- **Provider** ensures the bot-admin user exists and has `is_admin =
     true` (audit-logged). Then runs the new-post reconciler — replays
-  any `READY` posts since `last_ready_post_at` (the `LISTEN/NOTIFY`                                                                                                                                                                                   
-  catch-up high-water mark, see `architecture.md`). Then connects the            
+  any `READY` posts since `last_ready_post_at` (the `LISTEN/NOTIFY`
+  catch-up high-water mark, see `architecture.md`). Then connects the
   messaging adapter. Then starts the command router.
 
-A bean failure during startup refuses the service start (Quarkus                                                                                                                                                                                      
-default). The readiness probe stays unhealthy until every required                                                                                                                                                                                    
+**Bootstrap admin drift.** If the configured
+`infochat.admin.contact-id` does not match an existing
+`is_admin = true` row, Provider creates a new admin row
+(audit-logged) and **leaves any prior admin rows in place**. This is
+the safer default than auto-revoking old admins on every startup:
+an operator who rotates the bootstrap value gets a working bot;
+pruning stale bootstrap admins is then an operator action via
+`/revoke-admin` from the new admin's chat. Last-admin protection
+(invariant 2) still applies: the prior admin row cannot be revoked
+until a second active admin exists, which the new bootstrap row
+provides.
+
+**Asset bootstrap.** The Collector loads `bootstrap-assets.json`
+(when configured) and upserts `asset_config` rows by
+`(asset, sub_verb)` (`schema.md` §Operational). Entries removed
+from the file in a later reload are soft-disabled
+(`asset_config.enabled = false`); rows are never hard-deleted, and
+historical `price_snapshot` data for a soft-disabled asset is
+preserved for audit. The asset Fetchers schedule from
+`asset_config` rows where `enabled = true AND status = 'active'`.
+
+A bean failure during startup refuses the service start (Quarkus
+default). The readiness probe stays unhealthy until every required
 startup bean is up. Exact priorities live in design notes.
 
 ## Configuration surface (spec level)
@@ -130,7 +155,15 @@ property keys live in design notes:
   asset commands disabled).
 - **Admin bootstrap.** Bot-admin contact id.
 - **Security.** Release-on-Stage-2-failure default; SSRF allowlist (not
-  user-tunable; see `security.md`); fetch caps (size, timeouts).
+  user-tunable; see `security.md`); fetch caps (size, timeouts);
+  re-evaluation cadence and per-post attempt cap (separate caps for
+  Stage-2-infra-failure class and UNKNOWN-verdict class — both
+  profile-driven, both overridable per-property); admin-review TTL
+  for quarantine rows (`schema.md` invariant 6).
+- **Memory retention.** `chat_memory` TTL is profile-driven *and*
+  overridable per-property; both the profile-default key and the
+  per-property override key live in design notes. Users do not tune
+  this (D40); operators do.
 - **Rate limits.** Per-user buckets (capped at profile defaults; the             
   operator can lower, not raise).
 - **Translation.** Cache TTL, default language.

@@ -150,7 +150,9 @@ choices that shape every section.
   channels.
 - Additional `MessagingAdapter` impls (Telegram, Matrix, etc.).
 - Granular roles (replacing `is_admin` with a `roles` table).
-- Per-group bans / `/kick` distinct from bot-wide ban.
+- Per-group bans / `/kick` distinct from bot-wide ban. Note: in v1 a
+  group admin cannot kick a misbehaving member from the bot's
+  perspective — escalate to a bot admin for `/ban`.
 - `/recall <keyword>` and `/memories` commands.
 - Admin web UI (instead of admin chat commands).
 - More sophisticated cross-source linking (topic modeling).

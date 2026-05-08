@@ -43,7 +43,7 @@ amendment.
 - **Per-(user, scope) isolation** for state, memory, saves. Never leak across users or between DM and group.
 - **Deterministic SQL retrieval; LLM only for ingest evaluation and prose summarization.** The set of posts a command returns must be reproducible.
 - **Two admin tiers.** Bot admin (`user.is_admin`) is global; group admin (`group_membership.is_group_admin`) is per-group. Authorization runs in deterministic Java code; admin operations are NEVER exposed as LLM tools.
-- **Plain-text formatting** for all bot output. Inline code in single backticks, multi-line in triple backticks; bare URLs (no markdown link syntax). Adapters expose a `supportsMarkdownCode` capability flag for richer rendering where available.
+- **Plain-text formatting** for all bot output. Inline code in single backticks, multi-line in triple backticks; bare URLs (no markdown link syntax). Adapters expose a `supportsCodeFormatting` capability flag for richer rendering where available; v1 adapters additionally assert `supportsMarkdownLinks=false` so the rendering surface cannot silently widen.
 - **English by default**, per-scope `/lang <code>` opts into translation via `TranslationProvider` SPI. Source post bodies are never translated.
 - **Outbox pattern** for the evaluation queue: posts are persisted with `status='RAW'` before being enqueued; a startup rehydrator re-enqueues unfinished work.
 - **PostgreSQL LISTEN/NOTIFY** for collector→provider events (no Kafka dependency in v1).

@@ -23,7 +23,7 @@ Anything not strictly required to prove those three points is **deferred** — s
 
 ## 2. Schema (MVP tables only)
 
-Only the tables required by the MVP fetch → evaluate → store → query path. All other tables from [02-schema.md](02-schema.md) are deferred.
+Only the tables required by the MVP fetch → evaluate → store → query path. All other tables from [spec/schema.md](spec/schema.md) (and the matching design notes in [design/02-schema.md](design/02-schema.md)) are deferred.
 
 In scope:
 
@@ -57,7 +57,7 @@ Only one fetcher, only the necessary eval stages.
 
 Stages in MVP, in order:
 
-1. **Security Stage 1** (deterministic) — HTML sanitization, prompt-injection regex with ReDoS protection (RE2/J or 100 ms watchdog), Unicode bidi/zero-width strip, SSRF guard on outbound fetches.
+1. **Security Stage 1** (deterministic) — HTML sanitization, prompt-injection regex with ReDoS protection (the engine choice and watchdog timeout live in [design/04-security.md](design/04-security.md) — keeping concrete values out of the MVP description means tuning them does not require an MVP-doc edit), Unicode bidi/zero-width strip, SSRF guard on outbound fetches.
 2. **Security Stage 2** (LLM judge) — only invoked on Stage 1 hits. Verdict outcomes (`INJECTION` / `MALWARE` / `UNKNOWN`) → `QUARANTINED`. Infrastructure failure (after 1 retry) → release as `READY` with Stage 1 redactions retained and `post.stage2_failed=true`; throttled admin notify; re-evaluate when the LLM returns.
 3. **Tagger** — emits Tier 1 tags only, drawn from the controlled vocab. 1 retry → fallback to the source's bootstrap tags → admin notify.
 4. **Embedding** — single embedding per post. 1 retry → release without embedding (skip any future Tier 2 linking).
@@ -84,9 +84,9 @@ Deferred from the pipeline:
 - `/add-source <url> --tags tag1,tag2[,...]` — DM only; non-banned user; `--tags` mandatory; idempotent on `(kind='rss', identifier=<url>)` (decision D38).
 - `/summary [-w 1h|24h|7d]` — DM only; on-the-fly summarization (no cache); deterministic SQL select of READY posts in the time window for the user's subscriptions; LLM produces prose; topic IDs are **not** included in MVP output.
 
-Everything else from [03-commands.md](03-commands.md) is deferred — see §5.
+Everything else from [spec/commands.md](spec/commands.md) (and the matching design notes in [design/03-commands.md](design/03-commands.md)) is deferred — see §5.
 
-**Onboarding**: auto-register on first DM message; reply with `/help`. No group onboarding (groups are deferred).
+**Onboarding**: the MVP uses the **legacy auto-register-on-first-DM** path so the slice stays minimal — first DM message creates the user and replies with `/help`. v1 layers invite-gating (D44) and slow-start (D45) on top of this; both are in §5's deferred set. No group onboarding (groups are deferred).
 
 **Output formatting**: plain text, backticks for inline/multi-line code, bare URLs. Adapter capability flag is honored (the `InMemoryAdapter` reports `supportsMarkdownCode=false` so the test transcripts stay readable).
 
@@ -104,16 +104,19 @@ This is the explicit deferred list. Each item below is fully specified elsewhere
 - Cross-source linking (`post_reference`, named-entity match, cosine similarity)
 - Topic IDs / topic clustering
 - `TranslationProvider` SPI and `/lang`
-- Periodic 8am/8pm group summaries, staggered scheduler, summary cache, Pi-profile degraded fallback
-- Auto-compress at 75% context, `chat_memory`, hybrid memory retrieval, `recall_memory()` agent tool
+- Periodic morning / evening group summaries, staggered scheduler, summary cache, Pi-profile degraded fallback
+- Auto-compress near the profile-driven context-window ceiling, `chat_memory`, hybrid memory retrieval, `recall_memory()` agent tool
 
 ### Schema
 - `group`, `group_membership`
-- `saved_post`, `chat_memory`, `chat_session`
+- `saved_post`, `chat_memory`, `chat_session`, `summary_anchor`
 - `post_reference`, `post_entity`
 - `quarantine_review`, `admin_notification`
 - `summary_cache`
 - `scope_tag` follow/unfollow rows
+- `invite_code` and the bot-admin invite issuance flow (D44)
+- `users.probation_until` and the slow-start tier (D45)
+- `asset_config` and `price_snapshot` (D39)
 
 ### Commands
 - `/save`, `/saved`, `/unsave`
@@ -134,7 +137,7 @@ This is the explicit deferred list. Each item below is fully specified elsewhere
 - Group `@mention` reply path
 
 ### Adapters / providers
-- SimpleX adapter
+- SimpleX and Signal adapters (deferred past the MVP, exercised in the v1 build)
 - Anthropic LLM provider (only OpenAI-compatible in MVP)
 - Concrete `TranslationProvider` impls
 - `vps`, `pi`, `remote` hardware profiles (config plumbing in place, not exercised)

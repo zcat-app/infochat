@@ -39,11 +39,16 @@ Collector and Provider communicate only through the shared database:
 - **Catch-up.** A high-water mark on the Provider side guarantees correctness
   across restarts, since `LISTEN/NOTIFY` is best-effort and does not buffer
   events for disconnected listeners. NOTIFY is the latency optimization; the
-  high-water mark is the correctness guarantee. The catch-up query uses
-  `> last_ready_post_at`; the high-water mark is advanced **in the same DB
-  transaction** as the side effect it triggers, making processing idempotent:
-  a duplicate NOTIFY or a repeated catch-up pass for the same row produces
-  no additional side effect.
+  high-water mark is the correctness guarantee. The cursor is the
+  `(ready_at, post_id)` pair (not `ready_at` alone) so two posts with
+  identical `ready_at` cannot lose one to the cursor. The catch-up query
+  is `WHERE (ready_at, post_id) > (:last_ready_at, :last_post_id)
+  ORDER BY ready_at, post_id`; the high-water mark advances both fields
+  **in the same DB transaction** as the side effect it triggers,
+  making processing idempotent. The advance uses compare-and-swap
+  (`schema.md` §Provider state) so a slow processor cannot roll back
+  a fast one's mark; a duplicate NOTIFY or a repeated catch-up pass
+  for the same row produces no additional side effect.
 
 No external message broker in v1. Replacing the in-process channels with one
 later is a swap, not a rewrite (see decisions D3, D4).
@@ -58,6 +63,17 @@ digests, and contention on `provider_state`. Multi-instance horizontal scaling
 is a v2 spec amendment that requires per-source leasing (or partitioned
 fetcher assignment), per-group digest leasing, and a coordination story for
 the high-water mark.
+
+**Enforced via Postgres advisory lock.** Each service acquires a
+named `pg_advisory_lock` at startup (`infochat.collector` and
+`infochat.provider`, hashed to int8 per Postgres convention). A
+second instance attempting to acquire the lock fails fast with a
+fatal log message that points at the running instance's host
+identifier — recorded in a heartbeat row updated every N seconds
+(value in design notes). The lock is released on graceful shutdown;
+on hard kill the heartbeat staleness eventually invalidates the
+prior holder. This makes "exactly one" an enforced invariant, not
+a policy.
 
 The "independent scaling" benefit of the service split (above) is about
 deploying the two services on different hosts with different resource shapes,
@@ -93,9 +109,15 @@ from.
   they never hit the post outbox, never go through Stage 1/2,
   tagger, or embedding. The Fetcher SPI carries an output-type
   discriminator so the Collector's per-tick dispatch routes the
-  result to the right sink. There are no "ghost" `source` rows for
-  asset feeds: `price_snapshot` is keyed by `(asset, sub-verb)`
-  alone, not by a `source.id`.
+  result to the right sink. There are no `source` rows for asset
+  feeds: scheduling, status, and per-`(asset, sub_verb)` enable
+  state live in **`asset_config`** (`schema.md` §Operational, the
+  asset-side parallel to `source`). The Collector's asset
+  scheduler reads `asset_config` rows where `enabled = true AND
+  status = 'active'`; D42's per-source failure-counter model
+  applies to `asset_config.consecutive_failures` and the
+  `active → failed` transition on threshold crossing. The
+  Provider has `SELECT` on both `asset_config` and `price_snapshot`.
 - **`StreamSource`** — *long-lived, event-driven*. Started once at
   Collector startup; runs as a supervised worker that maintains its
   own connection (typically `wss://`, but the SPI is named around
@@ -106,26 +128,44 @@ from.
   outbox. Delivery to the outbox is **at-least-once**: an event is
   written to the outbox before the implementation considers it processed;
   duplicate deliveries (same event-id from multiple relays, or reconnect
-  replays) are deduplicated by stable upstream id. On graceful Collector
-  shutdown the implementation drains in-flight events to the outbox within
-  a profile-driven timeout; events not drained within that window are
-  dropped and will reappear on the next relay connection. Used by Nostr in v1.
+  replays) are deduplicated by stable upstream id.
+
+  **Drain on shutdown.** On graceful shutdown the StreamSource
+  implementation MUST aggressively flush in-flight events to the
+  outbox before acknowledging the shutdown signal. Events not
+  drained within a profile-driven hard timeout are dropped and
+  **not guaranteed to reappear** — the previous "events will
+  reappear on the next relay connection" wording was protocol-false:
+  Nostr relays do not universally replay history. On reconnect, the
+  implementation issues `since=last_persisted_event_at` per relay;
+  relays that support `since` filters will replay missed events,
+  relays that do not may produce permanent gaps. A per-relay
+  "events lost on shutdown" counter is exposed for operator
+  monitoring. **Non-graceful shutdown** (OOM, SIGKILL): same
+  outcome — events in-flight at the SIGKILL moment are lost; the
+  counter increments based on the gap between last-acknowledged
+  and re-delivered. Used by Nostr in v1.
 
 Picking between the two is deterministic: if the source is "fetch a
 URL on a tick," it's a `Fetcher`; if the source is "subscribe and
 receive events as they happen," it's a `StreamSource`. Sources MUST
 NOT straddle.
 
-**Source identity** (decision D38) is `(kind, identifier, config)`:
+**Source identity** (decision D38). The unique key is `(kind,
+identifier)`. The per-kind `config` block is a mutable value
+attached to that key; bootstrap reload and bot-admin source
+maintenance update it in place. `config` is **not** part of the
+unique key — making it part of the key would cause every relay-list
+edit to create a duplicate `source` row at the next bootstrap
+reload.
 
 - `kind` — the ingest type (`rss`, `bluesky`, `nostr`, …). Picks both
   the SPI shape and the implementation.
 - `identifier` — the URL for HTTP-shaped sources, the filter spec for
-  stream sources. Together with `kind` it forms the unique key for
-  `source` rows.
-- `config` — opaque per-kind JSON. Holds Nostr's relay list, kinds
-  filter, and any other per-source tuning that doesn't fit the
-  identifier.
+  stream sources. Together with `kind` it forms the unique key.
+- `config` — opaque per-kind JSON value (mutable). Holds Nostr's
+  relay list, kinds filter, and any other per-source tuning that
+  doesn't fit the identifier.
 
 **Cross-source dedup** is the implementation's responsibility, not the
 outbox's. For stream sources where the same event can arrive from N

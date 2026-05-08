@@ -54,8 +54,16 @@ Every adapter implements:
 - `trustLevel` — `HIGH` for cryptographically anchored ids, `LOW`                                                                                                                                                                                     
   otherwise. Provider rejects identity assertions from `LOW` adapters                                                                                                                                                                                 
   unless the operator explicitly opts in.
-- `supportsMarkdownCode` — when true, code spans render as monospace.                                                                                                                                                                                 
-  When false, the user sees backticks (still readable, decision D30).
+- `supportsCodeFormatting` — when true, code spans render as
+  monospace. When false, the user sees backticks (still readable,
+  decision D30). **Renamed from `supportsMarkdownCode`** because the
+  prior name implied broader markdown support; v1 adapters render
+  *only* code spans, never markdown links or other markdown
+  features. To enforce that the surface does not silently widen, every
+  v1 adapter additionally asserts `supportsMarkdownLinks = false` —
+  Provider treats this flag as required-false in v1 and a future
+  adapter cannot opt in without an explicit spec amendment. URLs are
+  always rendered bare (D30).
 - `supportsMessageEdit` — required for in-place progress updates.
 - `minEditInterval` — adapter-imposed floor between edits on the same                                                                                                                                                                                 
   message; the progress notifier honors `max(adapterMin, system floor)`.
@@ -72,9 +80,12 @@ A message handle is an opaque token returned by `send()`. It lets the
 caller subsequently `update` or `finalize` the same visible message.
 
 - Contents are adapter-defined.
-- Callers MUST NOT inspect or persist a handle. It is valid only within                                                                                                                                                                               
-  the originating adapter, in-process.
-- Handles are how the progress notifier turns a stream of stage events                                                                                                                                                                                
+- Callers **MUST NOT** persist a handle to the database, **MUST NOT**
+  pass it between service instances, and **MUST NOT** inspect or
+  rely on the contents. It is valid only within the originating
+  adapter, in-process. Holding it in memory for a single request's
+  processing (placeholder → updates → finalize) is the intended use.
+- Handles are how the progress notifier turns a stream of stage events
   into a single visibly-evolving message.
 
 ## Progress notifications
@@ -107,6 +118,39 @@ Constraints:
 The exact event names, edit interval floor, and localization-bundle
 structure live in design notes.
 
+## Per-adapter trust level and identity
+
+Every v1 adapter has a documented trust level and a documented
+contact-id shape. Operators picking an adapter know exactly what
+kind of identity assertion they are getting.
+
+- **SimpleX.** Trust level: **HIGH**. The contact id is a
+  cryptographic queue address — there is no human-readable user
+  name layer; the address itself is the identity. Display name is
+  informational only. Adapter asserts identity via SimpleX's
+  cryptographic message-routing layer; the bot trusts it as the
+  D10 anchor.
+- **Signal.** Trust level: **HIGH**. The contact id is the user's
+  registered phone number (E.164) or, where Signal supports it,
+  the username. The Signal protocol's Sealed Sender / sender
+  certificate provides cryptographic identity assertion at the
+  message layer; display name is informational. The Signal
+  identity assertion is the D10 anchor on Signal. **Cross-adapter
+  isolation invariant** (`security.md` §Invite-code registration):
+  a Signal contact id is **never** matched against a SimpleX
+  contact id even on byte-equality — the `(adapter, contact_id)`
+  tuple is always the join key, so `users.contact_id` plus
+  `users.adapter` together identify a row. Invite codes scoped to
+  Signal cannot be consumed by a SimpleX contact and vice versa.
+- **InMemory** (test only). Trust level: **configurable, defaults
+  to LOW**. Tests that exercise admin paths opt into HIGH
+  explicitly; the default-LOW makes accidental privilege escalation
+  in a test harness impossible by default.
+
+A future adapter (Telegram, Matrix, etc.) lands its trust-level and
+identity-assertion shape in this section before being enabled in
+production.
+
 ## Identity and groups
 
 - Inbound message → adapter resolves to `(contact_id, scope)`. DM scope                                                                                                                                                                               
@@ -122,8 +166,8 @@ structure live in design notes.
 
 Provider produces plain text per decision D30. The adapter:
 
-- May choose to render single-backtick spans as inline code if                                                                                                                                                                                        
-  `supportsMarkdownCode = true`.
+- May choose to render single-backtick spans as inline code if
+  `supportsCodeFormatting = true`.
 - MUST leave URLs bare (no markdown link wrapping) regardless of                                                                                                                                                                                      
   capability — the URL is the citation; obscuring it would defeat the                                                                                                                                                                                 
   point.
@@ -133,14 +177,34 @@ Provider produces plain text per decision D30. The adapter:
 
 ## Failure handling
 
-- Send/update/finalize failures are reported to Provider as exceptions                                                                                                                                                                                
-  with a category (transient vs. permanent). Transient failures retry                                                                                                                                                                                 
+- Send/update/finalize failures are reported to Provider as exceptions
+  with a category (transient vs. permanent). Transient failures retry
   with backoff; permanent failures abort the affected reply and log.
-- An adapter cannot silently drop messages. Either delivery succeeds or                                                                                                                                                                               
+- An adapter cannot silently drop messages. Either delivery succeeds or
   the caller learns it didn't.
-- Adapter-internal back-pressure (e.g. rate limits enforced by the                                                                                                                                                                                    
-  transport) surfaces as transient failures so Provider's per-user rate          
+- Adapter-internal back-pressure (e.g. rate limits enforced by the
+  transport) surfaces as transient failures so Provider's per-user rate
   limiter is the single source of truth for "slow this user down".
+- **Permanent delivery failure cleanup.** Permanent failures (the
+  user blocked the bot, the group is gone, credentials revoked)
+  abort the affected reply **without advancing chat session state**
+  — the context window remains as if the message was never
+  generated, and `chat_memory` is not written. For periodic group
+  digests, the failure is logged; the next slot retries. Sustained
+  permanent failure on a group triggers the bot-removed-from-group
+  handler below. The retry queue does not re-attempt permanent
+  failures.
+- **Bot removed from group.** When the adapter detects the bot has
+  been removed from a group (via an adapter-specific signal, or
+  via repeated permanent send failures past a profile-driven
+  threshold), Provider sets `groups.removed_at = NOW()` and
+  cancels the periodic-digest scheduler entries for that group.
+  The row is preserved for audit; on re-add the adapter signal
+  clears `removed_at`. **Group state (subscriptions, `scope_tag`,
+  `chat_memory`, `chat_session`, members' saves) is not purged
+  automatically** — the row is preserved against accidental
+  remove/re-add cycles. Cleanup of long-removed groups is a v2
+  admin command.
 
 ## What lives in design notes
 

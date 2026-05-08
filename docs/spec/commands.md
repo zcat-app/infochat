@@ -59,8 +59,10 @@ text, and output structure are in `docs/design/03-commands.md`.
   counts; admin sees more). DM and group; any non-banned user.
 - `/get-tags` — controlled vocabulary, marking the scope's followed
   tags. DM and group; any non-banned user (read-only, scope-filtered).
-- `/get-sources` — alias of `/list-sources` without `--all`. DM and
-  group; any non-banned user (read-only, scope-filtered).
+- `/get-sources` — alias of `/list-sources` accepting the same
+  flags **except `--all`** (and therefore not `--include-deleted`
+  either, since that requires `--all`). DM and group; any
+  non-banned user (read-only, scope-filtered).
 
 ### Content
 
@@ -74,15 +76,32 @@ text, and output structure are in `docs/design/03-commands.md`.
   D19): the cluster set is reproducible and depends only on the DB
   state, not on the LLM. A profile-driven cluster cap (value in
   design notes) bounds per-call work; clusters beyond the cap are
-  truncated with a "+N more" footer.
+  truncated with a "+N more" footer. **Empty window**: when no
+  eligible posts exist in the window, `/summary` returns a friendly
+  "no posts yet" reply (deterministic localization-bundle string,
+  no LLM invocation, no empty summary block).
 - `/save <uid> [-t personal-tags]` — bookmark a post into the calling
-  user's library (per-user, even in groups). Personal tags are
-  free-form and never join the controlled vocabulary. Each user's
-  saved-post library is **bounded by a profile-driven per-user cap**
-  (decision D13); the exact value lives in design notes. A `/save`
-  that would exceed the cap returns a friendly error pointing the
-  user at `/unsave`; the cap is the same for every user on a given
+  user's library. **Saves are per-user-globally** (decision D13): a
+  save made in DM is visible from any group, and vice versa. Personal
+  tags are free-form and never join the controlled vocabulary. Each
+  user's saved-post library is **bounded by a profile-driven per-user
+  cap** (decision D13); the exact value lives in design notes. The cap
+  is enforced **atomically**: the implementation uses
+  `SELECT … FOR UPDATE` on the user's save-counter row (or an
+  equivalent CHECK constraint on a derived counter) so two concurrent
+  `/save` calls at cap-1 admit exactly one. A `/save` that would
+  exceed the cap returns a friendly error pointing the user at
+  `/unsave`; the cap is the same for every user on a given
   deployment (no per-user bespoke values).
+  **Visibility-of-target rules.** `/save` on a `READY` post snapshots
+  the visible body. `/save` on a `QUARANTINED` post that has a
+  Stage 2 `BENIGN` verdict (visible with Stage 1 redactions) snapshots
+  the redacted body. `/save` on a `QUARANTINED` post with `INJECTION`,
+  `MALWARE`, or `UNKNOWN` (hidden — invisible to the user) is
+  treated as an unknown UID. `/save` on a `NEEDS_REVIEW` post follows
+  the visibility rules of its Stage 1 redactions (same as Stage 2
+  BENIGN above). The `/save` flow never lets a user bookmark content
+  they cannot see.
 - `/saved [tag] [-w …] [--page N]` — list saved posts with optional
   filters and pagination.
 - `/unsave <uid>` — remove from library (no confirmation).
@@ -164,6 +183,16 @@ Cross-cutting rules for asset commands (D39):
   suggestions (commands.md §Friendly errors).
 - **`/help` is context-aware.** Only operator-enabled assets appear
   in `/help`; only enabled sub-verbs appear in per-command help.
+- **Enable / disable lifecycle.** Asset commands are enabled only
+  when `bootstrap-assets.json` is configured and contains the
+  asset; the per-`(asset, sub_verb)` enabled flag lives in
+  `asset_config` (`schema.md` §Operational). When disabled, the
+  command does not appear in `/help` and an attempted invocation
+  returns the "not configured" friendly error. **Soft-disable**
+  (asset present in bootstrap, then later removed): on the next
+  bootstrap reload the loader sets `asset_config.enabled = false`;
+  the row and historical `price_snapshot` data are preserved for
+  audit, never hard-deleted.
 
 ### Source management
 
@@ -171,13 +200,20 @@ Source rows are global; subscriptions are per-scope (decision D7). DM
 subscriptions are private to the user; group subscriptions are
 shared across the group and writable only by group admins.
 
-- `/add-source <url> --tags …` — DM: any non-banned user adds to
-  their own scope. Group: group admin only. Tags are mandatory (decision
-  D14). The source `kind` (rss / bluesky / nostr / …) is inferred from
-  the URL shape; an explicit `--type <kind>` override is accepted but
-  not required, and defaults to `rss` when inference is ambiguous.
-  Identity is `(kind, identifier)` per decision D38; the per-kind
-  `config` block defaults to NULL when not supplied.
+- `/add-source <url> --tags … [--category <name>]` — DM: any
+  non-banned user adds to their own scope. Group: group admin only.
+  Tags are mandatory (decision D14). The source `kind` (rss /
+  bluesky / nostr / …) is inferred from the URL shape; an explicit
+  `--type <kind>` override is accepted but not required, and
+  defaults to `rss` when inference is ambiguous. Identity is
+  `(kind, identifier)` per decision D38; the per-kind `config`
+  block defaults to NULL when not supplied. The `--category` flag
+  selects one of `news` / `blog` / `social`; default is `news`
+  for user-added sources. **Note:** `category` is informational
+  metadata in v1 and is not used for retrieval, filtering, or
+  permission decisions; v2 may attach behavior to it (e.g., a
+  chat-agent tool filter), v1 commits to nothing beyond
+  storing it.
   **URL validation before insert.** For HTTP-shaped kinds, the
   Provider performs a lightweight `HEAD` (or, for servers that reject
   `HEAD`, a small-range `GET`) reachability probe through the
@@ -192,49 +228,109 @@ shared across the group and writable only by group admins.
   operator is trusted) but not for `/add-source`.
   **Tag-conflict resolution.** When the source `(kind, identifier)`
   already exists (because of bootstrap seeding or a prior `/add-source`),
-  the call is idempotent on the source row but **the new call's `--tags`
-  replace the existing `bootstrap_tags`** for that source row. The
-  user-visible reply distinguishes the two outcomes: "source added" for
-  a fresh insert, "source already existed, tags updated" for a tag
-  replacement. The replaced tags are unioned into the controlled
-  vocabulary (decision D5) before the row write so they are addressable
-  by `/follow-tag` immediately. The caller's `source_subscription` is
-  upserted in the same transaction.
-- `/list-sources [--all] [--page N]` — sources subscribed by the
-  calling scope; `--all` is bot-admin only and lists **every source
-  row globally where `deleted_at IS NULL`** (across all kinds, all
-  scopes, regardless of subscription). `failed` and `disabled`
-  status rows are included with their status flagged in the output
-  so an admin can see what is currently unhealthy without a separate
-  command.
+  the call is idempotent on the source row. **A non-admin caller never
+  rewrites `bootstrap_tags`** on an existing source row — source rows
+  are global per D7, so allowing any DM user to mutate the
+  deterministic-tagger fallback for every other subscriber would
+  silently change the ingest behaviour for users who never asked for
+  it. For a non-admin caller against an existing row: the caller's
+  `source_subscription` is upserted, the user-visible reply is
+  "subscribed; tags unchanged on existing source," and the supplied
+  `--tags` are quietly ignored. **Only a bot admin** may supply
+  `--tags` to replace `bootstrap_tags` on an existing row; this is
+  the single path that mutates the global row's tags and is
+  audit-logged. Per-scope tag preferences continue to flow through
+  `scope_tag` (`/follow-tag` / `/unfollow-tag`), not through
+  `/add-source`. On a fresh insert (whether bot-admin or non-admin),
+  the supplied `--tags` populate `bootstrap_tags` and are unioned into
+  the controlled vocabulary (decision D5) before the row write so
+  they are addressable by `/follow-tag` immediately. The user-visible
+  reply distinguishes outcomes: "source added" (fresh insert),
+  "source already existed, tags updated" (bot-admin tag replacement),
+  "subscribed; tags unchanged on existing source" (non-admin against
+  existing row). The caller's `source_subscription` is upserted in
+  the same transaction in all three cases.
+- `/list-sources [--all] [--include-deleted] [--page N]` — sources
+  subscribed by the calling scope; `--all` is bot-admin only and
+  lists **every source row globally where `deleted_at IS NULL`**
+  (across all kinds, all scopes, regardless of subscription).
+  `failed` and `disabled` status rows are included with their
+  status flagged in the output so an admin can see what is
+  currently unhealthy without a separate command.
+  `--include-deleted` (bot-admin only, valid only with `--all`)
+  also lists soft-deleted source rows for forensic / cleanup
+  workflows. **URL visibility caveat.** Source URLs are global
+  state and visible to bot admins via `--all`. Users adding
+  private feeds should treat URLs as operator-visible
+  (`security.md` §Source URL visibility).
 - `/unfollow-source <id>` — per-scope unsubscribe. Different from
   `/remove-source`: does not touch the global source row.
-  **Permission.** DM: the caller's own subscription only. Group: any
-  group member may unfollow a subscription **they** added; a group
-  admin (or bot admin acting in the group) may unfollow any
-  subscription on behalf of the group. The "last group subscription"
-  case (the row being removed is the group's only remaining
-  subscriber for that source) is restricted to group admin or bot
-  admin — a plain group member cannot leave the group with zero
-  subscribed sources.
+  **Permission (v1).** DM: the caller's own subscription only.
+  Group: **group admin or bot admin only** — a plain group member
+  cannot unfollow a group subscription. The earlier "any group
+  member may unfollow a subscription they added" exception is not
+  in v1: it requires per-contributor ownership tracking
+  (`source_subscription.added_by`, contributor sub-tables, and a
+  "last contributor leaves" edge case) that no review report
+  flagged as necessary. v2 may revisit if user requests
+  materialize.
 - `/remove-source <id>` — bot-admin only, requires confirm. Soft-delete
-  only.
+  only. The source row's `source_subscription` rows are
+  cascade-deleted in the same transaction (the source is gone, so
+  scope-level subscriptions to it must go too). `/unfollow-source`
+  in contrast deletes only the caller's subscription; the source
+  row stays. The "no remaining subscribers" state does **not**
+  auto-soft-delete the source — sources can exist without
+  subscribers and be re-followed later.
+- `/source-enable <id>` — bot-admin only. Transitions a `failed`
+  or `disabled` source row back to `active`. Emits a probe (HEAD
+  for HTTP-shaped, single-relay connection attempt for
+  StreamSource-shaped) before the transition; probe failure
+  leaves the source in its prior state with a friendly error.
+  Audit-logged. Resets the consecutive-failure counter on success.
+  This is the admin recovery path the spec already commits to in
+  `schema.md` §Sources and tags ("`failed → active` is set by an
+  admin recovery command"); naming it explicitly here closes the
+  catalogue.
 
 ### Per-scope tag preferences
+
+The scope's tag-selection mode is recorded explicitly on
+`scope_preferences.tag_mode ∈ {ALL, EXPLICIT}` (default `ALL`),
+not implicitly via "any rows in `scope_tag`?" — implicit-mode logic
+breaks down on edge cases like `/unfollow-tag` against an empty set
+and makes the digest query depend on row presence.
 
 - `/follow-tag <tag>` / `/unfollow-tag <tag>` — controls which tags
   appear in the scope's periodic digest. **Default for a fresh scope
   is "all tags from subscribed sources" (decision D15) — and the
-  default is dynamic, recomputed at each digest run.** A scope with
-  no `scope_tag` rows opts into the union of tags currently attached
-  to its subscribed sources at digest time, so a `/add-source` that
-  introduces a new tag to that union takes effect on the next digest
-  without requiring an explicit `/follow-tag`. The first
-  `/follow-tag` or `/unfollow-tag` call from a scope **switches the
-  scope to explicit mode**: the digest then uses only the tags whose
-  `scope_tag` rows exist for that scope. Returning to "all tags" is
-  done by removing the explicit rows (one `/unfollow-tag` per
-  followed tag, or a future `/reset-tags` command — out of v1).
+  default is dynamic, recomputed at each digest run.** A scope in
+  `ALL` mode opts into the union of tags currently attached to its
+  subscribed sources at digest time, so a `/add-source` that
+  introduces a new tag to that union takes effect on the next
+  digest without requiring an explicit `/follow-tag`.
+
+  Mode transitions:
+
+  - `ALL` mode + `/follow-tag <tag>` → flip to `EXPLICIT` and seed
+    `scope_tag` rows for **the followed tag only**. Matches the user
+    mental model: "I asked for X, only X."
+  - `ALL` mode + `/unfollow-tag <tag>` → flip to `EXPLICIT` and seed
+    rows for **all currently subscribed-source `bootstrap_tags`
+    minus the unfollowed tag**. Matches the user mental model: "I
+    want everything except X."
+  - `EXPLICIT` mode + `/follow-tag` / `/unfollow-tag` → add or
+    remove the row in place. When the row count drops to 0, the
+    mode flips back to `ALL`.
+
+  Digest query: `ALL` mode uses the union of subscribed-source
+  `bootstrap_tags`; `EXPLICIT` mode uses only the tags whose
+  `scope_tag` rows exist for that scope.
+
+- `/unfollow-tag --all` — bulk reset. Requires confirm. In any
+  mode, deletes all `scope_tag` rows for the scope and sets
+  `tag_mode = ALL`. The single command for "I want the dynamic
+  default back."
 
 ### Conversation control
 
@@ -255,29 +351,54 @@ shared across the group and writable only by group admins.
   per-group `groups.timezone` value, audit-logged before effect.
   Unknown zone names produce the friendly-error path with fuzzy
   suggestions over the IANA tzdb names.
-- `/forget` — immediate purge of the calling `(user, scope)`'s chat
-  memory and saved-post list. Per decision D37, this is the user-facing
-  privacy lever: anything kept on the user's behalf is removed. Does not
-  touch `users.is_admin`, `users.is_banned`, group membership, or any
-  audit row (the audit log is append-only by invariant). Audit-logged
-  before effect like every privileged action against user state.
-  Requires confirm. Idempotent: a second `/forget` with nothing to
-  remove returns a friendly no-op reply.
+- `/forget` — immediate purge of everything kept on the calling
+  user's behalf. Per decision D37, this is the user-facing privacy
+  lever. The exact purge set, called from any scope, is:
+  - `chat_memory` rows for `(caller, calling_scope)`;
+  - `chat_session` rows for `(caller, calling_scope)` (the live
+    context window — without this, a user who `/forget`s to escape
+    a runaway thread still sees it next time they message);
+  - `summary_anchor` rows for `(caller, calling_scope)` (defensive
+    — no leftover anchor pointing at posts from the prior session);
+  - `saved_post` rows for the caller — **globally, regardless of
+    calling scope** (saves are per-user-globally per A10/D13;
+    `/forget` from any scope wipes the whole library).
+
+  Does **not** touch `users.is_admin`, `users.is_banned`,
+  `group_membership`, or any `audit_log` row (the audit log is
+  append-only by invariant). Hard purge is the v1 contract; soft-
+  delete tombstones would silently violate D37's privacy
+  commitment. Audit-logged before effect like every privileged
+  action against user state. Requires confirm. Idempotent: a
+  second `/forget` with nothing to remove returns a friendly
+  no-op reply (no audit row written for the no-op).
 - `/export` — returns the calling user's own data. Group output is
-  defined by an **explicit table list**, not by a vague "the user's
-  contributions" rule, so the boundary is testable: rows from
-  `chat_memory`, `saved_post`, `scope_preferences`, `scope_tag`,
-  `chat_session`, and `source_subscription` whose scope key matches
-  the calling `(user, group)`, plus the caller's own `users` row
-  (excluding fields derived from the authorization state of *other*
-  users — last-admin counters, etc.). DM: full self-export under the
-  same table list, scoped to the calling user's DM scope. Group:
-  scoped to the calling `(user, group)` only — never another user's
-  rows in any of those tables, never group-wide content (other
-  members' messages, the group's `groups` row beyond `id` and
-  `timezone`, audit log entries about other users), never any row
-  outside the listed tables. Output format and size cap are in design
-  notes.
+  defined by an **explicit table list and a field-level positive
+  list**, not by a vague "the user's contributions" rule, so the
+  boundary is testable.
+  Tables included:
+  - `chat_memory`, `scope_preferences`, `scope_tag`,
+    `chat_session`, `source_subscription`, `summary_anchor` whose
+    scope key matches the calling scope;
+  - `saved_post` rows for the caller — **the full library
+    regardless of calling scope** (saves are per-user-globally per
+    A10/D13);
+  - the caller's own `users` row in full **except** `is_admin`,
+    `banned_by`, `ban_reason`, `banned_at`, `probation_until`
+    (these are authorization-state fields about the user, not data
+    held on the user's behalf — exposing them is at best
+    redundant, at worst a vector for confusion);
+  - the caller's own `audit_log` rows (rows where
+    `actor = self`); audit rows that mention the caller as a
+    target without being authored by them are **not** included.
+  Group `/export` is scoped to the calling `(user, group)` for
+  per-scope tables and to the caller for `saved_post` — never
+  another user's rows in any of those tables, never group-wide
+  content (other members' messages, the group's `groups` row
+  beyond `id` and `timezone`, audit log entries about other users),
+  never any row outside the listed tables. DM `/export` follows
+  the same shape with DM as the scope key. Output format and size
+  cap are in design notes.
 - `/stop` — cancels the calling (user, scope)'s currently in-flight
   interruptible request **immediately**, so the worker is freed for
   others. Applies to chat-mode agent loops and user-issued `/summary`
@@ -285,33 +406,66 @@ shared across the group and writable only by group admins.
   ingest pipeline, or already-completed work. The in-flight LLM
   stream is closed and any in-flight read-only tool call is
   abandoned: the worker discards the in-flight result, releases the
-  DB connection, and moves on. The DB-side query itself may continue
-  to completion server-side (the spec does not promise that the
-  Postgres backend is killed); what the spec promises is that the
-  *worker* and the *user-visible state* are released without waiting
-  for it. Once outbound delivery has begun the message is not
-  unsent. Idempotent (no-op with a friendly reply when nothing is in
-  flight). Audit-before-effect still holds — any audit row written
-  before cancellation stays. The progress notifier (decision D31)
-  renders a final "stopped" state on the in-place message. See
-  decision D35.
-- `/retry` — regenerates the prose for the last summary-producing
-  command in the calling (user, scope). Re-runs the LLM stage only;
+  DB connection, and moves on. The released DB query is
+  **best-effort cancelled via `pg_cancel_backend(pid)`** at the
+  released connection so the connection pool is not drained by
+  long-running orphans; the cancellation is best-effort because
+  Postgres may complete the query before the cancel takes effect.
+  As an additional safety net, every interruptible read-only query
+  (chat-mode tool calls, on-demand `/summary`) runs under a
+  profile-driven `statement_timeout` that bounds the worst case
+  even when `pg_cancel_backend` fails. Once outbound delivery has
+  begun the message is not unsent. Idempotent (no-op with a
+  friendly reply when nothing is in flight). Audit-before-effect
+  still holds — any audit row written before cancellation stays.
+  The progress notifier (decision D31) renders a final "stopped"
+  state on the in-place message. See decision D35.
+- `/retry` [`--digest`] — regenerates the prose for the last
+  summary-producing command. Re-runs the LLM stage only;
   deterministic post selection and clustering are reused unchanged
-  (decision D19). Bounded by a small fixed retry cap (value in
-  design notes) anchored to that most-recent summary-producing
-  command. Any non-`/retry` input from the same (user, scope) clears
-  the anchor; `/retry` itself never advances or resets it. No effect
-  (friendly error) when no eligible anchor exists, when the anchor
-  has been cleared, when the prior command was cancelled by `/stop`,
-  or when the prior command was not summary-producing. For periodic
-  group digests, `/retry` is group-admin or bot-admin only and
-  replaces the cached digest (decision D17); the post selection is
-  the **frozen** selection captured when the original digest was
-  generated (the digest's slot window, not the wall-clock window at
-  the moment `/retry` runs) — only the prose layer is re-rolled, so
-  the digest does not silently drift forward as time passes. See
-  decision D36.
+  (decision D19, schema.md §Summary anchor). Bounded by a small
+  fixed retry cap (value in design notes) anchored to that
+  most-recent summary-producing command. Any non-`/retry` input
+  from the same (user, scope) clears the anchor; `/retry` itself
+  never advances or resets it. No effect (friendly error) when no
+  eligible anchor exists, when the anchor has been cleared, when
+  the prior command was cancelled by `/stop`, or when the prior
+  command was not summary-producing.
+
+  **Routing rules in groups.** A group has both per-member personal
+  anchors (one per `(user, group)` from the user's last `/summary`)
+  and a group-wide cached digest (per decision D17). The
+  `summary_anchor` row's `command_kind` discriminator
+  (`personal` vs. `digest`) drives routing:
+
+  - Regular group member's `/retry` → matches the member's own
+    most recent `personal` summary anchor in this group, if it
+    exists. Group-admin-only access does not apply because the
+    member is regenerating their own personal summary.
+  - Group admin's `/retry`, with no personal anchor of their own
+    → resolves to the group's cached `digest` anchor, if present
+    and within the retry window.
+  - Group admin's `/retry` with both a personal anchor and a
+    cached digest → defaults to the personal anchor (the user's
+    most recent action wins). Use `/retry --digest` to disambiguate
+    explicitly when the admin wants the cached digest specifically.
+  - Non-admin's `/retry --digest` → friendly error
+    (group-admin or bot-admin only for digest replacement).
+
+  For periodic group digests, the retry replaces the cached digest
+  (decision D17); the post selection is the **frozen** selection
+  captured when the original digest was generated (the digest's
+  slot window, not the wall-clock window at the moment `/retry`
+  runs) — only the prose layer is re-rolled, so the digest does
+  not silently drift forward as time passes.
+
+  **Cached digest message handle.** The handle is held in process
+  memory only (`messaging.md` §Message handles forbids handle
+  persistence). After a Provider restart, a `/retry --digest`
+  posts a *new* message (with prose noting it replaces the prior
+  cached digest for subsequent reads); the original message is
+  not edited because the handle is gone. See decision D36 and B25
+  (delivery failure) for adjacent rules.
 
 ### Admin (bot admin)
 
@@ -338,11 +492,24 @@ shared across the group and writable only by group admins.
 - `/vouch <contact>` — immediately graduate a user from the slow-start
   probation tier to full access (decision D45). Audit-logged. No-op with a
   friendly reply if the user is already past probation.
-- `/quarantine list [-w …] [--page N]` — pending review queue.
-- `/quarantine approve <id>` / `/quarantine reject <id>` — review action.
-  Approve restores the redacted span; reject leaves the placeholder.
-- `/audit [-w …] [--actor …] [--action …] [--page N]` — read `audit_log`
-  with filters.
+- `/quarantine list [-w …] [--all] [--page N]` — review queue. The
+  review-status enum is `{PENDING, APPROVED, REJECTED}` (`schema.md`
+  §Posts and derivatives, Quarantine entry). Default lists `PENDING`
+  rows only; `--all` (bot-admin) lists every status for forensic /
+  audit workflows.
+- `/quarantine approve <id>` / `/quarantine reject <id>` — review
+  action. Both run as stored procedures (`security.md` §DB roles)
+  so the Provider role does not need `SELECT` on the raw-original
+  column. Approve restores the redacted span and re-NOTIFY's the
+  post; reject leaves the placeholder permanently.
+- `/audit [-w …] [--actor …] [--action …] [--page N]` — read
+  `audit_log_view` (the redacted view; `security.md` §DB roles)
+  with filters. **Unknown actor id** (`--actor <id>` against an id
+  with no matching `users` row) returns the same "no audit rows"
+  reply as a known id with no rows in the window — the
+  existence-vs-no-rows distinction is not exposed. v1 ships no
+  `/list-users` command; bot admins enumerate via the existing
+  audit history.
 
 ## Permission model
 
@@ -397,6 +564,15 @@ DM-returning case (or the group-first-mention case if it arrives in a
 group), reusing the existing welcome branch. The `/unban` action
 itself is audit-logged as always; surfacing it to the affected user
 is deferred to v2 if it surfaces at all.
+
+## Operator note: group-admin race
+
+Operators adding the bot to large or public groups should
+`/promote` the intended admin immediately to avoid a first-mention
+race winner who is not the intended owner. The "first non-banned,
+non-probation `@mention` wins" rule (`security.md` §Authorization
+model) is correct for the common case but an attentive operator
+gives the rule no chance to fire on the wrong user.
 
 ## Periodic group summaries
 

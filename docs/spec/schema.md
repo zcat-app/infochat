@@ -24,15 +24,37 @@ connect with (see decision D34 and `security.md`).
 - **Group membership.** The (user, group) join, with a per-group admin flag.
   Schema must enforce *at most one* group admin per group at any time
   (decision D9).
-- **Invite code.** A single-use token that gates DM registration (decision
-  D44). Keyed by a UUID code value. Carries the expected (contact\_id,
-  adapter) pair the code is bound to, status (`PENDING`, `USED`, `REVOKED`,
-  `EXPIRED`), the creating admin's user id, `created_at`, `expires_at`
-  (null = no expiry), and `used_at` (null until consumed). Invariants: a
-  `USED` or `REVOKED` code can never transition back to `PENDING`; a code
-  whose `expires_at` is in the past is treated as `EXPIRED` by the intake
-  path regardless of stored status. Hard delete is forbidden — invite codes
-  are audit artifacts.
+- **Invite code.** A single-use token that gates DM registration
+  (decision D44). Keyed by a UUID code value. Carries:
+  - `invite_type ∈ {CONTACT_BOUND, OPEN_ADAPTER}` — discriminator
+    for the two issuance flavours (decision D44: `--contact <id>`
+    vs. `--open`).
+  - `adapter` — adapter name the code is bound to.
+  - `expected_contact_id` — nullable; non-null iff
+    `invite_type = CONTACT_BOUND`. CHECK constraint enforces this
+    iff-relation at the schema layer.
+  - `status ∈ {PENDING, USED, REVOKED}`. **Note:** there is no
+    stored `EXPIRED` status. The intake path treats a row with
+    `status = 'PENDING' AND expires_at < NOW()` as expired — same
+    fixed friendly reply as a missing code — without ever writing
+    a state transition. Removing the denormalized status keeps the
+    state machine to one column with one allowed transition path
+    (`PENDING → USED` or `PENDING → REVOKED`).
+  - `created_by` — the issuing bot admin's user id.
+  - `created_at`, `expires_at` (null = no expiry), `used_at` (null
+    until consumed), `used_by_contact_id` (null until consumed).
+
+  Invariants: a `USED` or `REVOKED` code can never transition back to
+  `PENDING`. Hard delete is forbidden — invite codes are audit
+  artifacts. Single-use atomicity (the consume race) is enforced by a
+  conditional UPDATE: `UPDATE invite_code SET status = 'USED',
+  used_at = NOW(), used_by_contact_id = $1 WHERE code = $2 AND
+  status = 'PENDING' AND (expires_at IS NULL OR expires_at > NOW())
+  AND adapter = $3 AND (invite_type = 'OPEN_ADAPTER' OR
+  expected_contact_id = $1) RETURNING id`. A returning-row count
+  of 0 means the code was already consumed, revoked, expired, or
+  bound to a different contact — all surface as the same fixed
+  rejection reply (no information leak about which condition failed).
 - **Audit log.** Append-only record of every privileged action and
   bootstrap. Indexed for time-range and per-actor lookup.
 
@@ -76,16 +98,29 @@ connect with (see decision D34 and `security.md`).
 
 ### Posts and derivatives
 
-- **Post.** The fetched, sanitized, evaluated unit. Carries status (`RAW`,
-  `READY`, `QUARANTINED`), Stage-1 / Stage-2 / tagger / embedding outcome
-  flags, body, title, URL, timestamps, and Tier-1 tags. Each post has a
-  stable **UID** derived deterministically from `(source_id,
-  upstream_identifier)` — the per-source canonical id (RSS `<guid>`, Nostr
-  event id, Bluesky AT-URI, etc.) — with a content-hash fallback when the
-  source provides no usable upstream identifier. The UID is unique
-  globally and is the dedup key for refetches and cross-relay redelivery
-  (decision D38). It is also the user-visible handle for `/save`,
-  `/unsave`, and quarantine review.
+- **Post.** The fetched, sanitized, evaluated unit. Carries status
+  (`RAW`, `READY`, `QUARANTINED`, `NEEDS_REVIEW`), Stage-1 / Stage-2 /
+  tagger / embedding outcome flags, body, title, URL, timestamps, and
+  Tier-1 tags. The status state machine: ingest enters `RAW`; Stage 2
+  verdict `BENIGN` (or no Stage 2 because Stage 1 was clean) → `READY`;
+  Stage 2 verdict `INJECTION` / `MALWARE` / `UNKNOWN` → `QUARANTINED`;
+  re-evaluation queue (security.md §Re-evaluation job) exhausting its
+  per-post attempt cap → `QUARANTINED → NEEDS_REVIEW`. Transitions
+  from `NEEDS_REVIEW`: only `/quarantine approve` lifts to `READY`; a
+  later non-`BENIGN` re-eval verdict (rare — only if the post is
+  re-queued by an admin) returns it to `QUARANTINED`. `NEEDS_REVIEW`
+  is the durable signal that "the system gave up trying to classify
+  this; it stays hidden until an admin acts" — distinct from
+  `QUARANTINED` which is "the system has classified this as
+  hostile/unknown and the re-eval job may still touch it." Each post
+  has a stable **UID** derived deterministically from `(source_id,
+  upstream_identifier)` — the per-source canonical id (RSS `<guid>`,
+  Nostr event id, Bluesky AT-URI, etc.) — with a content-hash
+  fallback when the source provides no usable upstream identifier
+  (canonicalization rules: §UID derivation below). The UID is unique
+  globally and is the dedup key for refetches and cross-relay
+  redelivery (decision D38). It is also the user-visible handle for
+  `/save`, `/unsave`, and quarantine review.
 - **Post entity.** Named entities extracted from a post; used for Tier-2
   cross-source linking (decision D6: hybrid named-entity match for
   precision plus cosine similarity over embeddings for recall).
@@ -99,26 +134,81 @@ connect with (see decision D34 and `security.md`).
 - **Post reference.** Edges in the cross-source link graph
   (`link_type`, `score`). TTL'd by partition drop (decision D33).
 - **Quarantine.** One row per Stage-1 or Stage-2 hit, holding span offsets,
-  the verbatim original, and review status. Original content is reachable
-  only by the admin DB role (decision D34).
+  the verbatim original, and a review status `∈ {PENDING, APPROVED,
+  REJECTED}`. Original content is reachable only by the admin DB role
+  (decision D34). `/quarantine list` shows `PENDING` rows by default;
+  `--all` (bot-admin only) shows every status.
+
+#### UID derivation
+
+The post UID is stable globally across Collectors and across
+re-fetches; it is the dedup key for refetches and cross-relay
+redelivery (decision D38).
+
+- When the source provides a stable upstream identifier (RSS `<guid>`,
+  Nostr event id, Bluesky AT-URI, etc.) the UID is
+  `sha256(source_id || '|' || upstream_identifier)` lower-case
+  hex-encoded.
+- When the source provides no usable upstream identifier, the UID
+  falls back to `sha256(source_id || '|' || canonical_body)`
+  lower-case hex-encoded.
+- The **canonical body** is the Unicode-NFKC-normalized text body
+  with source-kind-specific volatile sections stripped (e.g. for
+  RSS: ad-tracking query parameters and the `<pubDate>` element are
+  removed before hashing). The per-kind canonicalization rules live
+  in design notes; the requirement that the rule exists per kind is
+  spec.
+
+The canonicalization step closes the brute-mutation evasion path:
+two minimally different bodies that share semantic content (because
+only volatile metadata changed) hash to the same UID and dedup
+correctly.
+
+### Per-user state (scope-independent)
+
+- **Saved post.** Per-user library entries with personal tags
+  (decision D13). **`/save` is per-user-globally** — a save made in
+  DM is visible in every group the user is in, and vice versa.
+  Saves are intentionally personal bookmarks, not scoped to the
+  conversation in which they were made. Saved bodies are
+  **snapshotted** so retention TTL on the underlying post does not
+  break the bookmark (decisions D13, D33). This is the single
+  documented exception to invariant 1 (per-(user, scope) isolation):
+  `saved_post` carries a user id only and no scope discriminator.
+  See also `/forget` (purges all of the caller's saves regardless
+  of calling scope) and `/export` (includes the caller's full save
+  list regardless of calling scope).
 
 ### Per-scope state
 
-- **Scope preferences.** Per-(scope) language and subscription
+- **Scope preferences.** Per-(scope) language, subscription
   versions (counters used to invalidate cached digests on subscription
-  changes). Per-tag digest preferences live in **Scope tag** below
-  (the v1 entity backing `/follow-tag` / `/unfollow-tag`); this row
-  does not duplicate them.
-- **Saved post.** Per-user library entries with personal tags. Snapshotted
-  so retention TTL on the underlying post does not break the bookmark
-  (decisions D13, D33).
+  changes), and `tag_mode ∈ {ALL, EXPLICIT}` defaulting to `ALL`
+  (the digest-tag selection mode that backs the dynamic-default rule
+  in commands.md §Per-scope tag preferences). Per-tag digest
+  preferences live in **Scope tag** below (the v1 entity backing
+  `/follow-tag` / `/unfollow-tag`); this row does not duplicate them.
+- **Summary anchor.** Per-(user, scope) row capturing the last
+  summary-producing command's deterministic payload: command name,
+  argument hash, post UIDs (ordered), cluster mapping,
+  `generated_at`, and a `command_kind` discriminator (`personal` /
+  `digest`). Read by `/retry` to replay deterministic post selection
+  and clustering (decision D19, D36). Cleared by any non-`/retry`
+  input from the same `(user, scope)`. Survives Provider restart for
+  the bounded retry window — this is what makes `/retry` work after
+  a controlled bounce. The anchor is a separate entity from
+  `chat_session` so the live context window's TTL/clear semantics
+  do not couple to retry storage.
 - **Chat memory.** Per-(user, scope) compressed memory entries created
   by `/compress` and consumed by the chat agent's recall path. Subject
   to a fixed TTL (decision D37); `/save`d posts are independent and
   not affected. The per-(user, group) shape is **per decision D26**:
   there is no shared group memory in v1 — each member of a group has
   their own memory rows, scoped to (user, group), the same privacy
-  model as `/save`.
+  model as `/save`. **Cross-scope isolation invariant.** Recall in
+  scope `S` retrieves only rows whose scope key equals `S`; DM
+  memory never surfaces in any group, and one group's memory never
+  surfaces in another. Verified end-to-end (verification.md).
 - **Chat session / context window.** Per-(user, scope) live context state,
   **persisted in the database** (not in-process). Persistence is required
   by two spec commitments: auto-`/compress` near the context-window
@@ -131,12 +221,54 @@ connect with (see decision D34 and `security.md`).
 
 ### Operational
 
-- **Provider state.** Singleton(s) holding catch-up high-water marks for the
-  `LISTEN/NOTIFY` reconciler (see `architecture.md`).
+- **Provider state.** Catch-up high-water marks for the
+  `LISTEN/NOTIFY` reconciler (see `architecture.md`). **One row per
+  channel** keyed by `channel`, holding `(channel, last_ready_at,
+  last_post_id, updated_at)`. Updates are compare-and-swap so a slow
+  processor cannot roll back a fast one's mark:
+  `UPDATE provider_state SET last_ready_at = :new_ready_at,
+  last_post_id = :new_post_id, updated_at = NOW()
+  WHERE channel = :ch AND (last_ready_at, last_post_id) <
+  (:new_ready_at, :new_post_id)`. The cursor is the
+  `(ready_at, post_id)` pair (not `ready_at` alone) so two posts
+  sharing a `ready_at` are both processed on catch-up — the
+  earlier-id post advances the mark to itself, the later-id post
+  advances it to itself in the same transaction as its side effect.
 - **Summary cache.** Pre-generated periodic-digest output keyed by group,
   slot, and subscription versions, with a short TTL (decision D17).
 - **Admin notification state.** Backing store for the throttled admin
   notifier (decision D22).
+- **Asset config.** One row per `(asset, sub_verb)` pair (decision
+  D39). Carries `enabled` flag, `default_quote_currency`,
+  `attribution_url`, `consecutive_failures`, `last_success_at`,
+  `last_failure_at`, and `status ∈ {active, failed, disabled}` —
+  same status taxonomy as `source.status`. The bootstrap loader
+  upserts entries from `bootstrap-assets.json` at Collector
+  startup; entries absent from the latest bootstrap are
+  `enabled = false` (soft-disable), never hard-deleted, so prior
+  `price_snapshot` rows remain queryable for audit. The Collector's
+  asset Fetchers schedule from this table; D42's per-source
+  failure-counter model applies. The Provider has `SELECT` on this
+  table and uses it to (a) decide which asset commands appear in
+  `/help`, (b) accept or reject sub-verb arguments at parse time,
+  (c) surface stale-data warnings when `last_success_at` is too
+  old per the freshness contract.
+- **Price snapshot.** One row per `(asset, sub_verb, captured_at)`
+  (decision D39). Columns: `asset` (FK to `asset_config`),
+  `sub_verb`, `captured_at`, `price`, `currency`, `source_url`,
+  `raw_payload` (JSONB — exactly the upstream response's relevant
+  fragment, kept for forensic replay). **INSERT-only**; no updates.
+  Partitioned on `captured_at` and aged out by partition drop
+  (Invariant 6) on a profile-driven retention horizon long enough
+  that "the latest snapshot for an enabled `(asset, sub_verb)`" is
+  always present and short enough that the table does not
+  unbounded-grow. The "latest snapshot" query reads the row with
+  the largest `captured_at` for the given `(asset, sub_verb)`,
+  backed by an index on `(asset, sub_verb, captured_at DESC)`.
+  Provider role has `SELECT`-only as already specified in
+  `security.md` §DB roles. NOTIFY `new_price_snapshot` is the
+  latency optimization; the table read is the correctness
+  guarantee.
 
 ## Invariants
 
@@ -145,7 +277,11 @@ them together. They are tested in CI (see `verification.md`).
 
 1. **Per-(user, scope) isolation.** Every row that holds user state carries a
    scope discriminator (`'dm'` or `'group'`) and a scope id (or equivalent
-   FKs). Every query against user state filters on both.
+   FKs). Every query against user state filters on both. **Exception:**
+   `saved_post` is per-user-globally (decision D13) — it carries a user
+   id only, no scope discriminator. This is the only documented carve-out;
+   any new user-state entity defaults to per-(user, scope) isolation
+   unless an explicit decision row exempts it.
 2. **Last-admin protection.** It is impossible to leave the system with zero
    bot admins. Enforced at the trigger layer, not just the command layer,
    on both the **UPDATE** path (revoking `is_admin`, setting `is_banned`
@@ -158,8 +294,13 @@ them together. They are tested in CI (see `verification.md`).
 4. **Soft-delete only for sources.** `source` is never hard-deleted; FKs from
    `post` and `saved_post` rely on this.
 5. **Outbox.** Posts are persisted before they are enqueued for evaluation.
-   A startup rehydrator picks up any post left in `RAW` (or an intermediate
-   evaluating state) after a crash.
+   A startup rehydrator picks up any post left in `RAW` after a crash.
+   Posts in `RAW` with one or more stage-outcome flags already set
+   resume from the next uncompleted stage; the per-stage flags
+   (`stage1_done`, `stage2_done`, `tagger_done`, `embedding_done`,
+   `stage2_failed`, etc.) are the durable cursor. There is no
+   distinct "evaluating" status — `RAW` plus the flag bitmap is the
+   complete representation of in-flight evaluation state.
 6. **TTL by partitioning.** `post`, `post_reference`, `post_embedding`,
    `price_snapshot`, and similar bulk-derived rows are partitioned and
    aged out by partition drop, not row delete. `post` carries a fixed,
@@ -170,6 +311,15 @@ them together. They are tested in CI (see `verification.md`).
    profile-driven retention horizon — long enough that `/zcash` /
    `/monero` always have a recent row, short enough that the table
    does not unbounded-grow.
+   **Quarantine rows are exempt** from the post-derivative TTL: a
+   quarantine row survives until explicitly approved or rejected by
+   an admin so a post awaiting review can never silently disappear.
+   A separate, longer **admin-review TTL** (profile-driven; value in
+   design notes) bounds an indefinitely-pending queue: a quarantine
+   row aged past the admin-review TTL is **not** auto-released, it
+   auto-`reject`s and the placeholder becomes permanent. The
+   admin-review TTL is intentionally long enough that an attentive
+   operator never trips it.
 7. **Audit-before-effect.** Privileged actions write to `audit_log` *before*
    their side effects, so an interrupted command leaves a record of intent.
 8. **No LLM-writable rows.** Tables that influence authorization

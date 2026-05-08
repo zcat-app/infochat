@@ -41,8 +41,16 @@ or `deployment.md`. Each one corresponds to at least one named test.
   re-enqueues anything left in `RAW` (or intermediate) state.
 - LISTEN/NOTIFY catch-up: a Provider that was down when a `new_post`             
   fired processes the post on next startup via the high-water mark.
-- Per-(user, scope) isolation: 100-user fuzz of saves, memory, and                                                                                                                                                                                    
-  subscriptions never leaks across scopes.
+- Per-(user, scope) isolation: 100-user fuzz of saves, memory, and
+  subscriptions never leaks across scopes. **Cross-scope chat memory
+  isolation** (`schema.md` §Chat memory): a recall in scope `S` does
+  not surface a row whose scope key is `S' ≠ S`; DM memory never
+  surfaces in any group; one group's memory never surfaces in
+  another. Saves are excluded from the per-scope isolation assertion
+  because saves are per-user-globally (D13 / A10) — the `saved_post`
+  fuzz instead asserts that saves made in scope `S` are visible in
+  every scope of the same user, and never to a different user in
+  any scope.
 - StreamSource reconnect (decision D38): kill the relay mid-stream;
   the StreamSource reconnects with backoff and resumes. No duplicate
   events emitted on resume — events delivered before disconnect that
@@ -78,29 +86,95 @@ or `deployment.md`. Each one corresponds to at least one named test.
 
 ### Commands and chat
 
-- Permission matrix: table-driven test, every command × every actor                                                                                                                                                                                   
-  type, asserts allow/deny. New commands added in code without a row                                                                                                                                                                                  
-  here fail the test.
+- Permission matrix: table-driven test, every command × every actor
+  type × {full-access, probation}, asserts allow/deny. The
+  probation-blocked list is **derived from the command registry**
+  (every write command not in the slow-start allowed list per D45),
+  not hand-written. New commands added in code without a matrix row
+  here fail the test; new commands added without a default
+  probation classification (allow/deny) also fail.
 - Banned-user intake: a banned user sending any input gets the fixed                                                                                                                                                                                  
   reply; no parser invocation, no DB query past the ban check, no LLM                                                                                                                                                                                 
   call. Verified by mock-call assertions.
-- Confirmation token state machine: 30-second timeout rejects late                                                                                                                                                                                    
-  confirms; bare `confirm` doesn't fire anything; cross-scope confirm                                                                                                                                                                                 
-  rejected; non-`confirm` input cancels with an explicit ack.
+- Confirmation token state machine: a confirm arriving past the
+  configured profile timeout is rejected; bare `confirm` doesn't fire
+  anything; cross-scope confirm rejected; non-`confirm` input cancels
+  with an explicit ack. (The exact timeout value is profile-driven;
+  the test asserts the timeout-vs-non-timeout boundary, not a specific
+  number.)
 - Slash-prefix exclusivity: a message starting with anything other than                                                                                                                                                                               
   `/` always reaches the chat agent, never the command router.
-- Onboarding modes: DM-fresh, DM-returning, group-first-mention each                                                                                                                                                                                  
-  produce the expected branch.
+- Onboarding modes: DM-fresh, DM-returning, group-first-mention each
+  produce the expected branch. **Invite-code lifecycle:** create
+  CONTACT_BOUND → wrong-contact reject → matching-contact accept;
+  create OPEN_ADAPTER → cross-adapter reject → first-unknown-contact
+  accept; expired code reject; revoked code reject; replayed USED
+  code reject; concurrent-race on OPEN_ADAPTER produces exactly one
+  USED transition and one new user row; pre-banned contact + invite
+  path is rejected at intake; brute-force rate limit triggers after
+  the configured threshold and audit-logs the breach.
+- **Slow-start tier** (decision D45 + B8 + B35): every write command
+  and chat-mode rejected during probation with the localized
+  probation reply; allowed list (read-only commands plus `/forget`
+  and `/lang`) is fully unblocked; `/vouch` immediately graduates;
+  probation expiry (`probation_until < NOW()`) auto-promotes on the
+  next request without admin action; the lazy sweep clears
+  `probation_until` after expiry without a background job.
+- **Fetcher failure ladder** (decision D42): N consecutive failures
+  on a single source flips `status = 'failed'`, N-1 does not; the
+  scheduler skips `failed` sources; the throttled admin notifier
+  fires once per `(channel, error_class)` window; `/source-enable`
+  with a probe success returns the source to `active` and resets
+  the consecutive-failure counter.
+- **StreamSource drain** (decision D38): graceful shutdown drains
+  in-flight events to the outbox before acknowledging shutdown; a
+  hard-killed test produces an "events lost on shutdown" counter
+  increment; reconnect with `since=last_persisted_event_at`
+  retrieves missed events from a replay-supporting fake relay; a
+  non-replay-supporting fake relay produces a measurable gap that
+  is exposed via the per-relay loss counter.
+- **Sanitizer match-set derivation** (B41/C41): every command in the
+  bot-admin and group-admin permission rows appears in the LLM
+  output sanitizer match set; CI fails on a mismatch (test fixture
+  adds an admin command without a sanitizer entry → CI red).
+- **chat_memory pruner** (decisions D37/D40): the pruner bean is
+  registered at startup; runs on the configured cadence; deletes
+  rows older than the horizon; the deletion test asserts the
+  pruner has fired at least once during a deployment-N controlled
+  run; rows newer than the horizon and `/save`d posts are
+  untouched.
+- **Single-instance lock** (B21): a second Collector or Provider
+  startup against the same DB fails to acquire the named
+  `pg_advisory_lock` and exits non-zero with a fatal log line that
+  references the running instance's heartbeat host id.
+- **Stage 2 re-eval BENIGN parity** (B4): a re-eval BENIGN keeps
+  Stage 1 redactions in place, matching first-pass behavior; only
+  `/quarantine approve` lifts redactions.
+- **UNKNOWN re-eval** (B14): an UNKNOWN-verdict post is picked up by
+  the re-eval queue with the lower attempt cap; cap exhaustion
+  transitions to `NEEDS_REVIEW` and produces a coalesced admin
+  notification (B38).
+- **Stage 1 / kind-filter ordering** (B3): a Nostr fixture event of
+  a disallowed kind is dropped at the kind-filter step before
+  Stage 1 runs (Stage 1 sanitizer counter does not increment); a
+  signature-failed event is dropped before the kind filter
+  (kind-filter counter does not increment).
 - Pagination: page size honored, footer-suggested next page actually                                                                                                                                                                                  
   works.
-- `/forget` purge (decision D37): after confirm, the calling
-  `(user, scope)`'s `chat_memory` and `saved_post` rows are gone;
-  another user's data in the same group is untouched; the same user's
-  data in a *different* scope (e.g. their DM) is untouched;
+- `/forget` purge (decision D37 + B7): after confirm, the calling
+  `(user, scope)`'s `chat_memory`, `chat_session`, and
+  `summary_anchor` rows are gone; the **caller's full `saved_post`
+  library** is gone (per A10/D13: saves are per-user-globally, so
+  `/forget` from any scope wipes them all — verified by saving in
+  DM, calling `/forget` from a group, and asserting the DM saves
+  are gone too); another user's data in the same scope is
+  untouched; the same user's data in a *different* scope is
+  untouched **for `chat_memory` / `chat_session` / `summary_anchor`**
+  (those are per-scope) but **not** for `saved_post`;
   `users.is_admin` / `users.is_banned` / `group_membership` /
-  `audit_log` rows are untouched (the audit log is append-only). An
-  audit row recording the `/forget` intent is written *before* the
-  purge.
+  `audit_log` rows are untouched (the audit log is append-only).
+  An audit row recording the `/forget` intent is written *before*
+  the purge.
 - `/forget` confirm + idempotency: late confirm rejected by the
   confirmation state machine; a second `/forget` after the first
   completes returns the friendly no-op reply (no audit row, no DB
@@ -210,8 +284,10 @@ or `deployment.md`. Each one corresponds to at least one named test.
 - Tool surface: the LLM's tool list does not include any mutator;                                                                                                                                                                                     
   attempts to call mutator-shaped names from the agent loop are                                                                                                                                                                                       
   rejected at the SPI boundary.
-- Rate limits: per-user LLM-trigger cap rejects the 11th call in a                                                                                                                                                                                    
-  window; per-turn tool-call cap stops the agent loop.
+- Rate limits: per-user LLM-trigger cap rejects the call that exceeds
+  the profile-configured cap; per-turn tool-call cap stops the agent
+  loop. (Specific numeric caps are profile-driven; the test asserts
+  the boundary behaviour.)
 - DB roles: a SQL-injection mutation attempt from the Provider role                                                                                                                                                                                   
   fails; the admin role can do it.
 - User-content log policy (decision D37): with the log capture set to

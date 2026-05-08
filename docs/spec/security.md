@@ -79,28 +79,39 @@ the actual security boundary.
 
 ## SSRF and outbound connections
 
-Every outbound connection from the Collector (feeds, `/add-source` URL
-validation, redirects, and `StreamSource` connections) runs through a
-fail-closed allowlist (decision D20):
+Every outbound connection from the Collector (feeds, redirects, and
+`StreamSource` connections) and from the Provider (`/add-source` URL
+validation HEAD/GET probes per `commands.md` §Source management) runs
+through a fail-closed allowlist (decision D20). Both services use the
+**same shared library module** (`infochat-ssrf`) which carries the
+IP blocklist, DNS-rebind defense, redirect cap, and timeout caps —
+the architecture's "DB-only inter-service communication" rule is
+about runtime data, not compile-time code sharing, so a Maven
+sibling module both services depend on is the right shape. There
+is no Provider→Collector RPC for SSRF checks.
 
 - Allowed schemes: `http`, `https`, `ws`, `wss`. The IP-blocklist and
   DNS-rebind defenses are **transport-agnostic** — a `wss://` relay
   connection is gated by the same checks as an `https://` feed fetch
   (decision D38).
-- DNS-resolved IPs are checked against a blocklist of private, loopback,                                                                                                                                                                              
-  link-local, multicast, CGNAT, and cloud-metadata ranges (notably                                                                                                                                                                                    
-  `169.254.169.254` and IPv6 equivalents) plus the host's own non-loopback       
+- DNS-resolved IPs are checked against a blocklist of private, loopback,
+  link-local, multicast, CGNAT, and cloud-metadata ranges (notably
+  `169.254.169.254` and IPv6 equivalents) plus the host's own non-loopback
   interfaces.
-- DNS is re-resolved after every redirect (TOCTOU defense); the IP               
+- DNS is re-resolved after every redirect (TOCTOU defense); the IP
   blocklist re-applies each hop. For long-lived `StreamSource`
-  connections the IP check applies on every reconnect.
-- Redirect, body-size, connect-timeout, and read-timeout caps are                
+  connections the IP check applies on every reconnect, and **any
+  peer-IP change observed at the socket layer is a hard close** —
+  the implementation does not transparently accept it as a connection
+  migration. A reconnect must re-pass the full allowlist before any
+  event is emitted on the new socket.
+- Redirect, body-size, connect-timeout, and read-timeout caps are
   enforced; an unset timeout is a configuration error.
 - HTTP-shaped fetchers: `GET` and `HEAD` only. WebSocket-shaped stream
   sources have no method concept; trust commitments instead live in
   the per-source trust boundaries section below.
 
-The allowlist is not user-configurable. Operators with a legitimate need                                                                                                                                                                              
+The allowlist is not user-configurable. Operators with a legitimate need
 to scrape an internal feed run a separate ingestion pipeline.
 
 ## Per-source trust boundaries
@@ -130,13 +141,17 @@ responsible for never emitting an unverified event into the outbox.
 - **Kind allowlist.** Only kinds 1 (text notes) and 6 (reposts) are
   parsed in v1. All other kinds — including kind 4 (DMs), kind 7
   (reactions), and any encrypted-content NIPs — are dropped without
-  parsing. **Ordering**: signature verification runs first (decision
-  D38 is the trust-boundary commitment — every received event MUST
-  pass signature verification against its claimed pubkey before
-  Stage 1, and the kind filter is part of Stage 1). The kind filter
-  applies after the signature check and before any body
-  interpretation; an unverified event of any kind is dropped at the
-  signature step and never reaches the kind filter.
+  parsing. **Ordering at the StreamSource trust boundary:**
+  signature verification → kind allowlist → outbox write. Stage 1
+  (HTML sanitization, regex set, Unicode normalization) begins at
+  outbox-write time and applies to the body of allowed kinds. The
+  kind allowlist is **not** part of Stage 1 — it is a Nostr-specific
+  protocol gate that prevents disallowed event types from reaching
+  the pipeline at all. This ordering means an unverified event of
+  any kind is dropped at the signature step and never reaches the
+  kind filter; an event of a disallowed kind is dropped at the kind
+  filter and never reaches the outbox; only events that pass both
+  gates enter Stage 1.
 - **Repost handling.** Kind 6 reposts are stored with a reference to
   the original event id; the original event is **not** auto-resolved
   in v1 (no extra fetches, no relay round-trips). If the original is
@@ -193,6 +208,15 @@ the sanitizer closes the social-engineering surface where a small LLM
 emits plausible-looking admin commands across any of the surfaces above.
 Every match is audit-logged (per-occurrence, not throttled).
 
+**Match-set derivation.** The sanitizer's match set is **derived
+from the permission matrix**, not hand-maintained: every command
+that appears in the bot-admin or group-admin rows of the matrix is
+in the sanitizer set. CI fails on a mismatch (a new admin command
+added without a matching sanitizer entry, or a sanitizer entry that
+no longer corresponds to a real admin command). This makes "admin
+commands never leak through LLM output" a structural property of
+the codebase rather than a discipline.
+
 ## Authorization model
 
 Two admin tiers (decision D9):
@@ -212,11 +236,17 @@ Invariants (also enforced in `schema.md`):
   not auto-replaced; the next bot-admin `/promote` or first-mention path
   refills the slot).
 - **One group admin per group at any time.** Enforced by partial unique
-  index. The "first @mention wins" auto-promote path is `INSERT … ON
-  CONFLICT DO NOTHING`; the row that loses the race produces no error and
-  no admin row — the user receives the standard non-admin response for
-  whatever command they sent. `/promote` demotes the existing group admin
-  in the same transaction.
+  index. The "first non-banned, non-probation `@mention` wins"
+  auto-promote path applies whenever the group has **zero**
+  `is_group_admin` rows — covering both newly-created groups and
+  groups left without an admin due to demotion or ban. Banned and
+  probation users are ineligible (probation users cannot run admin
+  commands by D45; promoting one would be a footgun). The promote
+  is `INSERT … ON CONFLICT DO NOTHING` against the partial unique
+  index; the row that loses a race produces no error and no admin
+  row — the user receives the standard non-admin response for
+  whatever command they sent. `/promote` demotes the existing group
+  admin in the same transaction.
 - **Banned-admin lockout escape hatch.** If the existing group admin is
   banned (their `is_group_admin` row remains but is unreachable per §User
   ban), a bot admin can `/promote` a different group member; the demote
@@ -305,23 +335,47 @@ DM access, applied uniformly across all adapters:
   check (step 2) finds a known contact and routes to the ban path instead.
 - `/invite list [--page N]` shows PENDING codes with their target contact,
   adapter, and expiry. `/invite revoke <code>` transitions a PENDING code to
-  `REVOKED` immediately.
+  `REVOKED` immediately. `/invite revoke` requires confirm.
+- **Brute-force rate limit.** A per-`(adapter, contact_id)` rate limit
+  applies to invite-code attempts. Failed attempts increment a counter;
+  when the counter exceeds a profile-driven threshold within a
+  profile-driven window, further attempts from that
+  `(adapter, contact_id)` are rejected without checking the code, and
+  an audit row records the threshold breach. The limit prevents a
+  patient brute-force search of the UUID space; it does not change
+  the per-failure user-visible reply.
+- **Pre-banned contact + invite.** `/invite create --contact <id>`
+  against a contact whose `users` row already has `is_banned=true`
+  returns a friendly error pointing the admin at `/unban`; **no
+  invite is created**. The intake-side ban check (authorization
+  step 4) is the second line of defense — even if a stale invite
+  exists, the ban check fires first — but refusing to mint the
+  invite at all keeps the audit trail clean.
 
 ## Slow-start tier
 
 Every newly registered user enters a probation period (decision D45). The
 duration is profile-driven (value in design notes). During probation:
 
-- **Allowed** (read-only subset): `/help`, `/status`, `/get-tags`,
-  `/get-sources`, `/list-sources`, `/summary`, `/saved`, asset commands
-  (`/zcash`, `/monero`), `/export`.
-- **Blocked**: chat mode, `/add-source`, `/save`, `/unsave`, `/follow-tag`,
-  `/unfollow-tag`, `/lang`, `/clear`, `/compress`, `/forget`,
+- **Allowed** (read-only subset plus the user's own privacy/locale
+  levers): `/help`, `/status`, `/get-tags`, `/get-sources`,
+  `/list-sources`, `/summary`, `/saved`, asset commands (`/zcash`,
+  `/monero`), `/export`, **`/forget`** (the user's privacy lever —
+  blocking it during probation would undermine D37), **`/lang`** (a
+  single-row UPDATE with no LLM cost — blocking it means a non-English
+  new user cannot get help in their language during the window when
+  they most need it).
+- **Blocked**: chat mode, `/add-source`, `/save`, `/unsave`,
+  `/follow-tag`, `/unfollow-tag`, `/clear`, `/compress`,
   `/group-timezone`, and any admin command.
 - Blocked operations return a friendly reply stating when full access unlocks;
   the reply never reaches the LLM or any write path.
 - After the probation window elapses, the user is automatically promoted to
-  full access — no admin action required.
+  full access — no admin action required. The mechanism is **lazy**: the
+  permission check is `probation_until IS NULL OR probation_until < NOW()`.
+  The user is promoted at the instant `NOW() > probation_until`, regardless
+  of whether the column has been nulled. A passive sweep clears the column
+  on the next request from a promoted user; no background job is required.
 - A bot admin can issue `/vouch <contact>` at any time to immediately graduate
   a user from probation. The vouch is audit-logged.
 - Probation state is a single `probation_until` timestamp on the `users` row.
@@ -330,21 +384,38 @@ duration is profile-driven (value in design notes). During probation:
 
 ## Quarantine workflow
 
-- Every Stage 1 or Stage 2 hit creates a quarantine row holding span                                                                                                                                                                                  
-  offsets, a placeholder id, the verbatim original, and a review status.
-- Posts with PENDING quarantine entries can still be visible to users                                                                                                                                                                                 
-  (with redactions in place). A Stage 2 `BENIGN` verdict keeps the post
-  visible with Stage 1 redactions retained. A Stage 2 `INJECTION`,
-  `MALWARE`, or `UNKNOWN` verdict                                                                                                                                                                             
-  hides the entire post.
-- Admins review via `/quarantine list` and `/quarantine approve|reject`.                                                                                                                                                                              
-  Approve restores the original span and re-NOTIFY's the post; reject                                                                                                                                                                                 
-  leaves the placeholder permanently.
-- The verbatim original is intentionally **not** displayed in chat (could        
-  re-inject in the admin's client). Operators use `psql` with the admin                                                                                                                                                                               
-  role on the rare occasions it's needed.
-- The placeholder format is structured and per-row randomized so attackers                                                                                                                                                                            
-  cannot pre-craft a fake placeholder.
+- Every Stage 1 or Stage 2 hit creates a quarantine row holding span
+  offsets, a placeholder id, the verbatim original, and a review
+  status `∈ {PENDING, APPROVED, REJECTED}`.
+- Posts with PENDING quarantine entries can still be visible to users
+  (with Stage 1 redactions in place). A Stage 2 `BENIGN` verdict keeps
+  the post visible with **Stage 1 redactions retained** — the verdict
+  closes the quarantine row's PENDING state but does **not** lift
+  redactions. A Stage 2 `INJECTION`, `MALWARE`, or `UNKNOWN` verdict
+  hides the entire post (`QUARANTINED` status).
+- **Redactions are lifted only by `/quarantine approve`.** This rule
+  applies uniformly to first-pass and re-evaluation BENIGN verdicts:
+  a re-eval BENIGN does not auto-lift first-pass redactions either.
+  An admin reviewing the quarantine row is the only path that
+  restores the original span. This is the safer of the two
+  verdict-vs-redaction interpretations and avoids the "first pass
+  keeps redactions, re-eval lifts them" inconsistency.
+- Admins review via `/quarantine list` and `/quarantine approve|reject`.
+  Approve restores the original span and re-NOTIFY's the post; reject
+  leaves the placeholder permanently. The Provider DB role
+  (`security.md` §DB roles) does not have `SELECT` on the raw
+  original column; approve and reject run as **stored procedures**
+  (`approve_quarantine(quarantine_id, actor_id)` and
+  `reject_quarantine(quarantine_id, actor_id)`) that internally
+  read the original under the procedure's elevated rights and
+  perform the restore + audit-log + NOTIFY in one transaction. The
+  Provider role has `EXECUTE` on these procedures, never `SELECT`
+  on the underlying raw-original column.
+- The verbatim original is intentionally **not** displayed in chat
+  (could re-inject in the admin's client). Operators use `psql` with
+  the admin role on the rare occasions it's needed.
+- The placeholder format is structured and per-row randomized so
+  attackers cannot pre-craft a fake placeholder.
 
 ## Failure handling
 
@@ -356,9 +427,12 @@ missing required field) is treated identically to an unparseable reply at
 every stage: retry once, then apply the stage-specific failure path below.
 
 - **Stage 2 verdict** of `BENIGN` → post released to the tagger and
-  embedding stage; Stage 1 redactions remain in the body (quarantine spans
-  are closed, not deleted — the original text is restorable only via admin
-  `/quarantine approve`).
+  embedding stage; Stage 1 redactions remain in the body (quarantine
+  spans are closed, not deleted — the original text is restorable
+  only via admin `/quarantine approve`). **Re-evaluation BENIGN follows
+  the same rule:** redactions are not auto-lifted on re-eval, only on
+  `/quarantine approve`. See §Quarantine workflow and §Re-evaluation
+  job.
 - **Stage 2 verdict** of `INJECTION`, `MALWARE`, or `UNKNOWN` → post
   stays `QUARANTINED` until admin review. The judge model treating
   `UNKNOWN` as a soft injection signal is intentional: a degraded judge
@@ -390,6 +464,17 @@ every stage: retry once, then apply the stage-specific failure path below.
   embedding also failed).
 - **Embedding** failure → release without a vector; the post is otherwise
   normal and fully visible.
+- **Compression failure (manual `/compress` or auto-compress).** LLM
+  unreachable, timeout, or schema-violating reply after retry → the
+  chat session is **held at the ceiling**: the user's next chat-mode
+  message returns a localized friendly error
+  ("memory checkpoint pending; please `/compress` manually or try
+  again later"), and the session is never silently truncated.
+  Manual `/compress` failure surfaces the same error and leaves the
+  session unchanged. The escape hatch is `/clear` (which discards
+  the live window — the user's choice, not the system's). Auto-compress
+  fires when the chat session occupies a profile-driven percentage of
+  the context-window ceiling (value in design notes).
 - **Admin notifications** are coalesced per `(channel, error_class)` for a
   short window so an outage produces one summary message, not 200 individual
   alerts.
@@ -398,15 +483,49 @@ A complete LLM outage degrades quality, not safety.
 
 ### Re-evaluation job
 
-Posts released with Stage 1 redactions retained (Stage 2 infrastructure
-failure path) are placed on a re-evaluation queue. The Collector runs a
-background job on a profile-driven cadence (value in design notes) that
-re-submits these posts to Stage 2. A per-post attempt counter bounds
-retries: after the profile-driven maximum the post is permanently marked
-`NEEDS_REVIEW` and admin is notified. On a `BENIGN` re-evaluation verdict
-the Stage 1 redactions are lifted (equivalent to a quarantine approve) and
-the post continues through the tagger and embedding stages. On `INJECTION`,
-`MALWARE`, or `UNKNOWN` the post transitions to `QUARANTINED`.
+Two kinds of posts feed the re-evaluation queue:
+
+1. Posts released with Stage 1 redactions retained because of a
+   **Stage 2 infrastructure failure** — these are `READY` and visible
+   with redactions, awaiting a healthy verdict that may close the
+   quarantine cleanly.
+2. Posts marked **UNKNOWN** by Stage 2 — these are `QUARANTINED`
+   (hidden) but the verdict is "judge couldn't classify," not
+   "judge classified as hostile." Periodic re-eval gives a
+   recovered or improved judge a chance to produce a definitive
+   verdict before admin-review escalation.
+
+The Collector runs a background job on a profile-driven cadence
+(value in design notes) that re-submits these posts to Stage 2.
+A per-post attempt counter bounds retries; the **infra-failure**
+class and the **UNKNOWN** class carry **separate, independent
+caps** (UNKNOWN's cap is the lower of the two so an UNKNOWN-flooding
+model exhausts attempts faster than infrastructure failures).
+After cap exhaustion the post transitions to `NEEDS_REVIEW`
+(per `schema.md` §Posts and derivatives) and the admin notifier
+fires.
+
+Re-eval verdict handling:
+
+- `BENIGN` on a Stage-2-infra-failure post → quarantine row stays
+  closed, **Stage 1 redactions are not lifted** (only
+  `/quarantine approve` lifts them — this matches the §Quarantine
+  workflow rule above), the post continues through tagger and
+  embedding if those stages had not already run.
+- `BENIGN` on an UNKNOWN post → post transitions
+  `QUARANTINED → READY` with Stage 1 redactions retained; same
+  rule as above for lifting (admin only).
+- `INJECTION`, `MALWARE`, or `UNKNOWN` on either class → post stays
+  `QUARANTINED` and the attempt counter increments.
+
+**Throttled NEEDS_REVIEW notifications.** Admin notifications for
+`NEEDS_REVIEW` transitions are coalesced per
+`(channel, error_class)` over a profile-driven window so a Stage-2
+outage that exhausts retries on hundreds of posts produces one
+summary notification, not hundreds — mirroring the throttling
+already in place for Stage 2 infra-failure notifications. Sustained
+high UNKNOWN rate also triggers the existing `Stage2UnknownRateHigh`
+operator alert (`docs/design/04-security.md`).
 
 ## Rate limiting
 
@@ -430,21 +549,43 @@ Exact numbers are profile-driven (decision D27) and live in
 
 Three Postgres roles, least-privilege (decision D34):
 
-- **Collector role** — `INSERT/UPDATE` on ingest-owned tables (including
-  `price_snapshot`); `SELECT` on the rest; `INSERT`-only on `audit_log`;
-  `LISTEN/NOTIFY`.
+- **Collector role** — `INSERT/UPDATE` on ingest-owned tables
+  (including `price_snapshot` and `asset_config`); `SELECT` on the
+  rest; `INSERT`-only on `audit_log`; `LISTEN/NOTIFY`.
 - **Provider role** — write access on user-state tables; `SELECT` on
-  collector-owned tables (including **`SELECT`-only on `price_snapshot`**:
-  the Provider reads the latest snapshot per `(asset, sub-verb)` for
-  `/zcash` and `/monero` and never writes to it); `SELECT` on the
-  quarantine review *view* (no raw original content); `INSERT`-only on
-  `audit_log`; `LISTEN/NOTIFY` (consumes `new_post`,
-  `new_price_snapshot`, and quarantine state-change channels).
-- **Admin role** — operator psql sessions only. Used for migrations, raw                                                                                                                                                                              
-  quarantine inspection, occasional bulk fixes.
+  collector-owned tables (including **`SELECT`-only on
+  `price_snapshot`** and **`SELECT`-only on `asset_config`**: the
+  Provider reads the latest snapshot per `(asset, sub_verb)` for
+  `/zcash` and `/monero` and reads `asset_config` to gate `/help`,
+  parse sub-verbs, and surface stale-data warnings; never writes to
+  either); `SELECT` on the quarantine review *view* (no raw
+  original content); **`SELECT` on the redacted `audit_log_view`,
+  not on `audit_log` itself** (`/audit` reads through the view, see
+  below); `INSERT`-only on `audit_log`; `EXECUTE` on the
+  `approve_quarantine` and `reject_quarantine` stored procedures
+  (no `SELECT` on the raw-original quarantine column);
+  `LISTEN/NOTIFY` (consumes `new_post`, `new_price_snapshot`, and
+  quarantine state-change channels).
+- **Admin role** — operator psql sessions only. Used for migrations,
+  raw quarantine inspection, occasional bulk fixes.
 
-The split means a SQL-injection bug in the Provider cannot delete posts,
-mutate price snapshots, or alter quarantine entries.
+**`audit_log_view`** is a Postgres view that exposes the same columns
+as `audit_log` minus any redacted fields (raw secrets, full contact
+ids — replaced with the redacted form per §Secrets handling).
+`SELECT` on `audit_log_view` is granted to the Provider role only;
+this is the path `/audit` uses. Granting `SELECT` directly on
+`audit_log` to the Provider would expose unredacted columns; the
+view is the single read path for the Provider role.
+
+The split means a SQL-injection bug in the Provider cannot delete
+posts, mutate price snapshots, alter quarantine entries, read
+unredacted audit rows, or read raw quarantine originals.
+
+**Invariant 4 enforcement.** `DELETE` on `source` is **revoked**
+from both Collector and Provider roles; only the Admin role
+(operator psql) can hard-delete a source row, and that path is the
+manual escape hatch that backs invariant 4 (soft-delete only for
+sources). Application code uses the soft-delete column.
 
 ## Secrets handling
 
@@ -459,6 +600,17 @@ mutate price snapshots, or alter quarantine entries.
   events, request IDs, scope IDs, and counts are loggable; the prose
   itself is not. The audit log records *intent* (command name, actor,
   scope, target), not user-authored prose.
+
+## Source URL visibility
+
+Source rows are global state (decision D7) — there is no per-user
+source row. As a consequence, every URL added via `/add-source`
+(DM or group) is visible to bot admins through `/list-sources --all`.
+Users adding private feeds should treat the URL as visible to
+operators. Hiding this would be dishonest to users; documenting it
+explicitly lets users make an informed choice. v2 may add a
+"private sources" feature with a per-user row and additional
+operational complexity; v1 commits to global source rows.
 
 ## What's intentionally NOT in v1
 
