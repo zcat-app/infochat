@@ -111,6 +111,17 @@ post bodies start leaving the host.
 - The embedding model is chosen per profile and **must not change** for                                                                                                                                                                               
   an existing deployment without a re-embed plan, because vectors from                                                                                                                                                                                
   different models are not comparable.
+- **Model identity guard.** The active embedding model's identifier and
+  vector dimensionality are stored in a singleton metadata row on first
+  use. On every startup the `EmbeddingProvider` reports its current
+  identifier and dimensionality; if either differs from the stored row,
+  startup is refused with a descriptive error referencing the re-embed
+  procedure. An explicit operator override flag bypasses the check for
+  intentional migration runs; its property key and semantics are in design
+  notes.
+- **Dimensionality mismatch at runtime is fatal.** Storing vectors of mixed
+  dimensions in the same pgvector column silently corrupts cosine similarity
+  scores. The only safe recovery is a full re-embed.
 - The pgvector index type is profile-driven (decision D27): HNSW for the                                                                                                                                                                              
   laptop / vps / remote profiles; IVFFlat for Pi (cheaper build,
   acceptable recall at the small live-set size).
@@ -166,11 +177,21 @@ never crosses scope boundaries.
 
 Per-task failure rules from `security.md` and decision D22:
 
+**Schema-violating output** (wrong JSON shape, unexpected label, missing
+required field) is treated identically to an unparseable reply at every
+stage.
+
 - Security Stage 2 — verdict vs. infra split (see `security.md`).
-- Tagger — bootstrap tags fallback.
-- Entity / embedding — release without artifact.
-- Translation — fall back to English with a one-line note (the user                                                                                                                                                                                   
-  should never see a hung response because translation flaked).
+- Tagger — bootstrap tags fallback; schema-violating output is treated as
+  unparseable (retry once, then fall back).
+- Entity extractor — on failure or schema-violating output, release without
+  entities; cross-source linking degrades to embedding-only for that post.
+- Embedding — release without a vector (see Embedding pipeline above);
+  the post is otherwise fully visible.
+- Translation — sanity-check the output: if the response is identical to
+  the input, empty, or clearly not in the target language, fall back to
+  English with a one-line note. The user must never see a hung or garbled
+  response because translation flaked.
 
 Admin notifications are throttled per error class.
 
@@ -203,4 +224,5 @@ Exact metric names and labels live in design notes.
 - Per-profile context-window sizes and auto-compress thresholds
 - Vector index build parameters
 - Translation cache TTL and key shape
+- Embedding model identity row shape, override flag property key, and re-embed procedure
 - Metric names, label sets, and dashboards

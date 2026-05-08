@@ -236,7 +236,9 @@ privilege escalation via injection (T3) infeasible.
 - Every Stage 1 or Stage 2 hit creates a quarantine row holding span                                                                                                                                                                                  
   offsets, a placeholder id, the verbatim original, and a review status.
 - Posts with PENDING quarantine entries can still be visible to users                                                                                                                                                                                 
-  (with redactions in place). A Stage 2 INJECTION/MALWARE/UNKNOWN verdict                                                                                                                                                                             
+  (with redactions in place). A Stage 2 `BENIGN` verdict keeps the post
+  visible with Stage 1 redactions retained. A Stage 2 `INJECTION`,
+  `MALWARE`, or `UNKNOWN` verdict                                                                                                                                                                             
   hides the entire post.
 - Admins review via `/quarantine list` and `/quarantine approve|reject`.                                                                                                                                                                              
   Approve restores the original span and re-NOTIFY's the post; reject                                                                                                                                                                                 
@@ -249,28 +251,63 @@ privilege escalation via injection (T3) infeasible.
 
 ## Failure handling
 
-The split between *verdict* and *infrastructure failure* is the heart of                                                                                                                                                                              
+The split between *verdict* and *infrastructure failure* is the heart of
 the policy (decision D22). Per stage:
 
-- **Stage 2 verdict** of `INJECTION`, `MALWARE`, or `UNKNOWN` → post                                                                                                                                                                                  
-  stays `QUARANTINED` until admin review. The judge model treating                                                                                                                                                                                    
-  `UNKNOWN` as a soft injection signal is intentional: a degraded judge                                                                                                                                                                               
+**Schema-violating LLM output** (wrong JSON shape, unexpected label value,
+missing required field) is treated identically to an unparseable reply at
+every stage: retry once, then apply the stage-specific failure path below.
+
+- **Stage 2 verdict** of `BENIGN` → post released to the tagger and
+  embedding stage; Stage 1 redactions remain in the body (quarantine spans
+  are closed, not deleted — the original text is restorable only via admin
+  `/quarantine approve`).
+- **Stage 2 verdict** of `INJECTION`, `MALWARE`, or `UNKNOWN` → post
+  stays `QUARANTINED` until admin review. The judge model treating
+  `UNKNOWN` as a soft injection signal is intentional: a degraded judge
   must never auto-release.
-- **Stage 2 infrastructure failure** (LLM unreachable, timeout, unparseable                                                                                                                                                                           
-  reply after retry) → release as `READY` with the **Stage 1 redactions
-  retained**, mark the post for re-evaluation when the LLM returns,                                                                                                                                                                                   
-  notify admin via the throttled channel. A profile-driven flag lets                                                                                                                                                                                  
-  production profiles invert this default and keep the post quarantined.
-- **Tagger** failure → fall back to `source.bootstrap_tags`, mark the post,                                                                                                                                                                           
-  throttled admin notify. (This is why `/add-source --tags` is mandatory:                                                                                                                                                                             
+- **Stage 2 infrastructure failure** (LLM unreachable, timeout, unparseable
+  or schema-violating reply after retry) → release as `READY` with the
+  **Stage 1 redactions retained**, mark the post for re-evaluation (see
+  Re-evaluation job below), notify admin via the throttled channel. A
+  profile-driven flag lets production profiles invert this default and keep
+  the post quarantined.
+- **Stage 1 infrastructure failure** (regex watchdog crash, HTML sanitizer
+  exception) → fail-closed: the post is immediately `QUARANTINED` and never
+  auto-released. Admin is notified via the throttled channel. Stage 1
+  infrastructure failure must never default to release — the deterministic
+  guard failing is a safety-critical event.
+- **Fetcher failure** (HTTP error, connection timeout, feed parse failure on
+  an HTTP-shaped source) → retry on the next scheduled tick. After *N*
+  consecutive per-source failures (profile-driven), the source `status`
+  transitions to `'failed'` and the scheduler skips it; a throttled admin
+  notification is sent with the error class and source id. Other sources
+  are unaffected. An admin must explicitly re-enable the source.
+- **Tagger** failure → fall back to `source.bootstrap_tags`, mark the post,
+  throttled admin notify. (This is why `/add-source --tags` is mandatory:
   every source must have a deterministic fallback.)
-- **Entity / embedding** failure → release without that artifact;                                                                                                                                                                                     
-  cross-source linking is degraded for that post.
-- **Admin notifications** are coalesced per `(channel, error_class)` for a                                                                                                                                                                            
-  short window so an outage produces one summary message, not 200 individual                                                                                                                                                                          
+- **Entity** failure → release without entities; cross-source linking
+  degrades to embedding-only for that post (or skipped entirely if
+  embedding also failed).
+- **Embedding** failure → release without a vector; the post is otherwise
+  normal and fully visible.
+- **Admin notifications** are coalesced per `(channel, error_class)` for a
+  short window so an outage produces one summary message, not 200 individual
   alerts.
 
 A complete LLM outage degrades quality, not safety.
+
+### Re-evaluation job
+
+Posts released with Stage 1 redactions retained (Stage 2 infrastructure
+failure path) are placed on a re-evaluation queue. The Collector runs a
+background job on a profile-driven cadence (value in design notes) that
+re-submits these posts to Stage 2. A per-post attempt counter bounds
+retries: after the profile-driven maximum the post is permanently marked
+`NEEDS_REVIEW` and admin is notified. On a `BENIGN` re-evaluation verdict
+the Stage 1 redactions are lifted (equivalent to a quarantine approve) and
+the post continues through the tagger and embedding stages. On `INJECTION`,
+`MALWARE`, or `UNKNOWN` the post transitions to `QUARANTINED`.
 
 ## Rate limiting
 
@@ -370,4 +407,6 @@ or quarantine entries.
 - The exact NIP subset and the kind-filter implementation
 - Prometheus counter names and recommended alert expressions
 - DB role grant statements
-- The `[refused-action]` marker convention 
+- The `[refused-action]` marker convention
+- Re-evaluation job cadence, per-post attempt cap, and re-eval status values
+- Fetcher consecutive-failure threshold (*N*) and source re-enable procedure 
