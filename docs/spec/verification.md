@@ -109,6 +109,65 @@ or `deployment.md`. Each one corresponds to at least one named test.
   user's chat memory, no other user's saves, no group-wide content
   beyond the caller's own contributions; a DM `/export` does not leak
   any group-scoped state.
+- `/stop` cancellation (decision D35): a chat-mode reply mid-stream is
+  interrupted by `/stop`; the LLM stream closes, any in-flight
+  read-only tool call is cancelled, the worker thread is freed within
+  the cancellation window, and the progress notifier renders a final
+  "stopped" state. A `/stop` from one `(user, scope)` does not affect
+  another user's in-flight request in the same group. `/stop` with
+  nothing in flight returns the friendly idempotent reply. `/stop`
+  fired after outbound delivery has begun does **not** unsend the
+  message. Periodic digests, ingest, and already-completed work are
+  unaffected by `/stop`.
+- `/retry` semantics (decision D36): `/retry` after a `/summary` reuses
+  the original deterministic post selection (asserted by capturing
+  the post-id list across both runs) and re-runs only the prose stage;
+  `/retry` exceeding the fixed retry cap returns the friendly error;
+  any non-`/retry` input from the same `(user, scope)` clears the
+  anchor (verified for `/help`, `/stop`, plain chat, and another
+  `/summary`); `/retry` after `/stop` cancelled the prior summary
+  returns the friendly error; `/retry` for a periodic group digest
+  from a non-admin user is rejected, and from a group admin replaces
+  the cached digest (decision D17).
+- Asset commands (decision D39): `/zcash` with no sub-verb uses the
+  operator-configured default; with a known sub-verb returns the
+  matching snapshot; with an unknown sub-verb returns the friendly
+  error with fuzzy suggestions. The reply header names the data
+  source and the body contains the bare source URL (D30
+  attribution). The Provider reads from `price_snapshot` directly;
+  the Provider DB role can `SELECT` from `price_snapshot` and
+  cannot `INSERT`/`UPDATE`/`DELETE` (DB-role test). When the latest
+  snapshot is older than the freshness window the reply includes the
+  "data is N minutes old" line; when no row exists the reply is the
+  friendly error. Snapshots never appear in `/summary`, `/save`, or
+  `/saved` results (assertion: `/save <price-snapshot-row-id>`
+  returns the unknown-uid error).
+- Periodic group summaries (decision D17): the morning/evening digest
+  is generated within the staggered slot window; a follow-up
+  `/summary` from the same group during the cache TTL is served from
+  cache (no second LLM call); when the worker pool is saturated a
+  digest is emitted in the degraded form (headlines + sources, no LLM
+  prose) and a regular `/summary` afterwards still produces full
+  prose; a `/retry` from group admin replaces the cached digest and
+  the next `/summary` reads the replacement.
+- Re-evaluation job (security.md §Failure handling): a post with
+  `stage2_failed=true` is picked up on the next re-eval tick once the
+  fake LLM is restored to a healthy verdict; verdict `BENIGN` lifts
+  Stage-1 redactions per the verdict-taxonomy commitment; verdict
+  `INJECTION`/`MALWARE`/`UNKNOWN` flips status to `QUARANTINED`; the
+  per-post attempt counter is bounded and a post that exhausts
+  attempts stays as-is with an admin-notification entry. Re-eval
+  cadence and max attempts are profile-driven; the test asserts the
+  cadence semantics, not the exact value.
+- End-to-end happy path (v1 integration): a single test drives the
+  full first-time-user flow against the in-memory adapter and fake
+  LLM — auto-registration on first DM, `/help` reply, `/add-source`
+  with required tags, fetch tick produces `READY` posts, `/summary`
+  returns deterministic clusters with prose, `/save <uid>` adds to
+  the user's library, `/saved` lists it, `/retry` re-runs the prose,
+  `/forget` (with confirm) purges the user's `chat_memory` and
+  `saved_post` rows. No assertion failure at any step is the
+  pass condition.
 
 ### Security
 
@@ -172,6 +231,14 @@ or `deployment.md`. Each one corresponds to at least one named test.
 - Embedding model swap is detected (a vector built with one model is                                                                                                                                                                                  
   not silently mixed with another).
 - Translation cache: a digest sent to N members translates once.
+- Source bodies are never translated (decision D29): with the scope's
+  `/lang` set to a non-English code, a fixture run that produces a
+  `/summary` and a periodic digest exercises the
+  `TranslationProvider`. A spy on the provider asserts that no call
+  argument equals or contains the body of any `post` row; only
+  presentation strings (cluster prose, headers, system phrasing)
+  reach the provider. Source post titles and URLs likewise never
+  pass through translation.
 - Translation flake fallback: a translator that throws falls back to                                                                                                                                                                                  
   English with a one-line note; the user does not see a hung response.
 

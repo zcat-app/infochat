@@ -37,8 +37,8 @@ In scope:
 
 Deferred (not created in MVP):
 
-- `group`, `group_membership`, `group_message_log`
-- `saved_post`, `chat_memory`
+- `group`, `group_membership`
+- `saved_post`, `chat_memory`, `chat_session`
 - `post_reference`, `post_entity`
 - `quarantine_review`, `admin_notification`
 - `summary_cache`
@@ -108,8 +108,8 @@ This is the explicit deferred list. Each item below is fully specified elsewhere
 - Auto-compress at 75% context, `chat_memory`, hybrid memory retrieval, `recall_memory()` agent tool
 
 ### Schema
-- `group`, `group_membership`, `group_message_log`
-- `saved_post`, `chat_memory`
+- `group`, `group_membership`
+- `saved_post`, `chat_memory`, `chat_session`
 - `post_reference`, `post_entity`
 - `quarantine_review`, `admin_notification`
 - `summary_cache`
