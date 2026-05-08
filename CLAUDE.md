@@ -8,13 +8,13 @@ Two-service Quarkus application: a news and social-media aggregator chatbot.
 - PostgreSQL with `pgvector` extension
 - `quarkus-langchain4j` for LLM integration
 - SmallRye Reactive Messaging (in-memory channels v1, Kafka optional later)
-- Quarkus Scheduler for periodic fetching and group summaries
-- Pluggable adapter for messaging app (SimpleX Chat first impl)
+- Quarkus Scheduler for periodic fetching and group digests
+- Pluggable adapter for messaging apps (SimpleX + Signal in v1; one Provider can run any non-empty subset of them simultaneously, decision D46)
 
 ## Two services
 
 - **Collector Server** — fetches RSS and social feeds, runs LLM evaluation pipeline (security check, tagging, entity extraction, embedding), stores posts. **No user-facing API.**
-- **Provider Server** — talks to messaging apps via pluggable adapter. Handles slash commands, chat-mode conversations, periodic group summaries. **Only user-facing component.**
+- **Provider Server** — talks to messaging apps via one or more pluggable adapters (decision D46). Handles slash commands, chat-mode conversations, periodic group digests. **Only user-facing component.**
 
 ## Where things live
 
@@ -29,7 +29,7 @@ Two-service Quarkus application: a news and social-media aggregator chatbot.
 - Asset commands (`/zcash`, `/monero` etc., price/market data): [docs/spec/commands.md](docs/spec/commands.md) §"Asset commands" + design [docs/design/10-asset-commands.md](docs/design/10-asset-commands.md)
 - Deployment and configuration (operator inputs, bootstrap, runtime): [docs/spec/deployment.md](docs/spec/deployment.md)
 - Verification strategy (what the test suite must prove): [docs/spec/verification.md](docs/spec/verification.md)
-- MVP slice (smallest end-to-end build): [docs/00-mvp.md](docs/00-mvp.md)
+- MVP slice (smallest end-to-end build, design-tier): [docs/design/00-mvp.md](docs/design/00-mvp.md)
 
 **Implementation details** (DDL, class names, package layout, property keys,                                                                                                                                                                          
 retry counts, regex strings, per-profile values) live under                                                                                                                                                                                           
@@ -53,13 +53,13 @@ amendment.
 
 ## Bootstrap admin & sources
 
-- **Bot admin**: set via `infochat.admin.contact-id` (SimpleX contact ID) in `application.properties`. On startup, an `@Startup` bean ensures that contact has `is_admin=true` (creating the user if needed). Audit log records the bootstrap. Last-admin protection: cannot revoke admin from the only admin; cannot ban self or last admin.
+- **Bot admin**: configured **per enabled adapter** in `application.properties` (one bootstrap admin contact id per adapter; the property is keyed by adapter — concrete keys in design notes — and is **optional per adapter** as long as the union across enabled adapters is non-empty). Each value is parsed by its own adapter (SimpleX queue address, Signal ACI, etc.). On startup, an `@Startup` bean ensures, for every adapter that has a configured admin, that the contact exists with `is_admin=true` (creating the user if needed). Audit log records each bootstrap. `/grant-admin` and `/revoke-admin` are scoped to the inbound adapter; last-admin protection counts `is_admin=true` rows globally across adapters (cannot leave the deployment with zero admins; cannot ban self or last admin). See `docs/spec/security.md` §Per-adapter admin threat profile for the SimpleX-vs-Signal threat surface and operator-side mitigations.
 - **Group admin**: first user to `@mention` the bot in a new group is auto-promoted; bot admins can override with `/promote` and `/demote`.
 - **Sources**: seeded from `bootstrap-sources.json` (path configurable via `infochat.bootstrap.sources-file`). Loader is idempotent: upsert by `(kind, identifier)` — `kind` is the source type (`rss`, `bluesky`, `nostr`, etc.), `identifier` is the URL for HTTP-shaped sources or the filter spec for stream sources (decision D38). The union of `tags` across all bootstrap entries seeds the controlled vocabulary. `/add-source` requires `--tags` (≥1 tag) so every source has a deterministic fallback when LLM tagging fails.
 
 ## User registration & ban
 
-- Users self-register on first message (auto-create + welcome with `/help`).
+- DM access requires an invite code issued by a bot admin (D44). Group access registers on first non-banned `@mention`. All newly registered users start in slow-start probation (D45).
 - Bot admin can `/ban <contact>` / `/unban <contact>`. Banned users are blocked at message intake; they receive one fixed response and never reach the LLM or any DB query beyond the ban check.
 
 ## Build / run quick reference
@@ -77,4 +77,4 @@ mvn -pl infochat-collector quarkus:dev
 mvn -pl infochat-provider quarkus:dev
 ```
 
-A `docker-compose.yml` will start Postgres+pgvector, Ollama (default LLM), and a stubbed messaging adapter for local development.
+A `docker-compose.yml` will start Postgres+pgvector, Ollama (default LLM), and the in-memory test adapter for local development. Production deployments enable one or more of SimpleX / Signal in the same Provider; the in-memory adapter is exercised in a separate test-time deployment shape and never alongside production adapters (decision D46, `docs/spec/deployment.md` §Deployment scenarios).

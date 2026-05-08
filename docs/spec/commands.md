@@ -16,8 +16,27 @@ live in `docs/design/03-commands.md`.
   `-w <duration>` flag with the same accepted forms (decision D12). Concrete
   forms are documented in design notes.
 - **Tag arguments are exact-match** against the controlled vocabulary,
-  case-insensitive. Unknown tags produce friendly errors with fuzzy
-  suggestions.
+  after a fixed normalization pipeline applied at every read and
+  write site:
+  1. Trim leading and trailing whitespace.
+  2. Apply Unicode NFC normalization (NFC, not NFKC — NFKC's
+     compatibility folding would silently merge visually-distinct
+     tags like `①` and `1`, which is a different design choice).
+  3. Lower-case the result via `String.toLowerCase(Locale.ROOT)`
+     (locale-independent so `İ`/`I` do not split between locales).
+  4. Reject any value whose post-normalization form does not match
+     the character class `[a-z0-9][a-z0-9-]{0,47}` — ASCII
+     alphanumerics plus internal hyphens, leading character must
+     be alphanumeric, total length 1–48 characters. Whitespace,
+     non-ASCII letters, and control characters are rejected at the
+     parser with a friendly error.
+  Normalization runs identically at ingest (bootstrap loader,
+  `/add-source --tags`, tagger output validation) and at command
+  parse (`/follow-tag`, `/unfollow-tag`, `/summary <tag>`,
+  `/saved <tag>`). The character-class restriction closes the
+  NFC-vs-NFKC homoglyph evasion path. Unknown tags produce
+  friendly errors with fuzzy suggestions over the controlled
+  vocabulary.
 - **Confirmation for destructive commands.** Destructive actions
   (e.g. `/clear`, `/remove-source`, `/ban`) require a follow-up
   `<command> confirm` within a **fixed, profile-tunable timeout**.
@@ -63,7 +82,18 @@ text, and output structure are in `docs/design/03-commands.md`.
 ### Discovery
 
 - `/help` — context-aware list of commands available to the caller.
-  DM and group; any non-banned user.
+  DM and group; any non-banned user. The list is filtered by the
+  exact set the caller is currently permitted to invoke: a
+  probation-tier caller (decision D45) sees **only** the slow-start
+  allowed subset, with a one-line note that fuller access unlocks
+  when probation ends; a non-admin caller does not see admin
+  commands; a group member who is not group admin does not see
+  group-admin-only commands. Showing a wider list with "blocked
+  during probation" annotations would contradict the
+  probation-reply text the user receives if they try to invoke
+  one of the blocked commands; filtering keeps the welcome
+  message, the `/help` listing, and the probation reply mutually
+  consistent.
 - `/status` — runtime status (active profile, uptime, scope-specific
   counts; admin sees more). DM and group; any non-banned user.
 - `/get-tags` — controlled vocabulary, marking the scope's followed
@@ -88,7 +118,19 @@ text, and output structure are in `docs/design/03-commands.md`.
   truncated with a "+N more" footer. **Empty window**: when no
   eligible posts exist in the window, `/summary` returns a friendly
   "no posts yet" reply (deterministic localization-bundle string,
-  no LLM invocation, no empty summary block).
+  no LLM invocation, no empty summary block). If the calling scope
+  has zero active subscriptions, `/summary` returns the same "no
+  posts yet" reply regardless of tag mode or window size — the
+  empty-eligible-set path covers both "subscribed but nothing
+  arrived" and "nothing subscribed."
+  **Posts with Stage 1 redactions retained** (`stage2_failed=true`,
+  released `READY` per `security.md` §Failure handling) are included
+  in the eligible set; the LLM summarizer sees the redacted body
+  as-is. `[REDACTED:<id>]` placeholders are **not** stripped before
+  the prompt — the placeholder serves the same defensive purpose at
+  summarize time as it does at delivery time (it tells the model
+  that text was removed without revealing what, and it preserves
+  the visual cue when the prose is read back to the user).
 - `/save <uid> [-t personal-tags]` — bookmark a post into the calling
   user's library. **Saves are per-user-globally** (decision D13): a
   save made in DM is visible from any group, and vice versa. Personal
@@ -107,10 +149,11 @@ text, and output structure are in `docs/design/03-commands.md`.
   Stage 2 `BENIGN` verdict (visible with Stage 1 redactions) snapshots
   the redacted body. `/save` on a `QUARANTINED` post with `INJECTION`,
   `MALWARE`, or `UNKNOWN` (hidden — invisible to the user) is
-  treated as an unknown UID. `/save` on a `NEEDS_REVIEW` post follows
-  the visibility rules of its Stage 1 redactions (same as Stage 2
-  BENIGN above). The `/save` flow never lets a user bookmark content
-  they cannot see.
+  treated as an unknown UID. `/save` on a `NEEDS_REVIEW` post is
+  treated as an unknown UID: `NEEDS_REVIEW` posts are never
+  user-visible — they are reachable only by bot admins via
+  `/quarantine list --all`. The `/save` flow never lets a user
+  bookmark content they cannot see.
 - `/saved [tag] [-w …] [--page N]` — list saved posts with optional
   filters and pagination.
 - `/unsave <uid>` — remove from library (no confirmation).
@@ -125,11 +168,17 @@ size, on-chain queries) can land without a new top-level command per
 verb.
 
 - `/zcash [sub-verb] [--vs <currency>]` — Zcash market data. Sub-verbs
-  in v1: `coingecko` (default, aggregated snapshot), `kraken`,
-  `bitfinex`. Bare `/zcash` uses the operator-configured default
-  sub-verb. Optional `--vs` selects the quote currency (USD by default;
-  the per-source allowlist of accepted quote currencies lives in design
-  notes). DM and group; any non-banned user.
+  in v1: `coingecko` (aggregated snapshot), `kraken`, `bitfinex`.
+  Bare `/zcash` resolves to the **per-asset default sub-verb** set
+  in `bootstrap-assets.json` (`asset_config.default_sub_verb` —
+  `schema.md` §Operational); when no default is configured for the
+  asset, bare `/zcash` returns the same friendly "not configured"
+  error as an unknown sub-verb (no implicit fallback to
+  `coingecko` or any other source — silent fallback would mask
+  operator misconfiguration). Optional `--vs` selects the quote
+  currency (USD by default; the per-source allowlist of accepted
+  quote currencies lives in design notes). DM and group; any
+  non-banned user.
 - `/monero [sub-verb] [--vs <currency>]` — Monero market data. Same
   shape as `/zcash`. The enabled sub-verb set is **not** the same:
   exchanges that do not list XMR (Binance, Coinbase, Gemini) are not
@@ -214,12 +263,9 @@ Source rows are global; subscriptions are per-scope (decision D7). DM
 subscriptions are private to the user; group subscriptions are
 shared across the group and writable only by group admins.
 
-- `/add-source <url> --tags … [--category <name>]` — DM: any
-  non-banned user adds to their own scope. Group: group admin only.
-  Tags are mandatory (decision D14). The source `kind` (rss /
-  bluesky / nostr / …) is inferred from the URL shape; an explicit
-  `--type <kind>` override is accepted but not required, and
-  defaults to `rss` when inference is ambiguous. Identity is
+- `/add-source <url> --tags … [--type <kind>] [--category <name>]` —
+  DM: any non-banned user adds to their own scope. Group: group admin
+  only. Tags are mandatory (decision D14). Identity is
   `(kind, identifier)` per decision D38; the per-kind `config`
   block defaults to NULL when not supplied. The `--category` flag
   selects one of `news` / `blog` / `social`; default is `news`
@@ -228,6 +274,43 @@ shared across the group and writable only by group admins.
   permission decisions; v2 may attach behavior to it (e.g., a
   chat-agent tool filter), v1 commits to nothing beyond
   storing it.
+
+  **Kind resolution.** The source `kind` is determined deterministically:
+
+  1. An explicit `--type <kind>` always wins. The value is matched
+     case-insensitively against the closed `source.kind` enum
+     (SPEC.md §Glossary "Source kind"); unknown values produce the
+     friendly-error path with fuzzy suggestions over the enum, the
+     same path as an unknown tag argument. The value never reaches
+     a SQL query as free-form text — the enum check is the validation
+     boundary.
+  2. With no `--type`, the kind is inferred from the URL by the
+     following closed table, applied in order. Host comparisons are
+     case-insensitive against the URL's authority component:
+     - Scheme is `wss://` or `ws://` → `nostr` (the only
+       StreamSource-shaped kind in v1).
+     - Host is `bsky.app`, `bsky.social`, or any subdomain
+       thereof → `bluesky`.
+     - Host is `reddit.com`, `redd.it`, or any subdomain
+       thereof → `reddit`.
+     - Host is `youtube.com`, `youtu.be`, or any subdomain
+       thereof → `youtube`.
+     - Host is `odysee.com` or any subdomain thereof → `odysee`.
+  3. URLs that match none of the rows above are **ambiguous**: the
+     call is rejected with a friendly error that lists the supported
+     kinds and instructs the caller to supply `--type`. There is
+     **no silent fallback to `rss`** — self-hosted Nitter instances
+     (no canonical host), non-canonical mirrors, and plain RSS feeds
+     therefore require an explicit `--type`. A URL silently routed
+     to the wrong SPI (Fetcher vs. StreamSource) and clashing with
+     an existing row on the `(kind, identifier)` unique key is a
+     worse failure mode than asking the caller for `--type`.
+
+  The host-pattern table above is **closed at spec level** —
+  additions are spec amendments, not design tweaks — so two
+  implementations cannot diverge on routing. IDN/Punycode folding
+  rules and the exact case-folding implementation live in design
+  notes.
   **URL validation before insert.** For HTTP-shaped kinds, the
   Provider performs a lightweight `HEAD` (or, for servers that reject
   `HEAD`, a small-range `GET`) reachability probe through the
@@ -488,8 +571,17 @@ and makes the digest query depend on row presence.
 
 - `/promote <contact>` / `/demote <contact>` — group admin
   promote/demote, used inside a group.
-- `/grant-admin <contact>` / `/revoke-admin <contact>` — bot-wide. Last-
-  admin protection applies.
+- `/grant-admin <contact>` / `/revoke-admin <contact>` — **scoped to
+  the inbound adapter** (one Provider may run multiple adapters per
+  `deployment.md` §Topology, and admin grants do not cross adapters
+  in v1). The `<contact>` argument refers to a contact id on the
+  same adapter the command came from; mutating an admin row on a
+  different adapter requires running the command from that adapter.
+  This bounds the blast radius of an adapter compromise: a
+  compromised admin on one adapter cannot silently elevate a
+  contact on another. Last-admin protection applies **globally
+  across adapters** — at least one `is_admin = true` row must
+  exist anywhere on the deployment after any revoke.
 - `/ban <contact> [--reason …]` / `/unban <contact>` — bot-wide ban. Cannot
   ban self or last admin.
 - `/invite create --adapter <name> --contact <id>` — generate a single-use
@@ -591,18 +683,62 @@ non-probation `@mention` wins" rule (`security.md` §Authorization
 model) is correct for the common case but an attentive operator
 gives the rule no chance to fire on the wrong user.
 
-## Periodic group summaries
+## Periodic group digests
 
 Groups receive a morning and evening digest at per-group local times
-(decision D16). Each digest fires within a **profile-driven window
-centered on the scope's configured local hour**, so the worker pool
-isn't slammed by hundreds of groups all asking at the same minute.
-The overload fallback (headlines + sources, no LLM prose, decision
-D17) fires when the window-end is reached without the digest having
-started — the operator's "the worker pool is saturated" recovery
-path. Results are cached briefly so a follow-up `/summary` from the
-same group during the cache TTL is served from cache (no second
-LLM call).
+(decision D16). The digest **slot hours** are
+**operator-configured globally** — two settings, "morning slot
+center hour" and "evening slot center hour", expressed in 24-hour
+local time of the group (`groups.timezone`). Both values live in
+`deployment.md` §Configuration surface §Groups; the defaults are
+profile-driven and live in design notes. v1 has **no per-group
+override** for the slot hours — every group on the deployment
+fires its morning digest at the same local hour and its evening
+digest at the same local hour, each interpreted in that group's
+own timezone. (Per-group hour overrides are a v2 candidate; v1
+keeps the configuration surface narrow because adding a per-group
+override requires a new command, a new `groups` column, and a
+matching audit row, none of which any review report flagged as
+needed.)
+
+Each digest fires within a **profile-driven window centered on
+the configured local hour** (window width is in design notes), so
+the worker pool isn't slammed by hundreds of groups all asking at
+the same minute. The overload fallback (headlines + sources, no
+LLM prose, decision D17) fires when the window-end is reached
+without the digest having started — the operator's "the worker
+pool is saturated" recovery path. Results are cached briefly so a
+follow-up `/summary` from the same group during the cache TTL is
+served from cache (no second LLM call).
+
+**Missed slot behaviour.** When the Provider is down for the entire
+slot window of a group, the missed slot is **skipped, not caught
+up**: digests are time-of-day signals, not strictly-once events,
+and a digest delivered at noon for an 08:00 slot is operator
+noise, not user value. The skip is recorded as a per-group
+`digest_slot_missed` audit row (one per missed slot, no
+throttling — sustained misses indicate a deployment problem the
+operator must see) and increments a `digest_slots_missed_total`
+counter labelled by group. The next slot fires normally on its
+own schedule. There is no operator-visible chat surface for
+missed digests in v1 — operators read the audit log or counter.
+
+**Degraded-fallback exit.** A degraded slot (headlines + sources,
+no LLM prose) **does not** affect any subsequent slot: each slot's
+mode is decided independently when its own window ends, so the
+next slot runs full-prose unconditionally if the worker pool is
+healthy at that point. A degraded slot writes to the same
+`summary_cache` row as a full-prose slot would, with the **same
+TTL**, so a follow-up `/summary` during the cache window is served
+from the degraded cache (no silent re-render). `/retry --digest`
+on a degraded slot regenerates **full prose** if the worker pool
+is now free (the retry replaces the cached digest per D17 and the
+cluster set is the frozen original), and degrades again to
+headlines+sources only if the retry itself hits the same
+saturation. There is no saturation back-off across slots — a
+sustained-overload signal is the throttled admin notification
+already in `security.md` §Failure handling, not a per-group
+slot-skipping policy.
 
 ## What lives in design notes
 

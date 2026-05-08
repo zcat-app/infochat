@@ -17,13 +17,46 @@ connect with (see decision D34 and `security.md`).
   audit), the `probation_until` timestamp (null means full access; non-null
   means the user is in the slow-start tier until that instant — decision D45),
   and informational metadata (display name, last-seen, save count).
-- **Group.** A messaging-adapter group the bot is a member of. Has a
-  per-group timezone for digest scheduling (defaults to the
+- **Group.** A messaging-adapter group the bot is a member of. Carries
+  a per-group timezone for digest scheduling (defaults to the
   operator-configured default — `UTC` out of the box; mutated at
-  runtime by `/group-timezone`).
-- **Group membership.** The (user, group) join, with a per-group admin flag.
-  Schema must enforce *at most one* group admin per group at any time
-  (decision D9).
+  runtime by `/group-timezone`), a nullable `removed_at` timestamp
+  set when the bot is removed from the group and cleared on re-add
+  (`messaging.md` §Failure handling), and informational metadata.
+  Group state (subscriptions, `scope_tag`, `chat_memory`,
+  `chat_session`, members' saves) is preserved across remove/re-add
+  cycles.
+- **Group membership.** The (user, group) join, with a per-group
+  admin flag. Schema must enforce *at most one* group admin per
+  group at any time (decision D9).
+  **User-departure lifecycle.** When the messaging adapter signals
+  that a user has left a group (a `user_left_group` adapter event,
+  or a permanent send failure to that specific user surfaced by
+  the adapter), the row is **soft-cleared, not deleted**: a
+  nullable `removed_at` timestamp is set, mirroring the
+  `groups.removed_at` semantics for the bot's own membership. The
+  row is preserved against accidental leave/rejoin cycles (the
+  user's per-(user, group) `chat_memory`, `chat_session`, and
+  `summary_anchor` rows are likewise preserved). On rejoin the
+  adapter signal clears `removed_at` and the prior state is
+  visible again.
+  **Interaction with the group-admin slot.** When the user being
+  cleared was the group admin (`is_group_admin = true` on this
+  row), the soft-clear **also clears `is_group_admin`** in the
+  same transaction, freeing the partial unique index slot. The
+  group is then admin-less until the next bot-admin `/promote` or
+  the next first-mention auto-promote; this matches the existing
+  rule (security.md §Authorization model) that "first non-banned,
+  non-probation @mention wins" applies whenever the group has zero
+  admins. A user who left and rejoins as a regular member does
+  **not** automatically reclaim `is_group_admin`; the slot is
+  refilled by the standard mechanisms.
+  **Eligibility for the auto-promote.** A row with
+  `removed_at IS NOT NULL` is **not eligible** as a "first
+  @mention" winner — the auto-promote only fires when the user
+  rejoins (`removed_at` cleared) and a fresh @mention arrives
+  while the slot is empty. This avoids ghost rows from
+  long-departed members claiming the slot on a stale row alone.
 - **Invite code.** A single-use token that gates DM registration
   (decision D44). Keyed by a UUID code value. Carries:
   - `invite_type ∈ {CONTACT_BOUND, OPEN_ADAPTER}` — discriminator
@@ -86,15 +119,43 @@ connect with (see decision D34 and `security.md`).
   scheduled, so it can't fail).
 - **Source subscription.** A (scope, source) link. DM scope is per user;
   group scope is shared.
-- **Tag.** A row in the controlled vocabulary (Tier 1, decision D5). Seeded
-  by the bootstrap loader and extended by `/add-source --tags`.
+- **Tag.** A row in the controlled vocabulary (Tier 1, decision D5).
+  Seeded by the bootstrap loader and extended by `/add-source --tags`.
+  **Stored form.** Every tag value is stored in its
+  post-normalization form per `commands.md` §Surface conventions
+  (NFC, lower-cased via `Locale.ROOT`, character class
+  `[a-z0-9][a-z0-9-]{0,47}`). The same normalization runs at
+  ingest and at every read/write site, so two values that hash
+  differently before normalization (e.g. NFC vs NFKC homoglyph
+  variants, mixed-case duplicates) collapse to a single row.
 - **Scope tag.** Per-scope follow / unfollow preference for digest content.
   Each row corresponds 1-1 with a `/follow-tag` user action; `/unfollow-tag`
   removes the row. Default for a fresh scope is "all tags from subscribed
   sources" (decision D15) — the absence of any rows in this entity for a
   scope means "all tags," not "no tags." The set of legal tag values is
-  the controlled vocabulary; rows referencing tags removed from the
-  vocabulary are pruned by the same path that maintains it.
+  the controlled vocabulary.
+
+  **Vocabulary lifecycle (v1).** The controlled vocabulary is
+  **append-only in v1**: tags enter via the bootstrap loader's
+  `tags[]` union (decision D8) and `/add-source --tags` on a fresh
+  insert (decision D14, decision D5); **nothing removes a tag row**.
+  Reducing the JSON, soft-deleting a source, and `/remove-source`
+  are all silent on the vocabulary. A bot admin replacing
+  `bootstrap_tags` on an existing source row (commands.md §Source
+  management) **adds** any new values to the vocabulary and leaves
+  any removed values in place. This is a deliberate v1
+  simplification: an automatic GC trigger that walked
+  `bootstrap_tags ⋃ scope_tag` and removed unreferenced rows
+  would race with concurrent `/follow-tag` writes and require a
+  separate locking story; the operational cost of a slowly
+  growing vocabulary is bounded and acceptable for v1. Removal
+  is a v2 candidate (likely an admin command surfaced via
+  `/vocab prune` or similar). Until v2, `/follow-tag` may accept a
+  tag whose only contributing source was removed long ago — the
+  digest query intersects the vocabulary against
+  `bootstrap_tags` of currently-subscribed sources, so a stale
+  vocabulary entry with no current contributor matches no posts
+  and produces no user-visible content.
 
 ### Posts and derivatives
 
@@ -108,7 +169,13 @@ connect with (see decision D34 and `security.md`).
   per-post attempt cap → `QUARANTINED → NEEDS_REVIEW`. Transitions
   from `NEEDS_REVIEW`: only `/quarantine approve` lifts to `READY`; a
   later non-`BENIGN` re-eval verdict (rare — only if the post is
-  re-queued by an admin) returns it to `QUARANTINED`. `NEEDS_REVIEW`
+  re-queued by an admin) returns it to `QUARANTINED`. When the
+  admin-review TTL (Invariant 6) fires on a quarantine row attached
+  to a `NEEDS_REVIEW` post, the row auto-transitions to `REJECTED`
+  and the post transitions `NEEDS_REVIEW → QUARANTINED` (the
+  placeholder body becomes permanent). No admin notification is
+  sent for the TTL-driven auto-reject — the throttled notifier
+  already paged when the post entered `NEEDS_REVIEW`. `NEEDS_REVIEW`
   is the durable signal that "the system gave up trying to classify
   this; it stays hidden until an admin acts" — distinct from
   `QUARANTINED` which is "the system has classified this as
@@ -164,6 +231,15 @@ two minimally different bodies that share semantic content (because
 only volatile metadata changed) hash to the same UID and dedup
 correctly.
 
+UID derivation runs **before Stage 1**, against the raw fetched body
+(after transport decoding but before HTML sanitization, NFKC
+normalization, or regex redaction). Canonicalization strips
+source-kind volatile metadata only, never system-generated artifacts
+such as `[REDACTED:<id>]` placeholders. This guarantees UID
+stability across refetch and across `/quarantine approve` lifting
+redactions: the same upstream content produces the same UID
+regardless of how many quarantine cycles it has been through.
+
 ### Per-user state (scope-independent)
 
 - **Saved post.** Per-user library entries with personal tags
@@ -198,7 +274,17 @@ correctly.
   the bounded retry window — this is what makes `/retry` work after
   a controlled bounce. The anchor is a separate entity from
   `chat_session` so the live context window's TTL/clear semantics
-  do not couple to retry storage.
+  do not couple to retry storage. Anchor rows carry the same
+  retention discipline as `chat_memory` (Invariant 9): a
+  profile-driven horizon, removed by the same scheduled pruner.
+  The "bounded retry window" framing above is the user-facing
+  semantics; the pruner is the operator-facing reclamation that
+  guarantees a user who walks away does not leave anchor rows
+  behind indefinitely. Chat-mode interactions that internally
+  call a summarization tool do **not** write a `summary_anchor`
+  row and are not replayable via `/retry`. Only top-level
+  summary-producing commands (`/summary`, periodic digests,
+  `/retry` itself) write anchors.
 - **Chat memory.** Per-(user, scope) compressed memory entries created
   by `/compress` and consumed by the chat agent's recall path. Subject
   to a fixed TTL (decision D37); `/save`d posts are independent and
@@ -224,8 +310,16 @@ correctly.
 - **Provider state.** Catch-up high-water marks for the
   `LISTEN/NOTIFY` reconciler (see `architecture.md`). **One row per
   channel** keyed by `channel`, holding `(channel, last_ready_at,
-  last_post_id, updated_at)`. Updates are compare-and-swap so a slow
-  processor cannot roll back a fast one's mark:
+  last_post_id, updated_at)`. A `UNIQUE` constraint on `channel`
+  enforces the singleton-row-per-channel semantics at the schema
+  layer. The first-boot insert uses
+  `INSERT INTO provider_state (channel, last_ready_at, last_post_id,
+  updated_at) VALUES (:ch, ...) ON CONFLICT (channel) DO NOTHING`;
+  two fresh Provider instances starting concurrently both attempt
+  the insert, exactly one wins, and the winning instance owns the
+  cursor — no duplicate rows can be produced by the first-insert
+  race. Updates are compare-and-swap so a slow processor cannot
+  roll back a fast one's mark:
   `UPDATE provider_state SET last_ready_at = :new_ready_at,
   last_post_id = :new_post_id, updated_at = NOW()
   WHERE channel = :ch AND (last_ready_at, last_post_id) <
@@ -241,8 +335,13 @@ correctly.
 - **Asset config.** One row per `(asset, sub_verb)` pair (decision
   D39). Carries `enabled` flag, `default_quote_currency`,
   `attribution_url`, `consecutive_failures`, `last_success_at`,
-  `last_failure_at`, and `status ∈ {active, failed, disabled}` —
-  same status taxonomy as `source.status`. The bootstrap loader
+  `last_failure_at`, an `is_default` flag (true on **at most one**
+  row per `asset` — enforced by a partial unique index — marks
+  which sub-verb resolves bare `/zcash` / `/monero` per
+  `commands.md` §Asset commands; absent default → bare invocation
+  returns the "not configured" friendly error), and
+  `status ∈ {active, failed, disabled}` — same status taxonomy as
+  `source.status`. The bootstrap loader
   upserts entries from `bootstrap-assets.json` at Collector
   startup; entries absent from the latest bootstrap are
   `enabled = false` (soft-disable), never hard-deleted, so prior
@@ -328,11 +427,15 @@ them together. They are tested in CI (see `verification.md`).
    (see `security.md`).
 9. **Chat-memory TTL.** `chat_memory` rows carry a fixed retention horizon
    (value in design notes) after which they are removed by a scheduled
-   pruner (decisions D37, D40). `/save`d posts are stored separately
-   (decision D13) and are not affected. `/forget` (decision D37) is a
-   user-initiated immediate purge of the caller's `(user, scope)` chat
-   memory and saved-list and is audit-logged like any other privileged
-   action against user state.
+   pruner (decisions D37, D40). `chat_session` rows carry the same TTL
+   and are removed by the same pruner; a stale `chat_session` row on
+   the next user message is treated as absent (equivalent to `/clear`).
+   `summary_anchor` rows are subject to the same pruner (see
+   §Per-scope state — Summary anchor). `/save`d posts are stored
+   separately (decision D13) and are not affected. `/forget`
+   (decision D37) is a user-initiated immediate purge of the caller's
+   `(user, scope)` chat memory and saved-list and is audit-logged like
+   any other privileged action against user state.
 
 ## What lives in design notes
 

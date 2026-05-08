@@ -12,15 +12,28 @@ A v1 deployment runs:
 - **PostgreSQL with pgvector.**
 - **Collector service.** Headless. Polls feeds, runs the eval pipeline,                                                                                                                                                                               
   writes posts.
-- **Provider service.** User-facing. Owns the messaging adapter, command                                                                                                                                                                              
-  router, chat agent.
+- **Provider service.** User-facing. Owns the configured messaging
+  adapters, command router, chat agent.
 - **One LLM provider** (local Ollama / llama.cpp by default; remote                                                                                                                                                                                   
   optional per task).
-- **One messaging adapter backend per deployment.** v1 supports
+- **One Provider, one or more messaging adapters.** v1 supports
   **SimpleX** and **Signal** as production adapters (decision D32);
-  the operator picks one per deployment — both are first-class v1
-  targets and either is exercised in the v1 build. The in-memory
-  test adapter is for tests, not production.
+  a single Provider process can run any non-empty subset of them
+  simultaneously, sharing the DB, the LLM worker pool, and the
+  per-user rate-limit budget. Running multiple adapters in one
+  Provider — rather than one Provider per adapter — is the v1
+  topology because (a) the LLM concurrency cap is a per-process
+  value (`llm.md` §Bounded concurrency) and splitting it across
+  Provider instances would multiply the load on a shared local
+  model, and (b) the schema's `(adapter, contact_id)` keying and
+  the cross-adapter isolation invariants (`messaging.md`
+  §Per-adapter trust level, `security.md` §Invite-code registration)
+  are load-bearing only when one Provider sees both adapters. The
+  in-memory test adapter is for tests, not production; production
+  deployments MUST NOT enable it. Each adapter's identity space is
+  isolated by the `(adapter, contact_id)` join key — a Signal
+  user and a SimpleX user are distinct `users` rows even at
+  byte-equal contact ids.
 
 Both services connect to the same DB but use different DB roles
 (`security.md` and decision D34). Both services run Flyway on startup;
@@ -43,17 +56,32 @@ An operator must provide:
 
 1. **A hardware profile choice** (`laptop` / `vps` / `pi` / `remote`,                                                                                                                                                                                 
    decision D27). One property setting picks a working configuration.
-2. **A bot-admin contact id.** The cryptographic contact id of the
-   user who will be the first bot admin. On startup, Provider ensures
-   this user exists with `is_admin = true` (creating the user if
-   needed) and writes a bootstrap row to `audit_log` (decision D9).
-   **The contact-id string format is adapter-specific** — SimpleX
-   contact ids are not Telegram user ids — and the operator MUST
-   supply a value that the *currently configured* messaging adapter
-   can parse. Switching adapters means re-issuing the contact id; the
-   old one is not portable. Provider validates the contact id against
-   the active adapter at startup and refuses to start on a
-   mismatch.
+2. **A bot-admin contact id, optional per adapter, required in
+   union.** The cryptographic contact id of the user who will be
+   the first bot admin **on a given enabled adapter**. The
+   property is keyed by adapter (concrete keys in design notes)
+   and **may be omitted for individual adapters** — an adapter
+   without a configured bootstrap admin still serves users, but
+   has no admin row of its own at startup. The deployment-wide
+   constraint is that **the union of bootstrap admin contacts
+   across all enabled adapters MUST be non-empty**; Provider
+   refuses to start otherwise (last-admin protection,
+   `security.md` §Authorization model, only works if at least one
+   admin exists somewhere). The contact-id string format is
+   **adapter-specific** — SimpleX contact ids are not Signal
+   ACI/UUIDs — so each value MUST be parseable by its own adapter;
+   Provider validates each at startup and refuses to start on a
+   mismatch. On startup Provider ensures, for every adapter that
+   does have a bootstrap admin, that the configured contact exists
+   with `is_admin = true` (creating the user if needed) and writes
+   a bootstrap row to `audit_log` (decision D9). The same human
+   typically maps to two distinct `users` rows — one per
+   `(adapter, contact_id)` — and is admin on each independently
+   per the inbound-adapter-scoped grant rule
+   (`commands.md` §Admin). Operators concerned about per-adapter
+   compromise risk should consult `security.md`
+   §Per-adapter admin threat profile when choosing where to
+   place admin.
 3. **A bootstrap sources file.** A JSON document listing the initial
    set of feeds. Each entry uses the v1 generalized identity
    `(kind, identifier)` (decision D38) plus `name`, `category`,
@@ -88,8 +116,13 @@ An operator must provide:
 5. **DB credentials** for the three Postgres roles.
 6. **LLM provider configuration.** Endpoint URL, API key (from env                                                                                                                                                                                    
    var, not the DB), model names per task (or rely on profile defaults).
-7. **Messaging adapter configuration.** Adapter selection plus its                                                                                                                                                                                    
-   transport-specific settings.
+7. **Messaging adapter configuration.** A list of one or more enabled
+   adapters and their transport-specific settings. Each enabled
+   adapter has its own connection settings, capability flag
+   defaults, and (per item 2) its own bot-admin contact id. The
+   list is closed at startup — adding or removing an adapter is a
+   restart. The exact property keys (and the multi-adapter list
+   shape) live in design notes.
 
 Everything else has a profile default.
 
@@ -108,23 +141,32 @@ Both services run Flyway migrations first. Then:
   `RAW`/intermediate states from a prior crash). Then starts the fetch                                                                                                                                                                                
   scheduler — including the asset-snapshot fetchers, on the                                                                                                                                                                                           
   profile-driven refresh interval.
-- **Provider** ensures the bot-admin user exists and has `is_admin =
-    true` (audit-logged). Then runs the new-post reconciler — replays
-  any `READY` posts since `last_ready_post_at` (the `LISTEN/NOTIFY`
-  catch-up high-water mark, see `architecture.md`). Then connects the
-  messaging adapter. Then starts the command router.
+- **Provider** ensures, for every enabled adapter, that its
+  bootstrap-admin user exists and has `is_admin = true`
+  (one bootstrap row per `(adapter, contact_id)`, all audit-logged).
+  Then runs the new-post reconciler — replays any `READY` posts
+  since `last_ready_post_at` (the `LISTEN/NOTIFY` catch-up
+  high-water mark, see `architecture.md`). Then connects each
+  enabled messaging adapter (a connection failure on one adapter
+  does not prevent the others from coming up; the failed adapter
+  is logged at fatal and the readiness probe stays unhealthy
+  until every enabled adapter is connected). Then starts the
+  command router.
 
-**Bootstrap admin drift.** If the configured
-`infochat.admin.contact-id` does not match an existing
-`is_admin = true` row, Provider creates a new admin row
-(audit-logged) and **leaves any prior admin rows in place**. This is
-the safer default than auto-revoking old admins on every startup:
-an operator who rotates the bootstrap value gets a working bot;
-pruning stale bootstrap admins is then an operator action via
-`/revoke-admin` from the new admin's chat. Last-admin protection
-(invariant 2) still applies: the prior admin row cannot be revoked
-until a second active admin exists, which the new bootstrap row
-provides.
+**Bootstrap admin drift.** Per enabled adapter: if the configured
+bootstrap admin contact id for that adapter does not match an
+existing `is_admin = true` row at `(adapter, contact_id)`,
+Provider creates a new admin row for that adapter (audit-logged)
+and **leaves any prior admin rows in place** (across this and any
+other adapter). This is the safer default than auto-revoking old
+admins on every startup: an operator who rotates the bootstrap
+value for one adapter gets a working bot on that adapter without
+cascading effects elsewhere; pruning stale bootstrap admins is
+then an operator action via `/revoke-admin` from the new admin's
+chat. Last-admin protection (invariant 2) is **global across
+adapters** — the prior admin row cannot be revoked until at
+least one other `is_admin = true` row exists anywhere on the
+deployment.
 
 **Asset bootstrap.** The Collector loads `bootstrap-assets.json`
 (when configured) and upserts `asset_config` rows by
@@ -149,7 +191,10 @@ property keys live in design notes:
   depth.
 - **LLM routing.** Per-task provider + model overrides; embedding                                                                                                                                                                                     
   provider; translator provider.
-- **Messaging adapter.** Adapter id + adapter-specific settings.
+- **Messaging adapters.** A non-empty list of enabled adapter ids,
+  each with its own adapter-specific settings and bootstrap-admin
+  contact id (per Operator inputs item 2). The list is closed at
+  startup; runtime add/remove is a v2 candidate.
 - **Source bootstrap.** Path to the JSON file.
 - **Asset bootstrap.** Path to the JSON file (optional; absent =                                                                                                                                                                                       
   asset commands disabled).
@@ -169,7 +214,14 @@ property keys live in design notes:
 - **Translation.** Cache TTL, default language.
 - **Groups.** Default group timezone for newly-created groups (`UTC`
   by default; an operator may override). `/group-timezone` mutates
-  the per-group value at runtime (commands.md).
+  the per-group value at runtime (commands.md). **Periodic-digest
+  morning slot center hour** and **periodic-digest evening slot
+  center hour** — two operator-configured 24-hour local-time values
+  (defaults profile-driven, in design notes) that apply uniformly
+  across every group on the deployment, each interpreted in that
+  group's own timezone. v1 has no per-group override; the slot
+  window width centered on each hour is also profile-driven and
+  in design notes.
 - **DB.** Per-role JDBC URLs + credentials.
 - **Operational.** Health endpoints, metrics endpoint, log level.
 
@@ -215,15 +267,21 @@ procedures are operator concerns and live in design notes / runbook.
 A `docker-compose.yml` brings up Postgres+pgvector, an Ollama instance,                                                                                                                                                                               
 the Collector, the Provider, and the in-memory test messaging adapter.           
 The bootstrap sources file points at a small set of feeds suitable for                                                                                                                                                                                
-a laptop. The MVP exit criteria (`00-mvp.md`) define the smallest                
-end-to-end slice that proves the topology works.
+a laptop. The MVP exit criteria (`docs/design/00-mvp.md`) define
+the smallest end-to-end slice that proves the topology works.
 
 ## Deployment scenarios
 
 Operator picks one of:
 
-- **Laptop / dev.** Single host, local Ollama, in-memory adapter for                                                                                                                                                                                  
-  tests + SimpleX adapter for real use. Default profile: `laptop`.
+- **Laptop / dev.** Single host, local Ollama. Default profile:
+  `laptop`. The production deployment runs one or more of
+  SimpleX / Signal (enabled per the multi-adapter rule in
+  §Topology) — both can run together in the one Provider, sharing
+  the LLM worker pool. The **in-memory adapter is exercised by
+  the test harness in a separate, test-time deployment shape**
+  (its own DB, its own Provider process), never alongside the
+  production adapters in the same running deployment.
 - **VPS.** Single host, smaller models, production-like Stage-2-failure                                                                                                                                                                               
   handling. Default profile: `vps`.
 - **Raspberry Pi.** Single host, tiny models, more aggressive degraded                                                                                                                                                                                

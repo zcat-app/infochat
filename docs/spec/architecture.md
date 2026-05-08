@@ -16,7 +16,7 @@ The two-service split is decision D2. Concretely:
 - **Collector** is headless. It fetches feeds, runs the evaluation pipeline,
   and stores posts. No user can address it directly.
 - **Provider** is the only user-facing component. It owns the messaging
-  adapter, the command router, the chat agent, the periodic-summary scheduler,
+  adapter, the command router, the chat agent, the periodic-digest scheduler,
   and all per-user state (subscriptions, saves, memory, preferences).
 
 The split exists for three reasons:

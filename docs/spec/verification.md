@@ -27,7 +27,10 @@ The suite has four layers, in increasing cost:
    has scriptable verdicts for every Stage-2 outcome.
 4. **End-to-end smoke.** `docker-compose up` against a small bootstrap                                                                                                                                                                                
    sources file. Verify the MVP exit criteria                                                                                                                                                                                                         
-   (`docs/00-mvp.md` §6) pass on a clean checkout.
+   (`docs/design/00-mvp.md` §6) pass on a clean checkout. The MVP
+   exit-criteria list is design-tier (it picks the smallest
+   end-to-end slice from spec); the requirement that the smoke
+   layer **exists and gates "MVP done"** is spec.
 
 ## Spec-level invariants the tests must enforce
 
@@ -120,6 +123,10 @@ or `deployment.md`. Each one corresponds to at least one named test.
   probation expiry (`probation_until < NOW()`) auto-promotes on the
   next request without admin action; the lazy sweep clears
   `probation_until` after expiry without a background job.
+  **`/help` filtering during probation:** a probation caller's
+  `/help` returns exactly the slow-start allowed subset, with the
+  probation note attached, and never lists a command whose
+  invocation would return the probation rejection reply.
 - **Fetcher failure ladder** (decision D42): N consecutive failures
   on a single source flips `status = 'failed'`, N-1 does not; the
   scheduler skips `failed` sources; the throttled admin notifier
@@ -154,6 +161,32 @@ or `deployment.md`. Each one corresponds to at least one named test.
   the re-eval queue with the lower attempt cap; cap exhaustion
   transitions to `NEEDS_REVIEW` and produces a coalesced admin
   notification (B38).
+- **Stage-2 infra-failure → NEEDS_REVIEW exhaustion** (mirrors B14
+  for the parallel infra-failure path, security.md §Failure
+  handling): a post released as `READY` with `stage2_failed=true`
+  is picked up by the re-eval queue; repeated infrastructure
+  failures or non-`BENIGN` verdicts up to the per-post attempt cap
+  transition the post to `NEEDS_REVIEW` with a coalesced admin
+  notification, matching the UNKNOWN-verdict path. A successful
+  `BENIGN` re-eval before exhaustion clears `stage2_failed` and
+  leaves the post `READY` with redactions retained (parallel to
+  Stage 2 re-eval BENIGN parity above).
+- **/save snapshot stability across post status transitions**
+  (decision D13 retention exemption): a `/save` of a `READY` post
+  snapshots the visible body; a subsequent transition of the
+  underlying post to `NEEDS_REVIEW` and then `QUARANTINED` (e.g.
+  via the admin-review TTL auto-reject path, schema.md Invariant
+  6) leaves the `saved_post` row's snapshot unchanged and
+  `/saved` continues to render the original snapshot body.
+  Asserts the snapshot is copied at `/save` time and never
+  re-resolved against `post`.
+- **Provider state first-boot concurrency** (schema.md §Provider
+  state): two Provider instances starting simultaneously against
+  an empty `provider_state` table both attempt the
+  `INSERT … ON CONFLICT (channel) DO NOTHING`; exactly one row
+  per channel is produced and exactly one instance owns the
+  cursor. The losing instance proceeds without error and reads
+  the winning instance's row on its next CAS update.
 - **Stage 1 / kind-filter ordering** (B3): a Nostr fixture event of
   a disallowed kind is dropped at the kind-filter step before
   Stage 1 runs (Stage 1 sanitizer counter does not increment); a
@@ -217,14 +250,26 @@ or `deployment.md`. Each one corresponds to at least one named test.
   friendly error. Snapshots never appear in `/summary`, `/save`, or
   `/saved` results (assertion: `/save <price-snapshot-row-id>`
   returns the unknown-uid error).
-- Periodic group summaries (decision D17): the morning/evening digest
+- Periodic group digests (decision D17): the morning/evening digest
   is generated within the staggered slot window; a follow-up
   `/summary` from the same group during the cache TTL is served from
   cache (no second LLM call); when the worker pool is saturated a
   digest is emitted in the degraded form (headlines + sources, no LLM
   prose) and a regular `/summary` afterwards still produces full
   prose; a `/retry` from group admin replaces the cached digest and
-  the next `/summary` reads the replacement.
+  the next `/summary` reads the replacement. **Missed slot
+  (commands.md §Periodic group digests):** with the Provider down
+  for the entire slot window, on next startup the slot is skipped
+  (no catch-up digest is emitted), a per-group `digest_slot_missed`
+  audit row is written, the `digest_slots_missed_total` counter
+  increments by exactly one for that group, and the next scheduled
+  slot fires normally. **Degraded-fallback independence:** a slot
+  forced into the degraded path does not change the mode of the
+  next slot — with the worker pool restored, the following slot
+  runs full prose unconditionally; a degraded slot writes the same
+  `summary_cache` row with the same TTL as a full-prose slot, and
+  `/retry --digest` on a degraded slot regenerates full prose when
+  the worker pool is free.
 - Re-evaluation job (security.md §Failure handling): a post with
   `stage2_failed=true` is picked up on the next re-eval tick once the
   fake LLM is restored to a healthy verdict; verdict `BENIGN` lifts
@@ -281,9 +326,13 @@ or `deployment.md`. Each one corresponds to at least one named test.
 - Chat output sanitizer: a fake LLM emits a reply containing                                                                                                                                                                                          
   `/grant-admin abc`; sanitizer strips it and writes an audit row;                                                                                                                                                                                    
   multi-match replies are refused entirely.
-- Tool surface: the LLM's tool list does not include any mutator;                                                                                                                                                                                     
-  attempts to call mutator-shaped names from the agent loop are                                                                                                                                                                                       
-  rejected at the SPI boundary.
+- Tool surface: the agent's tool registry contains exactly the closed
+  set named in `security.md` §Prompt-injection defenses (`searchPosts`,
+  `getPost`, `getReferences`, `recallMemory`, `listSaves`) and nothing
+  else; CI fails on a mismatch in either direction (a name added to the
+  registry without a matching spec row, or a spec row with no matching
+  registry entry). Attempts to call any other name from the agent loop
+  are rejected at the SPI boundary.
 - Rate limits: per-user LLM-trigger cap rejects the call that exceeds
   the profile-configured cap; per-turn tool-call cap stops the agent
   loop. (Specific numeric caps are profile-driven; the test asserts

@@ -279,6 +279,23 @@ Mirrors the tag-argument error shape (commands.md §Friendly errors):
   Available: usd, eur, czk, btc.                                                                                                                                                                                                                        
   ```                                                   
 
+## 10.8b Asset feed recovery (operator-side)
+
+Unlike sources, which have `/source-enable` for admin-driven recovery
+from `failed`, asset feeds in v1 have **no chat-command equivalent**.
+When an `asset_config` row crosses the consecutive-failure threshold
+and flips to `status = 'failed'`, recovery is operator-side:
+
+  ```sql
+  UPDATE asset_config
+     SET status = 'active', consecutive_failures = 0
+   WHERE asset = 'zcash' AND sub_verb = 'kraken';
+  ```
+
+A chat-command equivalent (e.g. `/asset-enable <asset> <sub-verb>`)
+is a v2 candidate; v1 accepts the operator-side gap because asset
+feeds are operator-curated and the failure surface is small.
+
 ## 10.9 Deferred to v2
 
 - **Live ticker mode.** Websocket-driven, in-place edits. Needs a

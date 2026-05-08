@@ -9,9 +9,10 @@ The full specification is split across three layers:
   source for every behavior the system must exhibit.
 - **`docs/design/`** — *how*. Working notes: DDL, class names, package                                                                                                                                                                                
   layout, property keys, regex strings, retry counts, profile values. Allowed
-  to change without a spec amendment.
-- **`docs/00-mvp.md`** — the smallest end-to-end slice that proves the                                                                                                                                                                                
-  architecture works. A strict subset of the spec.
+  to change without a spec amendment. The MVP slice
+  (`docs/design/00-mvp.md`) lives here too — it picks the smallest
+  end-to-end set of behaviours from the spec to build first; it is a
+  design-tier reading, not a spec commitment.
 
 If a documentation change would alter the system's *commitments* (a new          
 command, a different trust boundary, a new SPI), it lives in `docs/spec/`.                                                                                                                                                                            
@@ -29,7 +30,7 @@ interact with the bot via:
 
 - **Direct messages** (DM): one user, full feature set, private state.
 - **Group chats**: bot replies only when `@mentioned`, periodic morning /
-  evening summaries, admin-only destructive operations, per-user-within-                                                                                                                                                                              
+  evening digests, admin-only destructive operations, per-user-within-                                                                                                                                                                              
   group state isolation.
 
 The system is two services:
@@ -64,10 +65,11 @@ For new contributors / planners:
    bootstrap behavior, configuration surface.
 10. **[spec/verification.md](spec/verification.md)** — what the test                                                                                                                                                                                  
     suite must prove.
-11. **[00-mvp.md](00-mvp.md)** — first slice to build.
 
 For implementation:
 
+11. **[design/00-mvp.md](design/00-mvp.md)** — first slice to build
+    (design-tier; picks the smallest end-to-end slice from the spec).
 12. **[design/](design/)** — read the design note matching the spec section                                                                                                                                                                           
     you are working on. Each file carries a `Status: design notes, not spec`                                                                                                                                                                          
     banner.
@@ -106,7 +108,7 @@ choices that shape every section.
 - Layered ingest security with admin chat commands for quarantine review.
 - Two admin tiers: bot admin + per-group admin.
 - User ban (`/ban`/`/unban`).
-- Group periodic morning / evening summaries with per-group timezone,                                                                                                                                                                                 
+- Group periodic morning / evening digests with per-group timezone,                                                                                                                                                                                 
   staggered scheduling, cache, and degraded fallback for low-power                                                                                                                                                                                    
   profiles.
 - Auto-compress near the profile-defined context window ceiling.
@@ -153,7 +155,15 @@ choices that shape every section.
 - Per-group bans / `/kick` distinct from bot-wide ban. Note: in v1 a
   group admin cannot kick a misbehaving member from the bot's
   perspective — escalate to a bot admin for `/ban`.
-- `/recall <keyword>` and `/memories` commands.
+- `/recall <keyword>` and `/memories` commands. v1 covers the
+  underlying need with the chat agent's `recallMemory` tool
+  (memory recall during conversation; security.md
+  §Prompt-injection defenses) and the global `/forget` privacy
+  lever; promoting these to first-class user commands is deferred
+  because v1 has no user request for explicit memory listing /
+  search outside a chat-mode prompt, and adding them now would
+  multiply the rate-limit and translation surface without
+  evidence of demand.
 - Admin web UI (instead of admin chat commands).
 - More sophisticated cross-source linking (topic modeling).
 - Concrete `TranslationProvider` impls beyond English + Czech.
@@ -166,7 +176,7 @@ choices that shape every section.
   `/monero hashrate`, etc.). Needs an explorer-adapter SPI.
 - Auth-gated price sources (KuCoin, Gemini for most endpoints,                                                                                                                                                                                        
   CoinGecko Pro). Needs the operator-secret SPI. 
-- Public IPFS/IPNS publication of periodic summaries as a static
+- Public IPFS/IPNS publication of periodic digests as a static
   JS-free page, regenerated on the existing 12h cadence, intended as
   an uncensorable demo of what the bot does. Design notes:
   [design/future/public-ipfs-publishing.md](design/future/public-ipfs-publishing.md). 
@@ -181,10 +191,15 @@ choices that shape every section.
   embedding vectors. Used to link related posts; never shown to users.
 - **Post UID**: stable globally-unique ID for a fetched post. Returned in
   summaries; usable in `/save`, "tell me more about UID X" chat queries, etc.
-- **Topic ID**: ID of a post cluster (connected component in the
-  `post_reference` graph). Stable only within the periodic-summary cache                                                                                                                                                                              
-  window; clusters are recomputed on cache expiry, so topic IDs are                                                                                                                                                                                   
-  best-effort breadcrumbs, not durable references.
+- **Cluster**: a connected component in the `post_reference` graph —
+  the unit of summary granularity. The summary surface (one prose
+  block per cluster) and the determinism boundary (cluster set
+  computed by deterministic SQL traversal before any LLM call) are
+  both stated in terms of clusters.
+  **Cluster ID**: the identifier of a cluster within a single
+  computation. Stable only within the periodic-digest cache
+  window; clusters are recomputed on cache expiry, so cluster IDs
+  are best-effort breadcrumbs, not durable references.
 - **Memory entry**: a `chat_memory` row created by `/compress`. Per-(user,                                                                                                                                                                            
   scope).
 - **Bot admin**: user with `is_admin = true`. Globally privileged.                                                                                                                                                                                    

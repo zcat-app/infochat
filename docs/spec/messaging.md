@@ -31,10 +31,35 @@ Every adapter implements:
   cryptographically-anchored contact id plus optional display name. An                                                                                                                                                                                
   adapter that cannot do this MUST be marked low-trust and the operator                                                                                                                                                                               
   must opt in explicitly.
-- **Receive.** Pushes inbound `(scope, contact_id, body)` to Provider.                                                                                                                                                                                
-  Group messages arrive only when the bot is `@mentioned`; the mention                                                                                                                                                                                
-  is stripped before delivery (the adapter may do the strip, or                  
-  Provider may do it consistently across adapters — see design notes).
+- **Receive.** Pushes inbound `(scope, contact_id, body)` to Provider.
+  Group messages arrive only when the bot is `@mentioned`; the
+  mention is stripped before delivery (the adapter may do the strip,
+  or Provider may do it consistently across adapters — see design
+  notes).
+  **Mention-recognition rule.** Whether a group message counts as
+  an `@mention` of the bot is decided **only** by the cryptographic
+  contact id of the mention target (decision D10): the adapter's
+  mention payload references the bot's contact id, and the
+  comparison is byte-equality against the bot's
+  **per-adapter contact id** for the inbound adapter (one Provider
+  may have multiple adapters configured per `deployment.md`
+  §Topology, and each adapter has its own bot identity). Both v1
+  adapters expose mention anchoring at the protocol layer —
+  SimpleX by queue address, Signal by ACI (the UUID Signal binds
+  to its identity keys; surfaced by `signal-cli` as
+  `mentionUuid`). Display-name matching is
+  **never** sufficient — an attacker who can spoof or impersonate
+  the bot's display name in a group must not be able to suppress
+  legitimate mentions or fake mentions of the bot.
+  For adapters whose underlying protocol exposes no mention
+  primitive at all (no @-mention payload, no mention metadata),
+  the adapter MUST surface this in its capability flags
+  (`supportsMentionByContactId = false`), and Provider's intake
+  refuses to enable group mode for that adapter — group access
+  requires a cryptographic mention anchor in v1. Falling back to
+  string matching on the bot's display name in the message body
+  is explicitly out of v1 (see `security.md` §"What's intentionally
+  NOT in v1").
 - **Send.** Provider sends a (scope, body); adapter returns an opaque
   message handle.
 - **Update.** Given a handle, replace the message body. Optional —                                                                                                                                                                                    
@@ -69,6 +94,13 @@ Every adapter implements:
   message; the progress notifier honors `max(adapterMin, system floor)`.
 - `supportsTypingIndicator` — drives the typing-on/off pulses around
   long-running requests.
+- `supportsMentionByContactId` — true when the adapter's protocol
+  carries an `@mention` anchored to the mentioned user's
+  cryptographic contact id (SimpleX queue address, Signal ACI).
+  Required-true for any adapter that exposes group mode in v1; an
+  adapter with this flag false MUST disable its group SPI.
+  Display-name string matching is never an acceptable fallback
+  for mention recognition (see §Required SPI surface — Receive).
 
 Future flags (richer attachments, voice, reactions, etc.) extend this                                                                                                                                                                                 
 list; v1 ships only the above. Provider must treat an unknown flag as                                                                                                                                                                                 
@@ -183,13 +215,51 @@ Provider produces plain text per decision D30. The adapter:
 ## Failure handling
 
 - Send/update/finalize failures are reported to Provider as exceptions
-  with a category (transient vs. permanent). Transient failures retry
-  with backoff; permanent failures abort the affected reply and log.
-- An adapter cannot silently drop messages. Either delivery succeeds or
-  the caller learns it didn't.
+  with a category (transient vs. permanent). The categorisation rule
+  is the spec-level commitment below; adapters MUST classify each
+  failure cause into one bucket or the other before raising:
+  - **Transient.** Network timeout, TCP/TLS reset, transport
+    rate-limit response, transport's "try again later" / 5xx-style
+    signal, ephemeral signing-server unavailability. Retried per
+    the policy below.
+  - **Permanent.** User has blocked the bot, group no longer exists
+    or the bot is no longer a member, recipient identity has been
+    rotated/revoked, message rejected as a policy violation by the
+    transport. Aborts the affected reply, never retried.
+  An adapter that cannot tell the two apart MUST default to
+  permanent — silently looping a permanent failure is a worse
+  failure mode than aborting an occasionally-transient one.
+- **Transient retry policy** is **uniform across adapters and
+  channels** so the Provider's per-user rate limiter remains the
+  single source of truth for "slow this user down":
+  - **Maximum attempts:** 3 (the original send plus two retries).
+  - **Schedule:** exponential back-off with full jitter; the base
+    delay between attempts doubles each iteration (start delay,
+    growth factor, and jitter window are profile-driven and live
+    in design notes — the spec commits to the *shape*: bounded
+    attempt count, exponential growth, full jitter).
+  - **Terminal action on cap exhaustion:** the failure is escalated
+    to **permanent** for the rest of this reply's lifecycle: the
+    affected reply is aborted, the adapter does not enqueue another
+    retry, and the throttled-admin-notification path
+    (`security.md` §Failure handling) fires per
+    `(channel, error_class)`. The user is not pinged about the
+    failed delivery; the next inbound from the same scope reuses
+    the standard intake path.
+  - **No silent extension.** An adapter MUST NOT add its own retry
+    wrapper on top — the policy above is the only retry layer
+    between Provider and the transport. Transport-internal
+    back-pressure (e.g. an HTTP 429 returned by a Signal proxy)
+    surfaces as a transient failure and counts toward the same
+    attempt budget.
+- An adapter cannot silently drop messages. Either delivery succeeds,
+  the caller learns it didn't (after the bounded retry budget), or
+  the failure is permanent and surfaced immediately.
 - Adapter-internal back-pressure (e.g. rate limits enforced by the
-  transport) surfaces as transient failures so Provider's per-user rate
-  limiter is the single source of truth for "slow this user down".
+  transport) surfaces as transient failures so the Provider's
+  per-user rate limiter is the single source of truth for "slow
+  this user down". Cumulative cost is bounded by the attempt cap
+  above.
 - **Permanent delivery failure cleanup.** Permanent failures (the
   user blocked the bot, the group is gone, credentials revoked)
   abort the affected reply **without advancing chat session state**
@@ -210,6 +280,36 @@ Provider produces plain text per decision D30. The adapter:
   automatically** — the row is preserved against accidental
   remove/re-add cycles. Cleanup of long-removed groups is a v2
   admin command.
+- **Group deleted upstream.** If a periodic-digest delivery (or
+  any other send to the group) fails with a permanent
+  "group does not exist" error from the adapter (adapter-specific
+  signal — e.g. SimpleX's group-not-found, Signal's
+  group-no-longer-exists), Provider treats it identically to
+  bot-removed: `groups.removed_at = NOW()`, scheduler entries
+  cancelled, group state preserved. The bot-removed and
+  group-deleted cases are not distinguished to users or in the
+  scheduler, only in the adapter-side log; the same v2 cleanup
+  command will sweep both.
+- **User left group.** When the adapter exposes a "user X left
+  group Y" signal (or surfaces a permanent send failure to a
+  specific user), Provider soft-clears the
+  `group_membership` row by setting `removed_at = NOW()` per
+  `schema.md` §Identity and access. The row, the user's
+  per-(user, group) `chat_memory` / `chat_session` /
+  `summary_anchor`, and any subscription rows attributed to that
+  membership are preserved against accidental rejoin. If the
+  departing user was the group admin, the same transaction
+  clears `is_group_admin` so the partial unique index slot is
+  freed; the group is admin-less until the next `/promote` or
+  the next eligible first-mention auto-promote. A row with
+  `removed_at IS NOT NULL` is **not eligible** as a first-mention
+  auto-promote winner — the user must rejoin (clearing
+  `removed_at`) before the slot can be refilled by their
+  @mention. Adapters that do not expose a left-group signal
+  (some transports cannot tell) MUST NOT synthesise one from
+  inactivity; in that case the row stays `removed_at IS NULL`
+  and the membership is cleaned up only on explicit
+  bot-removed-from-group / group-deleted signals.
 
 ## What lives in design notes
 

@@ -31,13 +31,30 @@ The LLM adapter exposes pluggable interfaces (decision D32):
 - **`LlmProvider`** — chat completion + structured-output classification.
 - **`EmbeddingProvider`** — text → vector batch.
 - **`TranslationProvider`** — text + (from, to) → text.
-- **`ModelTask`** enum — `SECURITY_JUDGE`, `TAGGER`, `ENTITY`,                                                                                                                                                                                        
-  `SUMMARIZER`, `CHAT_AGENT`, `TRANSLATOR`.
-- **Router** — resolves `(task, scope_language)` to a concrete provider.
+- **`ModelTask`** enum — `SECURITY_JUDGE`, `TAGGER`, `ENTITY`,
+  `SUMMARIZER`, `CHAT_AGENT`, `TRANSLATOR`. **Scope of the enum:**
+  `ModelTask` enumerates `LlmProvider` tasks **only**. The embedder
+  is **not** a `ModelTask` — `EmbeddingProvider` is a distinct SPI
+  with its own provider selection (operators configure the
+  embedding provider via a dedicated property surface; the
+  property keys live in design notes). This keeps the router
+  signature `(ModelTask, scope_language) → LlmProvider` and
+  prevents the conceptually-different embedding lifecycle (model
+  identity guard, dimensionality invariants, batch shape) from
+  being routed through the same `LlmProvider` machinery as chat
+  and classification calls.
+- **Router** — resolves `(ModelTask, scope_language)` to a concrete
+  `LlmProvider`. Embedding-provider selection runs through a
+  separate, simpler resolution path (one provider per deployment;
+  no per-task or per-language routing — `EmbeddingProvider` has no
+  `ModelTask` axis).
 - **Call context** — trace id, scope id, task, language; carried through         
-  every call for observability.
+  every call for observability. The same call context wraps both
+  `LlmProvider` and `EmbeddingProvider` calls so traces stitch
+  across the embedding boundary.
 
-The router lets operators configure each task independently:
+The router lets operators configure each `LlmProvider` task
+independently:
 
 - Security judge — small, fast, local model. Optimized for high
   recall on injection-shaped content and for throughput.
@@ -50,12 +67,14 @@ The router lets operators configure each task independently:
 - Summarizer / chat agent — produces plain-text prose; per-task
   routing lets operators point this at the model they have chosen
   for production-quality output (local or remote).
-- Embedder — produces a fixed-dimensionality vector per input. A
-  single embedding model per deployment (changing it invalidates
-  existing vectors; see Embedding pipeline below).
 - Translator — produces plain-text prose in the requested target
   language; defaults to the chat model with a translation prompt.
   A dedicated provider may be plugged in.
+
+`EmbeddingProvider` is configured separately (see §Embedding
+pipeline below). It produces a fixed-dimensionality vector per
+input; a single embedding model per deployment (changing it
+invalidates existing vectors).
 
 Concrete property keys, default models per profile, and the routing                                                                                                                                                                                   
 algorithm live in `docs/design/05-llm-and-embeddings.md`.

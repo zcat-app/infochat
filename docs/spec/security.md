@@ -13,8 +13,12 @@ is the document that constrains them.
 
 We assume:
 
-- The **Provider** is exposed to the internet through the messaging adapter.                                                                                                                                                                          
-  Adversaries can send arbitrary text.
+- The **Provider** is exposed to the internet through every enabled
+  messaging adapter (one Provider may run multiple adapters per
+  `deployment.md` §Topology). Adversaries can send arbitrary text on
+  any of them; the cross-adapter isolation invariant
+  (`messaging.md` §Per-adapter trust level) prevents identity bleed
+  between adapters.
 - The **Collector** is exposed to arbitrary feed content. Every RSS publisher,   
   Reddit poster, Bluesky user, etc. is untrusted.
 - The **DB** is internal — only the two services and the operator reach it.
@@ -54,13 +58,25 @@ notes. The spec-level commitments below cover all of them.
 Every post goes through two stages before it can reach a user (decision                                                                                                                                                                               
 D20):
 
-- **Stage 1 — deterministic.** Runs on every post. HTML is sanitized                                                                                                                                                                                  
-  against an allowlist; the body is Unicode-normalized (NFKC, bidi-control                                                                                                                                                                            
-  and zero-width stripping); a prompt-injection regex set runs with                                                                                                                                                                                   
-  bounded execution time (catastrophic-backtracking inputs are                                                                                                                                                                                        
-  fail-closed). Matches are recorded as quarantine spans and replaced in                                                                                                                                                                              
-  the body with structured placeholders (`[REDACTED:<id>]`). Stage 1             
-  *never* blocks release on its own — it scrubs and routes to review.
+- **Stage 1 — deterministic.** Runs on every post. HTML is sanitized
+  against an allowlist; the body is Unicode-normalized (NFKC,
+  bidi-control and zero-width stripping); a prompt-injection regex
+  set runs with bounded execution time (catastrophic-backtracking
+  inputs are fail-closed). Matches are recorded as quarantine spans
+  and replaced in the body with a **structured placeholder
+  committed at spec level**: the literal sequence
+  `[REDACTED:<id>]`, where `<id>` is a per-row random opaque token
+  (hex- or base32-encoded; the encoding choice and the token-byte
+  length are profile-driven and live in design notes, but the
+  surrounding `[REDACTED:` and `]` brackets are fixed). The
+  brackets and `REDACTED:` literal are byte-identical across every
+  implementation so user-facing prose, snapshot bodies, and tests
+  recognise the marker by exact-match; the per-row `<id>`
+  randomization is what stops attackers from pre-crafting a fake
+  placeholder that would survive the Stage 1 `<<<UNTRUSTED>>>`
+  marker strip (`llm.md` §Prompt-injection-aware prompt shape).
+  Stage 1 *never* blocks release on its own — it scrubs and routes
+  to review.
 - **Stage 2 — LLM judge.** Only invoked when Stage 1 flagged something.                                                                                                                                                                               
   The judge sees the *original* (pre-redaction) content inside an
   untrusted-content wrapper and returns one of a fixed label set. See                                                                                                                                                                                 
@@ -178,14 +194,28 @@ considered untrusted (decision D21):
   inside the wrapper, to refuse action requests with a **structured
   refusal marker** (the literal token used in v1 lives in design notes),
   and to treat the content as data.
-- The LLM tool surface is a strict allowlist (every name appears
-  verbatim in the agent's tool registry; nothing else is callable):
-  tag-filtered SQL, single-post fetch, reference lookup,
-  `recallMemory(keywords)` (the scope-filtered memory recall agent
-  tool, decision D28; not to be confused with the user-facing
-  `/recall <keyword>` command which is **v2-deferred** per SPEC.md
-  §"Deferred to v2"), per-user saved-list read. Every argument is
-  type-checked and bound to enums or validated ranges.
+- The LLM tool surface is a strict allowlist. Every name appears
+  verbatim in the agent's tool registry; nothing else is callable.
+  The v1 list is **closed at spec level** (additions or removals
+  are spec amendments, not design tweaks):
+
+  | Name | Inputs | Output | Notes |
+  |---|---|---|---|
+  | `searchPosts` | `tags: list<Tier-1 tag>` (each value validated against the controlled vocabulary), `window: duration`, `limit: int ≤ profile-driven cap` | list of `{uid, title, url, ready_at, tags}` | Returns `READY` posts visible in the calling `(user, scope)` only. Tag filter intersects with the scope's `tag_mode` rules (commands.md §Per-scope tag preferences). |
+  | `getPost` | `uid: string` | `{uid, title, body, url, ready_at, tags}` or `null` | Scope-filtered: returns null for a UID not visible in the calling scope (the same path as a UID that does not exist; the existence-vs-no-access distinction is never exposed). |
+  | `getReferences` | `uid: string`, `limit: int ≤ profile-driven cap` | list of `{uid, title, url, link_type, score}` | Edges from the `post_reference` graph. Scope-filtered the same way as `searchPosts`. |
+  | `recallMemory` | `keywords: list<string>` (each ≤ a profile-driven length cap) | list of `{compressed_at, summary, references}` | Reads `chat_memory` for the calling `(user, scope)` only — D28. **Not** the user-facing `/recall <keyword>` command, which is v2-deferred per SPEC.md §"Deferred to v2". |
+  | `listSaves` | `tags: list<personal tag>` (free-form, but length-capped), `window: duration` | list of `{uid, saved_at, personal_tags, snapshot_title, snapshot_url}` | Reads the caller's `saved_post` rows globally (D13: per-user across scopes); never returns another user's saves. |
+
+  Every argument is type-checked and bound to enums, validated
+  ranges, or length caps before the underlying SQL runs. Every output
+  is a typed structured value, never a passthrough of free-form
+  upstream text outside the post body / saved snapshot already vetted
+  by the ingest pipeline. Verification (`verification.md` §Security)
+  asserts the registry's name set equals the table above
+  byte-for-byte; CI fails on a mismatch in either direction (a name
+  added to the registry without a matching spec row, or a spec row
+  with no matching registry entry).
 - **Never exposed (forever):** any tool that mutates `users`,                                                                                                                                                                                         
   `group_membership`, `is_admin`, `is_banned`, `audit_log`, `source`,                                                                                                                                                                                 
   `source_subscription`; any tool running arbitrary SQL; any tool sending                                                                                                                                                                             
@@ -229,13 +259,23 @@ Two admin tiers (decision D9):
 
 Invariants (also enforced in `schema.md`):
 
-- **Last-admin protection (bot admin only).** Cannot revoke the only bot
-  admin's `is_admin`, cannot ban the only bot admin, cannot ban self.
-  Enforced at the trigger layer, not just the command layer, so a buggy
-  command cannot bypass it. **Group admin has no last-admin protection** —
-  a group can exist with zero admins (a banned or demoted group admin is
-  not auto-replaced; the next bot-admin `/promote` or first-mention path
-  refills the slot).
+- **Last-admin protection (bot admin only).** Cannot revoke the only
+  bot admin's `is_admin`, cannot ban the only bot admin, cannot ban
+  self. **The "only bot admin" check is global across adapters** —
+  the count is `SELECT COUNT(*) FROM users WHERE is_admin = true`,
+  not per-adapter — so a deployment with admins on multiple adapters
+  may demote any single admin row as long as at least one
+  `is_admin = true` row remains anywhere. This pairs with
+  `/grant-admin` / `/revoke-admin` being inbound-adapter-scoped
+  (`commands.md` §Admin): the per-adapter scoping bounds the
+  blast radius of a single-adapter compromise, and the global
+  last-admin counter prevents that scoping from being weaponised
+  to lock the deployment out of admin entirely.
+  Enforced at the trigger layer, not just the command layer, so a
+  buggy command cannot bypass it. **Group admin has no last-admin
+  protection** — a group can exist with zero admins (a banned or
+  demoted group admin is not auto-replaced; the next bot-admin
+  `/promote` or first-mention path refills the slot).
 - **One group admin per group at any time.** Enforced by partial unique
   index. The "first non-banned, non-probation `@mention` wins"
   auto-promote path applies whenever the group has **zero**
@@ -280,6 +320,47 @@ Authorization evaluation order on every inbound message:
 
 Steps 1–8 never call the LLM. This is the determinism boundary that makes
 privilege escalation via injection (T3) infeasible.
+
+## Per-adapter admin threat profile
+
+Each enabled adapter has a different real-world compromise surface,
+and admin rows are per-`(adapter, contact_id)` (one Provider may
+run multiple adapters per `deployment.md` §Topology). Operators
+should pick admin placement deliberately:
+
+- **Signal admin.** The admin's identity is anchored cryptographically
+  to the ACI, but that ACI is bound to a phone number / username
+  recoverable through carrier and account-recovery flows. SIM-swap,
+  port-out fraud, and account-recovery social engineering are real
+  threats. A Signal admin compromise gives an attacker bot-admin
+  powers on the Signal adapter only (per the inbound-adapter-scoped
+  grant rule above), but that includes invite issuance, ban,
+  source mutation, and audit access for that adapter.
+- **SimpleX admin.** The admin's identity is a cryptographic queue
+  address with no phone number, no username layer, and no
+  third-party recovery path. The address can be **rotated**
+  (operator generates a fresh queue, updates the bootstrap
+  property, restarts; the prior admin row is left in place per
+  `deployment.md` §Bootstrap admin drift and can be `/revoke-admin`'d
+  from the new admin). This is the recommended high-assurance
+  admin placement.
+
+**Operator-side mitigations:**
+
+- Run admin only on the higher-trust adapter (typically SimpleX),
+  even when both adapters serve users. The bootstrap admin contact
+  id is configured per adapter and is **optional per adapter** —
+  an adapter may be enabled for users with no bootstrap admin
+  configured; only the union of admin rows across adapters must be
+  non-empty.
+- Treat ephemeral SimpleX queue rotation as the routine mitigation
+  for suspected exposure. Rotation is a property change plus
+  restart; the audit log records the bootstrap of the new admin
+  contact.
+- Cross-adapter elevation is impossible by design (`/grant-admin`
+  is inbound-adapter-scoped). A compromised Signal admin cannot
+  grant admin on SimpleX without also compromising a SimpleX
+  admin's chat session.
 
 ## User ban
 
@@ -368,7 +449,13 @@ duration is profile-driven (value in design notes). During probation:
   they most need it).
 - **Blocked**: chat mode, `/add-source`, `/save`, `/unsave`,
   `/follow-tag`, `/unfollow-tag`, `/clear`, `/compress`,
-  `/group-timezone`, and any admin command.
+  `/group-timezone`, `/retry` (LLM-invoking write), and any admin
+  command. `/stop` is **not blocked** — it returns the standard
+  idempotent no-op reply during probation regardless of in-flight
+  state, because it has no side effect (a probation user has no
+  in-flight LLM work to cancel since chat mode and `/retry` are
+  blocked, and the no-op reply is the same whether probation is
+  in effect or not).
 - Blocked operations return a friendly reply stating when full access unlocks;
   the reply never reaches the LLM or any write path.
 - After the probation window elapses, the user is automatically promoted to
@@ -415,8 +502,11 @@ duration is profile-driven (value in design notes). During probation:
 - The verbatim original is intentionally **not** displayed in chat
   (could re-inject in the admin's client). Operators use `psql` with
   the admin role on the rare occasions it's needed.
-- The placeholder format is structured and per-row randomized so
-  attackers cannot pre-craft a fake placeholder.
+- The placeholder format is the spec-committed marker
+  `[REDACTED:<id>]` (`security.md` §Ingest pipeline). The
+  surrounding brackets and `REDACTED:` literal are fixed; the
+  `<id>` token is per-row randomized so attackers cannot pre-craft
+  a fake placeholder that would survive the Stage 1 marker strip.
 
 ## Failure handling
 
@@ -512,12 +602,18 @@ Re-eval verdict handling:
   closed, **Stage 1 redactions are not lifted** (only
   `/quarantine approve` lifts them — this matches the §Quarantine
   workflow rule above), the post continues through tagger and
-  embedding if those stages had not already run.
+  embedding if those stages had not already run. The
+  `stage2_failed` cursor flag is **cleared** on this transition:
+  the post now has a clean Stage 2 verdict and the cursor returns
+  to its non-failed state. (Schema invariant 5: per-stage flags
+  are the durable cursor for in-flight evaluation.)
 - `BENIGN` on an UNKNOWN post → post transitions
   `QUARANTINED → READY` with Stage 1 redactions retained; same
   rule as above for lifting (admin only).
 - `INJECTION`, `MALWARE`, or `UNKNOWN` on either class → post stays
-  `QUARANTINED` and the attempt counter increments.
+  `QUARANTINED`, the `stage2_failed` flag is **preserved** (or set,
+  if the prior verdict was UNKNOWN) alongside the new verdict, and
+  the attempt counter increments.
 
 **Throttled NEEDS_REVIEW notifications.** Admin notifications for
 `NEEDS_REVIEW` transitions are coalesced per
@@ -603,8 +699,27 @@ sources). Application code uses the soft-delete column.
 ## Secrets handling
 
 - LLM API keys are read from environment variables, not the DB.
-- Audit-log writes pass through a redaction hook that masks values                                                                                                                                                                                    
-  matching common API-key shapes.
+- Audit-log writes pass through a redaction hook that masks values
+  matching a **closed catalogue of API-key shapes**. The catalogue's
+  v1 baseline (spec-level commitment) is:
+  - OpenAI-style `sk-…` (and the long-form `sk-proj-…`, `sk-svcacct-…`).
+  - Anthropic `sk-ant-…`.
+  - GitHub `ghp_…`, `gho_…`, `ghu_…`, `ghs_…`, `ghr_…`.
+  - AWS access keys: `AKIA[0-9A-Z]{16}` and `ASIA[0-9A-Z]{16}`.
+  - Google API keys: `AIza[0-9A-Za-z_-]{35}`.
+  - Slack `xox[abprs]-…`.
+  - Generic 32+-character hex / base64 strings adjacent to the
+    case-insensitive substrings `api[_-]?key`, `secret`, `token`,
+    `password`, `bearer`.
+  The exact regexes, locale-folding rules, and the test corpus that
+  feeds the redactor unit tests live in
+  `docs/design/04-security.md` — adding a shape to the catalogue
+  is a design-note edit, **removing** a shape from the spec
+  baseline is a spec amendment so the audit redactor cannot silently
+  weaken across versions. The redactor is fail-closed on regex
+  timeout (the same RE2/timeout discipline as Stage 1): a timed-out
+  match treats the whole field as redacted rather than emitting it
+  raw.
 - Contact IDs are logged in redacted form (prefix + ellipsis + suffix)                                                                                                                                                                                
   outside the audit log.
 - **User-content logging.** `chat_memory` content, `saved_post` bodies
@@ -680,6 +795,14 @@ operational complexity; v1 commits to global source rows.
   by the number of subscribers without a meaningful confidentiality
   benefit. Per-scope cache partitioning is a v2 candidate if a
   concrete attack surfaces.
+- **Display-name-based `@mention` recognition.** v1 mention
+  recognition is anchored to the cryptographic contact id only
+  (`messaging.md` §Required SPI surface). Adapters whose protocol
+  carries no mention primitive at all must disable group mode;
+  string-matching the bot's display name in inbound message
+  bodies is forever out of v1 because an attacker who spoofs or
+  impersonates the bot's display name could otherwise suppress
+  or fake mentions.
 - **Boundless growth of soft-deleted source rows.** v1 never
   hard-deletes a `source` row (invariant 4). Across years of
   operation an operator can accumulate thousands of soft-deleted
