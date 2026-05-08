@@ -14,12 +14,25 @@ connect with (see decision D34 and `security.md`).
 
 - **User.** A person, identified by the messaging adapter's cryptographic
   contact ID. Carries the bot-admin flag, the ban flag (with reason and
-  audit), and informational metadata (display name, last-seen, save count).
+  audit), the `probation_until` timestamp (null means full access; non-null
+  means the user is in the slow-start tier until that instant — decision D45),
+  and informational metadata (display name, last-seen, save count).
 - **Group.** A messaging-adapter group the bot is a member of. Has a
-  per-group timezone for digest scheduling.
+  per-group timezone for digest scheduling (defaults to the
+  operator-configured default — `UTC` out of the box; mutated at
+  runtime by `/group-timezone`).
 - **Group membership.** The (user, group) join, with a per-group admin flag.
   Schema must enforce *at most one* group admin per group at any time
   (decision D9).
+- **Invite code.** A single-use token that gates DM registration (decision
+  D44). Keyed by a UUID code value. Carries the expected (contact\_id,
+  adapter) pair the code is bound to, status (`PENDING`, `USED`, `REVOKED`,
+  `EXPIRED`), the creating admin's user id, `created_at`, `expires_at`
+  (null = no expiry), and `used_at` (null until consumed). Invariants: a
+  `USED` or `REVOKED` code can never transition back to `PENDING`; a code
+  whose `expires_at` is in the past is treated as `EXPIRED` by the intake
+  path regardless of stored status. Hard delete is forbidden — invite codes
+  are audit artifacts.
 - **Audit log.** Append-only record of every privileged action and
   bootstrap. Indexed for time-range and per-actor lookup.
 
@@ -36,9 +49,10 @@ connect with (see decision D34 and `security.md`).
   **Status state machine.** A source is in exactly one of three statuses:
   `active` (the fetcher / stream worker schedules it normally), `failed`
   (consecutive ingest failures crossed the per-kind threshold —
-  `security.md` §Failure handling — so the worker stops scheduling it
-  and the throttled admin notifier has been pinged), `disabled` (operator
-  or admin paused it without removing it). Status is **orthogonal** to
+  `security.md` §Failure handling and decision D42 for HTTP-shaped
+  sources, decision D38 for stream sources — so the worker stops
+  scheduling it and the throttled admin notifier has been pinged),
+  `disabled` (operator or admin paused it without removing it). Status is **orthogonal** to
   the soft-delete column `deleted_at`: the latter records "user removed
   this from a scope and the source has no remaining subscribers" and
   hides the row from listings. The fetcher / StreamSource scheduler
@@ -73,7 +87,8 @@ connect with (see decision D34 and `security.md`).
   (decision D38). It is also the user-visible handle for `/save`,
   `/unsave`, and quarantine review.
 - **Post entity.** Named entities extracted from a post; used for Tier-2
-  cross-source linking.
+  cross-source linking (decision D6: hybrid named-entity match for
+  precision plus cosine similarity over embeddings for recall).
 - **Post embedding.** Vector for a post; profile-driven index type
   (decision D27). **Optional** — a post may reach `READY` without an
   embedding when the embedding stage exhausted retries and was released
@@ -89,16 +104,21 @@ connect with (see decision D34 and `security.md`).
 
 ### Per-scope state
 
-- **Scope preferences.** Per-(scope) language, subscription versions
-  (counters used to invalidate cached digests on subscription changes),
-  digest-related preferences.
+- **Scope preferences.** Per-(scope) language and subscription
+  versions (counters used to invalidate cached digests on subscription
+  changes). Per-tag digest preferences live in **Scope tag** below
+  (the v1 entity backing `/follow-tag` / `/unfollow-tag`); this row
+  does not duplicate them.
 - **Saved post.** Per-user library entries with personal tags. Snapshotted
   so retention TTL on the underlying post does not break the bookmark
   (decisions D13, D33).
-- **Chat memory.** Per-(user, scope) compressed memory entries created by
-  `/compress` and consumed by the chat agent's recall path. Subject to a
-  fixed TTL (decision D37); `/save`d posts are independent and not
-  affected.
+- **Chat memory.** Per-(user, scope) compressed memory entries created
+  by `/compress` and consumed by the chat agent's recall path. Subject
+  to a fixed TTL (decision D37); `/save`d posts are independent and
+  not affected. The per-(user, group) shape is **per decision D26**:
+  there is no shared group memory in v1 — each member of a group has
+  their own memory rows, scoped to (user, group), the same privacy
+  model as `/save`.
 - **Chat session / context window.** Per-(user, scope) live context state,
   **persisted in the database** (not in-process). Persistence is required
   by two spec commitments: auto-`/compress` near the context-window
@@ -141,11 +161,15 @@ them together. They are tested in CI (see `verification.md`).
    A startup rehydrator picks up any post left in `RAW` (or an intermediate
    evaluating state) after a crash.
 6. **TTL by partitioning.** `post`, `post_reference`, `post_embedding`,
-   and similar bulk-derived rows are partitioned and aged out by
-   partition drop, not row delete. `post` carries a fixed, profile-driven
-   retention horizon (decision D33); saved-post snapshots (decision D13)
-   are exempt because the snapshot is copied into `saved_post` at
-   `/save` time and never re-resolved against `post`.
+   `price_snapshot`, and similar bulk-derived rows are partitioned and
+   aged out by partition drop, not row delete. `post` carries a fixed,
+   profile-driven retention horizon (decision D33); saved-post
+   snapshots (decision D13) are exempt because the snapshot is copied
+   into `saved_post` at `/save` time and never re-resolved against
+   `post`. `price_snapshot` (decision D39) carries its own
+   profile-driven retention horizon — long enough that `/zcash` /
+   `/monero` always have a recent row, short enough that the table
+   does not unbounded-grow.
 7. **Audit-before-effect.** Privileged actions write to `audit_log` *before*
    their side effects, so an interrupted command leaves a record of intent.
 8. **No LLM-writable rows.** Tables that influence authorization

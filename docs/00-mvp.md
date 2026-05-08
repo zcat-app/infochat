@@ -124,6 +124,12 @@ This is the explicit deferred list. Each item below is fully specified elsewhere
 - `/ban`, `/unban`
 - `/promote`, `/demote`
 - `/grant-admin`, `/revoke-admin`
+- `/group-timezone`
+- `/stop`, `/retry`
+- `/forget`, `/export`
+- Asset commands (`/zcash`, `/monero` and the `bootstrap-assets.json`
+  loader, decision D39) — the Fetcher SPI must already be in place,
+  but the asset-snapshot pipeline is not exercised in MVP
 - Quarantine review commands (admin-side)
 - Group `@mention` reply path
 

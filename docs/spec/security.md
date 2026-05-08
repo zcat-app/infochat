@@ -162,26 +162,36 @@ considered untrusted (decision D21):
 - The system prompt instructs the model to never follow instructions                                                                                                                                                                                  
   inside the wrapper, to refuse action requests with a `[refused-action]`        
   marker, and to treat the content as data.
-- The LLM tool surface is a strict allowlist: tag-filtered SQL, single-post                                                                                                                                                                           
-  fetch, reference lookup, scope-filtered memory recall, per-user saved-list
-  read. Every argument is type-checked and bound to enums or validated                                                                                                                                                                                
-  ranges.
+- The LLM tool surface is a strict allowlist (every name appears
+  verbatim in the agent's tool registry; nothing else is callable):
+  tag-filtered SQL, single-post fetch, reference lookup,
+  `recallMemory(keywords)` (the scope-filtered memory recall agent
+  tool, decision D28; not to be confused with the user-facing
+  `/recall <keyword>` command which is **v2-deferred** per SPEC.md
+  §"Deferred to v2"), per-user saved-list read. Every argument is
+  type-checked and bound to enums or validated ranges.
 - **Never exposed (forever):** any tool that mutates `users`,                                                                                                                                                                                         
   `group_membership`, `is_admin`, `is_banned`, `audit_log`, `source`,                                                                                                                                                                                 
   `source_subscription`; any tool running arbitrary SQL; any tool sending                                                                                                                                                                             
   messages outside the current conversation; any tool fetching arbitrary                                                                                                                                                                              
   URLs.
 
-### Chat output sanitizer
+### LLM output sanitizer
 
-Before any chat-mode reply is sent, the candidate text is passed through a                                                                                                                                                                            
-deterministic outbound regex pass that strips or refuses replies containing                                                                                                                                                                           
-admin command strings (`/grant-admin`, `/ban`, `/promote`, `/remove-source`,                                                                                                                                                                          
-etc.). Admin commands are dispatched only by the deterministic command                                                                                                                                                                                
-path, so a copy-pasted reply still requires `is_admin=true` to do anything;                                                                                                                                                                           
-the sanitizer closes the social-engineering surface where a small LLM emits                                                                                                                                                                           
-plausible-looking admin commands. Every match is audit-logged                    
-(per-occurrence, not throttled).
+Before any **LLM-generated** text is delivered to a user, the candidate
+output is passed through a deterministic outbound regex pass that
+strips or refuses output containing admin command strings
+(`/grant-admin`, `/ban`, `/promote`, `/remove-source`, etc.). The
+sanitizer applies to the **full set of LLM-authored output surfaces**:
+chat-mode replies, on-the-fly `/summary` prose, periodic group
+digests, `/retry` re-rolls, and any future LLM-emitted text. It does
+**not** apply to deterministic command output (`/help`, `/status`,
+`/list-sources`, etc.) because that text never passes through an LLM.
+Admin commands are dispatched only by the deterministic command path,
+so a copy-pasted reply still requires `is_admin=true` to do anything;
+the sanitizer closes the social-engineering surface where a small LLM
+emits plausible-looking admin commands across any of the surfaces above.
+Every match is audit-logged (per-occurrence, not throttled).
 
 ## Authorization model
 
@@ -217,17 +227,27 @@ Invariants (also enforced in `schema.md`):
 Authorization evaluation order on every inbound message:
 
 1. Resolve identity from the adapter.
-2. Auto-register if absent (DM only; group: only on @mention).
-3. **Ban check.** If banned, fixed reply and stop. No parser, no DB query                                                                                                                                                                             
-   past the ban check, no LLM.
-4. Parse command (or fall to chat-mode).
-5. Permission check against the matrix.
-6. Audit-log the intent.
-7. Execute.
-8. LLM only enters for chat-mode replies, summary prose, and the eval            
+2. **DM — unknown contact.** If no user row exists for this (contact\_id,
+   adapter): check whether the full message body is a valid PENDING invite
+   code bound to this exact (contact\_id, adapter) pair (decision D44).
+   - Valid: create user row (probation start), mark code USED, send welcome,
+     stop. No further processing of this message.
+   - Invalid / expired / absent: fixed "access requires an invitation" reply,
+     drop. No registration, no LLM, no DB write beyond the drop counter.
+3. **Group — unknown contact.** If no user row exists and this is a group
+   `@mention`, auto-register (start probation per D45).
+4. **Ban check.** If `is_banned=true`: fixed reply, stop. No parser, no DB
+   query past the ban check, no LLM.
+5. Parse command (or fall to chat-mode).
+6. **Permission check** against the matrix. Probation restrictions (D45)
+   are part of the permission matrix: blocked commands return a friendly
+   "probation period" reply and never reach execution.
+7. Audit-log the intent.
+8. Execute.
+9. LLM only enters for chat-mode replies, summary prose, and the eval
    pipeline.
 
-Steps 1–7 never call the LLM. This is the determinism boundary that makes                                                                                                                                                                             
+Steps 1–8 never call the LLM. This is the determinism boundary that makes
 privilege escalation via injection (T3) infeasible.
 
 ## User ban
@@ -242,6 +262,71 @@ privilege escalation via injection (T3) infeasible.
   applies).
 - `/ban` against an unknown contact id creates the user row with
   `is_banned=true` so the user is banned even on first attempt.
+
+## Invite-code registration
+
+The invite-code system (decision D44) is the application-level entry gate for
+DM access, applied uniformly across all adapters:
+
+- A bot admin issues `/invite create --adapter <name>` with exactly one of two
+  mutually exclusive flags:
+  - `--contact <id>` — strict invite, bound to a specific (contact\_id,
+    adapter) pair. No confirmation required; risk is bounded to one identity.
+  - `--open` — adapter-bound invite, not pre-bound to a contact\_id; the
+    first unknown contact on that adapter to present the code is registered.
+    Requires confirm (broader blast radius).
+  Providing neither flag returns a hint listing both options; no code is
+  created. Providing both is an error; no code is created.
+  The code is shown to the admin once in the reply and stored with status
+  `PENDING`.
+- An unknown DM contact's first message is checked against the invite table.
+  For a `--contact` invite: contact\_id, adapter, and code value must all
+  match, and status must be `PENDING` and not expired. For an `--open` invite:
+  only adapter and code value must match; any unknown contact on that adapter
+  may consume it.
+- On success: user row created (probation begins per D45), code marked `USED`,
+  welcome sent. The invite-acceptance is audit-logged.
+- On failure: fixed "access requires an invitation" reply. No registration, no
+  further processing. The drop is counted but not individually audit-logged
+  (a hostile actor can trigger many drops).
+- **Invite codes are single-use.** A `USED` code cannot be replayed.
+- **Codes carry a TTL.** An expired code is treated as absent. The TTL value
+  is operator-configured and lives in design notes.
+- **Cross-adapter isolation.** An invite bound to `(contact-id-A, simplex)`
+  cannot be consumed from `(contact-id-A, signal)` — the adapter field is part
+  of the match key. This prevents a code intercepted on one platform from being
+  used on another.
+- **Bot admin and bootstrap-seeded users are exempt** from the invite
+  requirement; they are created directly by config at startup.
+- **Pre-ban still works.** `/ban <contact>` against an unknown contact creates
+  the user row with `is_banned=true` without requiring an invite. The ban check
+  (step 4) fires before any command could succeed even if the contact later
+  presents a valid invite — but in practice the pre-ban row means the invite
+  check (step 2) finds a known contact and routes to the ban path instead.
+- `/invite list [--page N]` shows PENDING codes with their target contact,
+  adapter, and expiry. `/invite revoke <code>` transitions a PENDING code to
+  `REVOKED` immediately.
+
+## Slow-start tier
+
+Every newly registered user enters a probation period (decision D45). The
+duration is profile-driven (value in design notes). During probation:
+
+- **Allowed** (read-only subset): `/help`, `/status`, `/get-tags`,
+  `/get-sources`, `/list-sources`, `/summary`, `/saved`, asset commands
+  (`/zcash`, `/monero`), `/export`.
+- **Blocked**: chat mode, `/add-source`, `/save`, `/unsave`, `/follow-tag`,
+  `/unfollow-tag`, `/lang`, `/clear`, `/compress`, `/forget`,
+  `/group-timezone`, and any admin command.
+- Blocked operations return a friendly reply stating when full access unlocks;
+  the reply never reaches the LLM or any write path.
+- After the probation window elapses, the user is automatically promoted to
+  full access — no admin action required.
+- A bot admin can issue `/vouch <contact>` at any time to immediately graduate
+  a user from probation. The vouch is audit-logged.
+- Probation state is a single `probation_until` timestamp on the `users` row.
+  `NULL` means full access. Checking it is a single indexed read in the
+  permission step, adding no measurable latency.
 
 ## Quarantine workflow
 
@@ -290,11 +375,13 @@ every stage: retry once, then apply the stage-specific failure path below.
   infrastructure failure must never default to release — the deterministic
   guard failing is a safety-critical event.
 - **Fetcher failure** (HTTP error, connection timeout, feed parse failure on
-  an HTTP-shaped source) → retry on the next scheduled tick. After *N*
-  consecutive per-source failures (profile-driven), the source `status`
-  transitions to `'failed'` and the scheduler skips it; a throttled admin
-  notification is sent with the error class and source id. Other sources
-  are unaffected. An admin must explicitly re-enable the source.
+  an HTTP-shaped source) → retry on the next scheduled tick (decision D42).
+  After *N* consecutive per-source failures (profile-driven), the source
+  `status` transitions to `'failed'` and the scheduler skips it; a
+  throttled admin notification is sent with the error class and source
+  id. Other sources are unaffected. An admin must explicitly re-enable
+  the source. D42 is the HTTP-shaped mirror of D38's per-relay
+  degradation commitment for stream sources.
 - **Tagger** failure → fall back to `source.bootstrap_tags`, mark the post,
   throttled admin notify. (This is why `/add-source --tags` is mandatory:
   every source must have a deterministic fallback.)
@@ -394,10 +481,15 @@ mutate price snapshots, or alter quarantine entries.
   via `/forget` (decision D37), not by tuning TTL.
 - Two-factor confirmation for ban — single-step confirm-within-window                                                                                                                                                                                 
   is enough for v1.
-- CAPTCHAs / human verification — adapter-level identity is the gate.
+- CAPTCHAs / human verification — invite-code registration and the slow-start
+  tier are the v1 gates; CAPTCHA-style puzzles are not added on top.
 - Heuristic/anomaly-based banning — admin acts manually.
-- Sybil resistance — not feasible without adapter changes; operators                                                                                                                                                                                  
-  control invite distribution.
+- **Sybil resistance across adapters.** A user banned on one adapter can
+  present a fresh identity on another adapter; the bot has no cross-adapter
+  correlation signal. The v1 levers are: invite codes (every new identity on
+  every adapter needs its own admin-issued invite), the slow-start tier (bounds
+  early resource damage per identity), and manual `/ban`. Full Sybil
+  resistance is deferred to v2.
 - **Nostr publishing / signing.** Forever out of scope for v1 (decision
   D38). The Collector is read-only at the Nostr protocol layer: no key
   storage, no signing, no `EVENT` publishes. A future posting bot is a
@@ -409,6 +501,20 @@ mutate price snapshots, or alter quarantine entries.
 - **Nostr kinds beyond 1 and 6.** Out of v1: DMs (kind 4), reactions
   (kind 7), encrypted-content NIPs, relay-list events, and every other
   kind are dropped without parsing.
+- **Translation cache cross-scope timing side-channel.** The
+  presentation-layer translation cache (`llm.md` §Translation flow)
+  is keyed by `(hash(text), target_language)` and is **shared across
+  scopes** so a digest sent to multiple group members translates
+  once. A user observing translation latency could in principle infer
+  that another scope translated the same string moments earlier
+  (cache hit vs. cache miss). v1 accepts this as a minor trade-off:
+  the cached strings are presentation prose generated by the bot
+  (cluster summaries, headers, status lines), not user-authored
+  content; the translation key is a hash, not the plaintext; and the
+  alternative — a per-scope cache — would multiply translation cost
+  by the number of subscribers without a meaningful confidentiality
+  benefit. Per-scope cache partitioning is a v2 candidate if a
+  concrete attack surfaces.
 
 ## What lives in design notes
 
@@ -426,4 +532,6 @@ mutate price snapshots, or alter quarantine entries.
 - DB role grant statements
 - The `[refused-action]` marker convention
 - Re-evaluation job cadence, per-post attempt cap, and re-eval status values
-- Fetcher consecutive-failure threshold (*N*) and source re-enable procedure 
+- Fetcher consecutive-failure threshold (*N*) and source re-enable procedure
+- Invite-code TTL default and the exact drop-counter metric name
+- Slow-start tier duration (per profile) and the exact allowed-command list 

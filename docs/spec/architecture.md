@@ -4,10 +4,14 @@
 
 infochat is split into two cooperating services that share a single database.
 This file describes *why* the split exists, the responsibilities of each side,
-and the contracts between them. Concrete module names, package layout, startup
-ordering, and runtime tuning live in `docs/design/01-architecture.md`.
+and the contracts between them. The stack itself (Quarkus, PostgreSQL with
+pgvector, LangChain4j, Java 21, Maven multi-module) is fixed by decision
+D1. Concrete module names, package layout, startup ordering, and runtime
+tuning live in `docs/design/01-architecture.md`.
 
 ## Service split
+
+The two-service split is decision D2. Concretely:
 
 - **Collector** is headless. It fetches feeds, runs the evaluation pipeline,
   and stores posts. No user can address it directly.
@@ -73,7 +77,25 @@ from.
   the response, and returns a list of normalized posts. Used by RSS,
   Bluesky, Nitter, Reddit, YouTube, Odysee. The fetcher is stateless
   between ticks; "what's new since last time" is a query against
-  `posts`, not in-memory state.
+  `posts`, not in-memory state. **Pagination.** When the upstream
+  exposes a paginated feed (Bluesky, Reddit, Nitter, etc.), the
+  Fetcher paginates **within a single tick** up to a per-source
+  max-page cap (profile-driven, value in design notes). The cap
+  bounds the worst-case per-tick work; backlog beyond the cap is
+  picked up on subsequent ticks via the same "what's new since last
+  time" query against `posts`. RSS feeds typically have no pagination
+  and are a single request per tick.
+
+- **Output type.** A Fetcher is shaped around what it produces. The
+  default output is normalized posts that flow into the post outbox.
+  Asset Fetchers (decision D39) produce `price_snapshot` rows
+  instead and write **directly** to the `price_snapshot` table —
+  they never hit the post outbox, never go through Stage 1/2,
+  tagger, or embedding. The Fetcher SPI carries an output-type
+  discriminator so the Collector's per-tick dispatch routes the
+  result to the right sink. There are no "ghost" `source` rows for
+  asset feeds: `price_snapshot` is keyed by `(asset, sub-verb)`
+  alone, not by a `source.id`.
 - **`StreamSource`** — *long-lived, event-driven*. Started once at
   Collector startup; runs as a supervised worker that maintains its
   own connection (typically `wss://`, but the SPI is named around
@@ -176,6 +198,9 @@ they need to override is a single property change, not a code change.
 - Concrete property keys (`infochat.*`)
 - Per-profile numeric values (context window sizes, queue depths, worker
   counts, retry counts, intervals)
+- Per-source Fetcher max-page cap (the existence of a single-tick
+  pagination cap is spec; the exact value is design)
+- StreamSource graceful-shutdown drain timeout
 - Diagrams of every code path
 
 If a question is "what does this number need to be on a Pi?", the answer is

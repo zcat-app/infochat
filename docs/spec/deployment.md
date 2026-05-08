@@ -18,11 +18,20 @@ A v1 deployment runs:
   optional per task).
 - **One messaging adapter backend** (SimpleX in v1).
 
-Both services connect to the same DB but use different DB roles                                                                                                                                                                                       
+Both services connect to the same DB but use different DB roles
 (`security.md` and decision D34). Both services run Flyway on startup;
-the migration set is identical and idempotent on second-run. There is                                                                                                                                                                                 
-**no shared file state** between the two services — restarts and rolling                                                                                                                                                                              
+the migration set is identical and idempotent on second-run. There is
+**no shared file state** between the two services — restarts and rolling
 upgrades are coordinated through the DB only.
+
+**Dual-startup race.** When both services come up at the same time
+they may both attempt Flyway migration concurrently. Flyway's
+`schema_history` table and its `pg_advisory_lock` acquisition make
+the race correct (the loser waits, then sees the migrations already
+applied), but the operator should expect an extra-second-or-two
+startup latency on cold boot. There is no requirement to start the
+services in a fixed order; on a clean checkout running both at once
+is supported.
 
 ## Operator inputs
 
@@ -30,15 +39,41 @@ An operator must provide:
 
 1. **A hardware profile choice** (`laptop` / `vps` / `pi` / `remote`,                                                                                                                                                                                 
    decision D27). One property setting picks a working configuration.
-2. **A bot-admin contact id.** The cryptographic contact id of the                                                                                                                                                                                    
-   user who will be the first bot admin. On startup, Provider ensures                                                                                                                                                                                 
-   this user exists with `is_admin = true` (creating the user if                 
+2. **A bot-admin contact id.** The cryptographic contact id of the
+   user who will be the first bot admin. On startup, Provider ensures
+   this user exists with `is_admin = true` (creating the user if
    needed) and writes a bootstrap row to `audit_log` (decision D9).
+   **The contact-id string format is adapter-specific** — SimpleX
+   contact ids are not Telegram user ids — and the operator MUST
+   supply a value that the *currently configured* messaging adapter
+   can parse. Switching adapters means re-issuing the contact id; the
+   old one is not portable. Provider validates the contact id against
+   the active adapter at startup and refuses to start on a
+   mismatch.
 3. **A bootstrap sources file.** A JSON document listing the initial
-   set of feeds (`name`, `url`, `fetcher`, `category`, `tags[]`).                                                                                                                                                                                     
-   Loaded by the Collector on startup, idempotent on `(fetcher, url)`.           
-   The union of `tags[]` across all entries seeds the Tier-1 controlled                                                                                                                                                                               
-   vocabulary (decisions D5, D8).
+   set of feeds. Each entry uses the v1 generalized identity
+   `(kind, identifier)` (decision D38) plus `name`, `category`,
+   `tags[]`, and an optional per-kind `config` object whose shape
+   depends on `kind`. Loaded by the Collector on startup, idempotent
+   on `(kind, identifier)`. The union of `tags[]` across all entries
+   seeds the Tier-1 controlled vocabulary (decisions D5, D8). The
+   spec-level shape of an entry:
+
+   - `kind` — required. One of the supported source kinds
+     (Fetcher-shaped: `rss`, `bluesky`, `nitter`, `reddit`, `youtube`,
+     `odysee`; StreamSource-shaped: `nostr`).
+   - `identifier` — required. URL for HTTP-shaped sources; filter
+     spec (e.g. a Nostr filter) for stream sources.
+   - `name` — required, human-readable.
+   - `category` — required, one of `news` / `blog` / `social`.
+   - `tags` — required, ≥1 entry (decision D14).
+   - `config` — optional, omitted or `null` for HTTP-shaped sources;
+     a per-kind JSON object for stream sources. For `nostr` the
+     `config` block carries the relay list and any per-source
+     overrides; the exact shape lives in design notes.
+
+   The exact JSON Schema, including the per-kind `config` shape for
+   each `kind`, lives in `docs/design/07-deployment.md`.
 4. **A bootstrap assets file** (optional). A JSON document listing the
    set of enabled assets and per-asset enabled sub-verbs for the asset
    commands (decision D39). Absent file → asset commands disabled.
@@ -58,9 +93,10 @@ Everything else has a profile default.
 
 Both services run Flyway migrations first. Then:
 
-- **Collector** loads the bootstrap sources file and upserts `source`                                                                                                                                                                                 
-  rows by `(fetcher, url)`; never deletes; updates name/category/tags                                                                                                                                                                                 
-  in place when entries differ. Loads the bootstrap assets file if                                                                                                                                                                                    
+- **Collector** loads the bootstrap sources file and upserts `source`
+  rows by `(kind, identifier)` (decision D38); never deletes; updates
+  name/category/tags/config in place when entries differ. Loads the
+  bootstrap assets file if                                                                                                                                                                                    
   configured and upserts the per-asset enabled-sub-verb allowlist                                                                                                                                                                                     
   (decision D39); never deletes assets, so removing an asset from the                                                                                                                                                                                 
   file is a soft-disable in the operator's runbook, not an automatic                                                                                                                                                                                  
@@ -98,6 +134,9 @@ property keys live in design notes:
 - **Rate limits.** Per-user buckets (capped at profile defaults; the             
   operator can lower, not raise).
 - **Translation.** Cache TTL, default language.
+- **Groups.** Default group timezone for newly-created groups (`UTC`
+  by default; an operator may override). `/group-timezone` mutates
+  the per-group value at runtime (commands.md).
 - **DB.** Per-role JDBC URLs + credentials.
 - **Operational.** Health endpoints, metrics endpoint, log level.
 
@@ -169,7 +208,9 @@ behind each profile are tuning.
 - Default values per profile (queue depths, worker counts, timeouts)
 - `docker-compose.yml`
 - Example `application.properties`
-- Bootstrap sources JSON schema and example file
+- Bootstrap sources JSON schema and example file (including the
+  per-`kind` `config` block shape — the spec commits to the
+  top-level entry shape; the per-kind config shape lives here)
 - Bootstrap assets JSON schema and example file
 - Startup-bean priorities
 - Health endpoint paths and probe timeouts

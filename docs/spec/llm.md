@@ -39,16 +39,23 @@ The LLM adapter exposes pluggable interfaces (decision D32):
 
 The router lets operators configure each task independently:
 
-- Security judge — small, fast, local model. Goal: high recall on                                                                                                                                                                                     
-  injection-shaped content; throughput.
-- Tagger — competent at controlled-vocabulary classification.
-- Entity extractor — competent at structured output.
-- Summarizer / chat agent — the "good" model the operator paid for or                                                                                                                                                                                 
-  chose to run locally.
-- Embedder — a single embedding model per deployment (changing it                                                                                                                                                                                     
-  invalidates existing vectors).
-- Translator — the chat model with a translation prompt by default; a
-  dedicated provider may be plugged in.
+- Security judge — small, fast, local model. Optimized for high
+  recall on injection-shaped content and for throughput.
+- Tagger — produces a list of zero-or-more controlled-vocabulary tags
+  (Tier 1) that conform to the supplied vocabulary set; output is
+  validated against the vocabulary before use.
+- Entity extractor — produces structured output (named entities) that
+  conforms to a fixed JSON schema; schema-violating output is treated
+  as unparseable per `security.md` §Failure handling.
+- Summarizer / chat agent — produces plain-text prose; per-task
+  routing lets operators point this at the model they have chosen
+  for production-quality output (local or remote).
+- Embedder — produces a fixed-dimensionality vector per input. A
+  single embedding model per deployment (changing it invalidates
+  existing vectors; see Embedding pipeline below).
+- Translator — produces plain-text prose in the requested target
+  language; defaults to the chat model with a translation prompt.
+  A dedicated provider may be plugged in.
 
 Concrete property keys, default models per profile, and the routing                                                                                                                                                                                   
 algorithm live in `docs/design/05-llm-and-embeddings.md`.
@@ -105,8 +112,24 @@ post bodies start leaving the host.
 ## Embedding pipeline
 
 - One embedding per post (title + summary, by convention).
-- Embedding is the last release-blocking step before `READY`. On failure                                                                                                                                                                              
-  (after one retry), the post is released without a vector and is                                                                                                                                                                                     
+- **Batch SPI.** `EmbeddingProvider` is shaped around batch input
+  (`List<String> → List<Vector>`) so the pipeline can amortize
+  per-call overhead across multiple posts. The Collector's eval
+  pipeline batches by a profile-driven batch size (value in design
+  notes) when a batch's worth of embedding-ready posts is queued or
+  a flush timer fires. Single-post calls remain valid (a batch of
+  one) so the SPI does not force batching on callers that don't
+  need it.
+- **One-failure-fails-batch retry.** If the provider returns a batch
+  result of the wrong shape, an exception, or any per-element error
+  the Collector cannot map back to a specific post, the **entire
+  batch** retries once. If retry also fails, every post in the batch
+  follows the embedding-failure release path (release without a
+  vector — see below). This is intentional: silently dropping some
+  posts from a batch result without a clean per-post error mapping
+  is a worse failure mode than a uniform retry.
+- Embedding is the last release-blocking step before `READY`. On failure
+  (after one retry), the post is released without a vector and is
   excluded from semantic linking. The post is otherwise normal.
 - The embedding model is chosen per profile and **must not change** for                                                                                                                                                                               
   an existing deployment without a re-embed plan, because vectors from                                                                                                                                                                                
@@ -137,8 +160,21 @@ post bodies start leaving the host.
   trip. The summarizer exposes a "language-aware" capability so the                                                                                                                                                                                   
   router knows when this shortcut is safe.
 - **Source post bodies are never translated.** Embeddings, retrieval, and
-  entity extraction always operate on the original language. Translation                                                                                                                                                                              
+  entity extraction always operate on the original language. Translation
   is purely a presentation-layer concern.
+- **Deterministic strings come from a localization bundle, not the
+  translator (decision D43).** Anything the bot says that does not
+  depend on user content — `/help` output, friendly-error
+  templates, the banned-user fixed reply, progress-notifier stage
+  strings, the "source already existed, tags updated" line, etc. —
+  is looked up by key in a localization bundle. v1 ships **`en` and
+  `cs` (Czech) bundles**; adding a third language is a bundle
+  drop-in. The `TranslationProvider` is reserved for LLM-authored
+  prose (cluster summaries, chat replies, digest headers) where a
+  localization key is not a fit. Mixing the two paths — running
+  `/help` text through a model — is explicitly out of v1: it would
+  introduce non-determinism into deterministic output and is a
+  sanitizer-bypass risk.
 - Translated outputs are cached by `(hash(text), target_language)` for a                                                                                                                                                                              
   short window so a digest sent to ten group members is not translated                                                                                                                                                                                
   ten times.
@@ -239,5 +275,10 @@ Exact metric names and labels live in design notes.
 - Per-profile context-window sizes and auto-compress thresholds
 - Vector index build parameters
 - Translation cache TTL and key shape
+- Embedding batch size per profile (the batch-shaped SPI is spec; the
+  exact size is design)
 - Embedding model identity row shape, override flag property key, and re-embed procedure
+- Localization-bundle structure and key naming (the `en`/`cs`
+  commitment is spec; the exact bundle file format and keys are
+  design — see also `messaging.md`)
 - Metric names, label sets, and dashboards

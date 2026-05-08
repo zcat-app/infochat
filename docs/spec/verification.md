@@ -64,8 +64,9 @@ or `deployment.md`. Each one corresponds to at least one named test.
   and DELETE paths.
 - One group admin per group: simulated race of two simultaneous                                                                                                                                                                                       
   `@mention` inserts produces exactly one admin row.
-- Soft-delete only: a `/remove-source` followed by re-add flips                                                                                                                                                                                       
-  `deleted_at` and reuses the row; no duplicate `(fetcher, url)` rows.
+- Soft-delete only: a `/remove-source` followed by re-add flips
+  `deleted_at` and reuses the row; no duplicate `(kind, identifier)`
+  rows (decision D38).
 - TTL by partition drop: ageing partitions don't take row-level deletes.
 - Chat-memory TTL pruner (decision D37): a `chat_memory` row older than
   the configured horizon is removed by the scheduled pruner;

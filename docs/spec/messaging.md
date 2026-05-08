@@ -7,8 +7,8 @@ in-memory test adapter), property keys, and capability defaults live in
 
 ## Goals
 
-1. **Adapter pluggability.** A new transport (Telegram, Matrix, Signal)
-   is a class drop-in, not a rewrite. The first impl is SimpleX                                                                                                                                                                                       
+1. **Adapter pluggability.** A new transport (Telegram, Matrix, etc.)
+   is a class drop-in, not a rewrite. v1 ships SimpleX and Signal
    (decision D32).
 2. **Identity is the trust anchor.** The adapter's cryptographic contact                                                                                                                                                                              
    id is the *only* identity the system trusts (decision D10). Display                                                                                                                                                                                
@@ -20,8 +20,8 @@ in-memory test adapter), property keys, and capability defaults live in
    ban handling, rate limits, formatting, translation) lives in                  
    Provider. Adapters move bytes and assert identity.
 5. **Consistent UX across adapters.** Plain-text formatting (decision                                                                                                                                                                                 
-   D30) means the bot reads the same way whether the user is on SimpleX                                                                                                                                                                               
-   or a future text-only transport.
+   D30) means the bot reads the same way whether the user is on SimpleX,
+   Signal, or a future text-only transport.
 
 ## Required SPI surface
 
@@ -95,8 +95,9 @@ notifier:
 
 Constraints:
 
-- Stage strings are looked up by enum from a localization bundle. **User                                                                                                                                                                              
-  input is never interpolated into progress strings** — security                                                                                                                                                                                      
+- Stage strings are looked up by enum from the deterministic
+  localization bundle (decision D43; `llm.md` §Translation flow).
+  **User input is never interpolated into progress strings** — security
   requirement, prevents reflective injection in screenshots and logs.
 - Adapters without `supportsMessageEdit` collapse to a single final                                                                                                                                                                                   
   `send` of the completed text. Business logic does not change. The                                                                                                                                                                                   
@@ -145,6 +146,7 @@ Provider produces plain text per decision D30. The adapter:
 
 - The SimpleX adapter wire protocol (chat CLI / WebSocket framing)
 - The "live message" rendering mode the SimpleX adapter uses internally
+- The Signal adapter wire protocol (signal-cli / JSON-RPC framing) and capability defaults
 - The in-memory test adapter's API and assertion helpers
 - Concrete property keys for adapter selection
 - Per-adapter default capability values
