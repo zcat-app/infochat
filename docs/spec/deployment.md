@@ -168,6 +168,20 @@ adapters** — the prior admin row cannot be revoked until at
 least one other `is_admin = true` row exists anywhere on the
 deployment.
 
+**Bootstrap-seeded admin row shape.** A bootstrap-seeded admin row
+is created with `is_admin = true`, `is_banned = false`,
+`probation_until = NULL` (bootstrap admins skip the slow-start
+tier), and `registration_state = 'vouched'`
+(`schema.md` §Identity and access — User entity). The `vouched`
+state satisfies the DM-gate check in the permission step
+(`security.md` §Invite-code registration) so the bootstrap admin
+can DM the bot without minting an invite for themselves;
+`'vouched'` rather than a dedicated `'bootstrap'` value because
+the post-startup behavior is identical to a normal vouched user
+and adding an enum value is a load-bearing schema change with no
+semantic gain. The `audit_log` row written for the bootstrap
+records the original cause under `details_json.cause = 'bootstrap'`.
+
 **Asset bootstrap.** The Collector loads `bootstrap-assets.json`
 (when configured) and upserts `asset_config` rows by
 `(asset, sub_verb)` (`schema.md` §Operational). Entries removed

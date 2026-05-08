@@ -13,10 +13,68 @@ connect with (see decision D34 and `security.md`).
 ### Identity and access
 
 - **User.** A person, identified by the messaging adapter's cryptographic
-  contact ID. Carries the bot-admin flag, the ban flag (with reason and
-  audit), the `probation_until` timestamp (null means full access; non-null
-  means the user is in the slow-start tier until that instant — decision D45),
-  and informational metadata (display name, last-seen, save count).
+  contact ID. The unique key is `(adapter, contact_id)` (decision D46) — the
+  same human reachable on two adapters is two distinct rows. Carries:
+  - `adapter` — the messaging adapter that issued the contact id
+    (e.g. `simplex`, `signal`); part of the unique key with
+    `contact_id`. The contact-id format is adapter-specific
+    (`deployment.md` §Operator inputs item 2) — SimpleX queue
+    addresses are not Signal ACIs.
+  - `is_admin` (bot-admin flag) and `is_banned` with `reason`,
+    `banned_by`, `banned_at`.
+  - `probation_until` — timestamp; null means full access, non-null
+    means the user is in the slow-start tier until that instant
+    (decision D45).
+  - `registration_state ∈ {preban, group_only, invited, vouched}` —
+    the structural marker for how the row entered the system and
+    what gate it has cleared. The DM-side intake (security.md
+    §Authorization model step 7, §Invite-code registration) and
+    `/unban` (security.md §User ban) read this column. **Enum
+    values:**
+    - `preban` — minted by `/ban <contact>` against an unknown
+      contact; the row carries no registered identity. `/unban`
+      against this state **deletes the row** (the carve-out to
+      invariant 2 above) so the next inbound DM routes through
+      the invite gate. Bootstrap-seeded admin rows are NEVER
+      `preban` (deployment.md §Bootstrap behavior).
+    - `group_only` — auto-registered via the group `@mention` path
+      (auth step 3). Subject to the DM invite gate: a DM from a
+      `group_only` user is rejected with the same fixed reply as
+      step 2's invalid path until the row advances.
+    - `invited` — registered via consumed invite code (auth
+      step 2 success) **or** advanced from `group_only` by a bot
+      admin minting `/invite create --contact <id>` and the user
+      consuming it. DM access permitted.
+    - `vouched` — `group_only` row advanced by bot admin
+      `/vouch <contact>`, **or** the registration_state of every
+      bootstrap-seeded admin row at startup (deployment.md
+      §Bootstrap behavior). DM access permitted; semantically
+      equivalent to `invited` for permission purposes but
+      distinct in the audit trail.
+  - Informational metadata (display name, last-seen, save count).
+  **Registration-state transitions** (the closed set of v1 paths):
+  - `(none)` → `preban`: `/ban <contact>` against an unknown
+    contact (security.md §User ban).
+  - `(none)` → `group_only`: first non-banned `@mention` in any
+    group (auth step 3).
+  - `(none)` → `invited`: invite-code consume (auth step 2
+    success).
+  - `(none)` → `vouched`: bootstrap-seeded admin at Provider
+    startup (deployment.md §Bootstrap behavior).
+  - `group_only` → `invited`: bot admin issues `/invite create
+    --contact <id>` and the user consumes it.
+  - `group_only` → `vouched`: bot admin issues `/vouch <contact>`
+    (commands.md §Admin, decision D45). The same command also
+    clears `probation_until`.
+  - `preban` → `(deleted)`: `/unban` against a `preban` row
+    (carve-out to invariant 2).
+  No other transitions exist in v1; in particular,
+  `invited` ↔ `vouched` is not a v1 path (both states permit DM
+  access; collapsing them would lose the audit distinction
+  between "user accepted an invite" and "admin manually vouched"),
+  and there is no demotion path from `invited` / `vouched` back
+  to `group_only` (a regression would require a `/revoke-invite`
+  primitive that v1 does not surface).
 - **Group.** A messaging-adapter group the bot is a member of. Carries
   a per-group timezone for digest scheduling (defaults to the
   operator-configured default — `UTC` out of the box; mutated at
@@ -287,27 +345,54 @@ regardless of how many quarantine cycles it has been through.
   in commands.md §Per-scope tag preferences). Per-tag digest
   preferences live in **Scope tag** below (the v1 entity backing
   `/follow-tag` / `/unfollow-tag`); this row does not duplicate them.
-- **Summary anchor.** Per-(user, scope) row capturing the last
-  summary-producing command's deterministic payload: command name,
-  argument hash, post UIDs (ordered), cluster mapping,
-  `generated_at`, and a `command_kind` discriminator (`personal` /
-  `digest`). Read by `/retry` to replay deterministic post selection
-  and clustering (decision D19, D36). Cleared by any non-`/retry`
-  input from the same `(user, scope)`. Survives Provider restart for
-  the bounded retry window — this is what makes `/retry` work after
-  a controlled bounce. The anchor is a separate entity from
-  `chat_session` so the live context window's TTL/clear semantics
-  do not couple to retry storage. Anchor rows carry the same
-  retention discipline as `chat_memory` (Invariant 9): a
-  profile-driven horizon, removed by the same scheduled pruner.
-  The "bounded retry window" framing above is the user-facing
-  semantics; the pruner is the operator-facing reclamation that
-  guarantees a user who walks away does not leave anchor rows
-  behind indefinitely. Chat-mode interactions that internally
-  call a summarization tool do **not** write a `summary_anchor`
-  row and are not replayable via `/retry`. Only top-level
-  summary-producing commands (`/summary`, periodic digests,
-  `/retry` itself) write anchors.
+- **Summary anchor.** Captures the last summary-producing command's
+  deterministic payload: command name, argument hash, post UIDs
+  (ordered), cluster mapping, `generated_at`, and a `command_kind`
+  discriminator (`personal` / `digest`). Read by `/retry` to replay
+  deterministic post selection and clustering (decision D19, D36).
+  Cleared by any non-`/retry` input from the same `(user, scope)`.
+  Survives Provider restart for the bounded retry window — this is
+  what makes `/retry` work after a controlled bounce. The anchor is
+  a separate entity from `chat_session` so the live context window's
+  TTL/clear semantics do not couple to retry storage. Anchor rows
+  carry the same retention discipline as `chat_memory` (Invariant
+  9): a profile-driven horizon, removed by the same scheduled
+  pruner. The "bounded retry window" framing above is the
+  user-facing semantics; the pruner is the operator-facing
+  reclamation that guarantees a user who walks away does not leave
+  anchor rows behind indefinitely. Chat-mode interactions that
+  internally call a summarization tool do **not** write a
+  `summary_anchor` row and are not replayable via `/retry`. Only
+  top-level summary-producing commands (`/summary`, periodic
+  digests, `/retry` itself) write anchors.
+
+  **Keying by `command_kind`.** The two kinds of anchor row have
+  different actor semantics:
+  - `command_kind = 'personal'` — written by a user-issued
+    `/summary` (DM or group). Carries `(user_id, scope_id,
+    command_kind = 'personal')`. Per-(user, scope) isolation
+    applies (invariant 1).
+  - `command_kind = 'digest'` — written by the periodic-digest
+    scheduler (a group-wide cached digest, decision D17). Has
+    **no actor user**: digest rows carry `user_id IS NULL` and
+    `(scope_id, command_kind = 'digest')` is the logical key.
+    The bot itself has no `users` row (not a registered contact
+    on any adapter), so synthesizing a sentinel id would be
+    misleading; NULL is the structural marker for "scheduler
+    actor." `/retry --digest` from a group admin or bot admin
+    matches this row by `(scope_id, command_kind = 'digest')`
+    without referencing `user_id`.
+
+  Uniqueness is enforced by **two partial unique indexes** so the
+  two row shapes do not collide:
+  - `UNIQUE (user_id, scope_id, command_kind) WHERE user_id IS
+    NOT NULL` — at most one personal anchor per `(user, scope)`.
+  - `UNIQUE (scope_id, command_kind) WHERE user_id IS NULL AND
+    command_kind = 'digest'` — at most one digest anchor per
+    scope.
+  Splitting `summary_anchor` into two tables would duplicate the
+  retention/cleanup machinery for no semantic gain; the partial
+  indexes are the v1 commitment.
 - **Chat memory.** Per-(user, scope) compressed memory entries created
   by `/compress` and consumed by the chat agent's recall path. Subject
   to a fixed TTL (decision D37); `/save`d posts are independent and
@@ -435,16 +520,29 @@ them together. They are tested in CI (see `verification.md`).
    `users` row — the row carries authorization state (admin flag,
    ban flag, probation timestamp), not user-authored content, and
    removing it would break ban continuity and last-admin counting.
-   No application path issues `DELETE` against `users` in v1; the
-   only DELETE source is an operator running raw SQL under the
-   Admin role, and the DELETE-path trigger above is the
-   defense-in-depth guard for that case (it fails the DELETE if it
-   would leave zero `is_admin = true` rows; FK behavior for
-   user-owned rows under that operator-only path lives in design
-   notes alongside the cascade rules). A v2 admin command for
-   hard-delete with explicit cascade semantics is a candidate; v1
-   commits to `/forget` as the user-facing purge and `/ban` as the
-   user-facing revoke.
+   **No application path issues `DELETE` against a `users` row that
+   has ever held a registered identity** (i.e., a row with
+   `registration_state ∈ {invited, group_only, vouched}`); the only
+   DELETE source for such rows is an operator running raw SQL under
+   the Admin role.
+   **Carve-out: `registration_state = 'preban'` rows are
+   application-deletable.** A pre-ban row was minted purely to carry
+   the ban flag against an unknown contact (security.md §User ban —
+   "Pre-ban against unknown contact"); deleting it on `/unban` is the
+   only way to re-route the next inbound DM through the invite gate
+   (authorization step 2). The `/unban` path against a pre-ban row
+   issues `DELETE FROM users WHERE id = $1 AND registration_state =
+   'preban'` and is the **single** application-issued `DELETE`
+   permitted against `users` in v1. The DELETE-path last-admin
+   trigger still fires (a pre-ban row never has `is_admin = true`,
+   so the trigger always passes for this carve-out, but the guard
+   is present as defense-in-depth).
+   FK behavior for user-owned rows under any DELETE path (operator
+   raw-SQL or the pre-ban `/unban` carve-out) lives in design notes
+   alongside the cascade rules. A v2 admin command for hard-delete
+   with explicit cascade semantics is a candidate; v1 commits to
+   `/forget` as the user-facing purge and `/ban` as the user-facing
+   revoke.
    **The trigger MUST serialize concurrent revocation attempts** so
    two simultaneous `/revoke-admin` (or ban) operations against
    different admin rows cannot both observe the pre-state and both
@@ -495,6 +593,14 @@ them together. They are tested in CI (see `verification.md`).
    operator never trips it.
 7. **Audit-before-effect.** Privileged actions write to `audit_log` *before*
    their side effects, so an interrupted command leaves a record of intent.
+   **Carve-out:** privileged actions whose effect is a verified no-op
+   against current state may skip the audit write. This is the only
+   carve-out and applies to `/forget` against an empty caller scope
+   (`commands.md` §Conversation control — "Idempotent: a second
+   `/forget` with nothing to remove returns a friendly no-op reply
+   (no audit row written for the no-op)"). The verification is the
+   `RETURNING` row count of the `/forget` purge transaction; a
+   strictly-zero count is the no-op marker.
 8. **No LLM-writable rows.** Tables that influence authorization
    (`users.is_admin`, `users.is_banned`, `group_membership.is_group_admin`)
    are not reachable from any LLM tool surface. Enforced at the SPI boundary
@@ -510,6 +616,17 @@ them together. They are tested in CI (see `verification.md`).
    (decision D37) is a user-initiated immediate purge of the caller's
    `(user, scope)` chat memory and saved-list and is audit-logged like
    any other privileged action against user state.
+10. **Audit log is append-only.** Rows in `audit_log` are never
+    `UPDATE`d or `DELETE`d. Hard-delete is forbidden for any row in
+    `audit_log` and any row visible through `audit_log_view`.
+    Enforced two ways: (a) the DB role grant matrix
+    (`security.md` §DB roles) gives **`INSERT`-only** to Collector
+    and Provider roles and withholds `UPDATE` / `DELETE` from every
+    role except Admin (operator psql); (b) no application path in
+    either service issues `UPDATE` or `DELETE` against `audit_log`.
+    Backups must respect this property — a soft-deletable archive
+    that copies audit rows into a mutable target table is forbidden
+    by this invariant.
 
 ## What lives in design notes
 

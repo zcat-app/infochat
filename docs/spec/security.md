@@ -61,10 +61,20 @@ D20):
 - **Stage 1 — deterministic.** Runs on every post. HTML is sanitized
   against an allowlist; the body is Unicode-normalized (NFKC,
   bidi-control and zero-width stripping); a prompt-injection regex
-  set runs with bounded execution time (catastrophic-backtracking
-  inputs are fail-closed). Matches are recorded as quarantine spans
-  and replaced in the body with a **structured placeholder
-  committed at spec level**: the literal sequence
+  set runs with bounded execution time. **Regex engine commitment
+  (v1):** the Stage 1 implementation uses `java.util.regex` with a
+  per-input wall-clock watchdog that aborts the match when the cap
+  fires (the cap value is profile-driven and lives in design
+  notes); a watchdog abort is a Stage 1 infrastructure failure
+  (fail-closed, §Failure handling). `java.util.regex` is a
+  backtracking engine, so catastrophic backtracking is **mitigated
+  by the watchdog timeout, not prevented at the engine level** —
+  the spec commits to this trade-off explicitly so an
+  implementation choosing a true linear-time engine (RE2/J or
+  similar) does so as a v2 amendment, not a silent design tweak.
+  An RE2-style swap is a v2 candidate. Matches are recorded as
+  quarantine spans and replaced in the body with a **structured
+  placeholder committed at spec level**: the literal sequence
   `[REDACTED:<id>]`, where `<id>` is a per-row random opaque token
   (hex- or base32-encoded; the encoding choice and the token-byte
   length are profile-driven and live in design notes, but the
@@ -303,6 +313,19 @@ Invariants (also enforced in `schema.md`):
 Authorization evaluation order on every inbound message:
 
 1. Resolve identity from the adapter.
+1.5. **Transport-level rate cap.** Apply the per-`(adapter,
+   contact_id)` inbound rate cap (§Rate limiting, "Chat-mode
+   message rate (transport-level)"). Over-cap inbound is **dropped
+   silently** for the rest of the cap window — no reply (including
+   no fixed ban reply, no fixed invite-required reply, no friendly
+   error). The cap runs after step 1 (the bucket is keyed by the
+   resolved `(adapter, contact_id)`) and before every
+   application-level check below, so a hostile flood cannot drive
+   outbound cost via the per-inbound fixed-reply paths in steps
+   2 and 4. The brute-force invite-code limit
+   (§Invite-code registration) is a **separate** counter applied
+   inside step 2 (it counts attempts that reach step 2, not raw
+   inbound).
 2. **DM — unknown contact.** If no user row exists for this (contact\_id,
    adapter): check whether the full message body is a valid PENDING invite
    code bound to this exact (contact\_id, adapter) pair (decision D44).
@@ -381,14 +404,13 @@ should pick admin placement deliberately:
 - Banned-user check is the first thing after identity resolution.
 - Banned user receives one fixed reply per inbound message, regardless of                                                                                                                                                                             
   input.
-- **Transport-level rate cap fires before the ban check.** The
-  per-`(adapter, contact_id)` inbound rate cap (§Rate limiting,
-  "Chat-mode message rate (transport-level)") is evaluated
-  **before** the banned-user check — a banned user hitting the
-  cap receives no reply at all (including no fixed ban reply)
-  until the cap resets. This bounds outbound cost from a hostile
-  banned user driving inbound floods that would otherwise produce
-  a fixed reply per inbound message.
+- **Transport-level rate cap fires before the ban check** (and
+  before every other application-level check) — see §Authorization
+  model step 1.5. A banned user hitting the cap receives no reply
+  at all (including no fixed ban reply) until the cap resets. This
+  bounds outbound cost from a hostile banned user driving inbound
+  floods that would otherwise produce a fixed reply per inbound
+  message.
 - **Banning a user who is a group admin.** Their `is_group_admin` rows
   remain but are unreachable. **On `/unban`, restored group-admin roles
   are explicitly disclosed** in the command's reply and in the
@@ -599,9 +621,12 @@ duration is profile-driven (value in design notes). During probation:
   review queue; `BENIGN_CLOSED` rows are not surfaced unless an admin
   passes `--all` (forensic / audit view). Approve transitions
   `PENDING → APPROVED` (or `BENIGN_CLOSED → APPROVED`), restores the
-  original span, and re-NOTIFY's the post; reject transitions
-  `PENDING → REJECTED` (and on `BENIGN_CLOSED` rows the same forensic
-  rejection is reachable, leaving the placeholder permanent). The Provider DB role
+  original span, and **fires `NOTIFY new_post`** for the post (so the
+  Provider re-renders the now-unredacted body via the standard
+  high-water-mark path — `architecture.md` §Inter-service
+  communication); reject transitions `PENDING → REJECTED` (and on
+  `BENIGN_CLOSED` rows the same forensic rejection is reachable,
+  leaving the placeholder permanent). The Provider DB role
   (`security.md` §DB roles) does not have `SELECT` on the raw
   original column; approve and reject run as **stored procedures**
   (`approve_quarantine(quarantine_id, actor_id)` and
@@ -898,9 +923,9 @@ sources). Application code uses the soft-delete column.
   is a design-note edit, **removing** a shape from the spec
   baseline is a spec amendment so the audit redactor cannot silently
   weaken across versions. The redactor is fail-closed on regex
-  timeout (the same RE2/timeout discipline as Stage 1): a timed-out
-  match treats the whole field as redacted rather than emitting it
-  raw.
+  timeout (the same `java.util.regex`-plus-watchdog discipline as
+  Stage 1, see §Ingest pipeline): a timed-out match treats the
+  whole field as redacted rather than emitting it raw.
 - Contact IDs are logged in redacted form (prefix + ellipsis + suffix)                                                                                                                                                                                
   outside the audit log.
 - **User-content logging.** `chat_memory` content, `saved_post` bodies

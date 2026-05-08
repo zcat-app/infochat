@@ -49,10 +49,24 @@ Collector and Provider communicate only through the shared database:
     Provider/Collector contract).
   - `quarantine_review` — fires on quarantine state-machine
     transitions reachable by Provider (`PENDING` insert,
-    `BENIGN_CLOSED`, `APPROVED`, `REJECTED`). Payload carries
-    `(quarantine_id, new_status)`. Correctness mechanism:
-    high-water mark on Provider side, same shape as `new_post`
-    but keyed on the quarantine row's monotonic cursor.
+    `BENIGN_CLOSED`, `APPROVED`, `REJECTED`) and on a `post.status
+    → NEEDS_REVIEW` transition (`security.md` §Re-evaluation job).
+    Payload carries `(quarantine_id, new_status)` (and, for
+    NEEDS_REVIEW transitions, `(post_id, 'NEEDS_REVIEW')`).
+    Correctness mechanism: high-water mark on Provider side, same
+    shape as `new_post` but keyed on the quarantine row's
+    monotonic cursor. **Consumer behavior:** the Provider drives
+    the throttled admin notifier (`security.md` §Failure handling)
+    on `PENDING` inserts and on `→ NEEDS_REVIEW` transitions —
+    these are the two transitions that require admin attention.
+    `BENIGN_CLOSED`, `APPROVED`, and `REJECTED` transitions
+    advance the Provider's cursor (so the high-water mark stays
+    accurate) but produce no user-visible effect in v1; they are
+    on the channel because the channel's contract is "all
+    quarantine state-machine moves visible to the Provider role,"
+    not "only the ones the Provider acts on" — keeping the
+    channel comprehensive lets v2 add behavior to a transition
+    without a schema-level NOTIFY change.
   Adding a channel is a spec amendment.
 - **Payload-size bound.** NOTIFY payloads are bounded to the
   cursor key for the channel; large payloads MUST NOT be

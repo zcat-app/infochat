@@ -168,15 +168,16 @@ text, and output structure are in `docs/design/03-commands.md`.
   `/unsave`; the cap is the same for every user on a given
   deployment (no per-user bespoke values).
   **Visibility-of-target rules.** `/save` on a `READY` post snapshots
-  the visible body. `/save` on a `QUARANTINED` post that has a
-  Stage 2 `BENIGN` verdict (visible with Stage 1 redactions) snapshots
-  the redacted body. `/save` on a `QUARANTINED` post with `INJECTION`,
-  `MALWARE`, or `UNKNOWN` (hidden — invisible to the user) is
-  treated as an unknown UID. `/save` on a `NEEDS_REVIEW` post is
-  treated as an unknown UID: `NEEDS_REVIEW` posts are never
-  user-visible — they are reachable only by bot admins via
-  `/quarantine list --all`. The `/save` flow never lets a user
-  bookmark content they cannot see.
+  the visible body — including any Stage 1 redactions still in place
+  (a Stage 2 `BENIGN` verdict transitions the post to `READY` while
+  leaving Stage 1 redactions in the body until `/quarantine approve`
+  lifts them; `schema.md` §Posts and derivatives). `/save` on a
+  `QUARANTINED` post (Stage 2 `INJECTION`, `MALWARE`, or `UNKNOWN`,
+  hidden — invisible to the user) is treated as an unknown UID.
+  `/save` on a `NEEDS_REVIEW` post is treated as an unknown UID:
+  `NEEDS_REVIEW` posts are never user-visible — they are reachable
+  only by bot admins via `/quarantine list --all`. The `/save` flow
+  never lets a user bookmark content they cannot see.
 - `/saved [tag] [-w …] [--page N]` — list saved posts with optional
   filters and pagination.
 - `/unsave <uid>` — remove from library (no confirmation).
@@ -348,7 +349,8 @@ shared across the group and writable only by group admins.
   **URL validation before insert.** For HTTP-shaped kinds, the
   Provider performs a lightweight `HEAD` (or, for servers that reject
   `HEAD`, a small-range `GET`) reachability probe through the
-  Collector's SSRF allowlist (`security.md` §SSRF) **before** the
+  shared `infochat-ssrf` library (`security.md` §SSRF), identical
+  to the one Collector uses for fetcher traffic, **before** the
   source row is written. The probe runs under the same allowlist,
   redirect cap, and timeout caps as fetcher traffic; a 4xx/5xx
   response, an SSRF rejection, or a timeout produces a friendly error
@@ -435,6 +437,17 @@ shared across the group and writable only by group admins.
   `schema.md` §Sources and tags ("`failed → active` is set by an
   admin recovery command"); naming it explicitly here closes the
   catalogue.
+- `/source-disable <id>` — bot-admin only. Transitions an `active`
+  source row to `disabled` (the operator-paused status, distinct
+  from `failed`; `schema.md` §Sources and tags). The scheduler
+  stops scheduling the source on the next tick; existing posts
+  remain visible and `/list-sources --all` continues to list the
+  row with its `disabled` status flagged. No probe is required (the
+  operator is intentionally pausing the source). Audit-logged. The
+  reverse path is `/source-enable`. This closes the `active ↔
+  disabled` half of the source-status state machine that
+  `schema.md` already commits to but that no command reached
+  before this row.
 
 ### Per-scope tag preferences
 
@@ -570,9 +583,10 @@ and makes the digest query depend on row presence.
   cap are in design notes.
 - `/stop` — cancels the calling (user, scope)'s currently in-flight
   interruptible request **immediately**, so the worker is freed for
-  others. Applies to chat-mode agent loops and user-issued `/summary`
-  prose generation; does not affect periodic group digests, the
-  ingest pipeline, or already-completed work. The in-flight LLM
+  others. Applies to chat-mode agent loops, user-issued `/summary`
+  prose generation, and user-issued `/retry` re-rolls (decision
+  D35); does not affect periodic group digests, the ingest pipeline,
+  or already-completed work. The in-flight LLM
   stream is closed and any in-flight read-only tool call is
   abandoned: the worker discards the in-flight result, releases the
   DB connection, and moves on. **In v1 every tool in the closed
@@ -662,6 +676,20 @@ and makes the digest query depend on row presence.
 
 ### Admin (bot admin)
 
+**Unknown-contact rule.** Unless explicitly stated otherwise (`/ban`,
+which mints a `preban` row per `security.md` §User ban; `/invite
+create --contact <id>`, which writes an `invite_code` row but no
+`users` row), an admin command targeting an unknown
+`(inbound_adapter, contact_id)` returns a friendly "contact is not
+registered" error and writes no row. This applies uniformly to
+`/grant-admin`, `/revoke-admin`, `/promote`, `/demote`, `/vouch`,
+`/unban` (against a contact with no `users` row at all — distinct
+from a `preban` row, which is the path covered by the `/unban`
+deletion carve-out in `security.md` §User ban). Silently creating a
+row on these paths would bypass the invite gate for elevated
+contacts and contradict the registration-state model
+(`schema.md` §Identity and access — User entity).
+
 - `/promote <contact>` / `/demote <contact>` — group admin
   promote/demote, used inside a group. **Scoped to the inbound
   adapter** — both the targeted user and the targeted group must be
@@ -724,12 +752,24 @@ and makes the digest query depend on row presence.
 - `/invite revoke <code>` — immediately transition a PENDING code to REVOKED.
   Requires confirm.
 - `/vouch <contact>` — immediately graduate a user from the slow-start
-  probation tier to full access (decision D45). **Scoped to the
-  inbound adapter** (same convention as `/grant-admin`): the
-  targeted row is `(inbound_adapter, contact_id)`. Vouching the
-  same human on a second adapter requires running `/vouch` from
-  that adapter. Audit-logged. No-op with a friendly reply if the
-  user is already past probation.
+  probation tier to full access (decision D45) **and** lift the DM
+  invite gate for `group_only` users. The single command performs
+  both effects in one transaction: `probation_until = NULL` and, if
+  the row's prior `registration_state = 'group_only'`, advance
+  `registration_state = 'vouched'` so the next DM is no longer
+  rejected by the permission step (security.md §Invite-code
+  registration — "Group-registered users do not get free DM
+  access"). For a row already in `invited` or `vouched` state the
+  registration_state is left unchanged. **Scoped to the inbound
+  adapter** (same convention as `/grant-admin`): the targeted row
+  is `(inbound_adapter, contact_id)`. Vouching the same human on a
+  second adapter requires running `/vouch` from that adapter.
+  Audit-logged (the row carries both transitions under
+  `details_json`). No-op with a friendly reply if the user is
+  already past probation **and** the row is not `group_only`; a
+  `group_only` user past probation but still DM-gated is a valid
+  `/vouch` target (the command's purpose there is to lift the
+  gate, not to clear probation).
 - `/quarantine list [-w …] [--all] [--page N]` — review queue. The
   review-status enum is `{PENDING, BENIGN_CLOSED, APPROVED, REJECTED}`
   (`schema.md` §Posts and derivatives, Quarantine entry). Default
@@ -742,9 +782,12 @@ and makes the digest query depend on row presence.
   so the Provider role does not need `SELECT` on the raw-original
   column. Approve transitions `PENDING → APPROVED` (or
   `BENIGN_CLOSED → APPROVED`), restores the redacted span, and
-  re-NOTIFY's the post; reject transitions to `REJECTED` (from
-  `PENDING` for the routine path, from `BENIGN_CLOSED` for the
-  forensic path) and leaves the placeholder permanently.
+  fires `NOTIFY new_post` for the post (so the Provider re-renders
+  the now-unredacted body via the standard high-water-mark path —
+  `architecture.md` §Inter-service communication); reject
+  transitions to `REJECTED` (from `PENDING` for the routine path,
+  from `BENIGN_CLOSED` for the forensic path) and leaves the
+  placeholder permanently.
 - `/audit [-w …] [--actor …] [--action …] [--page N]` — read
   `audit_log_view` (the redacted view; `security.md` §DB roles)
   with filters. **Unknown actor id** (`--actor <id>` against an id
@@ -766,6 +809,15 @@ lives in `docs/design/03-commands.md`. The spec-level commitment:
   inside the group). Bot-wide destructive operations require bot admin.
 - Any new command added to the system goes through the same permission
   matrix and the same audit-before-effect rule.
+- **Admin-only flags are part of command identity.** A flag listed
+  in the closed bot-admin set below (e.g. `/list-sources --all`,
+  `/list-sources --include-deleted`, `/quarantine list --all`) is
+  treated as inseparable from its command for permission purposes.
+  A non-admin caller passing such a flag receives a friendly
+  permission error — the parser **never** silently strips the flag
+  and runs the un-flagged variant. Silent flag-strip would mask the
+  caller's intent and produce a result they did not ask for; the
+  spec commits to the explicit-error behavior.
 
 **Closed list of privileged-tier commands (spec level).** The
 following enumeration is the load-bearing closed set used by the
@@ -780,8 +832,8 @@ cannot silently shrink across versions.
   `/unban`, `/promote`, `/demote`, `/vouch`, `/invite create`,
   `/invite list`, `/invite revoke`, `/quarantine list`,
   `/quarantine approve`, `/quarantine reject`, `/audit`,
-  `/remove-source`, `/source-enable`, `/list-sources --all`,
-  `/list-sources --include-deleted`.
+  `/remove-source`, `/source-enable`, `/source-disable`,
+  `/list-sources --all`, `/list-sources --include-deleted`.
 - **Group-admin (or bot admin acting in the group):**
   `/add-source` in groups, `/unfollow-source` in groups,
   `/lang` in groups, `/group-timezone`, `/follow-tag` in groups,

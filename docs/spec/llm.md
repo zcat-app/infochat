@@ -213,6 +213,17 @@ Adding a fallback chain is a v2 candidate.
 
 ### Pipeline order (delivery direction)
 
+This pipeline applies **only** to LLM-authored output (cluster
+summaries, chat-agent replies, digest prose, `/retry` re-rolls).
+Deterministic localization-bundle strings (decision D43 — `/help`,
+friendly errors, banned-user reply, progress-notifier stages, etc.)
+are emitted **directly to the adapter** with no LLM call, no
+sanitizer pass, no `TranslationProvider` invocation, and no
+translation-cache interaction. Bundle strings are looked up by key
+in the scope's language bundle; if the key is missing in the
+scope's language, lookup falls back to `en` (a missing `en` key is
+a startup error, decision D43). The two paths never mix.
+
 For LLM-authored output, the order from generation to delivery is:
 
 1. LLM prose (summarizer, chat agent, digest writer).
@@ -224,9 +235,17 @@ For LLM-authored output, the order from generation to delivery is:
    strings, so the sanitizer runs again on the translated output.
    Double-sanitization is intentional, not duplicated work.
 5. **Translation cache write** (key:
-   `(hash(English source text), target_language)`, value:
-   post-sanitizer translated text). The cache stores the
-   already-sanitized form so cache hits skip step 4 too.
+   `(hash(post-sanitizer-1 English text), target_language)`, value:
+   post-sanitizer-2 translated text). The cache key is derived from
+   the **post-sanitizer-1** English text — the form produced by
+   step 2, with admin-command strings already stripped — so two
+   callers whose pre-sanitizer LLM outputs differ trivially (e.g.
+   one carried an admin-verb fragment that the sanitizer stripped,
+   the other did not) collide on the same key after sanitization.
+   Keying on pre-sanitizer text would let two semantically-equal
+   English strings miss the cache, multiplying translator load
+   without benefit. The cache stores the already-sanitized
+   translated form so cache hits skip step 4 too.
 6. Adapter delivery.
 
 Cache lookups occur between step 3 and step 4 — a hit short-circuits
