@@ -7,7 +7,7 @@ Two-service Quarkus application: a news and social-media aggregator chatbot.
 
 ## Stack
 
-- Quarkus 3.x / Java 21 / Maven (multi-module)
+- Quarkus 3.33 LTS / Java 25 / Maven (multi-module)
 - PostgreSQL with `pgvector` extension
 - `quarkus-langchain4j` for LLM integration
 - SmallRye Reactive Messaging (in-memory channels v1, Kafka optional later)
