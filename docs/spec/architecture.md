@@ -5,7 +5,7 @@
 infochat is split into two cooperating services that share a single database.
 This file describes *why* the split exists, the responsibilities of each side,
 and the contracts between them. The stack itself (Quarkus, PostgreSQL with
-pgvector, LangChain4j, Java 21, Maven multi-module) is fixed by decision
+pgvector, LangChain4j, Java 25, Maven multi-module) is fixed by decision
 D1. Concrete module names, package layout, startup ordering, and runtime
 tuning live in `docs/design/01-architecture.md`.
 

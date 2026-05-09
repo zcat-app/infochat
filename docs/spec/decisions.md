@@ -15,7 +15,7 @@ edits the existing row and notes the supersession (do not delete).
 
 | # | Decision | Choice |
 |---|---|---|
-| D1 | Stack | Quarkus + PostgreSQL + pgvector + LangChain4j + Java 21 + Maven multi-module |
+| D1 | Stack | Quarkus + PostgreSQL + pgvector + LangChain4j + Java 25 + Maven multi-module |
 | D2 | Service split | Two services: headless **Collector** (ingest/eval/store) and user-facing **Provider** (chat). Shared DB. |
 | D3 | Eval queue (v1) | In-process channels + outbox pattern (post persisted before enqueue). External broker is a v2 swap. |
 | D4 | Collector → Provider events | Postgres `LISTEN/NOTIFY` for push, plus a high-water mark for catch-up after restarts. No external broker in v1. |
