@@ -13,35 +13,37 @@ This file is a **reference**, not a design doc. It is normative for module depen
 
 ## 9.1 Module dependency DAG
 
-The codebase ships as five Maven modules. Dependencies are strictly one-directional; the build fails if a cycle is introduced.
+The codebase ships as six Maven modules. Dependencies are strictly one-directional; the build fails if a cycle is introduced. The module names match [01-architecture.md](01-architecture.md) §1.2 byte-for-byte.
 
 ```
-                    infochat-core
-                   /     |        \
-                  /      |         \
-   infochat-llm-adapter  |    infochat-messaging-adapter
-                  \      |         /
-                   \     |        /
-                    \    |       /
-              ┌──────────┴──────────┐
-              │                     │
-     infochat-collector     infochat-provider
+                              infochat-core
+                /              /         \              \
+               /              /           \              \
+   infochat-ssrf   infochat-llm-adapter   infochat-messaging-adapter
+                \              \           /              /
+                 \              \         /              /
+                  \              \       /              /
+              ┌─────────────────────┴───┴──────────────┐
+              │                                        │
+       infochat-collector              infochat-provider
 ```
 
 | Module | Depends on | Purpose |
 |---|---|---|
 | `infochat-core` | (none) | Domain entities, schema-level types, shared utilities. Pure Java; no Quarkus, no I/O. |
+| `infochat-ssrf` | `infochat-core` | SSRF-gated outbound HTTP/WS client (allowlist, IP blocklist, DNS-rebind defense, redirect cap, scheme allowlist, timeout caps). Shared by every Collector fetch / `StreamSource` connect and every Provider `/add-source` URL probe. See [04-security.md](04-security.md) §4.2. |
 | `infochat-llm-adapter` | `infochat-core` | `LlmProvider`, `EmbeddingProvider`, `TranslationProvider` SPIs and impls. See [05-llm-and-embeddings.md](05-llm-and-embeddings.md). |
-| `infochat-messaging-adapter` | `infochat-core` | `MessagingAdapter` SPI, SimpleX impl, `InMemoryAdapter`. See [06-messaging.md](06-messaging.md). |
-| `infochat-collector` | `infochat-core`, `infochat-llm-adapter` | Fetchers, eval pipeline, schedulers. Headless. No `messaging-adapter` dependency — Collector never talks to users. |
-| `infochat-provider` | `infochat-core`, `infochat-llm-adapter`, `infochat-messaging-adapter` | Command router, chat agent, periodic digest, admin commands. |
+| `infochat-messaging-adapter` | `infochat-core` | `MessagingAdapter` SPI plus the v1 in-tree implementations: SimpleX, Signal, and the in-memory test adapter (D32, D46). See [06-messaging.md](06-messaging.md). |
+| `infochat-collector` | `infochat-core`, `infochat-ssrf`, `infochat-llm-adapter` | Fetchers, eval pipeline, schedulers. Headless. No `messaging-adapter` dependency — Collector never talks to users. |
+| `infochat-provider` | `infochat-core`, `infochat-ssrf`, `infochat-llm-adapter`, `infochat-messaging-adapter` | Command router, chat agent, periodic digest, admin commands. |
 
 Notes:
 
 - `infochat-core` MUST stay free of Quarkus, JAX-RS, and Hibernate. Test-friendly and reusable.
+- `infochat-core` is deliberately one module — splitting DTOs from entities is a v2 candidate if a third consumer appears. The rationale lives in [01-architecture.md](01-architecture.md) §1.2.
 - `infochat-collector` MUST NOT depend on `infochat-messaging-adapter`. Enforced by the parent POM and verified in CI; an attempt to add the dependency fails the build with a clear error. This is the architectural guarantee that the Collector cannot accidentally become user-facing.
-- The two adapter modules are siblings — `llm-adapter` and `messaging-adapter` MUST NOT depend on each other.
-- See [F32 in the v2 review notes](../reviews-v2/claude-feedback.md) for the rationale against further splitting `infochat-core`.
+- The three sibling shared modules — `infochat-ssrf`, `infochat-llm-adapter`, and `infochat-messaging-adapter` — MUST NOT depend on each other.
+- `infochat-ssrf` is a compile-time shared library, not a runtime communication path. The "DB-only inter-service communication" rule from [01-architecture.md](01-architecture.md) §1.2 / [04-security.md](04-security.md) §4.2 still holds: there is no Provider→Collector RPC for SSRF checks. Sharing the gate as a Maven sibling is what keeps both services' allowlists from drifting.
 
 ---
 
@@ -110,13 +112,15 @@ Within a class, codes are not reused. Allocation is append-only — once shipped
 | `E4001` | DB connection acquisition timeout |
 | `E4002` | Flyway migration failed |
 | `E4003` | Adapter WS disconnect (transient) |
-| `E4004` | Adapter session token revoked → terminal `AUTH_FAILED` (see [06-messaging.md §6.4.6](06-messaging.md)) |
+| `E4004` | SimpleX adapter: session token revoked or repeatedly rejected → terminal `AUTH_FAILED`. Recovery: rotate `SIMPLEX_SESSION_TOKEN`, restart Provider — see [06-messaging.md §6.4.6](06-messaging.md) and [07-deployment.md](07-deployment.md) §7.14 "Rotate a SimpleX session token". |
 | `E4005` | LISTEN/NOTIFY channel dropped — reconciler runs on next startup |
 | `E4006` | Outbound queue overflow — newest message dropped |
 | `E4007` | Inbound queue overflow — newest message dropped + throttle reply |
 | `E4008` | Scheduler missed a slot (digest worker busy) |
 | `E4009` | Bootstrap-sources.json missing or malformed |
 | `E4010` | Bootstrap SHA mismatch — Collector loaded a different file than Provider sees on disk |
+| `E4011` | Bootstrap-assets.json missing or malformed (configured path absent, or present but unparseable / schema-invalid; `details_json.cause` distinguishes `'absent'` vs `'malformed'`, `details_json.file` carries the configured path, `details_json.error` carries the parse / validation error on malformed). See [07-deployment.md §7.6.2](07-deployment.md). |
+| `E4012` | Signal adapter: `signal-cli` account authentication terminally failed → terminal `AUTH_FAILED`. Recovery: stop `signal-cli`, re-register account out-of-band, restart Provider — see [06-messaging.md](06-messaging.md) §6.5 and [07-deployment.md](07-deployment.md) §7.14 "Re-register `signal-cli`". |
 
 ---
 
@@ -133,5 +137,11 @@ A common task: "I see error code `Eabcd` in a log — where is it documented?"
 | Adapter behavior question | [06-messaging.md](06-messaging.md) |
 | Schema question (table, column, index, TTL) | [02-schema.md](02-schema.md) |
 | Permission question | [04-security.md](04-security.md) §4.4 |
+
+A handful of E4xxx codes have a more specific anchor than the generic §7.14 runbook entry:
+
+- `E4004` (SimpleX `AUTH_FAILED`) → [06-messaging.md §6.4.6](06-messaging.md) for the auth-failure state machine + [07-deployment.md](07-deployment.md) §7.14 "Rotate a SimpleX session token" for the operator runbook.
+- `E4011` (`bootstrap-assets.json` missing or malformed) → [07-deployment.md §7.6.2](07-deployment.md) for the path-unset / path-set+absent / path-set+malformed file-state semantics.
+- `E4012` (Signal `AUTH_FAILED`) → [06-messaging.md](06-messaging.md) §6.5 for the Signal adapter's auth-failure terminal state + [07-deployment.md](07-deployment.md) §7.14 "Re-register `signal-cli`" for the operator runbook.
 
 ---

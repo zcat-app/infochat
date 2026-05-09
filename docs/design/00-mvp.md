@@ -1,5 +1,16 @@
 # infochat — MVP Scope
 
+> **Status: design notes, not spec.**
+> Implementation details below (DDL, class names, package layout, property keys,
+> retry counts, regex strings, etc.) are working notes that may change without a
+> spec amendment. The authoritative *what & why* lives in `docs/spec/`.
+>
+> **Superseded.** Milestone 1 of the v1 build follows the same vertical-slice
+> shape as this MVP but applies every v1 invariant (D44 invite-gating, D45
+> slow-start, D29/D43 translation/localization, D37 audit-log breadth,
+> D35/D36 cancellation/retry, capability-flag invariants, scope-discriminator
+> design). See the v1 milestone plan.
+
 This file defines the **smallest end-to-end slice** of infochat that proves the architecture works on a single laptop. It is **not** a replacement for [SPEC.md](SPEC.md); it is a strict subset.
 
 The goal of the MVP is to demonstrate, on the `laptop` profile, that:
