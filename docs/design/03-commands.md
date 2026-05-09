@@ -90,8 +90,7 @@ forensic-path rows) require a follow-up `<command> confirm` within a
 **fixed, profile-tunable timeout**. The same timeout applies to every
 confirmable command in a given deployment (no per-command bespoke values,
 [../spec/commands.md](../spec/commands.md) §Surface conventions). Per-profile
-defaults — concrete values land in
-[07-deployment.md](07-deployment.md) at Task 0.6:
+defaults — concrete values live in [07-deployment.md](07-deployment.md):
 
 | Profile | Confirmation timeout |
 |---|---|
@@ -199,7 +198,7 @@ inside an otherwise legal command line):
 | Single tag value | 48 chars (matches the tag-normalization regex) |
 
 Limits are constants in `infochat-core`; not user-tunable. The two top-level
-cap values land in [07-deployment.md](07-deployment.md) at Task 0.6.
+cap values live in [07-deployment.md](07-deployment.md).
 
 ---
 
@@ -301,8 +300,8 @@ agent, or any DB query past the ban check (decision D11).
 Newly-registered users (whether via invite code or group `@mention`) enter a
 probation window before getting full access (decision D45,
 [../spec/security.md](../spec/security.md) §Slow-start tier). Per-profile
-durations — the value moves to [07-deployment.md](07-deployment.md) at
-Task 0.6:
+durations (the canonical operator-facing values live in
+[07-deployment.md](07-deployment.md)):
 
 | Profile | Probation duration |
 |---|---|
