@@ -203,12 +203,23 @@ choices that shape every section.
   **Cluster ID**: the identifier of a cluster within a single
   computation. Stable only within the periodic-digest cache
   window; clusters are recomputed on cache expiry, so cluster IDs
-  are best-effort breadcrumbs, not durable references. **Cluster IDs
-  are not referenceable in commands** — only Post UIDs are durable
-  user-facing references (for `/save`, `/unsave`, and chat queries).
-  Commands that accept an ID argument always expect a Post UID.
+  are best-effort breadcrumbs, not durable references. **Cluster
+  IDs are not user-facing arguments to commands** — only Post
+  UIDs are durable user-facing references (for `/save`,
+  `/unsave`, and chat queries). Commands that accept an ID
+  argument always expect a Post UID. Cluster mappings *are*
+  stored internally in `summary_anchor` for `/retry` reuse, but
+  the IDs themselves are never accepted from user input.
 - **Memory entry**: a `chat_memory` row created by `/compress`. Per-(user,                                                                                                                                                                            
   scope).
+- **Summary anchor**: persistent record of the deterministic
+  cluster-mapping computed by the most recent summary-producing
+  command in a scope (`/summary`, `/digest`, periodic digests).
+  Used by `/retry` to reuse the cluster set so re-rolled prose
+  describes the same posts as the original run. Stored as a
+  `summary_anchor` row keyed by `(scope_id, user_id, command_kind)`
+  — `user_id` is NULL for digests; details in `schema.md`
+  §Per-scope state.
 - **Bot admin**: user with `is_admin = true`. Globally privileged.                                                                                                                                                                                    
   Bootstrapped from config.
 - **Group admin**: user with `group_membership.is_group_admin = true` for a                                                                                                                                                                           

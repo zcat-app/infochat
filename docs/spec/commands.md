@@ -52,7 +52,11 @@ live in `docs/design/03-commands.md`.
   a profile-driven value (design notes). A late `confirm` past the
   timeout is rejected with the same wording as a missing pending
   state. The confirmation is scoped to (user, scope) and any other
-  input cancels it with an explicit acknowledgement. (Per-command-
+  input cancels it with an explicit acknowledgement — including
+  `/stop`, which cancels a pending confirmation as a side effect
+  of its "any other input" treatment and replies with the standard
+  cancellation acknowledgement, even when no LLM work is in flight.
+  (Per-command-
   category split timeouts are recorded as a v2 candidate; v1's
   one-timeout-fits-all keeps the state machine simple.)
   **Confirmation state is in-memory only.** Pending confirmations are
@@ -99,8 +103,10 @@ text, and output structure are in `docs/design/03-commands.md`.
   DM and group; any non-banned user. The list is filtered by the
   exact set the caller is currently permitted to invoke: a
   probation-tier caller (decision D45) sees **only** the slow-start
-  allowed subset, with a one-line note that fuller access unlocks
-  when probation ends; a non-admin caller does not see admin
+  allowed subset, with a one-line note that fuller access — and
+  free-form chat-mode replies (chat mode is also blocked during
+  probation, `security.md` §Slow-start tier) — unlocks when
+  probation ends; a non-admin caller does not see admin
   commands; a group member who is not group admin does not see
   group-admin-only commands. Showing a wider list with "blocked
   during probation" annotations would contradict the
@@ -561,8 +567,16 @@ and makes the digest query depend on row presence.
   - `chat_session` rows for `(caller, calling_scope)` (the live
     context window — without this, a user who `/forget`s to escape
     a runaway thread still sees it next time they message);
-  - `summary_anchor` rows for `(caller, calling_scope)` (defensive
-    — no leftover anchor pointing at posts from the prior session);
+  - `summary_anchor` rows for `(caller, calling_scope)` with
+    `command_kind = 'personal'` only (defensive — no leftover
+    anchor pointing at posts from the prior session). The
+    group-wide digest anchor (`command_kind = 'digest'`,
+    `user_id IS NULL`) is **not** touched by `/forget`: it is
+    not user-owned data — it is computed from the group's
+    subscriptions and the global post set, and the same digest
+    is sent to every group member; clearing it on one user's
+    `/forget` would invalidate the next digest for the entire
+    group;
   - `saved_post` rows for the caller — **globally, regardless of
     calling scope** (saves are per-user-globally per D13;
     `/forget` from any scope wipes the whole library).
@@ -597,7 +611,11 @@ and makes the digest query depend on row presence.
   was. The reply does **not** name the other scopes (naming a DM
   would leak existence to a co-admin running the command;
   enumerating groups is unnecessary for the user's privacy
-  decision) — the count is sufficient.
+  decision) — the count is sufficient. When the count is **zero**
+  (the calling scope is the only scope holding the caller's
+  chat-tier rows) the disclosure clause is omitted and the reply
+  is the bare confirmation, e.g. `"Cleared this conversation."` —
+  surfacing "you have data in 0 other conversations" is noise.
 - `/export` — returns the calling user's own data. **Delivery is
   in-band**: the export is sent as a reply message (or paginated
   reply messages) on the same adapter channel as the command. No
@@ -853,13 +871,16 @@ contacts and contradict the registration-state model
   `group_only` user past probation but still DM-gated is a valid
   `/vouch` target (the command's purpose there is to lift the
   gate, not to clear probation).
-- `/quarantine list [-w …] [--all] [--page N]` — review queue. The
-  review-status enum is `{PENDING, BENIGN_CLOSED, APPROVED, REJECTED}`
+- `/quarantine list [-w …] [--all] [--page N]` — bot-admin only
+  (closed list below; the whole command is privileged, so `--all`
+  is not a tier-changing flag — it changes the row filter, not
+  the permission). The review-status enum is
+  `{PENDING, BENIGN_CLOSED, APPROVED, REJECTED}`
   (`schema.md` §Posts and derivatives, Quarantine entry). Default
-  lists `PENDING` rows only — the active admin queue. `BENIGN_CLOSED`
-  rows (Stage 2 cleared, redactions retained) are not surfaced by
-  default; `--all` (bot-admin) lists every status for forensic /
-  audit workflows.
+  lists `PENDING` rows only — the active admin queue.
+  `BENIGN_CLOSED` rows (Stage 2 cleared, redactions retained) are
+  not surfaced by default; `--all` lists every status for
+  forensic / audit workflows.
 - `/quarantine approve <id>` / `/quarantine reject <id>` — review
   action. Both run as stored procedures (`security.md` §DB roles)
   so the Provider role does not need `SELECT` on the raw-original
@@ -871,16 +892,25 @@ contacts and contradict the registration-state model
   transitions to `REJECTED` (from `PENDING` for the routine path,
   from `BENIGN_CLOSED` for the forensic path) and leaves the
   placeholder permanently.
-- `/audit [-w …] [--actor …] [--action …] [--page N]` — read
-  `audit_log_view` (the redacted view; `security.md` §DB roles)
-  with filters. **Bot admins see audit rows for all scopes** — the
-  view is not filtered by the calling scope for bot admins; they
-  see the deployment-wide audit history. **Unknown actor id**
-  (`--actor <id>` against an id with no matching `users` row)
-  returns the same "no audit rows" reply as a known id with no
-  rows in the window — the existence-vs-no-rows distinction is not
-  exposed. v1 ships no `/list-users` command; bot admins enumerate
-  via the existing audit history.
+- `/audit [-w …] [--actor <contact>] [--action <verb>] [--page N]`
+  — bot-admin only (closed list below). Reads `audit_log_view`
+  (the redacted view; `security.md` §DB roles) with filters. The
+  view is not scoped to the calling scope; a bot admin sees the
+  deployment-wide audit history. **Argument shapes.**
+  `--actor <contact>` accepts a contact id resolved against
+  `(inbound_adapter, contact_id)` (same shape as `/promote`,
+  `/ban`, `/vouch` — the inbound adapter is the one the command
+  arrives on); cross-adapter actor lookup is not supported in v1.
+  `--action <verb>` is one of the closed audit-action enum
+  (values in design notes); an unknown verb returns a friendly
+  error listing the accepted values. `--page N` is 1-indexed;
+  page size is profile-driven. **Unknown actor id** (a
+  well-formed contact id with no matching `users` row on the
+  inbound adapter) returns the same "no audit rows" reply as a
+  known id with no rows in the window — the
+  existence-vs-no-rows distinction is not exposed. v1 ships no
+  `/list-users` command; bot admins enumerate via the existing
+  audit history.
 
 ## Permission model
 

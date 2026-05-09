@@ -109,16 +109,15 @@ Every adapter implements:
   decision D30). **Renamed from `supportsMarkdownCode`** because the
   prior name implied broader markdown support; v1 adapters render
   *only* code spans, never markdown links or other markdown
-  features. To enforce that the surface does not silently widen, every
-  v1 adapter additionally asserts `supportsMarkdownLinks = false` —
+  features. URLs are always rendered bare (D30).
+- `supportsMarkdownLinks` — **MUST be false for every v1 adapter.**
   Provider **validates this flag at adapter registration (startup)**:
   if any registered adapter declares `supportsMarkdownLinks = true`,
   Provider fails fast at startup with a fatal log message identifying
   the adapter. This is a startup-fail-fast check, not a per-message
   check — widening the render surface is a spec amendment, not a
   configuration choice, and a per-message check would miss adapters
-  that silently upgrade their capabilities. URLs are always rendered
-  bare (D30).
+  that silently upgrade their capabilities.
 - `supportsMessageEdit` — required for in-place progress updates.
 - `minEditInterval` — adapter-imposed floor between edits on the same                                                                                                                                                                                 
   message; the progress notifier honors `max(adapterMin, system floor)`.

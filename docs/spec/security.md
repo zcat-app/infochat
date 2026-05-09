@@ -60,7 +60,12 @@ D20):
 
 - **Stage 1 — deterministic.** Runs on every post. HTML is sanitized
   against an allowlist; the body is Unicode-normalized (NFKC,
-  bidi-control and zero-width stripping); a prompt-injection regex
+  bidi-control and zero-width stripping — applied **unconditionally
+  to the entire body**, including any text the source happens to
+  enclose in code-fence syntax: ingest content is upstream-untrusted
+  and the regex set must operate on a normalized form, so the
+  chat-intake fenced-code carve-out (below) does **not** apply on
+  the ingest path); a prompt-injection regex
   set runs with bounded execution time. **Regex engine commitment
   (v1):** the Stage 1 implementation uses `java.util.regex` with a
   per-input wall-clock watchdog that aborts the match when the cap
@@ -93,9 +98,18 @@ D20):
   Failure handling below for the verdict-vs-infrastructure split.
 
 The Provider's chat intake mirrors the Stage 1 Unicode steps (NFKC + bidi                                                                                                                                                                             
-strip + zero-width strip outside fenced code) so a homoglyph or RTL                                                                                                                                                                                   
-override cannot disguise a slash command. The Provider does *not* run the                                                                                                                                                                             
-Stage 1 regex set on chat input — chat-input safety relies on the                                                                                                                                                                                     
+strip + zero-width strip) but **carves out fenced code blocks**: a user
+typing a deliberately exotic code snippet should see it round-trip
+unchanged. Fence recognition is the closed CommonMark rule —
+a line beginning (after up to three leading spaces) with a run of
+**three or more backticks** opens a fenced block; the block ends
+at the next line whose leading run of backticks is at least as
+long as the opener's run; if no closing fence is found the block
+extends to end-of-input. The recognition pass runs **before**
+Unicode normalization on a copy of the input; normalization is
+applied to text outside fences only. Bytes inside fences are
+preserved verbatim. The Provider does *not* run the Stage 1
+regex set on chat input — chat-input safety relies on the
 delimiter convention plus the LLM tool boundary.
 
 **Stage 1 is a coarse filter, not a complete defense.** It exists to                                                                                                                                                                                  
@@ -221,7 +235,13 @@ considered untrusted (decision D21):
 - The LLM tool surface is a strict allowlist. Every name appears
   verbatim in the agent's tool registry; nothing else is callable.
   The v1 list is **closed at spec level** (additions or removals
-  are spec amendments, not design tweaks):
+  are spec amendments, not design tweaks). **All free-form string
+  and list inputs across every tool below are length-bounded by a
+  profile-driven cap** (the cap value lives in design notes); a
+  call exceeding the cap is rejected by the tool dispatcher
+  before any SQL runs and the LLM sees a typed validation-error
+  reply. Per-tool overrides (cap differences, additional rules)
+  are noted in the Notes column.
 
   | Name | Inputs | Output | Notes |
   |---|---|---|---|
@@ -359,10 +379,13 @@ Authorization evaluation order on every inbound message:
 4. **Ban check.** If `is_banned=true`: fixed reply, stop. No parser, no DB
    query past the ban check, no LLM.
 5. **Unicode-normalize the body** (NFKC + bidi-control strip +
-   zero-width strip outside fenced code) **before parsing**, so a
-   `/` cannot be disguised by homoglyphs or bidi overrides. This
-   mirrors the Stage 1 ingest normalization (§Ingest pipeline) and
-   is the chat-input parity step. Normalization runs after the ban
+   zero-width strip outside fenced code blocks; fence recognition
+   per the CommonMark rule documented in §Ingest pipeline)
+   **before parsing**, so a `/` cannot be disguised by homoglyphs
+   or bidi overrides. This is the chat-input parity step that
+   mirrors Stage 1 ingest normalization with the user-intent
+   fenced-code carve-out (the carve-out is chat-side only —
+   ingest applies unconditionally). Normalization runs after the ban
    check (the ban check uses the cryptographic contact id, not the
    message body, so order does not matter for ban) and before parse
    so the slash detector sees the normalized form. **The normalized
@@ -536,6 +559,16 @@ DM access, applied uniformly across all adapters:
   (step 4) fires before any command could succeed even if the contact later
   presents a valid invite — but in practice the pre-ban row means the invite
   check (step 2) finds a known contact and routes to the ban path instead.
+  **Pre-ban revokes pending invites for the same contact.** If
+  `/ban <contact>` runs while one or more `PENDING` invites exist
+  for the same `(adapter, contact_id)` (either pre-bound via
+  `--contact` or open-but-bound-on-consume targeting that contact),
+  every such invite is transitioned to `REVOKED` in the same
+  transaction as the ban (audit-logged with the ban's
+  `request_id`). The intake-side ban check would block the contact
+  even if a stale invite remained, but explicit revoke keeps
+  `/invite list` honest and prevents an unbanned-then-rebanned
+  cycle from leaving an orphan invite in `PENDING`.
 - `/invite list [--page N]` shows PENDING codes with their target contact,
   adapter, and expiry. `/invite revoke <code>` transitions a PENDING code to
   `REVOKED` immediately. `/invite revoke` requires confirm.
@@ -593,8 +626,13 @@ duration is profile-driven (value in design notes). During probation:
 
 - **Allowed** (read-only subset plus the user's own privacy/locale
   levers): `/help`, `/status`, `/get-tags`, `/get-sources`,
-  `/list-sources`, `/summary`, `/saved`, asset commands (`/zcash`,
-  `/monero`), `/export`, **`/forget`** (the user's privacy lever —
+  `/list-sources`, `/summary`, `/saved`, **all operator-configured
+  asset commands** (every top-level asset command registered via
+  `bootstrap-assets.json` per D39 — read-only public-endpoint
+  reads with negligible cost; the allowlist is "the asset-command
+  family," not a fixed enumeration, so adding a future asset to
+  `bootstrap-assets.json` does not require a security.md
+  amendment), `/export`, **`/forget`** (the user's privacy lever —
   blocking it during probation would undermine D37), **`/lang`** (a
   single-row UPDATE with no LLM cost — blocking it means a non-English
   new user cannot get help in their language during the window when
@@ -994,9 +1032,11 @@ operational complexity; v1 commits to global source rows.
   is gated on a future product decision. v1 relies on minimization
   (chat-memory TTL, `/forget`, `/export`) instead.
 - Per-group bans — only bot-wide ban in v1.
-- User-controllable retention values — the chat-memory TTL itself is
-  fixed (configured per profile, not per user). Users control purge
-  via `/forget` (decision D37), not by tuning TTL.
+- User-controllable retention values — the chat-memory TTL is
+  operator-configurable (profile-driven default, overridable per
+  property in `deployment.md` §Configuration surface) but **not
+  user-configurable** in v1. Users control purge via `/forget`
+  (decision D37), not by tuning TTL.
 - Two-factor confirmation for ban — single-step confirm-within-window                                                                                                                                                                                 
   is enough for v1.
 - CAPTCHAs / human verification — invite-code registration and the slow-start

@@ -51,11 +51,21 @@ Collector and Provider communicate only through the shared database:
     transitions reachable by Provider (`PENDING` insert,
     `BENIGN_CLOSED`, `APPROVED`, `REJECTED`) and on a `post.status
     → NEEDS_REVIEW` transition (`security.md` §Re-evaluation job).
-    Payload carries `(quarantine_id, new_status)` (and, for
-    NEEDS_REVIEW transitions, `(post_id, 'NEEDS_REVIEW')`).
-    Correctness mechanism: high-water mark on Provider side, same
-    shape as `new_post` but keyed on the quarantine row's
-    monotonic cursor. **Consumer behavior:** the Provider drives
+    Payload is a **tagged shape** `(target_kind, target_id,
+    new_status)` where `target_kind ∈ {'quarantine', 'post'}`
+    discriminates: a quarantine state-machine move emits
+    `('quarantine', quarantine_id, new_status)`; the
+    `post.status → NEEDS_REVIEW` transition emits
+    `('post', post_id, 'NEEDS_REVIEW')`. The discriminator is
+    required so a single listener can route both event families
+    without ambiguity. Correctness mechanism: high-water mark
+    on Provider side, keyed on the channel's monotonic cursor
+    `(reviewed_at, target_kind, target_id)` — `reviewed_at` is the
+    quarantine row's `updated_at` for `'quarantine'` events and the
+    `post.status_changed_at` for `'post'` events; the
+    `(target_kind, target_id)` tail breaks ties so two events with
+    identical `reviewed_at` cannot lose one to the cursor.
+    **Consumer behavior:** the Provider drives
     the throttled admin notifier (`security.md` §Failure handling)
     on `PENDING` inserts and on `→ NEEDS_REVIEW` transitions —
     these are the two transitions that require admin attention.
@@ -78,9 +88,10 @@ Collector and Provider communicate only through the shared database:
 - **Catch-up.** A high-water mark on the Provider side guarantees correctness
   across restarts, since `LISTEN/NOTIFY` is best-effort and does not buffer
   events for disconnected listeners. NOTIFY is the latency optimization; the
-  high-water mark is the correctness guarantee. The cursor is the
-  `(ready_at, post_id)` pair (not `ready_at` alone) so two posts with
-  identical `ready_at` cannot lose one to the cursor. The catch-up query
+  high-water mark is the correctness guarantee. For the `new_post`
+  channel the cursor is the `(ready_at, post_id)` pair (not
+  `ready_at` alone) so two posts with identical `ready_at` cannot
+  lose one to the cursor. The catch-up query
   is `WHERE (ready_at, post_id) > (:last_ready_at, :last_post_id)
   ORDER BY ready_at, post_id`; the high-water mark advances both fields
   **in the same DB transaction** as the side effect it triggers,
@@ -89,7 +100,9 @@ Collector and Provider communicate only through the shared database:
   a fast one's mark; a duplicate NOTIFY or a repeated catch-up pass
   for the same row produces no additional side effect. The
   `quarantine_review` channel uses the same cursor mechanism on
-  its own `provider_state` row (per-channel `provider_state` keying,
+  its own `provider_state` row, with channel-specific cursor
+  semantics (per-channel `provider_state` keying — the row shape
+  is channel-agnostic, the interpretation is per-channel;
   `schema.md` §Operational).
 
 No external message broker in v1. Replacing the in-process channels with one

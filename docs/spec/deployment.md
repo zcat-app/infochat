@@ -145,25 +145,38 @@ Both services run Flyway migrations first. Then:
   bootstrap-admin user exists and has `is_admin = true`
   (one bootstrap row per `(adapter, contact_id)`, all audit-logged).
   Then runs the new-post reconciler — replays any `READY` posts
-  since `last_ready_post_at` (the `LISTEN/NOTIFY` catch-up
-  high-water mark, see `architecture.md`). Then connects each
-  enabled messaging adapter (a connection failure on one adapter
-  does not prevent the others from coming up; the failed adapter
-  is logged at fatal and the readiness probe stays unhealthy
-  until every enabled adapter is connected). Then starts the
-  command router.
+  since the `new_post` channel's `provider_state` cursor (the
+  `LISTEN/NOTIFY` catch-up high-water mark, see `architecture.md`).
+  Then connects each enabled messaging adapter. **Per-adapter
+  resilience.** A connection failure on one adapter does not
+  prevent the others from coming up and does not abort Provider
+  startup — the multi-adapter design (D46) exists precisely to
+  deliver per-adapter resilience. Each failed adapter is logged
+  at error severity and retries on a profile-driven backoff.
+  **Readiness rule.** The Provider's readiness probe reports
+  ready when **at least one** enabled adapter is connected
+  (because Provider can serve traffic via that adapter);
+  not-ready when zero adapters are connected. Per-adapter
+  connection state is exposed separately via metrics so an
+  operator can distinguish "fully healthy" from "degraded —
+  one adapter down" without parsing readiness alone. Then
+  starts the command router.
 
 **Bootstrap admin drift.** Per enabled adapter: if the configured
 bootstrap admin contact id for that adapter does not match an
 existing `is_admin = true` row at `(adapter, contact_id)`,
 Provider creates a new admin row for that adapter (audit-logged)
-and **leaves any prior admin rows in place** (across this and any
-other adapter). This is the safer default than auto-revoking old
-admins on every startup: an operator who rotates the bootstrap
-value for one adapter gets a working bot on that adapter without
-cascading effects elsewhere; pruning stale bootstrap admins is
-then an operator action via `/revoke-admin` from the new admin's
-chat. Last-admin protection (invariant 2) is **global across
+and **leaves any prior admin rows in place** with their
+`is_admin = true` flag intact (across this and any other
+adapter). After a rotation the deployment therefore has both the
+old and the new admin rows on the rotated adapter, both with
+`is_admin = true`, until the operator explicitly revokes the
+old one via `/revoke-admin` from the new admin's chat. This is
+the safer default than auto-revoking old admins on every startup:
+an operator who rotates the bootstrap value for one adapter gets
+a working bot on that adapter without cascading effects
+elsewhere; pruning stale bootstrap admins is an explicit operator
+action. Last-admin protection (invariant 2) is **global across
 adapters** — the prior admin row cannot be revoked until at
 least one other `is_admin = true` row exists anywhere on the
 deployment.
@@ -190,6 +203,19 @@ from the file in a later reload are soft-disabled
 historical `price_snapshot` data for a soft-disabled asset is
 preserved for audit. The asset Fetchers schedule from
 `asset_config` rows where `enabled = true AND status = 'active'`.
+**File-state semantics** (the two cases differ by intent and
+must be distinguished):
+- *Path unset / file absent.* Asset commands are disabled for the
+  deployment; `/help` omits them; the rest of v1 ships normally
+  (per `commands.md` §Asset commands). Startup logs an info
+  line. **Not** a startup failure.
+- *Path set, file present but malformed* (unparseable JSON,
+  schema-invalid, references an unknown sub-verb, etc.).
+  Startup **fails fast** with a fatal log message identifying
+  the file path and the parse error. A misconfiguration at this
+  level is operator intent gone wrong — silently disabling asset
+  commands would mask a deployment bug; the loader treats
+  presence-with-errors as opt-in-but-broken, not opt-out.
 
 A bean failure during startup refuses the service start (Quarkus
 default). The readiness probe stays unhealthy until every required

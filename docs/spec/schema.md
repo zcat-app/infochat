@@ -75,15 +75,19 @@ connect with (see decision D34 and `security.md`).
   and there is no demotion path from `invited` / `vouched` back
   to `group_only` (a regression would require a `/revoke-invite`
   primitive that v1 does not surface).
-- **Group.** A messaging-adapter group the bot is a member of. Carries
-  a per-group timezone for digest scheduling (defaults to the
-  operator-configured default — `UTC` out of the box; mutated at
-  runtime by `/group-timezone`), a nullable `removed_at` timestamp
-  set when the bot is removed from the group and cleared on re-add
-  (`messaging.md` §Failure handling), and informational metadata.
-  Group state (subscriptions, `scope_tag`, `chat_memory`,
-  `chat_session`, members' saves) is preserved across remove/re-add
-  cycles.
+- **Group.** A messaging-adapter group the bot is a member of.
+  Spec-level columns: `id` (PK), `(adapter, upstream_group_id)`
+  natural unique key (the `adapter` matches `users.adapter`
+  values), `timezone` (IANA timezone string for digest
+  scheduling — defaults to the operator-configured default,
+  `UTC` out of the box; mutated at runtime by `/group-timezone`,
+  `commands.md`), `removed_at` (nullable timestamp set when the
+  bot is removed from the group and cleared on re-add,
+  `messaging.md` §Failure handling), `created_at`, and
+  informational metadata (display name, etc. — design-tier
+  exact columns). Group state (subscriptions, `scope_tag`,
+  `chat_memory`, `chat_session`, members' saves) is preserved
+  across remove/re-add cycles.
 - **Group membership.** The (user, group) join, with a per-group
   admin flag. Schema must enforce *at most one* group admin per
   group at any time (decision D9).
@@ -147,7 +151,26 @@ connect with (see decision D34 and `security.md`).
   bound to a different contact — all surface as the same fixed
   rejection reply (no information leak about which condition failed).
 - **Audit log.** Append-only record of every privileged action and
-  bootstrap. Indexed for time-range and per-actor lookup.
+  bootstrap. Spec-level columns: `id` (monotonic),
+  `created_at` (timestamp), `actor_user_id` (FK to `users` —
+  nullable for bootstrap rows where no user was the actor),
+  `actor_contact_id` (denormalized at write time for
+  redaction-free historical lookup; the FK target may rotate),
+  `actor_adapter` (denormalized adapter name), `action` (closed
+  verb enum — values live in design notes), `target_kind`
+  (`'user' | 'group' | 'source' | 'post' | 'invite' |
+  'quarantine' | 'asset' | 'memory' | 'system'`),
+  `target_id` (FK or natural key into the target's table — type
+  varies by `target_kind`; design notes resolve the union to
+  concrete columns), `target_contact_id` (denormalized when the
+  target is a user), `scope_id` (nullable — group id for
+  group-scoped actions, NULL for DM and bootstrap),
+  `request_id` (correlation id assigned at command intake or
+  bootstrap), `details_json` (free-form JSON; subject to
+  redaction in `audit_log_view`). Indexed for time-range and
+  per-actor lookup. The redacted view (`audit_log_view`,
+  §Operational) projects this row with the contact-id and
+  details-json redactions applied.
 
 ### Sources and tags
 
@@ -171,10 +194,14 @@ connect with (see decision D34 and `security.md`).
   hides the row from listings. The fetcher / StreamSource scheduler
   selects rows where `status = 'active'` AND `deleted_at IS NULL`.
   Transitions: `active → failed` is set by the worker on threshold
-  crossing; `failed → active` is set by an admin recovery command or by
-  a successful manual probe; `active ↔ disabled` is set by an admin
-  command; `disabled → failed` cannot happen (a disabled source isn't
-  scheduled, so it can't fail).
+  crossing; `failed → active` is set by a bot-admin recovery
+  command (`/source-enable`, `commands.md`) or by a successful
+  manual probe; `active ↔ disabled` is set by a bot-admin command
+  (`/source-disable` / `/source-enable`); `disabled → failed`
+  cannot happen (a disabled source isn't scheduled, so it can't
+  fail). All admin transitions are bot-admin only because source
+  rows are global per D7 (a group admin cannot pause a source the
+  whole deployment shares).
 - **Source subscription.** A (scope, source) link. DM scope is per user;
   group scope is shared.
 - **Tag.** A row in the controlled vocabulary (Tier 1, decision D5).
@@ -437,25 +464,40 @@ regardless of how many quarantine cycles it has been through.
   is spec.
 - **Provider state.** Catch-up high-water marks for the
   `LISTEN/NOTIFY` reconciler (see `architecture.md`). **One row per
-  channel** keyed by `channel`, holding `(channel, last_ready_at,
-  last_post_id, updated_at)`. A `UNIQUE` constraint on `channel`
-  enforces the singleton-row-per-channel semantics at the schema
-  layer. The first-boot insert uses
-  `INSERT INTO provider_state (channel, last_ready_at, last_post_id,
-  updated_at) VALUES (:ch, ...) ON CONFLICT (channel) DO NOTHING`;
-  two fresh Provider instances starting concurrently both attempt
-  the insert, exactly one wins, and the winning instance owns the
-  cursor — no duplicate rows can be produced by the first-insert
-  race. Updates are compare-and-swap so a slow processor cannot
-  roll back a fast one's mark:
-  `UPDATE provider_state SET last_ready_at = :new_ready_at,
-  last_post_id = :new_post_id, updated_at = NOW()
-  WHERE channel = :ch AND (last_ready_at, last_post_id) <
-  (:new_ready_at, :new_post_id)`. The cursor is the
-  `(ready_at, post_id)` pair (not `ready_at` alone) so two posts
-  sharing a `ready_at` are both processed on catch-up — the
-  earlier-id post advances the mark to itself, the later-id post
-  advances it to itself in the same transaction as its side effect.
+  channel** keyed by `channel`, holding the channel-agnostic shape
+  `(channel, cursor_high, cursor_low_kind, cursor_low_id,
+  updated_at)`. A `UNIQUE` constraint on `channel` enforces the
+  singleton-row-per-channel semantics at the schema layer. The
+  cursor interpretation is per-channel:
+  - `new_post` — `cursor_high = ready_at`,
+    `cursor_low_kind = 'post'`, `cursor_low_id = post_id`.
+  - `quarantine_review` — `cursor_high = reviewed_at`
+    (quarantine.updated_at or post.status_changed_at, whichever
+    transition fired the event), `cursor_low_kind ∈
+    {'quarantine','post'}`, `cursor_low_id` = the corresponding
+    target id (matches the channel's tagged payload, see
+    `architecture.md` §Inter-service communication).
+  - `new_price_snapshot` — best-effort only; this channel does
+    not maintain a `provider_state` row (cache-flush-on-reconnect
+    is the correctness mechanism, not a high-water mark).
+  The first-boot insert uses
+  `INSERT INTO provider_state (channel, cursor_high,
+  cursor_low_kind, cursor_low_id, updated_at) VALUES (:ch, ...)
+  ON CONFLICT (channel) DO NOTHING`; two fresh Provider instances
+  starting concurrently both attempt the insert, exactly one
+  wins, and the winning instance owns the cursor — no duplicate
+  rows can be produced by the first-insert race. Updates are
+  compare-and-swap so a slow processor cannot roll back a fast
+  one's mark:
+  `UPDATE provider_state SET cursor_high = :new_high,
+  cursor_low_kind = :new_kind, cursor_low_id = :new_id,
+  updated_at = NOW() WHERE channel = :ch AND
+  (cursor_high, cursor_low_kind, cursor_low_id) <
+  (:new_high, :new_kind, :new_id)`. The compound cursor (not
+  `cursor_high` alone) ensures two events sharing a high-key
+  value are both processed on catch-up — the earlier event
+  advances the mark to itself, the later event advances it to
+  itself in the same transaction as its side effect.
 - **Summary cache.** Pre-generated periodic-digest output keyed by group,
   slot, and subscription versions, with a short TTL (decision D17).
 - **Admin notification state.** Backing store for the throttled admin
