@@ -140,6 +140,13 @@ or `deployment.md`. Each one corresponds to at least one named test.
   USED transition and one new user row; pre-banned contact + invite
   path is rejected at intake; brute-force rate limit triggers after
   the configured threshold and audit-logs the breach.
+  **Pre-normalization of invite-code consume**
+  (security.md §Authorization model step 1.7): a fixture submits a
+  valid invite code surrounded by leading/trailing whitespace,
+  bidi-control codepoints, and zero-width characters; the
+  normalized form is consumed correctly and the user row is
+  created. A homoglyph-substituted code (visually similar but
+  distinct codepoints after NFKC) does **not** match.
 - **Slow-start tier** (decision D45): every write command
   and chat-mode rejected during probation with the localized
   probation reply; allowed list (read-only commands plus `/forget`
@@ -156,7 +163,14 @@ or `deployment.md`. Each one corresponds to at least one named test.
   scheduler skips `failed` sources; the throttled admin notifier
   fires once per `(channel, error_class)` window; `/source-enable`
   with a probe success returns the source to `active` and resets
-  the consecutive-failure counter.
+  the consecutive-failure counter. **Soft-deleted source re-enable
+  does not restore subscriptions** (commands.md §Source
+  management — /source-enable): a `/remove-source` cascade-deletes
+  `source_subscription` rows; the subsequent `/source-enable`
+  clears `deleted_at` only and leaves the subscription rows
+  deleted; the reply discloses this; `/list-sources --all`
+  shows the source row, but per-scope `/list-sources` returns
+  empty until callers re-`/add-source`.
 - **StreamSource drain** (decision D38): graceful shutdown drains
   in-flight events to the outbox before acknowledging shutdown; a
   hard-killed test produces an "events lost on shutdown" counter
@@ -278,7 +292,28 @@ or `deployment.md`. Each one corresponds to at least one named test.
   "data is N minutes old" line; when no row exists the reply is the
   friendly error. Snapshots never appear in `/summary`, `/save`, or
   `/saved` results (assertion: `/save <price-snapshot-row-id>`
-  returns the unknown-uid error).
+  returns the unknown-uid error). **Default-row consistency**
+  (`schema.md` §Operational): a `bootstrap-assets.json` fixture
+  with a row carrying `is_default = true AND enabled = false`
+  fails Collector startup with a fatal log message identifying
+  the `(asset, sub_verb)` pair; a fixture where the inconsistency
+  is injected at runtime (test-only path) makes bare `/zcash`
+  return the "default sub-verb is currently disabled" friendly
+  error and lists the enabled sub-verbs. **Per-host refresh
+  interval** (commands.md §Asset commands): two enabled
+  `coingecko` `asset_config` rows (different assets) share a
+  single tick cadence; a `kraken` row ticks on its own per-host
+  cadence independently. Asserted by a fake-clock test that
+  counts upstream calls per host across one window.
+- **Concurrent `/retry --digest` per-group serialization**
+  (commands.md §Conversation control — /retry): two group admins
+  in the same group issue `/retry --digest` simultaneously; one
+  retry runs to completion (replaces `summary_cache` once); the
+  other receives the localized "a digest retry is already in
+  progress for this group" reply and produces no LLM call, no
+  anchor read, no `summary_cache` write. Asserted by a counter
+  on LLM invocations and by a fixture that observes exactly one
+  `summary_cache` UPDATE.
 - Periodic group digests (decision D17): the morning/evening digest
   is generated within the staggered slot window; a follow-up
   `/summary` from the same group during the cache TTL is served from
@@ -384,7 +419,19 @@ or `deployment.md`. Each one corresponds to at least one named test.
 - Determinism: `/summary` returns the same set of post ids on repeated                                                                                                                                                                                
   calls within the same window; only prose differs.
 - Routing: a property override picks a different provider for one task                                                                                                                                                                                
-  without changing others.
+  without changing others. **Local-only conflict**
+  (llm.md §Per-task routing rules): startup with the local-only
+  property set AND a per-task override pointing at a remote
+  provider fails fast with a fatal log line identifying the
+  task and provider; startup with local-only set and only
+  local per-task overrides comes up healthy.
+- **Tagger partial-valid output** (llm.md §Failure handling): a
+  fake LLM emits a tag list of three valid + one out-of-vocab
+  entries; the post is tagged with the three valid entries
+  (bootstrap-tags fallback does NOT fire); the per-post counter
+  records "3 valid + 1 invalid". A fake LLM emitting zero valid
+  entries (after normalization) does fall back to
+  `source.bootstrap_tags`.
 - Embedding model swap is detected (a vector built with one model is                                                                                                                                                                                  
   not silently mixed with another).
 - Translation cache: a digest sent to N members translates once.
@@ -427,6 +474,15 @@ or `deployment.md`. Each one corresponds to at least one named test.
   ends in the same schema state as running once.
 - Bootstrap loader idempotency: re-running with the same JSON does not                                                                                                                                                                                
   duplicate rows or churn `tag` rows.
+- **Bootstrap-assets file-state semantics** (deployment.md §Bootstrap
+  behavior on startup — Asset bootstrap): three startup fixtures —
+  (1) property unset → asset commands disabled, info log emitted,
+  Collector starts healthy; (2) property set, file absent →
+  Collector startup fails fast with a fatal log identifying the
+  configured path; (3) property set, file present, malformed
+  (unparseable JSON, schema-invalid, or `is_default = true AND
+  enabled = false`) → Collector startup fails fast with a fatal log
+  identifying the parse / validation error.
 - Bootstrap admin idempotency: restarting Provider does not produce              
   duplicate `BOOTSTRAP_ADMIN` audit rows when the admin already has                                                                                                                                                                                   
   the flag.

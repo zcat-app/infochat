@@ -126,8 +126,20 @@ based on (in priority order):
    the model can produce the target language directly).
 3. The profile default for that task.
 
-The router never picks a remote provider when an explicit local-only                                                                                                                                                                                  
-property is set. Switching the embedding provider to a remote service
+**Local-only is the most-restrictive posture.** When the operator
+sets the explicit local-only property, the router never picks a
+remote provider — and a per-task override pointing to a remote
+provider while local-only is set is **a configuration conflict
+that fails Provider startup with a fatal log line identifying the
+offending task and provider**. This is checked once at startup,
+not per call, so an operator cannot accidentally route one task
+remote while believing the deployment is local-only. The
+local-only posture is a privacy and data-leakage commitment
+(post bodies must not leave the host); silently letting a per-task
+override bypass it would defeat the commitment without operator
+notice.
+
+Switching the embedding provider to a remote service
 emits an explicit confirmation log line on startup so operators see when                                                                                                                                                                              
 post bodies start leaving the host.
 
@@ -305,7 +317,20 @@ stage.
 
 - Security Stage 2 — verdict vs. infra split (see `security.md`).
 - Tagger — bootstrap tags fallback; schema-violating output is treated as
-  unparseable (retry once, then fall back).
+  unparseable (retry once, then fall back). **Partial-valid handling.**
+  When the LLM emits a list of tags and only some entries pass the
+  controlled-vocabulary validation (post-normalization per
+  `commands.md` §Surface conventions: NFC + lower-case + character
+  class), the **valid tags are kept** and the invalid tags are
+  silently dropped — losing useful information because of one bad
+  entry would degrade tagging quality across deployments where the
+  smaller models occasionally emit one out-of-vocab tag in an
+  otherwise-clean list. The bootstrap-tags fallback fires only
+  when **zero** valid tags survive validation (or when the reply
+  is unparseable / schema-violating per the rule above). A
+  per-post counter records "tagger emitted N valid + M invalid"
+  for observability; sustained high invalid rates surface an
+  operator alert (cadence and threshold in design notes).
 - Entity extractor — on failure or schema-violating output, release without
   entities; cross-source linking degrades to embedding-only for that post.
 - Embedding — release without a vector (see Embedding pipeline above);

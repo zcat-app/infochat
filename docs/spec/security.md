@@ -360,9 +360,32 @@ Authorization evaluation order on every inbound message:
    (§Invite-code registration) is a **separate** counter applied
    inside step 2 (it counts attempts that reach step 2, not raw
    inbound).
+1.7. **Unicode-normalize the body** (NFKC + bidi-control strip +
+   zero-width strip + leading/trailing whitespace trim outside
+   fenced code blocks; fence recognition per the CommonMark rule
+   documented in §Ingest pipeline) **before any body-content
+   check**, so a `/` cannot be disguised by homoglyphs or bidi
+   overrides and a copy-pasted invite code with whitespace,
+   homoglyphs, or zero-width formatting is matched on its
+   semantic value, not its raw bytes. This is the chat-input parity
+   step that mirrors Stage 1 ingest normalization with the
+   user-intent fenced-code carve-out (the carve-out is chat-side
+   only — ingest applies unconditionally). Normalization runs
+   after the rate cap (so over-cap inbound is dropped without
+   spending normalization cost on adversarial bodies) and before
+   the invite-code check (step 2), the auto-register check (step 3),
+   and parse (step 6). The ban check (step 4) reads the
+   cryptographic contact id, not the body, so its position
+   relative to normalization is immaterial. **The normalized body
+   replaces the raw body for all downstream processing**: the
+   invite-code consume, the command parser, the chat agent, and
+   the LLM all receive only the normalized form. The raw body is
+   discarded after this step and never reaches the LLM in any
+   call path.
 2. **DM — unknown contact.** If no user row exists for this (contact\_id,
-   adapter): check whether the full message body is a valid PENDING invite
-   code bound to this exact (contact\_id, adapter) pair (decision D44).
+   adapter): check whether the full normalized message body is a valid
+   PENDING invite code bound to this exact (contact\_id, adapter) pair
+   (decision D44).
    - Valid: create user row (probation start), mark code USED, send welcome,
      stop. No further processing of this message.
    - Invalid / expired / absent: fixed "access requires an invitation" reply,
@@ -378,21 +401,9 @@ Authorization evaluation order on every inbound message:
    non-banned user arrives.
 4. **Ban check.** If `is_banned=true`: fixed reply, stop. No parser, no DB
    query past the ban check, no LLM.
-5. **Unicode-normalize the body** (NFKC + bidi-control strip +
-   zero-width strip outside fenced code blocks; fence recognition
-   per the CommonMark rule documented in §Ingest pipeline)
-   **before parsing**, so a `/` cannot be disguised by homoglyphs
-   or bidi overrides. This is the chat-input parity step that
-   mirrors Stage 1 ingest normalization with the user-intent
-   fenced-code carve-out (the carve-out is chat-side only —
-   ingest applies unconditionally). Normalization runs after the ban
-   check (the ban check uses the cryptographic contact id, not the
-   message body, so order does not matter for ban) and before parse
-   so the slash detector sees the normalized form. **The normalized
-   body replaces the raw body for all downstream processing**: the
-   command parser, the chat agent, and the LLM all receive only the
-   normalized form. The raw body is discarded after this step and
-   never reaches the LLM in any call path.
+5. (reserved — body normalization moved to step 1.7 so the
+   invite-code consume in step 2 sees the normalized form. Step
+   numbering preserved for cross-reference stability.)
 6. Parse command (or fall to chat-mode).
 7. **Permission check** against the matrix. Probation restrictions (D45)
    are part of the permission matrix: blocked commands return a friendly

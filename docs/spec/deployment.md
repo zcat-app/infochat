@@ -119,10 +119,25 @@ An operator must provide:
 7. **Messaging adapter configuration.** A list of one or more enabled
    adapters and their transport-specific settings. Each enabled
    adapter has its own connection settings, capability flag
-   defaults, and (per item 2) its own bot-admin contact id. The
-   list is closed at startup — adding or removing an adapter is a
-   restart. The exact property keys (and the multi-adapter list
-   shape) live in design notes.
+   defaults, (per item 2) its own bot-admin contact id, and **its
+   own bot identity material** — the cryptographic state by which
+   the adapter authenticates as the bot to its transport (e.g. a
+   SimpleX queue keypair file, a `signal-cli` account directory).
+   The shape and on-disk layout of this material is
+   adapter-specific and lives in design notes; the spec-level
+   commitment is that **each adapter owns and validates its own
+   bot identity at startup**: Provider does not synthesize bot
+   identity, and a misconfigured or unreadable identity store
+   fails the adapter's startup (the per-adapter resilience rule
+   in §Bootstrap behavior on startup applies — one adapter's
+   identity-store failure does not abort Provider). The
+   per-adapter bot contact id (the value mention recognition
+   compares against, `messaging.md` §Required SPI surface) is
+   derived from this identity material at adapter startup; it is
+   not an operator-typed property. The list is closed at startup
+   — adding or removing an adapter is a restart. The exact
+   property keys (and the multi-adapter list shape) live in
+   design notes.
 
 Everything else has a profile default.
 
@@ -203,19 +218,30 @@ from the file in a later reload are soft-disabled
 historical `price_snapshot` data for a soft-disabled asset is
 preserved for audit. The asset Fetchers schedule from
 `asset_config` rows where `enabled = true AND status = 'active'`.
-**File-state semantics** (the two cases differ by intent and
-must be distinguished):
-- *Path unset / file absent.* Asset commands are disabled for the
-  deployment; `/help` omits them; the rest of v1 ships normally
-  (per `commands.md` §Asset commands). Startup logs an info
-  line. **Not** a startup failure.
+**File-state semantics** (three cases — opt-out vs. opt-in-broken
+must be distinguished so an operator who configured the path
+cannot silently lose asset commands by deleting or moving the
+file):
+- *Path unset.* Operator opted out of asset commands. Asset
+  commands are disabled for the deployment; `/help` omits them;
+  the rest of v1 ships normally (per `commands.md` §Asset
+  commands). Startup logs an info line. **Not** a startup
+  failure.
+- *Path set, file absent.* Operator opted in but the file is
+  missing (typo, deleted, wrong working directory, mount not
+  attached). Startup **fails fast** with a fatal log message
+  identifying the configured path. Silently disabling asset
+  commands here would mask the misconfiguration; the loader
+  treats a configured-but-missing file as broken intent, not
+  opt-out.
 - *Path set, file present but malformed* (unparseable JSON,
-  schema-invalid, references an unknown sub-verb, etc.).
+  schema-invalid, references an unknown sub-verb, an
+  `is_default = true` row that is also `enabled = false` per
+  `schema.md` §Operational — Default-row consistency, etc.).
   Startup **fails fast** with a fatal log message identifying
-  the file path and the parse error. A misconfiguration at this
-  level is operator intent gone wrong — silently disabling asset
-  commands would mask a deployment bug; the loader treats
-  presence-with-errors as opt-in-but-broken, not opt-out.
+  the file path and the parse / validation error. Same
+  rationale as the file-absent case: presence-with-errors is
+  opt-in-but-broken, not opt-out.
 
 A bean failure during startup refuses the service start (Quarkus
 default). The readiness probe stays unhealthy until every required

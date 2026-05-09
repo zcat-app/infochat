@@ -15,7 +15,7 @@ live in `docs/design/03-commands.md`.
   **Leading whitespace is trimmed** before the slash-prefix check, so `  /help`
   parses as `/help` rather than as chat-mode input. Both transforms happen in
   the same normalization pass that strips bidi overrides and zero-width
-  characters (see `security.md` §Authorization model step 5); they are not
+  characters (see `security.md` §Authorization model step 1.7); they are not
   separate gates.
 - **Group rule.** In a group the bot only sees messages that `@mention` it.
   The mention is stripped before parsing.
@@ -217,16 +217,26 @@ verb.
 
 - `/zcash [sub-verb] [--vs <currency>]` — Zcash market data. Sub-verbs
   in v1: `coingecko` (aggregated snapshot), `kraken`, `bitfinex`.
-  Bare `/zcash` resolves to the **per-asset default sub-verb** set
-  in `bootstrap-assets.json` (`asset_config.default_sub_verb` —
-  `schema.md` §Operational); when no default is configured for the
-  asset, bare `/zcash` returns the same friendly "not configured"
-  error as an unknown sub-verb (no implicit fallback to
-  `coingecko` or any other source — silent fallback would mask
-  operator misconfiguration). Optional `--vs` selects the quote
-  currency (USD by default; the per-source allowlist of accepted
-  quote currencies lives in design notes). DM and group; any
-  non-banned user.
+  Bare `/zcash` resolves to the **per-asset default sub-verb**
+  marked in `bootstrap-assets.json` (the `asset_config.is_default`
+  flag — `schema.md` §Operational); when no row carries
+  `is_default = true` for the asset, bare `/zcash` returns the same
+  friendly "not configured" error as an unknown sub-verb (no
+  implicit fallback to `coingecko` or any other source — silent
+  fallback would mask operator misconfiguration).
+  **Default-but-disabled fallback.** The bootstrap loader rejects a
+  row with `is_default = true AND enabled = false` at Collector
+  startup (`schema.md` §Operational — Default-row consistency), so
+  the inconsistency normally cannot reach runtime. As
+  defense-in-depth, if it nonetheless does (e.g. a future runtime
+  admin mutation that bypasses the invariant), bare `/zcash`
+  returns the friendly "default sub-verb is currently disabled;
+  pass an explicit sub-verb" error with the asset's enabled
+  sub-verbs listed; no implicit fallback to a non-default sub-verb
+  fires.
+  Optional `--vs` selects the quote currency (USD by default; the
+  per-source allowlist of accepted quote currencies lives in
+  design notes). DM and group; any non-banned user.
 - `/monero [sub-verb] [--vs <currency>]` — Monero market data. Same
   shape as `/zcash`. The enabled sub-verb set is **not** the same:
   exchanges that do not list XMR (Binance, Coinbase, Gemini) are not
@@ -241,9 +251,18 @@ Cross-cutting rules for asset commands (D39):
   tagging, entity extraction, or embedding, and they are never
   surfaced via `/summary`, `/save`, or `/saved`.
 - **Polled, cached, refreshed on a tick.** Polled data sources reuse
-  the existing `Fetcher` SPI. The refresh interval is profile-driven
-  and lives in design notes. Repeated user calls within the cache
-  window are served from cache, not refetched per request.
+  the existing `Fetcher` SPI. **The refresh interval is keyed
+  per-data-source-host** (i.e., per `sub_verb` family — one interval
+  for `coingecko`, another for `kraken`, another for `bitfinex`),
+  not per-`(asset, sub_verb)` and not per-asset. This mirrors the
+  per-`kind` interval model for source Fetchers
+  (`architecture.md` §Ingest SPIs) and aligns with upstream
+  rate-limit budgets, which are imposed per upstream API host, not
+  per asset. All `kraken` snapshots across every enabled asset
+  share one tick cadence; same for `coingecko` and `bitfinex`. The
+  per-host interval values are profile-driven and live in design
+  notes. Repeated user calls within the cache window are served
+  from cache, not refetched per request.
 - **Provider/Collector contract.** The Collector owns
   `price_snapshot`: its asset Fetchers `INSERT` new rows on every
   successful poll and emit `NOTIFY new_price_snapshot` with `(asset,
@@ -468,7 +487,18 @@ shared across the group and writable only by group admins.
   (reviving a deliberately-removed source has broader implications
   than re-enabling an operationally-failed one; the confirm step is
   the operator's explicit acknowledgement). On success, `deleted_at`
-  is cleared and the row is returned to `active` status. There is no
+  is cleared and the row is returned to `active` status.
+  **Subscriptions are not restored.** `/remove-source` cascade-deletes
+  the source's `source_subscription` rows in the same transaction;
+  `/source-enable` against a soft-deleted row clears `deleted_at` on
+  the source row only and leaves the subscription rows deleted. The
+  user-visible reply discloses this explicitly
+  (e.g., `"Source re-enabled. No subscriptions were restored — affected
+  scopes must /add-source again to re-subscribe."`) so the executing
+  admin and re-subscribing users are not surprised by an empty
+  per-scope subscription list. The disclosure is omitted on
+  enable from `failed` or `disabled` (those transitions never
+  cascade-deleted subscriptions). There is no
   separate `/source-undelete` command: `/source-enable` is the single
   admin recovery path for all non-active-non-hard-deleted states.
 - `/source-disable <id>` — bot-admin only. Transitions an `active`
@@ -748,6 +778,26 @@ and makes the digest query depend on row presence.
   slot window, not the wall-clock window at the moment `/retry`
   runs) — only the prose layer is re-rolled, so the digest does
   not silently drift forward as time passes.
+
+  **Concurrent `/retry --digest` is per-group serialized.** At
+  most one `/retry --digest` is in flight per group at any time.
+  A second admin issuing `/retry --digest` while another admin's
+  retry is still running receives the localized "a digest retry
+  is already in progress for this group" friendly error
+  (deterministic localization-bundle string per D43); no LLM
+  call, no anchor read, no second `summary_cache` write. The
+  in-flight retry runs to completion or is cancelled by the
+  acting admin's `/stop`-equivalent (digest retries are
+  non-interruptible per D35, so practically the second admin
+  waits for the first retry to finish on its own). The
+  serialization is keyed on the group, not on the issuing user
+  — `/retry --digest` is a group-wide operation that mutates
+  shared state (`summary_cache`), so two admins racing each
+  other would otherwise spend two LLM calls and produce a
+  last-writer-wins replacement with no signal to either caller.
+  This rule extends the per-(user, scope) "at most one in-flight
+  interruptible request" rule from §Surface conventions to the
+  group-wide digest case.
 
   **Cached digest message handle.** The handle is held in process
   memory only (`messaging.md` §Message handles forbids handle

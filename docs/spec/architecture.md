@@ -229,11 +229,16 @@ NOT straddle.
 
 **Source identity** (decision D38). The unique key is `(kind,
 identifier)`. The per-kind `config` block is a mutable value
-attached to that key; bootstrap reload and bot-admin source
-maintenance update it in place. `config` is **not** part of the
-unique key — making it part of the key would cause every relay-list
-edit to create a duplicate `source` row at the next bootstrap
-reload.
+attached to that key. **In v1, `config` mutation is restart-only**:
+the bootstrap loader runs at Collector startup, is idempotent on
+`(kind, identifier)`, and updates `config` in place on existing
+rows. There is no v1 chat command that mutates `config` (no
+`/source-config`, no `--config` flag on `/add-source`); operators
+who need to rotate Nostr relays edit `bootstrap-sources.json` and
+restart the Collector. Runtime mutation via a chat command is a v2
+candidate. `config` is **not** part of the unique key — making it
+part of the key would cause every relay-list edit to create a
+duplicate `source` row at the next bootstrap reload.
 
 - `kind` — the ingest type (`rss`, `bluesky`, `nostr`, …). Picks both
   the SPI shape and the implementation.

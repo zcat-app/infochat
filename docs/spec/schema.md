@@ -511,7 +511,19 @@ regardless of how many quarantine cycles it has been through.
   `commands.md` §Asset commands; absent default → bare invocation
   returns the "not configured" friendly error), and
   `status ∈ {active, failed, disabled}` — same status taxonomy as
-  `source.status`. The bootstrap loader
+  `source.status`. **Default-row consistency.** A row with
+  `is_default = true AND enabled = false` is rejected by the
+  bootstrap loader at Collector startup with a fatal log message
+  identifying the `(asset, sub_verb)` pair (operator intent gone
+  wrong — the operator either meant to enable the default or move
+  the default flag to another row). If the inconsistency arises
+  at runtime through some other path (e.g. a future
+  admin-mutation command that misses the invariant), bare
+  `/zcash` / `/monero` returns a friendly error
+  ("default sub-verb is currently disabled; pass an explicit
+  sub-verb") with the enabled sub-verbs listed; the runtime
+  fallback exists as defense-in-depth, not as an alternative to
+  the bootstrap-time check. The bootstrap loader
   upserts entries from `bootstrap-assets.json` at Collector
   startup; entries absent from the latest bootstrap are
   `enabled = false` (soft-disable), never hard-deleted, so prior
