@@ -81,3 +81,60 @@ mvn -pl infochat-provider quarkus:dev
 ```
 
 A `docker-compose.yml` will start Postgres+pgvector, Ollama (default LLM), and the in-memory test adapter for local development. Production deployments enable one or more of SimpleX / Signal in the same Provider; the in-memory adapter is exercised in a separate test-time deployment shape and never alongside production adapters (decision D46, `docs/spec/deployment.md` §Deployment scenarios).
+
+## Engineering rules (universal — apply to all work in this repo)
+
+These rules apply to every change, ticket-driven or not. The reviewer enforces them; violations are escalated, never silently accepted.
+
+The verbatim text of every rule below — plus the full test-integrity rule list — lives in [docs/process/engineering-rules-verbatim.md](docs/process/engineering-rules-verbatim.md). That file is the single editing source; this section is the always-loaded summary. If the two disagree, the canonical file wins.
+
+### Surgical changes
+- Every changed line must trace to either the ticket's acceptance criteria, the user's stated request, or an orphan that your own changes created. If neither, don't change it.
+- Don't "improve" adjacent code, comments, or formatting.
+- Match existing style even if you'd write it differently.
+- If you notice unrelated dead code or a bug, file a follow-up ticket — don't delete or fix it inline.
+- Clean up imports/variables that YOUR changes made unused; don't touch pre-existing dead code.
+
+### No workarounds, no shortcuts
+- When tests fail, fix the code or escalate — never weaken, disable, or bypass the test. The forbidden test-integrity patterns are enumerated in [engineering-rules-verbatim.md §8](docs/process/engineering-rules-verbatim.md) and enforced by the reviewer.
+- When a constraint blocks progress, escalate via the workflow — never use destructive shortcuts (`--no-verify`, `-DskipTests`, `--skip-tests`, force-push) to make obstacles disappear.
+- Never sacrifice performance, security, or simplicity to reach a goal.
+
+### Better alternatives surface as proposals, not scope expansion
+- If you spot a better approach mid-implementation, complete the ticket as written. Record the alternative in the commit message under an `Alternatives considered:` trailer or file a new ticket. Never silently expand scope to chase the better idea.
+
+### Push back when simpler exists
+- If the requested approach has a materially simpler equivalent that meets the same goal, surface it before implementing. This is the one explicit "ask" channel outside the structured escalation; use it sparingly and only for design-level simplifications, not for scope nits.
+
+### Run the full test suite before declaring done
+- A ticket is not done when its own new tests pass. Run the full pre-existing suite (`mvn verify` from the repo root) and report regressions, not just the new green checks.
+
+### Never trade rules against each other
+- If a ticket's acceptance criteria cannot be satisfied without violating another rule, escalate. Do not pick which rule to violate.
+
+### No defensive code for impossible scenarios
+- Don't add error handling, fallbacks, or validation for scenarios that cannot happen given the trust boundary the code lives in. Validation belongs at *system boundaries* — adapter inbound, HTTP endpoints, config parsing, SQL deserialization, LLM tool-call arguments, file I/O. Inside those boundaries, internal code calling internal code is trusted.
+- No null-checks for parameters callers cannot legally pass null for; no try/catch around operations that cannot throw; no "just in case" branches.
+- Feature flags and backwards-compatibility shims are forbidden — M1 is greenfield, there is no prior version to be compatible with.
+- The reviewer applies this rule narrowly: a defensive check at a system boundary is fine; one between two internal classes is scope drift.
+
+## M1 workflow (in force for the v1 build)
+
+M1 work is ticket-driven via the `/m1-tick` skill. The universal workflow specification lives in `docs/process/workflow.md`; M1-specific framing lives in `docs/plan/m1/README.md`; the rules below are the always-loaded summary.
+
+- **Tickets** live in `docs/plan/m1/tickets/M1-NNN-<slug>.md`, one file per ticket, YAML frontmatter — see `docs/process/ticket-template.md` for the full schema (key fields: `id`, `status`, `blocked_by`, `acceptance`, `files_budget`, `out_of_scope`, `complexity`, `risk`, `round_cap`, `security_relevant`, `migration_touch`).
+- **Status board** is `docs/plan/m1/STATUS.md`, regenerated from frontmatter; never hand-edit, always derive.
+- **Lifecycle**: `pending` → `in-progress` → `in-review` → `done` (or `escalated` / `deferred`).
+- **One ticket = one branch = one commit on `main` after squash-merge.** Branch name `m1/M1-NNN-<slug>`. Commit subject `M1-NNN: <imperative summary>`. Body includes a `Reviewed-by:` trailer with the reviewer's verdict line.
+- **Never amend a passed commit.** Defects found after a passed review become a new ticket and a new commit.
+- **Round cap: 2 by default.** Implement → `mvn verify` → reviewer (round 1). If `REWORK`, fix only the named items → `mvn verify` → reviewer (round 2). If round 2 isn't `APPROVE`, escalate. Tickets with `complexity: high` or `risk: high` may set `round_cap: 3` in frontmatter.
+- **Round 2 must shrink.** Round-2 diff must be smaller than round-1 along files-touched, lines added, or lines removed. Larger → automatic SCOPE-DRIFT-CHECK fail unless round-1 REWORK explicitly required a refactor that grows the diff (citation required).
+- **Ticket-clarity pre-flight at start.** `/m1-tick start` spawns a fresh-context subagent that validates the ticket itself (testable acceptance, non-empty `out_of_scope`, valid `spec_refs`, plausible `files_budget`) before implementation begins. Failures block the start.
+- **Immediate escalation triggers** (skip remaining rounds): reviewer returns `MANUAL`; developer about to touch a file outside `files_budget`; tests fail in a way that suggests the ticket's premise is wrong; two consecutive test failures with the same root cause.
+- **Escalation surfaces a five-way menu** to the user in chat: refine / override / decompose / defer / spec-amend.
+- **Reviewer is a fresh-context subagent** (`Agent` with `subagent_type: "code-reviewer"`); developer-as-subagent is forbidden. The reviewer's prompt template lives in `docs/process/reviewer-prompt.md`. The reviewer also receives the list of files in `files_budget` that were NOT touched, so unintended skips are visible.
+- **Threat-actor (red-team) review** runs at milestone boundaries, on tickets with `security_relevant: true`, and before release tags. The fresh-context adversary subagent reads `docs/spec/security.md` (threat model only) plus the diff and looks for the gap between promise and delivery. Invoked via the separate `/redteam` skill (`.claude/skills/redteam/SKILL.md`); findings reach the lifecycle workflow only when the user runs `/m1-tick escalate <id> redteam-finding`.
+- **Commit safety re-runs `mvn verify`.** For `complexity: high` or `risk: high` tickets, `/m1-tick commit` re-executes the full suite rather than trusting the prior log. For other tickets, the commit step verifies the most recent test-log mtime is newer than the latest source mtime.
+- **Default sequential.** Parallel tickets only when their `files_budget` and `out_of_scope` lists are provably disjoint AND no in-flight ticket has `migration_touch: true`.
+
+Invoke `/m1-tick next` to see the next runnable ticket; `/m1-tick start <id>` to begin work. Other subcommands: `review`, `commit`, `escalate`, `abort`, `show`, `reopen`, `status`. Adversarial security review is a separate skill: `/redteam`.
