@@ -194,7 +194,7 @@
   | `laptop` | 200 |
   | `vps` | 100 |
   | `pi` | 50 |
-  | `remote` | 500 |
+  | `remote-llm` | 500 |
 
   When the deterministic SQL retrieval returns more posts than the cap, the **oldest** posts are dropped (the most recent within the window survive). The response notes both the cap and the excluded count, e.g. `Showing 100 of 137 posts (cap: vps=100; 37 oldest excluded)`. See [05-llm-and-embeddings.md §5.7](05-llm-and-embeddings.md) for how the cap interacts with cluster sizing and prompt budget.
                                                                                                                                                                                                                                                         

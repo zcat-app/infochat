@@ -83,8 +83,19 @@ Every adapter implements:
   group-deleted events are separate from per-user membership
   events and continue to flow through their existing adapter
   signals.
-- **Capability flags.** A static description of what the adapter                                                                                                                                                                                      
-  supports: identity trust level, markdown rendering, message edits,                                                                                                                                                                                  
+- **Inbound message size cap.** Adapters SHOULD enforce a
+  **transport-layer maximum inbound message size** that is tighter
+  than the application-level chat-mode body cap (`commands.md`
+  §Surface conventions). A message exceeding the transport cap is
+  dropped by the adapter before delivery to Provider; the
+  application-level cap then applies as a second defense. The
+  transport-layer cap value is adapter-specific and lives in design
+  notes. An adapter that cannot enforce a transport-layer cap (e.g.,
+  because the underlying protocol provides no such mechanism) MUST
+  rely solely on the application-level cap and document this in its
+  design note.
+- **Capability flags.** A static description of what the adapter
+  supports: identity trust level, markdown rendering, message edits,
   edit minimum interval, typing indicator, membership events, and
   any future flag a new transport needs.
 
@@ -100,9 +111,14 @@ Every adapter implements:
   *only* code spans, never markdown links or other markdown
   features. To enforce that the surface does not silently widen, every
   v1 adapter additionally asserts `supportsMarkdownLinks = false` —
-  Provider treats this flag as required-false in v1 and a future
-  adapter cannot opt in without an explicit spec amendment. URLs are
-  always rendered bare (D30).
+  Provider **validates this flag at adapter registration (startup)**:
+  if any registered adapter declares `supportsMarkdownLinks = true`,
+  Provider fails fast at startup with a fatal log message identifying
+  the adapter. This is a startup-fail-fast check, not a per-message
+  check — widening the render surface is a spec amendment, not a
+  configuration choice, and a per-message check would miss adapters
+  that silently upgrade their capabilities. URLs are always rendered
+  bare (D30).
 - `supportsMessageEdit` — required for in-place progress updates.
 - `minEditInterval` — adapter-imposed floor between edits on the same                                                                                                                                                                                 
   message; the progress notifier honors `max(adapterMin, system floor)`.
@@ -294,6 +310,11 @@ Provider produces plain text per decision D30. The adapter:
   via repeated permanent send failures past a profile-driven
   threshold), Provider sets `groups.removed_at = NOW()` and
   cancels the periodic-digest scheduler entries for that group.
+  **The permanent-failure threshold is always greater than 1** — a
+  single permanent failure does not trigger group cleanup, because
+  permanent vs. transient misclassification can occur at the adapter
+  layer and one failure is insufficient evidence the bot has been
+  removed. The profile-driven threshold value lives in design notes.
   The row is preserved for audit; on re-add the adapter signal
   clears `removed_at`. **Group state (subscriptions, `scope_tag`,
   `chat_memory`, `chat_session`, members' saves) is not purged

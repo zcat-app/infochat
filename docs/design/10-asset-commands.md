@@ -112,7 +112,7 @@ profile:
 | `laptop` | 60s | Aggressive enough for dev feel |                                                                                                                                                                                                   
 | `vps` | 90s | Default production cadence |                                                                                                                                                                                                          
 | `pi` | 300s | Lower load, lower polling |                                                                                                                                                                                                           
-| `remote` | 90s | Same as `vps` |                    
+| `remote-llm` | 90s | Same as `vps` |                    
 
 The user-facing reply always reads the **latest** `price_snapshot` row
 for that triple. There is no per-request fetch — `/zcash kraken` is a

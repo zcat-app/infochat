@@ -226,6 +226,14 @@ reload.
   the SPI shape and the implementation.
 - `identifier` — the URL for HTTP-shaped sources, the filter spec for
   stream sources. Together with `kind` it forms the unique key.
+  **Nostr filter-spec identifiers are canonicalized before unique-key
+  comparison**: JSON object keys are sorted lexicographically and the
+  JSON is compact (no extra whitespace). Two filter specs that are
+  semantically identical but differ only in key order or whitespace
+  are treated as the same identifier and do not create a duplicate
+  source row. The canonicalization rule is applied at bootstrap load
+  time and at `/add-source` parse time; the stored identifier is
+  always the canonical form.
 - `config` — opaque per-kind JSON value (mutable). Holds Nostr's
   relay list, kinds filter, and any other per-source tuning that
   doesn't fit the identifier.
@@ -235,6 +243,20 @@ outbox's. For stream sources where the same event can arrive from N
 relays (Nostr), the implementation MUST dedup by stable upstream id
 before enqueue; one event = one `posts` row regardless of how many
 relays delivered it.
+
+**Kind-6 cross-source linking** uses the original event's
+`upstream_identifier` (the Nostr event id — a SHA-256 hash of the
+event's canonical JSON) as the join key for the `post_reference` edge.
+The link is written as `(kind-6 post UID) →repost→ (original
+upstream_identifier)`, resolved to a post UID if and when the
+original event is also seen and stored. The derived post UID of the
+original may not yet exist at the time the kind-6 is processed
+(the original may arrive later or never); the `upstream_identifier`
+is the stable, protocol-level key that survives this ordering.
+Implementations MUST NOT use the derived UID as the join key in the
+`post_reference` edge for kind-6 reposts — a UID-based join would
+fail for cross-relay deliveries where the original arrives after the
+repost.
 
 **Per-relay (or per-endpoint) degradation** is a `StreamSource`
 commitment: a single misbehaving relay (slow, spamming, repeatedly
@@ -250,6 +272,19 @@ notification fires once per all-relays-bad transition (throttled
 per `(channel, error_class)` like every other admin notification).
 The notification's recovery counterpart fires when the first relay
 returns to healthy.
+
+**Absolute cycle cap → terminal failed state.** After a
+profile-driven number of consecutive all-relays-bad cycles (cap
+value in design notes), the StreamSource transitions to a **terminal
+`failed` state** and stops attempting reconnects entirely. The
+Collector emits a one-time admin notification distinct from the
+per-cycle throttled notification — e.g., "StreamSource for source
+`<id>` permanently stopped: all-relays-bad cycle cap exhausted."
+An operator must explicitly re-enable the source via
+`/source-enable <id>` to restart the StreamSource. This prevents
+an infinite reconnect storm against a permanently unreachable relay
+set and bounds outbound connection cost when the operator has not
+noticed the source is permanently dead.
 
 **Pagination cap saturation.** Fetchers expose a per-tick
 "pagination cap hit per source" counter. When a single source
@@ -302,9 +337,12 @@ intentionally describes the data flow without restating the trust rules.
 
 ## Hardware profiles
 
-A named profile (`laptop`, `vps`, `pi`, `remote`) drives a bundle of
+A named profile (`laptop`, `vps`, `pi`, `remote-llm`) drives a bundle of
 defaults: context-window size, default chat / embedding model, eval
 concurrency, vector-index choice, summary worker count, eval queue depth.
+The `remote-llm` profile is named to distinguish it from the `vps` profile:
+`vps` is "run everything on a VPS"; `remote-llm` is "local DB and services,
+remote LLM API (OpenAI, Anthropic, OpenRouter, etc.)".
 The profile concept is the spec-level commitment; the specific values per
 profile are tuning and live in `docs/design/01-architecture.md` §1.7.
 

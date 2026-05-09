@@ -41,7 +41,7 @@ edits the existing row and notes the supersession (do not delete).
 | D24 | `/compress` | Per-(user, scope) memory checkpoint (summary + keywords + post references). Auto-triggered near the context-window ceiling; explicit command available. |
 | D25 | `/clear` semantics | Wipes only the active context window for the calling (user, scope). Long-term memory is independent. |
 | D26 | Group memory | Per-(user, group) — same privacy model as `/save`. No shared group memory in v1. |
-| D27 | Hardware profiles | Named profile (e.g. `laptop`, `vps`, `pi`, `remote`) drives context-window size, default models, eval concurrency, and vector-index choice. Per-property override allowed. |
+| D27 | Hardware profiles | Named profile (e.g. `laptop`, `vps`, `pi`, `remote-llm`) drives context-window size, default models, eval concurrency, and vector-index choice. Per-property override allowed. |
 | D28 | Memory retrieval | Hybrid: deterministic keyword pre-fetch (cheap, always) plus an agent tool for deeper recall. |
 | D29 | Translation | English by default. Per-scope language opt-in via `/lang`. Source bodies are never translated; translation is presentation-only. Pluggable provider SPI; v1 ships English + Czech. |
 | D30 | Output formatting | Plain text. Inline code in single backticks; multi-line in triple backticks; URLs bare. Adapters expose a capability flag for richer rendering. |

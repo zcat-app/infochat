@@ -37,8 +37,8 @@ The system is two services:
 
 - **Collector** — ingests, evaluates, stores. Headless. No user can address                                                                                                                                                                           
   it directly.
-- **Provider** — handles user interaction through a pluggable messaging                                                                                                                                                                               
-  adapter. Coordinates with Collector via Postgres `LISTEN/NOTIFY` on a                                                                                                                                                                               
+- **Provider** — handles user interaction through one or more pluggable
+  messaging adapters (decision D46). Coordinates with Collector via Postgres `LISTEN/NOTIFY` on a                                                                                                                                                                               
   shared schema.
 
   ---                                                                              
@@ -100,7 +100,7 @@ choices that shape every section.
   `/vouch`.
 - OpenAI-compatible LLM provider (covers Ollama, llama.cpp, OpenAI,                                                                                                                                                                                   
   OpenRouter, NanoGPT) and an Anthropic provider.
-- Hardware profiles: `laptop`, `vps`, `pi`, `remote`.
+- Hardware profiles: `laptop`, `vps`, `pi`, `remote-llm`.
 - Bootstrap source loader (idempotent, seeds the controlled vocabulary).
 - Hybrid Tier 2 linking (entities + pgvector embeddings, profile-aware                                                                                                                                                                                
   index type).
@@ -181,7 +181,7 @@ choices that shape every section.
 - Auth-gated price sources (KuCoin, Gemini for most endpoints,                                                                                                                                                                                        
   CoinGecko Pro). Needs the operator-secret SPI. 
 - Public IPFS/IPNS publication of periodic digests as a static
-  JS-free page, regenerated on the existing 12h cadence, intended as
+  JS-free page, regenerated on the existing morning/evening digest cadence, intended as
   an uncensorable demo of what the bot does. Design notes:
   [design/future/public-ipfs-publishing.md](design/future/public-ipfs-publishing.md). 
 
@@ -203,7 +203,10 @@ choices that shape every section.
   **Cluster ID**: the identifier of a cluster within a single
   computation. Stable only within the periodic-digest cache
   window; clusters are recomputed on cache expiry, so cluster IDs
-  are best-effort breadcrumbs, not durable references.
+  are best-effort breadcrumbs, not durable references. **Cluster IDs
+  are not referenceable in commands** — only Post UIDs are durable
+  user-facing references (for `/save`, `/unsave`, and chat queries).
+  Commands that accept an ID argument always expect a Post UID.
 - **Memory entry**: a `chat_memory` row created by `/compress`. Per-(user,                                                                                                                                                                            
   scope).
 - **Bot admin**: user with `is_admin = true`. Globally privileged.                                                                                                                                                                                    
@@ -214,7 +217,7 @@ choices that shape every section.
 - **Banned user**: user with `is_banned = true`. Blocked at message intake;                                                                                                                                                                           
   no LLM/DB invocation; receives one fixed reply.
 - **Hardware profile**: named profile (`laptop`, `vps`, `pi`,
-  `remote`). Picks context-window size, default chat / embedding
+  `remote-llm`). Picks context-window size, default chat / embedding
   model, eval concurrency, vector index type. The property key that
   selects it is design-level and lives in
   `docs/design/07-deployment.md`.
@@ -226,14 +229,33 @@ choices that shape every section.
 - **StreamSource**: SPI for long-lived, event-driven ingest sources
   (decision D38). Distinct from `Fetcher`; both feed the same outbox.
   v1 implementations: Nostr.
-- **Category**: coarse classification of a source (`news`, `blog`,                                                                                                                                                                                    
+- **Fetcher**: SPI for polled, request/response ingest sources. The
+  scheduler ticks on a per-kind interval; the fetcher issues an HTTP
+  GET/HEAD, parses the response, and returns a list of normalized
+  posts. Used by `rss`, `bluesky`, `nitter`, `reddit`, `youtube`,
+  `odysee`, and the asset-snapshot variants (decision D38, D39).
+  See `architecture.md` §Ingest SPIs.
+- **MessagingAdapter**: SPI that connects the Provider to a messaging
+  transport (SimpleX, Signal, etc.). Asserts cryptographic user identity,
+  receives inbound messages, sends and optionally edits outbound messages,
+  and reports capability flags. The contract is defined in
+  `messaging.md` §Required SPI surface.
+- **TranslationProvider**: SPI for bot-output translation (decision D43).
+  Translates bot-generated prose into the scope's configured language.
+  Source post bodies are never translated. v1 implementations: English
+  (pass-through) + Czech. See `llm.md` §Translation flow.
+- **Outbox**: the persist-before-enqueue pattern for ingest. A post is
+  written to the DB with `status = 'RAW'` before it is enqueued for
+  evaluation; a startup rehydrator re-enqueues anything left `RAW` after
+  a crash. Decision D22; see `architecture.md` §Pipelines.
+- **Category**: coarse classification of a source (`news`, `blog`,
   `social`). Distinct from tags.
-- **Progress notifier**: cross-cutting Provider component that turns                                                                                                                                                                                  
-  business-logic stage events into messaging-adapter calls. Rate-limits and                                                                                                                                                                           
-  coalesces edits per `(scope, requestId)`; never interpolates user input                                                                                                                                                                             
+- **Progress notifier**: cross-cutting Provider component that turns
+  business-logic stage events into messaging-adapter calls. Rate-limits and
+  coalesces edits per `(scope, requestId)`; never interpolates user input
   into rendered strings.
-- **Message handle**: opaque token returned by a messaging adapter's `send()`.                                                                                                                                                                        
-  Lets a caller subsequently `update` or `finalize` the same visible message.                                                                                                                                                                         
+- **Message handle**: opaque token returned by a messaging adapter's `send()`.
+  Lets a caller subsequently `update` or `finalize` the same visible message.
   Adapter-defined contents — callers MUST NOT inspect or persist it.
 
   ---                                                                                                                                                                                                                                                   

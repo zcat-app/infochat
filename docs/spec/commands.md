@@ -10,6 +10,13 @@ live in `docs/design/03-commands.md`.
 - **Slash-prefix only.** Anything starting with `/` is a command. Anything
   else is chat-mode input routed to the chat agent. There is no "command
   mode" toggle.
+- **Empty and whitespace-only messages are dropped** before any further
+  processing — neither command parsing nor chat-mode routing runs on them.
+  **Leading whitespace is trimmed** before the slash-prefix check, so `  /help`
+  parses as `/help` rather than as chat-mode input. Both transforms happen in
+  the same normalization pass that strips bidi overrides and zero-width
+  characters (see `security.md` §Authorization model step 5); they are not
+  separate gates.
 - **Group rule.** In a group the bot only sees messages that `@mention` it.
   The mention is stripped before parsing.
 - **Single time flag.** Every command that takes a time window uses the same
@@ -48,6 +55,13 @@ live in `docs/design/03-commands.md`.
   input cancels it with an explicit acknowledgement. (Per-command-
   category split timeouts are recorded as a v2 candidate; v1's
   one-timeout-fits-all keeps the state machine simple.)
+  **Confirmation state is in-memory only.** Pending confirmations are
+  not persisted to the database. A Provider restart cancels all
+  pending confirmations; a `confirm` issued after the restart receives
+  the same "no pending action" reply as a late or unmatched confirm.
+  This is intentional: persisting confirmation tokens across restarts
+  would require a cleanup sweep and a TTL gate identical to the
+  in-memory timeout, with no gain in UX.
 - **At most one in-flight interruptible request per (user,
   scope).** A second request from the same caller while one is in
   flight returns a localized "request already in progress; use
@@ -179,7 +193,11 @@ text, and output structure are in `docs/design/03-commands.md`.
   only by bot admins via `/quarantine list --all`. The `/save` flow
   never lets a user bookmark content they cannot see.
 - `/saved [tag] [-w …] [--page N]` — list saved posts with optional
-  filters and pagination.
+  filters and pagination. **Saves are per-user-globally** (decision
+  D13): the list shows all saves regardless of which scope they were
+  created from. The command's `/help` line and reply header must
+  disclose this so users are not surprised to see DM saves appear
+  when running the command in a group context.
 - `/unsave <uid>` — remove from library (no confirmation).
 
 ### Asset commands
@@ -372,7 +390,14 @@ shared across the group and writable only by group admins.
   `--tags` are quietly ignored. **Only a bot admin** may supply
   `--tags` to replace `bootstrap_tags` on an existing row; this is
   the single path that mutates the global row's tags and is
-  audit-logged. Per-scope tag preferences continue to flow through
+  audit-logged. **Admin `--tags` replacement also requires ≥1 tag.**
+  A bot admin supplying `--tags` on an existing row must supply at
+  least one non-empty, non-rejected tag value — the same ≥1 constraint
+  as a fresh insert (decision D14). An empty replacement would leave
+  a source with zero `bootstrap_tags`, which in turn produces zero
+  eligible posts for any scope in `ALL` mode (the tagger's fallback
+  would be an empty set). The friendly error for a zero-tag attempt
+  is the same as for a fresh insert with no tags. Per-scope tag preferences continue to flow through
   `scope_tag` (`/follow-tag` / `/unfollow-tag`), not through
   `/add-source`. On a fresh insert (whether bot-admin or non-admin),
   the supplied `--tags` populate `bootstrap_tags` and are unioned into
@@ -427,16 +452,19 @@ shared across the group and writable only by group admins.
   row stays. The "no remaining subscribers" state does **not**
   auto-soft-delete the source — sources can exist without
   subscribers and be re-followed later.
-- `/source-enable <id>` — bot-admin only. Transitions a `failed`
-  or `disabled` source row back to `active`. Emits a probe (HEAD
-  for HTTP-shaped, single-relay connection attempt for
-  StreamSource-shaped) before the transition; probe failure
-  leaves the source in its prior state with a friendly error.
-  Audit-logged. Resets the consecutive-failure counter on success.
-  This is the admin recovery path the spec already commits to in
-  `schema.md` §Sources and tags ("`failed → active` is set by an
-  admin recovery command"); naming it explicitly here closes the
-  catalogue.
+- `/source-enable <id>` — bot-admin only. Transitions a `failed`,
+  `disabled`, **or soft-deleted** (`deleted_at IS NOT NULL`) source
+  row back to `active`. Emits a probe (HEAD for HTTP-shaped,
+  single-relay connection attempt for StreamSource-shaped) before the
+  transition; probe failure leaves the source in its prior state with
+  a friendly error. Audit-logged. Resets the consecutive-failure
+  counter on success. **Soft-deleted sources require `confirm`**
+  (reviving a deliberately-removed source has broader implications
+  than re-enabling an operationally-failed one; the confirm step is
+  the operator's explicit acknowledgement). On success, `deleted_at`
+  is cleared and the row is returned to `active` status. There is no
+  separate `/source-undelete` command: `/source-enable` is the single
+  admin recovery path for all non-active-non-hard-deleted states.
 - `/source-disable <id>` — bot-admin only. Transitions an `active`
   source row to `disabled` (the operator-paused status, distinct
   from `failed`; `schema.md` §Sources and tags). The scheduler
@@ -496,8 +524,24 @@ and makes the digest query depend on row presence.
   so an accidental `/clear` is irrecoverable. The confirm step is the
   operator-friendly equivalent of "are you sure?"
 - `/compress` — forces an immediate `chat_memory` checkpoint for the
-  calling (user, scope). Auto-triggered near the context-window ceiling
-  (decision D24).
+  calling (user, scope). On success, **`chat_session` rows for
+  `(user, scope)` are truncated**: the entire live context window is
+  cleared after the memory entry is written. The truncation is the
+  spec commitment; the exact retained-row count (0 vs. last-N) is
+  design-tier and lives in design notes. Failure behavior is in
+  `security.md` §Failure handling (session held at ceiling; no silent
+  truncation).
+  **Auto-compress** fires when the `chat_session` for `(user, scope)`
+  occupies a profile-driven percentage of the context-window ceiling
+  (value in design notes). The trigger is **deterministic** (a token-
+  or byte-count threshold), never LLM-judged. It runs **between
+  turns** — after the current reply is delivered and before the next
+  message is processed — so a reply is never interrupted mid-stream
+  by an auto-compress. On auto-compress, a **one-line system message**
+  (localization-bundle string, not a prose summary) is sent to the
+  user confirming the checkpoint was created. Probation users have
+  chat mode blocked, so their `chat_session` cannot grow; auto-compress
+  never fires during probation (correct by construction).
 - `/lang <code>` — sets per-scope output language. v1 ships English and
   Czech. DM: own scope. Group: group admin only. An unsupported code
   produces a friendly error that lists the supported codes — never a
@@ -554,7 +598,16 @@ and makes the digest query depend on row presence.
   would leak existence to a co-admin running the command;
   enumerating groups is unnecessary for the user's privacy
   decision) — the count is sufficient.
-- `/export` — returns the calling user's own data. Group output is
+- `/export` — returns the calling user's own data. **Delivery is
+  in-band**: the export is sent as a reply message (or paginated
+  reply messages) on the same adapter channel as the command. No
+  external URLs or out-of-band download links are generated. The
+  output format and per-message size cap are in design notes; if
+  the total export size exceeds the per-message cap, the reply is
+  split into pages. Audit-logged before effect (same rule as every
+  privileged action against user state). Rate-limited in the
+  "parser-only + DB-read paginated" bucket (`security.md` §Rate
+  limiting). Group output is
   defined by an **explicit table list and a field-level positive
   list**, not by a vague "the user's contributions" rule, so the
   boundary is testable.
@@ -583,10 +636,16 @@ and makes the digest query depend on row presence.
   cap are in design notes.
 - `/stop` — cancels the calling (user, scope)'s currently in-flight
   interruptible request **immediately**, so the worker is freed for
-  others. Applies to chat-mode agent loops, user-issued `/summary`
-  prose generation, and user-issued `/retry` re-rolls (decision
-  D35); does not affect periodic group digests, the ingest pipeline,
-  or already-completed work. The in-flight LLM
+  others. **Interruptible operations:** chat-mode agent loops,
+  user-issued `/summary` prose generation, and user-issued `/retry`
+  re-rolls (decision D35). **Not interruptible:** periodic group
+  digests, the ingest pipeline, already-completed work, and
+  `/retry --digest` (a group-admin operation that replaces the
+  group's shared cached digest — `/stop` against an in-flight
+  `/retry --digest` returns a friendly no-op with the reason; the
+  digest retry continues). Mutating commands (source adds, ban,
+  etc.) are never interruptible because their side effects may
+  already be partially committed. The in-flight LLM
   stream is closed and any in-flight read-only tool call is
   abandoned: the worker discards the in-flight result, releases the
   DB connection, and moves on. **In v1 every tool in the closed
@@ -612,14 +671,20 @@ and makes the digest query depend on row presence.
 - `/retry` [`--digest`] — regenerates the prose for the last
   summary-producing command. Re-runs the LLM stage only;
   deterministic post selection and clustering are reused unchanged
-  (decision D19, schema.md §Summary anchor). Bounded by a small
-  fixed retry cap (value in design notes) anchored to that
-  most-recent summary-producing command. Any non-`/retry` input
-  from the same (user, scope) clears the anchor; `/retry` itself
-  never advances or resets it. No effect (friendly error) when no
-  eligible anchor exists, when the anchor has been cleared, when
-  the prior command was cancelled by `/stop`, or when the prior
-  command was not summary-producing.
+  (decision D19, schema.md §Summary anchor). **New posts that
+  arrived since the original run are not pulled in** — the frozen
+  UID set and cluster mapping recorded in `summary_anchor` are the
+  complete input to the retry; the retry window is a design-tier
+  value (in design notes). Bounded by a small fixed retry cap
+  (value in design notes) anchored to that most-recent
+  summary-producing command. **When the retry cap is exhausted,
+  a friendly error is returned and the anchor is left intact** (not
+  cleared); the user must issue a non-`/retry` command to move past
+  the cap. Any non-`/retry` input from the same (user, scope) clears
+  the anchor; `/retry` itself never advances or resets it. No effect
+  (friendly error) when no eligible anchor exists, when the anchor
+  has been cleared, when the prior command was cancelled by `/stop`,
+  or when the prior command was not summary-producing.
 
   **Status filter on the frozen UID set.** The frozen UID set
   recorded in `summary_anchor` is **filtered against current post
@@ -691,9 +756,14 @@ contacts and contradict the registration-state model
 (`schema.md` §Identity and access — User entity).
 
 - `/promote <contact>` / `/demote <contact>` — group admin
-  promote/demote, used inside a group. **Scoped to the inbound
-  adapter** — both the targeted user and the targeted group must be
-  on the inbound adapter; the `<contact>` argument resolves to a
+  promote/demote, used inside a group. **The target must have an
+  active `group_membership` row (`removed_at IS NULL`) in the
+  group.** A contact with no active membership (never joined, or
+  soft-cleared via left-group event) cannot be promoted; the
+  reply is a friendly "contact is not an active member of this
+  group" error. **Scoped to the inbound adapter** — both the
+  targeted user and the targeted group must be on the inbound
+  adapter; the `<contact>` argument resolves to a
   `(adapter, contact_id)` row on the same adapter the command came
   from. Cross-adapter group-admin operations are not exposed in v1
   (same convention as `/grant-admin`, for the same blast-radius
@@ -741,12 +811,25 @@ contacts and contradict the registration-state model
   UUID invite code bound to the given (contact\_id, adapter) pair (decision
   D44). The code is displayed once in the reply and stored as PENDING. No
   confirmation required (risk is bounded to one specific identity).
+  Audit-logged before effect.
 - `/invite create --adapter <name> --open` — generate a single-use UUID invite
   code bound to the adapter only; the first unknown contact on that adapter to
   present the code is registered. Requires confirm (broader blast radius than
-  `--contact`).
+  `--contact`). Audit-logged before effect.
 - `--contact` and `--open` are mutually exclusive. Providing neither returns a
   hint listing both flags and their trade-offs; no invite is created.
+- **Cross-adapter invite creation is permitted by design.** Unlike
+  `/grant-admin` and `/vouch` (which are restricted to the inbound adapter),
+  `/invite create` carries an explicit `--adapter <name>` argument and may
+  name any adapter supported by the deployment. A SimpleX admin may create a
+  Signal invite for a contact they want to onboard. The security trade-off is
+  acceptable because the invite code is bound to the named `(adapter,
+  contact_id)` pair — it creates no elevated access; it only opens the
+  registration gate on that adapter. The cross-adapter action is constrained by
+  the per-adapter PENDING caps (`security.md` §Invite-code registration) and
+  by the audit trail. `--adapter <name>` is validated against the set of
+  currently-enabled adapters at parse time; naming an unknown adapter is a
+  friendly error.
 - `/invite list [--page N]` — list PENDING invite codes with target contact,
   adapter, and expiry.
 - `/invite revoke <code>` — immediately transition a PENDING code to REVOKED.
@@ -790,12 +873,14 @@ contacts and contradict the registration-state model
   placeholder permanently.
 - `/audit [-w …] [--actor …] [--action …] [--page N]` — read
   `audit_log_view` (the redacted view; `security.md` §DB roles)
-  with filters. **Unknown actor id** (`--actor <id>` against an id
-  with no matching `users` row) returns the same "no audit rows"
-  reply as a known id with no rows in the window — the
-  existence-vs-no-rows distinction is not exposed. v1 ships no
-  `/list-users` command; bot admins enumerate via the existing
-  audit history.
+  with filters. **Bot admins see audit rows for all scopes** — the
+  view is not filtered by the calling scope for bot admins; they
+  see the deployment-wide audit history. **Unknown actor id**
+  (`--actor <id>` against an id with no matching `users` row)
+  returns the same "no audit rows" reply as a known id with no
+  rows in the window — the existence-vs-no-rows distinction is not
+  exposed. v1 ships no `/list-users` command; bot admins enumerate
+  via the existing audit history.
 
 ## Permission model
 
@@ -933,6 +1018,15 @@ without the digest having started — the operator's "the worker
 pool is saturated" recovery path. Results are cached briefly so a
 follow-up `/summary` from the same group during the cache TTL is
 served from cache (no second LLM call).
+
+**Zero-eligible-posts digest.** When a digest slot fires and there
+are no eligible posts for the group (no active subscriptions, or
+subscribed but nothing arrived in the window), the digest sends a
+fixed **"no posts yet"** reply — the same deterministic
+localization-bundle string as `/summary` §Content empty window —
+rather than silently sending nothing. A silent digest slot would
+be indistinguishable from a missed slot, leaving the group admin
+with no signal that the bot ran and simply found nothing.
 
 **Missed slot behaviour.** When the Provider is down for the entire
 slot window of a group, the missed slot is **skipped, not caught

@@ -178,11 +178,25 @@ responsible for never emitting an unverified event into the outbox.
   kind filter; an event of a disallowed kind is dropped at the kind
   filter and never reaches the outbox; only events that pass both
   gates enter Stage 1.
-- **Repost handling.** Kind 6 reposts are stored with a reference to
-  the original event id; the original event is **not** auto-resolved
-  in v1 (no extra fetches, no relay round-trips). If the original is
-  later seen via a separate Nostr event delivery, normal cross-source
-  linking applies.
+- **Repost handling.** Kind 6 reposts carry the original event id as
+  a reference; the original event is **not** auto-resolved in v1 (no
+  extra fetches, no relay round-trips).
+  - A kind-6 event with a **non-empty `content` field** stores the
+    commentary text as the post body; the original event id is stored
+    as a `post_reference` edge with `link_type = 'repost'`. The
+    cross-source link is by `upstream_identifier` (the Nostr event id)
+    — see `architecture.md` §Source identity for the linking rule.
+  - A kind-6 event with an **empty `content` field** stores an empty
+    post body; the `post_reference` edge is still written.
+  - A kind-6 that references an original of a **disallowed kind**
+    (kind 4, 7, or any other kind outside the allowlist) stores only
+    the `post_reference` edge. The reference is a cryptographic event
+    id (a hash) and **reveals no content about the original event**.
+    The disallowed-kind original is never fetched, never parsed, and
+    never stored.
+  If the original is later seen via a separate allowed-kind event
+  delivery (i.e., the referenced event is itself a kind 1), normal
+  cross-source linking applies.
 - **Operator-configured relay list.** The relay set is configured via
   `application.properties` and the bootstrap JSON; **NIP-65
   auto-discovery is explicitly out of v1**. Trade-off: content posted
@@ -334,7 +348,14 @@ Authorization evaluation order on every inbound message:
    - Invalid / expired / absent: fixed "access requires an invitation" reply,
      drop. No registration, no LLM, no DB write beyond the drop counter.
 3. **Group — unknown contact.** If no user row exists and this is a group
-   `@mention`, auto-register (start probation per D45).
+   `@mention`, auto-register (start probation per D45). **The
+   auto-promote slot is NOT consumed by this message.** Auto-registration
+   places the user in probation, and the auto-promote check (step below)
+   requires a non-banned, non-probation user; a user registered in this
+   step is immediately in probation and therefore ineligible for
+   auto-promote on the same message. The auto-promote slot remains empty
+   until a future `@mention` from a registered, non-probation,
+   non-banned user arrives.
 4. **Ban check.** If `is_banned=true`: fixed reply, stop. No parser, no DB
    query past the ban check, no LLM.
 5. **Unicode-normalize the body** (NFKC + bidi-control strip +
@@ -344,7 +365,11 @@ Authorization evaluation order on every inbound message:
    is the chat-input parity step. Normalization runs after the ban
    check (the ban check uses the cryptographic contact id, not the
    message body, so order does not matter for ban) and before parse
-   so the slash detector sees the normalized form.
+   so the slash detector sees the normalized form. **The normalized
+   body replaces the raw body for all downstream processing**: the
+   command parser, the chat agent, and the LLM all receive only the
+   normalized form. The raw body is discarded after this step and
+   never reaches the LLM in any call path.
 6. Parse command (or fall to chat-mode).
 7. **Permission check** against the matrix. Probation restrictions (D45)
    are part of the permission matrix: blocked commands return a friendly
@@ -477,8 +502,11 @@ DM access, applied uniformly across all adapters:
   further processing. The drop is counted but not individually audit-logged
   (a hostile actor can trigger many drops).
 - **Invite codes are single-use.** A `USED` code cannot be replayed.
-- **Codes carry a TTL.** An expired code is treated as absent. The TTL value
-  is operator-configured and lives in design notes.
+- **Codes carry a TTL.** An expired code is treated as absent. A code
+  expires at the instant `NOW() >= expires_at` — the boundary is
+  inclusive, so a code with `expires_at = T` is expired starting
+  at wall-clock time T (not T+ε). The TTL value is operator-configured
+  and lives in design notes.
 - **Cross-adapter isolation.** An invite bound to `(contact-id-A, simplex)`
   cannot be consumed from `(contact-id-A, signal)` — the adapter field is part
   of the match key. This prevents a code intercepted on one platform from being
@@ -807,7 +835,11 @@ window has its `source.status` transitioned to `'failed'` (the same
 terminal status used for consecutive HTTP failures, decision D42),
 the scheduler skips it on subsequent ticks, and a throttled admin
 notification fires citing the source id, the observed UNKNOWN rate,
-and the threshold. This bounds the **quarantine-exhaustion** attack
+and the threshold. **Auto-disable only blocks new ingest** — it stops
+the fetcher or stream-source worker from enqueueing new posts from
+the source. Posts already in the outbox or re-evaluation queue
+**continue through their current evaluation stage** unaffected; the
+auto-disable affects only future picks from that source's feed. This bounds the **quarantine-exhaustion** attack
 surface: an adversary controlling a feed (or able to inject into
 one) cannot drown admin review capacity by crafting borderline
 content that consistently triggers UNKNOWN — the system shifts the

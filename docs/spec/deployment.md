@@ -54,7 +54,7 @@ is supported.
 
 An operator must provide:
 
-1. **A hardware profile choice** (`laptop` / `vps` / `pi` / `remote`,                                                                                                                                                                                 
+1. **A hardware profile choice** (`laptop` / `vps` / `pi` / `remote-llm`,                                                                                                                                                                                 
    decision D27). One property setting picks a working configuration.
 2. **A bot-admin contact id, optional per adapter, required in
    union.** The cryptographic contact id of the user who will be
@@ -307,7 +307,7 @@ Operator picks one of:
   fallbacks (digest fallback, IVFFlat vector index). Default profile:            
   `pi`.
 - **Remote LLM.** Local DB and services, remote LLM provider. Default                                                                                                                                                                                 
-  profile: `remote`.
+  profile: `remote-llm`.
 
 The set of supported profiles is the spec-level commitment; the values                                                                                                                                                                                
 behind each profile are tuning.
