@@ -192,9 +192,9 @@ Steps:
 2. **Test-freshness safety check.**
    - For tickets with `complexity: high` OR `risk: high`: re-run `mvn verify` from the repo root. Refuse to commit if it does not exit zero. Persist a fresh log to `target/m1-tick-test-{ID}-rcommit.log`.
    - For all other tickets: locate the most recent `target/m1-tick-test-{ID}-r*.log`. Read its mtime. Compute the latest mtime among the *commit candidates* from step 1. If the test log is older than any commit candidate, refuse and tell the user to re-run `mvn verify` (the test result is stale relative to the code about to be committed).
-3. Build the commit message:
+3. Build the commit message. Read the ticket file's `title:` field; if the value is YAML-quoted (surrounded by `"..."` or `'...'`, which YAML requires when the title contains a colon, hash, leading dash, or other reserved character), strip the surrounding quotes — the bare string is the imperative summary used in the subject line.
    ```
-   M1-NNN: <ticket title>
+   M1-NNN: <ticket title (quotes stripped)>
 
    <Context paragraph from the ticket body, wrapped at 72 chars>
 
@@ -235,7 +235,7 @@ Preconditions:
 
 Steps:
 
-1. **Idempotency precheck.** Read the ticket file's `title:` field and construct the canonical implementation-commit subject `M1-NNN: <title>` (e.g. `M1-001: Set up two-module Maven build`). Count commits on `main` whose subject EQUALS this string: `git log main --format=%s | grep -cFx "M1-NNN: <title>"`. (Fixed-string `-F` + whole-line `-x` match. Preliminary auxiliary commits using the workflow's `M1-NNN: ` prefix — `M1-NNN: draft ticket`, `M1-NNN: refine ticket spec ...`, `M1-NNN: aborted attempt #N`, etc. — have different summaries by convention and so do NOT collide with the canonical subject. A loose `^M1-NNN: ` regex would conflate them.) Three arms:
+1. **Idempotency precheck.** Read the ticket file's `title:` field; if the value is YAML-quoted (surrounded by `"..."` or `'...'`, which YAML requires when the title contains a colon, hash, leading dash, or other reserved character), strip the surrounding quotes so the bare string is used. Construct the canonical implementation-commit subject `M1-NNN: <title>` (e.g. `M1-001: Set up two-module Maven build`; for a ticket with `title: "m1-tick: fix STATUS.md order and review diff capture"` the constructed subject is `M1-002: m1-tick: fix STATUS.md order and review diff capture` — without the surrounding quotes). Count commits on `main` whose subject EQUALS this string: `git log main --format=%s | grep -cFx "M1-NNN: <title>"`. (Fixed-string `-F` + whole-line `-x` match. Preliminary auxiliary commits using the workflow's `M1-NNN: ` prefix — `M1-NNN: draft ticket`, `M1-NNN: refine ticket spec ...`, `M1-NNN: aborted attempt #N`, etc. — have different summaries by convention and so do NOT collide with the canonical subject. A loose `^M1-NNN: ` regex would conflate them.) Three arms:
    - **`0` matches AND branch resolves**: the canonical squash-merge path. Continue at step 2.
    - **`0` matches AND branch does NOT resolve**: refuse with `neither branch m1/M1-NNN-* nor a "M1-NNN: <title>" commit on main found; was /m1-tick commit M1-NNN run? (status is "done" but no committed work is locatable)`. STOP. This indicates ticket-state corruption — escalate to the user, do not silently fix.
    - **`1` match**: the ticket is **already merged on main**. If the per-ticket branch resolves, run `git branch -D <branch>` to delete it; print `M1-NNN already merged on main; deleted stale branch <branch>`. If the branch does NOT resolve, print `M1-NNN already merged on main; no branch to delete`. STOP — success exit. (No new commit, no status change, no `STATUS.md` regen needed.)
