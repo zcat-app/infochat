@@ -203,7 +203,7 @@ Steps:
      - <alt 1>: <reason>
      - <alt 2>: <reason>
 
-   Reviewed-by: code-reviewer (VERDICT: <APPROVE|OVERRIDE-APPROVE>; round <r>)
+   Reviewed-by: code-reviewer (VERDICT: <APPROVE|OVERRIDE-APPROVE>; round <r>; agent run: <id-or-NA>)
    ```
 4. Set ticket frontmatter `status: done`. Update `last_updated`. (This mutation produces a working-tree modification on the ticket file in addition to the commit candidates from step 1.)
 5. Stage explicitly: `git add` each commit candidate from step 1, plus the ticket file. Never `git add -A`.
@@ -279,10 +279,11 @@ Reply with: <number> [optional notes]
 
    - **`1` (refine).** Snapshot current frontmatter under `revisions:` with date + reason. Print the path of the ticket file and the relevant trigger context (clarity blockers, reviewer's last verdict, etc.); ask the user to edit the file directly and reply `done` when finished. The skill does NOT accept inline chat-format edits — file-edit + `done` is the single supported input mode (avoids the ambiguity of parsing free-form chat replies into YAML frontmatter and body sections). When the user replies `done`, re-read the file, verify the snapshot under `revisions:` is still present, and dispatch on the *prior* escalation reason (read from the most recent `escalations:` entry):
 
-     - **Refine after `clarity-fail` or `outline-fail`** (no branch ever existed; the ticket never reached `in-progress`): set `status: pending`. Clear `clarity_check:` (it described the *old* ticket; the rewritten ticket needs a fresh evaluation). The refined ticket lives on `main`; commit the edit there as `M1-NNN: refine ticket spec (clarity-fail rework)`. Tell the user to run `/m1-tick start M1-NNN` again — the next `start` will re-run clarity against the rewritten ticket, which is the correct behavior because the previous FAIL means the ticket was never validated.
+     - **Refine after `clarity-fail`** (no branch ever existed; the ticket never reached `in-progress`): set `status: pending`. Clear `clarity_check:` (it described the *old* ticket; the rewritten ticket needs a fresh evaluation). The refined ticket lives on `main`; while currently on `main`, commit the edit there as `M1-NNN: refine ticket spec (clarity-fail rework)`. Tell the user to run `/m1-tick start M1-NNN` again — the next `start` will re-run clarity against the rewritten ticket, which is the correct behavior because the previous FAIL means the ticket was never validated.
+     - **Refine after `outline-fail`** (branch was created at `start` step 6, but the Plan subagent returned `OUTLINE FAILED` before any implementation, so the branch has no useful state): set `status: pending`. Clear `clarity_check:` (clarity passed for the old ticket; the rewritten ticket needs a fresh evaluation). **Explicitly clean up the empty branch.** Run `git checkout main`, then `git branch -D m1/M1-NNN-<slug>` (resolved per the branch resolution procedure in [`workflow.md`](../../../docs/process/workflow.md)). Then commit the refined ticket file on `main` as `M1-NNN: refine ticket spec (outline-fail rework)`. Tell the user to run `/m1-tick start M1-NNN` again — the next `start` will re-create a fresh branch and re-run clarity AND the Plan subagent against the rewritten ticket. Without this branch deletion, the next `start`'s `git checkout -b m1/M1-NNN-<slug>` would fail.
      - **Refine after `round-cap`, `manual-verdict`, `budget-breach`, `premise-fail`, `loop`, or `redteam-finding`** (branch exists, implementation is in progress or complete): set `status: in-progress`. **Commit the refine on the per-ticket branch immediately.** Stage the ticket file (and only the ticket file): `git add docs/plan/m1/tickets/M1-NNN-<slug>.md`. Commit subject: `M1-NNN: refine ticket spec (round <r> rework)` where `<r>` is the round number that just escalated. This makes the refine durable mid-attempt — a subsequent `git checkout` (e.g. via `abort`) will not silently lose the refined acceptance criteria. Remind the developer to re-implement against the new criteria on the existing branch. The clarity pre-flight does NOT re-run on refine in this arm (the criteria are new but the implementation context — branch, prior diff, prior `mvn verify` — is preserved); WARN if the refined ticket would have failed clarity.
 
-     The two arms differ in destination status (`pending` vs `in-progress`), whether `clarity_check:` is cleared, and which ref the refine commit lands on (`main` vs the per-ticket branch). Both arms preserve the snapshot under `revisions:` for the audit trail.
+     All three arms preserve the snapshot under `revisions:` for the audit trail.
 
    - **`2` (override).** **Eligibility gate (run first).** Read the most recent entry in `escalations:` and inspect its `reason`. Override is reviewer-judgment-correction only — it applies iff `reason ∈ {round-cap, manual-verdict}`. For any other reason, refuse:
 
@@ -460,11 +461,21 @@ Preconditions:
 
 - The ticket exists and `status: deferred`.
 - If `deferred_on:` is set, that ticket is `status: done`. Refuse if not.
-- For `deferred_reason: spec-amend`, additionally require that the spec amendment ticket landed AND the user re-affirms that the original ticket's `spec_refs` are still correct (the spec text changed; the ticket's references may need updating).
+- For `deferred_reason: spec-amend`, additionally require that the spec amendment ticket landed AND the user re-affirms that the original ticket's `spec_refs` are still correct (the spec text changed; the ticket's references may need updating). The re-affirmation procedure runs in step 1 below.
 
 Steps:
 
-1. Ask the user for an optional one-line reason ("why now?").
+1. Ask the user for an optional one-line reason ("why now?"). **For `deferred_reason: spec-amend`, additionally print the operand ticket's current `spec_refs:` list and the spec-amend ticket's `spec_amend_for:` target, then prompt:**
+   ```
+   The spec amendment M1-AAA modified <spec-path>:§<section>.
+   This ticket's current spec_refs are:
+     - <ref 1>
+     - <ref 2>
+   Do these still resolve to the right anchors after the amendment?
+   Reply `confirm` to proceed unchanged, or edit the ticket file's
+   spec_refs (and reply `done`) before reopening.
+   ```
+   On `confirm`: proceed. On `done`: re-read the ticket file and proceed. Any other reply: re-print the prompt and STOP.
 2. Append to ticket frontmatter under a `reopens:` list:
    ```yaml
    reopens:

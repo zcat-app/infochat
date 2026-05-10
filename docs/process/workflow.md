@@ -155,8 +155,8 @@ The skill reads `docs/plan/<milestone>/tickets/`, finds tickets where `status: p
 |---|---|
 | `APPROVE` | Proceed to commit (step 6). |
 | `REWORK` (round 1) | Address only the named items. Do not re-architect. Re-run `mvn verify`. Re-invoke reviewer. |
-| `REWORK` (round 2) | Escalate, unless the ticket sets `round_cap: 3` AND the round-2 diff satisfied must-shrink vs round 1. With `round_cap: 3`, allow one more rework round; otherwise no round 3. |
-| `REWORK` (round 3) | Only reachable when `round_cap: 3`. Escalate; no round 4 exists. Round 3 is also bound by must-shrink vs round 2. |
+| `REWORK` (round 2) | If the ticket has `round_cap: 2` (default): escalate (no round 3). If the ticket has `round_cap: 3`: address only the named items, re-run `mvn verify`, re-invoke reviewer for round 3. (Round 2's own must-shrink check has already run by the time this verdict applies; a must-shrink failure in this round is a `SCOPE-DRIFT-CHECK: FAIL` that escalates immediately regardless of `round_cap`.) |
+| `REWORK` (round 3) | Only reachable when `round_cap: 3`. Escalate; no round 4 exists. (Round 3's own must-shrink check vs round 2 has already run by the time this verdict applies.) |
 | `MANUAL` | Escalate immediately. The reviewer's uncertainty is not for the developer to resolve. |
 
 **Round-N must-shrink (N ≥ 2).** Every rework round is a fix-only round. The reviewer compares round-N diff stats to round-(N−1): the round-N diff MUST be smaller along **at least one** of files-touched, net lines added, or net lines removed. Growth along **all three** dimensions simultaneously fails `SCOPE-DRIFT-CHECK` — unless the round-(N−1) REWORK explicitly required a refactor that grows the diff and the developer cited that REWORK item in the round-N commit message. Applies to round 2 (default `round_cap: 2`) AND to round 3 (only reachable when `round_cap: 3`). The canonical rule is in [`engineering-rules-verbatim.md`](engineering-rules-verbatim.md) §8 "Round-N must-shrink".
@@ -243,7 +243,7 @@ Alternatives considered:
   - <alt 1>: <one-line reason rejected>
   - <alt 2>: ...
 
-Reviewed-by: code-reviewer (VERDICT: APPROVE; agent run: <id-or-NA>)
+Reviewed-by: code-reviewer (VERDICT: <APPROVE|OVERRIDE-APPROVE>; round <r>; agent run: <id-or-NA>)
 ```
 
 - `git push` is the user's decision, not the agent's. The skill stops at the local commit.
