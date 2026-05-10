@@ -1,0 +1,29 @@
+# Local development database for the laptop profile.
+#
+# Image is the maintained pgvector upstream — Postgres 16 with the pgvector
+# binary already bundled. Vanilla postgres:16 does not ship the binary, so
+# CREATE EXTENSION vector (lands with M1-005's first Flyway migration)
+# would fail without a custom Dockerfile.
+#
+# The default POSTGRES_PASSWORD is for local dev only; production deployments
+# MUST override via the environment.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: infochat
+      POSTGRES_DB: infochat
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-infochat-dev}
+    ports:
+      - "5432:5432"
+    volumes:
+      - infochat-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U infochat -d infochat"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+volumes:
+  infochat-pgdata:

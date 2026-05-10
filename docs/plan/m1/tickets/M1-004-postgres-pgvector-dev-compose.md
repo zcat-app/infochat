@@ -1,9 +1,9 @@
 ---
 id: M1-004
 title: Postgres + pgvector dev compose
-status: pending
+status: done
 created: 2026-05-10
-last_updated: 2026-05-10
+last_updated: 2026-05-11
 blocked_by:
   - M1-001
 files_budget: 3
@@ -47,14 +47,32 @@ decision_refs:
   - D1
   - D41
 
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-05-11
+    verdict: APPROVE
+    agent_run: ae883d431e5dd4ea4
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 61
+      removed: 11
 escalations: []
 revisions: []
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-05-11
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-004: Postgres + pgvector dev compose

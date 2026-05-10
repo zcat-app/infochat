@@ -2,3 +2,4 @@ target/
 .quarkus/
 .idea/
 *.iml
+docker-compose.override.yml
