@@ -118,6 +118,34 @@ The verbatim text of every rule below — plus the full test-integrity rule list
 - Feature flags and backwards-compatibility shims are forbidden — M1 is greenfield, there is no prior version to be compatible with.
 - The reviewer applies this rule narrowly: a defensive check at a system boundary is fine; one between two internal classes is scope drift.
 
+## Coding style
+
+These are project-level coding-style preferences. They are NOT reviewer-enforced (the reviewer enforces the §Engineering rules above and the canonical [`engineering-rules-verbatim.md`](docs/process/engineering-rules-verbatim.md)); they are guidelines the developer applies when writing the diff.
+
+### Comment important, crucial, or complex code
+- Comment new code that carries an invariant, a hidden constraint, a non-obvious decision, a performance-critical path, or a subtle correctness argument — anything a future reader can't see by reading the code alone. When in doubt about whether code falls into one of these categories, include the comment.
+- This **overrides** the system-prompt default of "default to writing no comments" for these categories. The system-prompt rule still holds for ordinary code (well-named identifiers explain themselves there); this section widens the carve-out for important/complex code only.
+- Still WHY-not-WHAT: don't narrate code that named identifiers already explain. Don't reference the current ticket, fix, or callers ("used by X", "added for the Y flow", "handles the case from issue #123") — that belongs in the commit message and rots as the codebase evolves.
+
+### Descriptive names
+- Prefer fully-spelled, descriptive identifiers over abbreviations. `databaseConnection` reads better than `dc`; `messageAdapter` better than `ma`; `userId` better than `uid`. The cost of a longer name is paid once when typing; the benefit is paid every time the code is read.
+- Standard short names are still fine where the convention is universal: `i`/`j` for loop indices, `e` in a catch, `id` for an obvious primary key in scope. The bar is "would a new reader know what this means without context?"
+- Apply the same standard to test names — `findByTagReturnsEmptyWhenTagUnknown` beats `testFind3`. Tests are documentation; their names describe behavior.
+
+### Prefer switch expressions
+- For multi-branch dispatch over an enum, sealed type, or fixed set of values, prefer a Java switch expression (`switch (x) { case A -> ...; case B -> ...; }`) over a chain of `if`/`else if` or a classic `switch` statement with `break`s.
+- Switch expressions are exhaustiveness-checked by the compiler against sealed types and enums, return a value (so the result can be assigned), and have no fall-through. They make the dispatch shape visible at a glance.
+- This is a preference, not a hard rule. If the branches genuinely don't fit the dispatch pattern (heterogeneous conditions, side effects per branch, mid-branch returns), fall back to `if`/`else if`.
+
+### Early return / early exit
+- Validate inputs and handle special cases at the top of a function with early returns, then write the main path at the bottom unindented. `if (input == null) return EMPTY; ... main work ...` is clearer than wrapping the main work in an `if (input != null) { ... } else { return EMPTY; }`.
+- This includes guard clauses for system-boundary validation (NOT internal-code defensive checks — see §"No defensive code" above), short-circuit returns when the result is already known, and breaking out of loops as soon as the answer is found.
+- The benefit is reduced indentation: the main logic lives at the function's base indent rather than nested inside a happy-path `if`. A reader can scan the guards and skip to the meat.
+
+### Simplify aggressively
+- Already covered by the §Engineering rules: §"No workarounds" ("Never sacrifice ... simplicity to reach a goal"), §"Push back when simpler exists" (surface a simpler design before implementing), and the system-prompt rule "Don't add features, refactor, or introduce abstractions beyond what the task requires."
+- The bias holds at every level — design, structure, line-by-line. If a simpler form meets the same goal, prefer it. Three similar lines beats a premature abstraction. A flat function beats an unnecessary class. The simpler the implementation, the less commenting it needs (which is the point of pairing this with the comment policy above).
+
 ## M1 workflow (in force for the v1 build)
 
 M1 work is ticket-driven via the `/m1-tick` skill. The universal workflow specification lives in `docs/process/workflow.md`; M1-specific framing lives in `docs/plan/m1/README.md`; the rules below are the always-loaded summary.
