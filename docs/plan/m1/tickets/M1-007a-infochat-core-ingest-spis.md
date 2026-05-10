@@ -34,7 +34,7 @@ out_of_scope:
 acceptance:
   - "infochat-core/pom.xml exists and declares <packaging>jar</packaging> (or omits <packaging>, which defaults to jar) — grep -E '<packaging>(jar)?</packaging>' infochat-core/pom.xml returns either zero matches (omitted, default jar) or a `<packaging>jar</packaging>` match; explicitly NOT `<packaging>pom</packaging>`"
   - "grep -E '<module>infochat-core</module>' pom.xml returns at least one match (the parent registers the new module)"
-  - "grep -rEn '<version>' infochat-core/pom.xml returns zero matches inside <dependency> blocks (BOM supplies versions, M1-001 invariant preserved)"
+  - "infochat-core/pom.xml has no explicit <version> element inside any <dependency> block (BOM supplies all dependency versions, M1-001 invariant preserved). Verify: `awk '/<dependency>/,/<\\/dependency>/' infochat-core/pom.xml | grep -E '<version>'` returns zero matches. The awk line-range filter scopes grep to <dependency>...</dependency> contents only, so the mandatory <parent><version> block and any <build><plugins> versions are correctly excluded."
   - "grep -rE '<artifactId>quarkus-' infochat-core/pom.xml returns ZERO matches (the module is a plain library jar — no Quarkus extensions)"
   - "grep -E '<artifactId>infochat-core</artifactId>' infochat-collector/pom.xml returns at least one match (Collector depends on the new module)"
   - "grep -E '<artifactId>infochat-core</artifactId>' infochat-provider/pom.xml returns at least one match (Provider depends on the new module)"

@@ -37,7 +37,7 @@ out_of_scope:
 acceptance:
   - "infochat-llm-adapter/pom.xml exists; grep -E '<packaging>(jar)?</packaging>' returns either zero matches (omitted, default jar) or `<packaging>jar</packaging>`; explicitly NOT `<packaging>pom</packaging>`"
   - "grep -E '<module>infochat-llm-adapter</module>' pom.xml returns at least one match (parent registers the new module)"
-  - "grep -rEn '<version>' infochat-llm-adapter/pom.xml returns zero matches inside <dependency> blocks (BOM supplies versions, M1-001 invariant preserved)"
+  - "infochat-llm-adapter/pom.xml has no explicit <version> element inside any <dependency> block (BOM supplies all dependency versions, M1-001 invariant preserved). Verify: `awk '/<dependency>/,/<\\/dependency>/' infochat-llm-adapter/pom.xml | grep -E '<version>'` returns zero matches. The awk line-range filter scopes grep to <dependency>...</dependency> contents, correctly excluding the mandatory <parent><version> block and any <build><plugins> versions."
   - "grep -rE '<artifactId>quarkus-' infochat-llm-adapter/pom.xml returns ZERO matches outside any test-scope dependency block (the module is a plain library jar; no production Quarkus extensions)"
   - "grep -E '<artifactId>infochat-llm-adapter</artifactId>' infochat-collector/pom.xml returns at least one match"
   - "grep -E '<artifactId>infochat-llm-adapter</artifactId>' infochat-provider/pom.xml returns at least one match"
