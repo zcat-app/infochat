@@ -1,7 +1,7 @@
 ---
 id: M1-002
 title: "m1-tick: fix STATUS.md order and review diff capture"
-status: pending
+status: done
 created: 2026-05-10
 last_updated: 2026-05-10
 blocked_by: []
@@ -42,7 +42,20 @@ spec_refs:
   - docs/process/workflow.md §The flow
 decision_refs: []
 
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-05-10
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 20
+      removed: 17
 escalations:
   - date: 2026-05-10
     reason: clarity-fail
@@ -98,7 +111,11 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-05-10
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-002: m1-tick: fix STATUS.md order and review diff capture

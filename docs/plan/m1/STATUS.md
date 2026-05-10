@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 1 |
+| done | 2 |
 | deferred | 0 |
 | **total** | **2** |
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-002 — m1-tick: fix STATUS.md order and review diff capture (complexity: low, risk: low)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -61,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-001 | Set up two-module Maven build | 2026-05-10 | round 1 APPROVE |
+| M1-002 | m1-tick: fix STATUS.md order and review diff capture | 2026-05-10 | round 1 APPROVE |
 
 ---
 
@@ -74,5 +75,5 @@ _(none)_
 
 ```
 M1-001 (done)
-M1-002 (pending) ← runnable
+M1-002 (done)
 ```

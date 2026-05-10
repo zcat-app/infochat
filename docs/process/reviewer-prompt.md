@@ -25,7 +25,7 @@ Round: {{CURRENT_ROUND}}          # 1, 2, or 3 (3 only when round_cap: 3)
 
 ---
 
-## Diff (git diff main...HEAD on branch {{BRANCH}})
+## Diff (`git diff main` — working tree vs main, on branch {{BRANCH}})
 
 {{DIFF_OUTPUT}}
 
@@ -272,7 +272,7 @@ no explanatory wrapper. The skill parses the output literally.
 ## Skill responsibilities (what `/m1-tick review` does around the prompt)
 
 1. Resolves the ticket file, the branch, and the slug.
-2. Captures `git diff main...HEAD` on the branch.
+2. Captures the working-tree-vs-main diff on the branch: `git add -N` on any untracked-but-present files first (intent-to-add, so the file paths show up in the diff), then `git diff main` for the full diff. The `-N` entries are absorbed by the explicit `git add` at commit time and need no separate cleanup. A commit-range diff against `main` would be empty here because `commit` runs after `review`.
 3. Computes diff stats: files touched count, net lines added, net lines removed. Stores under `reviews[].diff_stats` in frontmatter for cross-round comparison.
 4. Builds the **negative-space list**: if the ticket has a non-empty `files_scope`, computes the set of files matching any glob in `files_scope` that are NOT in the diff and substitutes them as `{{NEGATIVE_SPACE_LIST}}`. If `files_scope` is empty or absent, the substitution is the literal string `(no path-level scope declared — files_budget is purely numeric, no negative-space evaluation applicable)` and the reviewer must report PASS on `NEGATIVE-SPACE-CHECK`.
 5. Captures the tail of the most recent `mvn verify` output (last ~200 lines including the build summary; full log persisted to `target/m1-tick-test-{{ID}}-r{{CURRENT_ROUND}}.log`).

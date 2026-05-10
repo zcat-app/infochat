@@ -126,8 +126,8 @@ Steps:
 
 1. Determine the current round number `N` from `reviews:` length + 1. The previous round is `N−1` (only meaningful when `N ≥ 2`).
 2. Capture inputs:
-   - `git diff main...HEAD` (full diff).
-   - Diff stats for the current round: files touched, net lines added, net lines removed.
+   - The full diff: at `review` time the implementation lives in the working tree (no commit on the branch yet — `commit` runs *after* `review`, so any commit-range diff against `main` would be empty and starve the reviewer of context). Capture as working-tree-vs-main: run `git add -N <untracked-files-in-the-working-tree>` first so newly created files appear in the diff (intent-to-add; the `-N` entries are absorbed by the explicit `git add` at `commit` time and require no separate cleanup), then `git diff main` to produce the diff.
+   - Diff stats for the current round: files touched, net lines added, net lines removed (`git diff main --shortstat`, mirroring the full-diff command above).
    - Diff stats for the previous round (read from `reviews[N−2].diff_stats` in frontmatter when `N ≥ 2`; on round 1 these are unset).
    - Build the negative-space list: if the ticket has a non-empty `files_scope`, take the union of paths matched by those globs minus paths actually present in the diff. If `files_scope` is empty or absent, the negative-space list is the literal sentinel string `(no path-level scope declared — files_budget is purely numeric, no negative-space evaluation applicable)` and the reviewer reports PASS on `NEGATIVE-SPACE-CHECK` by definition.
    - The tail of the most recent `mvn verify` output (last ~200 lines; full log persisted to `target/m1-tick-test-{{ID}}-r{{CURRENT_ROUND}}.log`).
@@ -187,7 +187,7 @@ Preconditions:
 
 Steps:
 
-1. **Identify the files about to be committed.** Run `git diff --name-only HEAD` to list modified files in the working tree. Exclude the ticket file itself (the ticket file's frontmatter mutation in step 4 happens *after* this check; we're checking the freshness of the test result against the source/test code that produced it). Call this set the *commit candidates*.
+1. **Identify the files about to be committed.** Run `git diff --name-only HEAD` to list modified files in the working tree. Exclude the ticket file itself AND `docs/plan/m1/STATUS.md` (the ticket file's frontmatter mutation in step 4 and the STATUS.md regeneration in step 5 both happen *after* this check; we're checking the freshness of the test result against the source/test code that produced it. STATUS.md is a workflow-artifact regeneration, not a source edit, and so does not invalidate test freshness). Call this set the *commit candidates*.
 2. **Test-freshness safety check.**
    - For tickets with `complexity: high` OR `risk: high`: re-run `mvn verify` from the repo root. Refuse to commit if it does not exit zero. Persist a fresh log to `target/m1-tick-test-{ID}-rcommit.log`.
    - For all other tickets: locate the most recent `target/m1-tick-test-{ID}-r*.log`. Read its mtime. Compute the latest mtime among the *commit candidates* from step 1. If the test log is older than any commit candidate, refuse and tell the user to re-run `mvn verify` (the test result is stale relative to the code about to be committed).
@@ -206,9 +206,9 @@ Steps:
    Reviewed-by: code-reviewer (VERDICT: <APPROVE|OVERRIDE-APPROVE>; round <r>; agent run: <id-or-NA>)
    ```
 4. Set ticket frontmatter `status: done`. Update `last_updated`. (This mutation produces a working-tree modification on the ticket file in addition to the commit candidates from step 1.)
-5. Stage explicitly: `git add` each commit candidate from step 1, plus the ticket file. Never `git add -A`.
-6. `git commit -m "<heredoc message>"` — single commit.
-7. Regenerate `STATUS.md`.
+5. Regenerate `STATUS.md`. (Done *before* `git commit` so the regenerated board reflects the new `done` state and lands in the same commit as the implementation. Performing this step after `git commit` would leave STATUS.md as an uncommitted modification blocking the next ticket's clean-tree precondition.)
+6. Stage explicitly: `git add` each commit candidate from step 1, plus the ticket file, plus `docs/plan/m1/STATUS.md`. Never `git add -A`.
+7. `git commit -m "<heredoc message>"` — single commit.
 8. If the ticket has `security_relevant: true`, remind the user that [`/redteam M1-NNN`](../redteam/SKILL.md) is recommended before merging.
 9. Print:
    ```
