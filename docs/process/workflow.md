@@ -30,8 +30,8 @@ Precedence on conflict: `CLAUDE.md` summary < this document < [`engineering-rule
       │  │  user re-runs /<driver> start to re-trigger clarity)      │
       │  │                                                           │
       ▼  │   clarity-fail / outline-fail  (skips in-progress)        ▼
-   in-progress  ──────────→  in-review  ─────────────────→  done
-   (developer)               (reviewer)                     (squash-merge into main)
+   in-progress  ──────────→  in-review  ─────────────────→  done  ──→  (squash-merged into main)
+   (developer)               (reviewer)                     (commit on branch)   (post-done; via /<driver> merge)
        ▲                         │
        │   REWORK rounds 1..N    │
        └─────────────────────────┘
@@ -52,7 +52,7 @@ Edges:
 - `in-progress → in-review` — `review` step.
 - `in-review → in-progress` — REWORK (rounds 1..N).
 - `in-review → escalated` — round-cap or `MANUAL` verdict.
-- `in-review → done` — `APPROVE` (or `OVERRIDE-APPROVE`) followed by `commit` and squash-merge.
+- `in-review → done` — `APPROVE` (or `OVERRIDE-APPROVE`) followed by `commit` (which lands the commit on the per-ticket branch). Squash-merge into `main` is a separate post-`done` step (`/<driver> merge`); it does not change `status` because `done` is the only terminal status.
 - `escalated → pending` — `refine` resolution when the prior escalation reason was `clarity-fail` or `outline-fail` (no branch). The user re-runs `/<driver> start` to re-trigger clarity.
 - `escalated → in-progress` — `refine` resolution when the prior escalation reason was `round-cap`, `manual-verdict`, `budget-breach`, `premise-fail`, `loop`, or `redteam-finding` (branch exists; clarity does NOT re-run).
 - `escalated → in-review → done` — `override` resolution (APPROVE bypassed; `OVERRIDE-APPROVE` recorded in `reviews:`).
@@ -67,7 +67,7 @@ Status values (used in ticket frontmatter):
 | `in-progress` | Developer (the main conversation) is actively implementing. Branch exists. |
 | `in-review` | Code is committed to the branch, `mvn verify` is green, reviewer subagent is running or has just returned a verdict. |
 | `escalated` | Round cap hit, or an immediate-escalation trigger fired. Awaiting user resolution via the five-way menu. |
-| `done` | Reviewer returned `APPROVE`, ticket commit landed on `main` via squash-merge. |
+| `done` | Reviewer returned `APPROVE` (or `OVERRIDE-APPROVE`), ticket commit landed on the per-ticket branch via `/<driver> commit`. Squash-merge into `main` is a separate post-`done` step via `/<driver> merge`; the squash commit on `main` is the merge audit trail and does not require a status change. |
 | `deferred` | Work paused. Either intentionally postponed (out-of-milestone scope discovered), blocked on a new ticket the work surfaced, or waiting on a spec amendment. |
 
 ---
@@ -169,9 +169,24 @@ The skill reads `docs/plan/<milestone>/tickets/`, finds tickets where `status: p
 - Body: the Context paragraph from the ticket + any `Alternatives considered:` trailer.
 - `Reviewed-by:` trailer carrying the reviewer's `APPROVE` (or `OVERRIDE-APPROVE`) verdict line, the round number, and the reviewer agent's run identifier (or `NA` if the harness did not surface one). Exact format under "Commit conventions" below.
 - Set frontmatter `status: done`. Update `last_updated`.
-- Squash-merge into `main` is the user's call (so `main` history stays one-commit-per-ticket).
+- The commit lives on the per-ticket branch only; `main` is unchanged until step 7. The driver prints a pointer at `/<driver> merge M<N>-NNN` as the next step.
 
-### 7. Escalate — `/<driver> escalate M<N>-NNN`
+### 7. Merge — `/<driver> merge M<N>-NNN`
+
+Squash-merge the per-ticket branch into `main` so `main` history stays one-commit-per-ticket. Idempotent: re-running on an already-merged ticket cleans up a stale branch instead of double-merging.
+
+- Preconditions: ticket `status: done`; working tree clean; the per-ticket branch is resolvable per the **branch resolution procedure** in §"Naming conventions (slug, branch, ticket file)" OR the canonical ticket commit (subject `M<N>-NNN: ...`) already exists on `main` (the idempotent-cleanup arm). Otherwise refuse with a diagnostic message — the driver does not silently paper over inconsistent state.
+- Idempotency precheck on `git log main --format=%s | grep -cE '^M<N>-NNN: '`:
+  - `0` matches AND branch resolves → squash-merge path below.
+  - `0` matches AND branch missing → refuse: ticket says `done` but no committed work is locatable; state is inconsistent.
+  - `1` match → ticket already on `main`; delete the stale branch if it still resolves, otherwise no-op. Success exit.
+  - `≥2` matches → refuse: duplicate ticket commits on `main` indicate a prior partial merge or hand-amend the driver will not silently fix.
+- Squash-merge path: `git checkout main` → `git merge --squash <branch>` → `git commit -C <branch-tip>` (reuses the branch tip's commit message verbatim, preserving the `Reviewed-by:` trailer and any `Alternatives considered:` block) → `git branch -D <branch>`. The squash hides the branch's intermediate refine commits so `main`'s history stays one ticket = one commit.
+- Status is NOT mutated — `done` is the only terminal status. The squash commit on `main` IS the merge audit trail; `git log main --grep '^M<N>-NNN: '` answers "is this merged?" in one command.
+- The driver never pushes. Push remains the user's call.
+- Conflicts at the `git merge --squash` step indicate `main` advanced between commit and merge (e.g. another ticket landed in between). The driver refuses; the user rebases the per-ticket branch onto fresh `main` and re-runs `/<driver> merge`.
+
+### 8. Escalate — `/<driver> escalate M<N>-NNN`
 
 The skill prints the five-way menu in chat:
 

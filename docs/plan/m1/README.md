@@ -44,8 +44,11 @@ The **procedure** for running M1 — ticket lifecycle, reviewer behavior, escala
 # After implementing + `mvn verify`, run review
 /m1-tick review M1-NNN
 
-# After APPROVE, finalize
+# After APPROVE, finalize the commit on the per-ticket branch
 /m1-tick commit M1-NNN
+
+# Squash-merge the per-ticket branch into main (post-done housekeeping)
+/m1-tick merge M1-NNN
 
 # Adversarial security review (separate skill)
 /redteam M1-NNN              # single ticket

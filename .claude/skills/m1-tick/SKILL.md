@@ -20,6 +20,7 @@ The user invokes the skill as `/m1-tick <subcommand> [args]`. Parse the args ver
 | `start <id> --parallel` | `start --parallel` — start in a worktree |
 | `review <id>` | `review` — spawn reviewer subagent |
 | `commit <id>` | `commit` — finalize the per-ticket commit |
+| `merge <id>` | `merge` — squash-merge the per-ticket branch into main |
 | `escalate <id> [reason]` | `escalate` — fire the five-way menu |
 | `abort <id>` | `abort` — cancel an in-progress ticket and roll back |
 | `show <id>` | `show` — read-only inspection of a ticket |
@@ -213,12 +214,49 @@ Steps:
 9. Print:
    ```
    M1-NNN committed on branch m1/M1-NNN-<slug>.
-   Branch is local; push and merge are your call.
-   Recommended: squash-merge into main so main history stays one
-   commit per ticket. `git revert <sha>` cleanly undoes this ticket.
+   Next step: `/m1-tick merge M1-NNN` to squash-merge into main.
+   (Push remains your call; the skill never pushes. After merge,
+   `git revert <sha>` cleanly undoes this ticket on main.)
    ```
 
-Do NOT push. Do NOT merge. Do NOT amend the commit if a defect is found later — file a new ticket.
+Do NOT push. Do NOT amend the commit if a defect is found later — file a new ticket. Merge is a separate explicit step (`/m1-tick merge`); never auto-merge from `commit`.
+
+---
+
+## `merge <id>`
+
+Squash-merge the per-ticket branch into `main` and delete the branch. Idempotent: re-running on an already-merged ticket cleans up a stale branch (or no-ops if the branch is already gone).
+
+Preconditions:
+
+- The ticket exists and `status: done`. Refuse with `M1-NNN must be 'done' first; run /m1-tick commit M1-NNN` for any other status.
+- The working tree is clean (`git status --porcelain` returns empty). Refuse with `working tree dirty; stash or commit first` — `git checkout main` must not clobber uncommitted edits.
+- The per-ticket branch is resolvable per the **branch resolution procedure** in [`docs/process/workflow.md`](../../../docs/process/workflow.md) §"Naming conventions (slug, branch, ticket file)" OR the canonical ticket commit already exists on `main` (idempotent re-run with the branch already deleted). If neither holds, refuse — see step 1's "neither" arm.
+
+Steps:
+
+1. **Idempotency precheck.** Run `git log main --format=%s | grep -cE '^M1-NNN: '` to count commits on `main` whose subject begins with the canonical ticket prefix `M1-NNN: ` (a space after the colon, matching the commit-step subject format). Three arms:
+   - **`0` matches AND branch resolves**: the canonical squash-merge path. Continue at step 2.
+   - **`0` matches AND branch does NOT resolve**: refuse with `neither branch m1/M1-NNN-* nor a 'M1-NNN: ' commit on main found; was /m1-tick commit M1-NNN run? (status is 'done' but no committed work is locatable)`. STOP. This indicates ticket-state corruption — escalate to the user, do not silently fix.
+   - **`1` match**: the ticket is **already merged on main**. If the per-ticket branch resolves, run `git branch -D <branch>` to delete it; print `M1-NNN already merged on main; deleted stale branch <branch>`. If the branch does NOT resolve, print `M1-NNN already merged on main; no branch to delete`. STOP — success exit. (No new commit, no status change, no `STATUS.md` regen needed.)
+   - **`≥2` matches**: refuse with `multiple commits on main match '^M1-NNN: '; manual cleanup required (a prior partial merge or hand-amend has produced duplicate ticket commits — the skill will not paper over this)`. STOP. Print the matching SHAs (`git log main --format='%H %s' | grep -E '^[0-9a-f]+ M1-NNN: '`) so the user can decide.
+
+2. **Switch to main:** `git checkout main`. The working-tree-clean precondition guarantees this is non-destructive.
+
+3. **Squash-merge the branch:** `git merge --squash <branch>`. This stages the branch's cumulative tree against `main` without creating a merge commit and without advancing `HEAD`. Refuse on conflict (`git merge --squash` exits non-zero with conflict markers in the working tree) — print the conflicting paths and run `git reset --hard HEAD` to clean up; STOP. (NOT `git merge --abort` — squash mode does not set `MERGE_HEAD`, so `--abort` would emit `fatal: There is no merge to abort`. `git reset --hard HEAD` is safe here because step 2's working-tree-clean precondition guarantees nothing is being discarded.) Conflicts at this point indicate `main` advanced between commit and merge (e.g. another ticket landed); the user resolves by rebasing the per-ticket branch onto fresh `main` and re-running `/m1-tick merge`.
+
+4. **Commit with the branch tip's message verbatim:** `git commit -C $(git rev-parse <branch>)`. The `-C` flag reuses the per-ticket branch tip's full commit metadata — message body (Context paragraph, `Alternatives considered:` block, `Reviewed-by:` trailer), author, and author-date — preserving the audit trail produced by `commit` step 3. The committer line is updated to "now" automatically; this is correct (the merge happens now, the authorship was earlier).
+
+5. **Delete the branch:** `git branch -D <branch>`. `-D` (not `-d`) is required because `git merge --squash` does NOT mark the branch as merged from git's POV — git sees the squash result as an unrelated commit on `main`. The branch's content is fully captured in the squash commit; the deletion is safe.
+
+6. Print:
+   ```
+   M1-NNN merged into main (commit <new-sha>).
+   Branch m1/M1-NNN-<slug> deleted.
+   `git revert <new-sha>` cleanly undoes this ticket.
+   ```
+
+Do NOT push. Do NOT mutate the ticket's `status` (it stays `done`; the squash commit on `main` IS the merge audit trail — `git log main --grep '^M1-NNN: '` answers "is this merged?" in one command). Do NOT regenerate `STATUS.md` (counts are unchanged; STATUS.md is in-flight-work-focused, not a merge tracker).
 
 ---
 
@@ -645,7 +683,7 @@ Optional flags:
 
 ## Cross-cutting rules this skill must obey
 
-- **Never push or merge.** That's the user's call.
+- **Never push.** That's the user's call. The skill performs squash-merge locally on demand via `/m1-tick merge <id>`, but never pushes the result.
 - **Never amend a passed commit.** Defects → new ticket.
 - **Never skip `mvn verify`** before review. If the developer claims tests pass without running them, refuse and re-run.
 - **Never skip the commit-step safety re-run** for high-complexity / high-risk tickets. The cost of re-running is small; the cost of shipping a faked review is large.
