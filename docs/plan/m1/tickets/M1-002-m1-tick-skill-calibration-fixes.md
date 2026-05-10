@@ -20,15 +20,16 @@ out_of_scope:
   - any change to the round-cap rules or the round-N must-shrink rules
   - any change to the clarity pre-flight, the Plan subagent step, or the `/redteam` skill
   - any edit to `docs/process/engineering-rules-verbatim.md` (these are skill-procedure bugs, not engineering-rule changes)
+  - any edit (including deletion) of `docs/process/m1-tick-calibration-findings.md` — it is the source backlog motivating this ticket; archival or removal is a separate concern, deliberately not in scope here so the diff stays focused on the three procedural fixes
   - any edit to `docs/plan/m1/tickets/M1-001-set-up-two-module-maven-build.md` (M1-001 is done and immutable)
   - any change to `docs/plan/m1/STATUS.md` content beyond what the regenerator emits (no hand edits)
   - any change to repo source code, poms, `.gitignore`, or test code (this ticket only edits skill/process docs)
 acceptance:
   - "grep -nE 'STATUS\\.md' .claude/skills/m1-tick/SKILL.md inside the `## commit <id>` section shows STATUS.md listed among the paths excluded from the commit-candidate set in step 1, alongside the ticket file"
-  - "the `## commit <id>` procedure in .claude/skills/m1-tick/SKILL.md regenerates STATUS.md BEFORE `git commit` and stages it explicitly, so no separate post-commit STATUS.md regeneration step exists at the end of the procedure"
+  - "within the `## commit <id>` section of .claude/skills/m1-tick/SKILL.md, exactly one line matches the regex 'Regenerate `STATUS.md`', AND that line appears BEFORE the line matching 'git commit -m' (i.e. the post-commit trailing regen step is gone, replaced by a pre-commit regen step)"
   - "grep -rn 'main\\.\\.\\.HEAD' .claude/skills/m1-tick/SKILL.md docs/process/workflow.md docs/process/reviewer-prompt.md returns zero matches"
-  - "the `## review <id>` procedure in .claude/skills/m1-tick/SKILL.md documents `git add -N <untracked-files>` followed by `git diff main` (or equivalent working-tree-vs-main capture) as the canonical diff command, and `--shortstat` capture uses the same diff command"
-  - "the `## Diff` header in docs/process/reviewer-prompt.md reflects the working-tree-vs-main capture (no longer cites `git diff main...HEAD`)"
+  - "within the `## review <id>` section of .claude/skills/m1-tick/SKILL.md (lines between the `## review <id>` and `## commit <id>` headings), grep matches `git add -N` at least once AND matches `git diff main` (with no `...HEAD`) at least once"
+  - "grep -n 'git diff main' docs/process/reviewer-prompt.md returns at least one match at the `## Diff` heading line (no longer cites `main...HEAD`; subsumed by item 3 on the negative side, asserted positively here)"
   - "mvn -B verify from the repo root exits 0"
 test_plan:
   adds: []
@@ -38,13 +39,61 @@ spec_refs:
   - .claude/skills/m1-tick/SKILL.md §commit
   - .claude/skills/m1-tick/SKILL.md §review
   - docs/process/reviewer-prompt.md §Diff
-  - docs/process/workflow.md (the line citing `git diff main...HEAD` as the reviewer input)
-  - docs/process/m1-tick-calibration-findings.md (source backlog of the three findings)
+  - docs/process/workflow.md §The flow
 decision_refs: []
 
 reviews: []
-escalations: []
-revisions: []
+escalations:
+  - date: 2026-05-10
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      CLARITY VERDICT: FAIL
+
+      SPEC-REFS-VALID: FAIL
+        - .claude/skills/m1-tick/SKILL.md §commit: PASS (line 180)
+        - .claude/skills/m1-tick/SKILL.md §review: PASS (line 117)
+        - docs/process/reviewer-prompt.md §Diff: PASS (line 28)
+        - docs/process/workflow.md (the line citing `git diff main...HEAD`
+          as the reviewer input): ANCHOR-NOT-FOUND — entry has no
+          §<section> anchor; parenthetical is prose, not a heading.
+        - docs/process/m1-tick-calibration-findings.md (source backlog
+          of the three findings): ANCHOR-NOT-FOUND — entry has no
+          §<section> anchor; parenthetical is prose, not a heading.
+
+      ACCEPTANCE-RUNNABLE: WARN (items 2, 4, 5 are narrative/prose
+      checks; would be stronger as grep assertions)
+
+      BLOCKERS:
+        1. spec_refs entry 'docs/process/workflow.md (the line citing
+           `git diff main...HEAD`...)' has no §<section> anchor.
+           Fix: replace with 'docs/process/workflow.md §The flow' (or
+           similar real heading) — drop the parenthetical.
+        2. spec_refs entry
+           'docs/process/m1-tick-calibration-findings.md (source backlog
+           of the three findings)' has no §<section> anchor.
+           Fix: replace with a real anchor (e.g. §Finding 1) or remove
+           the entry — the findings file is scratchpad, not durable spec.
+revisions:
+  - date: 2026-05-10
+    reason: clarity-fail rework
+    snapshot:
+      status: escalated
+      clarity_check:
+        date: 2026-05-10
+        verdict: FAIL
+        blockers:
+          - "spec_refs entry 'docs/process/workflow.md (the line citing `git diff main...HEAD` as the reviewer input)' has no §<section> anchor and resolves to ANCHOR-NOT-FOUND."
+          - "spec_refs entry 'docs/process/m1-tick-calibration-findings.md (source backlog of the three findings)' has no §<section> anchor and resolves to ANCHOR-NOT-FOUND."
+        warnings:
+          - "ACCEPTANCE-RUNNABLE WARN: items 2, 4, 5 are narrative/prose checks rather than runnable commands"
+          - "Findings file disposition (kept vs deleted) not explicitly classified in out_of_scope or acceptance"
+      escalation_reason: clarity-fail
+      spec_refs_at_snapshot:
+        - .claude/skills/m1-tick/SKILL.md §commit
+        - .claude/skills/m1-tick/SKILL.md §review
+        - docs/process/reviewer-prompt.md §Diff
+        - docs/process/workflow.md (the line citing `git diff main...HEAD` as the reviewer input)
+        - docs/process/m1-tick-calibration-findings.md (source backlog of the three findings)
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -150,13 +199,12 @@ sessions don't worry about it.
   this ticket fixes in `workflow.md` must read as milestone-agnostic
   (no hard-coded "m1" path); anything in the m1-tick skill is M1-only
   by design.
-- The clarity pre-flight will read this ticket against the cited
-  `spec_refs`. The findings file is one of those refs because the
-  ticket's "why" lives there; if clarity blocks on the findings file
-  not being a spec/design doc, that's its own signal — the findings
-  file is process-internal scratchpad, not durable spec, and should
-  probably be deleted or archived once this ticket lands (out of scope
-  here; mention only).
+- The findings file (`docs/process/m1-tick-calibration-findings.md`)
+  is process-internal scratchpad, not durable spec, so it is NOT in
+  `spec_refs` and is explicitly listed in `out_of_scope` (no edit or
+  deletion as part of this ticket). Archival or removal is a separate
+  follow-up, deliberately deferred so this diff stays focused on the
+  three procedural fixes.
 - Don't try to also fix unrelated friction observed in M1-001 (e.g.
   the "approximate placeholder STATUS.md will be overwritten on first
   /m1-tick status" footnote). Those aren't in the calibration backlog
