@@ -1,7 +1,7 @@
 ---
 id: M1-001
 title: Set up two-module Maven build
-status: pending
+status: done
 created: 2026-05-10
 last_updated: 2026-05-10
 blocked_by: []
@@ -46,14 +46,31 @@ decision_refs:
   - D1
   - D2
 
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-05-10
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 99
+      removed: 8
 escalations: []
 revisions: []
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-05-10
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-001: Set up two-module Maven build
