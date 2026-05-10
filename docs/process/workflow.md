@@ -175,14 +175,14 @@ The skill reads `docs/plan/<milestone>/tickets/`, finds tickets where `status: p
 
 Squash-merge the per-ticket branch into `main` so `main` history stays one-commit-per-ticket. Idempotent: re-running on an already-merged ticket cleans up a stale branch instead of double-merging.
 
-- Preconditions: ticket `status: done`; working tree clean; the per-ticket branch is resolvable per the **branch resolution procedure** in §"Naming conventions (slug, branch, ticket file)" OR the canonical ticket commit (subject `M<N>-NNN: ...`) already exists on `main` (the idempotent-cleanup arm). Otherwise refuse with a diagnostic message — the driver does not silently paper over inconsistent state.
-- Idempotency precheck on `git log main --format=%s | grep -cE '^M<N>-NNN: '`:
+- Preconditions: ticket `status: done`; working tree clean; the per-ticket branch is resolvable per the **branch resolution procedure** in §"Naming conventions (slug, branch, ticket file)" OR the canonical implementation-commit (subject `M<N>-NNN: <ticket-title>` exactly) already exists on `main` (the idempotent-cleanup arm). Otherwise refuse with a diagnostic message — the driver does not silently paper over inconsistent state.
+- Idempotency precheck. The driver reads the ticket file's `title` field, constructs the canonical implementation-commit subject `M<N>-NNN: <title>`, and counts commits on `main` whose subject EQUALS this string (fixed-string whole-line match: `git log main --format=%s | grep -cFx "M<N>-NNN: <title>"`). Auxiliary commits the workflow naturally produces with the same `M<N>-NNN: ` prefix (`M<N>-NNN: draft ticket`, `M<N>-NNN: refine ticket spec ...`, `M<N>-NNN: aborted attempt #N`, etc.) have distinct summaries by convention and do NOT collide with the canonical subject. Arms:
   - `0` matches AND branch resolves → squash-merge path below.
   - `0` matches AND branch missing → refuse: ticket says `done` but no committed work is locatable; state is inconsistent.
   - `1` match → ticket already on `main`; delete the stale branch if it still resolves, otherwise no-op. Success exit.
-  - `≥2` matches → refuse: duplicate ticket commits on `main` indicate a prior partial merge or hand-amend the driver will not silently fix.
+  - `≥2` matches → refuse: duplicate canonical ticket commits on `main` indicate a prior partial merge or hand-amend the driver will not silently fix.
 - Squash-merge path: `git checkout main` → `git merge --squash <branch>` → `git commit -C <branch-tip>` (reuses the branch tip's commit message verbatim, preserving the `Reviewed-by:` trailer and any `Alternatives considered:` block) → `git branch -D <branch>`. The squash hides the branch's intermediate refine commits so `main`'s history stays one ticket = one commit.
-- Status is NOT mutated — `done` is the only terminal status. The squash commit on `main` IS the merge audit trail; `git log main --grep '^M<N>-NNN: '` answers "is this merged?" in one command.
+- Status is NOT mutated — `done` is the only terminal status. The squash commit on `main` IS the merge audit trail; `git log main --grep -F "M<N>-NNN: <title>"` (with `<title>` filled in from the ticket frontmatter) answers "is this merged?" in one command.
 - The driver never pushes. Push remains the user's call.
 - Conflicts at the `git merge --squash` step indicate `main` advanced between commit and merge (e.g. another ticket landed in between). The driver refuses; the user rebases the per-ticket branch onto fresh `main` and re-runs `/<driver> merge`.
 

@@ -235,11 +235,11 @@ Preconditions:
 
 Steps:
 
-1. **Idempotency precheck.** Run `git log main --format=%s | grep -cE '^M1-NNN: '` to count commits on `main` whose subject begins with the canonical ticket prefix `M1-NNN: ` (a space after the colon, matching the commit-step subject format). Three arms:
+1. **Idempotency precheck.** Read the ticket file's `title:` field and construct the canonical implementation-commit subject `M1-NNN: <title>` (e.g. `M1-001: Set up two-module Maven build`). Count commits on `main` whose subject EQUALS this string: `git log main --format=%s | grep -cFx "M1-NNN: <title>"`. (Fixed-string `-F` + whole-line `-x` match. Preliminary auxiliary commits using the workflow's `M1-NNN: ` prefix — `M1-NNN: draft ticket`, `M1-NNN: refine ticket spec ...`, `M1-NNN: aborted attempt #N`, etc. — have different summaries by convention and so do NOT collide with the canonical subject. A loose `^M1-NNN: ` regex would conflate them.) Three arms:
    - **`0` matches AND branch resolves**: the canonical squash-merge path. Continue at step 2.
-   - **`0` matches AND branch does NOT resolve**: refuse with `neither branch m1/M1-NNN-* nor a 'M1-NNN: ' commit on main found; was /m1-tick commit M1-NNN run? (status is 'done' but no committed work is locatable)`. STOP. This indicates ticket-state corruption — escalate to the user, do not silently fix.
+   - **`0` matches AND branch does NOT resolve**: refuse with `neither branch m1/M1-NNN-* nor a "M1-NNN: <title>" commit on main found; was /m1-tick commit M1-NNN run? (status is "done" but no committed work is locatable)`. STOP. This indicates ticket-state corruption — escalate to the user, do not silently fix.
    - **`1` match**: the ticket is **already merged on main**. If the per-ticket branch resolves, run `git branch -D <branch>` to delete it; print `M1-NNN already merged on main; deleted stale branch <branch>`. If the branch does NOT resolve, print `M1-NNN already merged on main; no branch to delete`. STOP — success exit. (No new commit, no status change, no `STATUS.md` regen needed.)
-   - **`≥2` matches**: refuse with `multiple commits on main match '^M1-NNN: '; manual cleanup required (a prior partial merge or hand-amend has produced duplicate ticket commits — the skill will not paper over this)`. STOP. Print the matching SHAs (`git log main --format='%H %s' | grep -E '^[0-9a-f]+ M1-NNN: '`) so the user can decide.
+   - **`≥2` matches**: refuse with `multiple commits on main match "M1-NNN: <title>" exactly; manual cleanup required (a prior partial merge or hand-amend has produced duplicate canonical ticket commits — the skill will not paper over this)`. STOP. Print the matching SHAs (`git log main --format='%H %s' | grep -F "M1-NNN: <title>"`) so the user can decide. Note: this arm fires only on EXACT duplicate canonical subjects, not on the natural ticket-prefix family (drafts, refines, etc.).
 
 2. **Switch to main:** `git checkout main`. The working-tree-clean precondition guarantees this is non-destructive.
 
@@ -256,7 +256,7 @@ Steps:
    `git revert <new-sha>` cleanly undoes this ticket.
    ```
 
-Do NOT push. Do NOT mutate the ticket's `status` (it stays `done`; the squash commit on `main` IS the merge audit trail — `git log main --grep '^M1-NNN: '` answers "is this merged?" in one command). Do NOT regenerate `STATUS.md` (counts are unchanged; STATUS.md is in-flight-work-focused, not a merge tracker).
+Do NOT push. Do NOT mutate the ticket's `status` (it stays `done`; the squash commit on `main` IS the merge audit trail — `git log main --grep -F "M1-NNN: <title>"` (with `<title>` filled in from the ticket frontmatter) answers "is this merged?" in one command). Do NOT regenerate `STATUS.md` (counts are unchanged; STATUS.md is in-flight-work-focused, not a merge tracker).
 
 ---
 
