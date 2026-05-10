@@ -74,7 +74,7 @@ The reviewer's `TEST-INTEGRITY-CHECK` fails if the diff introduces any of the fo
 
 ### Round-2 must-shrink
 
-- On round-2 review, the diff MUST be smaller than round-1 along at least one of: files-touched count, net lines added, or net lines removed. Round-2 is a *fix-only* round; if the rework grew the diff, that is scope-creep-during-rework and `SCOPE-DRIFT-CHECK` fails automatically.
+- On round-2 review, the diff MUST be smaller than round-1 along at least one of: files-touched count, net lines added, or net lines removed. Round-2 is a *fix-only* round; if the rework grew along **all three** dimensions simultaneously, that is scope-creep-during-rework and `SCOPE-DRIFT-CHECK` fails automatically. Growth along one or two dimensions while shrinking along the remaining one is permitted (the rework is still convergent overall).
 - The reviewer's prompt receives both round-1 and round-2 diff stats so the comparison is mechanical.
 - Exception: if round-1 REWORK explicitly required a refactor that legitimately grows the diff (e.g. "extract this into a helper used by three callers"), the developer must cite that REWORK item in the round-2 commit message. Without the citation, growth → fail.
 

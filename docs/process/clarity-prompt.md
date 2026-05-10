@@ -1,8 +1,6 @@
 # Ticket-clarity pre-flight subagent prompt template
 
-Used when `/m1-tick start <id>` spawns the clarity pre-flight subagent. The job: read the ticket and judge whether it is *startable* before any code is written. Catches bad tickets before they consume implementation rounds.
-
-The reviewer that does this runs in fresh context. The prompt is self-contained.
+This is the user prompt the m1-tick skill substitutes and passes to `Agent(subagent_type: "clarity-reviewer", ...)` for `/m1-tick start <id>`. The agent's identity, tool allowlist (Read/Grep/Glob), and model pinning (sonnet) are declared in [`.claude/agents/clarity-reviewer.md`](../../.claude/agents/clarity-reviewer.md) — those are harness-level enforcement. This template carries the *ticket data*, the *resolved spec_refs*, AND repeats the persona/discipline content because recency-bias makes inline reinforcement materially more sticky for compliance with the structured verdict format.
 
 ---
 
@@ -66,13 +64,15 @@ Every spec_ref must point at a real section. If the resolution above shows ANCHO
 
 ### 4. `files_budget` is plausible given the acceptance criteria
 
-Mental math: the acceptance criteria imply some number of files (production code + tests + maybe a migration). If `files_budget` is much smaller than that mental estimate, the ticket is under-budgeted (the developer will breach budget); FAIL or WARN. If much larger, the ticket may be doing too much (decompose); WARN.
+Mental math: the acceptance criteria imply some number of files (production code + tests + maybe a migration). If `files_budget` (numeric ceiling) is much smaller than that mental estimate, the ticket is under-budgeted (the developer will breach budget); FAIL or WARN. If much larger, the ticket may be doing too much (decompose); WARN.
 
 Rough heuristics:
   - One acceptance item that adds an integration test → at minimum 2 files (production class + test).
   - One acceptance item that adds a Flyway migration → at minimum 2 files (migration SQL + a test that exercises it).
   - One acceptance item naming an SPI → at minimum 3 files (interface + implementation + test).
   - You can be wrong; lean to WARN over FAIL on this dimension.
+
+If the ticket also sets `files_scope` (an optional path/glob list enabling the reviewer's negative-space check), additionally check: does `files_scope` cover the files the acceptance criteria imply? If `files_scope` excludes a path the acceptance clearly requires, FAIL — the developer cannot succeed. If `files_scope` is empty or absent, only the numeric `files_budget` is evaluated.
 
 ### 5. `complexity` and `risk` are calibrated
 
@@ -105,7 +105,8 @@ SPEC-REFS-VALID: <PASS | FAIL>
   <one bullet per spec_ref with PASS or ANCHOR-NOT-FOUND>
 
 FILES-BUDGET-PLAUSIBLE: <PASS | WARN | FAIL>
-  <one paragraph: estimated files needed vs files_budget>
+  <one paragraph: estimated files needed vs files_budget; if files_scope
+   is set, also note whether it covers the implied paths>
 
 COMPLEXITY-RISK-CALIBRATED: <PASS | WARN>
   <one paragraph: any miscalibration>
@@ -144,7 +145,7 @@ the output literally.
    - `docs/spec/<file>.md §<section> → FOUND (line N: "<heading>")`
    - `docs/spec/<file>.md §<section> → ANCHOR-NOT-FOUND`
 2. Substitutes `{{TICKET_FILE_CONTENT}}` and `{{SPEC_REF_RESOLUTIONS}}`.
-3. Spawns `Agent(subagent_type: "code-reviewer", prompt: <substituted>, description: "Clarity pre-flight M1-NNN")`. Foreground.
+3. Spawns `Agent(subagent_type: "clarity-reviewer", prompt: <substituted>, description: "Clarity pre-flight M<N>-NNN")`. Foreground.
 4. Parses the structured verdict.
 5. Records under `clarity_check:` in ticket frontmatter:
    ```yaml

@@ -211,6 +211,19 @@ infochat.collector.partition-prune-cron=0 30 3 * * ?
 infochat.collector.ttl-prune-cron=0 0 4 * * ?
 infochat.provider.digest-tick-cron=0 * * * * ?   # checks every minute for due groups
 
+# ── Single-instance enforcement (D41; §7.8.5) ──────────────────────────
+# Heartbeat tick interval written by the lock-holding instance to
+# provider_state / collector_state. Profile default per §7.2.1 fills in
+# when unset (laptop/vps/remote-llm: 10s, pi: 30s); explicit operator
+# value always wins.
+# infochat.heartbeat.interval=PT10S
+
+# ── Groups (deployment-wide defaults; per-group overrides via /group-timezone) ─
+# Default timezone assigned to a newly-created group row (spec/deployment.md
+# §Configuration surface — Groups). IANA tzdb name; per-group override is the
+# /group-timezone command (03-commands.md §3.10).
+infochat.groups.default-timezone=UTC
+
 # ── HTTP / observability ───────────────────────────────────────────────
 # quarkus.http.port is service-specific and lives in each service's own
 # application.properties (see the two blocks below). Setting it here once
@@ -591,6 +604,10 @@ Restart=on-failure
 RestartSec=5
 StartLimitBurst=10
 StartLimitIntervalSec=300
+# Fatal-conflict exit code from the pg_try_advisory_lock loser (§7.8.5).
+# Without this, systemd would restart-loop the rejected instance against
+# the running holder — the loser must stay down so the operator notices.
+RestartPreventExitStatus=42
 
 # Hardening — defence in depth on top of running as a non-root user.
 NoNewPrivileges=yes              # cannot regain privileges via setuid binaries

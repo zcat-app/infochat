@@ -1,8 +1,8 @@
 # Red-team (threat-actor) subagent prompt template
 
-Used when `/redteam <target>` spawns the threat-actor subagent. The `/redteam` skill substitutes the placeholders below and passes the result as the `prompt` argument to `Agent(subagent_type: "code-reviewer", ...)` (the same fresh-context-reviewer agent type, but with an adversarial framing).
+Used when `/redteam <target>` spawns the threat-actor subagent. The `/redteam` skill substitutes the placeholders below and passes the result as the `prompt` argument to `Agent(subagent_type: "threat-actor", ...)`. The agent's identity, tool allowlist (Read/Grep/Glob), and model pinning are declared in [`.claude/agents/threat-actor.md`](../../.claude/agents/threat-actor.md) — those are harness-level enforcement.
 
-The adversary starts with **zero conversation context and zero implementation context**. It sees the threat model and the diff, nothing else. The framing — "you are looking for the gap between what the system *promised* to defend against and what it actually delivers" — is what makes this different from the engineering-rules reviewer.
+The adversary starts with **zero conversation context and zero implementation context**. It sees the threat model and the diff, nothing else. The framing — "you are looking for the gap between what the system *promised* to defend against and what it actually delivers" — is what makes this different from the engineering-rules reviewer (`code-reviewer`); both reviewers run in fresh context, but this one applies an adversarial threat-model lens rather than an implementation-rules lens.
 
 ---
 
@@ -81,7 +81,7 @@ do not assume it is exhaustive.
 | AUDIT-EVASION | Operations that should leave an audit trail but don't, or where the audit row is writable by the actor. |
 
 ---
-<<<
+
 ## Return exactly this format
 
 RED-TEAM VERDICT: <CLEAN | FINDINGS>
@@ -124,15 +124,22 @@ write-up beyond SUGGESTED-FIX-CLASS. The skill parses the output literally.
 
 ## Skill responsibilities (what `/redteam` does around the prompt)
 
-1. Resolves the target into a base→head git range. For `milestone <name>`, that's the merge-base of `main` and the first ticket of the milestone vs `main`. For `id-range <from>..<to>`, computes the inclusive ticket-set's collective diff vs `main` at the start of the range. For `<ticket-id>`, that's `main^...m1/M1-NNN-<slug>`.
+1. Resolves the target into a base→head git range. The exact algorithm — including how a single-ticket target's range is computed for both merged and unmerged states — lives in [`.claude/skills/redteam/SKILL.md`](../../.claude/skills/redteam/SKILL.md) §1 "Resolve the diff range". The resolved refs are substituted into `{{BASE_REF}}` and `{{HEAD_REF}}`.
 2. Reads `docs/spec/security.md` and substitutes `{{SECURITY_SPEC_CONTENT}}`.
-3. Greps the diff for sensitive-surface markers and substitutes `{{AUTH_PATHS}}`, `{{AUTHZ_PATHS}}`, `{{INPUT_PATHS}}`, `{{BAN_PATHS}}`, `{{AUDIT_PATHS}}`. Markers are pattern-based:
-   - auth: files under `**/security/auth/**`, methods named `*authenticate*`, `*invite*`, `@PermitAll`, `@RolesAllowed`
-   - authz: `is_admin`, `is_group_admin`, `@RolesAllowed`, files under `**/security/authz/**`
-   - input: adapter inbound classes, `@Path`/`@POST`/`@GET` handlers, JSON deserialization sites, LLM tool-method signatures
-   - ban: anything matching `*ban*` (case-insensitive) outside of comments
-   - audit: writes to `audit_log` table, `AuditLogger.*` calls
-4. Spawns `Agent(subagent_type: "code-reviewer", prompt: <substituted>, description: "Red-team M1-NNN")`. Foreground.
+3. Greps the diff for sensitive-surface markers and substitutes `{{AUTH_PATHS}}`, `{{AUTHZ_PATHS}}`, `{{INPUT_PATHS}}`, `{{BAN_PATHS}}`, `{{AUDIT_PATHS}}`. The canonical pattern list for each placeholder is below — when this list changes, the `/redteam` SKILL's grep step must be updated in lockstep.
+
+### Sensitive-surface patterns (canonical)
+
+| Placeholder | Surface | Patterns to grep for in the diff |
+|---|---|---|
+| `{{AUTH_PATHS}}` | Authentication / invite-code / first-mention registration | files under `**/security/auth/**`; methods named `*authenticate*` or `*invite*`; annotations `@PermitAll`, `@RolesAllowed` |
+| `{{AUTHZ_PATHS}}` | Authorization / admin-tier gates / per-(user, scope) isolation | `is_admin`, `is_group_admin`, `@RolesAllowed`; files under `**/security/authz/**` |
+| `{{INPUT_PATHS}}` | Input validation / message intake / LLM tool-call argument parsing | adapter inbound classes; `@Path` / `@POST` / `@GET` handlers; JSON deserialization sites; LLM tool-method signatures |
+| `{{BAN_PATHS}}` | Ban handling / fixed-response-only paths | anything matching `*ban*` (case-insensitive) outside comments |
+| `{{AUDIT_PATHS}}` | Audit log writes | writes to the `audit_log` table; `AuditLogger.*` calls |
+
+For each placeholder, the SKILL collects `file:line` tuples and emits one per line into the substitution. If a surface has no matches in the diff, the substitution is the literal string `(none touched)`. The list is intentionally non-exhaustive — it is a focusing aid, not a guarantee. The adversary subagent is reminded in the prompt body not to assume the list is complete.
+4. Spawns `Agent(subagent_type: "threat-actor", prompt: <substituted>, description: "Red-team <target>")`. Foreground.
 5. Parses the structured verdict.
 6. Records findings in:
    - For single-ticket targets: the ticket's `redteam_findings:` frontmatter list.

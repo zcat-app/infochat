@@ -1,11 +1,17 @@
 ---
-id: M1-NNN
+id: M<N>-NNN
 title: <imperative title, ≤ 60 chars>
 status: pending                # pending | in-progress | in-review | escalated | done | deferred
 created: <YYYY-MM-DD>          # set on first save; never edited afterwards
-last_updated: <YYYY-MM-DD>     # auto-updated by /m1-tick on every status transition
+last_updated: <YYYY-MM-DD>     # auto-updated by the milestone-driver skill on every status transition
 blocked_by: []
-files_budget: 8
+files_budget: 8                # numeric upper bound; max files this ticket may touch (incl. tests).
+                               # Reviewer FAILs SCOPE-DRIFT-CHECK if exceeded. Numeric is canonical.
+files_scope:                   # OPTIONAL path/glob list. When present, the reviewer ALSO performs
+                               # the negative-space check (files in scope NOT touched are surfaced
+                               # as PASS or WARN). Omit when the budget is purely numeric.
+  # - infochat-collector/src/main/java/.../rss/**
+  # - infochat-collector/src/test/java/.../rss/**
 complexity: low                # low | medium | high
 risk: low                      # low | medium | high
 round_cap: 2                   # default 2; opt-in to 3 only for complexity:high or risk:high
@@ -35,33 +41,42 @@ decision_refs:
   # Explicit decision IDs this ticket carries forward.
   # - D44
 
-# --- Lineage fields (populated by /m1-tick during escalations; usually empty) -----
+# --- Lineage fields (populated by the milestone-driver skill during escalations; usually empty) -----
+#
+# Placeholder convention (see docs/process/workflow.md §Ticket-ID placeholder convention):
+#   M<N>-NNN = the operand of the current driver invocation
+#   M<N>-AAA, M<N>-BBB = tickets newly created by the current invocation
+#   M<N>-XXX, M<N>-YYY = tickets referenced (existed before this invocation)
 
-decomposed_from:               # ticket ID this was split from, if any (e.g. M1-017)
-replaces:                      # ticket ID this rewrites, if any (refine path resulted in a new ticket)
-replaced_by:                   # set on the OLD ticket when refine produces a new one
-deferred_on:                   # ticket ID this ticket is blocked on, if status: deferred
-deferred_reason:               # one of: decomposed | blocked-on-new-ticket | spec-amend | out-of-scope
-spec_amend_for:                # set when this ticket exists to amend the spec for a paused parent
-spec_amend_parent:             # the parent ticket waiting on this spec amendment
+decomposed_from: M<N>-XXX      # the parent ticket this was split out from (parent = operand of decompose)
+replaces: M<N>-XXX             # the prior ticket this rewrites (refine path resulted in a new ticket)
+replaced_by: M<N>-AAA          # set on the OLD ticket when refine produces a new one
+deferred_on: M<N>-XXX          # the blocker ticket this is paused on (if status: deferred)
+deferred_reason:               # one of: decomposed | blocked-on-new-ticket | spec-amend
+spec_amend_for: docs/spec/X.md §Y    # set when this ticket exists to amend the cited spec section
+spec_amend_parent: M<N>-XXX    # the implementation ticket waiting on this amendment to land
+remediates: M<N>-XXX           # set on a remediation ticket created from a /redteam finding on a done ticket
+                               # (the original done ticket is NEVER amended; the new ticket carries the fix)
 
-# --- Dynamic fields (populated by /m1-tick; start empty) -------------------------
+# --- Dynamic fields (populated by the milestone-driver skill; start empty) -------
 
-reviews: []                    # list of {round, date, verdict, checks}
+reviews: []                    # list of {round, date, verdict, checks, diff_stats}
 escalations: []                # list of {date, reason, reviewer_verdict_excerpt}
-revisions: []                  # populated by /m1-tick on `refine` escalations
-overrides: []                  # populated by /m1-tick on `override` escalations
+revisions: []                  # populated on `refine` escalations
+overrides: []                  # populated on `override` escalations
+aborted_attempts: []           # populated by `abort`; one entry per aborted attempt
+reopens: []                    # populated by `reopen`; one entry per reopen
 redteam_findings: []           # populated by /redteam; one entry per finding
-clarity_check: {}              # populated by /m1-tick start when ticket-clarity pre-flight runs
+clarity_check: {}              # populated by `start` when ticket-clarity pre-flight runs
 ---
 
-# M1-NNN: <title>
+# M<N>-NNN: <title>
 
 ## Context
 
 One paragraph. Why does this ticket exist? What does completing it
-unlock? Cite the parent milestone goal in `docs/plan/implementation-plan.md`
-§Milestone 1 if applicable.
+unlock? Cite the parent milestone goal in `docs/plan/<milestone>/README.md`
+(e.g. `docs/plan/m1/README.md` §M1 milestone goal) if applicable.
 
 ## Definition of Done
 

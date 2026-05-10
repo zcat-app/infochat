@@ -63,12 +63,21 @@ Preconditions (refuse and explain if any fail):
 - The working tree is clean (`git status` shows no uncommitted changes), unless `--parallel` is set.
 - If not `--parallel`: there is no other ticket with `status: in-progress` or `status: in-review`.
 - If `--parallel`:
-  - The new ticket's `files_budget` paths and `out_of_scope` entries are provably disjoint from every in-flight ticket.
+  - The new ticket and every in-flight ticket BOTH declare a non-empty `files_scope`, AND the new ticket's `files_scope` and `out_of_scope` entries are provably disjoint from every in-flight ticket's. Tickets without `files_scope` (purely numeric `files_budget`) cannot start in parallel — the skill cannot mechanically prove disjointness without a path list.
   - Neither the new ticket nor any in-flight ticket has `migration_touch: true`.
 
 Steps:
 
-1. **Ticket-clarity pre-flight.** Read `docs/process/clarity-prompt.md`. Resolve every `spec_refs` entry by reading the cited file and locating the anchor heading; build the `{{SPEC_REF_RESOLUTIONS}}` block. Substitute placeholders. Spawn `Agent(subagent_type: "code-reviewer", prompt: <substituted>, description: "Clarity pre-flight M1-NNN")`. Foreground.
+1. **Ticket-clarity pre-flight.** Read `docs/process/clarity-prompt.md`. Resolve every `spec_refs` entry per the algorithm below; build the `{{SPEC_REF_RESOLUTIONS}}` block. Substitute placeholders. Spawn `Agent(subagent_type: "clarity-reviewer", prompt: <substituted>, description: "Clarity pre-flight M1-NNN")`. Foreground.
+
+   **`spec_refs` anchor resolution algorithm.** For each `spec_refs` entry of the form `<file-path> §<section-title>`:
+   1. Read `<file-path>`.
+   2. Find every line beginning with `#`-markers (`#`, `##`, `###`, etc.).
+   3. Strip the `#`-markers and surrounding whitespace from each candidate heading.
+   4. Lowercase both the candidate and the searched section-title; do a substring match (the searched title must appear as a substring of the candidate, or vice-versa for partial titles).
+   5. If exactly one heading matches, the resolution is `FOUND (line N: "<heading>")`.
+   6. If zero match, the resolution is `ANCHOR-NOT-FOUND`.
+   7. If multiple match, prefer the heading whose depth (count of `#` markers) is closest to the most recently resolved anchor's depth; tie-break by line number ascending. If still tied, the resolution is `AMBIGUOUS (lines: N, M, ...)` — the clarity reviewer treats AMBIGUOUS as FAIL.
 2. Parse the clarity verdict. Append to ticket frontmatter:
    ```yaml
    clarity_check:
@@ -80,13 +89,15 @@ Steps:
 3. Branch on clarity verdict:
    - `PASS` → continue.
    - `WARN` → print warnings; continue.
-   - `FAIL` → print blockers, refuse the start, leave status as `pending`. Suggest the user run `/m1-tick escalate <id> refine` (the refine path edits the ticket).
+   - `FAIL` → print blockers; refuse the start; fire `escalate` with `reason: clarity-fail` (this sets status to `escalated` and prints the five-way menu with `clarity_check.blockers:` as the trigger context). Status does NOT pass through `in-progress`.
 4. Set the ticket's frontmatter `status: in-progress`. Update `last_updated` to today's date.
-5. Compute slug from the title (lowercase, ASCII, hyphenated, ≤ 30 chars).
+5. Compute slug from the title per the canonical rule in [`docs/process/workflow.md`](../../../docs/process/workflow.md) §"Naming conventions (slug, branch, ticket file)".
 6. Branch:
    - **Sequential:** `git checkout -b m1/M1-NNN-<slug>` from `main`.
    - **Parallel:** create a worktree via `Agent(isolation: "worktree")` and run the rest of the flow inside it.
-7. If `complexity: high`, spawn `Agent(subagent_type: "Plan")` with the ticket file content and require it to return an implementation outline before any code edit. The outline becomes an "Implementation outline" section appended to the ticket body. The developer (the main conversation) reads it before touching code.
+7. If `complexity: high`: read `docs/process/plan-prompt.md`, substitute `{{TICKET_ID}}`, `{{TICKET_FILE_CONTENT}}`, and the same `{{SPEC_REF_RESOLUTIONS}}` block built for clarity. Spawn `Agent(subagent_type: "Plan", prompt: <substituted>, description: "Implementation outline M1-NNN")`. Foreground.
+   - If the response begins with `## OUTLINE FAILED`, append the OUTLINE FAILED block to the ticket body and fire `escalate` with `reason: outline-fail`. The branch created in step 6 is left in place (it'll be deleted by `abort` if the user chooses to abandon, or reused after `refine`).
+   - Otherwise, append the outline to the ticket body under a new `## Implementation outline` section. The developer (the main conversation) reads it before touching code.
 8. Regenerate `STATUS.md`.
 9. Print:
 
@@ -116,11 +127,11 @@ Steps:
 2. Capture inputs:
    - `git diff main...HEAD` (full diff).
    - Diff stats: files touched, net lines added, net lines removed. (For round 2, also surface round-1 diff stats from frontmatter.)
-   - Build the negative-space list: union of paths matched by `files_budget` (when expressed as paths/globs) minus paths actually present in the diff.
+   - Build the negative-space list: if the ticket has a non-empty `files_scope`, take the union of paths matched by those globs minus paths actually present in the diff. If `files_scope` is empty or absent, the negative-space list is the literal sentinel string `(no path-level scope declared — files_budget is purely numeric, no negative-space evaluation applicable)` and the reviewer reports PASS on `NEGATIVE-SPACE-CHECK` by definition.
    - The tail of the most recent `mvn verify` output (last ~200 lines; full log persisted to `target/m1-tick-test-{{ID}}-r{{ROUND}}.log`).
    - The ticket file content.
-3. Read `docs/process/reviewer-prompt.md` and substitute placeholders (`{{TICKET_ID}}`, `{{TICKET_FILE_CONTENT}}`, `{{DIFF_OUTPUT}}`, `{{R1_FILES}}`, `{{R1_ADDED}}`, `{{R1_REMOVED}}`, `{{R2_FILES}}`, `{{R2_ADDED}}`, `{{R2_REMOVED}}`, `{{NEGATIVE_SPACE_LIST}}`, `{{TEST_OUTPUT_TAIL}}`, `{{TEST_LOG_PATH}}`, `{{SLUG}}`, `{{ROUND}}`).
-4. Spawn `Agent(subagent_type: "code-reviewer", prompt: <substituted>, description: "Review M1-NNN")`. Foreground (the verdict gates the next step).
+3. Read `docs/process/reviewer-prompt.md` and substitute placeholders (`{{TICKET_ID}}`, `{{TICKET_FILE_CONTENT}}`, `{{DIFF_OUTPUT}}`, `{{R1_FILES}}`, `{{R1_ADDED}}`, `{{R1_REMOVED}}`, `{{R2_FILES}}`, `{{R2_ADDED}}`, `{{R2_REMOVED}}`, `{{NEGATIVE_SPACE_LIST}}`, `{{TEST_OUTPUT_TAIL}}`, `{{TEST_LOG_PATH}}`, `{{BRANCH}}` (the per-ticket branch name, e.g. `m1/M1-NNN-<slug>`), `{{ROUND}}`).
+4. Spawn `Agent(subagent_type: "code-reviewer", prompt: <substituted>, description: "Review M1-NNN")`. Foreground (the verdict gates the next step). The `code-reviewer` agent is defined at `.claude/agents/code-reviewer.md` (read-only tool allowlist, opus model).
 5. Parse the structured verdict.
 6. Append to ticket frontmatter under `reviews:`:
    ```yaml
@@ -149,9 +160,10 @@ Steps:
 
    - **REWORK, round 1.** Set `status: in-progress`. Append the rework items to the ticket body under a new `## Round 1 rework` section. Print the rework items in chat. Remind the developer to address only the named items, then re-run `mvn verify`, then `/m1-tick review M1-NNN`.
 
-   - **REWORK, round 2.** Read the ticket's `round_cap`. If `round_cap: 3`, set `status: in-progress` and append a `## Round 2 rework` section. Otherwise set `status: escalated` and fire `escalate` with `reason: round-cap`.
-
-   - **REWORK, round 3.** Set `status: escalated`. Fire `escalate` with `reason: round-cap`.
+   - **REWORK, round N (N≥2).**
+     - If the verdict's `SCOPE-DRIFT-CHECK: FAIL` reason includes a must-shrink violation (round-N diff grew along all three dimensions vs round-(N−1) without an authorized refactor citation), set `status: escalated` and fire `escalate` with `reason: round-cap`. Must-shrink failures do NOT consume a round-cap allowance — they exit immediately because the rework is no longer convergent. This applies even when `round_cap: 3`.
+     - Otherwise, if `round_cap: 3` AND this is round 2: set `status: in-progress` and append a `## Round 2 rework` section. The next review will be round 3 and will be compared to round 2 for must-shrink.
+     - Otherwise (round 2 with default `round_cap: 2`, or round 3 with any `round_cap`): set `status: escalated` and fire `escalate` with `reason: round-cap`.
 
    - **MANUAL.** Set `status: escalated`. Fire `escalate` with `reason: manual-verdict`.
 
@@ -163,15 +175,16 @@ Steps:
 
 Preconditions:
 
-- `status: in-review` and the most recent entry under `reviews:` has `verdict: APPROVE`.
-- Working tree is clean except for the ticket file's frontmatter update (which the next steps will commit alongside the code).
+- `status: in-review` and the most recent entry under `reviews:` has `verdict: APPROVE` OR `verdict: OVERRIDE-APPROVE` (the latter is written by the override escalation path).
+- Working tree contains the implementation diff to be committed; the ticket file's frontmatter update is the only mutation step 4 below adds.
 
 Steps:
 
-1. **Test-freshness safety check.**
-   - For tickets with `complexity: high` OR `risk: high`: re-run `mvn verify` from the repo root. Refuse to commit if it does not exit zero.
-   - For all other tickets: locate the most recent `target/m1-tick-test-{ID}-r*.log`. Read its mtime. Compute the latest mtime among the staged files (production + test code, but not the ticket file). If the test log is older than any staged file, refuse and require a fresh `mvn verify`.
-2. Build the commit message:
+1. **Identify the files about to be committed.** Run `git diff --name-only HEAD` to list modified files in the working tree. Exclude the ticket file itself (the ticket file's frontmatter mutation in step 4 happens *after* this check; we're checking the freshness of the test result against the source/test code that produced it). Call this set the *commit candidates*.
+2. **Test-freshness safety check.**
+   - For tickets with `complexity: high` OR `risk: high`: re-run `mvn verify` from the repo root. Refuse to commit if it does not exit zero. Persist a fresh log to `target/m1-tick-test-{ID}-rcommit.log`.
+   - For all other tickets: locate the most recent `target/m1-tick-test-{ID}-r*.log`. Read its mtime. Compute the latest mtime among the *commit candidates* from step 1. If the test log is older than any commit candidate, refuse and tell the user to re-run `mvn verify` (the test result is stale relative to the code about to be committed).
+3. Build the commit message:
    ```
    M1-NNN: <ticket title>
 
@@ -183,14 +196,14 @@ Steps:
      - <alt 1>: <reason>
      - <alt 2>: <reason>
 
-   Reviewed-by: code-reviewer (VERDICT: APPROVE; round <r>)
+   Reviewed-by: code-reviewer (VERDICT: <APPROVE|OVERRIDE-APPROVE>; round <r>)
    ```
-3. Set ticket frontmatter `status: done`. Update `last_updated`.
-4. Stage the changed files (use specific names; never `git add -A`).
-5. `git commit -m "<heredoc message>"` — single commit.
-6. Regenerate `STATUS.md`.
-7. If the ticket has `security_relevant: true`, remind the user that [`/redteam M1-NNN`](../redteam/SKILL.md) is recommended before merging.
-8. Print:
+4. Set ticket frontmatter `status: done`. Update `last_updated`. (This mutation produces a working-tree modification on the ticket file in addition to the commit candidates from step 1.)
+5. Stage explicitly: `git add` each commit candidate from step 1, plus the ticket file. Never `git add -A`.
+6. `git commit -m "<heredoc message>"` — single commit.
+7. Regenerate `STATUS.md`.
+8. If the ticket has `security_relevant: true`, remind the user that [`/redteam M1-NNN`](../redteam/SKILL.md) is recommended before merging.
+9. Print:
    ```
    M1-NNN committed on branch m1/M1-NNN-<slug>.
    Branch is local; push and merge are your call.
@@ -204,14 +217,16 @@ Do NOT push. Do NOT merge. Do NOT amend the commit if a defect is found later �
 
 ## `escalate <id> [reason]`
 
-Reasons (auto-set by `review` or passed explicitly):
+Reasons (auto-set by `review`/`start` or passed explicitly):
 
-- `round-cap` — round-cap returned non-APPROVE.
+- `round-cap` — round-cap returned non-APPROVE, or a must-shrink violation forced an early exit from the rework loop.
 - `manual-verdict` — reviewer returned MANUAL.
+- `clarity-fail` — clarity pre-flight returned FAIL during `/m1-tick start`.
+- `outline-fail` — Plan subagent returned `OUTLINE FAILED` during `/m1-tick start` (only reachable for `complexity: high` tickets).
 - `budget-breach` — developer is about to exceed `files_budget`.
 - `premise-fail` — tests fail in a way that suggests the ticket's premise is wrong.
 - `loop` — two consecutive failures with the same root cause.
-- `redteam-finding` — [`/redteam`](../redteam/SKILL.md) returned non-CLEAN and the user opened the lifecycle escalation for the affected ticket.
+- `redteam-finding` — [`/redteam`](../redteam/SKILL.md) returned non-CLEAN and the user opened the lifecycle escalation for the affected ticket. **REFUSED if the operand ticket has `status: done`** — done commits are immutable (per `CLAUDE.md` §M1 workflow "never amend a passed commit"). The redteam SKILL prints the alternative recommendation in this case: draft a new remediation ticket with `remediates: <done-id>` pointing back at the done ticket, then run `/m1-tick start <new-id>`. The done ticket's `redteam_findings:` is still populated for traceability.
 
 Steps:
 
@@ -225,18 +240,25 @@ Steps:
           or "N/A" if escalation is from budget-breach/loop/premise-fail>
    ```
 2. Regenerate `STATUS.md`.
-3. Print the five-way menu (in chat — the user picks):
+3. Print the five-way menu (in chat — the user picks). The "trigger context" block adapts based on reason:
+   - `round-cap` / `manual-verdict` → the verbatim verdict from the most recent `reviews:` entry.
+   - `clarity-fail` → the verbatim `clarity_check.blockers:` list.
+   - `outline-fail` → the verbatim `## OUTLINE FAILED` block appended to the ticket body by `start`.
+   - `redteam-finding` → the verbatim relevant entries from `redteam_findings:`.
+   - `budget-breach` / `premise-fail` / `loop` → a one-line description from the developer ("about to touch file X outside files_budget", "test Y fails because spec invariant Z is violated", "second failure on root cause W").
 
 ```
 M1-NNN: <title>  —  ESCALATED
 Trigger: <reason>
 
-Reviewer's last verdict (or trigger context):
-  <verbatim block>
+Trigger context:
+  <verbatim block per the table above; "N/A" only as a last resort>
 
 Choose:
   1. refine     — acceptance criteria were ambiguous; rewrite the ticket
   2. override   — reviewer was too strict; record the override and approve
+                  (NOT applicable to clarity-fail, outline-fail, premise-fail,
+                   budget-breach, loop, or redteam-finding)
   3. decompose  — split into N tickets; defer this one and queue replacements
   4. defer      — block on a new ticket the work surfaced; pause this one
   5. spec-amend — the spec itself is wrong; raise an amendment ticket and pause
@@ -248,7 +270,12 @@ Reply with: <number> [optional notes]
 
 5. On user reply, dispatch:
 
-   - **`1` (refine).** Snapshot current frontmatter under `revisions:` with date + reason. Prompt the user for the new acceptance criteria / out_of_scope / files_budget / etc. Apply the edits. Set `status: in-progress` and remind the developer to re-implement against the new criteria. The clarity pre-flight does NOT re-run on refine (the user has already written the new ticket); WARN if the refined ticket would have failed clarity.
+   - **`1` (refine).** Snapshot current frontmatter under `revisions:` with date + reason. Print the path of the ticket file and the relevant trigger context (clarity blockers, reviewer's last verdict, etc.); ask the user to edit the file directly and reply `done` when finished. The skill does NOT accept inline chat-format edits — file-edit + `done` is the single supported input mode (avoids the ambiguity of parsing free-form chat replies into YAML frontmatter and body sections). When the user replies `done`, re-read the file, verify the snapshot under `revisions:` is still present, and dispatch on the *prior* escalation reason (read from the most recent `escalations:` entry):
+
+     - **Refine after `clarity-fail` or `outline-fail`** (no branch ever existed; the ticket never reached `in-progress`): set `status: pending`. Clear `clarity_check:` (it described the *old* ticket; the rewritten ticket needs a fresh evaluation). Tell the user to run `/m1-tick start M1-NNN` again — the next `start` will re-run clarity against the rewritten ticket, which is the correct behavior because the previous FAIL means the ticket was never validated.
+     - **Refine after `round-cap`, `manual-verdict`, `budget-breach`, `premise-fail`, `loop`, or `redteam-finding`** (branch exists, implementation is in progress or complete): set `status: in-progress` and remind the developer to re-implement against the new criteria on the existing branch. The clarity pre-flight does NOT re-run on refine in this arm (the criteria are new but the implementation context — branch, prior diff, prior `mvn verify` — is preserved); WARN if the refined ticket would have failed clarity.
+
+     The two arms differ only in destination status (`pending` vs `in-progress`) and whether `clarity_check:` is cleared. Both arms preserve the snapshot under `revisions:` for the audit trail.
 
    - **`2` (override).** Append to ticket frontmatter:
      ```yaml
@@ -259,24 +286,59 @@ Reply with: <number> [optional notes]
          user_justification: |
            <user's reason from the reply>
      ```
-     Set `status: in-review` (with the prior APPROVE-equivalent verdict synthesized — the user's override IS the approval). Proceed to `commit`.
+     Append to `reviews:` a synthesized verdict entry distinct from a real APPROVE so the audit trail preserves the difference:
+     ```yaml
+     reviews:
+       - round: <same round number as the overridden REWORK>
+         date: <YYYY-MM-DD>
+         verdict: OVERRIDE-APPROVE
+         checks:
+           # carry through the actual checks from the overridden REWORK; they
+           # remain FAIL/WARN as the reviewer reported them. The verdict alone
+           # carries the override.
+         override_ref: <index of the corresponding overrides[] entry>
+     ```
+     Set `status: in-review`. The commit precondition accepts `verdict: OVERRIDE-APPROVE` exactly as it accepts `APPROVE`. Proceed to `commit`.
 
      Override is NOT permitted for `TEST-INTEGRITY-CHECK: FAIL` flowing through `MANUAL` — the user must explicitly acknowledge that they are overriding test integrity, and the override entry must include the literal text `"acknowledging-test-integrity-override"` in `user_justification`.
 
-   - **`3` (decompose).** Ask the user to name the N replacement ticket IDs and one-line titles. Set this ticket's `status: deferred` with `deferred_reason: decomposed`. Create N skeleton ticket files from `docs/process/ticket-template.md` with `blocked_by: []`, `decomposed_from: M1-NNN`, and the user-supplied titles, placed under `docs/plan/m1/tickets/`. Print the new ticket paths so the user can flesh them out.
+   - **`3` (decompose).** Ask the user how many replacement tickets and to provide one-line titles for each. Allocate IDs (`M1-AAA`, `M1-BBB`, ...) via the **ID allocation algorithm** below; do NOT ask the user for IDs (manual ID assignment risks collision with deferred or aborted tickets the user has forgotten about). Set the operand ticket's `status: deferred` with `deferred_reason: decomposed`. Create N skeleton ticket files from `docs/process/ticket-template.md`, one per allocated ID, each placed under `docs/plan/m1/tickets/M1-AAA-<slug-of-AAA>.md` (and `M1-BBB-...`, etc.). Skeleton frontmatter rules:
 
-   - **`4` (defer).** Ask the user to name the blocking ticket (existing ID) or to draft a new one. Set this ticket's `status: deferred`, `deferred_on: <blocker-id>`, `deferred_reason: blocked-on-new-ticket`. If new blocker, create the skeleton ticket file. Print the deferred state.
+     - `id: M1-AAA` (the allocated ID, distinct per skeleton)
+     - `title:` from the user-supplied one-liner
+     - `status: pending`
+     - `created:` today; `last_updated:` today
+     - `blocked_by: []` — the parent's `blocked_by` is NOT auto-inherited. Each child starts with no blockers. Ask the user once, after listing the new ticket paths: "Did the parent ticket M<N>-NNN have any `blocked_by` entries that should propagate to all/some/none of the children?" Apply their answer. Inter-skeleton dependencies (one child blocks another) are also the user's call — the skill does not infer them.
+     - `decomposed_from: M1-NNN` (the operand)
+     - **Sizing fields (`files_budget`, `files_scope`, `complexity`, `risk`, `round_cap`, `security_relevant`, `migration_touch`) are NOT inherited from the parent.** They are left at the template defaults (`files_budget: 8`, `files_scope: []`, `complexity: low`, `risk: low`, `round_cap: 2`, the rest `false`). The skeleton is a *placeholder*; the user must edit each new ticket to set sizing accurately for the smaller scope. The reasoning: a parent decomposed because it was too big; inheriting its sizing onto each child re-creates the original sizing problem distributed.
+     - `out_of_scope: []`, `acceptance: []`, `test_plan: { adds: [], preserves: [...] }`, `spec_refs: []`, `decision_refs: []` — the user must fill these in. The clarity pre-flight will FAIL on `start` until they do, which is the intended forcing function.
+     - All dynamic fields (`reviews`, `escalations`, `revisions`, `overrides`, `aborted_attempts`, `reopens`, `redteam_findings`, `clarity_check`) start empty.
 
-   - **`5` (spec-amend).** Ask the user which spec section is wrong (path + section heading) and what the amendment should change. Create a new ticket with:
-     - `id: M1-NNN+1` (or the next free ID)
+     Print the new ticket paths so the user can flesh them out, plus a one-line reminder: "Each skeleton needs acceptance criteria, sizing, and `out_of_scope` filled in before `/m1-tick start <id>` will pass clarity."
+
+   - **`4` (defer).** Ask the user to name the blocking ticket — either an existing ID (`M1-XXX`) or "draft a new one". If existing, use that ID directly. If new, allocate an ID (`M1-AAA`) via the **ID allocation algorithm** and create the skeleton ticket file at `docs/plan/m1/tickets/M1-AAA-<slug>.md`. Set the operand ticket's `status: deferred`, `deferred_on: <M1-XXX or M1-AAA>`, `deferred_reason: blocked-on-new-ticket`. Print the deferred state and (if newly allocated) the new ticket path.
+
+   - **`5` (spec-amend).** Ask the user which spec section is wrong (path + section heading) and what the amendment should change. Allocate the new amendment ticket's ID (`M1-AAA`) via the **ID allocation algorithm** below. Create the new ticket at `docs/plan/m1/tickets/M1-AAA-<slug>.md` with:
+     - `id: M1-AAA`
      - `title: "Amend <spec-path> §<section>"`
      - `spec_amend_for: <path>:§<section>`
-     - `spec_amend_parent: M1-NNN`
+     - `spec_amend_parent: M1-NNN` (the operand)
      - `acceptance:` derived from the user's amendment description (the new ticket's job is to land the spec change, not the implementation).
 
-     Set the ORIGINAL ticket: `status: deferred`, `deferred_on: <new-amendment-ticket-id>`, `deferred_reason: spec-amend`. Print the new ticket path. The amendment ticket must be `done` before the original can be reopened.
+     Set the operand ticket: `status: deferred`, `deferred_on: M1-AAA`, `deferred_reason: spec-amend`. Print the new ticket path. The amendment ticket must be `done` before the operand can be reopened.
 
 6. Regenerate `STATUS.md` after the resolution applies.
+
+### ID allocation algorithm
+
+Used by `decompose` and `spec-amend` to allocate fresh ticket IDs.
+
+1. Glob `docs/plan/m1/tickets/M1-*.md` (or for other milestones, the corresponding directory).
+2. Parse the `id:` field from every file's frontmatter. Include tickets in EVERY status — pending, in-progress, in-review, escalated, done, deferred. IDs of `aborted_attempts:` are NOT separate IDs (they're attempts on existing tickets), so they don't enter this scan.
+3. Extract the numeric suffix from each ID (e.g. `M1-007` → `7`). Take the maximum.
+4. Allocated ID = `M1-<max+1>`, zero-padded to 3 digits (e.g. `M1-008`).
+5. For multiple allocations in one operation (decompose into N), allocate sequentially: `M1-<max+1>`, `M1-<max+2>`, etc.
+6. **IDs are never reused.** A `done` ticket's ID is reserved for that ticket forever; a `deferred` ticket's ID stays with it through reopen; even an aborted-and-restarted ticket keeps its original ID. This way `git log --grep "M1-007"` returns the full history of that ID's work.
 
 ---
 
@@ -297,29 +359,41 @@ Steps:
    ```
    ABORT M1-NNN: <title>
    Branch m1/M1-NNN-<slug> will be deleted (uncommitted work on it will be lost).
-   Ticket frontmatter will be reset to status: pending.
-   Reviews and clarity-check history will be archived under aborted_attempts:.
+   Ticket frontmatter on `main` will be updated: status reset to pending,
+   prior attempt archived under aborted_attempts:. The skill commits the
+   archive on main BEFORE deleting the branch.
 
    Confirm with: yes
    ```
 2. Wait for the user's literal `yes`. Any other reply aborts the abort.
-3. Snapshot the current frontmatter under a new `aborted_attempts:` list:
-   ```yaml
-   aborted_attempts:
-     - date: <YYYY-MM-DD>
-       prior_status: <in-progress | in-review>
-       reviews_at_abort: <copy of the reviews list>
-       clarity_check_at_abort: <copy of clarity_check>
-       reason: <user's optional reason from the abort args>
-   ```
-4. Reset frontmatter: `status: pending`, clear `reviews:`, clear `clarity_check:`, update `last_updated`. Keep `created` untouched.
-5. Switch to `main`, then delete the branch: `git branch -D m1/M1-NNN-<slug>`. (Use `-D` because the branch may have local commits the user is intentionally discarding.)
-6. Regenerate `STATUS.md`.
-7. Print:
-   ```
-   M1-NNN aborted. Status reset to pending. Branch m1/M1-NNN-<slug> deleted.
-   Prior attempts archived under aborted_attempts:.
-   ```
+3. **Snapshot from the branch** (we are currently on the branch). Read the ticket file's current frontmatter into memory: capture `status`, `reviews:`, `clarity_check:`, anything else in dynamic fields. This is the data that will become the `aborted_attempts:` archive entry.
+4. **Switch to main** with `git checkout main`. This discards any uncommitted working-tree changes on the branch (including the ticket file's in-progress modifications) — which is the intended destructive behavior of abort.
+5. **Read the ticket file on main.** This is the older state (typically with `status: pending` from before `start` ran, or `status: in-progress` if a prior abort committed an in-progress reset — either way, the persistent main-branch state).
+6. **Build the new frontmatter on main:**
+   - Append the snapshot from step 3 to `aborted_attempts:`:
+     ```yaml
+     aborted_attempts:
+       - date: <YYYY-MM-DD>
+         prior_status: <captured status from step 3>
+         reviews_at_abort: <captured reviews from step 3>
+         clarity_check_at_abort: <captured clarity_check from step 3>
+         reason: <user's optional reason from the abort args>
+     ```
+   - Set `status: pending`.
+   - Clear `reviews:`, `clarity_check:` (these belonged to the aborted attempt; they're now archived).
+   - Update `last_updated` to today.
+   - Keep `created`, `blocked_by`, `files_budget`, `files_scope`, `complexity`, `risk`, `round_cap`, `security_relevant`, `migration_touch`, `out_of_scope`, `acceptance`, `test_plan`, `spec_refs`, `decision_refs`, lineage fields untouched.
+7. **Commit the archive on main:**
+   - Stage only the ticket file: `git add docs/plan/m1/tickets/M1-NNN-<slug>.md`.
+   - Commit subject: `M1-NNN: aborted attempt #<N> (reason: <reason-or-no-reason-given>)` where `<N>` is the new length of `aborted_attempts:` after appending. This makes aborts visible in `git log --oneline` and `git bisect`.
+8. **Delete the branch:** `git branch -D m1/M1-NNN-<slug>`. (Use `-D` because the branch may have local commits the user is intentionally discarding.)
+9. Regenerate `STATUS.md`.
+10. Print:
+    ```
+    M1-NNN aborted. Branch m1/M1-NNN-<slug> deleted.
+    Archive committed on main as attempt #<N> under aborted_attempts:.
+    Status reset to pending. To resume work, run `/m1-tick start M1-NNN`.
+    ```
 
 ---
 
@@ -380,7 +454,117 @@ Steps:
    - Done.
    - Deferred (with deferred_reason breakdown).
    - Dependency DAG (ASCII; nodes are ticket IDs, edges are blocked_by AND deferred_on).
-4. Render `docs/plan/m1/STATUS.md`. Set its `Last updated` line to today's date.
+4. Render `docs/plan/m1/STATUS.md` using the template below verbatim. Set the `Last updated` line to today's date. Substitute the computed sections; for any empty section, emit the literal `_(none)_` line shown in the template. The template intentionally matches the existing committed `docs/plan/m1/STATUS.md` style so the first `/m1-tick status` invocation produces minimal diff against the placeholder.
+
+   ```markdown
+   # M1 status board
+
+   > **Auto-generated by `/m1-tick status`.** Do not hand-edit. Source of truth is the frontmatter of the files under `docs/plan/m1/tickets/`. If this file disagrees with frontmatter, frontmatter wins; re-run `/m1-tick status` to regenerate.
+
+   **Last updated:** <YYYY-MM-DD>
+
+   ---
+
+   ## Summary
+
+   | Status | Count |
+   |---|---|
+   | pending | <n> |
+   | in-progress | <n> |
+   | in-review | <n> |
+   | escalated | <n> |
+   | done | <n> |
+   | deferred | <n> |
+   | **total** | **<n>** |
+
+   ---
+
+   ## Runnable now
+
+   Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
+
+   - M1-NNN — <title> (complexity: <c>, risk: <r>)
+   - ...
+
+   _(or `_(none — all pending tickets are blocked)_` when empty)_
+
+   ---
+
+   ## In flight
+
+   | ID | Title | Status | Last review |
+   |---|---|---|---|
+   | M1-NNN | ... | in-progress | round <r> <verdict> on <date> |
+
+   _(or `_(none)_` when empty)_
+
+   ---
+
+   ## Blocked
+
+   Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
+
+   - M1-NNN — blocked_by: M1-XXX (status), M1-YYY (status)
+
+   _(or `_(none)_` when empty)_
+
+   ---
+
+   ## Escalated (awaiting user resolution)
+
+   | ID | Title | Trigger | Date |
+   |---|---|---|---|
+   | M1-NNN | ... | round-cap | <date> |
+
+   _(or `_(none)_` when empty)_
+
+   ---
+
+   ## Done
+
+   Showing the 10 most recently `done` tickets (full history is git-log-derivable via `git log --grep "^M1-"`).
+
+   | ID | Title | Done date | Verdict |
+   |---|---|---|---|
+   | M1-NNN | ... | <date> | round <r> APPROVE |
+
+   _(or `_(none)_` when empty)_
+
+   ---
+
+   ## Deferred
+
+   Grouped by `deferred_reason`. Emit only subsections with non-zero entries.
+
+   ### decomposed (<n>)
+   - M1-NNN → replaced by M1-AAA, M1-BBB, M1-CCC
+
+   ### spec-amend (<n>)
+   - M1-NNN → blocked on M1-AAA (amends docs/spec/X.md §Y)
+
+   ### blocked-on-new-ticket (<n>)
+   - M1-NNN → blocked on M1-XXX
+
+   _(or `_(none)_` under the section header when all subsections are empty)_
+
+   ---
+
+   ## Dependency graph
+
+   ASCII DAG: nodes are ticket IDs (with status in parens), edges are `blocked_by` AND `deferred_on` relationships. Mark runnable tickets with `←`.
+
+   ```
+   M1-001 (done)
+     ├── M1-005 (done)
+     │     └── M1-012 (in-progress)
+     └── M1-007 (pending) ← runnable
+   M1-002 (escalated)
+   M1-008 (deferred — spec-amend → M1-009)
+     └── M1-009 (pending) ← runnable
+   ```
+
+   _(or `_(none — will render once tickets exist)_` when there are no tickets)_
+   ```
 5. Print a one-screen summary of the same content (counts + runnable list + in-flight) so the user sees it without opening the file.
 
 Optional flags:
@@ -397,7 +581,7 @@ Optional flags:
 - **Never skip the commit-step safety re-run** for high-complexity / high-risk tickets. The cost of re-running is small; the cost of shipping a faked review is large.
 - **Never spawn a developer-subagent.** The main conversation is the developer; subagents this skill spawns are: the reviewer (always at `review`), the planner (only on `complexity: high` at `start`), and the clarity pre-flight (always at `start`). The threat-actor subagent lives in the separate [`/redteam`](../redteam/SKILL.md) skill — this skill never spawns it directly.
 - **Never edit `STATUS.md` by hand.** Always regenerate from frontmatter.
-- **Never silently expand a ticket's `files_budget` or `out_of_scope`.** Frontmatter changes go through `escalate → refine`.
+- **Never silently expand a ticket's `files_budget`, `files_scope`, or `out_of_scope`.** Frontmatter changes go through `escalate → refine`.
 - **Never use destructive shortcuts** (`--no-verify`, `git reset --hard`, `--skip-tests`, force-push) to make obstacles disappear. Escalate instead.
 - **`abort` is destructive and requires explicit user confirmation.** Branch deletion uses `git branch -D` only after the user types `yes`.
 - **If this skill's procedure conflicts with `CLAUDE.md` §Engineering rules, §M1 workflow, `docs/process/workflow.md`, `docs/plan/m1/README.md`, or `docs/process/engineering-rules-verbatim.md`, those win.** Stop and surface the conflict; do not proceed.

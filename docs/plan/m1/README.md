@@ -23,6 +23,7 @@ The **procedure** for running M1 — ticket lifecycle, reviewer behavior, escala
 | Reviewer subagent prompt template | [`docs/process/reviewer-prompt.md`](../../process/reviewer-prompt.md) |
 | Clarity pre-flight prompt template | [`docs/process/clarity-prompt.md`](../../process/clarity-prompt.md) |
 | Red-team (threat-actor) prompt template | [`docs/process/redteam-prompt.md`](../../process/redteam-prompt.md) |
+| Plan subagent prompt template (used for `complexity: high` tickets at `start`) | [`docs/process/plan-prompt.md`](../../process/plan-prompt.md) |
 | Ticket frontmatter + body template | [`docs/process/ticket-template.md`](../../process/ticket-template.md) |
 | Driver skill (M1) | [`.claude/skills/m1-tick/SKILL.md`](../../../.claude/skills/m1-tick/SKILL.md) |
 | Adversarial security review skill | [`.claude/skills/redteam/SKILL.md`](../../../.claude/skills/redteam/SKILL.md) |

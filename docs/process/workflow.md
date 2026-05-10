@@ -10,20 +10,54 @@ Precedence on conflict: `CLAUDE.md` summary < this document < [`engineering-rule
 
 > **Milestone tokens used below.** Examples use `M<N>` (e.g. `M1`, `M2`) for ticket-ID prefixes and `m<N>` (e.g. `m1`, `m2`) for branch and directory tokens. The currently active milestone is M1, driven by the `/m1-tick` skill. Future milestones may instantiate their own driver skill or extend the existing one.
 
+> **Ticket-ID placeholder convention.** Where examples and skill text reference ticket IDs, they use these placeholders to avoid confusing the *operand* of an invocation with *other* tickets touched by it:
+>
+> - `M<N>-NNN` — **operand**: the ticket the user passed to the subcommand (e.g. `/m1-tick start M1-007` makes `M<N>-NNN = M1-007` everywhere in that invocation).
+> - `M<N>-AAA`, `M<N>-BBB`, `M<N>-CCC` — **newly created** by this invocation (decompose children, spec-amend amendment ticket, drafted blocker on defer).
+> - `M<N>-XXX`, `M<N>-YYY`, `M<N>-ZZZ` — **referenced** by the operand or by frontmatter (existing `blocked_by` entries, `decomposed_from`, `deferred_on`, `spec_amend_parent` from the perspective of an unrelated ticket).
+>
+> When you see `M<N>-NNN` in skill steps, it is always the operand. When you see `M<N>-AAA` and friends, those are fresh IDs the skill allocates per the [ID allocation algorithm](../../.claude/skills/m1-tick/SKILL.md#id-allocation-algorithm). When you see `M<N>-XXX`, the ticket is being referenced by ID without being either the operand or newly created.
+
 ---
 
 ## Lifecycle
 
 ```
-   pending                              ┌─→ done
-      │                                 │   (squash-merge into main)
-      ▼                                 │
-   in-progress  ───→  in-review  ───────┤
-   (developer)        (reviewer)        │
-                          │             │
-                          ▼             ▼
-                      escalated  ──→  refine | override | decompose | defer | spec-amend
+   pending  ─────────────────────────────────────────────────────────┐
+      │  ▲                                                           │
+      │  │ refine after clarity-fail / outline-fail                  │
+      │  │ (no branch ever existed; status returns to pending,       │
+      │  │  user re-runs /<driver> start to re-trigger clarity)      │
+      │  │                                                           │
+      ▼  │   clarity-fail / outline-fail  (skips in-progress)        ▼
+   in-progress  ──────────→  in-review  ─────────────────→  done
+   (developer)               (reviewer)                     (squash-merge into main)
+       ▲                         │
+       │   REWORK rounds 1..N    │
+       └─────────────────────────┘
+       (N=2 default; N=3 if            ▼
+        round_cap: 3)                escalated  ───→  refine     ─→ (in-progress if branch exists; pending otherwise)
+                                         │           override   ─→ (straight to commit; APPROVE bypassed)
+                                         │           decompose  ─→ (this ticket → deferred; new tickets created)
+                                         │           defer      ─→ (this ticket → deferred; blocker queued)
+                                         ▼           spec-amend ─→ (this ticket → deferred; amendment ticket queued)
+                                      deferred
+                                      (resume via /<driver> reopen once blocker is done)
 ```
+
+Edges:
+
+- `pending → in-progress` — normal `start` path (clarity PASS or WARN; for `complexity: high` tickets, also requires the Plan subagent to return an outline rather than `OUTLINE FAILED`).
+- `pending → escalated` — `start`-blocked-by-clarity-FAIL OR `outline-fail` for `complexity: high` tickets (Plan subagent returned `OUTLINE FAILED` after the branch was created). The status never passes through `in-progress` for the clarity-fail arm; for the outline-fail arm the branch exists but is rolled back if the user resolves with refine-to-pending or abort.
+- `in-progress → in-review` — `review` step.
+- `in-review → in-progress` — REWORK (rounds 1..N).
+- `in-review → escalated` — round-cap or `MANUAL` verdict.
+- `in-review → done` — `APPROVE` (or `OVERRIDE-APPROVE`) followed by `commit` and squash-merge.
+- `escalated → pending` — `refine` resolution when the prior escalation reason was `clarity-fail` or `outline-fail` (no branch). The user re-runs `/<driver> start` to re-trigger clarity.
+- `escalated → in-progress` — `refine` resolution when the prior escalation reason was `round-cap`, `manual-verdict`, `budget-breach`, `premise-fail`, `loop`, or `redteam-finding` (branch exists; clarity does NOT re-run).
+- `escalated → in-review → done` — `override` resolution (APPROVE bypassed; `OVERRIDE-APPROVE` recorded in `reviews:`).
+- `escalated → deferred` — `decompose`, `defer`, or `spec-amend`.
+- `deferred → pending` — `/<driver> reopen` once the blocker is `done`.
 
 Status values (used in ticket frontmatter):
 
@@ -42,73 +76,31 @@ A ticket may move between `in-progress` and `in-review` once (the round-2 rework
 
 ## Ticket frontmatter
 
-Every ticket file under `docs/plan/<milestone>/tickets/` starts with YAML frontmatter. The complete schema lives in [`ticket-template.md`](ticket-template.md); the load-bearing fields are documented below. Static fields are author-supplied; dynamic fields are populated by the milestone-driver skill (e.g. `/m1-tick`) and start empty.
+Every ticket file under `docs/plan/<milestone>/tickets/` starts with YAML frontmatter. The **complete, authoritative schema lives in [`ticket-template.md`](ticket-template.md)** — that file is the single editing source for field names, defaults, comments, body section order, and example values. This section is a navigation aid: it summarises the load-bearing fields so you can read a ticket without opening the template, and points at the canonical text for the full field list.
 
-```yaml
----
-# --- Identity & lifecycle ---
-id: M<N>-NNN
-title: Short imperative title (≤ 60 chars)
-status: pending             # pending | in-progress | in-review | escalated | done | deferred
-created: 2026-05-09         # set on first save; never edited
-last_updated: 2026-05-09    # auto-updated on every status transition
-blocked_by: []              # ticket IDs that must be `done` before this can start
+If this section disagrees with `ticket-template.md`, the template wins; sync this section.
 
-# --- Sizing & risk ---
-files_budget: 8             # max files this ticket may touch (incl. tests). Breach → escalate.
-complexity: low             # low | medium | high. high → spawn Plan subagent before implementing.
-risk: low                   # low | medium | high. high → reviewer extra-strict, mandatory full-suite re-run on commit.
-round_cap: 2                # default 2; opt-in to 3 ONLY for complexity:high or risk:high.
-security_relevant: false    # true → triggers /redteam (threat-actor review skill)
-migration_touch: false      # true → ticket touches Flyway migrations; serializes parallel start
+**Load-bearing fields (the ones that gate workflow behavior):**
 
-# --- Scope ---
-out_of_scope:
-  - infochat-provider/**
-  - migrations under V99__*
-acceptance:                 # ideally runnable assertions, not prose
-  - "mvn -pl infochat-collector test -Dtest=RssFetcherIT returns success"
-  - "Flyway migration V003__source.sql applies cleanly on a fresh DB"
-test_plan:
-  adds:
-    - infochat-collector/src/test/java/.../RssFetcherIT.java
-  preserves:
-    - all tests currently green on main
-spec_refs:
-  - docs/spec/architecture.md §Inter-service communication
-  - docs/spec/schema.md §Sources and tags
-decision_refs:
-  - D38
-  - D44
+| Field | Purpose | Used by |
+|---|---|---|
+| `id` | Stable ticket identifier (`M<N>-NNN`). Never reused. | every step |
+| `status` | Lifecycle state (`pending` → `in-progress` → `in-review` → `done` / `escalated` / `deferred`). | every step |
+| `blocked_by` | List of ticket IDs that must be `done` before this can start. | `next`, `start` preconditions |
+| `files_budget` | Numeric upper bound on file count touched by the diff (always enforced). | reviewer SCOPE-DRIFT-CHECK |
+| `files_scope` | Optional path/glob list. Enables negative-space check + parallelism eligibility. | reviewer NEGATIVE-SPACE-CHECK, `start --parallel` |
+| `out_of_scope` | Path/feature exclusions the diff MUST NOT touch. | reviewer OUT-OF-SCOPE-CHECK |
+| `acceptance` | Runnable / testable criteria, ideally one assertion per item. | reviewer ACCEPTANCE-CHECK, clarity pre-flight |
+| `complexity` | `low` / `medium` / `high`; `high` triggers the Plan subagent at `start`. | `start` |
+| `risk` | `low` / `medium` / `high`; `high` triggers the commit-time `mvn verify` re-run. | `commit` |
+| `round_cap` | Default 2; may be 3 for `complexity: high` OR `risk: high` tickets. | reviewer round bookkeeping |
+| `security_relevant` | When `true`, `/redteam` is recommended after APPROVE. | `commit` reminder |
+| `migration_touch` | When `true`, serializes parallel start globally. | `start --parallel` preconditions |
+| `spec_refs` / `decision_refs` | Anchors into `docs/spec/` and the decisions log. | clarity pre-flight |
+| `clarity_check`, `reviews`, `escalations`, `revisions`, `overrides`, `redteam_findings`, `aborted_attempts`, `reopens` | Dynamic — populated by the milestone-driver skill. Authors leave empty. | the driver skill |
+| Lineage (`decomposed_from`, `replaces`, `replaced_by`, `deferred_on`, `deferred_reason`, `spec_amend_for`, `spec_amend_parent`, `remediates`) | Populated only when applicable (escalation paths, redteam remediation on done tickets). | the driver skill |
 
-# --- Lineage (populated only when applicable) ---
-decomposed_from:            # ticket ID this was split from
-replaces:                   # ticket ID this rewrites (refine path)
-replaced_by:                # set on the OLD ticket when refine produces a new one
-deferred_on:                # ticket ID this ticket is blocked on
-deferred_reason:            # decomposed | blocked-on-new-ticket | spec-amend | out-of-scope
-spec_amend_for:             # set on a ticket whose purpose is to amend the spec for a paused parent
-spec_amend_parent:          # the parent ticket waiting on this spec amendment
-
-# --- Dynamic (populated by the driver skill; start empty) ---
-reviews: []                 # {round, date, verdict, checks, diff_stats}
-escalations: []             # {date, reason, reviewer_verdict_excerpt}
-revisions: []               # populated on `refine` escalations
-overrides: []               # populated on `override` escalations
-redteam_findings: []        # populated by /redteam
-clarity_check: {}           # populated by the driver's `start` (pre-flight)
----
-```
-
-Body sections (in this order):
-
-1. **Context** — one paragraph: why this ticket exists, what it unlocks.
-2. **Definition of Done** — bulleted, testable. Mirrors `acceptance` but in plain language.
-3. **Implementation notes** — non-binding hints. Pointers to relevant code, not a step-by-step.
-4. **Big-picture notes** — what the implementer must keep in mind that isn't in the immediate diff. E.g., "this fetcher will later be one of N kinds; design the SPI so kind 2 doesn't need to retrofit it."
-5. **Out-of-scope expansion** — prose explanation of what `out_of_scope` covers and why.
-6. **Authorized test changes** — list of pre-existing tests this ticket modifies and the new expected behavior. Required when modifying any pre-existing test (see canonical rules §8 test-modification authorization). Otherwise: "(none — this ticket adds tests but does not modify existing ones)".
-7. **Alternatives considered** — if relevant. Discourages re-deriving the same alternatives during implementation.
+For body section order (Context → Definition of Done → Implementation notes → Big-picture notes → Out-of-scope expansion → Authorized test changes → Alternatives considered) and field defaults / comments / example values, read [`ticket-template.md`](ticket-template.md) directly.
 
 ---
 
@@ -132,7 +124,7 @@ The skill reads `docs/plan/<milestone>/tickets/`, finds tickets where `status: p
 
 ### 2. Implement
 
-- Touch only files within `files_budget` and outside `out_of_scope`. Approaching the budget → escalate before exceeding it.
+- Touch at most `files_budget` files; if `files_scope` is set, every touched file must also match a glob in that list. Stay outside `out_of_scope`. Approaching the numeric budget → escalate before exceeding it.
 - Match existing style. No adjacent improvements (CLAUDE.md §Surgical changes).
 - If a better alternative surfaces → record under `Alternatives considered:` in the eventual commit message; complete the ticket as written.
 
@@ -150,7 +142,7 @@ The skill reads `docs/plan/<milestone>/tickets/`, finds tickets where `status: p
 - Reviewer receives:
   - The ticket file.
   - The diff (`git diff main...HEAD`).
-  - The list of files in `files_budget` that were NOT touched (the "negative space"), so the reviewer can judge whether the un-touched files were a deliberate skip or a forgotten part of the scope.
+  - The list of files in `files_scope` that were NOT touched (the "negative space"), so the reviewer can judge whether the un-touched files were a deliberate skip or a forgotten part of the scope. When `files_scope` is empty, the negative-space report is empty and `NEGATIVE-SPACE-CHECK` reports PASS by definition.
   - The test output.
   - On round 2: the round-1 diff stats (files touched, lines added, lines removed) for the must-shrink check.
   - The verbatim engineering rules and test-integrity rules embedded inline (the reviewer subagent has no other context).
@@ -166,7 +158,7 @@ The skill reads `docs/plan/<milestone>/tickets/`, finds tickets where `status: p
 | `REWORK` (round 2) | Escalate, unless the ticket sets `round_cap: 3` AND the round-2 diff actually shrank vs round 1. With `round_cap: 3`, allow one more rework round; otherwise no round 3. |
 | `MANUAL` | Escalate immediately. The reviewer's uncertainty is not for the developer to resolve. |
 
-**Round-2 must-shrink.** Round 2 is a fix-only round. The reviewer compares round-2 diff stats to round-1 and fails `SCOPE-DRIFT-CHECK` if the round-2 diff is larger along files-touched, net lines added, or net lines removed — unless the round-1 REWORK explicitly required a refactor that grows the diff and the developer cited that REWORK item in the round-2 commit message.
+**Round-2 must-shrink.** Round 2 is a fix-only round. The reviewer compares round-2 diff stats to round-1: the round-2 diff MUST be smaller along **at least one** of files-touched, net lines added, or net lines removed. Growth along **all three** dimensions simultaneously fails `SCOPE-DRIFT-CHECK` — unless the round-1 REWORK explicitly required a refactor that grows the diff and the developer cited that REWORK item in the round-2 commit message. The canonical rule is in [`engineering-rules-verbatim.md`](engineering-rules-verbatim.md) §8 "Round-2 must-shrink".
 
 ### 6. Commit — `/<driver> commit M<N>-NNN`
 
@@ -203,55 +195,29 @@ Reply with: <number> [optional notes]
 
 - `refine` → user edits the ticket; status returns to `in-progress`. The original frontmatter is preserved in a `revisions:` list with the date and a one-line reason.
 - `override` → reviewer's specific objections are recorded under `overrides:` with a one-line user justification. Status returns to `in-review` and the skill proceeds to commit.
-- `decompose` → user names the replacement ticket IDs. Original ticket → `status: deferred` with `deferred_reason: decomposed`. Replacement skeletons created in `docs/plan/<milestone>/tickets/` with `decomposed_from: M<N>-NNN` populated. The lineage is queryable so a stale child doesn't get lost when its parent is later reopened.
+- `decompose` → driver allocates fresh IDs (`M<N>-AAA`, `M<N>-BBB`, ...) via the ID allocation algorithm; user provides only titles. Operand → `status: deferred` with `deferred_reason: decomposed`. Replacement skeletons created in `docs/plan/<milestone>/tickets/M<N>-AAA-<slug>.md` (etc.) with `decomposed_from: M<N>-NNN` (the operand) populated on each child. The lineage is queryable so a stale child doesn't get lost when its parent is later reopened.
 - `defer` → user names the blocking ticket ID (or asks the skill to draft it). Original → `status: deferred` with `deferred_on:` and `deferred_reason: blocked-on-new-ticket`. Blocker → new pending ticket.
-- `spec-amend` → the spec itself is wrong. The skill creates a new ticket whose acceptance criteria amend the spec section, with `spec_amend_for: <spec-path-and-section>` and `spec_amend_parent: M<N>-NNN`. The original ticket → `status: deferred` with `deferred_reason: spec-amend` and `deferred_on:` pointing at the new amendment ticket. Use this instead of `decompose` whenever the issue is "the spec said X but should say Y", not "the implementation needs to be split into N pieces."
+- `spec-amend` → the spec itself is wrong. Driver allocates a fresh ID (`M<N>-AAA`) for the amendment ticket, whose acceptance criteria amend the spec section, with `spec_amend_for: <spec-path-and-section>` and `spec_amend_parent: M<N>-NNN` (the operand). The operand → `status: deferred` with `deferred_reason: spec-amend` and `deferred_on: M<N>-AAA`. Use this instead of `decompose` whenever the issue is "the spec said X but should say Y", not "the implementation needs to be split into N pieces."
 
 ---
 
 ## Reviewer verdict format
 
-The reviewer subagent MUST return a single message with this structure:
+The reviewer subagent returns a single structured message: a top-level `VERDICT` line (`APPROVE` / `REWORK` / `MANUAL`) followed by per-check results (`SCOPE-DRIFT-CHECK`, `TEST-INTEGRITY-CHECK`, `OUT-OF-SCOPE-CHECK`, `NEGATIVE-SPACE-CHECK`, `ACCEPTANCE-CHECK`) and, on REWORK, a list of specific addressable `REWORK ITEMS`.
 
-```
-VERDICT: <APPROVE | REWORK | MANUAL>
+The **canonical, complete output specification — including the exact paragraph-level instructions for each check and the verdict-rules block — lives in [`reviewer-prompt.md`](reviewer-prompt.md)**, which is what the reviewer subagent actually sees verbatim. That file is the single editing source; this section is a navigation aid.
 
-SCOPE-DRIFT-CHECK: <PASS | FAIL>
-  <one paragraph: which changed lines do not trace to acceptance criteria
-   or files_budget, or PASS if all do. On round 2, also FAIL if the diff
-   grew along files-touched, lines added, or lines removed and round-1
-   REWORK did not authorize a refactor.>
+If this section disagrees with `reviewer-prompt.md`, the prompt template wins; sync this section.
 
-TEST-INTEGRITY-CHECK: <PASS | FAIL>
-  <one paragraph: any forbidden patterns introduced (see canonical rules
-   §8 in engineering-rules-verbatim.md, embedded inline in the prompt),
-   or PASS if none>
+**Verdict-rules summary** (full text in `reviewer-prompt.md` §"Verdict rules"):
 
-OUT-OF-SCOPE-CHECK: <PASS | FAIL>
-  <one paragraph: any file or path in `out_of_scope` was touched, or PASS>
+- Any `*-CHECK: FAIL` forces `VERDICT` to be at least `REWORK`. `APPROVE` requires every check to be `PASS` — `NEGATIVE-SPACE-CHECK: WARN` is permitted under `APPROVE` and surfaces as informational.
+- `ACCEPTANCE-CHECK: PARTIAL` is `REWORK` unless the missing items are blocked on a deferred dependency, in which case `MANUAL`.
+- `TEST-INTEGRITY-CHECK: FAIL` with developer rationale "this is fine because…" is `MANUAL`, not `REWORK` — test integrity is not developer-overridable. Override is the user's call only.
+- `MANUAL` is for genuine reviewer uncertainty (ambiguous spec, conflicting rules, no clear path). Loop indicators are `REWORK`, not `MANUAL`.
+- `REWORK ITEMS` must be specific and addressable in the existing diff. "Refactor X for clarity" is too vague; "rename `Foo.bar()` to `Foo.baz()` to match `docs/spec/X.md` §Y" is fine.
 
-NEGATIVE-SPACE-CHECK: <PASS | WARN>
-  <one paragraph: list of files in `files_budget` that were NOT touched.
-   PASS if every untouched file is plausibly a deliberate skip; WARN if
-   any look like forgotten parts of the scope. WARN does not force
-   REWORK but the reviewer flags it for the user.>
-
-ACCEPTANCE-CHECK: <PASS | PARTIAL | FAIL>
-  <one bullet per acceptance item, with PASS/FAIL/SKIPPED and a one-line
-   reason>
-
-REWORK ITEMS: (omit on APPROVE; required on REWORK)
-  1. <specific, addressable, scoped to existing diff>
-  2. ...
-
-UNCERTAINTY: (required on MANUAL; omit otherwise)
-  <what is unclear, what the options are, why this can't be auto-resolved>
-```
-
-Verdict rules:
-- Any `*-CHECK: FAIL` forces `VERDICT` to be at least `REWORK`. `APPROVE` requires every check to be `PASS` (`NEGATIVE-SPACE-CHECK: WARN` is permitted under `APPROVE` and is surfaced to the user as informational).
-- `MANUAL` is for genuine reviewer uncertainty (ambiguous spec, conflicting rules, no clear path). Use sparingly.
-- `REWORK ITEMS` must be specific and addressable in the existing diff. "Refactor X for clarity" is too vague; "rename `Foo.bar()` to `Foo.baz()` to match §1.4 of the spec" is fine.
+The `OVERRIDE-APPROVE` verdict is distinct from `APPROVE`: it is written by the milestone-driver skill on the override escalation path (not by the reviewer) and preserves the original FAIL/WARN check results in the audit trail. The commit step accepts both `APPROVE` and `OVERRIDE-APPROVE`.
 
 ---
 
@@ -291,12 +257,39 @@ Reviewed-by: code-reviewer (VERDICT: APPROVE; agent run: <id-or-NA>)
 Default: sequential. One `in-progress` ticket at a time.
 
 Parallel allowed when:
-- Two `pending` tickets have empty intersection on `files_budget` (no shared paths).
+- Two `pending` tickets have empty intersection on `files_scope` (no shared paths). Tickets without `files_scope` (purely numeric budgets) cannot be parallelized — the skill cannot mechanically prove disjointness without a path list.
 - Two `pending` tickets have empty intersection on `out_of_scope` exclusions.
 - Neither has `migration_touch: true` AND no in-flight ticket has `migration_touch: true` (migrations serialize globally; the flag makes the rule mechanically checkable).
 - The user explicitly opts in via `/<driver> start <id> --parallel`.
 
 If parallel, each ticket runs in a git worktree (`Agent(isolation: "worktree")`). The skill refuses to start a parallel ticket whose constraints overlap an in-flight ticket; the conflict is surfaced via `STATUS.md`.
+
+---
+
+## Naming conventions (slug, branch, ticket file)
+
+The same slug derivation is used in three places: the per-ticket branch name, the ticket file name on disk, and any tooling that needs to refer to a ticket by branch (notably `/redteam <id> --in-progress`). Define it once here so every milestone-driver skill and any auxiliary skill can produce the same string from the same ticket.
+
+**Slug computation rule (canonical):**
+
+1. Take the ticket's `title` field.
+2. Lowercase it.
+3. Drop every character that is not ASCII `[a-z0-9 -]` (Unicode, punctuation, accents, smart quotes — all stripped).
+4. Collapse runs of whitespace to a single space; trim leading/trailing whitespace.
+5. Replace each remaining space with a hyphen.
+6. Collapse runs of consecutive hyphens to a single hyphen; trim leading/trailing hyphens.
+7. Truncate to 30 characters maximum, then trim a trailing hyphen if the truncation produced one.
+8. If the result is the empty string after all of the above (e.g. the title was non-ASCII), use the literal string `untitled`.
+
+**Derived names:**
+
+- Per-ticket branch: `m<N>/M<N>-NNN-<slug>` — e.g. `m1/M1-007-rss-fetcher-spi`.
+- Ticket file path: `docs/plan/m<N>/tickets/M<N>-NNN-<slug>.md`.
+- Test-log path: `target/<driver>-test-M<N>-NNN-r<round>.log` (no slug; the ID alone is enough).
+
+The slug is computed from the title at `start` and from the title at `redteam --in-progress`. Because titles can be edited via `refine`, the slug derived from the *current* title may not match the slug embedded in the existing branch name. When `redteam --in-progress` recomputes the slug and finds no matching branch, fall back to globbing `m<N>/M<N>-NNN-*` and selecting the unique match (refuse if zero or multiple matches).
+
+The slug is NOT used as a stable identifier — `M<N>-NNN` is. The slug is only a human-readable affordance attached to branch and file names so `git branch -a` and directory listings are scannable.
 
 ---
 
@@ -335,7 +328,13 @@ OUT-OF-MODEL: (optional)
     flag them so the user can decide whether to extend the model>
 ```
 
-**What happens with findings:** Findings are NOT auto-converted to REWORK. They escalate to the user with the five-way menu (trigger reason: `redteam-finding`) and `redteam_findings:` populated in the relevant ticket. The user decides which findings warrant new tickets, which warrant a spec amendment (the `spec-amend` escalation path), and which fall outside the model.
+**What happens with findings:** Findings are NOT auto-converted to REWORK. The path depends on the affected ticket's status:
+
+- For `in-progress` or `in-review` tickets — the user opens the standard five-way menu (trigger reason: `redteam-finding`) on that ticket; `redteam_findings:` is populated on it. The user can choose `refine` to widen acceptance, `decompose`, `defer`, or `spec-amend`.
+- For `done` tickets — the original commit is **never amended** (per `CLAUDE.md` §M1 workflow "never amend a passed commit"). Instead, the user creates a **new remediation ticket** with `remediates: M<N>-XXX` set on the new ticket pointing back at the done ticket. The new ticket carries the fix; the done ticket's `redteam_findings:` is populated for traceability but its commit stays untouched. This preserves the one-commit-per-ticket invariant of `main`.
+- For findings that span multiple tickets or describe an architectural gap with no clear owner, the user files a fresh ticket (no `remediates:`) or raises a spec amendment via `spec-amend` on a related ticket.
+
+The `/redteam` skill itself never opens escalations or creates tickets; it prints recommendations and writes to `redteam_findings:` only.
 
 ---
 

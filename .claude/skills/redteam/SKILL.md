@@ -35,12 +35,28 @@ If the args don't match, print the table above and stop.
 
 | Target form | Base | Head |
 |---|---|---|
-| `<ticket-id>` | `main^` (commit before the ticket landed) | the ticket's merge commit on `main`, or the branch tip if `--in-progress` |
+| `<ticket-id>` | depends on ticket state — see algorithm below | depends on ticket state — see algorithm below |
 | `milestone <name>` | merge-base of `main` and the first ticket commit of the milestone | `main` (or the latest done-ticket commit in that milestone) |
 | `id-range <a..b>` | commit before `a` landed | commit when `b` landed |
 | `release <tag>` | previous release tag | `<tag>` (or `main` if not yet tagged) |
 
 Capture: `git diff <base>...<head>`.
+
+**Single-ticket diff-range algorithm.** Run in order; stop at the first form that succeeds:
+
+1. **Try the merged form.** Run `git log --grep="^<ticket-id>: " --format=%H main` to find the squash-merge commit subject (commit messages start with `<ticket-id>: <imperative summary>` per the workflow's commit conventions). If exactly one commit hash returns, set `BASE = <hash>^` and `HEAD = <hash>`. Done.
+2. **Try the branch form** (only if `--in-progress` was passed; otherwise skip to step 3 and refuse). The expected branch name is `m<N>/<ticket-id>-<slug>` (e.g. `m1/M1-007-rss-fetcher`). Compute the slug from the ticket title per the canonical rule in [`docs/process/workflow.md`](../../../docs/process/workflow.md) §"Naming conventions (slug, branch, ticket file)". Check whether the branch exists with `git rev-parse --verify --quiet refs/heads/m<N>/<ticket-id>-<slug>`. If exact-match exists, set `BASE = main` and `HEAD = m<N>/<ticket-id>-<slug>` (use `main...m<N>/<ticket-id>-<slug>` so the diff shows what's on the branch but not main). If no exact match, fall back to globbing `m<N>/<ticket-id>-*` per the workflow's slug-drift fallback (refuse if zero or multiple matches). Done.
+3. **Otherwise refuse** with:
+   ```
+   /redteam <ticket-id>: cannot resolve diff range.
+     - Searched main for a commit matching "<ticket-id>: ..." → not found.
+     - Branch m<N>/<ticket-id>-<slug> → does not exist (or --in-progress was not passed).
+   If the ticket is in-flight on a branch, re-invoke as
+     /redteam <ticket-id> --in-progress
+   to opt into auditing the branch tip before APPROVE.
+   ```
+
+Multiple commit matches in step 1 (the same `<ticket-id>: ` prefix appearing in more than one commit subject) means the no-amend / one-commit-per-ticket invariant has been violated; refuse and tell the user to investigate.
 
 ### 2. Identify the active milestone (for report-write path)
 
@@ -53,17 +69,15 @@ The active-milestone token determines where reports get written: `docs/plan/<act
 
 ### 3. Build the sensitive-surface inventory
 
-Grep the diff for code paths matching:
+The canonical pattern list — what to grep for and which prompt placeholder each match feeds — lives in [`docs/process/redteam-prompt.md`](../../../docs/process/redteam-prompt.md) §"Sensitive-surface patterns (canonical)". When that list changes, this step's behavior changes with it; do not duplicate the patterns here.
 
-| Surface | Pattern |
-|---|---|
-| Authentication / invite / first-mention registration | files under `**/security/auth/**`; methods named `*authenticate*`, `*invite*`; annotations `@PermitAll`, `@RolesAllowed` |
-| Authorization / admin-tier gates / per-(user, scope) isolation | `is_admin`, `is_group_admin`, `@RolesAllowed`; files under `**/security/authz/**` |
-| Input validation / message intake / LLM tool-call argument parsing | adapter inbound classes; `@Path`/`@POST`/`@GET` handlers; JSON deserialization sites; LLM tool-method signatures |
-| Ban handling / fixed-response-only paths | anything matching `*ban*` (case-insensitive) outside comments |
-| Audit log writes | writes to `audit_log` table; `AuditLogger.*` calls |
+Mechanic:
 
-Collect file:line tuples per surface. Substitute into the prompt placeholders (`{{AUTH_PATHS}}`, `{{AUTHZ_PATHS}}`, `{{INPUT_PATHS}}`, `{{BAN_PATHS}}`, `{{AUDIT_PATHS}}`).
+1. For each placeholder in the canonical table (`{{AUTH_PATHS}}`, `{{AUTHZ_PATHS}}`, `{{INPUT_PATHS}}`, `{{BAN_PATHS}}`, `{{AUDIT_PATHS}}`), run `git grep -n` (or equivalent) of each pattern restricted to files appearing in the diff (`git diff --name-only <base>...<head>`).
+2. Collect `file:line` tuples per placeholder, deduplicate, and join with newlines.
+3. If a placeholder has no matches, set its substitution to the literal string `(none touched)` rather than an empty string.
+
+Substitute the resulting blocks in step 4. The patterns are deliberately conservative; the adversary subagent's prompt reminds it not to treat the list as exhaustive.
 
 ### 4. Substitute prompt placeholders
 
@@ -79,11 +93,13 @@ Read `docs/process/redteam-prompt.md`. Substitute:
 
 ```
 Agent(
-  subagent_type: "code-reviewer",
+  subagent_type: "threat-actor",
   prompt: <substituted>,
   description: "Red-team <target>"
 )
 ```
+
+The `threat-actor` agent is defined at `.claude/agents/threat-actor.md` (read-only tool allowlist, opus model). It is intentionally distinct from `code-reviewer`: the framing is adversarial, the inputs are limited to the threat model + diff (no implementation context), and the verdict format is bucketed findings rather than APPROVE/REWORK.
 
 Foreground. The verdict gates the next steps.
 
@@ -128,16 +144,29 @@ If the output doesn't parse, treat as MANUAL: print verbatim, ask the user how t
 
 ### 8. Escalate findings to the lifecycle workflow
 
-Findings DO NOT auto-rewrite tickets or auto-fire `/m1-tick escalate`. Cross-skill auto-invocation creates state-machine coupling that is hard to reason about. Instead:
+Findings DO NOT auto-rewrite tickets or auto-fire the milestone-driver's escalate. Cross-skill auto-invocation creates state-machine coupling that is hard to reason about. Instead:
 
 - Print a one-screen summary in chat (count by severity, count by category).
-- For each finding that maps to an existing ticket (single-ticket targets always; multi-target findings the user can opt in to mapping), recommend the lifecycle escalation:
-  ```
-  M1-NNN has 2 findings (1 critical, 1 medium). To open the lifecycle
-  escalation, run:
-    /m1-tick escalate M1-NNN redteam-finding
-  ```
-- For findings without a clear owning ticket (architectural gaps, missing audit coverage spanning many files), recommend the user file a new ticket OR raise a spec amendment via `/m1-tick escalate <some-related-ticket> spec-amend`.
+- The recommendation templates below use the placeholder `/<driver>` for the milestone-driver skill name. **Before printing each recommendation to chat, substitute `/<driver>` with the actual skill command for the affected ticket's milestone.** The substitution is mechanical: extract the milestone token from the ticket ID's prefix (e.g. `M1-007` → token `m1`), then form the command `/m<token>-tick` (so `/m1-tick` for M1, `/m2-tick` for a future M2, etc.). For the active milestone M1, every `/<driver>` becomes `/m1-tick` in the printed output. **The literal placeholder `/<driver>` must NOT appear in user-facing chat.**
+- For each finding that maps to an existing ticket (single-ticket targets always; multi-target findings the user can opt in to mapping), the recommendation depends on the ticket's status:
+  - **Ticket is `in-progress` or `in-review`** — recommend the lifecycle escalation on the same ticket:
+    ```
+    M<N>-NNN has 2 findings (1 critical, 1 medium). To open the lifecycle
+    escalation, run:
+      /<driver> escalate M<N>-NNN redteam-finding
+    ```
+  - **Ticket is `done`** — do NOT recommend escalating the original; per `CLAUDE.md` and `docs/process/workflow.md`, a `done` ticket's commit is never amended. Instead, recommend creating a new remediation ticket whose `remediates:` field points back at the done ticket:
+    ```
+    M<N>-NNN (done) has 2 findings (1 critical, 1 medium). The done
+    commit is immutable; the fix lands as a new remediation ticket.
+    Suggested next step:
+      1. Draft a new ticket under docs/plan/<milestone>/tickets/ with
+         frontmatter `remediates: M<N>-NNN` and acceptance criteria
+         derived from the GAP/REPRO blocks above.
+      2. Run `/<driver> next` to confirm it appears as runnable, then
+         `/<driver> start <new-id>`.
+    ```
+- For findings without a clear owning ticket (architectural gaps, missing audit coverage spanning many files), recommend the user file a new ticket OR raise a spec amendment via `/<driver> escalate <some-related-ticket> spec-amend`.
 
 The adversary subagent never edits files, runs commands, or fires escalations on its own.
 

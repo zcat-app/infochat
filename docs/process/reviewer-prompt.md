@@ -1,8 +1,6 @@
 # Reviewer subagent prompt template
 
-This is the prompt used when `/m1-tick review <id>` spawns the code-reviewer subagent. The skill substitutes the placeholders below and passes the result as the `prompt` argument to `Agent(subagent_type: "code-reviewer", ...)`.
-
-The reviewer starts with **zero conversation context**. Everything it knows must be in this prompt.
+This is the user prompt the m1-tick skill substitutes and passes to `Agent(subagent_type: "code-reviewer", ...)` for `/m1-tick review <id>`. The agent's identity, tool allowlist (Read/Grep/Glob), and model pinning (opus) are declared in [`.claude/agents/code-reviewer.md`](../../.claude/agents/code-reviewer.md) — those are harness-level enforcement. This template carries the *task data* AND repeats the persona/discipline content because recency-bias makes inline reinforcement materially more sticky for compliance with the structured verdict format the skill parses literally.
 
 The rules section below is embedded verbatim from [`engineering-rules-verbatim.md`](engineering-rules-verbatim.md). When that file changes, this prompt must be re-rendered in lockstep — the canonical file is the single editing source.
 
@@ -17,7 +15,7 @@ the test output, then return a verdict in the exact structured format
 specified at the bottom.
 
 The ticket is: {{TICKET_ID}}
-Round: {{ROUND}}                  # 1 or 2
+Round: {{ROUND}}                  # 1, 2, or 3 (3 only when round_cap: 3)
 
 ---
 
@@ -27,7 +25,7 @@ Round: {{ROUND}}                  # 1 or 2
 
 ---
 
-## Diff (git diff main...HEAD on branch m1/{{TICKET_ID}}-{{SLUG}})
+## Diff (git diff main...HEAD on branch {{BRANCH}})
 
 {{DIFF_OUTPUT}}
 
@@ -47,17 +45,19 @@ Round 2 stats (populated only on round 2 reviews):
 
 ---
 
-## Negative-space report (files in `files_budget` that were NOT touched)
+## Negative-space report (files in `files_scope` that were NOT touched)
 
-The ticket's `files_budget` permits N files. The diff touched M of them.
-The remaining N - M are listed below. Judge whether each untouched file
-is plausibly a deliberate skip OR looks like a forgotten part of the
-scope.
+The ticket's `files_scope` (when present) lists the path/glob set the
+ticket is bounded to. The diff touched some subset of those paths; the
+remaining paths are listed below. Judge whether each untouched file is
+plausibly a deliberate skip OR looks like a forgotten part of the scope.
 
 {{NEGATIVE_SPACE_LIST}}
 
-(If the list is empty, the diff used the full budget; report PASS on
-NEGATIVE-SPACE-CHECK.)
+(If the ticket has no `files_scope` field, or it is empty, the
+substitution above is the literal string "(no path-level scope declared
+— files_budget is purely numeric, no negative-space evaluation
+applicable)" and you MUST report PASS on NEGATIVE-SPACE-CHECK.)
 
 ---
 
@@ -158,11 +158,18 @@ Test-integrity violations are not developer-overridable:
   fine because ..." is MANUAL, not REWORK. The user is the only one
   who can override test-integrity violations.
 
-### Files budget (the ticket's frontmatter)
+### Files budget and scope (the ticket's frontmatter)
 
-The ticket sets `files_budget: N`. The diff MUST touch at most N files
-(including new test files). If exceeded, automatic FAIL on
-SCOPE-DRIFT-CHECK regardless of how reasonable the extra files seem.
+The ticket sets `files_budget: N` (numeric upper bound). The diff MUST
+touch at most N files (including new test files). If exceeded, automatic
+FAIL on SCOPE-DRIFT-CHECK regardless of how reasonable the extra files
+seem. The numeric budget is canonical and always enforced.
+
+The ticket MAY also set `files_scope: [paths/globs]`. When non-empty,
+every file in the diff MUST also match an entry in `files_scope`. A
+diffed file outside `files_scope` is automatic FAIL on SCOPE-DRIFT-CHECK.
+When `files_scope` is empty or absent, only the numeric budget applies
+and any path is acceptable (subject to `out_of_scope` exclusions).
 
 ### Out-of-scope (the ticket's frontmatter `out_of_scope` list)
 
@@ -185,9 +192,9 @@ VERDICT: <APPROVE | REWORK | MANUAL>
 SCOPE-DRIFT-CHECK: <PASS | FAIL>
   <one paragraph: which changed lines do not trace to acceptance criteria
    or files_budget, or PASS if all do. If FAIL, name specific files/lines.
-   On round 2, also FAIL if the diff grew along files-touched, lines
-   added, or lines removed and round-1 REWORK did not authorize a
-   refactor (must-shrink rule).>
+   On round 2, also FAIL if the diff grew along ALL THREE of files-touched,
+   lines added, AND lines removed and round-1 REWORK did not authorize a
+   refactor (must-shrink: smaller along at least one dimension is required).>
 
 TEST-INTEGRITY-CHECK: <PASS | FAIL>
   <one paragraph: any forbidden patterns introduced (see §8 above), or
@@ -197,10 +204,18 @@ OUT-OF-SCOPE-CHECK: <PASS | FAIL>
   <one paragraph: any file or path in `out_of_scope` was touched, or PASS.>
 
 NEGATIVE-SPACE-CHECK: <PASS | WARN>
-  <one paragraph: list of files in files_budget that were NOT touched.
+  <one paragraph: list of files in files_scope that were NOT touched.
    PASS if every untouched file is plausibly a deliberate skip; WARN
-   if any look like forgotten parts of the scope. WARN does not force
-   REWORK; it surfaces to the user as informational.>
+   if any look like forgotten parts of the scope. Heuristic: a file is
+   "deliberate skip" if its name suggests a sibling concern the ticket
+   acceptance criteria don't mention (e.g. acceptance covers RSS fetch,
+   files_scope includes a Bluesky sibling, the Bluesky file is untouched);
+   it's "forgotten" if its name aligns with an acceptance item that the
+   diff appears to address by other means or not at all (e.g. acceptance
+   names a migration test, files_scope includes the migration SQL, only
+   the test file was touched). WARN does not force REWORK; it surfaces to
+   the user as informational. If the prompt's negative-space block is the
+   no-scope-declared sentinel (no files_scope on the ticket), report PASS.>
 
 ACCEPTANCE-CHECK: <PASS | PARTIAL | FAIL>
   <one bullet per acceptance item, with PASS / FAIL / SKIPPED and a
@@ -246,7 +261,7 @@ no explanatory wrapper. The skill parses the output literally.
 1. Resolves the ticket file, the branch, and the slug.
 2. Captures `git diff main...HEAD` on the branch.
 3. Computes diff stats: files touched count, net lines added, net lines removed. Stores under `reviews[].diff_stats` in frontmatter for cross-round comparison.
-4. Builds the **negative-space list**: parses `files_budget` paths from the ticket, computes the set of files that match the budget but are NOT in the diff. Substitutes `{{NEGATIVE_SPACE_LIST}}`. (If `files_budget` is a numeric upper bound rather than a path list, the negative-space list is empty and the substitution says "files_budget is a numeric upper bound, no path-level negative space to evaluate.")
+4. Builds the **negative-space list**: if the ticket has a non-empty `files_scope`, computes the set of files matching any glob in `files_scope` that are NOT in the diff and substitutes them as `{{NEGATIVE_SPACE_LIST}}`. If `files_scope` is empty or absent, the substitution is the literal string `(no path-level scope declared — files_budget is purely numeric, no negative-space evaluation applicable)` and the reviewer must report PASS on `NEGATIVE-SPACE-CHECK`.
 5. Captures the tail of the most recent `mvn verify` output (last ~200 lines including the build summary; full log persisted to `target/m1-tick-test-{{ID}}-r{{ROUND}}.log`).
 6. Substitutes all placeholders.
 7. Spawns `Agent(subagent_type: "code-reviewer", prompt: <substituted>)`. Foreground.
