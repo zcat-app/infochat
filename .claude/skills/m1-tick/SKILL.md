@@ -418,12 +418,14 @@ Reply with: <number> [optional notes]
 
 Used by `decompose` and `spec-amend` to allocate fresh ticket IDs.
 
+**ID shape.** A ticket ID has the form `M<N>-<digits>[<suffix>]` where `<digits>` is one or more decimal digits (zero-padded to 3 in canonical form) and the optional `<suffix>` is one or more lowercase ASCII letters (`[a-z]+`). The suffix exists as a manual planning affordance for the **umbrella + subticket** idiom (see `docs/process/workflow.md` §Ticket-ID placeholder convention): a bare `M1-008` is the umbrella ticket holding the topic's shared context and the whole-topic integration test, while `M1-008a`, `M1-008b`, `M1-008c` are independent subtickets implementing one slice each. The umbrella and its subtickets are **distinct independent tickets** that share the digit slot by design; the umbrella's `blocked_by` lists the subtickets so it becomes runnable only after they ship. The skill itself never *generates* suffix-IDs — subticket IDs are authored by hand at planning time. For every other purpose (commit subjects, branch names, file paths, grep history) the ID is an opaque string, so the suffix is transparent to the rest of the workflow.
+
 1. Glob `docs/plan/m1/tickets/M1-*.md` (or for other milestones, the corresponding directory).
 2. Parse the `id:` field from every file's frontmatter. Include tickets in EVERY status — pending, in-progress, in-review, escalated, done, deferred. IDs of `aborted_attempts:` are NOT separate IDs (they're attempts on existing tickets), so they don't enter this scan.
-3. Extract the numeric suffix from each ID (e.g. `M1-007` → `7`). Take the maximum.
-4. Allocated ID = `M1-<max+1>`, zero-padded to 3 digits (e.g. `M1-008`).
-5. For multiple allocations in one operation (decompose into N), allocate sequentially: `M1-<max+1>`, `M1-<max+2>`, etc.
-6. **IDs are never reused.** A `done` ticket's ID is reserved for that ticket forever; a `deferred` ticket's ID stays with it through reopen; even an aborted-and-restarted ticket keeps its original ID. This way `git log --grep "M1-007"` returns the full history of that ID's work.
+3. For each ID, extract the digit run as an integer (any optional letter suffix is ignored for slot accounting: `M1-007` → `7`, `M1-008a` → `8`). Take the maximum integer across all IDs.
+4. Allocated ID = `M<N>-<max+1>`, zero-padded to 3 digits, no suffix (e.g. `M1-009` after a max of `8`). The skill always allocates primary IDs; suffix-IDs only enter the directory through hand-authored umbrella+subticket splits.
+5. For multiple allocations in one operation (decompose into N), allocate sequentially: `M1-<max+1>`, `M1-<max+2>`, etc. — all primary IDs, no suffixes.
+6. **IDs are never reused.** A `done` ticket's ID is reserved for that ticket forever; a `deferred` ticket's ID stays with it through reopen; even an aborted-and-restarted ticket keeps its original ID. To inspect history by ID, use the anchored prefix form to disambiguate umbrella from subtickets: `git log --grep "^M1-008: "` returns only the umbrella's commits, `git log --grep "^M1-008a: "` only that subticket's. The unanchored form `git log --grep "M1-008"` returns commits for the umbrella AND every subticket because `M1-008` is a substring of `M1-008a/b/c` — useful when you want the whole topic's history at once.
 
 ---
 

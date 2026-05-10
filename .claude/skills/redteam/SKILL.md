@@ -7,7 +7,7 @@ description: Run an adversarial security review on pending changes. Spawns a fre
 
 This skill is the procedure. The prompt template is `docs/process/redteam-prompt.md`. The threat model the adversary reads is `docs/spec/security.md`. If either of those is absent, the skill refuses and explains.
 
-This skill is milestone-agnostic — it accepts any ticket-ID matching the pattern `[A-Z]+\d+-\d+` (e.g. `M1-007`, `M2-012`) and infers the active milestone from the target argument. It is intentionally separate from `/m1-tick` because (a) its cadence is different (milestone-end / flagged-ticket / pre-release, not per-ticket), (b) its inputs and outputs are different (multi-ticket diff ranges; bucketed findings rather than APPROVE/REWORK), and (c) the adversary persona benefits from a focused skill description rather than being one of ten subcommands under a generic "drive the workflow" umbrella.
+This skill is milestone-agnostic — it accepts any ticket-ID matching the pattern `[A-Z]+\d+-\d+[a-z]*` (e.g. `M1-007`, `M2-012`, or umbrella-subtickets like `M1-008a`; see `docs/process/workflow.md` §Ticket-ID placeholder convention for the umbrella+subticket idiom) and infers the active milestone from the target argument. It is intentionally separate from `/m1-tick` because (a) its cadence is different (milestone-end / flagged-ticket / pre-release, not per-ticket), (b) its inputs and outputs are different (multi-ticket diff ranges; bucketed findings rather than APPROVE/REWORK), and (c) the adversary persona benefits from a focused skill description rather than being one of ten subcommands under a generic "drive the workflow" umbrella.
 
 ## Invocation forms
 

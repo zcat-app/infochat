@@ -7,6 +7,10 @@ last_updated: <YYYY-MM-DD>     # auto-updated by the milestone-driver skill on e
 blocked_by: []
 files_budget: 8                # numeric upper bound; max files this ticket may touch (incl. tests).
                                # Reviewer FAILs SCOPE-DRIFT-CHECK if exceeded. Numeric is canonical.
+                               # Umbrella tickets (per docs/process/workflow.md §Ticket-ID placeholder
+                               # convention — the umbrella + subticket idiom) typically declare a small
+                               # budget (e.g. 2–3) covering only the whole-topic integration test files;
+                               # the subtickets carry the implementation budget.
 files_scope:                   # OPTIONAL path/glob list. When present, the reviewer ALSO performs
                                # the negative-space check (files in scope NOT touched are surfaced
                                # as PASS or WARN). Omit when the budget is purely numeric.
@@ -23,6 +27,11 @@ out_of_scope:
   # - infochat-provider/**
   # - migrations under V99__*
   # - any file not listed here that is outside files_budget
+  #
+  # Subtickets of an umbrella (per docs/process/workflow.md §Ticket-ID placeholder
+  # convention) SHOULD list the umbrella's integration test file(s) here so the
+  # reviewer can confirm a subticket's diff doesn't pre-empt the whole-topic
+  # verification the umbrella ticket is reserved to provide.
 acceptance:
   # Ideally runnable assertions, not prose. The reviewer will check
   # each one literally. Examples:
