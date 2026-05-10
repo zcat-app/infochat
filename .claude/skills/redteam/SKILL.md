@@ -147,7 +147,16 @@ If the output doesn't parse, treat as MANUAL: print verbatim, ask the user how t
 Findings DO NOT auto-rewrite tickets or auto-fire the milestone-driver's escalate. Cross-skill auto-invocation creates state-machine coupling that is hard to reason about. Instead:
 
 - Print a one-screen summary in chat (count by severity, count by category).
-- The recommendation templates below use the placeholder `/<driver>` for the milestone-driver skill name. **Before printing each recommendation to chat, substitute `/<driver>` with the actual skill command for the affected ticket's milestone.** The substitution is mechanical: extract the milestone token from the ticket ID's prefix (e.g. `M1-007` → token `m1`), then form the command `/m<token>-tick` (so `/m1-tick` for M1, `/m2-tick` for a future M2, etc.). For the active milestone M1, every `/<driver>` becomes `/m1-tick` in the printed output. **The literal placeholder `/<driver>` must NOT appear in user-facing chat.**
+- The recommendation templates below use placeholders that MUST be substituted before printing to chat. None of the literal placeholder strings (`/<driver>`, `M<N>-NNN`, `<milestone>`, `<new-id>`) may appear in user-facing chat output.
+
+  | Placeholder | Substitute with |
+  |---|---|
+  | `/<driver>` | The milestone-driver skill command. Extract the milestone token from the ticket ID's prefix (e.g. `M1-007` → token `m1`), then form `/m<token>-tick` (so `/m1-tick` for M1, `/m2-tick` for a future M2). |
+  | `M<N>-NNN` | The affected ticket's actual ID (e.g. `M1-007`). |
+  | `<milestone>` | The active milestone token (e.g. `m1`). |
+  | `<new-id>` | The allocated ID per the milestone-driver's ID allocation algorithm; if allocation has not yet run (the user has not opted in to drafting the new ticket), use the literal phrase `the new ID once allocated`. |
+
+  Substitutions are mechanical; the skill performs them at print time, not the subagent.
 - For each finding that maps to an existing ticket (single-ticket targets always; multi-target findings the user can opt in to mapping), the recommendation depends on the ticket's status:
   - **Ticket is `in-progress` or `in-review`** — recommend the lifecycle escalation on the same ticket:
     ```

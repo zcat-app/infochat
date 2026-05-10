@@ -70,7 +70,7 @@ Status values (used in ticket frontmatter):
 | `done` | Reviewer returned `APPROVE`, ticket commit landed on `main` via squash-merge. |
 | `deferred` | Work paused. Either intentionally postponed (out-of-milestone scope discovered), blocked on a new ticket the work surfaced, or waiting on a spec amendment. |
 
-A ticket may move between `in-progress` and `in-review` once (the round-2 rework — or twice when the ticket sets `round_cap: 3`). It may move to `escalated` from either side. It may move to `deferred` from any state.
+A ticket may move between `in-progress` and `in-review` once for the round-2 rework, or twice when the ticket sets `round_cap: 3` (round-3 rework). It may move to `escalated` from either side. It may move to `deferred` from any state.
 
 ---
 
@@ -144,7 +144,7 @@ The skill reads `docs/plan/<milestone>/tickets/`, finds tickets where `status: p
   - The diff (`git diff main...HEAD`).
   - The list of files in `files_scope` that were NOT touched (the "negative space"), so the reviewer can judge whether the un-touched files were a deliberate skip or a forgotten part of the scope. When `files_scope` is empty, the negative-space report is empty and `NEGATIVE-SPACE-CHECK` reports PASS by definition.
   - The test output.
-  - On round 2: the round-1 diff stats (files touched, lines added, lines removed) for the must-shrink check.
+  - On rounds ≥ 2: the previous-round diff stats (files touched, lines added, lines removed) for the must-shrink check.
   - The verbatim engineering rules and test-integrity rules embedded inline (the reviewer subagent has no other context).
 - Reviewer returns the structured verdict (see "Reviewer verdict format" below).
 - Set frontmatter `status: in-review`.
@@ -155,10 +155,11 @@ The skill reads `docs/plan/<milestone>/tickets/`, finds tickets where `status: p
 |---|---|
 | `APPROVE` | Proceed to commit (step 6). |
 | `REWORK` (round 1) | Address only the named items. Do not re-architect. Re-run `mvn verify`. Re-invoke reviewer. |
-| `REWORK` (round 2) | Escalate, unless the ticket sets `round_cap: 3` AND the round-2 diff actually shrank vs round 1. With `round_cap: 3`, allow one more rework round; otherwise no round 3. |
+| `REWORK` (round 2) | Escalate, unless the ticket sets `round_cap: 3` AND the round-2 diff satisfied must-shrink vs round 1. With `round_cap: 3`, allow one more rework round; otherwise no round 3. |
+| `REWORK` (round 3) | Only reachable when `round_cap: 3`. Escalate; no round 4 exists. Round 3 is also bound by must-shrink vs round 2. |
 | `MANUAL` | Escalate immediately. The reviewer's uncertainty is not for the developer to resolve. |
 
-**Round-2 must-shrink.** Round 2 is a fix-only round. The reviewer compares round-2 diff stats to round-1: the round-2 diff MUST be smaller along **at least one** of files-touched, net lines added, or net lines removed. Growth along **all three** dimensions simultaneously fails `SCOPE-DRIFT-CHECK` — unless the round-1 REWORK explicitly required a refactor that grows the diff and the developer cited that REWORK item in the round-2 commit message. The canonical rule is in [`engineering-rules-verbatim.md`](engineering-rules-verbatim.md) §8 "Round-2 must-shrink".
+**Round-N must-shrink (N ≥ 2).** Every rework round is a fix-only round. The reviewer compares round-N diff stats to round-(N−1): the round-N diff MUST be smaller along **at least one** of files-touched, net lines added, or net lines removed. Growth along **all three** dimensions simultaneously fails `SCOPE-DRIFT-CHECK` — unless the round-(N−1) REWORK explicitly required a refactor that grows the diff and the developer cited that REWORK item in the round-N commit message. Applies to round 2 (default `round_cap: 2`) AND to round 3 (only reachable when `round_cap: 3`). The canonical rule is in [`engineering-rules-verbatim.md`](engineering-rules-verbatim.md) §8 "Round-N must-shrink".
 
 ### 6. Commit — `/<driver> commit M<N>-NNN`
 
@@ -212,7 +213,7 @@ If this section disagrees with `reviewer-prompt.md`, the prompt template wins; s
 **Verdict-rules summary** (full text in `reviewer-prompt.md` §"Verdict rules"):
 
 - Any `*-CHECK: FAIL` forces `VERDICT` to be at least `REWORK`. `APPROVE` requires every check to be `PASS` — `NEGATIVE-SPACE-CHECK: WARN` is permitted under `APPROVE` and surfaces as informational.
-- `ACCEPTANCE-CHECK: PARTIAL` is `REWORK` unless the missing items are blocked on a deferred dependency, in which case `MANUAL`.
+- `ACCEPTANCE-CHECK: PARTIAL` is `REWORK` unless the **ticket body itself** explicitly names a deferred dependency for the missing item (a citation visible in the ticket in front of the reviewer), in which case `MANUAL`. The reviewer does not crawl the ticket graph; if the citation is not in the ticket body, the missing item is REWORK.
 - `TEST-INTEGRITY-CHECK: FAIL` with developer rationale "this is fine because…" is `MANUAL`, not `REWORK` — test integrity is not developer-overridable. Override is the user's call only.
 - `MANUAL` is for genuine reviewer uncertainty (ambiguous spec, conflicting rules, no clear path). Loop indicators are `REWORK`, not `MANUAL`.
 - `REWORK ITEMS` must be specific and addressable in the existing diff. "Refactor X for clarity" is too vague; "rename `Foo.bar()` to `Foo.baz()` to match `docs/spec/X.md` §Y" is fine.
@@ -223,7 +224,7 @@ The `OVERRIDE-APPROVE` verdict is distinct from `APPROVE`: it is written by the 
 
 ## Test-integrity rules (no shortcuts; the reviewer enforces these)
 
-The full forbidden-pattern list — syntactic, semantic, test-modification authorization, stack-specific (Postgres+pgvector), and round-2 must-shrink — lives in [`engineering-rules-verbatim.md`](engineering-rules-verbatim.md) §8. That file is the editing source; the reviewer prompt embeds its text inline so the fresh-context subagent sees it without external reads.
+The full forbidden-pattern list — syntactic, semantic, test-modification authorization, stack-specific (Postgres+pgvector), and round-N must-shrink — lives in [`engineering-rules-verbatim.md`](engineering-rules-verbatim.md) §8. That file is the editing source; the reviewer prompt embeds its text inline so the fresh-context subagent sees it without external reads.
 
 A `FAIL` on `TEST-INTEGRITY-CHECK` is never `REWORK`-able by the developer alone. The reviewer escalates to `MANUAL` if the developer's stated rationale is "this is fine because ...". The user is the only one who can override test-integrity violations.
 
@@ -287,7 +288,17 @@ The same slug derivation is used in three places: the per-ticket branch name, th
 - Ticket file path: `docs/plan/m<N>/tickets/M<N>-NNN-<slug>.md`.
 - Test-log path: `target/<driver>-test-M<N>-NNN-r<round>.log` (no slug; the ID alone is enough).
 
-The slug is computed from the title at `start` and from the title at `redteam --in-progress`. Because titles can be edited via `refine`, the slug derived from the *current* title may not match the slug embedded in the existing branch name. When `redteam --in-progress` recomputes the slug and finds no matching branch, fall back to globbing `m<N>/M<N>-NNN-*` and selecting the unique match (refuse if zero or multiple matches).
+The slug is computed from the title at `start`. Subsequent steps (`/<driver> review`, `/<driver> commit`, `/<driver> abort`, `/redteam <id> --in-progress`) need to find the same branch later — but because titles can be edited via `refine`, the slug derived from the *current* title may diverge from the slug embedded in the existing branch name.
+
+**Branch resolution procedure (canonical; used by every consumer of the slug).**
+
+1. Compute the slug from the ticket's *current* title using the rule above; this gives the *expected* branch name `m<N>/M<N>-NNN-<slug>`.
+2. If the expected branch exists (`git rev-parse --verify --quiet refs/heads/m<N>/M<N>-NNN-<slug>`), use it.
+3. Otherwise glob `m<N>/M<N>-NNN-*` and select the unique match. Use that branch even though its trailing slug differs from the current title; the title was edited via `refine` after the branch was created, and `M<N>-NNN` remains the stable identifier.
+4. If the glob returns zero matches, refuse with: `<consumer>: branch m<N>/M<N>-NNN-* does not exist on this checkout. Either the ticket has not been started, or the branch was deleted. Run /<driver> start M<N>-NNN to begin.`
+5. If the glob returns multiple matches, refuse with: `<consumer>: branch m<N>/M<N>-NNN-* matched multiple branches: <list>. Resolve by deleting stale branches before retrying — the no-amend / one-branch-per-ticket invariant has been violated.`
+
+The procedure is identical for every consumer; the consumer's name (e.g. `m1-tick review`, `redteam --in-progress`) appears in the refusal message but the algorithm is the same.
 
 The slug is NOT used as a stable identifier — `M<N>-NNN` is. The slug is only a human-readable affordance attached to branch and file names so `git branch -a` and directory listings are scannable.
 

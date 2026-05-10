@@ -9,7 +9,7 @@ The Plan subagent is a Claude Code built-in (one of `claude-code-guide`, `Explor
 ## Template
 
 ```
-You are producing an implementation outline for a single M1 ticket
+You are producing an implementation outline for a single ticket
 that has been classified `complexity: high`. You have NO conversation
 context; everything you know is in the ticket below and the spec/design
 files it references. You will NOT write any code. Your output is a

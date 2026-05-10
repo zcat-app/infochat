@@ -72,11 +72,12 @@ The reviewer's `TEST-INTEGRITY-CHECK` fails if the diff introduces any of the fo
 - Replacing a Testcontainers PostgreSQL test with H2, HSQLDB, or any in-memory substitute is forbidden. pgvector and several Postgres-specific behaviors do not have viable in-memory equivalents; an in-memory substitute that "passes" is silently testing different code paths.
 - A new integration test that touches the database MUST use Testcontainers PostgreSQL (matching the version pinned in the parent pom). Unit tests that do not touch the database may use plain JUnit without containers.
 
-### Round-2 must-shrink
+### Round-N must-shrink (applies to every rework round, N ≥ 2)
 
-- On round-2 review, the diff MUST be smaller than round-1 along at least one of: files-touched count, net lines added, or net lines removed. Round-2 is a *fix-only* round; if the rework grew along **all three** dimensions simultaneously, that is scope-creep-during-rework and `SCOPE-DRIFT-CHECK` fails automatically. Growth along one or two dimensions while shrinking along the remaining one is permitted (the rework is still convergent overall).
-- The reviewer's prompt receives both round-1 and round-2 diff stats so the comparison is mechanical.
-- Exception: if round-1 REWORK explicitly required a refactor that legitimately grows the diff (e.g. "extract this into a helper used by three callers"), the developer must cite that REWORK item in the round-2 commit message. Without the citation, growth → fail.
+- On round-N review (N ≥ 2), the diff MUST be smaller than round-(N−1) along at least one of: files-touched count, net lines added, or net lines removed. Every rework round is a *fix-only* round; if the rework grew along **all three** dimensions simultaneously vs the previous round, that is scope-creep-during-rework and `SCOPE-DRIFT-CHECK` fails automatically. Growth along one or two dimensions while shrinking along the remaining one is permitted (the rework is still convergent overall).
+- This applies to round 2 (default cap) AND to round 3 (only reachable when the ticket sets `round_cap: 3`). Round-cap-3 tickets are typically `complexity: high` or `risk: high` — under-specifying must-shrink on round 3 would weaken the rule precisely when stakes are highest.
+- The reviewer's prompt receives both the current-round and previous-round diff stats so the comparison is mechanical. On round 1 the previous-round substitution is the literal sentinel `(N/A — round 1, no previous round)` and the rule does not apply.
+- Exception: if the round-(N−1) REWORK explicitly required a refactor that legitimately grows the diff (e.g. "extract this into a helper used by three callers"), the developer must cite that REWORK item in the round-N commit message. Without the citation, growth → fail.
 
 ### Test-integrity violations are not developer-overridable
 

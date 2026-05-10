@@ -9,13 +9,13 @@ The rules section below is embedded verbatim from [`engineering-rules-verbatim.m
 ## Template
 
 ```
-You are reviewing a single M1 ticket. You have no context from any prior
+You are reviewing a single ticket. You have no context from any prior
 conversation. Read the ticket, the diff, the negative-space report, and
 the test output, then return a verdict in the exact structured format
 specified at the bottom.
 
 The ticket is: {{TICKET_ID}}
-Round: {{ROUND}}                  # 1, 2, or 3 (3 only when round_cap: 3)
+Round: {{CURRENT_ROUND}}          # 1, 2, or 3 (3 only when round_cap: 3)
 
 ---
 
@@ -33,15 +33,17 @@ Round: {{ROUND}}                  # 1, 2, or 3 (3 only when round_cap: 3)
 
 ## Diff stats
 
-Round 1 stats (always populated; on round 1 this is the current diff):
-  files touched: {{R1_FILES}}
-  lines added:   {{R1_ADDED}}
-  lines removed: {{R1_REMOVED}}
+Current round ({{CURRENT_ROUND}}) stats:
+  files touched: {{CURRENT_FILES}}
+  lines added:   {{CURRENT_ADDED}}
+  lines removed: {{CURRENT_REMOVED}}
 
-Round 2 stats (populated only on round 2 reviews):
-  files touched: {{R2_FILES}}
-  lines added:   {{R2_ADDED}}
-  lines removed: {{R2_REMOVED}}
+Previous round ({{PREVIOUS_ROUND}}) stats (populated on rounds ≥ 2;
+the substitution is the literal string "(N/A — round 1, no previous
+round)" on round 1, in which case the must-shrink check does not apply):
+  files touched: {{PREVIOUS_FILES}}
+  lines added:   {{PREVIOUS_ADDED}}
+  lines removed: {{PREVIOUS_REMOVED}}
 
 ---
 
@@ -143,15 +145,20 @@ Stack-specific (PostgreSQL + pgvector):
 - A new integration test that touches the database MUST use
   Testcontainers PostgreSQL.
 
-Round-2 must-shrink:
-- On round-2 review, the diff MUST be smaller than round-1 along at
-  least one of: files touched, net lines added, or net lines removed.
-- If round-2 grew along ALL three dimensions vs round 1, FAIL
-  SCOPE-DRIFT-CHECK — unless the round-1 REWORK explicitly required
+Round-N must-shrink (applies whenever previous-round stats are non-null,
+i.e. {{CURRENT_ROUND}} ≥ 2):
+- On round-N review (N ≥ 2), the diff MUST be smaller than round-(N−1)
+  along at least one of: files touched, net lines added, or net lines
+  removed. This applies on round 2 (default cap) AND on round 3 (only
+  reachable when round_cap: 3).
+- If round-N grew along ALL three dimensions vs round-(N−1), FAIL
+  SCOPE-DRIFT-CHECK — unless the round-(N−1) REWORK explicitly required
   a refactor that legitimately grows the diff AND the developer cited
-  that REWORK item in the round-2 commit message. Look for the
+  that REWORK item in the round-N commit message. Look for the
   citation; without it, growth → FAIL.
-- The diff stats above give you the numbers mechanically.
+- The diff stats above give you the numbers mechanically. On round 1,
+  the previous-round substitution is the literal "(N/A — round 1, no
+  previous round)" and this check does not apply.
 
 Test-integrity violations are not developer-overridable:
 - A FAIL on TEST-INTEGRITY-CHECK with developer rationale "this is
@@ -192,9 +199,10 @@ VERDICT: <APPROVE | REWORK | MANUAL>
 SCOPE-DRIFT-CHECK: <PASS | FAIL>
   <one paragraph: which changed lines do not trace to acceptance criteria
    or files_budget, or PASS if all do. If FAIL, name specific files/lines.
-   On round 2, also FAIL if the diff grew along ALL THREE of files-touched,
-   lines added, AND lines removed and round-1 REWORK did not authorize a
-   refactor (must-shrink: smaller along at least one dimension is required).>
+   On round N ≥ 2, also FAIL if the diff grew along ALL THREE of
+   files-touched, lines added, AND lines removed vs round-(N−1) and the
+   prior round's REWORK did not authorize a refactor (must-shrink:
+   smaller along at least one dimension is required).>
 
 TEST-INTEGRITY-CHECK: <PASS | FAIL>
   <one paragraph: any forbidden patterns introduced (see §8 above), or
@@ -237,8 +245,13 @@ UNCERTAINTY: (required on MANUAL; omit otherwise)
   APPROVE requires every check to be PASS (NEGATIVE-SPACE-CHECK: WARN
   is permitted under APPROVE — it surfaces to the user as informational
   and does not block the commit).
-- ACCEPTANCE-CHECK: PARTIAL is REWORK unless the missing items are
-  themselves blocked on a deferred dependency, in which case use MANUAL.
+- ACCEPTANCE-CHECK: PARTIAL is REWORK unless the **ticket body itself**
+  explicitly names a deferred dependency for the missing item (e.g. a
+  bullet under "Definition of Done" that reads "deferred to M<N>-XXX"
+  or an `acceptance:` item flagged "blocked on M<N>-XXX"), in which
+  case use MANUAL. You are NOT required to crawl the ticket graph or
+  read other ticket files; if the citation isn't visible in the ticket
+  in front of you, treat the missing item as REWORK.
 - TEST-INTEGRITY-CHECK: FAIL with developer rationale "this is fine
   because ..." is MANUAL, not REWORK. Test integrity is not
   developer-overridable.
@@ -262,7 +275,7 @@ no explanatory wrapper. The skill parses the output literally.
 2. Captures `git diff main...HEAD` on the branch.
 3. Computes diff stats: files touched count, net lines added, net lines removed. Stores under `reviews[].diff_stats` in frontmatter for cross-round comparison.
 4. Builds the **negative-space list**: if the ticket has a non-empty `files_scope`, computes the set of files matching any glob in `files_scope` that are NOT in the diff and substitutes them as `{{NEGATIVE_SPACE_LIST}}`. If `files_scope` is empty or absent, the substitution is the literal string `(no path-level scope declared — files_budget is purely numeric, no negative-space evaluation applicable)` and the reviewer must report PASS on `NEGATIVE-SPACE-CHECK`.
-5. Captures the tail of the most recent `mvn verify` output (last ~200 lines including the build summary; full log persisted to `target/m1-tick-test-{{ID}}-r{{ROUND}}.log`).
+5. Captures the tail of the most recent `mvn verify` output (last ~200 lines including the build summary; full log persisted to `target/m1-tick-test-{{ID}}-r{{CURRENT_ROUND}}.log`).
 6. Substitutes all placeholders.
 7. Spawns `Agent(subagent_type: "code-reviewer", prompt: <substituted>)`. Foreground.
 8. Parses the structured verdict.
