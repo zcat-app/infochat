@@ -280,7 +280,22 @@ Reply with: <number> [optional notes]
    - **`1` (refine).** Snapshot current frontmatter under `revisions:` with date + reason. Print the path of the ticket file and the relevant trigger context (clarity blockers, reviewer's last verdict, etc.); ask the user to edit the file directly and reply `done` when finished. The skill does NOT accept inline chat-format edits — file-edit + `done` is the single supported input mode (avoids the ambiguity of parsing free-form chat replies into YAML frontmatter and body sections). When the user replies `done`, re-read the file, verify the snapshot under `revisions:` is still present, and dispatch on the *prior* escalation reason (read from the most recent `escalations:` entry):
 
      - **Refine after `clarity-fail`** (no branch ever existed; the ticket never reached `in-progress`): set `status: pending`. Clear `clarity_check:` (it described the *old* ticket; the rewritten ticket needs a fresh evaluation). The refined ticket lives on `main`; while currently on `main`, commit the edit there as `M1-NNN: refine ticket spec (clarity-fail rework)`. Tell the user to run `/m1-tick start M1-NNN` again — the next `start` will re-run clarity against the rewritten ticket, which is the correct behavior because the previous FAIL means the ticket was never validated.
-     - **Refine after `outline-fail`** (branch was created at `start` step 6, but the Plan subagent returned `OUTLINE FAILED` before any implementation, so the branch has no useful state): set `status: pending`. Clear `clarity_check:` (clarity passed for the old ticket; the rewritten ticket needs a fresh evaluation). **Explicitly clean up the empty branch.** Run `git checkout main`, then `git branch -D m1/M1-NNN-<slug>` (resolved per the branch resolution procedure in [`workflow.md`](../../../docs/process/workflow.md)). Then commit the refined ticket file on `main` as `M1-NNN: refine ticket spec (outline-fail rework)`. Tell the user to run `/m1-tick start M1-NNN` again — the next `start` will re-create a fresh branch and re-run clarity AND the Plan subagent against the rewritten ticket. Without this branch deletion, the next `start`'s `git checkout -b m1/M1-NNN-<slug>` would fail.
+     - **Refine after `outline-fail`** (branch was created at `start` step 6, but the Plan subagent returned `OUTLINE FAILED` before any implementation, so the branch is *expected* to have no commits beyond `main`): set `status: pending`. Clear `clarity_check:` (clarity passed for the old ticket; the rewritten ticket needs a fresh evaluation). **Verify-then-clean-up the empty branch.** Resolve the branch name per the branch resolution procedure in [`workflow.md`](../../../docs/process/workflow.md). Run `git rev-list --count main..m1/M1-NNN-<slug>` to count commits on the branch beyond `main`:
+       - If `0` (the canonical path): `git checkout main`, then `git branch -D m1/M1-NNN-<slug>` is safe.
+       - If `>0` (the user manually committed on the branch between `OUTLINE FAILED` and choosing refine): **refuse**. Print:
+         ```
+         Branch m1/M1-NNN-<slug> has <n> commits beyond main:
+           <git log --oneline main..m1/M1-NNN-<slug>>
+         These would be silently discarded by branch deletion. Outline-fail
+         refine assumes the branch is empty (Plan subagent failed before
+         implementation). Either:
+           - /m1-tick abort M1-NNN (explicit destructive path with archival)
+           - drop the extra commits manually (git checkout, git reset) before
+             re-running /m1-tick escalate M1-NNN outline-fail
+         ```
+         and STOP without writing the refine commit. The user re-issues a different resolution.
+
+       After successful deletion, commit the refined ticket file on `main` as `M1-NNN: refine ticket spec (outline-fail rework)`. Tell the user to run `/m1-tick start M1-NNN` again — the next `start` will re-create a fresh branch and re-run clarity AND the Plan subagent against the rewritten ticket. Without this branch deletion, the next `start`'s `git checkout -b m1/M1-NNN-<slug>` would fail.
      - **Refine after `round-cap`, `manual-verdict`, `budget-breach`, `premise-fail`, `loop`, or `redteam-finding`** (branch exists, implementation is in progress or complete): set `status: in-progress`. **Commit the refine on the per-ticket branch immediately.** Stage the ticket file (and only the ticket file): `git add docs/plan/m1/tickets/M1-NNN-<slug>.md`. Commit subject: `M1-NNN: refine ticket spec (round <r> rework)` where `<r>` is the round number that just escalated. This makes the refine durable mid-attempt — a subsequent `git checkout` (e.g. via `abort`) will not silently lose the refined acceptance criteria. Remind the developer to re-implement against the new criteria on the existing branch. The clarity pre-flight does NOT re-run on refine in this arm (the criteria are new but the implementation context — branch, prior diff, prior `mvn verify` — is preserved); WARN if the refined ticket would have failed clarity.
 
      All three arms preserve the snapshot under `revisions:` for the audit trail.
@@ -472,8 +487,10 @@ Steps:
      - <ref 1>
      - <ref 2>
    Do these still resolve to the right anchors after the amendment?
-   Reply `confirm` to proceed unchanged, or edit the ticket file's
-   spec_refs (and reply `done`) before reopening.
+     - Reply `confirm` to proceed with spec_refs unchanged.
+     - Edit the ticket file's spec_refs in your editor, then reply `done`
+       (same file-edit-then-confirm pattern used by /m1-tick refine —
+       the skill re-reads the file from disk on `done`).
    ```
    On `confirm`: proceed. On `done`: re-read the ticket file and proceed. Any other reply: re-print the prompt and STOP.
 2. Append to ticket frontmatter under a `reopens:` list:
@@ -507,7 +524,7 @@ Steps:
    - Done.
    - Deferred (with deferred_reason breakdown).
    - Dependency DAG (ASCII; nodes are ticket IDs, edges are blocked_by AND deferred_on).
-4. Render `docs/plan/m1/STATUS.md` using the template below verbatim. Set the `Last updated` line to today's date. Substitute the computed sections; for any empty section, emit the literal `_(none)_` line shown in the template. The committed placeholder version of `docs/plan/m1/STATUS.md` is approximate — the first `/m1-tick status` invocation will overwrite it with the canonical template below; the resulting diff is expected and not a sign of drift.
+4. Render `docs/plan/m1/STATUS.md` using the template below verbatim. Set the `Last updated` line to today's date — **except** when the total ticket count is `0` (no files under `docs/plan/m1/tickets/M1-*.md`), in which case render `Last updated: (no tickets yet — Phase 1 scaffolding only; no tickets drafted)` to preserve the meaningful placeholder. Substitute the computed sections; for any empty section, emit the literal `_(none)_` line shown in the template. The committed placeholder version of `docs/plan/m1/STATUS.md` is approximate — the first `/m1-tick status` invocation will overwrite it with the canonical template below; the resulting diff is expected and not a sign of drift.
 
    ```markdown
    # M1 status board

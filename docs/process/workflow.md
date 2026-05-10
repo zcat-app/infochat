@@ -70,8 +70,6 @@ Status values (used in ticket frontmatter):
 | `done` | Reviewer returned `APPROVE`, ticket commit landed on `main` via squash-merge. |
 | `deferred` | Work paused. Either intentionally postponed (out-of-milestone scope discovered), blocked on a new ticket the work surfaced, or waiting on a spec amendment. |
 
-A ticket may move between `in-progress` and `in-review` once for the round-2 rework, or twice when the ticket sets `round_cap: 3` (round-3 rework). It may move to `escalated` from either side. It may move to `deferred` from any state.
-
 ---
 
 ## Ticket frontmatter
@@ -169,7 +167,7 @@ The skill reads `docs/plan/<milestone>/tickets/`, finds tickets where `status: p
 - One commit on the per-ticket branch.
 - Subject: `M<N>-NNN: <imperative summary>` (≤ 72 chars).
 - Body: the Context paragraph from the ticket + any `Alternatives considered:` trailer.
-- `Reviewed-by:` trailer carrying the reviewer's `APPROVE` verdict line and the reviewer agent's run identifier (best-effort).
+- `Reviewed-by:` trailer carrying the reviewer's `APPROVE` (or `OVERRIDE-APPROVE`) verdict line, the round number, and the reviewer agent's run identifier (or `NA` if the harness did not surface one). Exact format under "Commit conventions" below.
 - Set frontmatter `status: done`. Update `last_updated`.
 - Squash-merge into `main` is the user's call (so `main` history stays one-commit-per-ticket).
 
