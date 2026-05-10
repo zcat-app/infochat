@@ -14,9 +14,9 @@
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 2 |
+| done | 3 |
 | deferred | 0 |
-| **total** | **2** |
+| **total** | **3** |
 
 ---
 
@@ -62,6 +62,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 |---|---|---|---|
 | M1-001 | Set up two-module Maven build | 2026-05-10 | round 1 APPROVE |
 | M1-002 | m1-tick: fix STATUS.md order and review diff capture | 2026-05-10 | round 1 APPROVE |
+| M1-003 | Quarkus app skeleton and first test | 2026-05-10 | round 1 APPROVE |
 
 ---
 
@@ -76,4 +77,5 @@ _(none)_
 ```
 M1-001 (done)
 M1-002 (done)
+M1-003 (done)
 ```
