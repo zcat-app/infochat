@@ -36,7 +36,7 @@ The classification rules and the template's exact rendering are in the prompt bo
 ## Tool use
 
 - **Glob** the prompt-supplied `{{TICKETS_GLOB}}` to enumerate the ticket files. Use the resolved list as the input set.
-- **Read** each ticket file. Parse the YAML frontmatter — `id`, `title`, `status`, `blocked_by`, `deferred_on`, `deferred_reason`, `complexity`, `risk`, `last_updated`, and the most recent entry under `reviews:` (for the in-flight and done tables).
+- **Read** the frontmatter prefix of each ticket file. Load each file with `limit: 150` — the per-ticket Read is frontmatter-only; the ticket body (Context, Definition of Done, Implementation notes, Alternatives considered) is NOT loaded. The rendering algorithm consults only frontmatter keys, so the body bytes would enter your fresh context unused. Parse from the prefix: `id`, `title`, `status`, `blocked_by`, `deferred_on`, `deferred_reason`, `complexity`, `risk`, `last_updated`, and the most recent entry under `reviews:` (for the in-flight and done tables). If the closing `---` of the frontmatter is not within the first 150 lines, re-Read with a larger window per the prompt's fallback rule (`offset: 0, limit: 300`, then `600` if still needed).
 - **Write** the rendered STATUS.md to the prompt-supplied `{{STATUS_FILE_PATH}}`. Write is allowed only at that path; writing anywhere else violates the agent's contract and is caught by the calling skill's porcelain guard.
 
 ## Output

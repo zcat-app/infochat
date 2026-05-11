@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 9 |
+| pending | 8 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 8 |
+| done | 9 |
 | deferred | 0 |
 | **total** | **17** |
 
@@ -29,7 +29,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-007b — infochat-llm-adapter + LLM SPIs (complexity: medium, risk: low)
 - M1-007c — infochat-messaging-adapter SPIs (complexity: medium, risk: low)
 - M1-014 — Prompt-size regression alarm for Agent spawns (complexity: low, risk: low)
-- M1-015 — Status-regenerator reads frontmatter only (complexity: low, risk: low)
 
 ---
 
@@ -67,6 +66,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-015 | Status-regenerator reads frontmatter only | 2026-05-11 | round 1 OVERRIDE-APPROVE |
 | M1-004 | Postgres + pgvector dev compose | 2026-05-11 | round 1 APPROVE |
 | M1-010 | Slim m1-tick subagent prompts | 2026-05-11 | round 1 APPROVE |
 | M1-011 | Split SKILL.md per subcommand | 2026-05-11 | round 1 APPROVE |
@@ -113,5 +113,5 @@ M1-010 (done)
   ├── M1-013 (done)
   │     └── M1-014 (pending) ← runnable
   └── M1-014 (pending) ← runnable
-M1-015 (pending) ← runnable
+M1-015 (done)
 ```

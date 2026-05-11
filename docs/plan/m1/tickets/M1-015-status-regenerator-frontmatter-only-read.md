@@ -1,7 +1,7 @@
 ---
 id: M1-015
 title: Status-regenerator reads frontmatter only
-status: pending
+status: done
 created: 2026-05-11
 last_updated: 2026-05-11
 blocked_by: []
@@ -48,14 +48,71 @@ spec_refs:
   - .claude/skills/m1-tick/subcommands/commit.md §/m1-tick commit
 decision_refs: []
 
-reviews: []
-escalations: []
+reviews:
+  - round: 1
+    date: 2026-05-11
+    verdict: MANUAL
+    checks:
+      scope_drift: FAIL
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+      spec_conformance: PASS
+    diff_stats:
+      files: 4
+      added: 14
+      removed: 10
+    uncertainty: |
+      SCOPE-DRIFT-CHECK FAIL is caused by two unavoidable workflow byproducts (STATUS.md regeneration and the ticket file's own status/clarity_check mutation) that /m1-tick start produces before the developer touches anything. files_budget: 2 is strictly violated by the diff against main, but the developer cannot fix it by reworking the diff. M1-012 precedent set files_budget: 6 and listed both byproducts in files_scope; M1-015 inherited the "lands in two files" framing without accounting for the workflow tax. Resolution options: (1) refine ticket frontmatter to files_budget: 4 and add docs/plan/m1/STATUS.md + the ticket file itself to files_scope; (2) override per escalate-menu; (3) accept as-is.
+  - round: 1
+    date: 2026-05-11
+    verdict: OVERRIDE-APPROVE
+    checks:
+      scope_drift: FAIL
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+      spec_conformance: PASS
+    override_ref: 0
+escalations:
+  - date: 2026-05-11
+    reason: manual-verdict
+    reviewer_verdict_excerpt: |
+      VERDICT: MANUAL
+      SCOPE-DRIFT-CHECK: FAIL — diff touches 4 files but files_budget: 2.
+      The two extra files (docs/plan/m1/STATUS.md, docs/plan/m1/tickets/M1-015-...md)
+      are workflow byproducts from /m1-tick start (STATUS regen + ticket frontmatter
+      mutation). M1-012 precedent set files_budget: 6 and listed both byproducts in
+      files_scope; M1-015 did not. All other checks PASS (test_integrity,
+      out_of_scope, negative_space, acceptance 9/9, spec_conformance).
+      Resolution per engineering-rules §6: escalate, not REWORK.
 revisions: []
-overrides: []
+overrides:
+  - date: 2026-05-11
+    objection: |
+      SCOPE-DRIFT-CHECK: FAIL — diff touches 4 files but files_budget: 2.
+      The two over-budget files (docs/plan/m1/STATUS.md and the ticket file
+      itself) are workflow byproducts from /m1-tick start (STATUS.md
+      regeneration + ticket frontmatter status/clarity_check mutation), not
+      developer choices. The numeric budget rule does not exempt lifecycle
+      paths.
+    user_justification: |
+      Known workflow tax: every ticket with non-empty files_scope pays a +2
+      budget cost for the two paths /m1-tick start itself writes to. M1-012
+      hit and was refined for the same reason. Override here rather than
+      relitigate per-ticket; workflow will be fixed in the same session
+      (reviewer prompt updated to auto-exempt the two lifecycle paths) so
+      future tickets stop tripping this.
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-05-11
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-015: Status-regenerator reads frontmatter only
