@@ -42,8 +42,8 @@ test_plan:
   preserves:
     - all tests currently green on main (this ticket only edits the prompt template and the agent definition; mvn verify is a smoke check that no source code was perturbed)
 spec_refs:
-  - docs/process/status-regen-prompt.md §Your task
-  - .claude/agents/status-regenerator.md §How you read tickets
+  - docs/process/status-regen-prompt.md §Inputs to load
+  - .claude/agents/status-regenerator.md §Tool use
   - .claude/skills/m1-tick/subcommands/status.md §/m1-tick status
   - .claude/skills/m1-tick/subcommands/commit.md §/m1-tick commit
 decision_refs: []
