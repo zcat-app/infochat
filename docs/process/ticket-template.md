@@ -11,9 +11,17 @@ files_budget: 8                # numeric upper bound; max files this ticket may 
                                # convention — the umbrella + subticket idiom) typically declare a small
                                # budget (e.g. 2–3) covering only the whole-topic integration test files;
                                # the subtickets carry the implementation budget.
+                               # LIFECYCLE-PATH EXEMPTION: do NOT count `docs/plan/m1/STATUS.md` or
+                               # this ticket's own file in files_budget. /m1-tick writes them
+                               # automatically as part of the workflow; the reviewer auto-exempts
+                               # both from the budget and the files_scope membership check
+                               # (see docs/process/reviewer-prompt.md §Files budget and scope).
 files_scope:                   # OPTIONAL path/glob list. When present, the reviewer ALSO performs
                                # the negative-space check (files in scope NOT touched are surfaced
                                # as PASS or WARN). Omit when the budget is purely numeric.
+                               # LIFECYCLE-PATH EXEMPTION: do NOT list `docs/plan/m1/STATUS.md` or
+                               # this ticket's own file here; the reviewer treats them as implicitly
+                               # in-scope. List only the implementation paths.
   # - infochat-collector/src/main/java/.../rss/**
   # - infochat-collector/src/test/java/.../rss/**
 complexity: low                # low | medium | high
