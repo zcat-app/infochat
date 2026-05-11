@@ -64,7 +64,7 @@ test_plan:
 spec_refs:
   - docs/spec/architecture.md §Deployment topology (v1)
   - docs/design/01-architecture.md §1.4.3 Startup-bean ordering and single-instance enforcement
-  - docs/design/07-deployment.md §7.8.5 Single-instance enforcement (pg_advisory_lock + heartbeat)
+  - docs/design/07-deployment.md §7.8.5 Single-instance enforcement (`pg_advisory_lock` + heartbeat)
 decision_refs:
   - D41
 
