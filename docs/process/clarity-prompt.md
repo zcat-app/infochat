@@ -1,6 +1,6 @@
 # Ticket-clarity pre-flight subagent prompt template
 
-This is the user prompt the m1-tick skill substitutes and passes to `Agent(subagent_type: "clarity-reviewer", ...)` for `/m1-tick start <id>`. The agent's identity, tool allowlist (Read/Grep/Glob), and model pinning (sonnet) are declared in [`.claude/agents/clarity-reviewer.md`](../../.claude/agents/clarity-reviewer.md) — those are harness-level enforcement. This template carries the *ticket data*, the *resolved spec_refs*, AND repeats the persona/discipline content because recency-bias makes inline reinforcement materially more sticky for compliance with the structured verdict format.
+This is the user prompt the m1-tick skill substitutes and passes to `Agent(subagent_type: "clarity-reviewer", ...)` for `/m1-tick start <id>`. The agent's identity, tool allowlist (Read/Grep/Glob/Write), and model pinning (sonnet) are declared in [`.claude/agents/clarity-reviewer.md`](../../.claude/agents/clarity-reviewer.md) — those are harness-level enforcement. This template carries only the *task metadata* and the *prompt-supplied paths* the agent reads; the ticket body and the cited spec files are loaded by the agent via Read in its fresh context, and the full structured verdict is written to disk before the short chat reply.
 
 ---
 
@@ -19,21 +19,52 @@ You are NOT looking for things the ticket should do differently. You
 are looking for things the ticket cannot be implemented from in its
 current form.
 
+The ticket is: {{TICKET_ID}}
+Ticket file (Read this with the Read tool): {{TICKET_FILE_PATH}}
+Verdict file (Write the full structured verdict here using the Write
+tool BEFORE returning your short chat reply): {{VERDICT_FILE_PATH}}
+
+Paths above are repo-relative unless prefixed with `/`. The Read and
+Write tools accept either form when the agent's CWD is the repo root.
+
 ---
 
-## The ticket
+## Inputs to load
 
-{{TICKET_FILE_CONTENT}}
+1. Use the Read tool to read the ticket file at {{TICKET_FILE_PATH}}.
+2. Before evaluating anything else, verify the ticket file you Read
+   has `id: {{TICKET_ID}}` in its YAML frontmatter. If the frontmatter
+   id does not match, abort the per-check evaluation, Write CLARITY
+   VERDICT: FAIL to {{VERDICT_FILE_PATH}} with a single BLOCKERS line
+   citing the mismatch ("frontmatter id was X, prompt id was
+   {{TICKET_ID}}"), and return the short chat reply with FAIL +
+   Blockers: 1. Do NOT proceed with the per-check evaluation.
+3. For each entry in the ticket's `spec_refs:` list (frontmatter),
+   resolve the anchor yourself using the algorithm below. The skill
+   no longer pre-resolves spec_refs in the main session; you resolve
+   each spec_ref in your fresh context. Every spec_ref entry has the
+   form `<file-path> §<section-title>`.
 
----
+   **`spec_refs` anchor resolution algorithm.** For each entry:
+   1. Use the Read tool to read `<file-path>`.
+   2. Find every line beginning with `#`-markers (`#`, `##`, `###`,
+      etc.).
+   3. Strip the `#`-markers and surrounding whitespace from each
+      candidate heading.
+   4. Lowercase both the candidate heading and the searched
+      section-title; do a substring match (the searched title must
+      appear as a substring of the candidate, or vice-versa for
+      partial titles).
+   5. If exactly one heading matches, the resolution is
+      `FOUND (line N: "<heading>")`.
+   6. If zero match, the resolution is `ANCHOR-NOT-FOUND`.
+   7. If multiple match, prefer the heading whose depth (count of
+      `#` markers) is closest to the most recently resolved anchor's
+      depth; tie-break by line number ascending. If still tied, the
+      resolution is `AMBIGUOUS (lines: N, M, ...)`. Treat AMBIGUOUS
+      as FAIL on SPEC-REFS-VALID.
 
-## Spec sections cited (verbatim, for cross-checking spec_refs)
-
-{{SPEC_REF_RESOLUTIONS}}
-
-(Each spec_ref in the ticket frontmatter is resolved here. If a ref
-points at a section that doesn't exist in the cited file, the resolution
-will say "ANCHOR-NOT-FOUND" and you must FAIL clarity.)
+   Resolve every spec_ref before reporting SPEC-REFS-VALID.
 
 ---
 
@@ -60,7 +91,9 @@ Vague entries (FAIL or WARN): "things unrelated to this ticket" — that's circu
 
 ### 3. `spec_refs` resolve to real anchors
 
-Every spec_ref must point at a real section. If the resolution above shows ANCHOR-NOT-FOUND for any ref, FAIL.
+Every spec_ref must point at a real section. Use the resolutions you
+computed above. Any entry that resolved to ANCHOR-NOT-FOUND or
+AMBIGUOUS → FAIL on this check.
 
 ### 4. `files_budget` is plausible given the acceptance criteria
 
@@ -90,7 +123,30 @@ If the ticket touches any of: invite-code logic, admin-tier gates, ban handling,
 
 ---
 
-## Return exactly this format
+## Short chat reply (the only thing you return inline)
+
+After Writing the full structured verdict to {{VERDICT_FILE_PATH}},
+return exactly these lines as your chat reply — nothing else, no
+preamble, no postscript:
+
+CLARITY VERDICT: <PASS | WARN | FAIL>
+Verdict file: {{VERDICT_FILE_PATH}}
+Blockers: <integer count, 0 on PASS/WARN>
+Warnings: <integer count, 0 if none>
+
+That is the entire chat reply. The skill parses these four lines
+literally; the full per-check verdict (with each BLOCKERS / WARNINGS
+string, each per-check PASS/FAIL/WARN reason) lives only in the
+verdict file you wrote, which the skill Reads to populate the ticket
+frontmatter `clarity_check:` entry.
+
+---
+
+## On-disk verdict format (Write this to {{VERDICT_FILE_PATH}} before the chat reply)
+
+Use the Write tool to write the following structured verdict — the
+canonical full form, which the skill parses for audit and frontmatter
+strings — to {{VERDICT_FILE_PATH}}:
 
 CLARITY VERDICT: <PASS | WARN | FAIL>
 
@@ -102,21 +158,23 @@ OUT-OF-SCOPE-SPECIFIC: <PASS | WARN | FAIL>
   <one paragraph: is out_of_scope non-empty and specific, or PASS>
 
 SPEC-REFS-VALID: <PASS | FAIL>
-  <one bullet per spec_ref with PASS or ANCHOR-NOT-FOUND>
+  <one bullet per spec_ref with PASS (line N: "<heading>") or
+   ANCHOR-NOT-FOUND or AMBIGUOUS (lines: N, M, ...)>
 
 FILES-BUDGET-PLAUSIBLE: <PASS | WARN | FAIL>
-  <one paragraph: estimated files needed vs files_budget; if files_scope
-   is set, also note whether it covers the implied paths>
+  <one paragraph: estimated files needed vs files_budget; if
+   files_scope is set, also note whether it covers the implied paths>
 
 COMPLEXITY-RISK-CALIBRATED: <PASS | WARN>
   <one paragraph: any miscalibration>
 
 TEST-CHANGES-AUTHORIZED: <PASS | FAIL | NOT-APPLICABLE>
-  <one paragraph: are pre-existing test modifications listed, or NOT-APPLICABLE
-   if no pre-existing tests are modified>
+  <one paragraph: are pre-existing test modifications listed, or
+   NOT-APPLICABLE if no pre-existing tests are modified>
 
 SECURITY-FLAG-CONSISTENT: <PASS | WARN>
-  <one paragraph: does security_relevant match the actual surface touched>
+  <one paragraph: does security_relevant match the actual surface
+   touched>
 
 BLOCKERS: (omit on PASS; required on FAIL)
   1. <specific, addressable, points at the line in the ticket that needs change>
@@ -133,21 +191,21 @@ WARNINGS: (optional, omit if empty)
 - Any *-CHECK: WARN with no FAILs makes CLARITY VERDICT: WARN. The skill prints the warnings, records them under `clarity_check:` in frontmatter, and proceeds with the start.
 - All PASS → CLARITY VERDICT: PASS. The skill records `clarity_check.verdict: PASS` and proceeds.
 
-Return ONLY the structured verdict above. No preamble. The skill parses
-the output literally.
+Write the full verdict to {{VERDICT_FILE_PATH}} first, then return
+ONLY the four-line short chat reply specified above. The skill parses
+both literally.
 ```
 
 ---
 
 ## Skill responsibilities (what `/m1-tick start` does around the prompt)
 
-1. Reads the ticket file and resolves every `spec_refs` entry by reading the cited file and grepping for the anchor heading. Builds `{{SPEC_REF_RESOLUTIONS}}` as a block where each line is either:
-   - `docs/spec/<file>.md §<section> → FOUND (line N: "<heading>")`
-   - `docs/spec/<file>.md §<section> → ANCHOR-NOT-FOUND`
-2. Substitutes `{{TICKET_FILE_CONTENT}}` and `{{SPEC_REF_RESOLUTIONS}}`.
+1. Pre-allocates the verdict file path under `target/m1-tick-clarity-{{ID}}.txt` so the subagent has a known location for its Write. The directory `target/` already exists by Maven convention and is excluded from version control.
+2. Substitutes `{{TICKET_ID}}`, `{{TICKET_FILE_PATH}}` (repo-relative path to the ticket file the skill resolved from the ID), and `{{VERDICT_FILE_PATH}}` (the path pre-allocated in step 1). No content placeholders — the subagent loads the ticket and each cited spec file via Read in its own fresh context.
 3. Spawns `Agent(subagent_type: "clarity-reviewer", prompt: <substituted>, description: "Clarity pre-flight M<N>-NNN")`. Foreground.
-4. Parses the structured verdict.
-5. Records under `clarity_check:` in ticket frontmatter:
+4. Parses the four-line short chat reply for the verdict line and integer blocker/warning counts.
+5. Reads `{{VERDICT_FILE_PATH}}` from disk to extract the BLOCKERS / WARNINGS strings for the ticket frontmatter `clarity_check:` entry.
+6. Records under `clarity_check:` in ticket frontmatter:
    ```yaml
    clarity_check:
      date: <YYYY-MM-DD>
@@ -155,7 +213,7 @@ the output literally.
      warnings: [<list of warning-strings>]
      blockers: [<list of blocker-strings if FAIL>]
    ```
-6. Branches on verdict:
+7. Branches on verdict:
    - `PASS` → proceed with the rest of `start`.
    - `WARN` → print warnings to chat, proceed.
    - `FAIL` → print blockers, refuse to start, ask user to refine the ticket. Status stays `pending`.

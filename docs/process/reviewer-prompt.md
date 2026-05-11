@@ -1,8 +1,6 @@
 # Reviewer subagent prompt template
 
-This is the user prompt the m1-tick skill substitutes and passes to `Agent(subagent_type: "code-reviewer", ...)` for `/m1-tick review <id>`. The agent's identity, tool allowlist (Read/Grep/Glob), and model pinning (opus) are declared in [`.claude/agents/code-reviewer.md`](../../.claude/agents/code-reviewer.md) — those are harness-level enforcement. This template carries the *task data* AND repeats the persona/discipline content because recency-bias makes inline reinforcement materially more sticky for compliance with the structured verdict format the skill parses literally.
-
-The rules section below is embedded verbatim from [`engineering-rules-verbatim.md`](engineering-rules-verbatim.md). When that file changes, this prompt must be re-rendered in lockstep — the canonical file is the single editing source.
+This is the user prompt the m1-tick skill substitutes and passes to `Agent(subagent_type: "code-reviewer", ...)` for `/m1-tick review <id>`. The agent's identity, tool allowlist (Read/Grep/Glob/Write), and model pinning (opus) are declared in [`.claude/agents/code-reviewer.md`](../../.claude/agents/code-reviewer.md) — those are harness-level enforcement. This template carries only the *task metadata*, the *prompt-supplied paths* the agent reads, the diff stats, and the negative-space list; the ticket body, diff, test log, and the canonical engineering rules are loaded by the agent via Read in its fresh context. The full structured verdict is written to disk before the short chat reply.
 
 ---
 
@@ -10,24 +8,45 @@ The rules section below is embedded verbatim from [`engineering-rules-verbatim.m
 
 ```
 You are reviewing a single ticket. You have no context from any prior
-conversation. Read the ticket, the diff, the negative-space report, and
-the test output, then return a verdict in the exact structured format
-specified at the bottom.
+conversation. Load the rules, read the ticket and diff, then write the
+verdict to disk and return a short chat reply.
 
 The ticket is: {{TICKET_ID}}
 Round: {{CURRENT_ROUND}}          # 1, 2, or 3 (3 only when round_cap: 3)
+Branch: {{BRANCH}}
 
 ---
 
-## Ticket
+## Inputs to load (Read these before evaluating)
 
-{{TICKET_FILE_CONTENT}}
+1. Read the ticket file at {{TICKET_FILE_PATH}} with the Read tool.
+   Before evaluating anything else, verify the ticket frontmatter
+   carries `id: {{TICKET_ID}}`. If the frontmatter id does not match,
+   abort the per-check evaluation, Write VERDICT: MANUAL to
+   {{VERDICT_FILE_PATH}} with an UNCERTAINTY line citing the mismatch
+   ("frontmatter id was X, prompt id was {{TICKET_ID}}"), and return
+   the short chat reply with MANUAL + Rework items: 0. Do NOT proceed
+   with the per-check evaluation.
+2. Read the diff file at {{DIFF_FILE_PATH}} with the Read tool. The
+   diff is `git diff main` — working tree vs main, on branch
+   {{BRANCH}}. This is the full diff under review.
+3. Test log (mvn verify from repo root): {{TEST_LOG_PATH}}
+   Use the Read tool. The build summary, any failures, and surrounding
+   context are at the bottom of the file. Use Grep to scope if the
+   file is large; the bottom carries `BUILD SUCCESS` / `BUILD FAILURE`
+   and the test summary.
+4. Engineering rules of record: `docs/process/engineering-rules-verbatim.md`
+   Use the Read tool. That file is the rule-text-of-record and you
+   MUST apply every rule it carries (§1–§8, the stack-specific
+   subsection, and the round-N must-shrink subsection), not just the
+   ones you find convenient. Do NOT infer "the spirit" of any rule —
+   apply the text as written.
+5. Verdict file (Write the full structured verdict here using the
+   Write tool BEFORE returning your short chat reply):
+   {{VERDICT_FILE_PATH}}
 
----
-
-## Diff (`git diff main` — working tree vs main, on branch {{BRANCH}})
-
-{{DIFF_OUTPUT}}
+Paths above are repo-relative unless prefixed with `/`. The Read and
+Write tools accept either form when the agent's CWD is the repo root.
 
 ---
 
@@ -63,107 +82,12 @@ applicable)" and you MUST report PASS on NEGATIVE-SPACE-CHECK.)
 
 ---
 
-## Test output (mvn verify from repo root)
+## Ticket-frontmatter rules to apply
 
-{{TEST_OUTPUT_TAIL}}
-
-(Full output is at {{TEST_LOG_PATH}} if you need it; the tail above
-includes the summary line, any failures, and the surrounding ~50 lines
-of context per failure.)
-
----
-
-## Rules to enforce (verbatim from engineering-rules-verbatim.md)
-
-The reviewer-relevant rules are reproduced below in full. They are the
-single editing source; do not infer "the spirit" of any rule — apply
-the text as written.
-
-### §1 Surgical changes
-
-- Every changed line must trace to either the ticket's acceptance
-  criteria, the user's stated request, or an orphan that the developer's
-  changes created. If neither, the line is scope drift.
-- No "improving" adjacent code, comments, or formatting.
-- Style must match existing code, even if a different style would be
-  better.
-- Unrelated dead code or pre-existing bugs noticed mid-implementation
-  should have been filed as new tickets — they MUST NOT be deleted or
-  fixed in this diff.
-
-### §7 No defensive code for impossible scenarios
-
-- Validation belongs at *system boundaries*: adapter inbound, HTTP
-  endpoints, JSON/YAML config parsing, SQL deserialization, LLM
-  tool-call arguments, file I/O. Inside those boundaries, internal
-  code calling internal code is trusted.
-- No null-checks for parameters callers cannot legally pass null for;
-  no try/catch around operations that cannot throw; no "just in case"
-  branches.
-- Feature flags and backwards-compatibility shims are forbidden — M1
-  is greenfield, there is no prior version to be compatible with.
-- Apply this narrowly: a defensive check at a system boundary is fine;
-  a defensive check between two internal classes is scope drift.
-
-### §8 Test integrity
-
-Forbidden additions in any commit (syntactic):
-- @Disabled, @Ignore, assumeTrue(false), JUnit assumptions that always skip
-- New @Test body that is empty, only contains assertTrue(true) /
-  assertNotNull(null)-style trivialities, or only logs
-- mvn -DskipTests, -Dmaven.test.skip=true, --no-verify in any committed file
-- git push --force / git reset --hard in committed scripts
-
-Forbidden additions in any commit (semantic):
-- Existing assertions weakened (precise check → looser check)
-- New catch (Exception ignored) {} or silent-swallow blocks in
-  production code
-- New @MockBean / @Mock replacing previously-real wiring in an
-  integration test (mocks belong in unit tests; integration tests integrate)
-- A test was modified to match new wrong behavior rather than the code
-  being fixed to match the test
-- A test was deleted or renamed without an accompanying explanation
-  tying it to a deliberate spec change
-
-Test-modification authorization:
-- If a pre-existing test was modified, the ticket body OR the commit
-  message MUST explicitly authorize the change ("this ticket changes
-  behavior X, which requires updating TestY at line Z"). Absent
-  explicit authorization, treat every modification to a pre-existing
-  test as suspicious and FAIL TEST-INTEGRITY-CHECK.
-- "Authorized" means the ticket says, in plain language, what the new
-  test should assert and why. A retroactive justification ("we needed
-  to update the test because the code changed") is not authorization;
-  it's circular reasoning.
-
-Stack-specific (PostgreSQL + pgvector):
-- Replacing a Testcontainers PostgreSQL test with H2, HSQLDB, or any
-  in-memory substitute is forbidden. pgvector and several
-  Postgres-specific behaviors do not have viable in-memory
-  equivalents; an in-memory substitute that "passes" is silently
-  testing different code paths. FAIL TEST-INTEGRITY-CHECK.
-- A new integration test that touches the database MUST use
-  Testcontainers PostgreSQL.
-
-Round-N must-shrink (applies whenever previous-round stats are non-null,
-i.e. {{CURRENT_ROUND}} ≥ 2):
-- On round-N review (N ≥ 2), the diff MUST be smaller than round-(N−1)
-  along at least one of: files touched, net lines added, or net lines
-  removed. This applies on round 2 (default cap) AND on round 3 (only
-  reachable when round_cap: 3).
-- If round-N grew along ALL three dimensions vs round-(N−1), FAIL
-  SCOPE-DRIFT-CHECK — unless the round-(N−1) REWORK explicitly required
-  a refactor that legitimately grows the diff AND the developer cited
-  that REWORK item in the round-N commit message. Look for the
-  citation; without it, growth → FAIL.
-- The diff stats above give you the numbers mechanically. On round 1,
-  the previous-round substitution is the literal "(N/A — round 1, no
-  previous round)" and this check does not apply.
-
-Test-integrity violations are not developer-overridable:
-- A FAIL on TEST-INTEGRITY-CHECK with developer rationale "this is
-  fine because ..." is MANUAL, not REWORK. The user is the only one
-  who can override test-integrity violations.
+These three sections interpret the ticket's frontmatter and stay
+inline because they are ticket-data wiring, not rules-of-record. The
+rules-of-record are in `engineering-rules-verbatim.md` (input #4
+above); read them too before evaluating.
 
 ### Files budget and scope (the ticket's frontmatter)
 
@@ -186,13 +110,35 @@ Glob patterns are literal globs; treat any match as a failure.
 ### Acceptance (the ticket's frontmatter `acceptance` list)
 
 Every acceptance item should be checkable. Many are runnable assertions
-("mvn -pl X test -Dtest=Y returns success"); the test output above
-either confirms or denies each. For non-runnable items (e.g. "Flyway
-migration applies cleanly"), use the diff and test output to judge.
+("mvn -pl X test -Dtest=Y returns success"); the test log either
+confirms or denies each. For non-runnable items (e.g. "Flyway
+migration applies cleanly"), use the diff and test log to judge.
 
 ---
 
-## Your verdict (return exactly this format, nothing else)
+## Short chat reply (the only thing you return inline)
+
+After Writing the full structured verdict to {{VERDICT_FILE_PATH}},
+return exactly these lines as your chat reply — nothing else, no
+preamble, no postscript:
+
+VERDICT: <APPROVE | REWORK | MANUAL>
+Verdict file: {{VERDICT_FILE_PATH}}
+Rework items: <integer count, 0 on APPROVE>
+
+That is the entire chat reply. The skill parses these three lines
+literally; the full per-check structured verdict (with each per-check
+PASS/FAIL/WARN reason, each REWORK item, any UNCERTAINTY block) lives
+only in the verdict file you wrote, which the skill Reads to populate
+the `reviews:` frontmatter entry for this round.
+
+---
+
+## On-disk verdict format (Write this to {{VERDICT_FILE_PATH}} before the chat reply)
+
+Use the Write tool to write the following structured verdict — the
+canonical full form, which the skill parses for audit and frontmatter
+strings — to {{VERDICT_FILE_PATH}}:
 
 VERDICT: <APPROVE | REWORK | MANUAL>
 
@@ -205,8 +151,10 @@ SCOPE-DRIFT-CHECK: <PASS | FAIL>
    smaller along at least one dimension is required).>
 
 TEST-INTEGRITY-CHECK: <PASS | FAIL>
-  <one paragraph: any forbidden patterns introduced (see §8 above), or
-   PASS if none. If FAIL, name the specific pattern and the file:line.>
+  <one paragraph: any forbidden patterns introduced (see
+   engineering-rules-verbatim.md §8 — syntactic, semantic, authorization,
+   stack-specific), or PASS if none. If FAIL, name the specific pattern
+   and the file:line.>
 
 OUT-OF-SCOPE-CHECK: <PASS | FAIL>
   <one paragraph: any file or path in `out_of_scope` was touched, or PASS.>
@@ -219,15 +167,14 @@ NEGATIVE-SPACE-CHECK: <PASS | WARN>
    acceptance criteria don't mention (e.g. acceptance covers RSS fetch,
    files_scope includes a Bluesky sibling, the Bluesky file is untouched);
    it's "forgotten" if its name aligns with an acceptance item that the
-   diff appears to address by other means or not at all (e.g. acceptance
-   names a migration test, files_scope includes the migration SQL, only
-   the test file was touched). WARN does not force REWORK; it surfaces to
-   the user as informational. If the prompt's negative-space block is the
-   no-scope-declared sentinel (no files_scope on the ticket), report PASS.>
+   diff appears to address by other means or not at all. WARN does not
+   force REWORK; it surfaces to the user as informational. If the
+   prompt's negative-space block is the no-scope-declared sentinel
+   (no files_scope on the ticket), report PASS.>
 
 ACCEPTANCE-CHECK: <PASS | PARTIAL | FAIL>
   <one bullet per acceptance item, with PASS / FAIL / SKIPPED and a
-   one-line reason citing the test output or diff.>
+   one-line reason citing the test log or diff.>
 
 REWORK ITEMS: (omit on APPROVE; required on REWORK)
   1. <specific, addressable, scoped to the existing diff>
@@ -254,7 +201,7 @@ UNCERTAINTY: (required on MANUAL; omit otherwise)
   in front of you, treat the missing item as REWORK.
 - TEST-INTEGRITY-CHECK: FAIL with developer rationale "this is fine
   because ..." is MANUAL, not REWORK. Test integrity is not
-  developer-overridable.
+  developer-overridable (see engineering-rules-verbatim.md §8).
 - MANUAL is for genuine reviewer uncertainty: ambiguous spec,
   conflicting rules between the ticket and the canonical rules, or no
   clear path to resolution. Use sparingly; loop indicators are REWORK,
@@ -263,27 +210,30 @@ UNCERTAINTY: (required on MANUAL; omit otherwise)
   "rename Foo.bar() → Foo.baz() to match docs/spec/X.md §Y" is
   acceptable.
 
-Return ONLY the structured verdict above. No preamble, no postscript,
-no explanatory wrapper. The skill parses the output literally.
+Write the full verdict to {{VERDICT_FILE_PATH}} first, then return
+ONLY the three-line short chat reply specified above. The skill parses
+both literally.
 ```
 
 ---
 
 ## Skill responsibilities (what `/m1-tick review` does around the prompt)
 
-1. Resolves the ticket file, the branch, and the slug.
-2. Captures the working-tree-vs-main diff on the branch: `git add -N` on any untracked-but-present files first (intent-to-add, so the file paths show up in the diff), then `git diff main` for the full diff. The `-N` entries are absorbed by the explicit `git add` at commit time and need no separate cleanup. A commit-range diff against `main` would be empty here because `commit` runs after `review`.
-3. Computes diff stats: files touched count, net lines added, net lines removed. Stores under `reviews[].diff_stats` in frontmatter for cross-round comparison.
-4. Builds the **negative-space list**: if the ticket has a non-empty `files_scope`, computes the set of files matching any glob in `files_scope` that are NOT in the diff and substitutes them as `{{NEGATIVE_SPACE_LIST}}`. If `files_scope` is empty or absent, the substitution is the literal string `(no path-level scope declared — files_budget is purely numeric, no negative-space evaluation applicable)` and the reviewer must report PASS on `NEGATIVE-SPACE-CHECK`.
-5. Captures the tail of the most recent `mvn verify` output (last ~200 lines including the build summary; full log persisted to `target/m1-tick-test-{{ID}}-r{{CURRENT_ROUND}}.log`).
-6. Substitutes all placeholders.
-7. Spawns `Agent(subagent_type: "code-reviewer", prompt: <substituted>)`. Foreground.
-8. Parses the structured verdict.
-9. Updates the ticket frontmatter:
-   - On `APPROVE`: status stays `in-review`; the verdict is recorded under a `reviews:` list with timestamp + round + diff stats; user is prompted to run `/m1-tick commit`.
-   - On `REWORK` round 1: status returns to `in-progress`; rework items are appended to the ticket body under a "Round 1 rework" section; the developer fixes only those items.
-   - On `REWORK` round 2: if the ticket's `round_cap` is `3`, status returns to `in-progress` and a "Round 2 rework" section is appended. Otherwise status moves to `escalated`; the five-way menu fires.
-   - On `REWORK` round 3 (only reachable when `round_cap: 3`): status moves to `escalated` regardless.
-   - On `MANUAL`: status moves to `escalated` immediately; the five-way menu fires.
+1. Resolves the ticket file path, the branch, and the slug.
+2. Captures the working-tree-vs-main diff on the branch: `git add -N` on any untracked-but-present files first (intent-to-add, so file paths show up in the diff), then `git diff main` for the full diff. Writes the diff to `target/m1-tick-review-{{ID}}-r{{CURRENT_ROUND}}.diff` and substitutes that path as `{{DIFF_FILE_PATH}}`. The `-N` entries are absorbed by the explicit `git add` at commit time and need no separate cleanup. A commit-range diff against `main` would be empty here because `commit` runs after `review`.
+3. Computes diff stats: files touched count, net lines added, net lines removed (`git diff main --shortstat`). Stores under `reviews[].diff_stats` in frontmatter for cross-round comparison; substitutes the numbers into the `{{CURRENT_FILES}}` / `{{CURRENT_ADDED}}` / `{{CURRENT_REMOVED}}` placeholders (and the previous-round counterparts on rounds ≥ 2).
+4. Builds the **negative-space list**: if the ticket has a non-empty `files_scope`, computes the set of files matching any glob in `files_scope` that are NOT in the diff and substitutes them as `{{NEGATIVE_SPACE_LIST}}`. If `files_scope` is empty or absent, the substitution is the literal sentinel string `(no path-level scope declared — files_budget is purely numeric, no negative-space evaluation applicable)` and the reviewer must report PASS on `NEGATIVE-SPACE-CHECK`.
+5. Locates the most recent `mvn verify` log at `target/m1-tick-test-{{ID}}-r{{CURRENT_ROUND}}.log` and substitutes its path as `{{TEST_LOG_PATH}}`.
+6. Pre-allocates a verdict file path under `target/m1-tick-review-{{ID}}-r{{CURRENT_ROUND}}.txt` and substitutes it as `{{VERDICT_FILE_PATH}}`.
+7. Substitutes the remaining placeholders: `{{TICKET_ID}}`, `{{TICKET_FILE_PATH}}` (repo-relative), `{{BRANCH}}`.
+8. Spawns `Agent(subagent_type: "code-reviewer", prompt: <substituted>)`. Foreground.
+9. Parses the three-line short chat reply for the verdict line and integer rework-item count.
+10. Reads `{{VERDICT_FILE_PATH}}` from disk to extract per-check results, REWORK ITEMS strings, and any UNCERTAINTY block for the ticket frontmatter `reviews:` entry.
+11. Updates the ticket frontmatter:
+    - On `APPROVE`: status stays `in-review`; the verdict is recorded under a `reviews:` list with timestamp + round + diff stats; user is prompted to run `/m1-tick commit`.
+    - On `REWORK` round 1: status returns to `in-progress`; rework items are appended to the ticket body under a "Round 1 rework" section; the developer fixes only those items.
+    - On `REWORK` round 2: if the ticket's `round_cap` is `3`, status returns to `in-progress` and a "Round 2 rework" section is appended. Otherwise status moves to `escalated`; the five-way menu fires.
+    - On `REWORK` round 3 (only reachable when `round_cap: 3`): status moves to `escalated` regardless.
+    - On `MANUAL`: status moves to `escalated` immediately; the five-way menu fires.
 
-The reviewer never edits files or runs commands. It reads the prompt, returns the verdict, and exits.
+The reviewer never edits source files. It Reads its inputs, Writes the full verdict to {{VERDICT_FILE_PATH}}, returns the short chat reply, and exits.

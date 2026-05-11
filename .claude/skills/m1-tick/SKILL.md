@@ -70,17 +70,8 @@ Preconditions (refuse and explain if any fail):
 
 Steps:
 
-1. **Ticket-clarity pre-flight.** Read `docs/process/clarity-prompt.md`. Resolve every `spec_refs` entry per the algorithm below; build the `{{SPEC_REF_RESOLUTIONS}}` block. Substitute placeholders. Spawn `Agent(subagent_type: "clarity-reviewer", prompt: <substituted>, description: "Clarity pre-flight M1-NNN")`. Foreground.
-
-   **`spec_refs` anchor resolution algorithm.** For each `spec_refs` entry of the form `<file-path> §<section-title>`:
-   1. Read `<file-path>`.
-   2. Find every line beginning with `#`-markers (`#`, `##`, `###`, etc.).
-   3. Strip the `#`-markers and surrounding whitespace from each candidate heading.
-   4. Lowercase both the candidate and the searched section-title; do a substring match (the searched title must appear as a substring of the candidate, or vice-versa for partial titles).
-   5. If exactly one heading matches, the resolution is `FOUND (line N: "<heading>")`.
-   6. If zero match, the resolution is `ANCHOR-NOT-FOUND`.
-   7. If multiple match, prefer the heading whose depth (count of `#` markers) is closest to the most recently resolved anchor's depth; tie-break by line number ascending. If still tied, the resolution is `AMBIGUOUS (lines: N, M, ...)` — the clarity reviewer treats AMBIGUOUS as FAIL.
-2. Parse the clarity verdict. Append to ticket frontmatter:
+1. **Ticket-clarity pre-flight.** Pre-allocate the verdict file path at `target/m1-tick-clarity-{{ID}}.txt` (the directory `target/` already exists by Maven convention and is excluded from version control). Read `docs/process/clarity-prompt.md` to load the template. Substitute three placeholders only: `{{TICKET_ID}}`, `{{TICKET_FILE_PATH}}` (the repo-relative path to the ticket file the skill resolved from the ID), and `{{VERDICT_FILE_PATH}}` (the path pre-allocated above). No content placeholders are substituted — the clarity subagent loads the ticket and each cited spec file via its own Read tool in fresh context, and runs the spec_refs anchor resolution algorithm itself (the algorithm body lives in step 7 below for the Plan-subagent path, which is the only main-session caller now). Spawn `Agent(subagent_type: "clarity-reviewer", prompt: <substituted>, description: "Clarity pre-flight M1-NNN")`. Foreground.
+2. Parse the four-line short chat reply for the verdict + integer blocker/warning counts. Read `target/m1-tick-clarity-{{ID}}.txt` (the same `{{VERDICT_FILE_PATH}}` substituted above) from disk to extract the BLOCKERS / WARNINGS strings the subagent wrote there. Append to ticket frontmatter:
    ```yaml
    clarity_check:
      date: <YYYY-MM-DD>
@@ -97,9 +88,18 @@ Steps:
 6. Branch:
    - **Sequential:** `git checkout -b m1/M1-NNN-<slug>` from `main`.
    - **Parallel:** create a worktree via `Agent(isolation: "worktree")` and run the rest of the flow inside it.
-7. If `complexity: high`: read `docs/process/plan-prompt.md`, substitute `{{TICKET_ID}}`, `{{TICKET_FILE_CONTENT}}`, and the same `{{SPEC_REF_RESOLUTIONS}}` block built for clarity. Spawn `Agent(subagent_type: "Plan", prompt: <substituted>, description: "Implementation outline M1-NNN")`. Foreground.
+7. If `complexity: high`: read `docs/process/plan-prompt.md`. The Plan template still inlines its inputs (the path-based slimming is applied only to the clarity and review prompts; plan-prompt.md remains content-inlined). Substitute `{{TICKET_ID}}`, the ticket body (read from the ticket file) into the template's content placeholder, and a resolution block built by running the **spec_refs anchor resolution algorithm below** over the ticket's `spec_refs` list. Spawn `Agent(subagent_type: "Plan", prompt: <substituted>, description: "Implementation outline M1-NNN")`. Foreground.
    - If the response begins with `## OUTLINE FAILED`, append the OUTLINE FAILED block to the ticket body and fire `escalate` with `reason: outline-fail`. The branch created in step 6 is left in place (it'll be deleted by `abort` if the user chooses to abandon, or reused after `refine`).
    - Otherwise, append the outline to the ticket body under a new `## Implementation outline` section. The developer (the main conversation) reads it before touching code.
+
+   **`spec_refs` anchor resolution algorithm.** For each `spec_refs` entry of the form `<file-path> §<section-title>`:
+   1. Read `<file-path>`.
+   2. Find every line beginning with `#`-markers (`#`, `##`, `###`, etc.).
+   3. Strip the `#`-markers and surrounding whitespace from each candidate heading.
+   4. Lowercase both the candidate and the searched section-title; do a substring match (the searched title must appear as a substring of the candidate, or vice-versa for partial titles).
+   5. If exactly one heading matches, the resolution is `FOUND (line N: "<heading>")`.
+   6. If zero match, the resolution is `ANCHOR-NOT-FOUND`.
+   7. If multiple match, prefer the heading whose depth (count of `#` markers) is closest to the most recently resolved anchor's depth; tie-break by line number ascending. If still tied, the resolution is `AMBIGUOUS (lines: N, M, ...)` — the Plan subagent treats AMBIGUOUS as failure.
 8. Regenerate `STATUS.md`.
 9. Print:
 
@@ -127,19 +127,24 @@ Steps:
 
 1. Determine the current round number `N` from `reviews:` length + 1. The previous round is `N−1` (only meaningful when `N ≥ 2`).
 2. Capture inputs:
-   - The full diff: at `review` time the implementation lives in the working tree (no commit on the branch yet — `commit` runs *after* `review`, so any commit-range diff against `main` would be empty and starve the reviewer of context). Capture as working-tree-vs-main: run `git add -N <untracked-files-in-the-working-tree>` first so newly created files appear in the diff (intent-to-add; the `-N` entries are absorbed by the explicit `git add` at `commit` time and require no separate cleanup), then `git diff main` to produce the diff.
+   - The full diff: at `review` time the implementation lives in the working tree (no commit on the branch yet — `commit` runs *after* `review`, so any commit-range diff against `main` would be empty and starve the reviewer of context). Capture as working-tree-vs-main: run `git add -N <untracked-files-in-the-working-tree>` first so newly created files appear in the diff (intent-to-add; the `-N` entries are absorbed by the explicit `git add` at `commit` time and require no separate cleanup), then `git diff main` to produce the diff. **Write the diff to `target/m1-tick-review-{{ID}}-r{{CURRENT_ROUND}}.diff` BEFORE spawning the subagent** — the reviewer Reads the diff from disk rather than from an inlined prompt placeholder. That path is what gets substituted as `{{DIFF_FILE_PATH}}` in step 3.
    - Diff stats for the current round: files touched, net lines added, net lines removed (`git diff main --shortstat`, mirroring the full-diff command above).
    - Diff stats for the previous round (read from `reviews[N−2].diff_stats` in frontmatter when `N ≥ 2`; on round 1 these are unset).
    - Build the negative-space list: if the ticket has a non-empty `files_scope`, take the union of paths matched by those globs minus paths actually present in the diff. If `files_scope` is empty or absent, the negative-space list is the literal sentinel string `(no path-level scope declared — files_budget is purely numeric, no negative-space evaluation applicable)` and the reviewer reports PASS on `NEGATIVE-SPACE-CHECK` by definition.
-   - The tail of the most recent `mvn verify` output (last ~200 lines; full log persisted to `target/m1-tick-test-{{ID}}-r{{CURRENT_ROUND}}.log`).
-   - The ticket file content.
-3. Read `docs/process/reviewer-prompt.md` and substitute placeholders. The role-based stats placeholders carry the round-N-vs-round-(N−1) must-shrink machinery:
-   - `{{TICKET_ID}}`, `{{TICKET_FILE_CONTENT}}`, `{{DIFF_OUTPUT}}`
+   - The path of the most recent `mvn verify` log at `target/m1-tick-test-{{ID}}-r{{CURRENT_ROUND}}.log` (the reviewer Reads this path; the skill no longer captures the tail into the prompt).
+   - The ticket file path (the reviewer Reads this path; the skill no longer inlines the ticket body into the prompt).
+3. Pre-allocate the verdict file path at `target/m1-tick-review-{{ID}}-r{{CURRENT_ROUND}}.txt`. Read `docs/process/reviewer-prompt.md` and substitute the placeholders. The role-based stats placeholders carry the round-N-vs-round-(N−1) must-shrink machinery:
+   - `{{TICKET_ID}}` = the ticket ID
+   - `{{TICKET_FILE_PATH}}` = the repo-relative path to the ticket file
+   - `{{DIFF_FILE_PATH}}` = the path of the diff written in step 2
+   - `{{TEST_LOG_PATH}}` = the test-log path from step 2
+   - `{{VERDICT_FILE_PATH}}` = the path pre-allocated at the top of this step
+   - `{{BRANCH}}` = the per-ticket branch resolved per the workflow's branch resolution procedure
    - `{{CURRENT_ROUND}}` = `N`; `{{CURRENT_FILES}}` / `{{CURRENT_ADDED}}` / `{{CURRENT_REMOVED}}` = the current diff stats from step 2
    - `{{PREVIOUS_ROUND}}` = `N−1` when `N ≥ 2`, else the literal `(N/A — round 1)`. `{{PREVIOUS_FILES}}` / `{{PREVIOUS_ADDED}}` / `{{PREVIOUS_REMOVED}}` = the prior round's stats from frontmatter when `N ≥ 2`, else the literal `(N/A — round 1, no previous round)`.
-   - `{{NEGATIVE_SPACE_LIST}}`, `{{TEST_OUTPUT_TAIL}}`, `{{TEST_LOG_PATH}}`, `{{BRANCH}}` (the per-ticket branch resolved per the workflow's branch resolution procedure)
-4. Spawn `Agent(subagent_type: "code-reviewer", prompt: <substituted>, description: "Review M1-NNN")`. Foreground (the verdict gates the next step). The `code-reviewer` agent is defined at `.claude/agents/code-reviewer.md` (read-only tool allowlist, opus model).
-5. Parse the structured verdict.
+   - `{{NEGATIVE_SPACE_LIST}}` = the negative-space list from step 2 (or the no-scope-declared sentinel)
+4. Spawn `Agent(subagent_type: "code-reviewer", prompt: <substituted>, description: "Review M1-NNN")`. Foreground (the verdict gates the next step). The `code-reviewer` agent is defined at `.claude/agents/code-reviewer.md` (Read/Grep/Glob/Write tool allowlist, opus model).
+5. Parse the three-line short chat reply for the verdict line + integer rework-item count. Read `target/m1-tick-review-{{ID}}-r{{CURRENT_ROUND}}.txt` (the same `{{VERDICT_FILE_PATH}}` substituted above) from disk to extract per-check results (SCOPE-DRIFT-CHECK / TEST-INTEGRITY-CHECK / OUT-OF-SCOPE-CHECK / NEGATIVE-SPACE-CHECK / ACCEPTANCE-CHECK) and the REWORK ITEMS / UNCERTAINTY strings the subagent wrote there.
 6. Append to ticket frontmatter under `reviews:`:
    ```yaml
    reviews:

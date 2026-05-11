@@ -1,7 +1,7 @@
 ---
 id: M1-010
 title: Slim m1-tick subagent prompts
-status: pending
+status: done
 created: 2026-05-11
 last_updated: 2026-05-11
 blocked_by: []
@@ -68,14 +68,33 @@ spec_refs:
   - .claude/agents/code-reviewer.md §How you read the prompt
 decision_refs: []
 
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-05-11
+    verdict: APPROVE
+    agent_run: a38594369182fb161
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 284
+      removed: 232
 escalations: []
 revisions: []
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-05-11
+  verdict: WARN
+  warnings:
+    - "Acceptance item 13 is a non-runnable structural quality check (explicitly labelled 'non-numeric'); relies on inspection of the `## start <id>` and `## review <id>` substitution paragraphs in SKILL.md rather than a grep. Does not block — items 9, 10, 11 cover the same structural property via grep — but the developer should inspect the substitution paragraphs directly to satisfy item 13."
+  blockers: []
 ---
 
 # M1-010: Slim m1-tick subagent prompts
