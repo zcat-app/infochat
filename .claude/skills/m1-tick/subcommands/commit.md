@@ -29,7 +29,11 @@ Steps:
    Reviewed-by: code-reviewer (VERDICT: <APPROVE|OVERRIDE-APPROVE>; round <r>; agent run: <id-or-NA>)
    ```
 4. Set ticket frontmatter `status: done`. Update `last_updated`. (This mutation produces a working-tree modification on the ticket file in addition to the commit candidates from step 1.)
-5. Regenerate `STATUS.md`. (Done *before* `git commit` so the regenerated board reflects the new `done` state and lands in the same commit as the implementation. Performing this step after `git commit` would leave STATUS.md as an uncommitted modification blocking the next ticket's clean-tree precondition.)
+5. Regenerate `STATUS.md` via the fresh-context subagent. (Done *before* `git commit` so the regenerated board reflects the new `done` state and lands in the same commit as the implementation. Performing this step after `git commit` would leave STATUS.md as an uncommitted modification blocking the next ticket's clean-tree precondition.)
+   - Snapshot `git status --porcelain` immediately before spawning the subagent. This is the Write-scope guard pre-image.
+   - Read the prompt template at `docs/process/status-regen-prompt.md`. Substitute `{{TICKETS_GLOB}}` with the literal `docs/plan/m1/tickets/M1-*.md` and `{{STATUS_FILE_PATH}}` with the literal `docs/plan/m1/STATUS.md`.
+   - Spawn `Agent(subagent_type: "status-regenerator", prompt: <substituted>, description: "Regenerate STATUS.md")`. Foreground. The agent Globs the tickets, Reads each, renders the template, Writes `docs/plan/m1/STATUS.md`, and returns the four-line short reply.
+   - Snapshot `git status --porcelain` immediately after the spawn returns. Diff against the pre-image. The only new working-tree change permitted is `docs/plan/m1/STATUS.md`. If any other new change appears outside that path, refuse to proceed and surface a clear error ("status-regenerator wrote to <path> outside its contract") — the guard catches a misbehaving agent before its writes can be staged.
 6. Stage explicitly: `git add` each commit candidate from step 1, plus the ticket file, plus `docs/plan/m1/STATUS.md`. Never `git add -A`.
 7. `git commit -m "<heredoc message>"` — single commit.
 8. If the ticket has `security_relevant: true`, remind the user that [`/redteam M1-NNN`](../../redteam/SKILL.md) is recommended before merging.

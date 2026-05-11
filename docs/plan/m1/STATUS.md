@@ -14,9 +14,9 @@
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 6 |
+| done | 7 |
 | deferred | 0 |
-| **total** | **15** |
+| **total** | **16** |
 
 ---
 
@@ -28,7 +28,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-007a — infochat-core + ingest SPIs (complexity: medium, risk: low)
 - M1-007b — infochat-llm-adapter + LLM SPIs (complexity: medium, risk: low)
 - M1-007c — infochat-messaging-adapter SPIs (complexity: medium, risk: low)
-- M1-012 — STATUS.md regeneration via fresh-context subagent (complexity: low, risk: low)
 - M1-013 — Clarity self-contained check and reviewer spec-conformance check (complexity: low, risk: low)
 
 ---
@@ -49,6 +48,7 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 - M1-006 — blocked_by: M1-005 (pending)
 - M1-007 — blocked_by: M1-007a (pending), M1-007b (pending), M1-007c (pending)
 - M1-009 — blocked_by: M1-005 (pending), M1-006 (pending)
+- M1-014 — blocked_by: M1-012 (in-progress), M1-013 (pending)
 
 ---
 
@@ -73,6 +73,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-004 | Postgres + pgvector dev compose | 2026-05-11 | round 1 APPROVE |
 | M1-010 | Slim m1-tick subagent prompts | 2026-05-11 | round 1 APPROVE |
 | M1-011 | Split SKILL.md per subcommand | 2026-05-11 | round 1 APPROVE |
+| M1-012 | STATUS.md regeneration via fresh-context subagent | 2026-05-11 | round 2 APPROVE |
 
 ---
 
@@ -102,6 +103,10 @@ M1-003 (done)
   └── M1-005 (pending) ← runnable [shown above]
 M1-010 (done)
   ├── M1-011 (done)
-  │     └── M1-012 (pending) ← runnable
-  └── M1-013 (pending) ← runnable
+  │     ├── M1-012 (done)
+  │     │     └── M1-014 (pending; also blocked on M1-013)
+  │     └── M1-014 (pending; also blocked on M1-013)
+  ├── M1-013 (pending) ← runnable
+  │     └── M1-014 (pending)
+  └── M1-014 (pending; blocked on M1-013)
 ```
