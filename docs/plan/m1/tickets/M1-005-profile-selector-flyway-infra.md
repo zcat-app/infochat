@@ -3,11 +3,11 @@ id: M1-005
 title: Profile selector + Flyway infra
 status: pending
 created: 2026-05-10
-last_updated: 2026-05-10
+last_updated: 2026-05-11
 blocked_by:
   - M1-001
   - M1-003
-files_budget: 7
+files_budget: 10
 files_scope:
   - infochat-collector/pom.xml
   - infochat-provider/pom.xml
@@ -16,6 +16,9 @@ files_scope:
   - infochat-collector/src/main/resources/db/migration/V1__init.sql
   - infochat-collector/src/main/java/io/infochat/collector/config/InfochatProfile.java
   - infochat-provider/src/main/java/io/infochat/provider/config/InfochatProfile.java
+  - infochat-collector/src/test/java/io/infochat/collector/config/InfochatProfileTest.java
+  - infochat-collector/src/test/java/io/infochat/collector/flyway/FlywayMigrationIT.java
+  - infochat-provider/src/test/java/io/infochat/provider/config/InfochatProfileTest.java
 complexity: medium
 risk: low
 round_cap: 2
@@ -66,8 +69,31 @@ decision_refs:
   - D34
 
 reviews: []
-escalations: []
-revisions: []
+escalations:
+  - date: 2026-05-11
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      N/A — escalation is from clarity pre-flight (no implementation review yet).
+      See clarity_check.blockers for the trigger context.
+revisions:
+  - date: 2026-05-11
+    reason: clarity-fail rework — add 3 test files from test_plan.adds into files_scope and raise files_budget
+    prior_values: |
+      files_budget: 7
+      files_scope:
+        - infochat-collector/pom.xml
+        - infochat-provider/pom.xml
+        - infochat-collector/src/main/resources/application.properties
+        - infochat-provider/src/main/resources/application.properties
+        - infochat-collector/src/main/resources/db/migration/V1__init.sql
+        - infochat-collector/src/main/java/io/infochat/collector/config/InfochatProfile.java
+        - infochat-provider/src/main/java/io/infochat/provider/config/InfochatProfile.java
+      (files_scope omitted the 3 paths listed under test_plan.adds: the
+       collector InfochatProfileTest, the collector FlywayMigrationIT, and
+       the provider InfochatProfileTest. Acceptance items [12] and [13]
+       require those files to exist, so the developer would breach
+       files_scope before finishing round 1. Refine adds those 3 paths to
+       files_scope and raises files_budget from 7 to 10.)
 overrides: []
 aborted_attempts: []
 reopens: []

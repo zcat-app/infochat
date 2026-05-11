@@ -10,17 +10,19 @@
 
 | Status | Count |
 |---|---|
-| pending | 7 |
+| pending | 6 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 10 |
+| done | 11 |
 | deferred | 0 |
 | **total** | **17** |
 
 ---
 
 ## Runnable now
+
+Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-005 — Profile selector + Flyway infra (complexity: medium, risk: low)
 - M1-007a — infochat-core + ingest SPIs (complexity: medium, risk: low)
@@ -40,6 +42,8 @@ _(none)_
 
 ## Blocked
 
+Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
+
 - M1-006 — blocked_by: M1-005 (pending)
 - M1-007 — blocked_by: M1-007a (pending), M1-007b (pending), M1-007c (pending)
 - M1-009 — blocked_by: M1-005 (pending), M1-006 (pending)
@@ -57,22 +61,26 @@ _(none)_
 
 ## Done
 
+Showing the 10 most recently `done` tickets.
+
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
-| M1-015 | Status-regenerator reads frontmatter only | 2026-05-11 | OVERRIDE-APPROVE |
-| M1-014 | Prompt-size regression alarm for Agent spawns | 2026-05-11 | APPROVE |
-| M1-013 | Clarity self-contained check and reviewer spec-conformance check | 2026-05-11 | APPROVE |
-| M1-012 | STATUS.md regeneration via fresh-context subagent | 2026-05-11 | APPROVE |
-| M1-011 | Split SKILL.md per subcommand | 2026-05-11 | APPROVE |
-| M1-010 | Slim m1-tick subagent prompts | 2026-05-11 | APPROVE |
 | M1-004 | Postgres + pgvector dev compose | 2026-05-11 | APPROVE |
-| M1-003 | Quarkus app skeleton and first test | 2026-05-10 | APPROVE |
-| M1-002 | m1-tick: fix STATUS.md order and review diff capture | 2026-05-10 | APPROVE |
+| M1-010 | Slim m1-tick subagent prompts | 2026-05-11 | APPROVE |
+| M1-011 | Split SKILL.md per subcommand | 2026-05-11 | APPROVE |
+| M1-012 | STATUS.md regeneration via fresh-context subagent | 2026-05-11 | APPROVE |
+| M1-013 | Clarity self-contained check and reviewer spec-conformance check | 2026-05-11 | APPROVE |
+| M1-014 | Prompt-size regression alarm for Agent spawns | 2026-05-11 | APPROVE |
+| M1-015 | Status-regenerator reads frontmatter only | 2026-05-11 | OVERRIDE-APPROVE |
 | M1-001 | Set up two-module Maven build | 2026-05-10 | APPROVE |
+| M1-002 | m1-tick: fix STATUS.md order and review diff capture | 2026-05-10 | APPROVE |
+| M1-003 | Quarkus app skeleton and first test | 2026-05-10 | APPROVE |
 
 ---
 
 ## Deferred
+
+Grouped by `deferred_reason`. Emit only subsections with non-zero entries.
 
 _(none)_
 
@@ -82,26 +90,35 @@ _(none)_
 
 ```
 M1-001 (done)
+  ├── M1-004 (done)
   ├── M1-005 (pending) ← runnable
-  │     ├── M1-006 (pending)
-  │     │     └── M1-009 (pending)
-  │     └── M1-009 (pending)
   ├── M1-007a (pending) ← runnable
-  │     └── M1-007 (pending)
   ├── M1-007b (pending) ← runnable
-  │     └── M1-007 (pending)
   └── M1-007c (pending) ← runnable
-        └── M1-007 (pending)
-M1-002 (done)
 M1-003 (done)
   └── M1-005 (pending) ← runnable
-M1-004 (done)
+M1-005 (pending)
+  ├── M1-006 (pending)
+  └── M1-009 (pending)
+M1-006 (pending)
+  └── M1-009 (pending)
+M1-007a (pending)
+  └── M1-007 (pending)
+M1-007b (pending)
+  └── M1-007 (pending)
+M1-007c (pending)
+  └── M1-007 (pending)
 M1-010 (done)
   ├── M1-011 (done)
-  │     └── M1-012 (done)
-  │           └── M1-014 (done)
   ├── M1-013 (done)
-  │     └── M1-014 (done)
   └── M1-014 (done)
+M1-011 (done)
+  ├── M1-012 (done)
+  └── M1-014 (done)
+M1-012 (done)
+  └── M1-014 (done)
+M1-013 (done)
+  └── M1-014 (done)
+M1-002 (done)
 M1-015 (done)
 ```
