@@ -40,7 +40,8 @@ acceptance:
   - "within docs/process/reviewer-prompt.md, the verdict-rules section names SPEC-CONFORMANCE-CHECK in the list of checks that can force REWORK. Verify: grep -niE 'SPEC-CONFORMANCE-CHECK.*FAIL|any .*-CHECK.*FAIL' docs/process/reviewer-prompt.md returns at least one match in the `## Verdict rules` block (the existing 'Any *-CHECK: FAIL forces VERDICT to be at least REWORK' line already covers SPEC-CONFORMANCE-CHECK because it matches the *-CHECK pattern; no new derivation rule is needed but the check must be enumerated as a *-CHECK)"
   - ".claude/agents/clarity-reviewer.md persona body (post-frontmatter) describes the new SELF-CONTAINED check. Verify: grep -niE 'self.contained|load.bearing' .claude/agents/clarity-reviewer.md returns at least one match after the YAML frontmatter"
   - ".claude/agents/code-reviewer.md persona body (post-frontmatter) describes the new SPEC-CONFORMANCE check including the instruction to Read each spec_refs file before judging. Verify: grep -niE 'spec.conformance|spec_refs.*Read|Read.*spec_refs' .claude/agents/code-reviewer.md returns at least one match after the YAML frontmatter"
-  - "the structural contract for SPEC-CONFORMANCE-CHECK is documented in docs/process/reviewer-prompt.md as: reviewer Reads every spec_refs entry in the ticket's frontmatter (in its fresh context — does NOT leak spec bytes to main session), compares the diff against the cited spec sections, and flags semantic mismatches between what the spec promises and what the diff delivers. Verify by inspection: the SPEC-CONFORMANCE-CHECK paragraph in the verdict block instructs the reviewer to (a) Read each cited spec file, (b) compare diff semantics to spec semantics, (c) FAIL on a clear mismatch / WARN on partial coverage / PASS when the diff faithfully implements the cited sections."
+  - "the structural contract for SPEC-CONFORMANCE-CHECK is documented in docs/process/reviewer-prompt.md as: reviewer Reads every spec_refs entry in the ticket's frontmatter (in its fresh context — does NOT leak spec bytes to main session), compares the diff against the cited spec sections, and flags semantic mismatches between what the spec promises and what the diff delivers. Verify by inspection: the SPEC-CONFORMANCE-CHECK paragraph in the verdict block instructs the reviewer to (a) Read each cited spec file by anchor range (see next item), (b) compare diff semantics to spec semantics, (c) FAIL on a clear mismatch / WARN on partial coverage / PASS when the diff faithfully implements the cited sections."
+  - "the SPEC-CONFORMANCE-CHECK contract instructs the reviewer to Read each spec_refs entry by ANCHOR RANGE — locate the cited heading using the same anchor-resolution algorithm `docs/process/clarity-prompt.md` already documents, then Read from the heading line until the next heading at the same-or-higher depth — NOT the whole file. Verify: grep -niE 'anchor range|by anchor|until the next heading|same.or.higher' docs/process/reviewer-prompt.md returns at least one match in the SPEC-CONFORMANCE paragraph; AND the algorithm itself is cross-referenced rather than duplicated (grep -nF 'clarity-prompt.md' docs/process/reviewer-prompt.md returns at least one match in the SPEC-CONFORMANCE paragraph so the reviewer reuses the existing anchor-resolution algorithm)."
   - "the structural contract for SELF-CONTAINED-CHECK is documented in docs/process/clarity-prompt.md as: clarity-reviewer judges whether the ticket body carries enough behavioral detail that an implementer doesn't need to Read cited spec files to know WHAT to build (cited spec files may still be used for cross-reference / context; they must not be load-bearing). Verify by inspection: the SELF-CONTAINED paragraph in the `## What to check` block names concrete failure shapes (e.g. acceptance items that say 'implements §X of the spec' without inlining the behavioral assertion; Definition of Done that delegates to spec without inlining the SPI shape)."
   - "the new clarity check leans WARN over FAIL on judgment-call cases. Verify by inspection: the SELF-CONTAINED paragraph in docs/process/clarity-prompt.md explicitly documents the WARN-over-FAIL default (mirrors the FILES-BUDGET-PLAUSIBLE precedent at line ~73 of the pre-edit file: 'You can be wrong; lean to WARN over FAIL on this dimension')."
   - "no new placeholders are introduced in either prompt template. Verify: grep -nE '\\{\\{[A-Z_]+\\}\\}' docs/process/clarity-prompt.md returns the same set of placeholder names as before this ticket (no additions beyond what M1-010 establishes); same for docs/process/reviewer-prompt.md. The new checks operate on existing prompt content (the ticket file the subagent Reads, the spec_refs list in the ticket frontmatter)."
@@ -287,14 +288,40 @@ each subagent — that the user's framing exposed as gaps.
   above) and WARN otherwise.
 - **The reviewer's spec_refs Read cost.** Each cited spec file
   is typically 100–500 lines (a few KB to ~20 KB). Tickets
-  cite 2–5 spec sections on average. So the reviewer's fresh
-  context absorbs 10–100 KB of spec content per review — paid
-  ONCE per review in the subagent's fresh context, never
-  leaking to main-session transcript. M1-010 already
-  established this trade-off explicitly when it replaced the
-  85-line embedded engineering-rules block with a Read pointer
-  to a 94-line canonical file. The reviewer's fresh context
-  is the right place for this cost.
+  cite 2–5 spec sections on average. Whole-file Reads would
+  absorb 10–100 KB of spec content per review; anchor-range
+  Reads (next bullet) tighten that to 2–20 KB. Either way
+  the cost is paid ONCE per review in the subagent's fresh
+  context, never leaking to main-session transcript. M1-010
+  already established this trade-off explicitly when it
+  replaced the 85-line embedded engineering-rules block with
+  a Read pointer to a 94-line canonical file. The reviewer's
+  fresh context is the right place for this cost.
+- **Anchor-range Read, not whole-file Read.** The `spec_refs`
+  entries are structured as `<file-path> §<section-title>`,
+  which is enough to slice each cited section out of its
+  file. The code-reviewer reuses the anchor-resolution
+  algorithm `docs/process/clarity-prompt.md` already
+  documents (case-insensitive substring match against
+  `#`-prefixed headings; ambiguity rules; line-number
+  output) to locate the section's starting line, then Reads
+  from that line until the next heading at the same-or-higher
+  depth. For a citation like `docs/spec/security.md §Per-adapter
+  admin threat profile`, the reviewer Reads ~30–80 lines of
+  the cited section instead of the file's ~600 lines.
+  Cross-reference the algorithm rather than duplicating it
+  (clarity-prompt.md is the single source of truth for the
+  resolution shape); the code-reviewer's extension is one
+  step beyond — bound the body Read by the next same-or-higher
+  heading. If a citation's `<section-title>` is missing
+  (entry is just `<file-path>` with no `§`), Read the whole
+  file as before — the anchor-range tightening only applies
+  when a section is named. If anchor resolution returns
+  `ANCHOR-NOT-FOUND` or `AMBIGUOUS`, fall back to whole-file
+  Read AND raise SPEC-CONFORMANCE-CHECK to WARN with a note
+  citing the unresolved anchor — the spec-conformance judgment
+  is still made on the available content, but the operator is
+  informed that the citation could not be tightened.
 - **The clarity-reviewer's spec_refs Read cost.** Same shape:
   the clarity-reviewer already Reads cited spec files (after
   M1-010, to resolve anchors). Re-reading the same files for
