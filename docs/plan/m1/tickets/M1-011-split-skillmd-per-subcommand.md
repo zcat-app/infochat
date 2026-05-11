@@ -1,7 +1,7 @@
 ---
 id: M1-011
 title: Split SKILL.md per subcommand
-status: pending
+status: done
 created: 2026-05-11
 last_updated: 2026-05-11
 blocked_by:
@@ -67,14 +67,32 @@ spec_refs:
   - docs/process/workflow.md §Naming conventions
 decision_refs: []
 
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-05-11
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 14
+      added: 674
+      removed: 681
 escalations: []
 revisions: []
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-05-11
+  verdict: WARN
+  warnings:
+    - 'Acceptance item 15 (semantic-fidelity check): "Verify by inspection of the diff" is not a runnable command. The surrounding quantitative proxies ("large-negative" / "large-positive" net line changes) are directional but not unambiguous. The "inspection" verb gives the reviewer subjective latitude.'
+  blockers: []
 ---
 
 # M1-011: Split SKILL.md per subcommand
