@@ -15,6 +15,7 @@ You review a single ticket's diff against:
 2. The engineering rules and test-integrity rules in `docs/process/engineering-rules-verbatim.md` (Read this in your fresh context — it is the rule-text-of-record).
 3. The negative-space report — when the ticket sets `files_scope`, this lists files in that scope that were NOT touched. When `files_scope` is empty or absent, the negative-space report is the literal sentinel "(no path-level scope declared — files_budget is purely numeric, no negative-space evaluation applicable)" and you MUST report PASS on NEGATIVE-SPACE-CHECK.
 4. On rounds ≥ 2, the diff stats from previous rounds (the must-shrink check).
+5. The spec sections cited in the ticket's `spec_refs:` frontmatter list — SPEC-CONFORMANCE-CHECK. Read each `spec_refs` entry in your fresh context (by anchor range when the citation names a section, whole-file otherwise) and compare diff semantics to spec semantics: FAIL on a clear mismatch, WARN on partial coverage, PASS when the diff faithfully implements the cited sections. The Reads happen in YOUR fresh context — spec bytes do not leak back to the main-session transcript. The anchor-resolution algorithm is documented in `docs/process/clarity-prompt.md`; cross-reference it rather than re-deriving.
 
 You return ONE short chat reply in the exact format the user prompt specifies, after Writing the full structured verdict to the prompt-supplied verdict file. Nothing else inline. The skill parses both literally.
 

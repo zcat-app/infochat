@@ -114,6 +114,53 @@ Every acceptance item should be checkable. Many are runnable assertions
 confirms or denies each. For non-runnable items (e.g. "Flyway
 migration applies cleanly"), use the diff and test log to judge.
 
+### Spec-conformance (Read each spec_refs entry in your fresh context)
+
+The ticket's `spec_refs:` frontmatter list names the spec sections the
+diff is supposed to implement. SPEC-CONFORMANCE-CHECK verifies that
+the diff faithfully implements those sections — not just that the
+acceptance items pass as literal strings, but that the diff matches
+the cited spec's semantics. Acceptance items can shadow the spec
+imperfectly; this check closes the loop.
+
+Read each spec_refs entry in your fresh context (the agent's allowlist
+permits Read). These Reads happen in YOUR fresh context, NOT in the
+main-session transcript, so spec bytes do not leak back to main.
+
+For each `spec_refs:` entry of the form `<file-path> §<section-title>`:
+read by ANCHOR RANGE — not the whole file. Locate the cited heading
+using the anchor-resolution algorithm documented in
+`docs/process/clarity-prompt.md` (case-insensitive substring match
+against `#`-prefixed headings; ambiguity rules; line-number output),
+then Read from that line until the next heading at the same-or-higher
+depth. Cross-reference clarity-prompt.md rather than duplicating the
+algorithm here — that file is the single source of truth for anchor
+resolution.
+
+If the citation has no `§<section-title>` (entry is just `<file-path>`),
+Read the whole file. If anchor resolution returns ANCHOR-NOT-FOUND or
+AMBIGUOUS, fall back to whole-file Read AND raise SPEC-CONFORMANCE-CHECK
+to WARN with a note citing the unresolved anchor — the spec-conformance
+judgment is still made on the available content, but the operator is
+informed that the citation could not be tightened.
+
+Then compare diff semantics to spec semantics:
+  - FAIL on a clear mismatch: method/function names in the diff that
+    diverge from the spec's named SPI; a behavioral guarantee the spec
+    promises that the diff omits (e.g. spec says `the loader is
+    idempotent` and the diff has no idempotency guard); the diff
+    materially diverges from what the cited section says.
+  - WARN on partial coverage: a spec section names N requirements, the
+    diff implements M < N of them, and the ticket's acceptance only
+    claimed M. Surfaces to the user as informational; does not block
+    APPROVE. Also WARN when a spec_refs entry is materially unrelated
+    to the diff (the ticket may be over-citing).
+  - PASS when the diff faithfully implements the cited sections.
+
+A diff that does the spec thing AND an adjacent thing the spec doesn't
+mention is SCOPE-DRIFT-CHECK territory (the existing check covers it),
+not SPEC-CONFORMANCE.
+
 ---
 
 ## Short chat reply (the only thing you return inline)
@@ -175,6 +222,14 @@ NEGATIVE-SPACE-CHECK: <PASS | WARN>
 ACCEPTANCE-CHECK: <PASS | PARTIAL | FAIL>
   <one bullet per acceptance item, with PASS / FAIL / SKIPPED and a
    one-line reason citing the test log or diff.>
+
+SPEC-CONFORMANCE-CHECK: <PASS | WARN | FAIL>
+  <one paragraph: did the diff faithfully implement the spec sections
+   cited in spec_refs (PASS), partially implement them (WARN), or
+   materially diverge (FAIL)? Cite the spec section and the diff hunk
+   that conflicts. Per the Spec-conformance section above, Read each
+   spec_refs entry by anchor range in your fresh context; on
+   ANCHOR-NOT-FOUND or AMBIGUOUS, raise to WARN with a note.>
 
 REWORK ITEMS: (omit on APPROVE; required on REWORK)
   1. <specific, addressable, scoped to the existing diff>

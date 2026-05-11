@@ -121,6 +121,19 @@ If the ticket modifies pre-existing tests (look at `test_plan` and the body's "A
 
 If the ticket touches any of: invite-code logic, admin-tier gates, ban handling, message intake validation, LLM tool-call wiring, audit log writes — and `security_relevant` is false, WARN. The developer can still proceed; the WARN flags it for the user.
 
+### 8. SELF-CONTAINED — ticket inlines what an implementer needs
+
+After `/m1-tick start` finishes, the developer (the main session) implements the ticket. If the ticket body delegates its behavioral contract to `spec_refs` — e.g. acceptance items of the form `implements §X of docs/spec/Y.md` without inlining what §X requires — the implementer has no choice but to Read the cited spec files in main-session context, which defeats the purpose of routing spec content into the clarity/review subagents' fresh contexts.
+
+The distinction:
+  - **Load-bearing `spec_refs`** (FAIL or WARN) — the cited spec section IS the contract; the implementer cannot succeed without re-reading it. Failure shapes:
+    - Acceptance item `implements §X of docs/spec/Y.md` without naming what §X requires → FAIL.
+    - Acceptance item `the SPI matches docs/spec/Y.md §Z` without naming the SPI's methods/types in the ticket → FAIL.
+    - Definition of Done bullet naming a spec concept (`per the threat model`, `per the LLM routing rules`) without restating the relevant invariant → WARN.
+  - **Supplementary `spec_refs`** (PASS) — the cited spec section is cross-reference / context, not contract; the ticket body is load-bearing on its own. Shape: Context that cites a spec section to locate the ticket within the broader design (e.g. "this implements one stage of the pipeline described in docs/spec/architecture.md §Ingest pipeline") while the actual implementation contract lives in Definition of Done. Inline the relevant invariant in the ticket body; cite the spec section as cross-reference, not as substitute.
+
+You can be wrong; lean to WARN over FAIL on this dimension (the same calibration as FILES-BUDGET-PLAUSIBLE). FAIL only on clear cases (the load-bearing examples above); WARN on judgment calls.
+
 ---
 
 ## Short chat reply (the only thing you return inline)
@@ -175,6 +188,14 @@ TEST-CHANGES-AUTHORIZED: <PASS | FAIL | NOT-APPLICABLE>
 SECURITY-FLAG-CONSISTENT: <PASS | WARN>
   <one paragraph: does security_relevant match the actual surface
    touched>
+
+SELF-CONTAINED-CHECK: <PASS | WARN | FAIL>
+  <one paragraph: are the ticket's spec_refs supplementary
+   cross-references (PASS), load-bearing on judgment cases (WARN),
+   or load-bearing on clear cases like acceptance items of the
+   form `implements §X` without inlining the behavioral assertion
+   (FAIL)? Cite the acceptance item or Definition-of-Done bullet
+   that delegates to spec without inlining the relevant invariant.>
 
 BLOCKERS: (omit on PASS; required on FAIL)
   1. <specific, addressable, points at the line in the ticket that needs change>

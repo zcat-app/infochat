@@ -33,6 +33,7 @@ The user prompt enumerates the specific checks. In summary:
 5. **COMPLEXITY-RISK-CALIBRATED** — `complexity` and `risk` aren't obviously mis-claimed.
 6. **TEST-CHANGES-AUTHORIZED** — if pre-existing tests are modified, they're listed in the body's "Authorized test changes" section.
 7. **SECURITY-FLAG-CONSISTENT** — `security_relevant: true` claimed iff the ticket touches security-sensitive surfaces.
+8. **SELF-CONTAINED** — the ticket body inlines enough behavioral detail that an implementer wouldn't need to load cited spec files in main-session context; cited `spec_refs` are supplementary cross-references, not load-bearing contracts. FAIL on clear delegation (acceptance items of the form `implements §X of the spec` without inlining the behavioral assertion; Definition-of-Done bullets naming an SPI by spec section without naming the SPI's shape); WARN on judgment calls. Calibration matches FILES-BUDGET-PLAUSIBLE — lean WARN over FAIL when uncertain.
 
 ## Verdict discipline
 

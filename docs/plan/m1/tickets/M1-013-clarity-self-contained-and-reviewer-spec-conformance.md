@@ -1,7 +1,7 @@
 ---
 id: M1-013
 title: Clarity self-contained check and reviewer spec-conformance check
-status: pending
+status: done
 created: 2026-05-11
 last_updated: 2026-05-11
 
@@ -61,7 +61,21 @@ spec_refs:
   - .claude/agents/code-reviewer.md §How you read the prompt
 decision_refs: []
 
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-05-11
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+      spec_conformance: PASS
+    diff_stats:
+      files: 6
+      added: 93
+      removed: 10
 escalations:
   - date: 2026-05-11
     reason: clarity-fail
@@ -86,7 +100,14 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-05-11
+  verdict: WARN
+  warnings:
+    - "Acceptance item 9 (line 44) uses 'Verify by inspection' without a runnable command for the SPEC-CONFORMANCE-CHECK paragraph contract; specific sub-criteria (a, b, c) are named but execution is manual."
+    - "Acceptance item 11 (line 46) uses 'Verify by inspection' for the SELF-CONTAINED paragraph's concrete failure shapes; specific shapes are listed but verification is manual."
+    - "Acceptance item 12 (line 47) uses 'Verify by inspection' for the WARN-over-FAIL default documentation; could be mechanised with a grep for 'lean' or 'WARN over FAIL'."
+  blockers: []
 ---
 
 # M1-013: Clarity self-contained check and reviewer spec-conformance check
