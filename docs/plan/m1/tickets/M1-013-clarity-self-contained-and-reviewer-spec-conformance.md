@@ -4,6 +4,7 @@ title: Clarity self-contained check and reviewer spec-conformance check
 status: pending
 created: 2026-05-11
 last_updated: 2026-05-11
+
 blocked_by:
   - M1-010
 files_budget: 4
@@ -32,10 +33,10 @@ out_of_scope:
   - any change to STATUS.md content beyond what the regenerator emits
   - any change to round-cap rules, must-shrink rules, or escalation triggers
 acceptance:
-  - "within docs/process/clarity-prompt.md, the `## What to check` block (bounded by `## What to check` and `## Return exactly this format` headings) introduces a new numbered SELF-CONTAINED check. Verify: grep -nE '^### [0-9]+\\. ' docs/process/clarity-prompt.md returns one more match than the pre-edit file AND grep -nF 'SELF-CONTAINED' docs/process/clarity-prompt.md returns at least one match in that block"
-  - "within docs/process/clarity-prompt.md, the verdict-format block (bounded by `## Return exactly this format` and `## Verdict rules` headings) adds a `SELF-CONTAINED-CHECK: <PASS | WARN | FAIL>` line. Verify: grep -nE '^SELF-CONTAINED-CHECK:' docs/process/clarity-prompt.md returns at least one match"
+  - "within docs/process/clarity-prompt.md, the `## What to check` block (bounded by `## What to check` and `## Short chat reply` headings) introduces a new numbered SELF-CONTAINED check. Verify: grep -nE '^### [0-9]+\\. ' docs/process/clarity-prompt.md returns one more match than the pre-edit file AND grep -nF 'SELF-CONTAINED' docs/process/clarity-prompt.md returns at least one match in that block"
+  - "within docs/process/clarity-prompt.md, the verdict-format block (bounded by `## On-disk verdict format` and `## Verdict rules` headings) adds a `SELF-CONTAINED-CHECK: <PASS | WARN | FAIL>` line. Verify: grep -nE '^SELF-CONTAINED-CHECK:' docs/process/clarity-prompt.md returns at least one match"
   - "within docs/process/clarity-prompt.md, the SELF-CONTAINED check body describes the load-bearing-vs-supplementary spec_refs distinction. Verify: grep -niE 'load.bearing|supplementary|inline.*spec' docs/process/clarity-prompt.md returns at least one match within the `## What to check` block"
-  - "within docs/process/reviewer-prompt.md, the `## Your verdict` block (bounded by `## Your verdict` and `## Verdict rules` headings) adds a `SPEC-CONFORMANCE-CHECK: <PASS | WARN | FAIL>` line. Verify: grep -nE '^SPEC-CONFORMANCE-CHECK:' docs/process/reviewer-prompt.md returns at least one match"
+  - "within docs/process/reviewer-prompt.md, the `## On-disk verdict format` block (bounded by `## On-disk verdict format` and `## Verdict rules` headings) adds a `SPEC-CONFORMANCE-CHECK: <PASS | WARN | FAIL>` line. Verify: grep -nE '^SPEC-CONFORMANCE-CHECK:' docs/process/reviewer-prompt.md returns at least one match"
   - "within docs/process/reviewer-prompt.md, the rules section above the verdict block explicitly instructs the reviewer to Read every spec_refs file before judging conformance. Verify: grep -niE 'Read.*spec_refs|each spec_ref.*Read' docs/process/reviewer-prompt.md returns at least one match"
   - "within docs/process/reviewer-prompt.md, the verdict-rules section names SPEC-CONFORMANCE-CHECK in the list of checks that can force REWORK. Verify: grep -niE 'SPEC-CONFORMANCE-CHECK.*FAIL|any .*-CHECK.*FAIL' docs/process/reviewer-prompt.md returns at least one match in the `## Verdict rules` block (the existing 'Any *-CHECK: FAIL forces VERDICT to be at least REWORK' line already covers SPEC-CONFORMANCE-CHECK because it matches the *-CHECK pattern; no new derivation rule is needed but the check must be enumerated as a *-CHECK)"
   - ".claude/agents/clarity-reviewer.md persona body (post-frontmatter) describes the new SELF-CONTAINED check. Verify: grep -niE 'self.contained|load.bearing' .claude/agents/clarity-reviewer.md returns at least one match after the YAML frontmatter"
@@ -52,17 +53,35 @@ test_plan:
     - all tests currently green on main (this ticket only edits process docs and agent definitions; mvn verify is a smoke check that no source code was perturbed)
 spec_refs:
   - docs/process/clarity-prompt.md §What to check
-  - docs/process/clarity-prompt.md §Return exactly this format
+  - docs/process/clarity-prompt.md §On-disk verdict format
   - docs/process/clarity-prompt.md §Verdict rules
-  - docs/process/reviewer-prompt.md §Your verdict
+  - docs/process/reviewer-prompt.md §On-disk verdict format
   - docs/process/reviewer-prompt.md §Verdict rules
   - .claude/agents/clarity-reviewer.md §What you check
   - .claude/agents/code-reviewer.md §How you read the prompt
 decision_refs: []
 
 reviews: []
-escalations: []
-revisions: []
+escalations:
+  - date: 2026-05-11
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      SPEC-REFS-VALID: FAIL
+        - docs/process/clarity-prompt.md §Return exactly this format → ANCHOR-NOT-FOUND
+        - docs/process/reviewer-prompt.md §Your verdict → ANCHOR-NOT-FOUND
+      (Both anchors missing from their target files; see clarity_check.blockers for fix suggestions.)
+revisions:
+  - date: 2026-05-11
+    reason: clarity-fail rework — fix non-existent heading references
+    prior_values: |
+      spec_refs (lines 56, 58):
+        - docs/process/clarity-prompt.md §Return exactly this format
+        - docs/process/reviewer-prompt.md §Your verdict
+      acceptance items (lines 36, 37, 39) and Definition of Done (line 182)
+      referred to the same non-existent headings in prose.
+      The verdict-format block in both files is actually titled
+      "## On-disk verdict format"; the block bounding `## What to check`
+      in clarity-prompt.md is `## Short chat reply`.
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -164,7 +183,7 @@ each subagent — that the user's framing exposed as gaps.
   unchanged — the existing rules ("Any *-CHECK: FAIL forces
   CLARITY VERDICT: FAIL") already cover the new check via the
   wildcard pattern.
-- `docs/process/reviewer-prompt.md` `## Your verdict` block adds
+- `docs/process/reviewer-prompt.md` `## On-disk verdict format` block adds
   a `SPEC-CONFORMANCE-CHECK: <PASS | WARN | FAIL>` line in the
   per-check list, positioned after `ACCEPTANCE-CHECK`. The line
   carries the same one-paragraph rationale shape.
