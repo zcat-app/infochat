@@ -1,9 +1,9 @@
 ---
 id: M1-005
 title: Profile selector + Flyway infra
-status: pending
+status: done
 created: 2026-05-10
-last_updated: 2026-05-11
+last_updated: 2026-05-12
 blocked_by:
   - M1-001
   - M1-003
@@ -68,7 +68,21 @@ decision_refs:
   - D1
   - D34
 
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-05-12
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+      spec_conformance: PASS
+    diff_stats:
+      files: 12
+      added: 676
+      removed: 44
 escalations:
   - date: 2026-05-11
     reason: clarity-fail
@@ -98,7 +112,13 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-05-11
+  verdict: WARN
+  warnings:
+    - "Acceptance item [13] uses `mvn -pl infochat-collector test` to grep surefire-reports for the Flyway success log, but the test file is named FlywayMigrationIT.java. By default Maven Surefire excludes *IT.java files; those run under Maven Failsafe during the verify phase. If the project follows standard Maven conventions, item [13]'s grep check may always return zero matches (vacuously true) because the IT never ran under surefire. The developer should either rename the file to FlywayMigrationTest.java, configure Surefire to include *IT.java, or change item [13] to grep target/failsafe-reports/ after `mvn -pl infochat-collector verify`."
+    - "risk: low is slightly underclaimed for a ticket with migration_touch: true that establishes the foundational Flyway infrastructure. All subsequent migration tickets depend on this wiring being correct. risk: medium would be more defensible. This does not block implementation but the reviewer will likely scrutinize the Flyway configuration and DevServices integration closely."
+  blockers: []
 ---
 
 # M1-005: Profile selector + Flyway infra
