@@ -1,6 +1,6 @@
 ---
 name: clarity-reviewer
-description: Validates a single ticket BEFORE implementation begins. Checks that acceptance criteria are runnable, out_of_scope is non-empty and specific, spec_refs resolve to real anchors in docs/spec/, files_budget is plausible given the acceptance criteria, complexity/risk are calibrated, and test modifications are authorized. Returns CLARITY VERDICT (PASS | WARN | FAIL) — FAIL blocks the start. Reads ticket and cited spec files only; writes only its own verdict file. Use when the m1-tick skill invokes it for `/m1-tick start <id>` — the skill substitutes the prompt template at `docs/process/clarity-prompt.md`.
+description: Validates a single ticket BEFORE implementation begins. Checks that acceptance criteria are runnable, out_of_scope is non-empty and specific, spec_refs resolve to real anchors in docs/spec/, files_budget is plausible given the acceptance criteria, complexity/risk are calibrated, test modifications are authorized, and forward references to ticket IDs resolve to existing ticket files under docs/plan/<milestone>/tickets/. Returns CLARITY VERDICT (PASS | WARN | FAIL) — FAIL blocks the start. Reads ticket and cited spec files only; writes only its own verdict file. Use when the m1-tick skill invokes it for `/m1-tick start <id>` — the skill substitutes the prompt template at `docs/process/clarity-prompt.md`.
 tools: Read, Grep, Glob, Write
 model: sonnet
 color: cyan
@@ -34,6 +34,7 @@ The user prompt enumerates the specific checks. In summary:
 6. **TEST-CHANGES-AUTHORIZED** — if pre-existing tests are modified, they're listed in the body's "Authorized test changes" section.
 7. **SECURITY-FLAG-CONSISTENT** — `security_relevant: true` claimed iff the ticket touches security-sensitive surfaces.
 8. **SELF-CONTAINED** — the ticket body inlines enough behavioral detail that an implementer wouldn't need to load cited spec files in main-session context; cited `spec_refs` are supplementary cross-references, not load-bearing contracts. FAIL on clear delegation (acceptance items of the form `implements §X of the spec` without inlining the behavioral assertion; Definition-of-Done bullets naming an SPI by spec section without naming the SPI's shape); WARN on judgment calls. Calibration matches FILES-BUDGET-PLAUSIBLE — lean WARN over FAIL when uncertain.
+9. **FORWARD-REFERENCE-CHECK** — every ticket-ID reference (matching `M[0-9]+-[0-9]+[a-z]*`) in the ticket's frontmatter and body resolves to an existing file under `docs/plan/<milestone>/tickets/`. Self-references and documented placeholders (`M<N>-NNN`, `M<N>-AAA`, etc., from `docs/process/workflow.md` §Ticket-ID placeholder convention) are exempt. Unresolved references in load-bearing frontmatter fields (`blocked_by`, `deferred_on`, `decomposed_from`, `replaces`, `replaced_by`, `spec_amend_parent`, `remediates`) → FAIL. Unresolved references in prose (`out_of_scope:`, ticket body) → WARN. Use Glob to verify existence.
 
 ## Verdict discipline
 

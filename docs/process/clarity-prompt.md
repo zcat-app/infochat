@@ -134,6 +134,74 @@ The distinction:
 
 You can be wrong; lean to WARN over FAIL on this dimension (the same calibration as FILES-BUDGET-PLAUSIBLE). FAIL only on clear cases (the load-bearing examples above); WARN on judgment calls.
 
+### 9. FORWARD-REFERENCE-CHECK — forward references to ticket IDs resolve
+
+The ticket may reference other ticket IDs in its frontmatter
+(e.g. `blocked_by:`, `decomposed_from:`, `deferred_on:`, prose in
+`out_of_scope:`) or in its body (e.g. "see M1-XXX umbrella",
+"deferred to the M1-YYY follow-up"). When the named ticket does
+not exist as a file under `docs/plan/<milestone>/tickets/`, the
+deferral is a prose promise with no tracked work behind it — the
+class of bug that produced M1-009 (a `M1-007a` follow-up that was
+promised in two places and never filed; the consequence surfaced
+rounds later when Provider's tests had no schema source). This
+check fires the forcing function: forward references resolve, or
+the ticket cannot start.
+
+Scan the ticket file (frontmatter + body, the same file you Read
+in step 1) for substrings matching the regex
+`M[0-9]+-[0-9]+[a-z]*`. For each match, classify:
+
+- **Self-reference** — the matched ID equals the ticket's own
+  frontmatter `id:`. Exempt; no flag. (A ticket of id `M1-018`
+  mentioning `M1-018` in its body or frontmatter is fine.)
+- **Placeholder** — the matched ID is one of the documented
+  placeholders from `docs/process/workflow.md` §Ticket-ID
+  placeholder convention: `M<N>-NNN`, `M<N>-AAA`, `M<N>-BBB`,
+  `M<N>-CCC`, `M<N>-XXX`, `M<N>-YYY`, `M<N>-ZZZ`. These are
+  syntactic placeholders, not real references. Exempt; no flag.
+  (The regex above happens not to match `<N>` literal-bracket
+  forms because `<` is not a digit, but the exemption is named
+  explicitly so the rule is robust to future placeholder shapes
+  and to a subagent's regex tolerance.)
+- **Resolved** — Use the Glob tool with the pattern
+  `docs/plan/<milestone>/tickets/<ID>-*.md`, where `<milestone>`
+  is the lowercase prefix of the matched ID (e.g. `M1-007a` →
+  `docs/plan/m1/tickets/M1-007a-*.md`). If Glob returns at least
+  one path, the reference is resolved. Informational only;
+  no flag.
+- **Unresolved, load-bearing** — Glob returned empty AND the
+  match appears in one of these load-bearing frontmatter fields
+  (the fields the runnable-state computation consults):
+  - `blocked_by:`
+  - `deferred_on:`
+  - `decomposed_from:`
+  - `replaces:`
+  - `replaced_by:`
+  - `spec_amend_parent:`
+  - `remediates:`
+
+  Report `FAIL` for this check. The ticket cannot become runnable
+  because its blocker (or lineage parent) can never reach `done`
+  — the file does not exist.
+- **Unresolved, prose** — Glob returned empty AND the match
+  appears anywhere else: `out_of_scope:` prose, the ticket body
+  sections (Context, Definition of Done, Implementation notes,
+  Big-picture notes, Out-of-scope expansion, Alternatives
+  considered, Authorized test changes), or any field outside the
+  load-bearing list above. Report `WARN`. The ticket can run; the
+  operator sees the missing follow-up flagged.
+
+For each match, record the classification with the ID in the
+verdict file's FORWARD-REFERENCE-CHECK section. Cite each
+UNRESOLVED-LOAD-BEARING and UNRESOLVED-PROSE finding by ID in the
+BLOCKERS / WARNINGS sections respectively.
+
+The overall FORWARD-REFERENCE-CHECK verdict is:
+- `PASS` — all matches are RESOLVED, SELF-REF, or PLACEHOLDER.
+- `WARN` — at least one UNRESOLVED-PROSE and no UNRESOLVED-LOAD-BEARING.
+- `FAIL` — at least one UNRESOLVED-LOAD-BEARING.
+
 ---
 
 ## Short chat reply (the only thing you return inline)
@@ -196,6 +264,16 @@ SELF-CONTAINED-CHECK: <PASS | WARN | FAIL>
    form `implements §X` without inlining the behavioral assertion
    (FAIL)? Cite the acceptance item or Definition-of-Done bullet
    that delegates to spec without inlining the relevant invariant.>
+
+FORWARD-REFERENCE-CHECK: <PASS | WARN | FAIL>
+  <one bullet per matched ticket-ID with the classification:
+   RESOLVED (path: <glob result>) | SELF-REF | PLACEHOLDER |
+   UNRESOLVED-LOAD-BEARING (field: <field-name>) |
+   UNRESOLVED-PROSE (location: <section or field>).
+   The section verdict is PASS when every match is
+   RESOLVED/SELF-REF/PLACEHOLDER; WARN when there is at least one
+   UNRESOLVED-PROSE and no UNRESOLVED-LOAD-BEARING; FAIL when
+   there is at least one UNRESOLVED-LOAD-BEARING.>
 
 BLOCKERS: (omit on PASS; required on FAIL)
   1. <specific, addressable, points at the line in the ticket that needs change>

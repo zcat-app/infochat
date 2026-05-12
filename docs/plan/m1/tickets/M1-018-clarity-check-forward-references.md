@@ -1,10 +1,30 @@
 ---
 id: M1-018
 title: Clarity check validates forward references to ticket IDs
-status: pending
+status: done
 created: 2026-05-12
-last_updated: 2026-05-12
+last_updated: 2026-05-13
 blocked_by: []
+clarity_check:
+  date: 2026-05-13
+  verdict: WARN
+  warnings:
+    - "Acceptance item 9 cites the wrong verdict file path: 'docs/plan/m1/clarity/M1-NNN-clarity.md' should be 'target/m1-tick-clarity-<ID>.txt' per docs/process/clarity-prompt.md §Skill responsibilities (line 224). The directory docs/plan/m1/clarity/ does not exist. The behavioral assertion in item 9 is still testable; only the parenthetical path description is wrong. The implementer should note this discrepancy and verify against the actual verdict file location."
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-05-13
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 113
+      removed: 26
 files_budget: 5
 files_scope:
   - docs/process/clarity-prompt.md

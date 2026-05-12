@@ -40,6 +40,15 @@ out_of_scope:
   # convention) SHOULD list the umbrella's integration test file(s) here so the
   # reviewer can confirm a subticket's diff doesn't pre-empt the whole-topic
   # verification the umbrella ticket is reserved to provide.
+  #
+  # FORWARD-REFERENCE RULE: ticket-ID references in this list (and anywhere else
+  # in the ticket — frontmatter or body) are validated by the clarity pre-flight
+  # (see docs/process/clarity-prompt.md §FORWARD-REFERENCE-CHECK). A reference
+  # to a ticket that does not yet exist as a file under docs/plan/<milestone>/
+  # tickets/ produces a clarity WARN here in prose, or a clarity FAIL when the
+  # reference is in a load-bearing frontmatter field (blocked_by, deferred_on,
+  # decomposed_from, replaces, replaced_by, spec_amend_parent, remediates).
+  # File the follow-up ticket as a skeleton before deferring work to it.
 acceptance:
   # Ideally runnable assertions, not prose. The reviewer will check
   # each one literally. Examples:
