@@ -1,16 +1,77 @@
 ---
 id: M1-017
 title: Relocate Flyway migrations from infochat-collector to infochat-core
-status: pending
+status: done
 created: 2026-05-12
-last_updated: 2026-05-12
+last_updated: 2026-05-13
+reviews:
+  - round: 1
+    date: 2026-05-13
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+      spec_conformance: PASS
+    diff_stats:
+      files: 7
+      added: 140
+      removed: 63
+clarity_check:
+  date: 2026-05-13
+  verdict: PASS
+  warnings: []
+  blockers: []
+escalations:
+  - date: 2026-05-13
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A — developer-initiated escalation. About to touch
+      infochat-collector/src/main/resources/db/migration/V4__nologin.sql,
+      which is outside files_scope. V4 landed in M1-016 (commit b09c802)
+      after M1-017 was filed on 2026-05-12; the ticket's files_scope
+      only enumerates V1 and V2. Leaving V4 in infochat-collector while
+      V1/V2 move to infochat-core would mean Provider's test-scoped
+      Flyway sees V1+V2 only (no V4 on Provider's classpath, since
+      Provider does not depend on infochat-collector), so Provider's
+      DevServices DB would diverge from production schema (no NOLOGIN
+      ALTER on application roles). Either V4 must also relocate (and
+      files_scope/out_of_scope expand to cover it) or the ticket must
+      explicitly carve V4 out and document the schema-divergence
+      consequence.
+revisions:
+  - date: 2026-05-13
+    reason: refine (budget-breach — V4__nologin.sql outside files_scope)
+    snapshot:
+      files_budget: 8
+      files_scope:
+        - infochat-core/src/main/resources/db/migration/V1__init.sql
+        - infochat-core/src/main/resources/db/migration/V2__roles.sql
+        - infochat-collector/src/main/resources/db/migration/V1__init.sql
+        - infochat-collector/src/main/resources/db/migration/V2__roles.sql
+        - infochat-provider/pom.xml
+        - infochat-provider/src/main/resources/application.properties
+      out_of_scope_summary: |
+        Pre-refine out_of_scope enumerated: V3__heartbeat.sql (M1-009
+        territory); any change to migration file CONTENT; any new
+        Quarkus extension in infochat-core/pom.xml; any change to
+        Collector's quarkus.flyway.migrate-at-start; any change to
+        Provider's PRODUCTION pom; any addition/change to V1/V2 content;
+        any test added to infochat-core; any change to
+        infochat-collector/pom.xml. V4__nologin.sql was unmentioned
+        because it did not exist when the ticket was filed.
+      acceptance_count: 10
 blocked_by: []
-files_budget: 8
+files_budget: 10
 files_scope:
   - infochat-core/src/main/resources/db/migration/V1__init.sql
   - infochat-core/src/main/resources/db/migration/V2__roles.sql
+  - infochat-core/src/main/resources/db/migration/V4__nologin.sql
   - infochat-collector/src/main/resources/db/migration/V1__init.sql
   - infochat-collector/src/main/resources/db/migration/V2__roles.sql
+  - infochat-collector/src/main/resources/db/migration/V4__nologin.sql
   - infochat-provider/pom.xml
   - infochat-provider/src/main/resources/application.properties
 complexity: low
@@ -20,24 +81,26 @@ security_relevant: false
 migration_touch: true
 out_of_scope:
   - V3__heartbeat.sql (M1-009 territory; V3 has never been committed and lands when M1-009 reopens, placing it directly in the new infochat-core/db/migration location — this ticket does NOT pre-create V3)
-  - any change to migration file CONTENT (this is a relocation, not a rewrite — V1's CREATE EXTENSION vector and V2's three CREATE ROLE blocks ship byte-identical to their prior infochat-collector copies, save for the per-migration header comment which may be updated to reflect the new location)
+  - any change to migration file CONTENT (this is a relocation, not a rewrite — V1's CREATE EXTENSION vector, V2's three CREATE ROLE blocks, and V4's three ALTER ROLE ... NOLOGIN statements ship byte-identical to their prior infochat-collector copies, save for the per-migration header comment which may be updated to reflect the new location)
   - any new Quarkus extension dependency in infochat-core/pom.xml — the module stays a plain library jar per M1-007a out_of_scope line 31 ("any Quarkus extension dependency in infochat-core/pom.xml ... this module is a plain library jar — no quarkus-arc, no quarkus-jdbc-postgresql, no quarkus-flyway here; downstream Quarkus apps pull extensions, infochat-core only carries types"). quarkus-flyway lives in the consuming services, not in infochat-core
   - any change to Collector's quarkus.flyway.migrate-at-start=true (production behavior unchanged; the operator pattern "Collector migrates first" is preserved in production)
   - any change to Provider's PRODUCTION pom — Provider's quarkus-flyway dep is test-scoped only; production Provider continues to not migrate per the existing pom comment
-  - any addition or change to V1's pgvector extension load or V2's three CREATE ROLE blocks (move only)
+  - any addition or change to V1's pgvector extension load, V2's three CREATE ROLE blocks, or V4's three ALTER ROLE NOLOGIN statements (move only)
   - any test added to infochat-core (the module is a plain library jar; tests here would require quarkus-junit5 which would pull in Quarkus extensions and violate the M1-007a invariant — Flyway behavior is tested in the consuming services' ITs)
   - any change to infochat-collector/pom.xml (Collector already has quarkus-flyway from M1-005; only its migration source directory becomes empty)
 acceptance:
   - "infochat-core/src/main/resources/db/migration/V1__init.sql exists and contains a CREATE EXTENSION vector statement (grep -E 'CREATE EXTENSION.*vector' returns at least one match)"
   - "infochat-core/src/main/resources/db/migration/V2__roles.sql exists and creates the three application roles (grep -E 'CREATE ROLE infochat_collector' returns at least one match AND grep -E 'CREATE ROLE infochat_provider' returns at least one match AND grep -E 'CREATE ROLE infochat_admin' returns at least one match) AND grants schema USAGE to each (grep -E 'GRANT USAGE ON SCHEMA public TO infochat_(collector|provider|admin)' returns at least three matches)"
+  - "infochat-core/src/main/resources/db/migration/V4__nologin.sql exists and contains three ALTER ROLE ... NOLOGIN statements (grep -E 'ALTER ROLE infochat_collector\\s+NOLOGIN' returns at least one match AND grep -E 'ALTER ROLE infochat_provider\\s+NOLOGIN' returns at least one match AND grep -E 'ALTER ROLE infochat_admin\\s+NOLOGIN' returns at least one match)"
   - "infochat-collector/src/main/resources/db/migration/V1__init.sql no longer exists (test ! -e infochat-collector/src/main/resources/db/migration/V1__init.sql exits 0)"
   - "infochat-collector/src/main/resources/db/migration/V2__roles.sql no longer exists (same check)"
+  - "infochat-collector/src/main/resources/db/migration/V4__nologin.sql no longer exists (same check)"
   - "infochat-provider/pom.xml adds quarkus-flyway at test scope (the matching <dependency> block contains both <artifactId>quarkus-flyway</artifactId> and <scope>test</scope> — verify by extracting the dependency element via awk '/<dependency>/,/<\\/dependency>/' and grepping that block)"
   - "infochat-provider/src/main/resources/application.properties enables Flyway under the test profile (grep -E '^%test\\.quarkus\\.flyway\\.migrate-at-start=true' returns at least one match)"
   - "infochat-provider/pom.xml's existing comment about migrations is updated — the line 'The migration ownership moves to infochat-core after M1-007a, at which point both services depend on it.' is rewritten to reflect that the relocation has happened (e.g., 'Migrations live in infochat-core (M1-017); both services see them on classpath. Production Provider does not run them; test-scoped quarkus-flyway runs them against Provider's DevServices container only.')"
   - "mvn -B verify from the repo root exits 0"
-  - "After mvn -pl infochat-collector test, grep -rE 'Migrated.*successfully.*V[12]' infochat-collector/target/surefire-reports/ returns at least one match (M1-005's FlywayMigrationIT continues to assert V1 applied via the new classpath location)"
-  - "After mvn -pl infochat-provider test, grep -rE 'Migrated.*successfully.*V[12]' infochat-provider/target/surefire-reports/ returns at least one match (Provider's @QuarkusTest runs apply migrations from the infochat-core classpath via its test-scoped quarkus-flyway)"
+  - "After mvn -pl infochat-collector test, grep -rE 'Migrated.*successfully.*V[124]' infochat-collector/target/surefire-reports/ returns at least one match (M1-005's FlywayMigrationIT continues to assert V1 applied via the new classpath location; V2 and V4 apply transparently from the same classpath)"
+  - "After mvn -pl infochat-provider test, grep -rE 'Migrated.*successfully.*V[124]' infochat-provider/target/surefire-reports/ returns at least one match (Provider's @QuarkusTest runs apply V1+V2+V4 from the infochat-core classpath via its test-scoped quarkus-flyway, giving Provider's DevServices DB the same schema shape as production)"
 test_plan:
   adds: []
   preserves:
@@ -79,6 +142,18 @@ documents the intended end state: *"The migration ownership moves to
 infochat-core after M1-007a, at which point both services depend on
 it."*
 
+While this ticket was awaiting start, `M1-016` landed
+`V4__nologin.sql` in `infochat-collector/src/main/resources/db/migration/`
+(the three `ALTER ROLE ... NOLOGIN` statements that close the role-
+attribute drift surfaced in M1-016's threat model). V4 was filed
+in Collector under the prior layout, but the intent of THIS ticket
+is "all production migrations live in `infochat-core`" — leaving V4
+behind would mean Provider's test-scoped Flyway scans V1+V2 from
+the `infochat-core` classpath only, so Provider's DevServices DB
+would have LOGIN roles in tests where production has NOLOGIN.
+That divergence is the exact failure shape this relocation exists
+to prevent. V4 is folded in via the budget-breach refine.
+
 Both services already depend on `infochat-core`. Relocating the
 migration files there means both modules' classpaths carry them, so:
 
@@ -93,13 +168,14 @@ migration files there means both modules' classpaths carry them, so:
 
 ## Definition of Done
 
-- `infochat-core/src/main/resources/db/migration/V1__init.sql` and
-  `V2__roles.sql` exist in `infochat-core`, byte-identical (modulo
-  header comments) to their prior `infochat-collector` copies.
-- `infochat-collector/src/main/resources/db/migration/V1__init.sql`
-  and `V2__roles.sql` no longer exist (the move is a delete-from-
-  collector + create-in-core; git tracks the move via content
-  similarity).
+- `infochat-core/src/main/resources/db/migration/V1__init.sql`,
+  `V2__roles.sql`, and `V4__nologin.sql` exist in `infochat-core`,
+  byte-identical (modulo header comments) to their prior
+  `infochat-collector` copies.
+- `infochat-collector/src/main/resources/db/migration/V1__init.sql`,
+  `V2__roles.sql`, and `V4__nologin.sql` no longer exist (the move
+  is a delete-from-collector + create-in-core; git tracks the move
+  via content similarity).
 - `infochat-collector/pom.xml` is unchanged (Collector already has
   `quarkus-flyway` from `M1-005`; only its migration source
   directory becomes empty, which is fine — Flyway scans the full
@@ -114,7 +190,7 @@ migration files there means both modules' classpaths carry them, so:
 - `infochat-core/pom.xml` is unchanged — no Quarkus extensions
   added (M1-007a invariant preserved).
 - `mvn -B verify` from the repo root exits 0; both modules'
-  surefire reports show Flyway successfully applying V1 and V2.
+  surefire reports show Flyway successfully applying V1, V2, and V4.
 
 ## Implementation notes
 
@@ -163,12 +239,15 @@ migration files there means both modules' classpaths carry them, so:
 
 - **V3__heartbeat.sql.** M1-009 territory. V3 is not yet on disk
   in any module's main branch; it lands when M1-009 reopens. This
-  ticket touches V1 and V2 only.
+  ticket touches V1, V2, and V4 only.
 - **Migration content changes.** Pure relocation — same SQL, new
   directory. Any change to the actual statements (new GRANTs, new
-  CREATE TABLE, etc.) belongs in the consuming ticket (M1-008
-  umbrella for new entity tables, M1-009 for heartbeat additions
-  inside V3, etc.).
+  CREATE TABLE, new ALTER ROLE attributes, etc.) belongs in the
+  consuming ticket (M1-008 umbrella for new entity tables, M1-009
+  for heartbeat additions inside V3, M1-016 for the NOLOGIN
+  attribute that already shipped V4). V4's three
+  `ALTER ROLE ... NOLOGIN` lines are byte-identical to the M1-016
+  source.
 - **Quarkus extensions in infochat-core.** `M1-007a` `out_of_scope`
   forbids adding any Quarkus extension to `infochat-core/pom.xml`.
   This ticket honors that — only resource files move; the
@@ -199,12 +278,15 @@ migration files there means both modules' classpaths carry them, so:
   holds regardless of which classpath the migration came from.
   `M1-006`'s `DbRoleMatrixIT` continues to assert the three role
   principals exist; V2 applied from `infochat-core` produces the
-  same role-state outcome. Provider's existing tests
-  (`QuarkusBootstrapTest`, `InfochatProfileTest`, `AllSpisLoadIT`)
-  do not query DB tables, so they are unaffected by the migration
-  presence — they pass identically whether Flyway ran or not, but
-  with the new test-scoped `quarkus-flyway` they will additionally
-  log V1/V2 application in their surefire reports, which the
+  same role-state outcome. `M1-016`'s `RoleAttributesIT`
+  (if present) continues to assert NOLOGIN on the three roles;
+  V4 applied from `infochat-core` produces the same role-attribute
+  outcome. Provider's existing tests (`QuarkusBootstrapTest`,
+  `InfochatProfileTest`, `AllSpisLoadIT`) do not query DB tables,
+  so they are unaffected by the migration presence — they pass
+  identically whether Flyway ran or not, but with the new
+  test-scoped `quarkus-flyway` they will additionally log
+  V1/V2/V4 application in their surefire reports, which the
   acceptance criteria above use as proof.)
 
 ## Alternatives considered

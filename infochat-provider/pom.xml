@@ -31,14 +31,23 @@
             <artifactId>quarkus-arc</artifactId>
         </dependency>
         <!--
-             Provider connects to the same Postgres as Collector but does NOT
-             own migrations in v1. quarkus-flyway is intentionally absent so
-             Provider startup cannot accidentally try to migrate; the operator
-             runs Collector first (which migrates), then Provider.
+             Migrations live in infochat-core (M1-017); both services see them
+             on classpath via their transitive dependency on infochat-core.
+             Production Provider does not run them: the operator runs Collector
+             first (which migrates), then Provider. quarkus-flyway below is
+             test-scoped only — it applies V1/V2/V4 against Provider's
+             DevServices container so @QuarkusTest sees the same schema shape
+             as production, without coupling test fixtures to Collector's
+             container.
         -->
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-jdbc-postgresql</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-flyway</artifactId>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>

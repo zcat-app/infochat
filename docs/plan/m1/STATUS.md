@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 17 |
+| done | 18 |
 | deferred | 1 |
 | **total** | **22** |
 
@@ -24,16 +24,12 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-017 — Relocate Flyway migrations from infochat-collector to infochat-core (complexity: low, risk: medium)
 - M1-018 — Clarity check validates forward references to ticket IDs (complexity: low, risk: low)
 - M1-019 — Redact API-key shapes in stdout logs (mirror audit-log hook) (complexity: medium, risk: medium)
 
 ---
 
 ## In flight
-
-| ID | Title | Status | Last review |
-|---|---|---|---|
 
 _(none)_
 
@@ -49,9 +45,6 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
 ## Escalated (awaiting user resolution)
 
-| ID | Title | Trigger | Date |
-|---|---|---|---|
-
 _(none)_
 
 ---
@@ -62,16 +55,16 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-017 | Relocate Flyway migrations from infochat-collector to infochat-core | 2026-05-13 | round 1 APPROVE |
 | M1-016 | Enforce NOLOGIN on application roles | 2026-05-13 | round 1 APPROVE |
-| M1-005 | Profile selector + Flyway infra | 2026-05-12 | round 1 APPROVE |
-| M1-006 | DB role matrix (collector, provider, admin) | 2026-05-12 | round 1 APPROVE |
-| M1-007 | Cross-module SPI loading test | 2026-05-12 | round 1 APPROVE |
-| M1-007a | infochat-core + ingest SPIs | 2026-05-12 | round 1 APPROVE |
-| M1-007b | infochat-llm-adapter + LLM SPIs | 2026-05-12 | round 1 APPROVE |
 | M1-007c | infochat-messaging-adapter SPIs | 2026-05-12 | round 1 APPROVE |
-| M1-004 | Postgres + pgvector dev compose | 2026-05-11 | round 1 APPROVE |
-| M1-010 | Slim m1-tick subagent prompts | 2026-05-11 | round 1 APPROVE |
-| M1-011 | Split SKILL.md per subcommand | 2026-05-11 | round 1 APPROVE |
+| M1-007b | infochat-llm-adapter + LLM SPIs | 2026-05-12 | round 1 APPROVE |
+| M1-007a | infochat-core + ingest SPIs | 2026-05-12 | round 1 APPROVE |
+| M1-007 | Cross-module SPI loading test | 2026-05-12 | round 1 APPROVE |
+| M1-006 | DB role matrix (collector, provider, admin) | 2026-05-12 | round 1 APPROVE |
+| M1-005 | Profile selector + Flyway infra | 2026-05-12 | round 1 APPROVE |
+| M1-015 | Status-regenerator reads frontmatter only | 2026-05-11 | round 1 OVERRIDE-APPROVE |
+| M1-014 | Prompt-size regression alarm for Agent spawns | 2026-05-11 | round 1 APPROVE |
 
 ---
 
@@ -94,27 +87,33 @@ M1-001 (done)
   ├── M1-005 (done)
   │     └── M1-006 (done)
   ├── M1-007a (done)
-  │     └── M1-007 (done)
   ├── M1-007b (done)
-  │     └── M1-007 (done)
   └── M1-007c (done)
-        └── M1-007 (done)
-M1-003 (done)
-  └── M1-005 (done)
+
 M1-002 (done)
+
+M1-003 (done)
+  └── M1-005 (done) [see also M1-001]
+        └── M1-006 (done)
+              └── M1-009 (deferred — blocked-on-new-ticket)
+
+M1-007 (done) [depends on M1-007a, M1-007b, M1-007c]
+
+M1-009 (deferred — blocked-on-new-ticket)
+  └── deferred_on: M1-017 (done)
+
 M1-010 (done)
   ├── M1-011 (done)
-  │     ├── M1-012 (done)
-  │     │     └── M1-014 (done)
-  │     └── M1-014 (done)
-  ├── M1-013 (done)
-  │     └── M1-014 (done)
-  └── M1-014 (done)
-M1-015 (done)
+  │     └── M1-012 (done)
+  │           └── M1-014 (done) [see also M1-010, M1-011, M1-013]
+  └── M1-013 (done)
+
 M1-016 (done)
-M1-017 (pending) ← runnable
-  └── M1-009 (deferred — blocked-on-new-ticket → M1-017)
+
+M1-017 (done)
+
 M1-018 (pending) ← runnable
+
 M1-019 (pending) ← runnable
-  └── M1-020 (pending — blocked)
+  └── M1-020 (pending)
 ```
