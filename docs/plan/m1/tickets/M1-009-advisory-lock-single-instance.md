@@ -3,16 +3,17 @@ id: M1-009
 title: Advisory-lock single-instance enforcement + heartbeat
 status: pending
 created: 2026-05-11
-last_updated: 2026-05-11
+last_updated: 2026-05-12
 blocked_by:
   - M1-005
   - M1-006
-files_budget: 8
+files_budget: 9
 files_scope:
   - infochat-collector/src/main/resources/db/migration/V3__heartbeat.sql
   - infochat-collector/src/main/java/io/infochat/collector/startup/InstanceLockGuard.java
   - infochat-collector/src/main/java/io/infochat/collector/startup/HeartbeatScheduler.java
   - infochat-collector/src/main/resources/application.properties
+  - infochat-collector/pom.xml
   - infochat-provider/src/main/java/io/infochat/provider/startup/InstanceLockGuard.java
   - infochat-provider/src/main/java/io/infochat/provider/startup/HeartbeatScheduler.java
   - infochat-provider/src/main/resources/application.properties
@@ -45,7 +46,7 @@ acceptance:
   - "infochat-collector/src/main/resources/application.properties declares `infochat.heartbeat.interval` under the `%laptop` profile namespace (grep -E '^%laptop\\.infochat\\.heartbeat\\.interval' returns at least one match) — value is a duration like `5s`; the other three profile namespaces (`%vps`, `%pi`, `%remote-llm`) may carry the key now or defer to their feature tickets, see Implementation notes"
   - "infochat-provider/src/main/resources/application.properties declares the same `%laptop.infochat.heartbeat.interval` key"
   - "infochat-provider/pom.xml adds `quarkus-scheduler` (grep -E '<artifactId>quarkus-scheduler</artifactId>' returns at least one match) — M1-005's Provider pom did not include it"
-  - "infochat-collector/pom.xml ALREADY contains `quarkus-scheduler` OR this ticket adds it (grep -E '<artifactId>quarkus-scheduler</artifactId>' returns at least one match; if M1-005 already added it, this ticket's diff to the collector pom is empty)"
+  - "infochat-collector/pom.xml adds `quarkus-scheduler` (grep -E '<artifactId>quarkus-scheduler</artifactId>' returns at least one match) — M1-005's Collector pom did not include it either"
   - "mvn -B verify from the repo root exits 0; the new IT (see test_plan) confirms (a) a single instance acquires the lock and writes its heartbeat row, and (b) a second test-time guard instance — simulated by calling the lock-acquisition routine twice in the same test JVM with two separate JDBC connections — observes false from the second attempt and logs the contention message"
   - "after `mvn -pl infochat-collector test`, grep -rE 'Migrated.*successfully.*V3' infochat-collector/target/surefire-reports/ returns at least one match"
 test_plan:
@@ -69,8 +70,41 @@ decision_refs:
   - D41
 
 reviews: []
-escalations: []
-revisions: []
+escalations:
+  - date: 2026-05-12
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      files_scope omits infochat-collector/pom.xml, but acceptance item 13
+      requires adding quarkus-scheduler to that pom — and grep confirms
+      quarkus-scheduler is absent from the collector module. Fix: add
+      infochat-collector/pom.xml to files_scope and set files_budget: 9.
+revisions:
+  - date: 2026-05-12
+    reason: clarity-fail refinement
+    summary: |
+      - files_scope: added infochat-collector/pom.xml (clarity blocker — M1-005's
+        collector pom does not carry quarkus-scheduler, so acceptance item 13
+        requires touching this file).
+      - files_budget: 8 → 9 to match the expanded files_scope.
+      - acceptance item 13: dropped the "ALREADY contains ... OR this ticket
+        adds it" conditional; grep at current HEAD confirms quarkus-scheduler
+        is absent from the collector pom, so the conditional always resolved
+        to "this ticket adds it".
+      - Definition of Done: the quarkus-scheduler bullet now lists both module
+        poms as targets rather than treating the collector touch as conditional.
+      - Big-picture notes: removed the "internal design inconsistency to note"
+        bullet documenting the §1.4.3 vs §7.8.5 mismatch; that mismatch was
+        reconciled by a manual docs edit on main (commits alongside this
+        refine) so both sections now agree on heartbeat(service, host_id, pid,
+        last_seen_at) with hashtext() routine.
+      - Big-picture notes: trimmed the "provider_state is a separate concept"
+        bullet's trailing sentence pointing at the resolved inconsistency.
+      - Implementation notes: trimmed the "Hash function: hashtext, not
+        SHA-256" justification paragraph (design now specifies hashtext
+        directly, so it is no longer an "alternatives considered" item).
+      - Alternatives considered: removed the "single heartbeat vs separate
+        per-service tables" bullet (design now specifies the single-table
+        form).
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -143,10 +177,9 @@ able to read both rows, but the application code must never DELETE).
   `%remote-llm` may be added here as placeholders OR deferred to
   the feature tickets that consume those profiles — see
   Implementation notes for the call.
-- `infochat-provider/pom.xml` adds the `quarkus-scheduler`
-  extension (M1-005's Provider pom did not). If
-  `infochat-collector/pom.xml` does not already carry it, this
-  ticket adds it there too.
+- Both `infochat-provider/pom.xml` and
+  `infochat-collector/pom.xml` add the `quarkus-scheduler`
+  extension (M1-005 did not add it to either).
 - `mvn -B verify` from the repo root exits 0; the new IT suite
   confirms (a) lock acquisition writes the heartbeat row, (b) a
   second acquire attempt in the same test JVM via a separate JDBC
@@ -156,16 +189,12 @@ able to read both rows, but the application code must never DELETE).
 
 ## Implementation notes
 
-- **Hash function: `hashtext`, not a Java-side SHA-256 truncate.**
-  `docs/design/07-deployment.md` §7.8.5 says "SHA-256-truncate-to-int8"
-  is the conceptual specification; in practice Postgres' built-in
-  `hashtext(text)` returns an int4 and the standard idiom is
-  `pg_try_advisory_lock(hashtext('infochat.collector'))`. This
-  keeps the hash computation server-side so two instances on
-  different hosts always race for the same int. (Implementation
-  choice consistent with the design intent — record this in the
-  commit message under `Alternatives considered:` so the next
-  reader doesn't go looking for SHA-256 code.)
+- **Hash function: `hashtext`.** Postgres' built-in `hashtext(text)`
+  returns an int4 and is the standard idiom for
+  `pg_try_advisory_lock(hashtext('infochat.collector'))` — the hash
+  computation runs server-side so two instances on different hosts
+  always race for the same int (`docs/design/07-deployment.md`
+  §7.8.5 specifies this routine).
 - **Hold the JDBC connection open for the JVM lifetime.** Advisory
   locks are scoped to the *session* (Postgres backend), not to the
   transaction. If you acquire the lock, return the connection to
@@ -244,25 +273,10 @@ able to read both rows, but the application code must never DELETE).
 
 ## Big-picture notes
 
-- **Internal design inconsistency to note.** `docs/design/01-architecture.md`
-  §1.4.3 names a single `service_heartbeat(service, host_id,
-  last_beat_at)` table, while `docs/design/07-deployment.md`
-  §7.8.5 names separate `provider_state` / `collector_state`
-  tables with a richer column set (`holder_pid`,
-  `holder_started_at`, `last_heartbeat_at`). The planning team
-  resolved this inconsistency in M1-009's favour: a single
-  `heartbeat` table with the column set in `acceptance` above.
-  A future spec amendment will reconcile the two design notes;
-  in the meantime this ticket is the authoritative shape. Note
-  the inconsistency in the commit message and consider filing a
-  small "reconcile §1.4.3 vs §7.8.5 heartbeat shape" docs ticket
-  after the commit lands.
 - **`provider_state` is a separate concept.** The spec mentions
   contention on `provider_state` (§Deployment topology). That is
   the Provider's high-water-mark table (M1-008 territory), NOT
   the heartbeat table. M1-009 does NOT create `provider_state`.
-  The naming overlap with `docs/design/07-deployment.md` §7.8.5
-  is part of the inconsistency above.
 - **Forward-compatibility with the exit-code-42 unit file.** The
   design promises `RestartPreventExitStatus=42` so systemd does
   not restart the loser. This ticket uses exit code 1 because
@@ -360,12 +374,3 @@ able to read both rows, but the application code must never DELETE).
   irrelevant to the single-instance invariant itself. The
   exit-code value is a one-line change when the unit-file
   ticket lands.
-- **Single `heartbeat` table vs. separate `collector_heartbeat`
-  + `provider_heartbeat` tables.** A single table with a
-  `service` PK is simpler (one V3 migration, one grant block,
-  one bean shape parameterised over service name) and matches
-  `docs/design/01-architecture.md` §1.4.3's `service_heartbeat`
-  shape. Separate tables would mirror
-  `docs/design/07-deployment.md` §7.8.5 more literally but
-  double the surface for no integrity benefit — both rows are
-  read/written in the same ways. Chose the single-table form.

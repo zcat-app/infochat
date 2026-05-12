@@ -89,22 +89,24 @@ ASCII DAG: nodes are ticket IDs (with status in parens), edges are `blocked_by` 
 ```
 M1-001 (done)
   ├── M1-004 (done)
-  ├── M1-005 (done)
-  │     └── M1-006 (done)
-  │           └── M1-009 (pending) ← runnable
   ├── M1-007a (done)
+  │     └── M1-007 (done)
   ├── M1-007b (done)
-  └── M1-007c (done)
+  │     └── M1-007 (done)
+  ├── M1-007c (done)
+  │     └── M1-007 (done)
+  └── M1-005 (done) [also ← M1-003]
+        └── M1-006 (done)
+              └── M1-009 (pending) ← runnable
 M1-002 (done)
 M1-003 (done)
-  └── M1-005 (done) [see above]
-M1-007 (done) [blocked_by M1-007a, M1-007b, M1-007c — all done]
+  └── M1-005 (done) [also ← M1-001]
 M1-010 (done)
   ├── M1-011 (done)
   │     └── M1-012 (done)
-  │           └── M1-014 (done) [blocked_by M1-010, M1-011, M1-012, M1-013 — all done]
+  │           └── M1-014 (done) [also ← M1-010, M1-011, M1-013]
   └── M1-013 (done)
-        └── M1-014 (done) [see above]
+        └── M1-014 (done) [also ← M1-010, M1-011, M1-012]
 M1-015 (done)
 M1-016 (pending) ← runnable
 ```
