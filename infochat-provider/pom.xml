@@ -64,6 +64,28 @@
                     </execution>
                 </executions>
             </plugin>
+            <!--
+                 Failsafe wires *IT tests into the integration-test / verify
+                 phases. The M1-007 umbrella IT (AllSpisLoadIT) lives here
+                 because Provider transitively depends on all three new SPI
+                 modules and is the right place to assert their cross-module
+                 visibility; surefire (which runs *Test) is unchanged.
+                 Version pinned to match the surefire pin from the Maven
+                 super POM so the two test phases stay aligned.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <version>3.5.4</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 </project>

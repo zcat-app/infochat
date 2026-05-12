@@ -1,9 +1,9 @@
 ---
 id: M1-007
 title: Cross-module SPI loading test
-status: pending
+status: done
 created: 2026-05-11
-last_updated: 2026-05-11
+last_updated: 2026-05-12
 blocked_by:
   - M1-007a
   - M1-007b
@@ -47,14 +47,33 @@ spec_refs:
   - docs/design/01-architecture.md §1.2 Module layout (Maven)
 decision_refs: []
 
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-05-12
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+      spec_conformance: PASS
+    diff_stats:
+      files: 4
+      added: 132
+      removed: 21
 escalations: []
 revisions: []
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-05-12
+  verdict: PASS
+  warnings:
+    - "Acceptance item 3 labels the records as 'four supporting records' but names five (NormalizedPost, LlmResponse, EmbeddingResult, MessageHandle, CapabilityFlags). The Definition of Done body correctly says 'five supporting records.' The typo in the acceptance item's label does not affect testability — the list of five names is authoritative — but a developer reading only the acceptance header could initially be confused. Consider fixing the label from 'four' to 'five' for consistency."
+  blockers: []
 ---
 
 # M1-007: Cross-module SPI loading test
