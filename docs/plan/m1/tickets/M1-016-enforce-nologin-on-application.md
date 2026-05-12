@@ -1,9 +1,9 @@
 ---
 id: M1-016
 title: Enforce NOLOGIN on application roles
-status: pending
+status: done
 created: 2026-05-12
-last_updated: 2026-05-12
+last_updated: 2026-05-13
 blocked_by: []
 files_budget: 2
 files_scope:
@@ -50,14 +50,32 @@ spec_refs:
 decision_refs:
   - D34
 
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-05-13
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+      spec_conformance: PASS
+    diff_stats:
+      files: 4
+      added: 83
+      removed: 44
 escalations: []
 revisions: []
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-05-13
+  verdict: PASS
+  warnings: []
+  blockers: []
 remediates: M1-006
 ---
 
