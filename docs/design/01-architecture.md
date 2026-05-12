@@ -468,19 +468,28 @@ the explicit exception to this rule
 The `InstanceLockGuard` beans implement the
 "exactly one Collector and exactly one Provider" invariant from decision D41:
 
-- Each service acquires a named `pg_advisory_lock` at startup
-  (`infochat.collector` and `infochat.provider`, hashed to int8 per
-  Postgres convention).
-- A heartbeat row in `service_heartbeat(service, host_id, last_beat_at)`
-  is updated every **30 seconds** (laptop/vps/remote-llm) or **60 seconds**
-  (pi). Stale = no update for >120 seconds (laptop/vps/remote-llm) /
-  >240 seconds (pi).
+- Each service acquires a named `pg_advisory_lock` at startup, using
+  Postgres' built-in `hashtext('infochat.collector')` /
+  `hashtext('infochat.provider')` so both instances always race for the
+  same lock id regardless of host (the hash is computed server-side, no
+  client routine required).
+- A heartbeat row in `heartbeat(service, host_id, pid, last_seen_at)` —
+  one row per service, keyed by `service` text PRIMARY KEY (values
+  `'collector'` and `'provider'`) — is refreshed every
+  `infochat.heartbeat.interval` (per-profile defaults in
+  [07-deployment.md §7.2.1](07-deployment.md)). The `heartbeat` table
+  is distinct from `provider_state` (§1.5 — the per-channel
+  `LISTEN/NOTIFY` high-water-mark table); the two share no rows.
 - A second instance attempting to acquire the lock fails fast with a fatal
-  log message that names the running instance's `host_id` from the heartbeat
-  row, so the operator can diagnose without hunting.
-- The lock is released on graceful shutdown; on hard kill the heartbeat
-  staleness eventually invalidates the prior holder so the next start can
-  acquire it.
+  log message that names the running instance's `host_id`, `pid`, and
+  `last_seen_at` read from the heartbeat row, so the operator can
+  diagnose without hunting.
+- The lock is released when the holding Postgres session ends — on
+  graceful shutdown or hard kill (the session terminates and the server
+  releases the lock). The heartbeat row persists across restarts and is
+  overwritten by the next holder via UPSERT on `service`; staleness of
+  `last_seen_at` is an operator-visible signal, not part of the
+  lock-release path.
 
 ### 1.4.4 `StreamSource` supervised-worker lifecycle (design specifics)
 

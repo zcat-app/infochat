@@ -645,18 +645,22 @@ In v1 the two services are separate JVMs colocated on one host. They communicate
 
 [../spec/architecture.md](../spec/architecture.md) §Deployment topology commits to **exactly one Collector and exactly one Provider** per shared database (D41). The invariant is enforced via Postgres advisory locks:
 
-- On startup, each service acquires a named `pg_advisory_lock` on the int8 hash of `'infochat.collector'` (Collector) or `'infochat.provider'` (Provider). The hash is computed from the literal string by the same SHA-256-truncate-to-int8 routine on every host so two instances always race for the same lock id.
-- Acquisition uses the **non-blocking** form (`pg_try_advisory_lock`). A second instance attempting to acquire the lock receives `false` and **fails fast** with a fatal log message that points at the running instance's host identifier (read from the heartbeat row, see below). Provider/Collector exit with a non-zero status; systemd does NOT restart on `Restart=on-failure` for this exit code (the unit file pins `RestartPreventExitStatus=42`, the fatal-conflict code) so the loser does not flap.
-- The lock is **released on graceful shutdown** (process exit). On a hard kill (SIGKILL, OOM-killer, host crash) the Postgres backend session terminates and the lock is released by the server.
+- On startup, each service acquires a named `pg_advisory_lock` on `hashtext('infochat.collector')` (Collector) or `hashtext('infochat.provider')` (Provider). `hashtext` is a Postgres built-in that returns int4; computing the hash server-side guarantees two instances on different hosts always race for the same lock id with no client-side hashing routine required.
+- Acquisition uses the **non-blocking** form (`pg_try_advisory_lock`). A second instance attempting to acquire the lock receives `false` and **fails fast** with a fatal log message that points at the running instance's host identifier (read from the heartbeat row, see below). The long-term shape is exit code **42** paired with a systemd unit file pinning `RestartPreventExitStatus=42` so the loser does not flap; v1 lands exit code **1** in the application code and the unit-file refinement rides with the operator-tooling ticket (the exit-code value is then a one-line swap at the call site).
+- The lock is **released when the holding Postgres session ends** — on graceful shutdown (`Quarkus.asyncExit`) or hard kill (SIGKILL, OOM-killer, host crash), the backend session terminates and the server releases the lock. The `InstanceLockGuard` therefore holds a dedicated long-lived JDBC connection for the JVM lifetime; pool idle-eviction must not touch it, or the lock would silently release while the JVM is still alive.
 
-**Heartbeat row.** Each holding instance writes a row to `provider_state` (Provider) or a sibling `collector_state` (Collector) every **`infochat.heartbeat.interval`** seconds (per-profile defaults in §7.2.1: 10 s for `laptop`/`vps`/`remote-llm`, 30 s for `pi`). The row carries:
+**Heartbeat row.** Each holding instance writes a row to the `heartbeat` table — one row per service, keyed by `service` text PRIMARY KEY (values `'collector'` and `'provider'`) — every **`infochat.heartbeat.interval`** (per-profile defaults in §7.2.1). The row carries:
 
-- `holder_host` — host name / container id of the lock-holding instance.
-- `holder_pid` — process id, for runbook clarity.
-- `holder_started_at` — instance start timestamp (the boot-time of the current lock holder).
-- `last_heartbeat_at` — `NOW()` on each tick.
+- `service` — text PRIMARY KEY; `'collector'` or `'provider'`.
+- `host_id` — host name / container id of the lock-holding instance.
+- `pid` — process id, for runbook clarity.
+- `last_seen_at` — `NOW()` on each tick; doubles as the heartbeat-recency clock.
 
-**Staleness threshold.** A holder whose `last_heartbeat_at` is older than the per-profile staleness threshold (§7.2.1 — typically 6× the heartbeat interval) is treated as suspect by the runbook (see §7.14). The advisory lock itself is the authoritative single-instance gate; the heartbeat row is the operator-visible fingerprint that says *who* is currently the holder, so the rejected-on-acquire log message can name them ("`pg_try_advisory_lock` failed; current holder is `<holder_host>` PID `<holder_pid>` since `<holder_started_at>`, last heartbeat `<delta>` ago").
+The application roles (`infochat_collector`, `infochat_provider`) hold `SELECT`/`INSERT`/`UPDATE` on `heartbeat` but **not** `DELETE` — only `infochat_admin` may delete heartbeat rows (operator path), so an application bug cannot remove the contention fingerprint. The next holder overwrites the prior fingerprint via `INSERT … ON CONFLICT (service) DO UPDATE SET host_id=…, pid=…, last_seen_at=now()`.
+
+The `heartbeat` table is distinct from `provider_state` (the per-channel `LISTEN/NOTIFY` high-water-mark table — see [01-architecture.md §1.5](01-architecture.md)); the two share no rows or schema.
+
+**Staleness threshold.** A holder whose `last_seen_at` is older than the per-profile staleness threshold (§7.2.1 — typically 6× the heartbeat interval) is treated as suspect by the runbook (see §7.14). The advisory lock itself is the authoritative single-instance gate; the heartbeat row is the operator-visible fingerprint that says *who* is currently the holder, so the rejected-on-acquire log message can name them ("`pg_try_advisory_lock` failed; current holder is `<host_id>` PID `<pid>`, last heartbeat `<delta>` ago").
 
 The lock + heartbeat together turn "exactly one" from a deployment policy into an enforced invariant: a misconfigured rolling upgrade that brings up the new Collector before the old one exits cannot produce duplicate fetches; the new instance exits non-zero with a clear error and the operator's deploy script halts.
 
