@@ -1,9 +1,9 @@
 ---
 id: M1-007a
 title: infochat-core + ingest SPIs
-status: pending
+status: done
 created: 2026-05-11
-last_updated: 2026-05-11
+last_updated: 2026-05-12
 blocked_by:
   - M1-001
 files_budget: 10
@@ -57,14 +57,31 @@ spec_refs:
 decision_refs:
   - D38
 
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-05-12
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 238
+      removed: 18
 escalations: []
 revisions: []
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-05-12
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-007a: infochat-core + ingest SPIs

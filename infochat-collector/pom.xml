@@ -15,6 +15,10 @@
 
     <dependencies>
         <dependency>
+            <groupId>infochat</groupId>
+            <artifactId>infochat-core</artifactId>
+        </dependency>
+        <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-arc</artifactId>
         </dependency>

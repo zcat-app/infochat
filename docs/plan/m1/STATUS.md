@@ -14,9 +14,9 @@
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 12 |
+| done | 13 |
 | deferred | 0 |
-| **total** | **17** |
+| **total** | **18** |
 
 ---
 
@@ -24,10 +24,10 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-007a — infochat-core + ingest SPIs (complexity: medium, risk: low)
 - M1-007b — infochat-llm-adapter + LLM SPIs (complexity: medium, risk: low)
 - M1-007c — infochat-messaging-adapter SPIs (complexity: medium, risk: low)
 - M1-009 — Advisory-lock single-instance enforcement + heartbeat (complexity: medium, risk: medium)
+- M1-016 — Enforce NOLOGIN on application roles (complexity: low, risk: low)
 
 ---
 
@@ -44,7 +44,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-007 — blocked_by: M1-007a (pending), M1-007b (pending), M1-007c (pending)
+- M1-007 — blocked_by: M1-007b (pending), M1-007c (pending)
 
 ---
 
@@ -65,6 +65,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 |---|---|---|---|
 | M1-006 | DB role matrix (collector, provider, admin) | 2026-05-12 | round 1 APPROVE |
 | M1-005 | Profile selector + Flyway infra | 2026-05-12 | round 1 APPROVE |
+| M1-007a | infochat-core + ingest SPIs | 2026-05-12 | round 1 APPROVE |
 | M1-015 | Status-regenerator reads frontmatter only | 2026-05-11 | round 1 OVERRIDE-APPROVE |
 | M1-014 | Prompt-size regression alarm for Agent spawns | 2026-05-11 | round 1 APPROVE |
 | M1-013 | Clarity self-contained check and reviewer spec-conformance check | 2026-05-11 | round 1 APPROVE |
@@ -72,7 +73,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-011 | Split SKILL.md per subcommand | 2026-05-11 | round 1 APPROVE |
 | M1-010 | Slim m1-tick subagent prompts | 2026-05-11 | round 1 APPROVE |
 | M1-004 | Postgres + pgvector dev compose | 2026-05-11 | round 1 APPROVE |
-| M1-001 | Set up two-module Maven build | 2026-05-10 | round 1 APPROVE |
 
 ---
 
@@ -94,18 +94,23 @@ M1-001 (done)
   ├── M1-005 (done)
   │     └── M1-006 (done)
   │           └── M1-009 (pending) ← runnable
-  ├── M1-007a (pending) ← runnable
+  ├── M1-007a (done)
   ├── M1-007b (pending) ← runnable
   └── M1-007c (pending) ← runnable
-        └── M1-007 (pending) [also blocked_by M1-007a, M1-007b]
-M1-002 (done)
 M1-003 (done)
-  └── M1-005 (done) [see above]
+  └── M1-005 (done)  [see above]
+M1-007a (done) ─┐
+M1-007b (pending) ← runnable ─┤→ M1-007 (pending)
+M1-007c (pending) ← runnable ─┘
+M1-002 (done)
 M1-010 (done)
   ├── M1-011 (done)
-  │     └── M1-012 (done)
-  │           └── M1-014 (done) [also blocked_by M1-010, M1-011, M1-013]
-  └── M1-013 (done)
-        └── M1-014 (done) [see above]
+  │     ├── M1-012 (done)
+  │     │     └── M1-014 (done)  [see below]
+  │     └── M1-014 (done)  [see below]
+  ├── M1-013 (done)
+  │     └── M1-014 (done)  [see below]
+  └── M1-014 (done)
 M1-015 (done)
+M1-016 (pending) ← runnable
 ```

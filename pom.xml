@@ -10,6 +10,7 @@
     <packaging>pom</packaging>
 
     <modules>
+        <module>infochat-core</module>
         <module>infochat-collector</module>
         <module>infochat-provider</module>
     </modules>
@@ -29,6 +30,16 @@
                 <version>${quarkus.platform.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+            <!--
+                 infochat-core is the reactor-local shared SPI module.
+                 Listing it here keeps downstream module POMs version-less
+                 (preserves the M1-001 BOM-managed-versions invariant).
+            -->
+            <dependency>
+                <groupId>infochat</groupId>
+                <artifactId>infochat-core</artifactId>
+                <version>${project.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
