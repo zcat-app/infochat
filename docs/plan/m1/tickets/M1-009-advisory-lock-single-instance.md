@@ -7,7 +7,7 @@ last_updated: 2026-05-12
 blocked_by:
   - M1-005
   - M1-006
-files_budget: 9
+files_budget: 13
 files_scope:
   - infochat-collector/src/main/resources/db/migration/V3__heartbeat.sql
   - infochat-collector/src/main/java/io/infochat/collector/startup/InstanceLockGuard.java
@@ -18,6 +18,10 @@ files_scope:
   - infochat-provider/src/main/java/io/infochat/provider/startup/HeartbeatScheduler.java
   - infochat-provider/src/main/resources/application.properties
   - infochat-provider/pom.xml
+  - infochat-collector/src/test/java/io/infochat/collector/startup/InstanceLockGuardIT.java
+  - infochat-collector/src/test/java/io/infochat/collector/startup/HeartbeatSchedulerIT.java
+  - infochat-provider/src/test/java/io/infochat/provider/startup/InstanceLockGuardIT.java
+  - infochat-provider/src/test/java/io/infochat/provider/startup/HeartbeatSchedulerIT.java
 complexity: medium
 risk: medium
 round_cap: 2
@@ -78,6 +82,16 @@ escalations:
       requires adding quarkus-scheduler to that pom — and grep confirms
       quarkus-scheduler is absent from the collector module. Fix: add
       infochat-collector/pom.xml to files_scope and set files_budget: 9.
+  - date: 2026-05-12
+    reason: clarity-warn
+    reviewer_verdict_excerpt: |
+      FILES-BUDGET-PLAUSIBLE: WARN — files_scope omits the 4 integration
+      test files required by acceptance item 14 and test_plan.adds.
+      files_budget (9) is under-counted by 4. The reviewer's negative-space
+      check cannot fire if a test file is missing. Recommended fix: add the
+      4 test paths to files_scope (collector and provider
+      InstanceLockGuardIT.java and HeartbeatSchedulerIT.java) and set
+      files_budget: 13.
 revisions:
   - date: 2026-05-12
     reason: clarity-fail refinement
@@ -105,6 +119,19 @@ revisions:
       - Alternatives considered: removed the "single heartbeat vs separate
         per-service tables" bullet (design now specifies the single-table
         form).
+  - date: 2026-05-12
+    reason: clarity-warn refinement
+    summary: |
+      - files_scope: added the 4 integration test files required by
+        acceptance item 14 and test_plan.adds (collector and provider
+        InstanceLockGuardIT.java + HeartbeatSchedulerIT.java). The clarity
+        WARN flagged that the reviewer's negative-space check cannot fire
+        on a missed IT file if those paths are not in files_scope.
+      - files_budget: 9 → 13 to match the expanded files_scope (9
+        production files + 4 IT files).
+      - No body changes; the test files were already named in test_plan.adds
+        and Definition of Done — only files_scope and files_budget needed to
+        catch up.
 overrides: []
 aborted_attempts: []
 reopens: []
