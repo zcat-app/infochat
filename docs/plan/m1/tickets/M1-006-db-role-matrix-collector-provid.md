@@ -39,7 +39,7 @@ acceptance:
   - "V2__roles.sql grants LISTEN privilege via the documented Postgres mechanism — Postgres LISTEN/NOTIFY needs no explicit GRANT (any role with a session can LISTEN); document this in a SQL comment line (grep -E 'LISTEN/NOTIFY' infochat-collector/src/main/resources/db/migration/V2__roles.sql returns at least one match)"
   - "infochat-collector/src/test/java/io/infochat/collector/db/DbRoleMatrixIT.java exists, is annotated `@QuarkusTest`, and asserts (against the DevServices Postgres after Flyway has run) that `SELECT rolname FROM pg_roles WHERE rolname IN ('infochat_collector','infochat_provider','infochat_admin')` returns exactly three rows"
   - "mvn -B verify from the repo root exits 0; M1-003 and M1-005 tests still pass"
-  - "after `mvn -pl infochat-collector test`, grep -rE 'Migrated.*successfully.*V2' infochat-collector/target/surefire-reports/ returns at least one match (Flyway success log for V2)"
+  - "after `mvn -pl infochat-collector test`, grep -rE 'version \"2 - roles\"' infochat-collector/target/surefire-reports/ returns at least one match (Flyway log line confirming V2 was applied; the actual Flyway output is `Migrating schema \"public\" to version \"2 - roles\"`, which the QuarkusBootstrapTest's @QuarkusTest boot writes into its surefire report when migrate-at-start runs against the DevServices Postgres — combined with `mvn verify` exit 0, this confirms V2 applied successfully)"
 test_plan:
   adds:
     - infochat-collector/src/test/java/io/infochat/collector/db/DbRoleMatrixIT.java (one @QuarkusTest that queries pg_roles and asserts the three role principals exist after V2 applies)
