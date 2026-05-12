@@ -11,6 +11,7 @@
 
     <modules>
         <module>infochat-core</module>
+        <module>infochat-llm-adapter</module>
         <module>infochat-collector</module>
         <module>infochat-provider</module>
     </modules>
@@ -39,6 +40,17 @@
             <dependency>
                 <groupId>infochat</groupId>
                 <artifactId>infochat-core</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <!--
+                 infochat-llm-adapter is the LLM-side SPI module (LlmProvider,
+                 EmbeddingProvider). Same reactor-local pattern as infochat-core:
+                 management here keeps consumers (collector, provider, future
+                 impl modules) version-less.
+            -->
+            <dependency>
+                <groupId>infochat</groupId>
+                <artifactId>infochat-llm-adapter</artifactId>
                 <version>${project.version}</version>
             </dependency>
         </dependencies>

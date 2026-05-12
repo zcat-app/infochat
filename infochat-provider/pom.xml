@@ -19,6 +19,10 @@
             <artifactId>infochat-core</artifactId>
         </dependency>
         <dependency>
+            <groupId>infochat</groupId>
+            <artifactId>infochat-llm-adapter</artifactId>
+        </dependency>
+        <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-arc</artifactId>
         </dependency>
