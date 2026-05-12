@@ -1,25 +1,26 @@
 ---
 id: M1-019
-title: Redact API-key shapes in stdout logs (mirror audit-log hook)
-status: pending
+title: Redact API-key shapes in stdout logs
+status: in-progress
 created: 2026-05-12
-last_updated: 2026-05-12
+last_updated: 2026-05-13
 blocked_by: []
 files_budget: 8
 files_scope:
   - docs/spec/security.md
   - docs/spec/deployment.md
-  - infochat-common/src/main/java/**/log/**
+  - infochat-core/src/main/java/**/log/**
+  - infochat-core/pom.xml
   - infochat-collector/src/main/resources/application.properties
   - infochat-provider/src/main/resources/application.properties
-  - infochat-common/src/test/java/**/log/**
+  - infochat-core/src/test/java/**/log/**
 complexity: medium
 risk: medium
 round_cap: 2
 security_relevant: true
 migration_touch: false
 out_of_scope:
-  - audit_log redaction hook (already exists; do not modify)
+  - audit_log writer (does not exist in code yet — future tickets will use the same Redactor utility this ticket creates)
   - quarantine table redaction (separate code path; out of scope)
   - contact-id redaction format (different mechanism; out of scope)
   - Stage-1 sanitizer regex catalogue (different code path; out of scope)
@@ -27,18 +28,18 @@ out_of_scope:
   - log retention or shipping behavior (deployment §7.13.1 unchanged)
   - any framework-level logger configuration outside the console appender
 acceptance:
-  - "docs/spec/security.md §Secrets handling adds a bullet committing to: stdout console logs pass through the same closed API-key catalogue redactor as audit_log writes, fail-closed on regex timeout (whole field replaced with a fixed sentinel)."
-  - "docs/spec/deployment.md §Backups, rotation, secrets adds a bullet mirroring the existing audit-log line: 'Stdout log redaction hook redacts API-key-shaped strings.'"
+  - "docs/spec/security.md §Secrets handling adds a bullet committing to: stdout console logs pass through the closed API-key catalogue redactor, fail-closed on regex timeout (whole message replaced with a fixed sentinel). The future audit_log writer will consume the same Redactor utility so the two cannot drift."
+  - "docs/spec/deployment.md §Backups, rotation, secrets adds a bullet: 'Stdout log redaction hook redacts API-key-shaped strings before any console output (fail-closed on regex timeout).'"
   - "A RedactingLogFilter (or equivalent JBoss LogManager handler filter) is registered as a console appender filter on both Collector and Provider"
-  - "The filter's regex catalogue is loaded from a single shared source so it cannot drift from the audit-log redactor"
+  - "The filter's regex catalogue lives in a single Redactor utility class so any future caller (e.g. the audit_log writer) consumes the same source"
   - "On regex timeout the filter replaces the whole log message with the literal sentinel '[REDACTED:timeout]' rather than emitting raw text"
-  - "mvn -pl infochat-common test -Dtest=RedactingLogFilterTest passes; the test feeds one synthetic log line per catalogue shape (sk-..., sk-ant-..., sk-proj-..., sk-svcacct-..., gh[posrh]_..., AKIA..., ASIA..., AIza..., xox[abprs]-..., generic 32+-char adjacent to api_key/secret/token/password/bearer) and asserts the rendered output contains '[REDACTED' and does not contain the literal key"
-  - "An integration test simulates a failed LLM call whose exception carries 'sk-ant-test-redact-me-please-1234567890' in the message; the test captures stdout and asserts the literal key is absent from every emitted line"
+  - "mvn -pl infochat-core test -Dtest=RedactingLogFilterTest passes; the test feeds one synthetic log line per catalogue shape (sk-..., sk-ant-..., sk-proj-..., sk-svcacct-..., gh[posrh]_..., AKIA..., ASIA..., AIza..., xox[abprs]-..., generic 32+-char adjacent to api_key/secret/token/password/bearer) and asserts the rendered output contains '[REDACTED' and does not contain the literal key"
+  - "An integration test simulates a failed log path whose log message carries 'sk-ant-test-redact-me-please-1234567890'; the test captures stdout and asserts the literal key is absent from every emitted line"
   - "mvn verify from the repo root exits zero"
 test_plan:
   adds:
-    - infochat-common/src/test/java/**/log/RedactingLogFilterTest.java
-    - infochat-common/src/test/java/**/log/RedactingLogFilterIT.java
+    - infochat-core/src/test/java/io/infochat/core/log/RedactingLogFilterTest.java
+    - infochat-core/src/test/java/io/infochat/core/log/RedactingLogFilterIT.java
   preserves:
     - all tests currently green on main
 spec_refs:
@@ -54,57 +55,65 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-05-13
+  verdict: WARN
+  warnings:
+    - "Acceptance items 1 and 2 (spec amendments to security.md and deployment.md) state the required bullet text inline, making them verifiable by grep, but they do not cite a runnable command form (e.g., \"grep -n 'stdout console logs' docs/spec/security.md returns a match\"). This is a weak acceptance criterion but not a blocker because the expected text is fully specified. Consider adding an explicit grep command for reviewer clarity."
+  blockers: []
 ---
 
-# M1-019: Redact API-key shapes in stdout logs (mirror audit-log hook)
+# M1-019: Redact API-key shapes in stdout logs
 
 ## Context
 
-The current logging policy applies the closed API-key redaction
-catalogue only to `audit_log` writes (`docs/spec/security.md`
-§Secrets handling, lines 986–1009). Stdout logs depend entirely on
-developer discipline at every call site: a single careless
+The spec commits to redacting the closed API-key catalogue
+(`docs/spec/security.md` §Secrets handling, lines 986–1009) on every
+audit_log row. The audit_log writer itself hasn't been built yet —
+that comes in a later M1 ticket — but stdout logs already need the
+same protection: a single careless
 `log.error("LLM call failed", request)` where `request` carries an
 `Authorization: Bearer sk-ant-...` header leaks the key into the
 operator's log aggregator (Loki by default, per
-`docs/design/07-deployment.md` §7.13). This ticket closes the gap by
-mirroring the audit-log redaction hook on the stdout console
-appender, with the same closed catalogue and the same
-fail-closed-on-timeout discipline. Closing this gap also makes the
-spec promise in `deployment.md` §Backups, rotation, secrets
-internally consistent: today the audit-log line is a hard
-commitment, while stdout redaction is silently absent.
+`docs/design/07-deployment.md` §7.13). This ticket builds the
+Redactor utility holding the closed catalogue and the
+fail-closed-on-timeout discipline, registers it as a JBoss
+LogManager console filter on both services, and leaves the Redactor
+shape such that the future audit_log writer can call the same
+`redact(String): String` entry point so the two cannot drift.
 
 ## Definition of Done
 
 - The closed API-key catalogue from `security.md` §Secrets handling
-  applies to stdout logs as well as audit-log writes.
-- A single shared regex source feeds both the audit-log hook and the
-  new stdout filter; the catalogue cannot drift between the two.
+  applies to every line written to stdout.
+- A single `Redactor` utility class holds the catalogue; any future
+  caller (audit_log writer when its ticket lands) calls
+  `Redactor.redact(String): String` so the catalogue cannot drift.
 - The console appender filter is registered on both Collector and
   Provider services.
 - A regex timeout in the filter replaces the entire log message with
   the literal sentinel `[REDACTED:timeout]`.
 - Unit tests assert every catalogue shape is replaced.
-- An integration test simulates a failed LLM call carrying an API key
-  in the exception message and asserts the key does not reach stdout.
+- An integration test asserts a log message carrying a synthetic API
+  key never reaches stdout in literal form.
 - The two spec files are amended to commit to the new behavior.
 
 ## Implementation notes
 
-- The audit-log redaction hook lives in the `AuditLogger` write path
-  (`docs/design/04-security.md` §`AuditLogger`). Lift the regex set
-  into a shared utility so both paths consume the same source.
-- Quarkus uses JBoss LogManager. Register the filter via the standard
-  console handler filter mechanism; concrete property keys belong in
-  design notes, not the spec.
+- The Redactor utility lives in `infochat-core` (shared module). The
+  filter (a JBoss `java.util.logging.Filter`) is also in
+  `infochat-core` so Collector and Provider can each reference it
+  via the same logging property.
+- Quarkus uses JBoss LogManager. Register the filter via the
+  standard console-handler filter property
+  (`quarkus.log.console.filter`).
 - The closed catalogue is listed verbatim in `security.md` lines
-  988-1009. Keep the spec as the editing source; do not duplicate the
-  list in code comments.
-- Fail-closed timeout: reuse the same `java.util.regex`-plus-watchdog
-  pattern documented for Stage 1 sanitizer (`security.md` §Ingest
-  pipeline).
+  988-1009. Keep the spec as the editing source; do not duplicate
+  the list in code comments.
+- Fail-closed timeout: wrap each regex evaluation in a hard wall-clock
+  budget; on timeout replace the whole message with
+  `[REDACTED:timeout]`. The Stage 1 sanitizer (`security.md` §Ingest
+  pipeline) uses the same shape.
 
 ## Big-picture notes
 
@@ -115,10 +124,10 @@ commitment, while stdout redaction is silently absent.
   substitution. Structured-logging MDC fields written separately from
   the message are out of scope here — that gap is a candidate for a
   future ticket.
-- The exception-message-sanitization ticket (M1-020) will reuse this
-  redactor utility. Design the utility's API with that consumer in
-  mind (e.g., a `Redactor` class with a single `redact(String): String`
-  entry point, not a filter-only abstraction).
+- The exception-message-sanitization ticket (M1-020) and the future
+  audit_log writer will reuse this Redactor utility. The utility's
+  API is a class with a single `redact(String): String` entry point,
+  not a filter-only abstraction.
 
 ## Out-of-scope expansion
 
