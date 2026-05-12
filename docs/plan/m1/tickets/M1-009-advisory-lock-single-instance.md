@@ -1,9 +1,11 @@
 ---
 id: M1-009
 title: Advisory-lock single-instance enforcement + heartbeat
-status: pending
+status: deferred
 created: 2026-05-11
 last_updated: 2026-05-12
+deferred_on: M1-017
+deferred_reason: blocked-on-new-ticket
 blocked_by:
   - M1-005
   - M1-006
@@ -76,6 +78,32 @@ decision_refs:
 reviews: []
 escalations:
   - date: 2026-05-12
+    reason: premise-fail
+    reviewer_verdict_excerpt: |
+      N/A — developer-detected. During implementation it surfaced that
+      Provider's @QuarkusTest DevServices container has no `heartbeat`
+      table: Provider has no `quarkus-flyway` (deliberate — see Provider
+      pom comment), and Quarkus 3.33's DevServices does not expose a
+      `shared`/`service-name` knob for cross-module container reuse
+      (only `reuse`, which depends on user-machine Testcontainers
+      config and is not portable). The ticket's premise — that the
+      Provider's @Startup InstanceLockGuard could acquire the lock and
+      upsert the heartbeat row in test mode without any precursor
+      migration-relocation work — turned out to require either a
+      duplicated test-fixture SQL file (schema-drift hack) or an
+      inline @QuarkusTestResource (DevServices reimplementation).
+      Sustainable resolution: relocate Flyway migrations from
+      `infochat-collector` to `infochat-core` so both modules' test
+      classpaths see them, then re-attempt M1-009. The relocation
+      work was deferred-in-prose by M1-005 ("Cleaner to land
+      Collector-owned migrations now, move them after M1-007a as a
+      small follow-up") and M1-007a (out_of_scope line 30: "the
+      migration-move-into-core follow-up is a SEPARATE ticket filed
+      once M1-007a lands"); the follow-up ticket was never actually
+      filed. M1-017 now captures that work; M1-018 captures the
+      process-improvement meta-lesson (clarity check should validate
+      forward references to ticket IDs).
+  - date: 2026-05-12
     reason: clarity-fail
     reviewer_verdict_excerpt: |
       files_scope omits infochat-collector/pom.xml, but acceptance item 13
@@ -136,7 +164,11 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-05-12
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-009: Advisory-lock single-instance enforcement + heartbeat
