@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>infochat</groupId>
+        <artifactId>infochat-parent</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>infochat-messaging-adapter</artifactId>
+    <packaging>jar</packaging>
+
+    <!--
+         infochat-messaging-adapter is a plain library jar: Provider-side
+         presentation-layer SPI types only (MessagingAdapter,
+         TranslationProvider, ProgressNotifier) plus the supporting enum
+         and records. NO Quarkus extensions in production scope so the SPI
+         surface stays transport-agnostic and the concrete adapters
+         (SimpleX, Signal, InMemory — each in its own Tier-3 ticket) layer
+         the extension they need without forcing every consumer to inherit
+         it. Collector intentionally does NOT depend on this module per
+         docs/design/01-architecture.md §1.2 — only Provider talks to
+         messaging backends. JUnit is BOM-managed via the parent's
+         quarkus-bom import; no <version> appears on dependencies in this
+         POM (M1-001 invariant).
+    -->
+    <dependencies>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

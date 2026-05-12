@@ -12,6 +12,7 @@
     <modules>
         <module>infochat-core</module>
         <module>infochat-llm-adapter</module>
+        <module>infochat-messaging-adapter</module>
         <module>infochat-collector</module>
         <module>infochat-provider</module>
     </modules>
@@ -51,6 +52,17 @@
             <dependency>
                 <groupId>infochat</groupId>
                 <artifactId>infochat-llm-adapter</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <!--
+                 infochat-messaging-adapter is the Provider-side presentation-layer
+                 SPI module (MessagingAdapter, TranslationProvider, ProgressNotifier).
+                 Same reactor-local pattern: management here keeps the Provider
+                 consumer and future messaging-impl modules version-less.
+            -->
+            <dependency>
+                <groupId>infochat</groupId>
+                <artifactId>infochat-messaging-adapter</artifactId>
                 <version>${project.version}</version>
             </dependency>
         </dependencies>
