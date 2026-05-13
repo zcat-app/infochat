@@ -1,9 +1,28 @@
 ---
 id: M1-008b
 title: Sources and tags catalogues (§2.2.1, §2.2.2)
-status: pending
+status: done
 created: 2026-05-13
-last_updated: 2026-05-13
+last_updated: 2026-05-14
+clarity_check:
+  date: 2026-05-14
+  verdict: PASS
+  warnings: []
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-05-14
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 368
+      removed: 13
 blocked_by:
   - M1-005
   - M1-006
