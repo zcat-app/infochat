@@ -49,6 +49,16 @@
             <artifactId>quarkus-flyway</artifactId>
             <scope>test</scope>
         </dependency>
+        <!--
+             quarkus-scheduler drives the HeartbeatScheduler @Scheduled tick
+             that refreshes the heartbeat row's last_seen_at every
+             ${infochat.heartbeat.interval} (D41 / docs/design/07-deployment.md
+             §7.8.5).
+        -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-scheduler</artifactId>
+        </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-junit5</artifactId>

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 19 |
+| done | 20 |
 | deferred | 0 |
 | **total** | **22** |
 
@@ -24,12 +24,14 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-009 — Advisory-lock single-instance enforcement + heartbeat (complexity: medium, risk: medium)
 - M1-019 — Redact API-key shapes in stdout logs (complexity: medium, risk: medium)
 
 ---
 
 ## In flight
+
+| ID | Title | Status | Last review |
+|---|---|---|---|
 
 _(none)_
 
@@ -37,11 +39,16 @@ _(none)_
 
 ## Blocked
 
+Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
+
 - M1-020 — blocked_by: M1-019 (pending)
 
 ---
 
 ## Escalated (awaiting user resolution)
+
+| ID | Title | Trigger | Date |
+|---|---|---|---|
 
 _(none)_
 
@@ -49,18 +56,20 @@ _(none)_
 
 ## Done
 
+Showing the 10 most recently `done` tickets (full history is git-log-derivable via `git log --grep "^M1-"`).
+
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
-| M1-018 | Clarity check validates forward references to ticket IDs | 2026-05-13 | APPROVE |
-| M1-017 | Relocate Flyway migrations from infochat-collector to infochat-core | 2026-05-13 | APPROVE |
-| M1-016 | Enforce NOLOGIN on application roles | 2026-05-13 | APPROVE |
-| M1-007c | infochat-messaging-adapter SPIs | 2026-05-12 | APPROVE |
-| M1-007b | infochat-llm-adapter + LLM SPIs | 2026-05-12 | APPROVE |
-| M1-007a | infochat-core + ingest SPIs | 2026-05-12 | APPROVE |
-| M1-007 | Cross-module SPI loading test | 2026-05-12 | APPROVE |
-| M1-006 | DB role matrix (collector, provider, admin) | 2026-05-12 | APPROVE |
-| M1-005 | Profile selector + Flyway infra | 2026-05-12 | APPROVE |
-| M1-015 | Status-regenerator reads frontmatter only | 2026-05-11 | OVERRIDE-APPROVE |
+| M1-018 | Clarity check validates forward references to ticket IDs | 2026-05-13 | round 1 APPROVE |
+| M1-017 | Relocate Flyway migrations from infochat-collector to infochat-core | 2026-05-13 | round 1 APPROVE |
+| M1-016 | Enforce NOLOGIN on application roles | 2026-05-13 | round 1 APPROVE |
+| M1-009 | Advisory-lock single-instance enforcement + heartbeat | 2026-05-13 | round 1 APPROVE |
+| M1-007c | infochat-messaging-adapter SPIs | 2026-05-12 | round 1 APPROVE |
+| M1-007b | infochat-llm-adapter + LLM SPIs | 2026-05-12 | round 1 APPROVE |
+| M1-007a | infochat-core + ingest SPIs | 2026-05-12 | round 1 APPROVE |
+| M1-007 | Cross-module SPI loading test | 2026-05-12 | round 1 APPROVE |
+| M1-006 | DB role matrix (collector, provider, admin) | 2026-05-12 | round 1 APPROVE |
+| M1-005 | Profile selector + Flyway infra | 2026-05-12 | round 1 APPROVE |
 
 ---
 
@@ -72,37 +81,37 @@ _(none)_
 
 ## Dependency graph
 
+ASCII DAG: nodes are ticket IDs (with status in parens), edges are `blocked_by` AND `deferred_on` relationships. Mark runnable tickets with `←`.
+
 ```
 M1-001 (done)
   ├── M1-004 (done)
   ├── M1-005 (done)
-  │     └── M1-006 (done)
-  │           └── M1-009 (pending) ← runnable
+  │     ├── M1-006 (done)
+  │     │     └── M1-009 (done)
+  │     └── M1-009 (done)
   ├── M1-007a (done)
   ├── M1-007b (done)
   └── M1-007c (done)
-        └── M1-007 (done) [umbrella: blocked_by M1-007a, M1-007b, M1-007c]
-
 M1-003 (done)
-  └── M1-005 (done) [see M1-001 branch above]
-
-M1-009 (pending) ← runnable
-  blocked_by: M1-005 (done), M1-006 (done)
-
+  └── M1-005 (done) [see above]
+M1-007a (done)
+M1-007b (done)
+M1-007c (done)
+  └── M1-007 (done)
 M1-010 (done)
   ├── M1-011 (done)
-  │     └── M1-012 (done)
-  └── M1-013 (done)
-        └── M1-014 (done)
-              blocked_by: M1-010 (done), M1-011 (done), M1-012 (done), M1-013 (done)
-
+  │     ├── M1-012 (done)
+  │     │     └── M1-014 (done)
+  │     └── M1-014 (done) [see above]
+  ├── M1-013 (done)
+  │     └── M1-014 (done) [see above]
+  └── M1-014 (done) [see above]
+M1-002 (done)
+M1-015 (done)
+M1-016 (done)
+M1-017 (done)
+M1-018 (done)
 M1-019 (pending) ← runnable
   └── M1-020 (pending)
-        blocked_by: M1-019 (pending)
-
-M1-002 (done)   [no deps]
-M1-015 (done)   [no deps]
-M1-016 (done)   [no deps]
-M1-017 (done)   [no deps]
-M1-018 (done)   [no deps]
 ```

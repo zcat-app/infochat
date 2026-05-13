@@ -1,17 +1,15 @@
 ---
 id: M1-009
 title: Advisory-lock single-instance enforcement + heartbeat
-status: deferred
+status: done
 created: 2026-05-11
-last_updated: 2026-05-12
-deferred_on: M1-017
-deferred_reason: blocked-on-new-ticket
+last_updated: 2026-05-13
 blocked_by:
   - M1-005
   - M1-006
 files_budget: 13
 files_scope:
-  - infochat-collector/src/main/resources/db/migration/V3__heartbeat.sql
+  - infochat-core/src/main/resources/db/migration/V3__heartbeat.sql
   - infochat-collector/src/main/java/io/infochat/collector/startup/InstanceLockGuard.java
   - infochat-collector/src/main/java/io/infochat/collector/startup/HeartbeatScheduler.java
   - infochat-collector/src/main/resources/application.properties
@@ -40,7 +38,7 @@ out_of_scope:
   - any `RestartPreventExitStatus` systemd unit file or scripts/ wrapper (the design ties exit code 42 to a unit file; the unit-file ticket lands with the operator-tooling slice and is not this ticket's responsibility — M1-009 commits only to System.exit(1) on lock-conflict, see Implementation notes)
   - any production code under `infochat-collector/src/main/java/` or `infochat-provider/src/main/java/` outside the two `startup/` packages listed in files_scope
 acceptance:
-  - "infochat-collector/src/main/resources/db/migration/V3__heartbeat.sql exists"
+  - "infochat-core/src/main/resources/db/migration/V3__heartbeat.sql exists"
   - "V3__heartbeat.sql creates a `heartbeat` table with columns `service` (text, PRIMARY KEY), `host_id` (text NOT NULL), `pid` (integer NOT NULL), `last_seen_at` (timestamptz NOT NULL DEFAULT now()) — grep -E 'CREATE TABLE.*heartbeat' returns at least one match; grep -E 'PRIMARY KEY' returns at least one match; grep -E '\\bservice\\b' AND grep -E '\\bhost_id\\b' AND grep -E '\\bpid\\b' AND grep -E '\\blast_seen_at\\b' each return at least one match"
   - "V3__heartbeat.sql grants SELECT, INSERT, UPDATE on `heartbeat` to BOTH `infochat_collector` AND `infochat_provider` (grep -E 'GRANT .*ON heartbeat.* TO infochat_collector' returns at least one match; same for `infochat_provider`)"
   - "V3__heartbeat.sql does NOT grant DELETE on `heartbeat` to either application role (grep -iE 'GRANT.*DELETE.*ON heartbeat.*TO infochat_(collector|provider)' returns zero matches — only `infochat_admin` may delete heartbeat rows; the application code only INSERT-on-first-tick + UPDATE-on-subsequent-ticks)"
@@ -54,7 +52,7 @@ acceptance:
   - "infochat-provider/pom.xml adds `quarkus-scheduler` (grep -E '<artifactId>quarkus-scheduler</artifactId>' returns at least one match) — M1-005's Provider pom did not include it"
   - "infochat-collector/pom.xml adds `quarkus-scheduler` (grep -E '<artifactId>quarkus-scheduler</artifactId>' returns at least one match) — M1-005's Collector pom did not include it either"
   - "mvn -B verify from the repo root exits 0; the new IT (see test_plan) confirms (a) a single instance acquires the lock and writes its heartbeat row, and (b) a second test-time guard instance — simulated by calling the lock-acquisition routine twice in the same test JVM with two separate JDBC connections — observes false from the second attempt and logs the contention message"
-  - "after `mvn -pl infochat-collector test`, grep -rE 'Migrated.*successfully.*V3' infochat-collector/target/surefire-reports/ returns at least one match"
+  - "V3 application is asserted indirectly by the four new ITs (collector and provider InstanceLockGuardIT + HeartbeatSchedulerIT): each performs SELECT/INSERT/UPDATE against `heartbeat`, operations that succeed only when V3 has applied to the test DevServices Postgres. `mvn -B verify` exiting 0 (acceptance #14) is the runnable verification — the explicit grep on `Migrated.*successfully.*V3` in `surefire-reports/` from the prior revision was mechanically unsatisfiable (surefire does not redirect stdout to per-test files by default, and Flyway's actual log lines are `Migrating schema ... to version \"3 - heartbeat\"` and `Successfully applied N migrations`, neither matching the regex)"
 test_plan:
   adds:
     - infochat-collector/src/test/java/io/infochat/collector/startup/InstanceLockGuardIT.java (@QuarkusTest: asserts on first guard activation the heartbeat row appears with this JVM's host_id/pid; calls `pg_try_advisory_lock` a second time via a fresh JDBC connection from the same test JVM and asserts the second call returns false; captures the log line and asserts it names the current holder's host_id and pid)
@@ -75,7 +73,20 @@ spec_refs:
 decision_refs:
   - D41
 
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-05-13
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 15
+      added: 1015
+      removed: 43
 escalations:
   - date: 2026-05-12
     reason: premise-fail
@@ -160,14 +171,155 @@ revisions:
       - No body changes; the test files were already named in test_plan.adds
         and Definition of Done — only files_scope and files_budget needed to
         catch up.
+  - date: 2026-05-13
+    reason: post-M1-017 reopen — V3 migration path realignment
+    summary: |
+      - files_scope: V3__heartbeat.sql path changed from
+        infochat-collector/src/main/resources/db/migration/ to
+        infochat-core/src/main/resources/db/migration/. M1-017 (landed
+        post-defer) relocated all Flyway migrations into infochat-core so
+        both modules' Quarkus apps see them on classpath. Leaving V3 in
+        the collector module would leave Provider's tests without the
+        heartbeat schema — exactly the premise-fail that caused the
+        original defer.
+      - acceptance item 1: path updated to match the new files_scope entry.
+      - files_budget: unchanged (still 13 — same file count, only path moved).
+      - Acceptance item 15 ("after `mvn -pl infochat-collector test`, grep
+        ... 'Migrated.*successfully.*V3' in surefire-reports") is unchanged:
+        the collector still runs Flyway against migrations on classpath
+        (now sourced from infochat-core via the module dependency), so the
+        log line still appears in the collector's surefire reports.
+      - Out-of-scope expansion line about V1/V2 — left as-is. V4__nologin
+        from M1-016 also exists in infochat-core now; not listed in
+        out_of_scope but unambiguously not this ticket's concern.
+      - No clarity_check re-run required by this targeted refinement; the
+        upcoming /m1-tick start will run a fresh clarity pre-flight against
+        the corrected frontmatter.
+  - date: 2026-05-13
+    reason: criterion #15 unsatisfiable — mid-implementation refine
+    summary: |
+      - acceptance item 15 rewritten. The prior form required `grep -rE
+        'Migrated.*successfully.*V3' infochat-collector/target/surefire-
+        reports/ returns at least one match`. That is mechanically
+        unsatisfiable for two independent reasons:
+          (1) Surefire does not redirect test stdout to per-test files
+              by default — the surefire-reports/ directory contains only
+              the summary text and the structured XML; Flyway INFO log
+              lines stay on the build console and never reach the
+              reports directory.
+          (2) Flyway 12 logs `Migrating schema "public" to version "3 -
+              heartbeat"` (present-progressive "Migrating", not past
+              "Migrated") and `Successfully applied N migrations to
+              schema "public", now at version v4` (lowercase "v4", not
+              uppercase "V3"). Neither line matches the regex
+              `Migrated.*successfully.*V3` case-sensitively.
+      - Replaced with a runnable assertion: V3 application is implicit
+        in the four new ITs (collector + provider InstanceLockGuardIT
+        and HeartbeatSchedulerIT), each of which SELECT/INSERT/UPDATE
+        against the `heartbeat` table. Those operations succeed only
+        when V3 has applied. `mvn -B verify` exiting 0 (acceptance #14)
+        is the existing runnable verification.
+      - No body changes, no files_scope changes, no files_budget
+        changes. Only the acceptance string changed.
+      - Discovered mid-implementation after `mvn -B verify` produced
+        BUILD SUCCESS but the literal grep in #15 returned no matches
+        in `target/surefire-reports/`. The clarity pre-flight did not
+        catch this because the reviewer does not run the proposed
+        commands; the defect surfaced only on first execution.
 overrides: []
 aborted_attempts: []
-reopens: []
-redteam_findings: []
+reopens:
+  - date: 2026-05-13
+    prior_deferred_reason: blocked-on-new-ticket
+    prior_deferred_on: M1-017
+    reason: M1-017 landed — Flyway migrations relocated to infochat-core
+redteam_findings:
+  - date: 2026-05-13
+    category: AUDIT-EVASION
+    severity: low
+    promise: |
+      "The split means a SQL-injection bug in the Provider cannot delete
+      posts, mutate price snapshots, alter quarantine entries, read
+      unredacted audit rows, or read raw quarantine originals."
+      (security.md §DB roles) — establishing least-privilege role
+      separation as a structural defense so a single-service compromise
+      cannot tamper with other services' state.
+    gap: |
+      V3__heartbeat.sql lines 33–34 grant SELECT, INSERT, UPDATE on the
+      entire `heartbeat` table to BOTH infochat_collector AND
+      infochat_provider. The Provider role can UPDATE the Collector's
+      row and vice versa; no row-level partitioning, no policy
+      restricting each role to its own `service` value. The heartbeat
+      row is the operator-visible "who is currently running" fingerprint
+      that a rejected second instance reads to identify the live
+      holder (InstanceLockGuard.readHolder + logContention).
+    repro: |
+      Adversary obtains SQL injection on the Provider. The Provider
+      role can `UPDATE heartbeat SET host_id='fake-host', pid=12345
+      WHERE service='collector'`. A subsequent restart of the Collector
+      that loses the lock race reads the tampered row and emits a fatal
+      log line naming a falsified holder, masking the real Collector's
+      identity from the operator. The advisory lock itself remains
+      intact, but the operator's diagnostic surface — the only
+      audit-style record produced by the single-instance gate — has
+      been silently falsified by a different service's compromise,
+      violating the role-separation promise.
+    suggested_fix_class: trust-boundary-tightening
+  - date: 2026-05-13
+    category: INJECTION
+    severity: low
+    promise: |
+      "Contact IDs are logged in redacted form ... User-content logging
+      ... never appear in non-audit logs, at any log level (decision
+      D37)." (security.md §Secrets handling) — establishing log content
+      as a controlled surface where adversary-controlled bytes do not
+      flow verbatim into operator-readable logs.
+    gap: |
+      InstanceLockGuard.java (both modules) composes the fatal
+      contention log via `String.format("...host_id='%s' pid=%d
+      last_seen_at=%s", h.hostId(), h.pid(), h.lastSeenAt())` where
+      h.hostId() is the raw `host_id` text column value from heartbeat.
+      Any actor with UPDATE on heartbeat (i.e., either application role
+      — see prior finding) can inject newline / ANSI / log-format
+      bytes into host_id; the value is interpolated into the fatal log
+      line without sanitization or quoting normalization.
+    repro: |
+      Adversary uses SQL injection on either service to set
+      `heartbeat.host_id = "real-host\n2026-05-13 10:00:00 INFO Forged
+      log entry\n"`. The losing instance's contention log entry now
+      contains injected log lines that mimic legitimate operator-visible
+      records, confusing forensic review of why the second instance
+      refused to start.
+    suggested_fix_class: input-sanitization
+out_of_model_notes:
+  - date: 2026-05-13
+    note: |
+      The threat model does not commit to audit-logging single-instance-
+      enforcement events. A losing second instance exits with no row
+      written to audit_log; operator-visible signal is only the stdout
+      fatal line. If forensic reconstruction of "who tried to start a
+      duplicate instance and when" matters, that is a scope-extension
+      discussion rather than a violation.
+  - date: 2026-05-13
+    note: |
+      Holding a permanent Agroal pool connection (InstanceLockGuard
+      heldConnection) is necessary for advisory-lock session lifetime
+      but reduces pool capacity by one. Not a threat-model commitment;
+      flagged for operator awareness.
+  - date: 2026-05-13
+    note: |
+      Quarkus.asyncExit(1) returns from @PostConstruct after scheduling
+      shutdown; in the brief window before JVM exit the losing
+      instance's HeartbeatScheduler.tick() may run and bump
+      last_seen_at on the winning instance's row. Cosmetic /
+      operationally confusing but not a threat-model gap.
 clarity_check:
-  date: 2026-05-12
-  verdict: PASS
-  warnings: []
+  date: 2026-05-13
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE / item 9: Provider HeartbeatScheduler acceptance lacks explicit grep checks (symmetric to item 8); a stub could pass. Developer will implement symmetrically with item 8."
+    - "ACCEPTANCE-RUNNABLE / out_of_scope line 38: parenthetical 'System.exit(1)' contradicts acceptance item 7 + Implementation notes mandating Quarkus.asyncExit(1). Developer will follow the authoritative acceptance/notes."
+    - "FORWARD-REFERENCE-CHECK / M1-008: prose references only; no docs/plan/m1/tickets/M1-008-*.md file exists. UNRESOLVED-PROSE (non-blocking)."
   blockers: []
 ---
 
