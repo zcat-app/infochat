@@ -44,7 +44,7 @@ Steps:
    5. If exactly one heading matches, the resolution is `FOUND (line N: "<heading>")`.
    6. If zero match, the resolution is `ANCHOR-NOT-FOUND`.
    7. If multiple match, prefer the heading whose depth (count of `#` markers) is closest to the most recently resolved anchor's depth; tie-break by line number ascending. If still tied, the resolution is `AMBIGUOUS (lines: N, M, ...)` — the Plan subagent treats AMBIGUOUS as failure.
-8. Regenerate `STATUS.md` per the status-regenerator spawn procedure (the same machinery as [`commit.md`](commit.md) step 5: snapshot pre-image, substitute the two literal paths into `docs/process/status-regen-prompt.md`, spawn, Write-scope guard the post-image). **PROMPT-SIZE-ALARM** (status-regenerator, threshold 10000 bytes) applies at this spawn site: compute the UTF-8 byte length of the substituted prompt string just built. If that length exceeds 10000, print one chat line: `⚠ PROMPT-SIZE-ALARM status-regenerator: substituted prompt is <N> bytes (threshold 10000). This may indicate a regression — a placeholder may have been re-inlined that should reference a file by path. Proceeding anyway.` The alarm is warn-only and does not block the spawn; proceed regardless.
+8. Regenerate `STATUS.md` via `scripts/regen-status.py 'docs/plan/m1/tickets/M1-*.md' docs/plan/m1/STATUS.md` (Bash tool). The script writes only the destination path; if it exits non-zero, surface stderr and refuse to proceed.
 9. Print:
 
 ```
