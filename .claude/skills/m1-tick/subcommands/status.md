@@ -1,6 +1,6 @@
 # /m1-tick status
 
-Regenerate `STATUS.md` and print a one-screen summary. The regeneration work is delegated to a fresh-context subagent so the main session never reads N ticket bodies.
+Regenerate `STATUS.md` and print a one-screen summary. The regeneration work runs in a deterministic Python script so the main session never reads N ticket bodies and the cost stays constant as the ticket set grows.
 
 ## No-args regenerate path
 
