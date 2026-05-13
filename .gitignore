@@ -3,3 +3,4 @@ target/
 .idea/
 *.iml
 docker-compose.override.yml
+scripts/__pycache__/

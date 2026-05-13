@@ -3,62 +3,172 @@
 
 Usage: regen-status.py <tickets-glob> <status-file-path>
 
-The script reads every ticket file matching the glob, parses the top-level
-frontmatter fields we need (ignoring fields whose values may contain
-backticks or other characters that confuse strict YAML parsing), classifies
-each ticket, renders the canonical template, writes the destination file,
-and prints a four-line summary on stdout matching the contract the m1-tick
-skill consumes:
+The script reads every ticket file matching the glob, extracts the
+specific frontmatter fields STATUS.md needs (id, title, status,
+blocked_by, deferred_on, deferred_reason, complexity, risk,
+last_updated, reviews, escalations), classifies each ticket, renders
+the canonical template, writes the destination file, and prints a
+four-line summary on stdout matching the contract the m1-tick skill
+consumes.
 
-    STATUS REGENERATED: <path>
-    Counts: pending=N, in-progress=N, in-review=N, escalated=N, done=N, deferred=N
-    Runnable: M tickets — M1-AAA, M1-BBB
-    In flight: <ids-or-none>
+The parser is targeted extraction — not a general YAML parser. It
+reads only the eleven fields above; everything else in the
+frontmatter (acceptance, files_scope, out_of_scope, test_plan, etc.)
+is ignored by construction. This is deliberate: those fields contain
+backticks and other characters that break strict YAML in our tickets
+(M1-006, M1-010), and we don't need them for STATUS.md. Targeted
+extraction also eliminates the pyyaml dependency, so the script's
+trust chain bottoms out at CPython alone — nothing to pip-install,
+nothing to scan for CVEs.
 
-Exits 0 on success, 2 on usage error, 1 on internal error.
+Supported value shapes:
+  - Scalar: `key: value` or `key: "value with colons"`
+  - Inline list: `key: [A, B, C]` or `key: []`
+  - Block list of IDs: `key:` followed by `  - M1-001` lines
+  - Block list of small mappings (reviews, escalations): we read only
+    the round/date/verdict (or trigger/date) sub-keys; nested
+    structures inside an entry (e.g. `checks:`) are skipped.
+
+Exits 0 on success, 2 on usage error.
 """
 
 import datetime
 import glob
+import re
 import sys
 from pathlib import Path
 
-import yaml
-
-# Top-level frontmatter fields the renderer consults. Other fields
-# (acceptance, files_scope, out_of_scope, test_plan, …) are deliberately
-# stripped before yaml.safe_load — those bodies may contain backticks
-# and other characters that break strict YAML parsing, and we don't need
-# them for STATUS.md.
-KEEP_FIELDS = {
-    "id", "title", "status",
-    "blocked_by", "deferred_on", "deferred_reason",
-    "complexity", "risk", "last_updated",
-    "reviews", "escalations",
+SCALAR_FIELDS = {
+    "id", "title", "status", "complexity", "risk",
+    "last_updated", "deferred_reason",
 }
+ID_LIST_FIELDS = {"blocked_by", "deferred_on"}
+MAPPING_LIST_FIELDS = {"reviews", "escalations"}
+KEEP_FIELDS = SCALAR_FIELDS | ID_LIST_FIELDS | MAPPING_LIST_FIELDS
+
+# Sub-keys we extract from each mapping in a MAPPING_LIST_FIELDS entry.
+# Other sub-keys (e.g. `checks:` under a review) are skipped — they may
+# contain nested structures we don't need.
+MAPPING_ENTRY_KEYS = {"round", "date", "verdict", "trigger"}
+
+_TOP_KEY_RE = re.compile(r"^([a-z_]+):\s*(.*?)\s*$")
+_NESTED_KEY_RE = re.compile(r"^    ([a-z_]+):\s*(.*?)\s*$")
+
+
+def _unquote(s: str) -> str:
+    s = s.strip()
+    if len(s) >= 2 and ((s[0] == '"' and s[-1] == '"') or (s[0] == "'" and s[-1] == "'")):
+        return s[1:-1]
+    return s
+
+
+def _split_inline_list(rest: str) -> list[str]:
+    # rest begins with `[`; collect everything up to the matching `]`
+    end = rest.rfind("]")
+    inner = rest[1:end] if end > 0 else rest[1:]
+    if not inner.strip():
+        return []
+    return [_unquote(part.strip()) for part in inner.split(",") if part.strip()]
 
 
 def parse_frontmatter(path: Path) -> dict:
     text = path.read_text(encoding="utf-8")
     if not text.startswith("---"):
         return {}
-    end = text.find("\n---", 4)
-    if end < 0:
+    closing = text.find("\n---", 4)
+    if closing < 0:
         return {}
-    body = text[4:end]
-    filtered_lines, keeping = [], False
-    for line in body.split("\n"):
-        if line and not line[0].isspace() and ":" in line and not line.startswith("#"):
-            key = line.split(":", 1)[0].strip()
-            keeping = key in KEEP_FIELDS
-        if keeping:
-            filtered_lines.append(line)
-    filtered = "\n".join(filtered_lines)
-    try:
-        return yaml.safe_load(filtered) or {}
-    except yaml.YAMLError as e:
-        print(f"WARN: yaml parse error in {path}: {e}", file=sys.stderr)
-        return {}
+    body = text[4:closing]
+    return _parse_body(body)
+
+
+def _parse_body(body: str) -> dict:
+    lines = body.split("\n")
+    result: dict = {}
+    i, n = 0, len(lines)
+
+    while i < n:
+        line = lines[i]
+        # Skip blanks, indented continuations of previous fields, and comments.
+        if not line or line[0].isspace() or line.lstrip().startswith("#"):
+            i += 1
+            continue
+        m = _TOP_KEY_RE.match(line)
+        if not m:
+            i += 1
+            continue
+        key, rest = m.group(1), m.group(2)
+
+        if key in SCALAR_FIELDS:
+            result[key] = _unquote(rest)
+            i += 1
+            continue
+
+        if key in ID_LIST_FIELDS:
+            if rest.startswith("["):
+                result[key] = _split_inline_list(rest)
+                i += 1
+                continue
+            if rest:
+                # Single bare scalar after the colon (unusual but tolerated).
+                result[key] = [_unquote(rest)]
+                i += 1
+                continue
+            # Block list: collect `^  - ID` lines until the next top-level key.
+            items: list[str] = []
+            i += 1
+            while i < n:
+                nxt = lines[i]
+                if nxt.startswith("  - "):
+                    items.append(_unquote(nxt[4:]))
+                    i += 1
+                elif not nxt or nxt[0].isspace():
+                    i += 1  # blank or deeper-indented continuation
+                else:
+                    break  # next top-level key
+            result[key] = items
+            continue
+
+        if key in MAPPING_LIST_FIELDS:
+            entries: list[dict] = []
+            current: dict | None = None
+            i += 1
+            while i < n:
+                nxt = lines[i]
+                if nxt.startswith("  - "):
+                    if current is not None:
+                        entries.append(current)
+                    current = {}
+                    inner = nxt[4:]
+                    sm = _TOP_KEY_RE.match(inner)
+                    if sm and sm.group(1) in MAPPING_ENTRY_KEYS and sm.group(2):
+                        current[sm.group(1)] = _unquote(sm.group(2))
+                    i += 1
+                elif current is not None and nxt.startswith("    "):
+                    sm = _NESTED_KEY_RE.match(nxt)
+                    if sm and sm.group(1) in MAPPING_ENTRY_KEYS and sm.group(2):
+                        v = sm.group(2)
+                        # Skip if value is empty (means a nested block follows).
+                        if v and not v.startswith("-"):
+                            current[sm.group(1)] = _unquote(v)
+                    i += 1
+                elif not nxt:
+                    i += 1
+                elif nxt[0].isspace():
+                    i += 1  # deeper-indented continuation we don't read
+                else:
+                    break
+            if current is not None:
+                entries.append(current)
+            result[key] = entries
+            continue
+
+        # Unknown top-level key: skip the key and any indented continuation.
+        i += 1
+        while i < n and (not lines[i] or lines[i][0].isspace()):
+            i += 1
+
+    return result
 
 
 def last_review(t: dict) -> dict:
@@ -76,7 +186,8 @@ def is_runnable(t: dict, tickets_by_id: dict) -> bool:
 
 
 def render_dag(tickets_by_id: dict, runnable_ids: set) -> str:
-    children, parents = {tid: [] for tid in tickets_by_id}, {tid: [] for tid in tickets_by_id}
+    children = {tid: [] for tid in tickets_by_id}
+    parents = {tid: [] for tid in tickets_by_id}
     for tid, t in tickets_by_id.items():
         for kind in ("blocked_by", "deferred_on"):
             for blocker in t.get(kind) or []:
@@ -119,7 +230,7 @@ def main(argv: list[str]) -> int:
         return 2
     tickets_glob, status_path = argv[1], Path(argv[2])
 
-    tickets_by_id = {}
+    tickets_by_id: dict = {}
     for path_str in sorted(glob.glob(tickets_glob)):
         fm = parse_frontmatter(Path(path_str))
         tid = fm.get("id")
@@ -267,7 +378,7 @@ def main(argv: list[str]) -> int:
     L.append("## Deferred")
     L.append("")
     if deferred_ids:
-        groups = {}
+        groups: dict = {}
         for tid in deferred_ids:
             reason = tickets_by_id[tid].get("deferred_reason", "other")
             groups.setdefault(reason, []).append(tid)
