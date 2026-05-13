@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 21 |
 | deferred | 2 |
-| **total** | **26** |
+| **total** | **27** |
 
 ---
 
@@ -25,6 +25,7 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-008b — Sources and tags catalogues (§2.2.1, §2.2.2) (complexity: medium, risk: medium)
+- M1-021 — Identity/audit redteam remediation (V6 — actor checks, search_path, ban-self trigger, audit-actor integrity) (complexity: medium, risk: high)
 
 ---
 
@@ -93,8 +94,9 @@ M1-001 (done)
   │     ├── M1-006 (done)
   │     │     ├── M1-008a (done)
   │     │     │     ├── M1-008 (pending)
-  │     │     │     └── M1-008c (pending)
-  │     │     │           └── M1-008 (pending) [see above]
+  │     │     │     ├── M1-008c (pending)
+  │     │     │     │     └── M1-008 (pending) [see above]
+  │     │     │     └── M1-021 (pending) ← runnable
   │     │     ├── M1-008b (pending) ← runnable
   │     │     │     ├── M1-008 (pending) [see above]
   │     │     │     └── M1-008c (pending) [see above]

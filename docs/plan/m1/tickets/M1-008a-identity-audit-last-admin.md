@@ -23,6 +23,141 @@ reviews:
       files: 10
       added: 1146
       removed: 9
+redteam_findings:
+  - date: 2026-05-13
+    category: AUDIT-EVASION
+    severity: high
+    promise: |
+      docs/spec/security.md §DB roles / Invariant 7 ("audit-before-effect"):
+      "Writes the UNBAN_PREBAN_DELETE audit row BEFORE the DELETE
+      (audit-before-effect, Invariant 7)." Spec §User ban commits to the
+      pre-ban deletion being audit-logged.
+    gap: |
+      infochat-core/src/main/resources/db/migration/V5__identity_audit.sql:485-498
+      — delete_preban_user writes the audit row via
+      INSERT INTO audit_log ... SELECT p_actor_id, a.contact_id, a.adapter, ...
+      FROM users u JOIN users a ON a.id = p_actor_id WHERE u.id = p_user_id.
+      When p_actor_id does not match any row in users, the JOIN returns zero
+      rows, the INSERT inserts zero rows (no FK violation, no error), and the
+      subsequent DELETE FROM users WHERE id = p_user_id AND
+      registration_state = 'preban' proceeds unconditionally. The preban user
+      is deleted with no audit trail.
+    repro: |
+      A caller (Provider role, which has EXECUTE on the procedure) invokes
+      CALL delete_preban_user('<valid-preban-uuid>', '<nonexistent-actor-uuid>').
+      Result: the preban row is removed; SELECT count(*) FROM audit_log WHERE
+      action='UNBAN_PREBAN_DELETE' is unchanged. Anyone with the procedure
+      EXECUTE bit can launder preban deletions with no audit signal.
+    suggested_fix_class: audit-log-coverage
+  - date: 2026-05-13
+    category: PERM-ESCAL
+    severity: high
+    promise: |
+      docs/spec/security.md §Authorization model: "Last-admin protection
+      (bot admin only). Cannot revoke the only bot admin's is_admin, **cannot
+      ban the only bot admin, cannot ban self**. ... Enforced at the trigger
+      layer, not just the command layer, so a buggy command cannot bypass it."
+    gap: |
+      infochat-core/src/main/resources/db/migration/V5__identity_audit.sql:199-219
+      — the trg_last_admin_protection_update trigger fires only on
+      (OLD.is_admin = TRUE AND NEW.is_admin = FALSE) or
+      (OLD.is_banned = FALSE AND NEW.is_banned = TRUE AND OLD.is_admin = TRUE)
+      and verifies "remaining non-banned admins exist". It has no signal of
+      *which* connection / actor issued the UPDATE, so it cannot enforce the
+      spec's "cannot ban self" rule at the trigger layer. A bot admin in a
+      multi-admin deployment can UPDATE users SET is_banned = TRUE WHERE
+      id = <self> and the trigger will permit it as long as another admin
+      remains.
+    repro: |
+      Two bot admins exist (Alice, Bob). Alice's command path has a bug or is
+      compromised at the application layer, issuing UPDATE users SET is_banned
+      = TRUE WHERE id = '<alice>'. The trigger sees one remaining admin (Bob),
+      so it does not raise. Alice has now banned herself, contradicting the
+      spec's "cannot ban self" promise that is explicitly meant to be enforced
+      at the trigger layer.
+    suggested_fix_class: trust-boundary-tightening
+  - date: 2026-05-13
+    category: PERM-ESCAL
+    severity: medium
+    promise: |
+      docs/spec/security.md §User ban: "Bot admin can /ban <contact> /
+      /unban <contact>." Spec §Trust boundaries (3): "Permission checks run in
+      deterministic Java." The §DB roles split is "least-privilege" so "a
+      SQL-injection bug in the Provider cannot delete posts ... or read raw
+      quarantine originals," with the Provider's only DELETE-on-users path
+      being the audit-attached delete_preban_user carve-out.
+    gap: |
+      infochat-core/src/main/resources/db/migration/V5__identity_audit.sql:473-503
+      — delete_preban_user is SECURITY DEFINER, granted EXECUTE to
+      infochat_provider, and performs no check that p_actor_id corresponds to
+      a user with is_admin = TRUE. The procedure trusts the caller to pass a
+      bona-fide bot-admin UUID. A Provider-side SQL injection (or any code
+      path that reaches the procedure with attacker-controlled p_actor_id) can
+      delete arbitrary preban rows attributed to any UUID the attacker
+      chooses, bypassing the spec's "permission checks run in deterministic
+      Java" trust boundary.
+    repro: |
+      A Provider-tier code path takes p_actor_id from a less-trusted source
+      (or a SQLi in any Provider query reaches CALL delete_preban_user(...)).
+      Attacker calls CALL delete_preban_user('<some-preban-uuid>', '<any-non-
+      admin-user-uuid>'). The procedure deletes the row and writes (or, per
+      the AUDIT-EVASION finding, omits) an audit row attributing the deletion
+      to a non-admin user. The hardened DB-role boundary is weakened: SECURITY
+      DEFINER widens the Provider's privilege beyond the GRANT matrix without
+      the procedure body re-establishing the missing authorization check.
+    suggested_fix_class: missing-auth-check
+  - date: 2026-05-13
+    category: PERM-ESCAL
+    severity: medium
+    promise: |
+      docs/spec/security.md §DB roles: the role split is least-privilege;
+      SECURITY DEFINER procedures are the only path that elevates privilege.
+      The spec frames delete_preban_user as a narrow carve-out, not a general
+      elevation surface.
+    gap: |
+      infochat-core/src/main/resources/db/migration/V5__identity_audit.sql:473-500
+      — delete_preban_user is declared SECURITY DEFINER but has no
+      SET search_path = public, pg_catalog (or equivalent) in its definition.
+      The classic SECURITY DEFINER attack: an attacker who can create objects
+      in any schema earlier in the caller's search_path can shadow users,
+      audit_log, or built-in functions referenced inside the procedure,
+      hijacking the procedure's elevated execution.
+    repro: |
+      Future migration or operator action grants CREATE on public (or any
+      schema) to infochat_provider (a plausible misconfiguration; spec only
+      enumerates table-level grants). Attacker creates public.audit_log as a
+      view/table they can read/write, then issues CALL delete_preban_user(...);
+      the SECURITY DEFINER body's unqualified audit_log reference resolves to
+      the attacker's shadow object. The "audit row written before delete"
+      invariant is silently violated.
+    suggested_fix_class: trust-boundary-tightening
+  - date: 2026-05-13
+    category: AUDIT-EVASION
+    severity: medium
+    promise: |
+      docs/spec/security.md §DB roles: Provider role has INSERT-only on
+      audit_log; "audit log records *intent* (command name, actor, scope,
+      target)". The intent is that audit rows faithfully attribute actions to
+      their originator.
+    gap: |
+      infochat-core/src/main/resources/db/migration/V5__identity_audit.sql:354-368
+      — audit_log allows actor_user_id, actor_contact_id, actor_adapter to be
+      set freely on INSERT, with no consistency check (e.g. that
+      (actor_user_id, actor_adapter, actor_contact_id) matches a real users
+      row, or that the connecting role corresponds to the claimed actor).
+      Combined with the GRANT INSERT to both Provider and Collector roles, any
+      code path with an audit-INSERT capability can mint audit rows that name
+      an arbitrary admin as actor for an arbitrary action — including actions
+      like GRANT_ADMIN, BAN, UNBAN_PREBAN_DELETE that the role itself has no
+      other capability to perform.
+    repro: |
+      Compromised or buggy Collector path issues
+      INSERT INTO audit_log (actor_user_id, action, target_kind, target_id)
+      VALUES ('<bot-admin-uuid>', 'GRANT_ADMIN', 'user', '<attacker-uuid>').
+      No GRANT exists on users for the Collector to actually grant admin, but
+      the audit record now suggests a bot admin did so. An operator's /audit
+      review sees a falsified action attributed to a real admin.
+    suggested_fix_class: trust-boundary-tightening
 blocked_by:
   - M1-005
   - M1-006
