@@ -150,6 +150,18 @@ These are project-level coding-style preferences. They are NOT reviewer-enforced
 
 M1 work is ticket-driven via the `/m1-tick` skill. The universal workflow specification lives in `docs/process/workflow.md`; M1-specific framing lives in `docs/plan/m1/README.md`; the rules below are the always-loaded summary.
 
+### Commit prefixes (not every change is a ticket)
+
+The ticket flow exists for code, tests, migrations, and spec changes coordinated with code. Pure-doc edits (spec, design, process, skills, agents) bypass clarity-check, reviewer, `mvn verify`, and STATUS regen — commit them directly on `main` with a non-ticket prefix:
+
+| Prefix | When | Example |
+|---|---|---|
+| `M<N>-NNN:` | Implementation ticket: code, tests, migrations, or spec coordinated with code | `M1-009: Advisory-lock single-instance enforcement + heartbeat` |
+| `spec:` | Pure spec/design edit (`docs/spec/`, `docs/design/`), no code change | `spec: Clarify NOTIFY payload tag schema` |
+| `process:` | `.claude/`, `docs/process/`, `docs/plan/`, or `CLAUDE.md` edit, no code change | `process: Replace status-regenerator subagent with script` |
+
+If a change touches both code and docs, it's a ticket. `git log --grep "^M1-"` keeps cleanly enumerating ticketed work because no non-ticket prefix starts with `M`. Full rules in `docs/process/workflow.md` §Non-ticket commits.
+
 - **Tickets** live in `docs/plan/m1/tickets/M1-NNN-<slug>.md`, one file per ticket, YAML frontmatter — see `docs/process/ticket-template.md` for the full schema (key fields: `id`, `status`, `blocked_by`, `acceptance`, `files_budget`, `out_of_scope`, `complexity`, `risk`, `round_cap`, `security_relevant`, `migration_touch`).
 - **Status board** is `docs/plan/m1/STATUS.md`, regenerated from frontmatter; never hand-edit, always derive.
 - **Lifecycle**: `pending` → `in-progress` → `in-review` → `done` (or `escalated` / `deferred`).

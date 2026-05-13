@@ -268,6 +268,34 @@ Reviewed-by: code-reviewer (VERDICT: <APPROVE|OVERRIDE-APPROVE>; round <r>; agen
 
 ---
 
+## Non-ticket commits (spec / process)
+
+The ticket flow exists for code, tests, migrations, and spec changes coordinated with code. The reviewer's checks (surgical changes, scope drift, test integrity, files-budget, negative space) all bite on production code; for a pure-documentation edit they reduce to ceremony. Pure-doc edits **do not need a ticket** — they commit directly on `main` with a non-ticket subject prefix.
+
+### Prefixes
+
+| Prefix | Scope | Skipped vs ticket flow |
+|---|---|---|
+| `M<N>-NNN:` | Implementation ticket: code, tests, migrations, or spec changes coordinated with code | (full flow) |
+| `spec:` | Pure spec/design edit under `docs/spec/` or `docs/design/`, no code change | clarity, reviewer, `mvn verify`, STATUS regen |
+| `process:` | Edit under `.claude/`, `docs/process/`, `docs/plan/`, or `CLAUDE.md`, no code change | clarity, reviewer, `mvn verify`, STATUS regen |
+
+### Rules
+
+1. **Touch code → ticket.** Any commit that adds, deletes, or modifies a file under `infochat-*/`, a module's `src/`, a `pom.xml`, or `db/migration/` is a ticket and uses `M<N>-NNN:`. The `spec:` and `process:` prefixes are pure-doc only.
+2. **Touch spec coordinated with code → ticket.** If a spec amendment is *paired* with the code change it justifies, both land in the same `M<N>-NNN:` commit. The `spec:` prefix is for amendments that stand alone — clarifications, decision-log entries, formatting fixes, refinements with no code consequence yet.
+3. **Dominant-path prefix.** If a `process:` commit incidentally fixes a typo in a spec file, it stays `process:` — pick the prefix that names the load-bearing change. Co-prefixing (`spec+process:`) is forbidden; if the change is genuinely split across both surfaces, make two commits.
+4. **Grep safety.** `git log --grep "^M<N>-"` continues to enumerate implementation-ticket work cleanly because no non-ticket prefix starts with `M`. Tools that build the Done table from `git log` (the status regenerator or its replacement) keep working unchanged.
+5. **Human review present.** The user is the reviewer for `spec:` and `process:` commits. Skipping the reviewer subagent is not a relaxation of the surgical-changes principle — it reflects that the reviewer's automated checks have nothing to bite on for pure-doc edits. Stay surgical.
+6. **STATUS unchanged.** Non-ticket commits do not touch ticket frontmatter, so `STATUS.md` is unaffected and `/<driver> status` is not invoked.
+7. **Revert semantics preserved.** `git revert <commit>` undoes a non-ticket commit cleanly; the one-prefix-per-commit convention keeps history searchable.
+
+### When in doubt
+
+Default to the ticket flow. The cost of an unnecessary ticket is lower than the cost of an unreviewed code change slipping through under a `process:` prefix. The `spec:` and `process:` prefixes are for changes that would feel silly going through clarity-check — a typo fix in a skill prompt; a sentence-level spec refinement; a rule-rewording in `engineering-rules-verbatim.md`; replacing an LLM subagent with a deterministic script.
+
+---
+
 ## Parallelism
 
 Default: sequential. One `in-progress` ticket at a time.
