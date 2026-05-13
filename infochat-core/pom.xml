@@ -19,13 +19,92 @@
          downstream Quarkus apps stay in charge of which extensions
          their runtime pulls in. JUnit is BOM-managed via the parent's
          quarkus-bom import; no <version> appears on dependencies in
-         this POM (M1-001 invariant).
+         this POM (M1-001 invariant). The testcontainers-bom imported
+         below extends BOM management to the schema-test stack the
+         M1-008 umbrella + subtickets need without pinning per-artifact
+         versions inline.
     -->
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>testcontainers-bom</artifactId>
+                <version>1.21.4</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
     <dependencies>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
+        <!--
+             Schema-level tests (M1-008a §2.1 identity/audit) drive a
+             real Postgres via Testcontainers and apply the V5 Flyway
+             migration directly from src/main/resources/db/migration.
+             infochat-core remains a plain library JAR in production
+             scope (no Quarkus extensions); the Testcontainers /
+             Postgres / Flyway dependencies are test-scope only so the
+             production artifact stays library-shaped per M1-001.
+        -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <!--
+                 maven-failsafe-plugin runs *IT.java tests during
+                 `mvn verify`. Maven's default lifecycle does not bind
+                 failsafe; this execution wires it so the M1-008
+                 umbrella's PerScopeIsolationIT will run when added.
+                 Surefire (test phase) remains bound by the super-pom
+                 default and picks up *Test.java automatically.
+            -->
+            <plugin>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <version>3.5.2</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
 </project>

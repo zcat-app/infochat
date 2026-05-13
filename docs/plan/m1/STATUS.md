@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 20 |
+| done | 21 |
 | deferred | 2 |
-| **total** | **22** |
+| **total** | **26** |
 
 ---
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-008b — Sources and tags catalogues (§2.2.1, §2.2.2) (complexity: medium, risk: medium)
 
 ---
 
@@ -41,7 +41,8 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-008 — blocked_by: M1-008a (done), M1-008b (pending), M1-008c (pending)
+- M1-008c — blocked_by: M1-008a (done), M1-008b (pending)
 
 ---
 
@@ -64,12 +65,12 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-017 | Relocate Flyway migrations from infochat-collector to infochat-core | 2026-05-13 | round 1 APPROVE |
 | M1-016 | Enforce NOLOGIN on application roles | 2026-05-13 | round 1 APPROVE |
 | M1-009 | Advisory-lock single-instance enforcement + heartbeat | 2026-05-13 | round 1 APPROVE |
+| M1-008a | Identity, audit, last-admin trigger (§2.1) | 2026-05-13 | round 1 APPROVE |
 | M1-007c | infochat-messaging-adapter SPIs | 2026-05-12 | round 1 APPROVE |
 | M1-007b | infochat-llm-adapter + LLM SPIs | 2026-05-12 | round 1 APPROVE |
 | M1-007a | infochat-core + ingest SPIs | 2026-05-12 | round 1 APPROVE |
 | M1-007 | Cross-module SPI loading test | 2026-05-12 | round 1 APPROVE |
 | M1-006 | DB role matrix (collector, provider, admin) | 2026-05-12 | round 1 APPROVE |
-| M1-005 | Profile selector + Flyway infra | 2026-05-12 | round 1 APPROVE |
 
 ---
 
@@ -90,7 +91,16 @@ M1-001 (done)
   ├── M1-004 (done)
   ├── M1-005 (done)
   │     ├── M1-006 (done)
+  │     │     ├── M1-008a (done)
+  │     │     │     ├── M1-008 (pending)
+  │     │     │     └── M1-008c (pending)
+  │     │     │           └── M1-008 (pending) [see above]
+  │     │     ├── M1-008b (pending) ← runnable
+  │     │     │     ├── M1-008 (pending) [see above]
+  │     │     │     └── M1-008c (pending) [see above]
   │     │     └── M1-009 (done)
+  │     ├── M1-008a (done) [see above]
+  │     ├── M1-008b (pending) [see above]
   │     └── M1-009 (done) [see above]
   ├── M1-007a (done)
   │     └── M1-007 (done)
@@ -112,6 +122,8 @@ M1-010 (done)
 M1-015 (done)
 M1-016 (done)
 M1-017 (done)
+  ├── M1-008a (done) [see above]
+  └── M1-008b (pending) [see above]
 M1-018 (done)
 M1-019 (deferred)
   └── M1-020 (deferred)
