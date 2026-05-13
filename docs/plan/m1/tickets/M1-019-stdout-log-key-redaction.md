@@ -1,7 +1,7 @@
 ---
 id: M1-019
 title: Redact API-key shapes in stdout logs
-status: in-progress
+status: pending
 created: 2026-05-12
 last_updated: 2026-05-13
 blocked_by: []
