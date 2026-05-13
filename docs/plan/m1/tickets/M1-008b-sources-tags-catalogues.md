@@ -37,7 +37,7 @@ acceptance:
   - "V6 declares the partial activity index on source — grep -E 'CREATE INDEX\\s+\\w+\\s+ON\\s+source\\s*\\(\\s*status\\s*\\)\\s+WHERE\\s+deleted_at\\s+IS\\s+NULL' returns at least one match"
   - "V6 declares the tag.name UNIQUE and the normalized-form CHECK constraint per docs/spec/schema.md §Sources and tags — Tag — grep -E 'UNIQUE.*name' returns at least one match AND grep -E \"name\\s+~\\s+'\\^\\[a-z0-9\\]\\[a-z0-9-\\]\\{0,47\\}\\$'\" returns at least one match"
   - "V6 declares tag.source_origin CHECK over the two-value set — grep -E \"source_origin\\s+IN\\s*\\(\\s*'bootstrap'\\s*,\\s*'user'\\s*\\)\" returns at least one match"
-  - "V6 grants are aligned with docs/spec/security.md §DB roles — grep -E 'GRANT\\s+SELECT(\\s*,\\s*\\w+)*\\s+ON\\s+source\\s+TO\\s+infochat_provider' returns at least one match (Provider writes via /add-source / /remove-source) AND grep -E 'GRANT\\s+SELECT\\s+ON\\s+source\\s+TO\\s+infochat_collector' returns at least one match (Collector reads to know what to poll); the same grants exist for tag"
+  - "V6 grants are aligned with docs/design/04-security.md §infochat_collector / §infochat_provider — grep -E 'GRANT\\s+SELECT\\s*,\\s*INSERT\\s*,\\s*UPDATE\\s+ON\\s+source\\s+TO\\s+infochat_collector' returns at least one match (Collector writes source via the bootstrap loader's INSERT path and the fetcher's UPDATE path) AND grep -E 'GRANT\\s+SELECT\\s+ON\\s+source\\s+TO\\s+infochat_provider' returns at least one match (Provider reads source for /list-sources and join queries); the same paired grants exist for tag (Collector: SELECT/INSERT/UPDATE; Provider: SELECT)"
   - "V6 revokes DELETE on source from both service roles (Invariant 4) — grep -E 'REVOKE\\s+DELETE\\s+ON\\s+source\\s+FROM\\s+(infochat_collector|infochat_provider|PUBLIC)' returns at least one match"
   - "SourceTableTest.java exercises the (kind, identifier) UNIQUE constraint: a second INSERT with the same (kind, identifier) pair raises a unique-violation SQLException; the soft-delete column round-trips (an UPDATE that sets deleted_at = now() then a SELECT returns a non-null timestamp); the status CHECK rejects an unknown status value with a CHECK-violation SQLException"
   - "TagTableTest.java exercises the tag.name regex CHECK: inserting `'Hello'` (uppercase H) raises a CHECK-violation SQLException; inserting `'-leading'` (leading hyphen) raises a CHECK-violation SQLException; inserting a 49-character name raises a CHECK-violation SQLException; a valid name (e.g., `'news'`) inserts cleanly; the source_origin CHECK rejects a third value (e.g., `'imported'`) with a CHECK-violation"
@@ -151,21 +151,35 @@ shape the bootstrap loader and Tier-1 commands will write to.
       them before INSERT; this CHECK is the second line of
       defense against an unnormalized write.
   - **Per-table GRANTs** aligned with `docs/spec/security.md` §DB
-    roles. The grants must reflect that:
-    - `source` is **Provider-write**: `/add-source`,
-      `/remove-source`, `/source-enable`, `/source-disable`, and
-      the bootstrap loader all run as the Provider role (D34) —
-      the bootstrap loader is a Collector-side process but per
-      `docs/spec/deployment.md` §Bootstrap behavior the loader
-      writes through the Provider's role; **verify against
-      `docs/spec/security.md` §DB roles before locking**: if
-      §DB roles names Collector as the writer for `source`, the
-      grant matches what the spec says, not what this paragraph
-      assumes. Collector reads to schedule polling.
-    - `tag` is **Provider-write**: the bootstrap loader seeds
-      the initial vocabulary; `/add-source --tags` adds rows
-      on a fresh insert. Collector reads to validate tags on
-      ingest.
+    roles, as enumerated in `docs/design/04-security.md` §`infochat_collector`
+    (lines 625-626) and §`infochat_provider` (lines 633-634). The grants
+    must reflect that:
+    - `source` is **Collector-write**: `GRANT SELECT, INSERT, UPDATE
+      ON source TO infochat_collector` — the Collector runs the
+      bootstrap loader's idempotent upsert path (INSERT) per
+      `docs/spec/deployment.md` §Bootstrap behavior, and the fetcher
+      writes `status`, `last_fetch_at`, `last_success_at`,
+      `consecutive_failures` on every polling cycle (UPDATE) per
+      decision D42. The Provider gets `GRANT SELECT ON source TO
+      infochat_provider` only — read-side of joins for command
+      handlers (`/list-sources`, `/get-sources`); Provider-side
+      writes to `source` from `/add-source`, `/remove-source`,
+      `/source-enable`, `/source-disable` route through a future
+      handoff path (stored procedure, NOTIFY-based request to
+      Collector, or a later spec-amend) and are NOT in scope for
+      this ticket — the schema commitment is the GRANT shape
+      enumerated above.
+    - `tag` is **Collector-write**: `GRANT SELECT, INSERT, UPDATE
+      ON tag TO infochat_collector` — `tag` is listed as an
+      ingest-owned table in `docs/design/04-security.md` line 625;
+      the tagger writes new vocabulary entries during ingest, and
+      the bootstrap loader seeds the initial vocabulary on
+      Collector startup. The Provider gets `GRANT SELECT ON tag
+      TO infochat_provider` only — read-side for command handlers
+      (`/get-tags`, `/follow-tag` validation); like `source`, any
+      Provider-initiated writes to `tag` (e.g. `/add-source
+      --tags` minting a new vocabulary entry) route through a
+      future handoff path and are out of scope here.
     - `DELETE ON source` is **REVOKEd** from both service roles
       (Invariant 4 — soft-delete only; `infochat_admin` is the
       sole DELETE path).
@@ -185,11 +199,17 @@ shape the bootstrap loader and Tier-1 commands will write to.
     present).
   - `TagTableTest.java` — exercises the `name` CHECK across
     representative invalid inputs: uppercase (`'News'`),
-    leading hyphen (`'-news'`), trailing hyphen (`'news-'`),
-    too-long (49 characters), special characters (`'news!'`,
-    `'news space'`). A valid name (`'news'`) inserts cleanly.
-    The `source_origin` CHECK rejects an out-of-set value
-    (`'imported'`) with a CHECK-violation.
+    leading hyphen (`'-news'`), too-long (49 characters),
+    special characters (`'news!'`, `'news space'`). A valid
+    name (`'news'`) inserts cleanly. The `source_origin`
+    CHECK rejects an out-of-set value (`'imported'`) with a
+    CHECK-violation. Note: trailing hyphens (e.g. `'news-'`)
+    are PERMITTED by the regex `^[a-z0-9][a-z0-9-]{0,47}$`
+    because the second character class `[a-z0-9-]` includes
+    `-` with no terminal-alphanumeric anchor. This deviates
+    from the prose at `docs/spec/commands.md` §Surface
+    conventions ("internal hyphens"); the prose-vs-regex gap
+    is a separate spec-quality concern out of scope here.
 - `mvn -B clean verify` from the repo root exits 0. All prior
   tests (M1-003, M1-007, M1-007a/b/c, M1-008a) continue to pass;
   the two new test classes execute against the Testcontainers
