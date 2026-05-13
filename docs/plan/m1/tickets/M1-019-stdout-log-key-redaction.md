@@ -1,9 +1,11 @@
 ---
 id: M1-019
 title: Redact API-key shapes in stdout logs
-status: pending
+status: deferred
 created: 2026-05-12
 last_updated: 2026-05-13
+deferred_reason: post-mvp-hardening
+deferred_on: []
 blocked_by: []
 files_budget: 8
 files_scope:

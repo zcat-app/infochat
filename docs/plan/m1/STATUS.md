@@ -10,12 +10,12 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 20 |
-| deferred | 0 |
+| deferred | 2 |
 | **total** | **22** |
 
 ---
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-019 — Redact API-key shapes in stdout logs (complexity: medium, risk: medium)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -41,7 +41,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-020 — blocked_by: M1-019 (pending)
+_(none)_
 
 ---
 
@@ -75,7 +75,9 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 ## Deferred
 
-_(none)_
+### post-mvp-hardening (2)
+- M1-019 → unspecified
+- M1-020 → unspecified
 
 ---
 
@@ -111,6 +113,6 @@ M1-015 (done)
 M1-016 (done)
 M1-017 (done)
 M1-018 (done)
-M1-019 (pending) ← runnable
-  └── M1-020 (pending)
+M1-019 (deferred)
+  └── M1-020 (deferred)
 ```
