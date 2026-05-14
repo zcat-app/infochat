@@ -23,6 +23,112 @@ reviews:
       files: 8
       added: 806
       removed: 7
+redteam_findings:
+  - date: 2026-05-14
+    category: INJECTION
+    severity: critical
+    promise: |
+      Every outbound connection from the Collector runs through a
+      fail-closed allowlist (decision D20). Both services use the same
+      shared library module (infochat-ssrf) which carries the IP
+      blocklist, DNS-rebind defense, redirect cap, and timeout caps.
+      DNS-resolved IPs are checked against a blocklist of private,
+      loopback, link-local, multicast, CGNAT, and cloud-metadata
+      ranges (notably 169.254.169.254 and IPv6 equivalents).
+    gap: |
+      RssFetcher.java:62-67 constructs a raw HttpClient with no SSRF
+      gate; URI.create(identifier) and httpClient.send(...) run with
+      no IP check. infochat-ssrf does not exist anywhere in the repo.
+      The ticket explicitly authorizes this carve-out (Big-picture
+      notes "SSRF GATE TODO — load-bearing carve-out") — the gate
+      lands in a follow-up ticket before T1-C wires the FetchScheduler
+      to production traffic.
+    repro: |
+      Source identifier http://169.254.169.254/latest/meta-data/...
+      retrieves cloud-metadata credentials; HTTP succeeds, parser
+      raises but credentials are already over the network. DNS-rebind
+      via Redirect.NORMAL re-resolves to 127.0.0.1 mid-fetch — the
+      spec's TOCTOU defense (DNS re-resolved per redirect hop) is
+      absent.
+    suggested_fix_class: trust-boundary-tightening
+    disposition: known-carve-out — bounded by the requirement that
+      infochat-ssrf lands before T1-C wires this Fetcher to production
+      traffic. Not currently injected into any scheduler.
+  - date: 2026-05-14
+    category: DOS
+    severity: high
+    promise: |
+      Redirect, body-size, connect-timeout, and read-timeout caps are
+      enforced; an unset timeout is a configuration error.
+    gap: |
+      RssFetcher.java:85 uses HttpResponse.BodyHandlers.ofByteArray()
+      with no size limit; body is fully buffered into one byte[] with
+      no cap. No redirect-count cap beyond JDK default. Parser's
+      readTextContent at RssFeedParser.java:344-366 accumulates into
+      unbounded StringBuilder.
+    repro: |
+      Hostile feed serves a 10 GB response; httpClient.send buffers
+      the entire response into a byte[], exhausting Collector heap.
+      Per-source consecutive-failure threshold D42 is bypassed because
+      the fetch succeeds (HTTP 200); OOM happens during buffer.
+    suggested_fix_class: rate-limit
+  - date: 2026-05-14
+    category: INJECTION
+    severity: high
+    promise: |
+      Allowed schemes: http, https, ws, wss. HTTP-shaped fetchers:
+      GET and HEAD only.
+    gap: |
+      RssFetcher.java:76 URI.create(identifier) accepts userinfo
+      segments and any URI scheme the JDK accepts. No normalization,
+      no rejection of http://user:password@host/ shape, no
+      pre-allowlist beyond what the JDK happens to enforce.
+    repro: |
+      Bootstrap entry http://victim.internal:8080/admin?delete=1
+      passes through; the Collector becomes a confused deputy for
+      internal-network reachability.
+    suggested_fix_class: input-sanitization
+  - date: 2026-05-14
+    category: INFO-LEAK
+    severity: medium
+    promise: |
+      Contact IDs are logged in redacted form outside the audit log.
+      Audit-log writes pass through a redaction hook that masks
+      values matching a closed catalogue of API-key shapes.
+    gap: |
+      RssFetcher.java:88-98 interpolate the full raw identifier URL
+      (and exception message) into RssFetchException — a source URL
+      with embedded credentials (https://user:token@host/) leaks the
+      credentials into any log scope that captures the exception
+      message. The closed-catalogue redactor is not on this path.
+    repro: |
+      Operator configures private feed
+      https://feeduser:sk-ant-key@private/feed.xml; on HTTP failure
+      RssFetchException.getMessage() returns the full URL including
+      the Anthropic key. Any log line that captures the exception
+      message leaks the key in plaintext.
+    suggested_fix_class: input-sanitization
+  - date: 2026-05-14
+    category: DOS
+    severity: medium
+    promise: |
+      Stage 1 — deterministic. Runs on every post. A prompt-injection
+      regex set runs with bounded execution time. Fetcher failure
+      (parse failure on an HTTP-shaped source) → retry on next tick;
+      after N consecutive failures source.status transitions to
+      'failed'.
+    gap: |
+      RssFeedParser.java:193-203,257-267 walk <item>/<entry> elements
+      with no cap on returned item count, and readTextContent has no
+      per-element body-size cap. Fetcher is upstream of Stage 1 and
+      has no analogous parse-wall-clock bound.
+    repro: |
+      Hostile feed serves valid XML with one billion <item> entries
+      (small bodies). Parser allocates one NormalizedPost per item,
+      exhausting heap before Stage 1 ever runs. D42's per-source
+      consecutive-failure threshold is bypassed because HTTP 200 was
+      returned.
+    suggested_fix_class: rate-limit
 blocked_by:
   - M1-007a
 files_budget: 6

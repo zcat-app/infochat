@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 26 |
 | deferred | 2 |
-| **total** | **29** |
+| **total** | **30** |
 
 ---
 
@@ -25,6 +25,7 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-021 — Identity/audit redteam remediation (V6 — actor checks, search_path, ban-self trigger, audit-actor integrity) (complexity: medium, risk: high)
+- M1-024 — infochat-ssrf module + RssFetcher hardening (M1-023 remediation) (complexity: high, risk: high)
 
 ---
 
@@ -107,6 +108,7 @@ M1-001 (done)
   ├── M1-007a (done)
   │     ├── M1-007 (done)
   │     └── M1-023 (done)
+  │           └── M1-024 (pending) ← runnable
   ├── M1-007b (done)
   │     └── M1-007 (done) [see above]
   └── M1-007c (done)
