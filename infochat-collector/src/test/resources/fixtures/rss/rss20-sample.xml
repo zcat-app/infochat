@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Sample RSS 2.0 Feed</title>
+    <link>https://example.com/feed</link>
+    <description>Three-item fixture exercising guid-bearing, link-fallback, and HTML-body paths.</description>
+    <language>en-us</language>
+    <pubDate>Mon, 06 Sep 2010 00:01:00 +0000</pubDate>
+
+    <item>
+      <title>First post with explicit guid</title>
+      <link>https://example.com/posts/1</link>
+      <guid isPermaLink="false">urn:example:post:1</guid>
+      <description>Plain text body for the first post.</description>
+      <pubDate>Mon, 06 Sep 2010 00:01:00 +0000</pubDate>
+    </item>
+
+    <item>
+      <title>Second post relies on link as identifier</title>
+      <link>https://example.com/posts/2</link>
+      <description>Plain text body for the link-fallback item.</description>
+      <pubDate>Tue, 07 Sep 2010 12:30:45 +0000</pubDate>
+    </item>
+
+    <item>
+      <link>https://example.com/posts/3</link>
+      <guid isPermaLink="false">urn:example:post:3</guid>
+      <description><![CDATA[<p>HTML <a href="https://example.com">link</a> body.</p>]]></description>
+      <pubDate>Wed, 08 Sep 2010 06:00:00 +0000</pubDate>
+    </item>
+
+  </channel>
+</rss>

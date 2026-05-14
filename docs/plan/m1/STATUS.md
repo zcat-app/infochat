@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 25 |
+| done | 26 |
 | deferred | 2 |
 | **total** | **29** |
 
@@ -25,7 +25,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-021 — Identity/audit redteam remediation (V6 — actor checks, search_path, ban-self trigger, audit-actor integrity) (complexity: medium, risk: high)
-- M1-023 — RSS Fetcher implementation (Fetcher SPI, kind='rss') (complexity: medium, risk: medium)
 
 ---
 
@@ -61,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-023 | RSS Fetcher implementation (Fetcher SPI, kind='rss') | 2026-05-14 | round 1 APPROVE |
 | M1-022 | Bootstrap-sources loader (Collector @Startup + bootstrap_meta) | 2026-05-14 | round 1 OVERRIDE-APPROVE |
 | M1-008c | Joins, scope preferences, posts (§2.2.3..§2.2.5 + §2.3) | 2026-05-14 | round 1 APPROVE |
 | M1-008b | Sources and tags catalogues (§2.2.1, §2.2.2) | 2026-05-14 | round 1 APPROVE |
@@ -70,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-016 | Enforce NOLOGIN on application roles | 2026-05-13 | round 1 APPROVE |
 | M1-009 | Advisory-lock single-instance enforcement + heartbeat | 2026-05-13 | round 1 APPROVE |
 | M1-008a | Identity, audit, last-admin trigger (§2.1) | 2026-05-13 | round 1 APPROVE |
-| M1-007c | infochat-messaging-adapter SPIs | 2026-05-12 | round 1 APPROVE |
 
 ---
 
@@ -107,7 +106,7 @@ M1-001 (done)
   │     └── M1-009 (done) [see above]
   ├── M1-007a (done)
   │     ├── M1-007 (done)
-  │     └── M1-023 (pending) ← runnable
+  │     └── M1-023 (done)
   ├── M1-007b (done)
   │     └── M1-007 (done) [see above]
   └── M1-007c (done)

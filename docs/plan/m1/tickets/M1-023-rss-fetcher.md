@@ -1,9 +1,28 @@
 ---
 id: M1-023
 title: RSS Fetcher implementation (Fetcher SPI, kind='rss')
-status: pending
+status: done
 created: 2026-05-14
 last_updated: 2026-05-14
+clarity_check:
+  date: 2026-05-14
+  verdict: PASS
+  warnings: []
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-05-14
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 806
+      removed: 7
 blocked_by:
   - M1-007a
 files_budget: 6
