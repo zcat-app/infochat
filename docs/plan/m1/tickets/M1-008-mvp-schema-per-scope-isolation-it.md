@@ -1,9 +1,28 @@
 ---
 id: M1-008
 title: MVP schema umbrella — per-(user, scope) isolation IT
-status: pending
+status: done
 created: 2026-05-13
-last_updated: 2026-05-13
+last_updated: 2026-05-14
+clarity_check:
+  date: 2026-05-14
+  verdict: PASS
+  warnings: []
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-05-14
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 3
+      added: 386
+      removed: 10
 blocked_by:
   - M1-008a
   - M1-008b

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 23 |
+| done | 24 |
 | deferred | 2 |
 | **total** | **27** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-008 — MVP schema umbrella — per-(user, scope) isolation IT (complexity: low, risk: low)
 - M1-021 — Identity/audit redteam remediation (V6 — actor checks, search_path, ban-self trigger, audit-actor integrity) (complexity: medium, risk: high)
 
 ---
@@ -63,6 +62,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 |---|---|---|---|
 | M1-008c | Joins, scope preferences, posts (§2.2.3..§2.2.5 + §2.3) | 2026-05-14 | round 1 APPROVE |
 | M1-008b | Sources and tags catalogues (§2.2.1, §2.2.2) | 2026-05-14 | round 1 APPROVE |
+| M1-008 | MVP schema umbrella — per-(user, scope) isolation IT | 2026-05-14 | round 1 APPROVE |
 | M1-018 | Clarity check validates forward references to ticket IDs | 2026-05-13 | round 1 APPROVE |
 | M1-017 | Relocate Flyway migrations from infochat-collector to infochat-core | 2026-05-13 | round 1 APPROVE |
 | M1-016 | Enforce NOLOGIN on application roles | 2026-05-13 | round 1 APPROVE |
@@ -70,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-008a | Identity, audit, last-admin trigger (§2.1) | 2026-05-13 | round 1 APPROVE |
 | M1-007c | infochat-messaging-adapter SPIs | 2026-05-12 | round 1 APPROVE |
 | M1-007b | infochat-llm-adapter + LLM SPIs | 2026-05-12 | round 1 APPROVE |
-| M1-007a | infochat-core + ingest SPIs | 2026-05-12 | round 1 APPROVE |
 
 ---
 
@@ -92,12 +91,12 @@ M1-001 (done)
   ├── M1-005 (done)
   │     ├── M1-006 (done)
   │     │     ├── M1-008a (done)
-  │     │     │     ├── M1-008 (pending) ← runnable
+  │     │     │     ├── M1-008 (done)
   │     │     │     ├── M1-008c (done)
-  │     │     │     │     └── M1-008 (pending) [see above]
+  │     │     │     │     └── M1-008 (done) [see above]
   │     │     │     └── M1-021 (pending) ← runnable
   │     │     ├── M1-008b (done)
-  │     │     │     ├── M1-008 (pending) [see above]
+  │     │     │     ├── M1-008 (done) [see above]
   │     │     │     └── M1-008c (done) [see above]
   │     │     └── M1-009 (done)
   │     ├── M1-008a (done) [see above]
