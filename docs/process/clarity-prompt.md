@@ -272,11 +272,49 @@ Lean to `FAIL` when the assertion is mechanically impossible to
 satisfy given the DoD's enumeration (Shape-2). `WARN` only when the
 DoD does not commit to the relevant fragment fully enough to count.
 
+**Aggregate-count smell — WARN even when satisfiable.** If an
+acceptance item asserts a count across **heterogeneous elements**
+(phrasings like `across the three join tables`, `at least N matches
+across the catalogue tables`, `grep -c … over the per-scope schema`),
+record `WARN` on this check even when the count is mechanically
+satisfiable against the DoD. The aggregate-count pattern is the
+authoring-time smell that produced M1-008c: it hides structural
+shape differences between the elements and silently accepts a
+regression in any one element so long as the total count remains
+met. The author intended a uniform structural commitment; what they
+wrote is a fragile count that happens to add up.
+
+The recommended alternative — **one acceptance item per named
+element**, each pinning that element's exact shape (e.g., one item
+per table, each asserting the table's specific PK / GRANT / index
+declaration) — is documented in
+[`docs/process/ticket-template.md`](../../docs/process/ticket-template.md)
+under the `acceptance:` field comments. The clarity reviewer flags
+the smell so the ticket-author can split the aggregate item into
+per-element items before `/m1-tick start` proceeds; the per-element
+form is then mechanically checkable against the DoD without count
+arithmetic at all.
+
+Aggregate counts have ONE legitimate use: enforcing "exactly N and
+no more" when **all N elements are structurally identical** — e.g.,
+M1-008c's correct acceptance item `grep -cE '(stage1_done|stage2_done|
+tagger_done|embedding_done|stage1_flagged|stage2_failed|tagger_fallback)
+\s+BOOLEAN NOT NULL' V7 returns 7` (seven per-stage flags of the
+same shape; the count is the load-bearing assertion). Do NOT WARN
+on the structurally-identical case; the WARN fires for heterogeneous
+aggregates only. Distinguishing test: if you can name each element
+and the elements have visibly different shapes in the DoD (e.g.,
+different PK lengths, different FK targets, different CHECK
+expressions), the aggregate is heterogeneous. If the DoD enumerates
+N elements that share the same shape and only differ in name, the
+aggregate is identical-count.
+
 This check does NOT verify regex *correctness* on individual inputs
 (that's the spec-vs-prose half — clarity catches it via test-vector
 review on the spec side; the developer's own grep against the DoD
 catches it here). It verifies regex *cardinality* — that the
-count claim is satisfiable.
+count claim is satisfiable — AND surfaces the aggregate-count
+authoring smell so the per-element pattern can replace it.
 
 ---
 
@@ -314,13 +352,20 @@ ACCEPTANCE-RUNNABLE: <PASS | WARN | FAIL>
 ACCEPTANCE-VS-DOD-CONSISTENT: <PASS | WARN | FAIL>
   <one bullet per acceptance item that asserts a grep-match count;
    each bullet records the asserted count, the expected count derived
-   from the DoD's inlined fragments, and a PASS/WARN/FAIL classification.
-   Items that do not assert a count (mvn invocations, prose
-   behavioral assertions, integration-test outcomes) are reported as
-   "N/A — no count assertion" and do not contribute to the verdict.
-   FAIL when at least one item's expected count cannot satisfy the
-   asserted bound; WARN when the DoD is ambiguous on the count for
-   at least one item and no item is FAIL; PASS otherwise.>
+   from the DoD's inlined fragments, an aggregate-vs-identical
+   classification of the elements counted (HETEROGENEOUS-AGGREGATE |
+   IDENTICAL-AGGREGATE | SINGLE-ELEMENT | N/A), and a PASS/WARN/FAIL
+   classification. Items that do not assert a count (mvn invocations,
+   prose behavioral assertions, integration-test outcomes) are
+   reported as "N/A — no count assertion" and do not contribute to
+   the verdict. FAIL when at least one item's expected count cannot
+   satisfy the asserted bound (Shape-2 unsatisfiability); WARN when
+   at least one item is HETEROGENEOUS-AGGREGATE (authoring smell —
+   recommend split into per-element items) OR the DoD is ambiguous
+   on the count, and no item is FAIL; PASS otherwise. The
+   HETEROGENEOUS-AGGREGATE WARN cites the recommended per-element
+   replacement set so the author can refine without re-deriving
+   the structural break.>
 
 OUT-OF-SCOPE-SPECIFIC: <PASS | WARN | FAIL>
   <one paragraph: is out_of_scope non-empty and specific, or PASS>

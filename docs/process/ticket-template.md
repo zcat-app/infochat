@@ -55,6 +55,34 @@ acceptance:
   # - "mvn -pl <module> test -Dtest=<TestName> returns success"
   # - "Flyway migration V<NNN>__<name>.sql applies cleanly on a fresh DB"
   # - "grep -rn '<forbidden-pattern>' src/ returns zero matches"
+  #
+  # AUTHORING RULE — one assertion = one claim about one named element.
+  # When a structural commitment (PK shape, column type, GRANT shape,
+  # index definition) spans multiple tables/elements, write ONE
+  # acceptance item PER element, each pinning that element by name. Do
+  # NOT aggregate via a count across heterogeneous elements. The
+  # aggregate-count pattern hides shape differences and silently
+  # accepts regressions in any one element so long as the total
+  # count is satisfied. Per-element assertions are independently
+  # falsifiable and force you to enumerate the elements at
+  # authoring time — exactly the structural check that surfaces
+  # whether the elements actually share the shape you assumed.
+  #
+  # ❌ Aggregate-count smell:
+  #   - "grep 'PRIMARY KEY\s*\(\s*scope_kind\s*,\s*scope_id\s*,' returns ≥3 matches"
+  #     (assumes three tables share a 3-column PK shape; M1-008c hit a
+  #      trap here because scope_preferences's PK is 2-column.)
+  #
+  # ✓ Per-element pattern:
+  #   - "source_subscription declares PRIMARY KEY (scope_kind, scope_id, source_id)"
+  #   - "scope_tag declares PRIMARY KEY (scope_kind, scope_id, tag_id)"
+  #   - "scope_preferences declares PRIMARY KEY (scope_kind, scope_id)"
+  #
+  # Aggregate counts have one legitimate use: enforcing "exactly N and
+  # no more" when all N are structurally identical (e.g., the seven
+  # per-stage BOOLEAN flags on `post` — same shape, count is the
+  # load-bearing assertion). For heterogeneous element sets, always
+  # split. See [[regex-test-vectors]] in author-memory.
 test_plan:
   adds:
     # - <module>/src/test/java/.../FooIT.java
