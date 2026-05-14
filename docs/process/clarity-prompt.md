@@ -202,6 +202,82 @@ The overall FORWARD-REFERENCE-CHECK verdict is:
 - `WARN` — at least one UNRESOLVED-PROSE and no UNRESOLVED-LOAD-BEARING.
 - `FAIL` — at least one UNRESOLVED-LOAD-BEARING.
 
+### 10. ACCEPTANCE-VS-DOD-CONSISTENT — grep-count assertions are satisfiable against the DoD's inlined commitments
+
+Check #1 verifies that each acceptance item is *syntactically runnable*
+(grep is a valid command, the regex parses, etc.). This check verifies
+that each acceptance item is *semantically satisfiable* given what the
+ticket's own Definition of Done commits the implementation to. The two
+are distinct: a grep can be perfectly runnable and still describe a
+predicate that no implementation matching the DoD could satisfy.
+
+This check fires the forcing function against the class of bug that
+produced M1-008c: an acceptance grep asserted "≥3 matches of
+`PRIMARY KEY\s*\(\s*scope_kind\s*,\s*scope_id\s*,`" across three join
+tables, but the same ticket's DoD specified the third table's PK as
+2-column (`(scope_kind, scope_id)`), which doesn't match a regex
+requiring a comma after `scope_id`. The assertion was unsatisfiable
+the moment the DoD was written; the developer hit the trap at
+implementation time and had to escalate.
+
+For each acceptance item that asserts a **count over a regex's
+matches** — phrasings like `returns exactly N matches`, `returns at
+least N matches`, `returns N`, `returns zero matches`, `grep -c ...
+returns N`:
+
+1. Identify the artifact the grep targets (a migration file path, a
+   test-class set, a source tree). The ticket may not commit to all of
+   the artifact's content inline, but the DoD typically commits to the
+   *relevant* fragments (CREATE TABLE columns, CHECK expressions,
+   PRIMARY KEY shapes, GRANT statements, named constants).
+2. Extract those DoD fragments. In M1-008c's DoD they are listed as
+   bullets under "Definition of Done": each `- table_name per …` block
+   inlines the column list, PK declaration, CHECK constraints, etc.
+3. Apply the regex mentally (or with the Read tool's grep-equivalents)
+   to the extracted fragments and count the matches you would expect.
+4. Compare the expected count against the asserted count:
+   - Expected count satisfies the assertion (≥ lower bound, ≤ upper
+     bound, exactly N when N is asserted) → `PASS` on this item.
+   - Expected count cannot satisfy the assertion (lower than a `≥N`
+     bound, higher than an `exactly N` bound, non-zero when `zero` is
+     asserted) → `FAIL` on this item.
+   - The DoD is ambiguous about the count (e.g., DoD says "and
+     additional indexes as needed" without enumerating, or the DoD
+     does not commit to the relevant fragment at all) → `WARN`.
+
+Examples (real and constructed):
+
+- **FAIL (M1-008c shape):** Acceptance: `grep -E 'PRIMARY KEY\s*\(\s*
+  scope_kind\s*,\s*scope_id\s*,' returns at least 3 matches`. DoD:
+  source_subscription PK `(scope_kind, scope_id, source_id)`; scope_tag
+  PK `(scope_kind, scope_id, tag_id)`; **scope_preferences PK
+  `(scope_kind, scope_id)`**. Expected matches: 2. Asserted: ≥3. The
+  third PK doesn't have the trailing comma the regex requires. FAIL
+  with citation: "scope_preferences PK is 2-column per DoD; grep
+  cannot return 3 matches; reduce to ≥2, or relax regex to allow
+  `[,)]` after `scope_id`."
+- **FAIL (constructed):** Acceptance: `grep -cE 'BOOLEAN NOT NULL' V7
+  returns 7`. DoD enumerates 6 BOOLEAN NOT NULL columns. Expected: 6.
+  Asserted: exactly 7. FAIL.
+- **WARN (ambiguous DoD):** Acceptance: `grep -E 'CREATE INDEX ... ON
+  post' returns at least 5 matches`. DoD: "the full index set per
+  docs/design/02-schema.md §2.3.1: idx_post_status_fetched,
+  idx_post_source, idx_post_published, idx_post_ready_at,
+  idx_post_link_cursor, idx_post_tags_gin, idx_post_status_changed" —
+  seven named. Expected: 7. Asserted: ≥5. PASS (assertion satisfied);
+  no warning. But if DoD said only "and additional partial indexes",
+  expected count would be ambiguous → WARN.
+
+Lean to `FAIL` when the assertion is mechanically impossible to
+satisfy given the DoD's enumeration (Shape-2). `WARN` only when the
+DoD does not commit to the relevant fragment fully enough to count.
+
+This check does NOT verify regex *correctness* on individual inputs
+(that's the spec-vs-prose half — clarity catches it via test-vector
+review on the spec side; the developer's own grep against the DoD
+catches it here). It verifies regex *cardinality* — that the
+count claim is satisfiable.
+
 ---
 
 ## Short chat reply (the only thing you return inline)
@@ -234,6 +310,17 @@ CLARITY VERDICT: <PASS | WARN | FAIL>
 ACCEPTANCE-RUNNABLE: <PASS | WARN | FAIL>
   <one bullet per acceptance item with PASS/WARN/FAIL and a one-line
    reason; cite the item by index>
+
+ACCEPTANCE-VS-DOD-CONSISTENT: <PASS | WARN | FAIL>
+  <one bullet per acceptance item that asserts a grep-match count;
+   each bullet records the asserted count, the expected count derived
+   from the DoD's inlined fragments, and a PASS/WARN/FAIL classification.
+   Items that do not assert a count (mvn invocations, prose
+   behavioral assertions, integration-test outcomes) are reported as
+   "N/A — no count assertion" and do not contribute to the verdict.
+   FAIL when at least one item's expected count cannot satisfy the
+   asserted bound; WARN when the DoD is ambiguous on the count for
+   at least one item and no item is FAIL; PASS otherwise.>
 
 OUT-OF-SCOPE-SPECIFIC: <PASS | WARN | FAIL>
   <one paragraph: is out_of_scope non-empty and specific, or PASS>
