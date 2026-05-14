@@ -1,9 +1,89 @@
 ---
 id: M1-008c
 title: Joins, scope preferences, posts (§2.2.3..§2.2.5 + §2.3)
-status: pending
+status: done
 created: 2026-05-13
-last_updated: 2026-05-13
+last_updated: 2026-05-14
+reviews:
+  - round: 1
+    date: 2026-05-14
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+      spec_conformance: PASS
+    diff_stats:
+      files: 8
+      added: 1141
+      removed: 11
+clarity_check:
+  date: 2026-05-14
+  verdict: PASS
+  warnings: []
+  blockers: []
+escalations:
+  - date: 2026-05-14
+    reason: premise-fail
+    reviewer_verdict_excerpt: |
+      Pre-implementation developer-flagged inconsistency between an
+      acceptance grep and the Definition of Done:
+
+      Acceptance item 3 expects
+        grep -E 'PRIMARY KEY\s*\(\s*scope_kind\s*,\s*scope_id\s*,'
+      to return "at least three matches across the three join tables".
+
+      The regex requires a comma after `scope_id`, i.e. a third PK
+      column. The Definition of Done specifies scope_preferences PK
+      as `(scope_kind, scope_id)` — a two-column PK that does NOT
+      match this regex. Only source_subscription's
+      `(scope_kind, scope_id, source_id)` and scope_tag's
+      `(scope_kind, scope_id, tag_id)` produce matches, for a total
+      of 2 — never 3.
+
+      docs/design/02-schema.md §2.2.5 confirms scope_preferences PK
+      is two-column. The grep cannot be satisfied without violating
+      the canonical schema. Fix: either weaken the count to "at
+      least two", or relax the regex to allow `[,)]` after scope_id
+      so the two-column PK on scope_preferences also matches.
+revisions:
+  - date: 2026-05-14
+    reason: premise-fail
+    notes: |
+      Acceptance item 3 was an aggregate-count assertion that
+      conflicted with the Definition of Done.
+
+      OLD form (aggregate-count across heterogeneous tables;
+      unsatisfiable against DoD):
+        "Every per-scope join carries a (scope_kind, scope_id, *)
+         primary key — grep -E 'PRIMARY KEY\s*\(\s*scope_kind\s*,
+         \s*scope_id\s*,' returns at least three matches across the
+         three join tables (this is Invariant 1's schema-level
+         enforcement — no per-scope row can exist without both
+         discriminator and id)"
+
+      Problem: the regex requires a comma after `scope_id` (i.e.,
+      a third PK column). The DoD specifies scope_preferences PK
+      as (scope_kind, scope_id) — 2 columns, no trailing comma.
+      The grep can return at most 2 matches given the DoD; "at
+      least 3" was unsatisfiable.
+
+      NEW form (per-element pattern; three independently falsifiable
+      assertions, each pinning one table's exact PK shape; see items
+      3a/3b/3c in the acceptance list below):
+        - source_subscription PK (scope_kind, scope_id, source_id)
+        - scope_tag           PK (scope_kind, scope_id, tag_id)
+        - scope_preferences   PK (scope_kind, scope_id)
+
+      The per-element pattern is the recommended structural form per
+      docs/process/ticket-template.md §acceptance authoring rule and
+      docs/process/clarity-prompt.md §10 ACCEPTANCE-VS-DOD-CONSISTENT
+      (both landed in commit 6d9cd4f on main as upstream prevention
+      for the bug class this ticket surfaced). The refine swaps the
+      aggregate item for the three per-element items in place; no
+      other acceptance criteria change.
 blocked_by:
   - M1-008a
   - M1-008b
@@ -36,7 +116,9 @@ out_of_scope:
 acceptance:
   - "infochat-core/src/main/resources/db/migration/V7__joins_post.sql exists and contains CREATE TABLE statements for source_subscription, scope_tag, scope_preferences, and post (grep -E 'CREATE TABLE\\s+(source_subscription|scope_tag|scope_preferences|post)\\b' V7 returns exactly four matches)"
   - "Every join-table row carries a scope discriminator: source_subscription, scope_tag, and scope_preferences each declare scope_kind TEXT NOT NULL with a CHECK constraint over ('dm','group') — grep -E \"scope_kind\\s+TEXT\\s+NOT\\s+NULL\" returns at least three matches AND grep -E \"scope_kind\\s+IN\\s*\\(\\s*'dm'\\s*,\\s*'group'\\s*\\)\" returns at least three matches"
-  - "Every per-scope join carries a (scope_kind, scope_id, *) primary key — grep -E 'PRIMARY KEY\\s*\\(\\s*scope_kind\\s*,\\s*scope_id\\s*,' returns at least three matches across the three join tables (this is Invariant 1's schema-level enforcement — no per-scope row can exist without both discriminator and id)"
+  - "source_subscription enforces Invariant 1 with PRIMARY KEY (scope_kind, scope_id, source_id) — grep -E 'PRIMARY KEY\\s*\\(\\s*scope_kind\\s*,\\s*scope_id\\s*,\\s*source_id\\s*\\)' returns at least one match in V7 (Invariant 1 schema-level enforcement plus dedup of the (scope, source) pair)"
+  - "scope_tag enforces Invariant 1 with PRIMARY KEY (scope_kind, scope_id, tag_id) — grep -E 'PRIMARY KEY\\s*\\(\\s*scope_kind\\s*,\\s*scope_id\\s*,\\s*tag_id\\s*\\)' returns at least one match in V7 (Invariant 1 schema-level enforcement plus dedup of the (scope, tag) pair)"
+  - "scope_preferences enforces Invariant 1 with PRIMARY KEY (scope_kind, scope_id) — grep -E 'PRIMARY KEY\\s*\\(\\s*scope_kind\\s*,\\s*scope_id\\s*\\)' returns at least one match in V7 (Invariant 1 schema-level enforcement; the 2-column PK is intentional — one settings row per scope, no third PK column needed, see Implementation notes)"
   - "source_subscription declares the FK to source(id) — grep -E 'REFERENCES\\s+source\\s*\\(\\s*id\\s*\\)' returns at least one match in V7 — and explicitly does NOT declare ON DELETE CASCADE on source_id (per docs/design/02-schema.md §2.2.3 — soft-delete is the only path; cascade on hard-delete is the operator's manual problem); grep -E 'source_id\\s+UUID.*REFERENCES\\s+source.*ON\\s+DELETE\\s+CASCADE' returns ZERO matches"
   - "scope_tag declares the FK to tag(id) — grep -E 'tag_id\\s+UUID\\s+NOT\\s+NULL\\s+REFERENCES\\s+tag' returns at least one match in V7"
   - "scope_preferences declares the language default ('en'), the digest_enabled default (TRUE), the tag_mode CHECK over ('ALL','EXPLICIT'), and the two BIGINT subscription-version counters — grep -E \"language\\s+TEXT\\s+NOT\\s+NULL\\s+DEFAULT\\s+'en'\" returns at least one match AND grep -E \"tag_mode\\s+IN\\s*\\(\\s*'ALL'\\s*,\\s*'EXPLICIT'\\s*\\)\" returns at least one match AND grep -cE '(tag_subscription_version|source_subscription_version)\\s+BIGINT\\s+NOT\\s+NULL\\s+DEFAULT\\s+0' returns 2"
@@ -542,3 +624,69 @@ Those land in T1-B, T1-C, T1-D, T1-E, T1-F.
   M1-008a — `infochat-core` is a plain library jar; the
   Testcontainers Postgres + plain JDBC tests are simpler
   and faster.
+
+## Implementation outline (M1-008c, generated by Plan subagent on 2026-05-14)
+
+### Files to touch (6 of 8)
+- create: `infochat-core/src/main/resources/db/migration/V7__joins_post.sql` — single transactional Flyway migration creating `source_subscription`, `scope_tag`, `scope_preferences`, parent `post` (PARTITION BY RANGE), one initial partition, all design-§2.3.1 indexes, and the per-table GRANT block.
+- create: `infochat-core/src/test/java/io/infochat/core/schema/SourceSubscriptionTableTest.java` — covers `scope_kind` CHECK, NOT NULL columns, compound PK dedup, FK to `source(id)` without ON DELETE CASCADE, reverse-lookup index `idx_source_sub_source` exists.
+- create: `infochat-core/src/test/java/io/infochat/core/schema/ScopeTagTableTest.java` — covers `scope_kind` CHECK, compound PK dedup on `(scope_kind, scope_id, tag_id)`, FK violation on unknown `tag_id`.
+- create: `infochat-core/src/test/java/io/infochat/core/schema/ScopePreferencesTableTest.java` — covers `language` DEFAULT 'en', `tag_mode` CHECK closes `('ALL','EXPLICIT')`, both version counters DEFAULT 0, monotonic UPDATE round-trips, PK on `(scope_kind, scope_id)`.
+- create: `infochat-core/src/test/java/io/infochat/core/schema/PostPartitioningTest.java` — covers partition routing happy-path INSERT lands in the bootstrap partition (verifiable via `tableoid::regclass`), INSERT outside the bootstrap range raises SQLException, `status` CHECK closes the four-value set, the seven per-stage BOOLEAN NOT NULL flags default FALSE, `tags TEXT[]` defaults `'{}'`, GIN index `idx_post_tags_gin` exists, PK is `(id, fetched_at)`, UNIQUE on `(uid, fetched_at)` raises 23505 on duplicate.
+- create: `infochat-core/src/test/java/io/infochat/core/schema/SoftDeletedSourceFkTest.java` — covers the non-obvious Invariant 4 case: after `UPDATE source SET deleted_at = now()`, a subsequent `INSERT INTO post (source_id, …)` still succeeds because the FK is to `source(id)` and soft-delete leaves the PK row intact. Mirror assertion for `source_subscription` insert against a soft-deleted source.
+
+Files used: 1 migration + 5 test files = 6 of the 8-file budget. Two-file headroom remains; no surplus, no escalation required on `files_budget`.
+
+### Tests
+- add: `infochat-core/src/test/java/io/infochat/core/schema/SourceSubscriptionTableTest.java` — covers acceptance items "scope_kind TEXT NOT NULL with CHECK", "PRIMARY KEY (scope_kind, scope_id, *) on the three join tables", "source_subscription FK to source(id) without ON DELETE CASCADE", "NOT NULL, CHECK, PK violation, compound PK requirement", and "Every new *Test.java reuses PostgresSchemaTestBase from M1-008a".
+- add: `infochat-core/src/test/java/io/infochat/core/schema/ScopeTagTableTest.java` — covers "scope_tag FK to tag(id)", the `scope_kind` CHECK + PK acceptance items, and "ScopeTagTableTest: same scope_kind + FK violation on unknown tag_id".
+- add: `infochat-core/src/test/java/io/infochat/core/schema/ScopePreferencesTableTest.java` — covers "scope_preferences: language default 'en', tag_mode CHECK ('ALL','EXPLICIT'), two BIGINT version counters default 0" and "language default, tag_mode CHECK, version counters default 0 and monotonic UPDATE".
+- add: `infochat-core/src/test/java/io/infochat/core/schema/PostPartitioningTest.java` — covers "post as PARTITION BY RANGE (fetched_at)", "at least one initial partition CREATE TABLE post_NNNNNN PARTITION OF post", "post status CHECK over ('RAW','READY','QUARANTINED','NEEDS_REVIEW')", "7 per-stage BOOLEAN NOT NULL flags", "PRIMARY KEY (id, fetched_at) and UNIQUE (uid, fetched_at)", "GIN index on post(tags)", and "partition routing happy path; INSERT outside range raises SQLException".
+- add: `infochat-core/src/test/java/io/infochat/core/schema/SoftDeletedSourceFkTest.java` — covers Invariant 4 acceptance item "post INSERT against soft-deleted source still succeeds".
+
+No pre-existing tests are modified. The ticket's "Authorized test changes" section says "(none — adds five new test files in infochat-core; no pre-existing tests modified.)" — this matches the plan exactly. No authorization gap.
+
+`PostgresSchemaTestBase.truncateAll()` currently TRUNCATEs only the V5 identity tables. M1-008b's pattern (e.g., `SourceTableTest`) avoids the gap by using **per-test-unique identifiers** so independent test methods can't collide. New tests in this ticket MUST follow that pattern: each test method picks a unique `scope_id` (a fresh UUID literal per method) and unique `source.identifier` / `tag.name` strings when bootstrapping referenced rows. Do NOT modify `PostgresSchemaTestBase` — it's outside `files_scope` (the helper's evolution is owned by the umbrella M1-008 commit, not this subticket) and the per-test-unique-identifier convention M1-008b set is the established alternative.
+
+### Cross-cutting concerns
+- **Invariant 1 (per-(user, scope) isolation).** Three of the four new tables are per-scope. The `(scope_kind, scope_id, *)` PRIMARY KEY is the schema-level enforcement: a row cannot exist without both the discriminator and the id, so an accidentally scope-agnostic INSERT fails at the storage layer. Tests must include a PK-violation case (insert two rows with identical `(scope_kind, scope_id, tag_id)` or `(scope_kind, scope_id, source_id)` and assert SQLState 23505).
+- **Invariant 4 (soft-delete only for sources).** `source_subscription.source_id` and `post.source_id` both FK to `source(id)` **without** `ON DELETE CASCADE`. The `SoftDeletedSourceFkTest` is the schema-level proof that in-flight ingest still resolves the FK after `UPDATE source SET deleted_at = now()` (because soft-delete is just an UPDATE, the PK row stays). Verify in the migration that no `ON DELETE CASCADE` clause appears on either FK; `ON DELETE SET NULL` on `added_by → users(id)` is correct.
+- **Invariant 5 (no `'EVALUATING'` status).** The `post.status` CHECK must close to `('RAW','READY','QUARANTINED','NEEDS_REVIEW')` — four values, no fifth. The seven per-stage `BOOLEAN NOT NULL DEFAULT FALSE` flags are the durable cursor: `stage1_done, stage2_done, tagger_done, embedding_done, stage1_flagged, stage2_failed, tagger_fallback`. Test the count and the NOT NULL.
+- **Invariant 6 (TTL by partitioning).** `PARTITION BY RANGE (fetched_at)` plus **one** initial partition (named `post_YYYYMM` — pick the current calendar month, e.g., `post_202605`). No `DEFAULT` partition. The schema commitment is "the parent is partitionable" plus "day-one inserts route somewhere." The pruner cadence is later territory.
+- **Security §DB roles.** The GRANT block mirrors V6's structure exactly — per-table GRANTs at the bottom of the migration. Per-scope joins: `SELECT, INSERT, UPDATE, DELETE` to `infochat_provider`, `SELECT` to `infochat_collector`. `post`: `SELECT, INSERT, UPDATE` to `infochat_collector`, `SELECT` to `infochat_provider`; neither role gets `DELETE` on `post`. Neither table is reachable by `infochat_listen`.
+- **Migration atomicity.** Single Flyway transaction; partial failure rolls back cleanly. Match V5/V6's "one file, one transaction" pattern. No `\connect` lines, no `COMMIT;` mid-file.
+
+### Implementation order
+1. **Author `V7__joins_post.sql`** end-to-end (all four tables + initial partition + indexes + GRANTs). Doing the migration first is mandatory: `PostgresSchemaTestBase.POSTGRES.start()` plus Flyway-migrate runs at static-init time on the first test class. If the migration is missing or fails, every new test class fails at JVM startup with a Flyway error before any assertion runs.
+2. **Author `SourceSubscriptionTableTest.java`** first among the test files. It exercises the simplest table and tests the FK-to-`source` shape that `SoftDeletedSourceFkTest` later builds on; getting this right first means the FK quirks are localized.
+3. **Author `ScopeTagTableTest.java`** next. Similar shape to `SourceSubscriptionTableTest` (compound PK, scope_kind CHECK, FK to a V6 catalogue table), so it benefits from the patterns already settled in step 2.
+4. **Author `ScopePreferencesTableTest.java`** next. Different shape — no FK to a catalogue table, but DEFAULTs and a monotonic-counter UPDATE that tests the spec's "version counters fold into the digest cache key" commitment. Self-contained.
+5. **Author `PostPartitioningTest.java`** next. Most complex test: partition routing happy-path (insert lands in `post_YYYYMM`, verify via `tableoid::regclass`), out-of-range insert raises SQLException, status CHECK, seven per-stage flags, `(id, fetched_at)` PK, `(uid, fetched_at)` UNIQUE, GIN index existence. Doing this after the simpler tables means the helper patterns are already in muscle memory.
+6. **Author `SoftDeletedSourceFkTest.java`** last. Exercises the cross-table invariant: bootstrap a source row, soft-delete it, then INSERT into both `source_subscription` and `post` and assert both succeed. Requires patterns from steps 2 and 5 to already exist.
+7. **Run `mvn -B -pl infochat-core -am test`** and verify all five new tests pass plus all M1-008a/b tests still pass.
+8. **Run `mvn -B clean verify`** from the repo root and verify exit 0.
+
+A wrong order — e.g., writing tests before the migration, or starting with `SoftDeletedSourceFkTest` before the simpler tables — produces broken intermediate states where the static-init Flyway-migrate fails for every test class in the package.
+
+### Risks
+- **Initial partition date selection / naming pattern.** The acceptance grep expects `post_NNNNNN` (six digits = `post_YYYYMM`, monthly). If the developer picks daily (`post_YYYYMMDD`, eight digits), the grep fails. Stick to `post_YYYYMM` for the initial partition. Escalation if ambiguous: **refine**.
+- **Initial partition range edge case.** Test methods that use `now()` for `fetched_at` could land outside the bootstrap partition when CI runs near a month boundary. Mitigation: `PostPartitioningTest` explicitly threads `fetched_at = '2026-05-15 12:00:00+00'::timestamptz` (a known timestamp inside the bootstrap range) rather than relying on `DEFAULT now()`. Escalation if it surfaces as a real problem: **refine**.
+- **`PostgresSchemaTestBase.truncateAll()` doesn't TRUNCATE the new tables.** Per-test isolation depends on per-test-unique identifiers (M1-008b's convention). If any new test reuses an identifier between methods, intermittent flakes appear. Mitigation: use fresh UUIDs / unique string suffixes in every test method. Not an escalation — a discipline call on test authoring.
+- **`tableoid::regclass` for routing verification.** Simpler than `pg_partition_tree`. Recommend for `PostPartitioningTest`.
+- **`security_relevant: true` flag.** The post partition declaration carries security weight. The threat-actor review (separate `/redteam` skill) will look at this and at FK soft-delete behavior. No mitigation needed at implementation time beyond getting the schema right.
+
+No risk warrants `decompose`, `defer`, or `spec-amend`. The single candidate for `refine` (partition-naming pattern) is already resolved by the implementation-notes language. The ticket is implementable as written within the `round_cap: 2` budget.
+
+### Out-of-scope (echoed from ticket)
+- `infochat-core/src/test/java/io/infochat/core/schema/PerScopeIsolationIT.java` — umbrella commit.
+- Any change under V5__*.sql or V6__*.sql — frozen.
+- Any modification to V1..V6 migrations — frozen.
+- Any partition pruner, retention sweep, scheduled DROP-PARTITION job — later T1-D / T1-E ticket.
+- Any LISTEN/NOTIFY trigger on `post` or `post.ready_at` — T1-C's territory.
+- Any `post_reference`, `post_embedding`, or `quarantine` table — T1-D's territory.
+- Any `pgvector` extension installation or `vector` column.
+- Any Java entity class, repository, service, DAO, or Fetcher impl.
+- Any /summary, /saved, /save, /unsave, /follow-tag, /unfollow-tag, /add-source, /remove-source command handler.
+- Any `saved_post` table.
+- Any `chat_memory`, `chat_session`, `summary_anchor` table.
+- Any change to `infochat-core/pom.xml`.
