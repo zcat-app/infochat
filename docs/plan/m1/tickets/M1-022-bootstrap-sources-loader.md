@@ -1,9 +1,76 @@
 ---
 id: M1-022
 title: Bootstrap-sources loader (Collector @Startup + bootstrap_meta)
-status: pending
+status: done
 created: 2026-05-14
 last_updated: 2026-05-14
+reviews:
+  - round: 1
+    date: 2026-05-14
+    verdict: REWORK
+    checks:
+      scope_drift: FAIL
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 1015
+      removed: 9
+    rework_items:
+      - "Out-of-scope file infochat-collector/src/test/resources/application.properties was added to re-point the loader at the test fixture so pre-existing M1-003/005/006/009 @QuarkusTest classes keep booting. Per files_scope rule, every diffed file must be in files_scope (or covered by the lifecycle-path exemption, which covers only STATUS.md and the ticket file). Resolve via /m1-tick escalate M1-022 scope-expansion to add this path to files_scope and bump files_budget 8→9 (option a, cleaner), OR restructure tests so the override file is unneeded (option b, harder — loader's fail-fast-on-missing-file is by design)."
+  - round: 1
+    date: 2026-05-14
+    verdict: OVERRIDE-APPROVE
+    checks:
+      scope_drift: FAIL
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    override_ref: 0
+escalations:
+  - date: 2026-05-14
+    reason: round-cap
+    reviewer_verdict_excerpt: |
+      SCOPE-DRIFT-CHECK: FAIL
+        The diff adds a NEW file `infochat-collector/src/test/resources/application.properties`
+        that is NOT listed in the ticket's `files_scope` frontmatter. ... The file is real
+        (the @PostConstruct fires in every @QuarkusTest in the module — the pre-existing
+        M1-003 QuarkusBootstrapTest, M1-009 InstanceLockGuardIT, M1-009 HeartbeatSchedulerIT,
+        etc. — so without re-pointing the loader at the fixture the entire QuarkusTest suite
+        would fail to boot during `mvn verify`), but the resolution is to expand `files_scope`
+        (and `files_budget`) via the escalation/scope-expansion path rather than silently add
+        an out-of-scope file.
+overrides:
+  - date: 2026-05-14
+    objection: |
+      Out-of-scope file infochat-collector/src/test/resources/application.properties was
+      added during round 1 to re-point the @PostConstruct loader at the test fixture so the
+      pre-existing M1-003/005/006/009 @QuarkusTest classes keep booting. Per the files_scope
+      rule, every diffed file must be in files_scope. The reviewer recommended either
+      /m1-tick escalate M1-022 scope-expansion (option a — refine files_scope to include
+      the property file and bump files_budget 8→9) or restructure the tests so the file is
+      no longer needed (option b).
+    user_justification: |
+      Override approved by user. The need for src/test/resources/application.properties was
+      identified mid-implementation and surfaced in conversation before being written; the
+      user authorized the deviation explicitly after weighing the alternatives (per-test
+      @TestProfile annotation on each pre-existing @QuarkusTest, which would have violated
+      "Authorized test changes: none", vs the one-line test-resource property override,
+      which preserves all pre-existing tests unchanged). The reviewer is correct on
+      procedure but the deviation was already an informed engineering decision. The
+      ticket's files_scope should be refined in a follow-up administrative commit to
+      include this path; this override records the bypass in the audit trail rather than
+      pretending the procedural step was followed.
+clarity_check:
+  date: 2026-05-14
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE item 9: grep predicate 'config.*non-null|HTTP-shaped' against BootstrapSourcesParserTest.java prescribes implementation vocabulary; a behavior-correct test using different phrasing would fail it. Consider behavioral assertion (e.g. '@Test.*rss.*config') or fold into item 19's @Test-count."
+    - "ACCEPTANCE-VS-DOD-CONSISTENT item 6: HETEROGENEOUS-AGGREGATE smell — six-field grep counts across fields of different Java types (String, List<String>, Map<String, Object>). 'name' is a common substring that may match outside the record field. Recommended per-element replacements: grep 'String kind', 'String identifier', 'String name', 'String category', 'List<String> tags', 'Map<String, Object> config'."
+  blockers: []
 blocked_by:
   - M1-008a
   - M1-008b
@@ -541,3 +608,31 @@ to attach to once they exist.
   no outbound network calls, so deferring `infochat-ssrf` to its
   own ticket has no effect on this ticket's correctness.
   See Implementation notes — the carve-out is documented inline.
+
+## Round 1 rework
+
+1. **Out-of-scope file:**
+   `infochat-collector/src/test/resources/application.properties` was
+   added during round 1 to re-point the loader at the test fixture so
+   the pre-existing M1-003 / M1-005 / M1-006 / M1-009 `@QuarkusTest`
+   classes (`QuarkusBootstrapTest`, `FlywayMigrationIT`,
+   `DbRoleMatrixIT`, `InstanceLockGuardIT`, `HeartbeatSchedulerIT`)
+   continue to boot cleanly under `mvn verify`. Each of those tests
+   boots the whole Collector Quarkus app, which fires the new
+   `BootstrapLoader`'s `@PostConstruct`; without the override the
+   loader's `Files.readAllBytes(Paths.get("bootstrap-sources.json"))`
+   throws `NoSuchFileException` and Quarkus startup fails.
+   The new property file is one line:
+   `infochat.bootstrap.sources-file=src/test/resources/bootstrap/bootstrap-sources-fixture.json`.
+
+   Reviewer's recommended resolution: **option (a) — scope
+   expansion via `/m1-tick escalate M1-022 scope-expansion`**, adding
+   `infochat-collector/src/test/resources/application.properties` to
+   `files_scope` and bumping `files_budget` from 8 to 9. Option (b)
+   (restructuring the tests to avoid the override file) is harder
+   because the loader's design contract is to fail-fast on a missing
+   file — the alternative would require either making the loader
+   tolerant of a missing file (contradicts §1.4.3 startup-failure
+   rule and the DoD) or annotating every pre-existing collector
+   `@QuarkusTest` with a `@TestProfile` (forbidden by this ticket's
+   "Authorized test changes: none").
