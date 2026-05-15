@@ -1,9 +1,37 @@
 ---
 id: M1-026
 title: infochat-ssrf hardening followup (M1-025 remediation)
-status: pending
+status: done
 created: 2026-05-15
 last_updated: 2026-05-15
+reviews:
+  - round: 1
+    date: 2026-05-15
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 581
+      removed: 190
+implementation_log:
+  - "2026-05-15: implementation complete. mvn -B -pl infochat-ssrf test: 44 tests pass (24 IpBlocklist, 14 SsrfGuardedHttpClient, 6 UrlRedactor); 3 new @Test methods added (hostInterfaceAddedAfterStartupIsBlocked, dripBodyReadHitsTotalDeadline, pinSurvivesMixedCaseAndTrailingDot). mvn -B clean verify from repo root: all 7 modules SUCCESS, RssFetcherTest preserved unchanged. Files touched: 5 (IpBlocklist.java, SsrfGuardedHttpClient.java, PinnedDnsResolver.java, IpBlocklistTest.java, SsrfGuardedHttpClientTest.java) — at files_budget."
+clarity_check:
+  date: 2026-05-15
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE: Item 10 (isBlocked per-call invocation + TTL cache bound) has no runnable mechanical check; the per-call behavior is tested indirectly by item 11's integration test. The TTL upper-bound (<= 5 s) is not directly asserted by any runnable command. ACCEPTED — the per-call behavior is integration-tested in item 11; the TTL is optional and integration-tested via the AtomicReference mutation pattern."
+    - "FORWARD-REFERENCE-CHECK: M1-027 is referenced in the Alternatives considered prose (split off F1 into M1-027) but no such ticket file exists. This is a prose mention of a conditional decomposition outcome; it does not block the ticket but the escalation path it names is untraceable. ACCEPTED — conditional decomposition outcome; if escalated, the actual decomposition ticket will be filed at that point and a substitute placeholder is not warranted."
+  warnings_resolved_by_direct_edit:
+    - "ACCEPTANCE-RUNNABLE: Item 6 — addressed by adding `grep -cE 'canonicalizeHost' SsrfGuardedHttpClient.java returns at least 2 matches` to item 6 (covers both initial-hop and redirect-hop call sites)."
+    - "ACCEPTANCE-RUNNABLE: Item 14 — removed (prose-summary acceptance item was redundant with items 1-11)."
+    - "ACCEPTANCE-VS-DOD-CONSISTENT: Item 12 count clause — removed; item 12 now names the three test methods explicitly without an aggregate count. Items 4/8/11 already pin each test individually."
+    - "FILES-BUDGET-PLAUSIBLE: Sibling utility class option — removed from both acceptance item 5 and the DoD. canonicalizeHost is now mandated as a package-private static on SsrfGuardedHttpClient (PinnedDnsResolver calls it directly since both classes are in io.infochat.ssrf). Stays within files_budget: 5."
+  blockers: []
 blocked_by:
   - M1-025
 remediates: M1-025
@@ -80,8 +108,8 @@ acceptance:
   # the lookup side so the pin matches regardless of JDK normalization
   # choices.
   # ----------------------------------------------------------------------
-  - "A package-private static helper `io.infochat.ssrf.SsrfGuardedHttpClient.canonicalizeHost(String host)` (a sibling utility class is acceptable as long as PinnedDnsResolver can call the SAME helper — DRY) applies the following transformations in order: (a) reject null/blank with `IllegalArgumentException`; (b) `java.net.IDN.toASCII(host, IDN.ALLOW_UNASSIGNED)` to convert Unicode/punycode to canonical ASCII; (c) `.toLowerCase(java.util.Locale.ROOT)` to case-fold without locale-specific surprises (the Turkish-dotless-i hazard); (d) strip a single trailing `.` if present (the FQDN trailing-dot variant). Returns the canonical form. grep -E 'IDN\\.toASCII' SsrfGuardedHttpClient.java returns at least one match AND grep -E 'Locale\\.ROOT' SsrfGuardedHttpClient.java returns at least one match"
-  - "SsrfGuardedHttpClient.get(uri) invokes `canonicalizeHost(uri.getHost())` BEFORE installing the DNS pin, so the pin map entry is always keyed by the canonical form (e.g., `Map.of(canonicalizeHost(uri.getHost()), validatedIps)`). The per-redirect-hop pin replacement applies the same canonicalization to the new target's host"
+  - "A package-private static helper `io.infochat.ssrf.SsrfGuardedHttpClient.canonicalizeHost(String host)` is defined as a method on `SsrfGuardedHttpClient` itself — NOT a sibling utility class, since `PinnedDnsResolver` lives in the same `io.infochat.ssrf` package and can call the package-private static directly, and a sibling class would push the implementation to 6 files and breach `files_budget: 5`. The helper applies the following transformations in order: (a) reject null/blank with `IllegalArgumentException`; (b) `java.net.IDN.toASCII(host, IDN.ALLOW_UNASSIGNED)` to convert Unicode/punycode to canonical ASCII; (c) `.toLowerCase(java.util.Locale.ROOT)` to case-fold without locale-specific surprises (the Turkish-dotless-i hazard); (d) strip a single trailing `.` if present (the FQDN trailing-dot variant). Returns the canonical form. grep -E 'IDN\\.toASCII' SsrfGuardedHttpClient.java returns at least one match AND grep -E 'Locale\\.ROOT' SsrfGuardedHttpClient.java returns at least one match"
+  - "SsrfGuardedHttpClient.get(uri) invokes `canonicalizeHost(uri.getHost())` BEFORE installing the DNS pin, so the pin map entry is always keyed by the canonical form (e.g., `Map.of(canonicalizeHost(uri.getHost()), validatedIps)`). The per-redirect-hop pin replacement applies the same canonicalization to the new target's host. Verifiable: grep -cE 'canonicalizeHost' SsrfGuardedHttpClient.java returns at least 2 matches (the initial-hop call site AND the redirect-hop call site, exclusive of the helper definition itself, so >=2 covers at least the two call sites; the helper definition pushes the actual count to >=3)"
   - "PinnedDnsResolver.lookupByName(host, lookupPolicy) invokes the SAME `canonicalizeHost(host)` helper on its `host` argument BEFORE the `pins.get(...)` lookup — defense-in-depth on the lookup side, so the pin matches even if the JDK passes a form different from what URI.getHost() returned at install time. grep -E 'canonicalizeHost' PinnedDnsResolver.java returns at least one match"
   - "SsrfGuardedHttpClientTest adds a @Test method `pinSurvivesMixedCaseAndTrailingDot`: the resolver-seam is invoked through the wrapper's resolver-seam constructor parameter and records every host it is called with. The test calls `client.get(URI.create(\"http://EVIL.Example.test./\"))` — a mixed-case host with a trailing dot — against an in-process HttpServer on 127.0.0.1 with the test-mode IpBlocklist that permits 127.0.0.1. The seam is configured to return `[127.0.0.1]` for any host input. Assert: `assertEquals(200, response.statusCode())` AND the seam was invoked exactly once with the CANONICAL form `\"evil.example.test\"` (lowercased + trailing-dot-stripped, no IDN-roundtripping needed for ASCII input). If canonicalization were missing on either side, the pin would mismatch and the resolver would fall through to BUILTIN — the in-process server would not be reached and the test would fail on connection refused or unexpected resolution"
 
@@ -106,9 +134,8 @@ acceptance:
   # ----------------------------------------------------------------------
   # Build + cross-cut
   # ----------------------------------------------------------------------
-  - "mvn -B -pl infochat-ssrf test exits 0; the new test methods (≥1 drip-body-read, ≥1 canonical-host, ≥1 post-startup-host-interface) execute and pass alongside M1-024's and M1-025's existing IpBlocklistTest / SsrfGuardedHttpClientTest / UrlRedactorTest classes"
+  - "mvn -B -pl infochat-ssrf test exits 0; the three new test methods (`dripBodyReadHitsTotalDeadline`, `pinSurvivesMixedCaseAndTrailingDot`, `hostInterfaceAddedAfterStartupIsBlocked`) execute and pass alongside M1-024's and M1-025's existing IpBlocklistTest / SsrfGuardedHttpClientTest / UrlRedactorTest classes"
   - "mvn -B clean verify from the repo root exits 0; M1-024's RssFetcherTest continues to pass UNCHANGED (the wrapper's public API surface — `new SsrfGuardedHttpClient()` no-arg + `HttpResponse<byte[]> get(URI)` — is preserved; this ticket only widens internal constructors + adds the constructor `Duration bodyReadDeadline` parameter, which the no-arg constructor supplies a default for so RssFetcher's call site is unaffected). M1-025's existing IpBlocklistTest and SsrfGuardedHttpClientTest @Test methods continue to pass UNCHANGED (the M1-025 package-private constructors are preserved as overloads of the new Supplier-form and bodyReadDeadline-bearing constructors respectively)"
-  - "All three M1-025 redteam findings are addressed: Finding 1 (DOS / high — drip body-read + lock starvation) by the `bodyReadDeadline` constructor parameter + readBounded total-deadline enforcement + lock release before body-read + dripBodyReadHitsTotalDeadline test; Finding 2 (INFO-LEAK / medium — pin map case-sensitivity / IDN / trailing-dot) by the shared `canonicalizeHost` helper applied on both install and lookup sides + pinSurvivesMixedCaseAndTrailingDot test; Finding 3 (INFO-LEAK / low — startup-snapshot host-interfaces) by the `Supplier<Set<InetAddress>>` seam + per-call enumeration default + hostInterfaceAddedAfterStartupIsBlocked test"
 test_plan:
   adds:
     - infochat-ssrf/src/test/java/io/infochat/ssrf/IpBlocklistTest.java — adds at least 1 new @Test method (`hostInterfaceAddedAfterStartupIsBlocked`). Existing M1-024/M1-025 @Test methods preserved unchanged.
@@ -229,9 +256,12 @@ traceable.
   `bodyReadDeadline` with `IllegalArgumentException("body read
   deadline must be configured")`.
 - New package-private static helper `canonicalizeHost(String host)`
-  (or a sibling utility class importable from `PinnedDnsResolver` —
-  the helper must be shared, not duplicated). Applies, in order:
-  reject null/blank; `IDN.toASCII(host, IDN.ALLOW_UNASSIGNED)`;
+  defined on `SsrfGuardedHttpClient` itself (NOT a sibling utility
+  class — `PinnedDnsResolver` is in the same `io.infochat.ssrf`
+  package and can call the package-private static directly; a
+  sibling class would push the implementation to 6 files and breach
+  `files_budget: 5`). Applies, in order: reject null/blank;
+  `IDN.toASCII(host, IDN.ALLOW_UNASSIGNED)`;
   `.toLowerCase(Locale.ROOT)`; strip a single trailing `.` if
   present. Returns the canonical form.
 - `get(URI uri)` invokes `canonicalizeHost(uri.getHost())` BEFORE
@@ -256,11 +286,12 @@ traceable.
 ### `io.infochat.ssrf.PinnedDnsResolver` (MODIFIED)
 
 - `lookupByName(String host, LookupPolicy lookupPolicy)` invokes
-  the SAME `canonicalizeHost(host)` helper (DRY: imported from
-  `SsrfGuardedHttpClient` or a shared utility) on its `host`
-  argument BEFORE the `pins.get(canonicalHost)` lookup. Defense-in-
-  depth: even if the JDK passes a non-canonical form, the resolver
-  still matches the canonical pin.
+  the SAME `canonicalizeHost(host)` helper (the package-private
+  static on `SsrfGuardedHttpClient`, called directly since both
+  classes are in `io.infochat.ssrf`) on its `host` argument BEFORE
+  the `pins.get(canonicalHost)` lookup. Defense-in-depth: even if
+  the JDK passes a non-canonical form, the resolver still matches
+  the canonical pin.
 - The nested `Provider` class, its static pin slot, and the JVM-wide
   `ReentrantLock` are unchanged in shape — only `lookupByName`'s
   pre-lookup transformation widens.
@@ -557,3 +588,76 @@ surface is preserved.
   + recorded-host-arg captures whichever form actually fires.
   Escalation: **refine** if the JDK's actual normalization
   behavior is materially different from what the test asserts.
+
+## Implementation outline (M1-026, generated by Plan subagent on 2026-05-15)
+
+### Files to touch (5 of 5)
+- modify: `infochat-ssrf/src/main/java/io/infochat/ssrf/SsrfGuardedHttpClient.java` — add `Duration bodyReadDeadline` constructor parameter with literal validation message; add package-private static `canonicalizeHost(String)` helper (IDN.toASCII + Locale.ROOT lowercase + single trailing-dot strip); invoke canonicalizeHost on initial-hop AND each redirect-hop pin install; refactor `get(uri)` lock-hold scope so `PinnedDnsResolver.Provider.lock()` is released BEFORE `readBounded` begins; extend `readBounded` with a TOTAL wall-clock deadline check raising `SsrfPolicyException("body read deadline exceeded ...")`; keep the M1-024 5-arg public constructor and the M1-025 6-arg public constructor as overloads that delegate to an enlarged internal form supplying a default `Duration.ofMinutes(2)` bodyReadDeadline (so RssFetcherTest's existing 5-arg call sites compile unchanged).
+- modify: `infochat-ssrf/src/main/java/io/infochat/ssrf/PinnedDnsResolver.java` — in `lookupByName(host, lookupPolicy)` invoke `SsrfGuardedHttpClient.canonicalizeHost(host)` BEFORE `pins.get(canonicalHost)`. Provider/ForwardingResolver/lock/pin-slot shape unchanged.
+- modify: `infochat-ssrf/src/main/java/io/infochat/ssrf/IpBlocklist.java` — add package-private constructor `IpBlocklist(Supplier<Set<InetAddress>> hostInterfacesProvider)`; preserve M1-025's `IpBlocklist(Set<InetAddress>)` as an overload that delegates as `this(() -> Set.copyOf(hostInterfaces))`; rewire the no-arg public constructor so the supplier defaults to `HostInterfaceSet::enumerate` (per-call enumeration, NOT one-shot snapshot); change `isBlocked(InetAddress)` to invoke `hostInterfacesProvider.get()` per call (optional short TTL cache <=5s via AtomicReference<CachedSet> is permitted by the DoD).
+- modify: `infochat-ssrf/src/test/java/io/infochat/ssrf/IpBlocklistTest.java` — add new @Test `hostInterfaceAddedAfterStartupIsBlocked`. Preserve all M1-024/M1-025 existing tests.
+- modify: `infochat-ssrf/src/test/java/io/infochat/ssrf/SsrfGuardedHttpClientTest.java` — add new @Test methods `dripBodyReadHitsTotalDeadline` and `pinSurvivesMixedCaseAndTrailingDot`; supply the new `bodyReadDeadline` argument on each pre-existing call site that uses the parameterized constructor (mechanical one-line edit per test — explicitly authorized in `test_plan.modifies`). Preserve all assertions on existing tests.
+
+### Tests
+- modify: `infochat-ssrf/src/test/java/io/infochat/ssrf/IpBlocklistTest.java` — covers F3 acceptance item:
+  - `hostInterfaceAddedAfterStartupIsBlocked` — construct `IpBlocklist` via the Supplier overload with `AtomicReference<Set<InetAddress>>` initially `Set.of()`; assert `isBlocked(203.0.113.5)` false; mutate ref to `Set.of(InetAddress.getByName("203.0.113.5"))`; assert `isBlocked(...)` true on next call (if TTL cache, sleep > TTL — DoD permits 5s TTL with `Thread.sleep(6000)`).
+- modify: `infochat-ssrf/src/test/java/io/infochat/ssrf/SsrfGuardedHttpClientTest.java` — covers F1 + F2 acceptance items:
+  - `dripBodyReadHitsTotalDeadline` — in-process `HttpServer` writes Content-Length 5000000 then 1 byte every `readTimeout/4`; wrapper with `readTimeout=500ms`, `bodyReadDeadline=2s`; assert `SsrfPolicyException` whose message starts with `body read deadline exceeded`, AND elapsed wall-clock within `bodyReadDeadline + 1s` tolerance.
+  - `pinSurvivesMixedCaseAndTrailingDot` — recording seam captures host arg; call `client.get(URI.create("http://EVIL.Example.test./..."))` against loopback `HttpServer`; seam returns `[127.0.0.1]`; assert HTTP 200 + seam invoked exactly once with canonical `"evil.example.test"`.
+  - Pre-existing parameterized-constructor tests get an additional `bodyReadDeadline` argument (Duration value, e.g. `Duration.ofSeconds(5)`).
+
+Test-modification authorization: confirmed in `test_plan.modifies` for both files.
+
+### Cross-cutting concerns
+- **Public API surface stability** — the M1-024 5-arg public constructor `SsrfGuardedHttpClient(IpBlocklist, Duration connect, Duration request, long bodyCap, int redirectCap)` and the M1-025 form must keep current signatures. `RssFetcherTest.java` calls the 5-arg form and must compile/pass unchanged. The new `bodyReadDeadline` parameter is added on an expanded internal constructor + the no-arg defaults; existing public overloads supply a default.
+- **DRY canonicalization** — `canonicalizeHost` is ONE symbol shared by `SsrfGuardedHttpClient` (install) and `PinnedDnsResolver` (lookup). Package-private static on `SsrfGuardedHttpClient` is the form because both classes are in `io.infochat.ssrf`. Duplicated copies would fail the F2 remediation intent.
+- **Lock-hold scope is load-bearing** — the redirect loop MUST stay inside the lock (each hop re-pins under lock), but `readBounded` MUST run outside the lock. Verifiable invariant: LAST `lock.unlock()` line < `readBounded(...)` line. Use try/finally so unlock + clear-pin run on exception paths as well.
+- **IDN canonicalization order**: `IDN.toASCII(host, IDN.ALLOW_UNASSIGNED)` FIRST, then `Locale.ROOT` lowercase, then single trailing-dot strip. Lowercasing punycode-encoded ASCII before `toASCII` can mis-handle pathological cases.
+- **IDN.toASCII throws IAE** on invalid hosts — wrap cleanly so the wrapper's `get(uri)` boundary surfaces `SsrfPolicyException`, not raw IAE leaking JDK internals. Spec invariant: policy rejections flow through SsrfPolicyException.
+- **Fail-closed determinism** — `IpBlocklist.isBlocked` is on every fetch's critical path. TTL cache, if implemented, must not lose addresses under contention; AtomicReference + last-writer-wins is acceptable.
+- **Per-redirect-hop pin re-install** — spec §SSRF "DNS is re-resolved after every redirect (TOCTOU defense); the IP blocklist re-applies each hop". Each hop must invoke `canonicalizeHost`, resolve+validate, AND installPins fresh.
+- **No LLM, SQL, audit, or user-facing surface touched** — no per-(user, scope) isolation concerns, no plain-text formatting concerns, no audit_log writes.
+
+### Implementation order
+1. Add `canonicalizeHost(String host)` package-private static to `SsrfGuardedHttpClient`. Pure utility, no callers yet — safe to land first.
+2. In `PinnedDnsResolver.lookupByName`, invoke `SsrfGuardedHttpClient.canonicalizeHost(host)` then `pins.get(canonical)`. Pair with step 3.
+3. In `SsrfGuardedHttpClient.get(uri)`, before each `installPins(Map.of(host, addrs))`, canonicalize the host. Apply on initial hop AND inside the redirect loop. Steps 2+3 must land atomically — keys must match.
+4. Refactor `get(uri)` lock-hold scope: hold lock across redirect loop + terminal `httpClient.send`; clear pins + unlock BEFORE `readBounded`. Flag-tracked release pattern ensures cleanup on exception paths.
+5. Extend parameterized constructor with `Duration bodyReadDeadline`; reject null/zero/negative with `IllegalArgumentException("body read deadline must be configured")`. M1-024 5-arg and M1-025 6-arg public constructors + no-arg public constructor supply a default (e.g., `Duration.ofMinutes(2)`). Store field.
+6. Modify `readBounded`: capture `bodyReadStartNanos` before read loop; check elapsed vs `bodyReadDeadline` after each read; raise `SsrfPolicyException("body read deadline exceeded after Nms")` on breach. Per-read `readTimeout` watchdog unchanged.
+7. In `IpBlocklist`: add Supplier-form package-private constructor; preserve M1-025 Set-form as overload delegating to Supplier; rewire no-arg public to `HostInterfaceSet::enumerate` (per-call); rewrite `isBlocked` to invoke supplier per call. Optional TTL cache.
+8. Add `IpBlocklistTest.hostInterfaceAddedAfterStartupIsBlocked` using Supplier-form + `AtomicReference` mutation.
+9. Add `SsrfGuardedHttpClientTest.dripBodyReadHitsTotalDeadline` — patterned on M1-025's `bodyReadTimeoutFiresOnSlowUpstream` but each read returns within per-read window, so TOTAL deadline is what fires.
+10. Add `SsrfGuardedHttpClientTest.pinSurvivesMixedCaseAndTrailingDot` with recording seam capturing host arg; verify 200 + exactly-once seam invocation with canonical host.
+11. Update pre-existing parameterized-constructor test call sites to supply new `bodyReadDeadline` argument (mechanical edits; values large enough not to fire, e.g., `Duration.ofSeconds(5)`).
+12. `mvn -B -pl infochat-ssrf test` first; then `mvn -B clean verify` from repo root. `RssFetcherTest.java` must pass unchanged.
+
+Rationale on ordering: step 1 (pure helper) before 2-3 (depend on it). Steps 2+3 atomic — pinned-key mismatch otherwise breaks existing tests. Step 5 (new param) before step 6 (consumer). Steps 7-11 independent of the SsrfGuardedHttpClient refactor — any order. Step 12 verification gate.
+
+### Risks
+- **Lock-release refactor changes `get()` control flow substantially.** The new shape needs the loop inside the lock, the terminal hop's body-read outside, AND clean lock release on exception paths. If the reviewer finds the resulting try/finally hard to read, expect REWORK. Escalation: **refine**.
+- **IDN.toASCII throws on invalid input.** If raised before existing scheme/userinfo gates, the message will be raw JDK text. Mitigation: invoke canonicalizeHost AFTER scheme/userinfo gates but BEFORE pin install + seam.apply; catch IAE in canonicalizeHost and re-throw as `SsrfPolicyException`. Escalation: **refine**.
+- **TTL cache concurrency** if implemented — multiple threads racing → multiple JNI calls. Acceptable per spec. Test flake risk if sleep < TTL. Mitigation: skip the cache OR sleep 6s in `hostInterfaceAddedAfterStartupIsBlocked` (DoD permits this).
+- **`pinSurvivesMixedCaseAndTrailingDot` relies on JDK invoking the resolver SPI at least once.** If JDK 25's `HttpClient` short-circuits via internal name cache between back-to-back tests, the seam might not record a call. Mitigation: fresh hostname per test (mixed-case + trailing-dot is a different string from M1-025's pins) + fresh `HttpClient` per `get()` (already true). Escalation: **refine** if observed.
+- **Files budget exactly 5; no room for a sibling utility class** for `canonicalizeHost`. Package-private static on existing class uses 0 extra files. The DoD permits a sibling class but the static-on-existing form is preferred at this budget.
+- **Two consecutive REWORKs would exceed `round_cap: 3`.** If lock-release refactor and canonicalization wiring are both rejected on round 1, round 2 must shrink and address both. Do not bundle additional refactors mid-round.
+
+### Out-of-scope (echoed from ticket)
+- any change to the `io.infochat.core.ingest.Fetcher` SPI or `NormalizedPost` record
+- any change to `RssFetcher.java` or `RssFeedParser.java` — wrapper's public surface preserved
+- any change to `RssFetcherTest.java`
+- any change to `HostInterfaceSet.java` — enumerator shape unchanged
+- any change to `META-INF/services/java.net.spi.InetAddressResolverProvider`
+- any change to `UrlRedactor.java` or `SsrfPolicyException.java`
+- any WebSocket / ws / wss wrapping (NostrStreamSource ticket)
+- any Provider-side `/add-source` HEAD/GET probe wiring
+- any FetchScheduler / `@Scheduled` / per-tick cadence selection (T1-C territory)
+- any outbox sink, RAW-row INSERT, post-table write, OutboxRehydrator, LISTEN/NOTIFY new_post, provider_state, or NewPostReconciler wiring (T1-C)
+- any Stage 1 HTML sanitization, NFKC normalization, regex redaction, or canonical-body UID hashing (T1-D)
+- any source-row UPDATE for last_fetch_at / last_success_at / consecutive_failures
+- any retry / backoff / Retry-After / per-source politeness window
+- any change to V1..V8 Flyway migrations (`migration_touch: false`)
+- any LLM tool surface, prompt-injection sanitizer, or LLM-output redactor
+- any audit_log write or AuditLogger code path
+- any port-based filtering (OUT-OF-MODEL per M1-024 redteam)
+- any operator-facing knob to disable host-interface enumeration, DNS pinning, or the new body-read deadline

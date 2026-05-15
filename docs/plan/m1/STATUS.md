@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 28 |
+| done | 29 |
 | deferred | 3 |
 | **total** | **32** |
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-026 — infochat-ssrf hardening followup (M1-025 remediation) (complexity: high, risk: high)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -60,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-026 | infochat-ssrf hardening followup (M1-025 remediation) | 2026-05-15 | round 1 APPROVE |
 | M1-025 | infochat-ssrf hardening (M1-024 remediation) | 2026-05-15 | round 1 APPROVE |
 | M1-024 | infochat-ssrf module + RssFetcher hardening (M1-023 remediation) | 2026-05-15 | round 1 APPROVE |
 | M1-023 | RSS Fetcher implementation (Fetcher SPI, kind='rss') | 2026-05-14 | round 1 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-008 | MVP schema umbrella — per-(user, scope) isolation IT | 2026-05-14 | round 1 APPROVE |
 | M1-018 | Clarity check validates forward references to ticket IDs | 2026-05-13 | round 1 APPROVE |
 | M1-017 | Relocate Flyway migrations from infochat-collector to infochat-core | 2026-05-13 | round 1 APPROVE |
-| M1-016 | Enforce NOLOGIN on application roles | 2026-05-13 | round 1 APPROVE |
 
 ---
 
@@ -112,7 +112,7 @@ M1-001 (done)
   │     └── M1-023 (done)
   │           └── M1-024 (done)
   │                 └── M1-025 (done)
-  │                       └── M1-026 (pending) ← runnable
+  │                       └── M1-026 (done)
   ├── M1-007b (done)
   │     └── M1-007 (done) [see above]
   └── M1-007c (done)

@@ -60,7 +60,26 @@ public final class PinnedDnsResolver implements InetAddressResolver {
     @Override
     public Stream<InetAddress> lookupByName(String host, LookupPolicy lookupPolicy)
             throws UnknownHostException {
-        List<InetAddress> pinned = pins.get(host);
+        // M1-026 Finding 2: canonicalize the host BEFORE pins.get().
+        // The pin map is keyed by SsrfGuardedHttpClient.canonicalizeHost
+        // on the install side; the JDK may pass a different form of
+        // the host argument here (case-fold, trailing-dot strip,
+        // IDN <-> punycode). The shared helper normalizes both sides
+        // to the same key, so the pin matches regardless of JDK
+        // transformation choices.
+        //
+        // If canonicalization throws (invalid host per IDN.toASCII),
+        // the host cannot be in our pin map (always keyed by the
+        // canonical form). Delegate to the builtin resolver — it
+        // may reject with UnknownHostException or accept on its own
+        // terms; either is correct policy.
+        String canonicalHost;
+        try {
+            canonicalHost = SsrfGuardedHttpClient.canonicalizeHost(host);
+        } catch (IllegalArgumentException e) {
+            return delegate.lookupByName(host, lookupPolicy);
+        }
+        List<InetAddress> pinned = pins.get(canonicalHost);
         if (pinned != null) {
             return pinned.stream();
         }

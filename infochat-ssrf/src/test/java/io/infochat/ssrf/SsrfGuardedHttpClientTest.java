@@ -17,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -266,6 +267,7 @@ class SsrfGuardedHttpClientTest {
             Duration.ofSeconds(2),
             Duration.ofSeconds(5),
             Duration.ofSeconds(5),
+            Duration.ofSeconds(5),
             10L * 1024,
             3,
             seam);
@@ -346,6 +348,150 @@ class SsrfGuardedHttpClientTest {
         assertTrue(elapsed < (readTimeout.toMillis() + 500),
             "timeout must fire within readTimeout + 500ms; elapsed="
             + elapsed + "ms (readTimeout=" + readTimeout.toMillis() + "ms)");
+    }
+
+    // -----------------------------------------------------------------
+    // M1-026 total body-read deadline (Finding 1: DOS / high). The
+    // M1-025 per-read watchdog covers stalled reads but a drip
+    // attacker delivering 1 byte per (readTimeout - epsilon) keeps
+    // each individual in.read() under the per-read window — the
+    // watchdog never fires. The total wall-clock bodyReadDeadline
+    // bounds the cumulative elapsed body-read time, terminating the
+    // call even when each individual read returns promptly.
+    // -----------------------------------------------------------------
+
+    @Test
+    void dripBodyReadHitsTotalDeadline() {
+        Duration readTimeout = Duration.ofMillis(500);
+        Duration bodyReadDeadline = Duration.ofSeconds(2);
+        // 1 byte every (readTimeout / 4) = 125ms keeps each individual
+        // in.read() returning well under the 500ms per-read window,
+        // so the per-read watchdog NEVER fires; the TOTAL deadline
+        // must be what terminates the call.
+        Duration dripInterval = readTimeout.dividedBy(4);
+
+        server.createContext("/drip", exchange -> {
+            exchange.getResponseHeaders().add("Content-Type", "application/octet-stream");
+            exchange.sendResponseHeaders(200, 5_000_000);
+            OutputStream out = exchange.getResponseBody();
+            try {
+                while (true) {
+                    out.write(new byte[] { 'A' });
+                    out.flush();
+                    Thread.sleep(dripInterval.toMillis());
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } catch (IOException e) {
+                // Expected: wrapper closed the connection after deadline.
+            } finally {
+                try {
+                    out.close();
+                } catch (IOException ignored) {
+                    // Connection already gone.
+                }
+            }
+        });
+
+        SsrfGuardedHttpClient client = new SsrfGuardedHttpClient(
+            new LoopbackPermitting(),
+            Duration.ofSeconds(2),
+            // Long request-timeout so the failure cannot be the
+            // request-level timeout instead of the body-read deadline.
+            Duration.ofSeconds(30),
+            readTimeout,
+            bodyReadDeadline,
+            10L * 1024 * 1024,
+            3);
+
+        long start = System.currentTimeMillis();
+        SsrfPolicyException ex = assertThrows(SsrfPolicyException.class,
+            () -> client.get(URI.create("http://127.0.0.1:" + port + "/drip")));
+        long elapsed = System.currentTimeMillis() - start;
+
+        assertTrue(ex.getMessage().startsWith("body read deadline exceeded"),
+            "must surface the literal \"body read deadline exceeded\" "
+            + "prefix; got: " + ex.getMessage());
+        assertTrue(elapsed >= bodyReadDeadline.toMillis(),
+            "deadline must not fire BEFORE the configured "
+            + "bodyReadDeadline; elapsed=" + elapsed + "ms, "
+            + "bodyReadDeadline=" + bodyReadDeadline.toMillis() + "ms");
+        assertTrue(elapsed < bodyReadDeadline.toMillis() + 1000,
+            "deadline must fire within bodyReadDeadline + 1s tolerance "
+            + "(NOT after the full requestTimeout); elapsed=" + elapsed
+            + "ms, bodyReadDeadline=" + bodyReadDeadline.toMillis() + "ms");
+    }
+
+    // -----------------------------------------------------------------
+    // M1-026 canonical-host pinning (Finding 2: INFO-LEAK / medium).
+    // M1-025's pin map was keyed by raw URI.getHost(); the JDK's
+    // HttpClient.send may pass a normalized form (case-fold,
+    // trailing-dot strip, IDN ↔ punycode) to the resolver SPI,
+    // causing pins.get(host) to miss and the resolver to fall
+    // through to the unpinned builtin — defeating the rebind
+    // defense. canonicalizeHost is invoked on BOTH install and
+    // lookup sides so the keys match regardless of JDK choices.
+    // -----------------------------------------------------------------
+
+    @Test
+    void pinSurvivesMixedCaseAndTrailingDot() throws Exception {
+        server.createContext("/canonical", exchange -> {
+            byte[] body = "ok".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, body.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(body);
+            }
+        });
+
+        // Recording seam: captures the exact host string the wrapper
+        // passed to validate-time DNS. Returns [127.0.0.1] for any
+        // input so the connect succeeds against the loopback fixture.
+        // If canonicalization were missing on the INSTALL side, the
+        // recorded host would still carry case or the trailing dot.
+        AtomicReference<String> recordedHost = new AtomicReference<>();
+        AtomicInteger seamCalls = new AtomicInteger();
+        Function<String, List<InetAddress>> recordingSeam = host -> {
+            recordedHost.set(host);
+            seamCalls.incrementAndGet();
+            try {
+                return List.of(InetAddress.getByName("127.0.0.1"));
+            } catch (UnknownHostException e) {
+                throw new IllegalStateException(e);
+            }
+        };
+
+        SsrfGuardedHttpClient client = new SsrfGuardedHttpClient(
+            new LoopbackPermitting(),
+            Duration.ofSeconds(2),
+            Duration.ofSeconds(5),
+            Duration.ofSeconds(5),
+            Duration.ofSeconds(5),
+            10L * 1024,
+            3,
+            recordingSeam);
+
+        // Mixed-case + trailing-dot. The .test TLD (RFC 6761) is
+        // reserved as never-resolvable, so if canonicalization were
+        // missing on the LOOKUP side the JDK builtin would attempt
+        // to resolve it, fail, and the 200-status assertion would
+        // fail on connection refused / UnknownHostException.
+        HttpResponse<byte[]> response = client.get(
+            URI.create("http://EVIL.Example.test.:" + port + "/canonical"));
+
+        assertEquals(200, response.statusCode(),
+            "wrapper must have connected to the pinned 127.0.0.1; if "
+            + "canonicalization were missing on either side, the pin "
+            + "would miss and the JDK builtin would try to resolve "
+            + "the .test TLD which is RFC 6761-reserved as "
+            + "never-resolvable");
+        assertEquals(1, seamCalls.get(),
+            "seam must be invoked exactly once (validate-time only)");
+        assertEquals("evil.example.test", recordedHost.get(),
+            "seam must have received the CANONICAL host form "
+            + "(IDN.toASCII -> lowercase(Locale.ROOT) -> trailing-dot "
+            + "stripped); a raw URI.getHost() would still carry case "
+            + "or the trailing dot, indicating canonicalization was "
+            + "missing on the install side");
     }
 
     private SsrfGuardedHttpClient testModeClient() {

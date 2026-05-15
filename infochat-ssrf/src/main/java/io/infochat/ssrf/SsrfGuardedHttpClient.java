@@ -4,6 +4,7 @@ import javax.net.ssl.SSLSession;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.IDN;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.UnknownHostException;
@@ -14,6 +15,7 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
@@ -40,46 +42,48 @@ import java.util.function.Function;
  *       implementation (carved out per the ticket's
  *       {@code out_of_scope}).</li>
  *   <li><strong>Userinfo gate</strong> — any URI carrying
- *       {@code user[:password]@} is rejected before the dial. The
- *       {@link UrlRedactor} exists for log/exception output; this
- *       gate prevents credential laundering at intake.</li>
+ *       {@code user[:password]@} is rejected before the dial.</li>
+ *   <li><strong>Host canonicalization (M1-026, Finding 2
+ *       remediation)</strong> — every host (initial + each redirect
+ *       hop) is canonicalized via {@link #canonicalizeHost(String)}:
+ *       {@code IDN.toASCII} → {@code toLowerCase(Locale.ROOT)} → a
+ *       single trailing-dot strip. The pin map is always keyed by
+ *       the canonical form so a JDK normalization mismatch
+ *       (case-fold, IDN ↔ punycode, trailing-dot strip) cannot
+ *       cause the pin to miss.</li>
  *   <li><strong>DNS resolution</strong> — the resolver seam returns
- *       the candidate {@link InetAddress} set; every entry is
- *       checked against {@link IpBlocklist}; ANY blocked address
- *       rejects the request.</li>
- *   <li><strong>DNS pinning (M1-025, Finding 2 remediation)</strong>
- *       — the IP set just validated is installed in the JVM-wide
- *       {@link PinnedDnsResolver.Provider}'s pin slot for the
- *       hostname, so the subsequent JDK {@code HttpClient.send}
- *       resolves the host to those same IPs. The wrapper holds the
- *       provider's {@link ReentrantLock} for the duration of the
- *       call, serializing concurrent wrapper invocations JVM-wide.
- *       This closes the within-hop DNS-rebind window the M1-024
- *       redteam flagged: validate-time and connect-time DNS results
- *       are now provably identical.</li>
+ *       the candidate {@link InetAddress} set for the canonical
+ *       host; every entry is checked against {@link IpBlocklist};
+ *       ANY blocked address rejects the request.</li>
+ *   <li><strong>DNS pinning</strong> — the IP set just validated is
+ *       installed in the JVM-wide {@link PinnedDnsResolver.Provider}
+ *       pin slot, keyed by the canonical host, so the subsequent
+ *       JDK {@code HttpClient.send} resolves the host to those same
+ *       IPs. The wrapper holds the provider's {@link ReentrantLock}
+ *       across the redirect loop + the terminal hop's
+ *       {@code httpClient.send} (which returns when headers are
+ *       received) and RELEASES the lock BEFORE the body-read phase
+ *       (M1-026 Finding 1 lock-starvation arm). The JDK does not
+ *       re-resolve DNS during body read on an already-established
+ *       connection, so releasing the lock there is safe.</li>
  *   <li><strong>HTTP send</strong> via a per-call
- *       {@link HttpClient} (no connection pool reuse across calls,
- *       so cached connections cannot leak DNS state) with non-zero
- *       connect + request timeouts, {@code Redirect.NEVER}, and a
- *       per-read length- AND wall-clock-bounded body reader
- *       (default 10 MiB + 30 s per read).</li>
+ *       {@link HttpClient} with non-zero connect + request timeouts,
+ *       {@code Redirect.NEVER}, a per-read length- AND wall-clock-
+ *       bounded body reader, AND a total wall-clock
+ *       {@code bodyReadDeadline} (M1-026 Finding 1 drip-body-read
+ *       remediation).</li>
  *   <li><strong>Redirect handling</strong> — on 3xx the wrapper
  *       parses the {@code Location} header, increments a per-call
  *       counter, and re-enters the pipeline from step 1, REPLACING
  *       the pin slot (still under the same lock).</li>
  * </ol>
  *
- * <p>Production callers always use the no-arg constructor. The
- * parameterized constructor is the test-mode seam plus a knob
- * surface for future per-source policy. The package-private
- * resolver-seam constructor lets tests substitute the validation-
- * time DNS resolver (separate from the JVM-wide pinning resolver).
- *
  * <p>This class is NOT itself thread-safe for the pinning surface
- * — the static pin slot is JVM-wide. Multiple wrapper instances can
- * coexist, but concurrent {@link #get(URI)} calls (across instances
- * or threads) serialize on the {@link PinnedDnsResolver.Provider}
- * lock.
+ * — the static pin slot is JVM-wide. Concurrent {@link #get(URI)}
+ * calls serialize on the {@link PinnedDnsResolver.Provider} lock
+ * for the connection-establishment phase. The body-read phase runs
+ * unlocked, so concurrent fetches to different hosts can interleave
+ * their body reads.
  */
 public final class SsrfGuardedHttpClient {
 
@@ -89,9 +93,14 @@ public final class SsrfGuardedHttpClient {
 
     private static final Duration DEFAULT_READ_TIMEOUT = Duration.ofSeconds(30);
 
-    // 10 MiB — large enough for the longest RSS / Atom feeds observed
-    // in the wild, small enough to bound the worst-case allocation
-    // against a hostile feed serving an unbounded payload.
+    // 2 minutes — large enough for a well-behaved feed to deliver a
+    // full 10 MiB body over a slow but legitimate link; small enough
+    // to bound the worst-case attacker-controlled body-read phase.
+    // Without a total deadline, a drip attacker delivering one byte
+    // every (readTimeout - epsilon) bypasses the per-read watchdog
+    // and can hold the call open for ~9.6 years at default settings.
+    private static final Duration DEFAULT_BODY_READ_DEADLINE = Duration.ofMinutes(2);
+
     private static final long DEFAULT_BODY_CAP = 10L * 1024 * 1024;
 
     private static final int DEFAULT_REDIRECT_CAP = 3;
@@ -108,35 +117,29 @@ public final class SsrfGuardedHttpClient {
 
     private final Duration readTimeout;
 
+    private final Duration bodyReadDeadline;
+
     private final long bodyCap;
 
     private final int redirectCap;
 
     private final Function<String, List<InetAddress>> resolverSeam;
 
-    /**
-     * Production constructor. Wires the strict {@link IpBlocklist},
-     * profile-driven default timeouts / caps, and
-     * {@link InetAddress#getAllByName} as the validation resolver.
-     */
     public SsrfGuardedHttpClient() {
         this(new IpBlocklist(),
              DEFAULT_CONNECT_TIMEOUT,
              DEFAULT_REQUEST_TIMEOUT,
              DEFAULT_READ_TIMEOUT,
+             DEFAULT_BODY_READ_DEADLINE,
              DEFAULT_BODY_CAP,
              DEFAULT_REDIRECT_CAP);
     }
 
     /**
-     * M1-024 parameterized constructor — preserved as a stable
-     * public API surface for cross-module test fixtures
-     * (notably {@code infochat-collector}'s {@code RssFetcherTest})
-     * that constructed the wrapper before M1-025 introduced
-     * {@code readTimeout}. Supplies the default read timeout so
-     * existing M1-024 call sites continue to compile and behave
-     * identically. New M1-025 call sites that need to customize
-     * the read-timeout use the 6-arg form below.
+     * M1-024 parameterized constructor — preserved as a stable public
+     * API surface. Supplies default read-timeout AND default
+     * body-read-deadline so existing M1-024 call sites continue to
+     * compile and behave identically.
      */
     public SsrfGuardedHttpClient(IpBlocklist blocklist,
                                  Duration connectTimeout,
@@ -144,21 +147,14 @@ public final class SsrfGuardedHttpClient {
                                  long bodyCap,
                                  int redirectCap) {
         this(blocklist, connectTimeout, requestTimeout,
-             DEFAULT_READ_TIMEOUT, bodyCap, redirectCap,
-             defaultResolverSeam());
+             DEFAULT_READ_TIMEOUT, DEFAULT_BODY_READ_DEADLINE,
+             bodyCap, redirectCap);
     }
 
     /**
-     * Parameterized constructor — the test-mode seam and the
-     * production future-knob surface. The strict production
-     * blocklist refuses to dial 127.0.0.1 (the
-     * {@code com.sun.net.httpserver.HttpServer} fixture's bind
-     * address); tests pass a permissive {@link IpBlocklist}
-     * subclass that carves out the loopback range. Engaging the
-     * carve-out requires deliberately constructing a non-default
-     * {@link IpBlocklist} and passing it — accidentally enabling
-     * it is impossible without writing code that visibly subclasses
-     * the production policy.
+     * M1-025 parameterized constructor — preserved as a stable public
+     * API surface. Supplies a default body-read-deadline so existing
+     * M1-025 call sites continue to compile and behave identically.
      */
     public SsrfGuardedHttpClient(IpBlocklist blocklist,
                                  Duration connectTimeout,
@@ -167,22 +163,41 @@ public final class SsrfGuardedHttpClient {
                                  long bodyCap,
                                  int redirectCap) {
         this(blocklist, connectTimeout, requestTimeout, readTimeout,
-             bodyCap, redirectCap, defaultResolverSeam());
+             DEFAULT_BODY_READ_DEADLINE, bodyCap, redirectCap);
+    }
+
+    /**
+     * M1-026 parameterized constructor — exposes the new
+     * {@code bodyReadDeadline} knob alongside the M1-025 read
+     * timeout. {@code readTimeout} bounds each individual
+     * {@code in.read()} call (covers the slow-loris vector);
+     * {@code bodyReadDeadline} bounds the TOTAL wall-clock time of
+     * the body-read phase (covers the drip vector that passes
+     * per-read but accumulates).
+     */
+    public SsrfGuardedHttpClient(IpBlocklist blocklist,
+                                 Duration connectTimeout,
+                                 Duration requestTimeout,
+                                 Duration readTimeout,
+                                 Duration bodyReadDeadline,
+                                 long bodyCap,
+                                 int redirectCap) {
+        this(blocklist, connectTimeout, requestTimeout, readTimeout,
+             bodyReadDeadline, bodyCap, redirectCap,
+             defaultResolverSeam());
     }
 
     /**
      * Package-private resolver-seam constructor. Lets tests replace
      * the validation-time DNS lookup with a deterministic
      * {@link Function} without installing a JVM-global resolver
-     * provider — the seam covers the wrapper's own resolve-and-
-     * validate step. The JVM-wide pinning resolver remains in
-     * effect and forces the JDK {@link HttpClient}'s actual
-     * connect-time DNS to match what the seam returned.
+     * provider.
      */
     SsrfGuardedHttpClient(IpBlocklist blocklist,
                           Duration connectTimeout,
                           Duration requestTimeout,
                           Duration readTimeout,
+                          Duration bodyReadDeadline,
                           long bodyCap,
                           int redirectCap,
                           Function<String, List<InetAddress>> resolverSeam) {
@@ -198,6 +213,9 @@ public final class SsrfGuardedHttpClient {
         if (readTimeout == null || readTimeout.isZero() || readTimeout.isNegative()) {
             throw new IllegalArgumentException("read timeout must be configured");
         }
+        if (bodyReadDeadline == null || bodyReadDeadline.isZero() || bodyReadDeadline.isNegative()) {
+            throw new IllegalArgumentException("body read deadline must be configured");
+        }
         if (bodyCap <= 0) {
             throw new IllegalArgumentException("body cap must be configured");
         }
@@ -211,6 +229,7 @@ public final class SsrfGuardedHttpClient {
         this.connectTimeout = connectTimeout;
         this.requestTimeout = requestTimeout;
         this.readTimeout = readTimeout;
+        this.bodyReadDeadline = bodyReadDeadline;
         this.bodyCap = bodyCap;
         this.redirectCap = redirectCap;
         this.resolverSeam = resolverSeam;
@@ -227,32 +246,80 @@ public final class SsrfGuardedHttpClient {
     }
 
     /**
-     * Issue a GET against {@code uri}, returning the response with
-     * the body materialized as a bounded byte array. Throws
-     * {@link SsrfPolicyException} on any policy violation; the
-     * underlying JDK contract for {@link HttpClient#send} otherwise
-     * applies (checked {@link IOException} on transport failure,
-     * {@link InterruptedException} on thread interrupt).
+     * Canonicalize a hostname for stable equality across the JDK
+     * resolver SPI. M1-025's pin map was keyed by raw
+     * {@code URI.getHost()}; the JDK's {@code HttpClient.send} may
+     * pass a normalized form (case-fold, trailing-dot strip,
+     * IDN ↔ punycode) to the resolver SPI, causing
+     * {@code pins.get(host)} to miss and the resolver to fall
+     * through to the unpinned builtin — defeating the rebind
+     * defense. Both the install side ({@link #get(URI)}) and the
+     * lookup side ({@link PinnedDnsResolver#lookupByName}) MUST call
+     * this helper so the pin keys match regardless of JDK
+     * transformation choices.
+     *
+     * <p>Transformations applied, in order:
+     * <ol>
+     *   <li>Reject null or blank input with
+     *       {@link IllegalArgumentException}.</li>
+     *   <li>{@code IDN.toASCII(host, IDN.ALLOW_UNASSIGNED)} — convert
+     *       Unicode / punycode to canonical ASCII Compatible Encoding.
+     *       Applied first because lowercase-then-toASCII can mis-handle
+     *       case-sensitive punycode constructs.</li>
+     *   <li>{@code toLowerCase(Locale.ROOT)} — case-fold without the
+     *       Turkish-dotless-i hazard of the default-locale form.</li>
+     *   <li>Strip a single trailing {@code .} if present — the FQDN
+     *       trailing-dot variant; some HTTP clients and DNS resolvers
+     *       preserve the dot, others strip it, so pinning against the
+     *       dot-less form makes the pin key stable.</li>
+     * </ol>
+     *
+     * <p>Package-private so {@link PinnedDnsResolver} (same package)
+     * can call it directly. A sibling utility class would push the
+     * implementation to 6 files and breach the M1-026 5-file
+     * {@code files_budget}.
+     */
+    static String canonicalizeHost(String host) {
+        if (host == null || host.isBlank()) {
+            throw new IllegalArgumentException("host must not be null or blank");
+        }
+        String ascii = IDN.toASCII(host, IDN.ALLOW_UNASSIGNED);
+        String lower = ascii.toLowerCase(Locale.ROOT);
+        if (lower.endsWith(".")) {
+            return lower.substring(0, lower.length() - 1);
+        }
+        return lower;
+    }
+
+    /**
+     * Issue a GET against {@code uri}. Throws
+     * {@link SsrfPolicyException} on any policy violation.
+     *
+     * <p>The JVM-wide {@link PinnedDnsResolver.Provider} lock is held
+     * across the redirect loop + the terminal hop's
+     * {@code httpClient.send}. It is RELEASED before the body-read
+     * phase — concurrent fetches to different hosts can interleave
+     * body reads without serializing on the JVM-wide lock (M1-026
+     * Finding 1 lock-starvation remediation).
      */
     public HttpResponse<byte[]> get(URI uri) throws IOException, InterruptedException {
-        URI current = uri;
-        int redirectCount = 0;
+        HttpResponse<InputStream> terminalResponse;
         ReentrantLock lock = PinnedDnsResolver.Provider.lock();
         lock.lock();
         try {
+            URI current = uri;
+            int redirectCount = 0;
             while (true) {
-                List<InetAddress> addresses = resolveAndValidate(current);
-
-                // Install the per-hop pin BEFORE constructing the
-                // per-call HttpClient. The JVM-wide resolver consults
-                // the pin slot on every lookup, so the connect's DNS
-                // lookup will return our pinned IPs.
+                ResolvedHost resolved = resolveAndValidate(current);
+                // Pin the per-hop canonical host -> validated IPs map
+                // BEFORE constructing the per-call HttpClient. The
+                // JVM-wide resolver consults the pin slot on every
+                // lookup, so the connect's DNS will return our IPs.
                 PinnedDnsResolver.Provider.installPins(
-                    Map.of(current.getHost(), addresses));
+                    Map.of(resolved.canonicalHost(), resolved.addresses()));
 
-                // Redirect.NEVER — we handle redirects manually so each
-                // hop re-runs scheme / userinfo / DNS pipeline AND
-                // updates the pin slot.
+                // Redirect.NEVER — we handle redirects manually so
+                // each hop re-runs the pipeline AND updates the pin.
                 HttpClient perCallClient = HttpClient.newBuilder()
                     .connectTimeout(connectTimeout)
                     .followRedirects(HttpClient.Redirect.NEVER)
@@ -270,8 +337,8 @@ public final class SsrfGuardedHttpClient {
                 int status = response.statusCode();
                 if (status >= 300 && status < 400) {
                     try (InputStream discard = response.body()) {
-                        // Drain via close(); redirect bodies carry no
-                        // payload we need.
+                        // Drain via close(); redirect bodies carry
+                        // no payload we need.
                     }
                     redirectCount++;
                     if (redirectCount > redirectCap) {
@@ -284,16 +351,25 @@ public final class SsrfGuardedHttpClient {
                     continue;
                 }
 
-                byte[] body = readBounded(response);
-                return new BoundedByteArrayResponse(response, body);
+                terminalResponse = response;
+                break;
             }
         } finally {
             PinnedDnsResolver.Provider.clearPins();
             lock.unlock();
         }
+
+        // Lock released; pins cleared. JDK does not re-resolve DNS
+        // during body read on an already-established connection, so
+        // releasing here is safe — and crucial for F1: concurrent
+        // get(uri) calls to different hosts can interleave body
+        // reads instead of serializing on the JVM-wide lock for the
+        // entire (drip-attacker-controllable) body-read phase.
+        byte[] body = readBounded(terminalResponse);
+        return new BoundedByteArrayResponse(terminalResponse, body);
     }
 
-    private List<InetAddress> resolveAndValidate(URI uri) {
+    private ResolvedHost resolveAndValidate(URI uri) {
         String scheme = uri.getScheme();
         if (scheme == null || !(scheme.equals("http") || scheme.equals("https"))) {
             throw new SsrfPolicyException("scheme not allowed: " + scheme);
@@ -301,41 +377,67 @@ public final class SsrfGuardedHttpClient {
         if (uri.getRawUserInfo() != null) {
             throw new SsrfPolicyException("userinfo segment not allowed");
         }
-        String host = uri.getHost();
-        if (host == null) {
+        String rawHost = uri.getHost();
+        if (rawHost == null) {
             throw new SsrfPolicyException("host missing from URI");
         }
-        List<InetAddress> addresses = resolverSeam.apply(host);
+        // M1-026 Finding 2: canonicalize before BOTH the seam call
+        // AND the pin install. The same helper is invoked on the
+        // lookup side by PinnedDnsResolver.lookupByName, so the pin
+        // matches regardless of JDK normalization choices.
+        // IDN.toASCII throws IllegalArgumentException on invalid
+        // input; wrap as SsrfPolicyException so the wrapper boundary
+        // surfaces a clean policy exception (no JDK internals leak).
+        String canonicalHost;
+        try {
+            canonicalHost = canonicalizeHost(rawHost);
+        } catch (IllegalArgumentException e) {
+            throw new SsrfPolicyException("invalid host: " + rawHost, e);
+        }
+        List<InetAddress> addresses = resolverSeam.apply(canonicalHost);
         if (addresses == null || addresses.isEmpty()) {
-            throw new SsrfPolicyException("unknown host: " + host);
+            throw new SsrfPolicyException("unknown host: " + canonicalHost);
         }
         for (InetAddress addr : addresses) {
             if (blocklist.isBlocked(addr)) {
                 throw new SsrfPolicyException("blocked IP: " + addr.getHostAddress());
             }
         }
-        return addresses;
+        return new ResolvedHost(canonicalHost, addresses);
     }
 
     private byte[] readBounded(HttpResponse<InputStream> response) throws IOException {
-        // Per-read wall-clock watchdog (M1-025, Finding 4 remediation).
-        // The JDK's HttpRequest.timeout() bounds only the receipt of
-        // response HEADERS; without this watchdog a malicious upstream
-        // can dribble body bytes one per minute and hold a fetcher
-        // thread for hours. We run each in.read(buf) call on a
-        // dedicated single-thread executor and supervise it from the
-        // caller thread; on timeout we cancel the future (interrupting
-        // the read) and raise SsrfPolicyException.
+        // Per-read wall-clock watchdog (M1-025, Finding 4): the JDK's
+        // HttpRequest.timeout() bounds only the receipt of response
+        // HEADERS; without this watchdog a malicious upstream can
+        // dribble body bytes one per minute and hold a fetcher thread
+        // for hours. We run each in.read(buf) call on a single-thread
+        // executor and supervise from the caller thread; on timeout
+        // we cancel the future and raise SsrfPolicyException.
+        //
+        // M1-026 Finding 1: in addition to the per-read watchdog,
+        // the TOTAL wall-clock time from the start of body-read is
+        // bounded by bodyReadDeadline. A drip attacker that returns
+        // 1 byte per (readTimeout - epsilon) defeats the per-read
+        // watchdog (each individual read completes well under the
+        // window) but cannot defeat a total-elapsed deadline.
         ExecutorService readerExecutor = Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(r, "ssrf-body-reader");
             t.setDaemon(true);
             return t;
         });
+        long bodyReadStartNanos = System.nanoTime();
         try (InputStream in = response.body();
              ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             byte[] buf = new byte[8192];
             long total = 0;
             while (true) {
+                long elapsedNanos = System.nanoTime() - bodyReadStartNanos;
+                if (elapsedNanos > bodyReadDeadline.toNanos()) {
+                    long elapsedMs = TimeUnit.NANOSECONDS.toMillis(elapsedNanos);
+                    throw new SsrfPolicyException(
+                        "body read deadline exceeded after " + elapsedMs + "ms");
+                }
                 Future<Integer> readFuture = readerExecutor.submit(() -> in.read(buf));
                 int n;
                 try {
@@ -375,14 +477,16 @@ public final class SsrfGuardedHttpClient {
     }
 
     /**
+     * Validation result: the canonical host form (used as the pin
+     * map key) and the resolved + blocklist-passing IP set.
+     */
+    private record ResolvedHost(String canonicalHost, List<InetAddress> addresses) {}
+
+    /**
      * Raised on any policy violation in the wrapper pipeline:
      * disallowed scheme, userinfo in URI, blocked IP, oversize
-     * body, exceeded redirect cap, body-read timeout. Unchecked
-     * because the {@code Fetcher} SPI signature
-     * ({@code fetch(long, String)} returning
-     * {@code List<NormalizedPost>}) does not declare checked
-     * exceptions, so a checked policy exception would force an SPI
-     * change that is out of scope here.
+     * body, exceeded redirect cap, body-read timeout, body-read
+     * deadline exceeded.
      */
     public static final class SsrfPolicyException extends RuntimeException {
 
@@ -395,13 +499,6 @@ public final class SsrfGuardedHttpClient {
         }
     }
 
-    /**
-     * Adapter from the {@code HttpResponse<InputStream>} the
-     * wrapper drives internally to the
-     * {@code HttpResponse<byte[]>} the wrapper's public surface
-     * promises. Delegates every method except {@link #body()} to
-     * the underlying response.
-     */
     private static final class BoundedByteArrayResponse implements HttpResponse<byte[]> {
 
         private final HttpResponse<InputStream> delegate;

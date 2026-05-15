@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -193,5 +194,43 @@ class IpBlocklistTest {
             "255.255.255.255 (IPv4 limited broadcast, RFC 919) "
             + "must block — sending here from userland is meaningless "
             + "and risks hitting the local segment");
+    }
+
+    // -----------------------------------------------------------------
+    // M1-026 per-call host-interface enumeration (Finding 3:
+    // INFO-LEAK / low). Spec text is present-tense ("are checked"),
+    // no startup-snapshot qualifier. M1-025 snapshotted at IpBlocklist
+    // construction, so post-startup interfaces (VPN tunnels,
+    // hot-plugged NICs, K8s sidecar IPs, freshly-attached cloud
+    // EIPs) were never seen. M1-026 widens the host-interface field
+    // from a frozen Set to a Supplier consulted per call.
+    // -----------------------------------------------------------------
+
+    @Test
+    void hostInterfaceAddedAfterStartupIsBlocked() throws UnknownHostException {
+        // 203.0.113.5 is TEST-NET-3 (RFC 5737), reserved for
+        // documentation and never assigned in the real internet —
+        // so it cannot be the test machine's actual interface IP
+        // by accident.
+        InetAddress later = InetAddress.getByName("203.0.113.5");
+        AtomicReference<Set<InetAddress>> ref = new AtomicReference<>(Set.of());
+        IpBlocklist blocklist = new IpBlocklist(ref::get);
+
+        assertFalse(blocklist.isBlocked(later),
+            "203.0.113.5 is TEST-NET-3 (not in any blocked range) "
+            + "and the host-interface set is initially empty; "
+            + "isBlocked must return false");
+
+        // Simulate an interface coming up post-startup (VPN, NIC,
+        // sidecar, cloud EIP). The Supplier seam means the next
+        // isBlocked call must see the new IP — no snapshot caching.
+        ref.set(Set.of(later));
+
+        assertTrue(blocklist.isBlocked(later),
+            "after the simulated interface is added to the host-set, "
+            + "the very next isBlocked call must see it via the "
+            + "per-call Supplier.get() invocation. If the M1-025 "
+            + "snapshot-at-construction semantics had survived, "
+            + "this assertion would fail");
     }
 }
