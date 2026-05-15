@@ -147,8 +147,10 @@ Normalize → INSERT post(status='RAW', body=sanitized_html)
 Enqueue post_id on the eval channel  ──────────┐
                                                 │
   (if Collector restarts, OutboxRehydrator      │
-   on @Startup scans status IN ('RAW',          │
-   'EVALUATING') and re-enqueues.)              │
+   on @Startup scans status='RAW' and           │
+   re-enqueues. Invariant 5: in-flight          │
+   evaluation = RAW + per-stage *_done flags,   │
+   no 'EVALUATING' status.)                     │
                                                 ▼
                                          eval workers (§1.3.4)
 ```
@@ -443,7 +445,7 @@ Collector:
 | 50       | InstanceLockGuard | Acquires `pg_advisory_lock(hash('infochat.collector'))`. Failure to acquire → fatal log + refuse to start.  |
 | 100      | (Flyway)          | Quarkus runs Flyway migrations before any `@Startup` bean.                                                  |
 | 200      | BootstrapLoader   | Seeds `source`, `tag`, and `asset_config` from JSON.                                                        |
-| 300      | OutboxRehydrator  | Re-enqueues posts left in `RAW`/`EVALUATING` from prior crash.                                              |
+| 300      | OutboxRehydrator  | Re-enqueues posts left in `status='RAW'` from prior crash (Invariant 5: no `'EVALUATING'` status — in-flight eval = RAW + per-stage `*_done` flags).         |
 | 400      | FetchScheduler    | Begins per-kind polling for `Fetcher` sources and asset Fetchers.                                           |
 | 450      | StreamSourceSupervisor | Registers each `StreamSource` worker with the supervised pool. **Asynchronous startup**: the supervisor returns immediately once registration is accepted; per-relay connect runs in background. A relay unreachable at boot does NOT fail readiness ([`spec/architecture.md`](../spec/architecture.md) §Ingest SPIs). |
 
