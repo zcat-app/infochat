@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>infochat</groupId>
+        <artifactId>infochat-parent</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>infochat-ssrf</artifactId>
+    <packaging>jar</packaging>
+
+    <!--
+         infochat-ssrf is a plain library jar: the SSRF-gated outbound
+         HTTP client (IP blocklist, DNS-rebind defense, redirect cap,
+         scheme allowlist, body-size cap) shared by Collector and Provider
+         per docs/spec/security.md §SSRF and outbound connections + decision
+         D20. NO Quarkus extensions live here — the wrapper uses only the
+         JDK (java.net.http.HttpClient, java.net.InetAddress). JUnit is
+         BOM-managed via the parent's quarkus-bom import; no <version>
+         appears on dependencies in this POM (M1-001 invariant).
+    -->
+    <dependencies>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

@@ -50,6 +50,14 @@ public final class RssFeedParser {
 
     private static final String ATOM_NS = "http://www.w3.org/2005/Atom";
 
+    // Per-parse item-count cap. A normal feed publishes 10–500
+    // items; 1000 is an order of magnitude above legitimate use,
+    // small enough to bound the allocation against a hostile feed
+    // serving an unbounded item list. The check applies AFTER each
+    // successful per-item parse — a feed with exactly MAX_ITEMS
+    // entries succeeds; the cap+1-th entry raises.
+    private static final int MAX_ITEMS = 1000;
+
     private RssFeedParser() {
         // static-only
     }
@@ -106,6 +114,10 @@ public final class RssFeedParser {
             int event = reader.next();
             if (event == XMLStreamConstants.START_ELEMENT && "item".equals(reader.getLocalName())) {
                 posts.add(parseRssItem(reader, sourceId, fetchedAt));
+                if (posts.size() > MAX_ITEMS) {
+                    throw new RssFeedParseException(
+                        "feed item count exceeded " + MAX_ITEMS);
+                }
             }
         }
         return posts;
@@ -170,6 +182,10 @@ public final class RssFeedParser {
             int event = reader.next();
             if (event == XMLStreamConstants.START_ELEMENT && "entry".equals(reader.getLocalName())) {
                 posts.add(parseAtomEntry(reader, sourceId, fetchedAt));
+                if (posts.size() > MAX_ITEMS) {
+                    throw new RssFeedParseException(
+                        "feed item count exceeded " + MAX_ITEMS);
+                }
             }
         }
         return posts;

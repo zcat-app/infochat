@@ -20,6 +20,10 @@
         </dependency>
         <dependency>
             <groupId>infochat</groupId>
+            <artifactId>infochat-ssrf</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>infochat</groupId>
             <artifactId>infochat-llm-adapter</artifactId>
         </dependency>
         <dependency>

@@ -1,12 +1,46 @@
 ---
 id: M1-024
 title: infochat-ssrf module + RssFetcher hardening (M1-023 remediation)
-status: pending
+status: done
 created: 2026-05-14
-last_updated: 2026-05-14
+last_updated: 2026-05-15
+# (status briefly transited escalated→in-progress on 2026-05-15 per
+#  refine-after-premise-fail; see escalations[] + revisions[] entries
+#  below. Branch m1/M1-024-infochat-ssrf-module retains the implementation.)
 blocked_by:
   - M1-023
 remediates: M1-023
+clarity_check:
+  date: 2026-05-15
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-VS-DOD-CONSISTENT / item 2: `grep -cE '<artifactId>' infochat-ssrf/pom.xml is exactly 2` is ambiguous — if test-scoped deps (JUnit 5) are declared in the child pom, count exceeds 2 and the grep fails. Mitigations: enumerate exact <dependency> blocks in DoD; or relax to `at least 1 match` + a separate `grep -E '<scope>runtime</scope>' returns zero`; or rely on parent BOM to manage all test deps without per-module declarations."
+    - "ACCEPTANCE-RUNNABLE / item 21: the cross-reference matrix mapping the five M1-023 findings to acceptance items is prose, not a runnable check; it does not add a testable commitment beyond items 1–18."
+  blockers: []
+escalations:
+  - date: 2026-05-15
+    reason: premise-fail
+    reviewer_verdict_excerpt: "N/A — developer-surfaced unsatisfiable acceptance during implementation. Item 2 asserts `grep -cE '<artifactId>' infochat-ssrf/pom.xml is exactly 2`, but the pom needs a third `<artifactId>` for junit-jupiter (test-scope) so acceptance item 19 (`mvn -B -pl infochat-ssrf test exits 0`) can pass. The DoD's stated goal (NO external RUNTIME deps; no quarkus-*, Apache HttpClient, or Netty) IS met — JUnit is test-scope, not runtime — but the count grep doesn't distinguish scopes. Clarity-WARN on 2026-05-15 predicted this exact unsatisfiability."
+revisions:
+  - date: 2026-05-15
+    reason: premise-fail-refine
+    refined_field: acceptance[2]
+    snapshot_before: |
+      "infochat-ssrf/pom.xml exists, declares `<parent>infochat-parent</parent>`, packaging jar, and adds NO external runtime dependencies beyond the JDK (no quarkus-* deps, no Apache HttpClient, no Netty — the SSRF wrapper uses java.net.http only) — grep -E '<artifactId>infochat-ssrf</artifactId>' infochat-ssrf/pom.xml returns at least one match AND grep -cE '<artifactId>' infochat-ssrf/pom.xml is exactly 2 (the module's own artifactId + the parent's)"
+reviews:
+  - round: 1
+    date: 2026-05-15
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 14
+      added: 1253
+      removed: 52
 files_budget: 12
 files_scope:
   - pom.xml
@@ -42,7 +76,7 @@ out_of_scope:
   - any audit_log write, audit_log_view, or AuditLogger code path (security.md §Secrets handling — the SSRF wrapper's policy denials are logged via the standard JUL logger with the URL already pre-redacted by UrlRedactor, not via audit_log which is reserved for user/admin intent records)
 acceptance:
   - "The repo root pom.xml lists `infochat-ssrf` in its `<modules>` block — grep -E '<module>infochat-ssrf</module>' pom.xml returns at least one match (Finding 1 — module exists)"
-  - "infochat-ssrf/pom.xml exists, declares `<parent>infochat-parent</parent>`, packaging jar, and adds NO external runtime dependencies beyond the JDK (no quarkus-* deps, no Apache HttpClient, no Netty — the SSRF wrapper uses java.net.http only) — grep -E '<artifactId>infochat-ssrf</artifactId>' infochat-ssrf/pom.xml returns at least one match AND grep -cE '<artifactId>' infochat-ssrf/pom.xml is exactly 2 (the module's own artifactId + the parent's)"
+  - "infochat-ssrf/pom.xml exists, declares `<parent>infochat-parent</parent>`, packaging jar, and adds NO external RUNTIME dependencies beyond the JDK (test-scope JUnit is permitted; the SSRF wrapper uses java.net.http only) — grep -E '<artifactId>infochat-ssrf</artifactId>' infochat-ssrf/pom.xml returns at least one match AND grep -cE '<artifactId>' infochat-ssrf/pom.xml returns exactly 3 (parent + self + junit-jupiter) AND grep -nE '<groupId>(io\\.quarkus|org\\.apache\\.httpcomponents|io\\.netty)' infochat-ssrf/pom.xml returns zero matches (no quarkus, Apache HttpClient, or Netty runtime deps)"
   - "infochat-ssrf/src/main/java/io/infochat/ssrf/SsrfGuardedHttpClient.java exists, declares `public final class SsrfGuardedHttpClient`, exposes a public `HttpResponse<byte[]> get(URI uri)` method (or equivalent named method matching the per-call shape), and uses `java.net.http.HttpClient` internally — grep -E 'public final class SsrfGuardedHttpClient' returns at least one match AND grep -E 'java\\.net\\.http\\.HttpClient' returns at least one match"
   - "SsrfGuardedHttpClient rejects any URI with a non-allowlisted scheme; the allowlist is `http` and `https` only (ws/wss are carved out for the future StreamSource ticket per out_of_scope). Rejected schemes raise an `SsrfPolicyException` (nested class) whose message starts with the literal substring `scheme not allowed` — grep -E 'scheme not allowed' SsrfGuardedHttpClient.java returns at least one match"
   - "SsrfGuardedHttpClient rejects any URI whose authority component carries a userinfo segment (matches `://[^/@]+@`). Rejected URIs raise `SsrfPolicyException` with message starting with the literal substring `userinfo segment not allowed` (Finding 4 — credentials-in-URL leak) — grep -E 'userinfo segment not allowed' SsrfGuardedHttpClient.java returns at least one match"
@@ -454,3 +488,65 @@ continue to pass under the new wrapper (with the test-mode override).
   redactor closes both surfaces uniformly. It is also a logging
   helper the Provider's later `/add-source` audit logging will
   consume.
+
+## Implementation outline (M1-024, generated by Plan subagent on 2026-05-15)
+
+### Files to touch (12 of 12)
+- modify: `pom.xml` — insert `<module>infochat-ssrf</module>` into `<modules>` BEFORE `infochat-collector` and `infochat-provider` (reactor ordering so downstream depends on built artifact). Also add an `infochat-ssrf` entry under `<dependencyManagement>` to preserve the M1-001 "version-less downstream POMs" invariant (matches the `infochat-core` precedent).
+- create: `infochat-ssrf/pom.xml` — new `<parent>infochat-parent</parent>`, `<artifactId>infochat-ssrf</artifactId>`, `<packaging>jar</packaging>`. NO Quarkus extensions (mirror the `infochat-core` plain-library precedent). Test deps: junit-jupiter (BOM-managed). Maven-failsafe-plugin only if any `*IT.java` is needed — this ticket adds only `*Test.java`, so failsafe is omitted.
+- create: `infochat-ssrf/src/main/java/io/infochat/ssrf/IpBlocklist.java` — `final` class, no state; method `boolean isBlocked(InetAddress addr)`. Internal helpers private for IPv4 CIDR matches; v6-mapped-v4 (`addr.getAddress().length == 16` with leading bytes per the `::ffff:0:0/96` prefix) delegates to v4 check. Thread-safe by virtue of statelessness.
+- create: `infochat-ssrf/src/main/java/io/infochat/ssrf/UrlRedactor.java` — `final` class, private constructor, single `public static String redact(String url)`. Strips userinfo + query; on `URISyntaxException`/`NullPointerException` returns the literal `<malformed-url>` (infallible per DoD).
+- create: `infochat-ssrf/src/main/java/io/infochat/ssrf/SsrfGuardedHttpClient.java` — production-default no-arg constructor wires the strict `IpBlocklist` singleton + default timeouts (configurable values declared as final fields). Package-private constructor accepting `(IpBlocklist, Duration connect, Duration request, long bodyCap, int redirectCap)` for test override. Constructor rejects any zero/null value with `IllegalArgumentException("timeout must be configured")`. `HttpResponse<byte[]> get(URI uri)` implements the 7-step internal sequence. Nested `public static final class SsrfPolicyException extends RuntimeException` with `(String)` and `(String, Throwable)` constructors. Body read via `BodyHandlers.ofInputStream()` + manual bounded read into `ByteArrayOutputStream`; on overflow close stream + raise. Manual redirect loop: counter int local, increment on 3xx, re-enter step 1 with parsed `Location` URI.
+- modify: `infochat-collector/pom.xml` — add `<dependency>infochat-ssrf</dependency>` (version-less; coordinates managed by parent).
+- modify: `infochat-collector/src/main/java/io/infochat/collector/fetcher/rss/RssFetcher.java` — replace the `HttpClient httpClient` field with `SsrfGuardedHttpClient client`; remove `HttpRequest`/`HttpResponse` imports no longer used; replace `httpClient.send(...)` with `client.get(URI.create(identifier))`; remove the `SSRF GATE TODO` javadoc block; in each of the three exception sites (`InterruptedException`, `IOException`, non-2xx) replace `identifier` interpolation with `UrlRedactor.redact(identifier)`. Preserve `fetchedAt = Instant.now()` captured BEFORE the call.
+- modify: `infochat-collector/src/main/java/io/infochat/collector/fetcher/rss/RssFeedParser.java` — add a `MAX_ITEMS = 1000` private constant; counter local to `parseRss` / `parseAtom`; on each successful `parseRssItem` / `parseAtomEntry` increment-then-check; if `count > MAX_ITEMS` raise `RssFeedParseException("feed item count exceeded " + MAX_ITEMS)`. Apply identically to both walks.
+
+### Tests
+- add: `infochat-ssrf/src/test/java/io/infochat/ssrf/IpBlocklistTest.java` — one `@Test` per CIDR class: blocks `127.0.0.1`, `127.255.255.254` (loopback boundary), `169.254.169.254` (link-local + metadata), `10.0.0.1`, `172.16.0.1`, `172.31.255.254`, `192.168.1.1`, `100.64.0.1` (CGNAT), `224.0.0.1` (multicast), `::1`, `fe80::1`, `fc00::1`, `ff02::1`, `::ffff:127.0.0.1` (mapped-v4 delegation); allows `8.8.8.8`, `1.1.1.1`, `2001:4860:4860::8888`. Covers acceptance item 15.
+- add: `infochat-ssrf/src/test/java/io/infochat/ssrf/UrlRedactorTest.java` — strips `user:pass@` userinfo; strips `?query=secret`; preserves scheme + host + path; malformed input (`"not a url"`, `null`, embedded control chars) returns `<malformed-url>`. Covers acceptance item 17.
+- add: `infochat-ssrf/src/test/java/io/infochat/ssrf/SsrfGuardedHttpClientTest.java` — uses `com.sun.net.httpserver.HttpServer` on 127.0.0.1 ephemeral port. Must use a test-mode `IpBlocklist` that permits 127.0.0.1; constructed via the package-private constructor. Test cases: happy-path 2xx returns body; non-http(s) scheme raises `SsrfPolicyException` with `"scheme not allowed"`; userinfo URI raises with `"userinfo segment not allowed"`; strict (production) blocklist on 127.0.0.1 raises with `"blocked IP"`; oversize body raises with `"response body exceeded"`; redirect loop past cap raises with `"redirect cap exceeded"`; redirect to a strict-blocklist IP re-resolves and is rejected hop 2; constructor rejects null `Duration` with `IllegalArgumentException("timeout must be configured")`. Covers acceptance item 16.
+- modify: `infochat-collector/src/test/java/io/infochat/collector/fetcher/rss/RssFetcherTest.java` — authorized in ticket body §"Authorized test changes". Three existing methods preserved in substance; their setup migrates to construct `RssFetcher` with a test-mode `SsrfGuardedHttpClient` via constructor-injection seam on `RssFetcher` (preserves production no-arg construction). Add `fetchRejectsIdentifierWithEmbeddedCredentials` (Finding 4) and `fetchRaisesOnOversizeResponseBody` (Finding 2). Covers acceptance item 18.
+
+### Cross-cutting concerns
+- **Partition-key invariant**: `fetchedAt` must be captured BEFORE the wrapper call. Replacing `httpClient.send(...)` with `client.get(...)` is one statement; the `Instant.now()` capture above it must remain literally first.
+- **Fetcher SPI signature is frozen** (out_of_scope): `fetch(long, String)` returning `List<NormalizedPost>` does not change. The wrapper's exception type (`SsrfPolicyException`) MUST be a `RuntimeException` so it propagates through the SPI without forcing a checked-exception change.
+- **Spec scheme allowlist is `http,https,ws,wss`** (security.md §SSRF); this ticket implements only `http`/`https`. The wrapper's scheme check must reject `ws`/`wss` for now AND the exception message must not lie about why — say "scheme not allowed: ws" so the future NostrStreamSource ticket can widen the allowlist without contradicting committed test text.
+- **DNS re-resolution per hop** is the TOCTOU defense (security.md §SSRF). `HttpClient.Redirect.NEVER` + manual loop + fresh `InetAddress.getAllByName` per hop is the only correct shape — `Redirect.NORMAL` (currently in RssFetcher) does NOT re-resolve.
+- **"Any peer-IP change on stream sockets is a hard close"** is a `StreamSource` commitment, NOT relevant to this ticket's `Fetcher` path. Don't bake socket-migration logic into `SsrfGuardedHttpClient`.
+- **No defensive code rule** (CLAUDE.md §Engineering rules): constructor validation IS a system boundary (config parsing), so the IllegalArgumentException on zero/null is rule-compliant. Internal helpers (e.g., the IPv4 CIDR matcher called from `IpBlocklist.isBlocked`) MUST NOT add internal-caller null checks.
+- **BOM-managed versions invariant** (M1-001): every new `pom.xml` entry must be version-less; the version pin happens once in parent `dependencyManagement`.
+- **D42 failure-counter contract**: `SsrfPolicyException` propagating from `fetch()` lands at the FetchScheduler (out of scope) as an uncategorized failure — same treatment as `RssFetchException`. Do not catch-and-translate inside `RssFetcher`.
+- **Logging redaction** (security.md §Secrets handling): if/when `SsrfGuardedHttpClient` emits a JUL log line for a policy denial, the URL must already be redacted at the call site. Do not log raw URLs.
+- **No `@QuarkusTest`** on the new tests — matches `RssFetcherTest`, `RssFeedParserTest`, and the `infochat-core` library precedent. The ssrf module ships zero CDI surfaces in this ticket.
+
+### Implementation order
+1. **Module skeleton first**: parent `pom.xml` `<modules>` + `dependencyManagement` entry, then `infochat-ssrf/pom.xml`. Verify with `mvn -B -pl infochat-ssrf clean compile` that the empty module builds.
+2. **`UrlRedactor`** next — pure function, no deps, used by the next two steps' tests and by RssFetcher; landing it first lets later tests assert against its exact output.
+3. **`IpBlocklist`** + `IpBlocklistTest` — pure function, no network. Lock the address-classification surface before the HTTP client depends on it.
+4. **`SsrfGuardedHttpClient`** + `SsrfGuardedHttpClientTest` — uses both prior classes. Use `HttpServer` localhost fixture (test-mode blocklist override).
+5. **`RssFeedParser.java`** item-count cap — narrowest possible diff (one constant + two counter sites). Land before the RssFetcher rewire because the existing `RssFetcherTest` parses fixture XML.
+6. **`RssFetcher.java`** wrapper swap + `UrlRedactor` calls + javadoc edit. Then update `RssFetcherTest` (fixture migrates to test-mode override, two new tests added).
+7. **Full `mvn -B clean verify` from repo root** — DoD-mandated.
+
+### Risks
+- **`HttpClient.send` for HEAD vs GET asymmetry** — spec says HTTP-shaped fetchers support GET and HEAD only. DoD names only `get(URI)`. Provider's `/add-source` HEAD probe is out_of_scope, so v1 surface is GET-only. If reviewer flags missing HEAD, escalation: **defer** (separate Provider ticket per out_of_scope item 1) — do NOT scope-creep.
+- **Item-count cap interplay with redirect cap** — the DoD doesn't constrain interaction; default 1000 items × 3 redirect hops is independent. No risk if the two counters are scoped to their own contexts.
+- **Test seam vs feature flag boundary** — the ticket's implementation note "IpBlocklist override is an API surface, not a flag" forbids `infochat.ssrf.test.permit-loopback`-style config. Implementation MUST use the package-private constructor. If a hidden config path appears in PR, reviewer fails it as defensive/feature-flag drift.
+- **`Redirect.NEVER` + manual loop may interact with JDK HttpClient internals** (e.g., HTTP/2 server push, `Expect: 100-continue`). RSS feeds in v1 are HTTP/1.1 GETs; risk is bounded by the redirect cap and body-cap.
+- **`files_budget: 12` is exactly hit** — adding any extra file (e.g., a logging helper, an inner enum extracted) trips the cap. If `SsrfGuardedHttpClient` grows a `ResponseBodyReader` companion file, inline it as a nested class. Escalation if budget pressure surfaces: **refine** or refactor to use nested classes (prefer the latter).
+- **`com.sun.net.httpserver.HttpServer` is JDK-internal** — used by `RssFetcherTest` already; no new precedent. No risk.
+
+### Out-of-scope (echoed from ticket)
+- Provider-side `/add-source` URL-validation HEAD/GET probe (separate later ticket)
+- WebSocket (ws/wss) wrapping (NostrStreamSource ticket consumes IpBlocklist policy class but its transport wrapper is separate)
+- FetchScheduler / @Scheduled wiring / per-tick cadence (T1-C @Priority(400))
+- outbox sink, RAW-row INSERT, post-table write, OutboxRehydrator, LISTEN/NOTIFY new_post, provider_state, NewPostReconciler (T1-C)
+- Stage 1 HTML sanitization, NFKC normalization, regex redaction, canonical-body UID hashing (T1-D)
+- Bluesky / Nitter / Reddit / YouTube / Odysee fetcher implementations (each Tier-3 T3-B ticket)
+- source-row UPDATE for last_fetch_at / last_success_at / consecutive_failures (FetchScheduler's responsibility per D42)
+- pagination cap counter, admin-notification on saturation, single-tick page-walk
+- retry / backoff / Retry-After / per-source politeness (FetchScheduler boundary)
+- change to `io.infochat.core.ingest.Fetcher` SPI or `NormalizedPost` record
+- V1..V8 Flyway migrations (migration_touch: false)
+- LLM tool surface, tool registry, prompt-injection sanitizer, LLM-output redactor
+- audit_log writes (SSRF policy denials logged via JUL with URL pre-redacted by UrlRedactor)
