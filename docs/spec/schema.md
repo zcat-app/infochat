@@ -267,11 +267,11 @@ connect with (see decision D34 and `security.md`).
   hostile/unknown and the re-eval job may still touch it." Each post
   has a stable **UID** derived deterministically from `(source_id,
   upstream_identifier)` — the per-source canonical id (RSS `<guid>`,
-  Nostr event id, Bluesky AT-URI, etc.) — with a content-hash
-  fallback when the source provides no usable upstream identifier
-  (canonicalization rules: §UID derivation below). The UID is unique
-  globally and is the dedup key for refetches and cross-relay
-  redelivery (decision D38). It is also the user-visible handle for
+  Nostr event id, Bluesky AT-URI, etc.; every Fetcher must produce
+  a non-null upstream identifier — §UID derivation below). The UID
+  is unique globally and is the dedup key for refetches and
+  cross-relay redelivery (decision D38). It is also the user-visible
+  handle for
   `/save`, `/unsave`, and quarantine review.
 - **Post entity.** Named entities extracted from a post; used for Tier-2
   cross-source linking (decision D6: hybrid named-entity match for
@@ -320,33 +320,39 @@ The post UID is stable globally across Collectors and across
 re-fetches; it is the dedup key for refetches and cross-relay
 redelivery (decision D38).
 
-- When the source provides a stable upstream identifier (RSS `<guid>`,
-  Nostr event id, Bluesky AT-URI, etc.) the UID is
-  `sha256(source_id || '|' || upstream_identifier)` lower-case
-  hex-encoded.
-- When the source provides no usable upstream identifier, the UID
-  falls back to `sha256(source_id || '|' || canonical_body)`
+- Every Fetcher / StreamSource SPI implementation MUST produce a
+  non-null `upstream_identifier` (RSS `<guid>` or `<link>`, Atom
+  `<id>`, Bluesky AT-URI, Nostr event id, Reddit fullname, YouTube
+  video id, etc.). Items lacking a usable upstream identifier are
+  rejected at the Fetcher boundary; they never reach the outbox.
+  The SPI contract is non-nullable (`NormalizedPost.upstreamIdentifier`)
+  and each Fetcher's integration test asserts the rejection
+  behavior on malformed input.
+- The UID is `sha256(source_id || '|' || upstream_identifier)`
   lower-case hex-encoded.
-- The **canonical body** is the Unicode-NFKC-normalized text body
-  with source-kind-specific volatile sections stripped (e.g. for
-  RSS: ad-tracking query parameters and the `<pubDate>` element are
-  removed before hashing). The per-kind canonicalization rules live
-  in design notes; the requirement that the rule exists per kind is
-  spec.
 
-The canonicalization step closes the brute-mutation evasion path:
-two minimally different bodies that share semantic content (because
-only volatile metadata changed) hash to the same UID and dedup
-correctly.
+UID derivation runs **before Stage 1**, against the raw fetched
+upstream identifier (after transport decoding but before HTML
+sanitization or regex redaction). This guarantees UID stability
+across refetch and across `/quarantine approve` lifting redactions:
+the same upstream content produces the same UID regardless of how
+many quarantine cycles it has been through.
 
-UID derivation runs **before Stage 1**, against the raw fetched body
-(after transport decoding but before HTML sanitization, NFKC
-normalization, or regex redaction). Canonicalization strips
-source-kind volatile metadata only, never system-generated artifacts
-such as `[REDACTED:<id>]` placeholders. This guarantees UID
-stability across refetch and across `/quarantine approve` lifting
-redactions: the same upstream content produces the same UID
-regardless of how many quarantine cycles it has been through.
+v1 deliberately omits a content-hash fallback for ID-less sources.
+Every planned v1 source kind has a protocol-mandated upstream
+identifier, so the SPI rejects ID-less items at the boundary
+rather than synthesizing UIDs from the body. The cost avoided is
+the canonicalization step a content-hash UID would require: NFKC
+normalization plus per-kind volatile-section stripping introduces
+adversarial collision surface (NFKC homoglyph / ZWJ collisions
+under attacker-chosen bodies), cross-JRE NFKC implementation drift
+(deployments on different JDK versions silently compute different
+UIDs for the same body), and canonicalization-rule version drift
+(any future rule change breaks dedup against older posts). If a
+future source kind genuinely lacks IDs (e.g. an HTML-only blog
+scrape without permalinks), this section is amended together with
+the SPI loosening and the per-kind canonicalization rules in one
+coordinated change.
 
 ### Per-user state (scope-independent)
 

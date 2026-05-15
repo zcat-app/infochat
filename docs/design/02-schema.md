@@ -597,12 +597,18 @@ CREATE TABLE scope_preferences (
 CREATE TABLE post (
   id                  UUID NOT NULL DEFAULT gen_random_uuid(),
   uid                 TEXT NOT NULL,                  -- spec §UID derivation: sha256(source_id ||
-                                                      --   '|' || (upstream_identifier OR canonical_body))
-                                                      --   lower-case hex. Stable globally; computed
-                                                      --   BEFORE Stage 1 against the raw fetched body.
+                                                      --   '|' || upstream_identifier) lower-case hex.
+                                                      --   Stable globally; computed BEFORE Stage 1
+                                                      --   against the raw fetched upstream identifier.
+                                                      --   v1 SPI requires non-null upstream_identifier;
+                                                      --   no content-hash fallback (spec §UID derivation).
   source_id           UUID NOT NULL REFERENCES source(id),
   upstream_identifier TEXT,                           -- guid, AT-URI, Nostr event id, …
-                                                      --   NULL when only content-hash UID applies.
+                                                      --   Non-null in v1 (every Fetcher must produce a
+                                                      --   non-null identifier per spec §UID derivation;
+                                                      --   the column is left nullable in the schema so
+                                                      --   a future SPI loosening for ID-less sources
+                                                      --   doesn't require a migration).
                                                       --   Cap 2048 chars (TOAST-DoS guard for
                                                       --   malicious feeds pushing multi-MB GUIDs);
                                                       --   beyond the cap the fetcher hashes the
