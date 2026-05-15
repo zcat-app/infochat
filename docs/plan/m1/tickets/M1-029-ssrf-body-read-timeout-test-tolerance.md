@@ -39,12 +39,36 @@ test_plan:
     - infochat-ssrf/src/test/java/io/infochat/ssrf/IpBlocklistTest.java (M1-024)
     - all prior M1-024, M1-025, M1-026 tests
 spec_refs:
-  - docs/spec/security.md §Network controls (only as the threat-surface
-    that the SUT defends; this ticket touches the test, not the SUT)
+  - docs/spec/security.md §SSRF and outbound connections (only as the
+    threat-surface that the SUT defends; this ticket touches the test,
+    not the SUT)
 decision_refs: []
 reviews: []
-escalations: []
-revisions: []
+escalations:
+  - date: 2026-05-15
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      SPEC-REFS-VALID FAIL — frontmatter `spec_refs:` entry
+      `docs/spec/security.md §Network controls` does not resolve to any
+      heading in that file. The correct heading is
+      `## SSRF and outbound connections` (line 120 of
+      docs/spec/security.md). Fix: change the spec_ref anchor to
+      `§SSRF and outbound connections`.
+revisions:
+  - date: 2026-05-15
+    reason: clarity-fail rework — fix non-existent spec_refs anchor and resolve the prose-vs-code contradiction in the Implementation notes
+    prior_values: |
+      spec_refs:
+        - docs/spec/security.md §Network controls (only as the threat-surface
+          that the SUT defends; this ticket touches the test, not the SUT)
+      Implementation notes "Replacement shape" code snippet used
+      `readTimeout.toMillis() + 5_000` as the upper bound, contradicting
+      the prose directive "reference that value, don't hardcode 30_000"
+      and breaking acceptance item 3's grep alternatives
+      (requestTimeout | Duration.ofSeconds(30) | 30_000 | 30000) which
+      did not match `5_000`. The §"Network controls" anchor resolved to
+      ANCHOR-NOT-FOUND; the correct heading in docs/spec/security.md
+      is "## SSRF and outbound connections" at line 120.
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -98,21 +122,35 @@ jitter without weakening the actual correctness check.
       "timeout must fire within readTimeout + 500ms; elapsed="
       + elapsed + "ms (readTimeout=" + readTimeout.toMillis() + "ms)");
   ```
-- Replacement shape (the request timeout is `Duration.ofSeconds(30)`
+- Replacement shape. The request timeout is `Duration.ofSeconds(30)`
   in this test per the `SsrfGuardedHttpClient` constructor call
-  ~line 335; reference that value, don't hardcode `30_000`):
+  ~line 335. Pull that value into a `requestTimeout` local variable
+  so the assertion can reference it (don't hardcode `30_000`); the
+  assertion's upper bound is then `requestTimeout.toMillis()` — the
+  meaningful boundary "elapsed < request-level timeout" per the DoD:
   ```java
-  assertTrue(elapsed < (readTimeout.toMillis() + 5_000),
-      "per-read watchdog must fire well before the request-level "
-      + "timeout (30s) — if elapsed is near the request timeout, "
-      + "it's the wrong code path firing; elapsed="
-      + elapsed + "ms (readTimeout=" + readTimeout.toMillis() + "ms)");
+  // ~line 335 area: introduce the local before the constructor call
+  Duration requestTimeout = Duration.ofSeconds(30);
+  // ... pass requestTimeout to the SsrfGuardedHttpClient constructor
+  //     in place of the inline Duration.ofSeconds(30) ...
+
+  // ~line 348: the wall-clock upper bound
+  assertTrue(elapsed < requestTimeout.toMillis(),
+      "per-read watchdog must fire before the request-level "
+      + "timeout (" + requestTimeout.toSeconds() + "s) — if elapsed "
+      + "is near the request timeout, it's the wrong code path firing; "
+      + "elapsed=" + elapsed + "ms (readTimeout="
+      + readTimeout.toMillis() + "ms, requestTimeout="
+      + requestTimeout.toMillis() + "ms)");
   ```
-  5s tolerance leaves abundant headroom for scheduler jitter,
-  GC pauses, and CI load while still falsifying "the per-read
-  watchdog never fired and the request-level timeout eventually
-  triggered instead" (which would yield elapsed ~ 30000ms, well
-  above 5s).
+  Using `requestTimeout.toMillis()` (≈30000ms) as the upper bound
+  leaves abundant headroom for scheduler jitter, GC pauses, and CI
+  load while still falsifying "the per-read watchdog never fired and
+  the request-level timeout eventually triggered instead" — that
+  failure mode would yield elapsed ≥ 30000ms, violating the bound.
+  The assertion is satisfied by the per-read watchdog firing at any
+  point before the request-level timeout would, which is the
+  correctness boundary the DoD names.
 - Alternative: drop the wall-clock assertion entirely and rely
   on the exception-type + message-prefix assertions to confirm
   the per-read watchdog fired (the request-level timeout would
