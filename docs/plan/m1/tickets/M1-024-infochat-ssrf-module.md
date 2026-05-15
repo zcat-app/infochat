@@ -41,6 +41,130 @@ reviews:
       files: 14
       added: 1253
       removed: 52
+redteam_findings:
+  - date: 2026-05-15
+    category: INFO-LEAK
+    severity: high
+    promise: |
+      "DNS-resolved IPs are checked against a blocklist of private,
+      loopback, link-local, multicast, CGNAT, and cloud-metadata ranges
+      (notably `169.254.169.254` and IPv6 equivalents) **plus the host's
+      own non-loopback interfaces**." (security.md §SSRF and outbound
+      connections)
+    gap: |
+      infochat-ssrf/src/main/java/io/infochat/ssrf/IpBlocklist.java
+      enumerates loopback, link-local, multicast, RFC1918, CGNAT, ULA —
+      but does NOT enumerate the host's own non-loopback interfaces (no
+      NetworkInterface.getNetworkInterfaces() walk, no comparison against
+      the local machine's bound IPs). The spec lists this category as a
+      first-class blocklist item; the diff omits it.
+    repro: |
+      Operator runs the Collector on a VPS with public IP 198.51.100.50
+      and a private interface 10.0.0.50 hosting an internal admin panel
+      on 10.0.0.50:9000. Attacker registers `evil.example` whose A record
+      returns 198.51.100.50 (the box's own public IP). IpBlocklist
+      categorically allows public IPs, so a hostile bootstrap-sources
+      entry (or future /add-source) for `http://evil.example:9000/feed.xml`
+      routes to the box itself, bypassing perimeter filtering.
+    suggested_fix_class: trust-boundary-tightening
+  - date: 2026-05-15
+    category: INFO-LEAK
+    severity: high
+    promise: |
+      "DNS is re-resolved after every redirect (TOCTOU defense); the IP
+      blocklist re-applies each hop." (security.md §SSRF and outbound
+      connections) — the parent paragraph commits to a "DNS-rebind defense"
+      as a load-bearing wrapper feature.
+    gap: |
+      SsrfGuardedHttpClient.validate() resolves DNS via
+      InetAddress.getAllByName(host) and applies the blocklist; the
+      subsequent httpClient.send(request, …) performs its OWN independent
+      DNS lookup using the URI hostname for the actual TCP connect. The
+      validate-time IP set is never pinned, and the connect-time
+      resolution is not gated. The redirect-loop re-resolution closes
+      the cross-hop window but does nothing for the within-hop window.
+    repro: |
+      Attacker controls authoritative DNS for `rebind.evil.example` with
+      TTL=0; the server answers (1) 8.8.8.8 to the validate query, then
+      (2) 169.254.169.254 to the immediately-following connect query.
+      Operator submits `http://rebind.evil.example/feed.xml`. validate()
+      sees 8.8.8.8 → blocklist passes. httpClient.send() re-resolves and
+      gets 169.254.169.254, dials it, returns the IMDS document as the
+      "feed". The response body is in-process and proceeds into ingest.
+    suggested_fix_class: trust-boundary-tightening
+  - date: 2026-05-15
+    category: INFO-LEAK
+    severity: medium
+    promise: |
+      "DNS-resolved IPs are checked against a blocklist of private,
+      loopback, link-local, multicast, CGNAT, and cloud-metadata ranges"
+      (security.md §SSRF and outbound connections). "Loopback" is the
+      listed category; the wrapper is fail-closed.
+    gap: |
+      IpBlocklist.isBlockedV4 does not block 0.0.0.0/8 (the IPv4
+      "this host" / unspecified range, RFC 1122) or 255.255.255.255
+      (limited broadcast); isBlockedV6 does not block :: (IPv6
+      unspecified). On Linux/BSD/Windows, connect(2) to 0.0.0.0 is
+      rewritten to 127.0.0.1 by the kernel — so a URL of
+      http://0.0.0.0:NNNN/... reaches localhost services while being
+      categorically allowed by the blocklist (byte 0 == 0 falls through
+      every condition).
+    repro: |
+      Hostile bootstrap-sources file (or future /add-source by a
+      compromised user) lists `http://0.0.0.0:5432/feed`. validate()
+      calls InetAddress.getByName("0.0.0.0") → returns the unspecified
+      address, which isBlockedV4 does not match. The dial reaches the
+      local box's Postgres (or any other localhost-bound service) on
+      port 5432 — every same-machine SSRF the loopback range was
+      supposed to prevent.
+    suggested_fix_class: trust-boundary-tightening
+  - date: 2026-05-15
+    category: DOS
+    severity: medium
+    promise: |
+      "Redirect, body-size, connect-timeout, and read-timeout caps are
+      enforced; an unset timeout is a configuration error."
+      (security.md §SSRF and outbound connections)
+    gap: |
+      SsrfGuardedHttpClient validates that connectTimeout and
+      requestTimeout are non-null/non-zero/non-negative — but
+      requestTimeout is the JDK HttpRequest.timeout(), which governs
+      receipt of response *headers*. The body is consumed via
+      BodyHandlers.ofInputStream() and readBounded() blocks indefinitely
+      on in.read(buf) if the upstream dribbles bytes one at a time
+      below the body cap. There is no separate per-read or per-body
+      wall-clock timeout. The spec calls out "read-timeout caps" as
+      an enforced cap; the diff enforces no read timeout on the body
+      stream.
+    repro: |
+      Attacker hosts http://attacker.example/slow.xml that sends
+      Content-Length: 5000000, then 200 OK headers immediately, then
+      trickles one byte every 60 seconds. The request-timeout fires
+      only on header receipt, so it passes. readBounded enters the
+      read loop and blocks per-read indefinitely (within the body cap,
+      ~10 MiB at 1 byte/min ≈ 19 years), holding a fetcher thread.
+      Multiplied across a dozen sources from the same attacker, the
+      FetchScheduler stalls.
+    suggested_fix_class: rate-limit
+redteam_out_of_model:
+  - date: 2026-05-15
+    note: |
+      Port-based filtering — the wrapper does not restrict destination
+      ports. A URL like http://public-host:22/ or http://public-host:25/
+      will dial those ports. Spec lists IP-range and scheme as the gates,
+      not port; flagged for operator review.
+  - date: 2026-05-15
+    note: |
+      URI parser ambiguity / IDN homograph — URI.getHost() returns
+      punycode form, which InetAddress.getAllByName resolves correctly.
+      Spec does not commit to a separate normalization step; reduces to
+      the DNS-rebind question.
+  - date: 2026-05-15
+    note: |
+      Connection pool reuse — the shared httpClient may reuse a TCP
+      connection to a previously-validated host without re-resolving
+      DNS on a future call. Spec is silent on per-call connection
+      isolation; defense-in-depth note only.
 files_budget: 12
 files_scope:
   - pom.xml
