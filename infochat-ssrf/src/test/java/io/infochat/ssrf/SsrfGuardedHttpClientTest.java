@@ -11,10 +11,13 @@ import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URI;
+import java.net.UnknownHostException;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -119,6 +122,7 @@ class SsrfGuardedHttpClientTest {
             new LoopbackPermitting(),
             Duration.ofSeconds(2),
             Duration.ofSeconds(2),
+            Duration.ofSeconds(5),
             1024L,
             3);
 
@@ -196,6 +200,7 @@ class SsrfGuardedHttpClientTest {
                 new IpBlocklist(),
                 null,
                 Duration.ofSeconds(1),
+                Duration.ofSeconds(1),
                 1024L,
                 3));
         assertTrue(ex.getMessage().contains("timeout must be configured"),
@@ -210,6 +215,7 @@ class SsrfGuardedHttpClientTest {
                 new IpBlocklist(),
                 Duration.ofSeconds(1),
                 Duration.ZERO,
+                Duration.ofSeconds(1),
                 1024L,
                 3));
         assertTrue(ex.getMessage().contains("timeout must be configured"),
@@ -217,10 +223,136 @@ class SsrfGuardedHttpClientTest {
             + "\"timeout must be configured\" prefix");
     }
 
+    // -----------------------------------------------------------------
+    // M1-025 within-hop DNS pinning (Finding 2: INFO-LEAK / high). The
+    // spec's "DNS-rebind defense" requires the IPs the wrapper
+    // validated to be the SAME IPs the JDK HttpClient connects to —
+    // no independent DNS lookup between validate() and send().
+    // -----------------------------------------------------------------
+
+    @Test
+    void connectUsesValidationTimeIpsNotFreshLookup() throws Exception {
+        // Server bound to 127.0.0.1 returns 200 OK + a small body.
+        server.createContext("/pin", exchange -> {
+            byte[] body = "pinned".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, body.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(body);
+            }
+        });
+
+        // The seam returns [127.0.0.1] on the first invocation (the
+        // wrapper's validate step) and [192.0.2.1] (TEST-NET-1,
+        // unreachable) on any subsequent invocation. If the wrapper
+        // calls the seam a second time, the test fails on the
+        // exactly-once assertion. If the JDK performs an independent
+        // DNS lookup for the .invalid hostname (rather than honoring
+        // our pin), the connect fails with UnknownHostException and
+        // the 200-status assertion fails.
+        AtomicInteger seamCalls = new AtomicInteger();
+        Function<String, List<InetAddress>> seam = host -> {
+            int n = seamCalls.incrementAndGet();
+            try {
+                return List.of(n == 1
+                    ? InetAddress.getByName("127.0.0.1")
+                    : InetAddress.getByName("192.0.2.1"));
+            } catch (UnknownHostException e) {
+                throw new IllegalStateException(e);
+            }
+        };
+
+        SsrfGuardedHttpClient client = new SsrfGuardedHttpClient(
+            new LoopbackPermitting(),
+            Duration.ofSeconds(2),
+            Duration.ofSeconds(5),
+            Duration.ofSeconds(5),
+            10L * 1024,
+            3,
+            seam);
+
+        // .invalid TLD (RFC 6761) is reserved as never-resolvable, so
+        // the JDK builtin would fail the lookup. Only the pin makes
+        // this succeed.
+        HttpResponse<byte[]> response = client.get(
+            URI.create("http://ssrf-pin-test.invalid:" + port + "/pin"));
+
+        assertEquals(200, response.statusCode(),
+            "wrapper must have connected to 127.0.0.1 (the pin), not "
+            + "performed an independent JDK lookup of the .invalid host");
+        assertEquals(1, seamCalls.get(),
+            "seam must be invoked exactly once (validate-time only); "
+            + "a second invocation would indicate the wrapper called "
+            + "the seam again rather than pinning the JDK lookup");
+    }
+
+    // -----------------------------------------------------------------
+    // M1-025 per-read body wall-clock timeout (Finding 4: DOS /
+    // medium). The JDK's HttpRequest.timeout() bounds only HEADERS;
+    // a malicious upstream that dribbles body bytes one per minute
+    // can hold a fetcher thread for ~19 years (within the 10 MiB
+    // body cap). The wrapper's readBounded watchdog must fire when
+    // an individual in.read() does not return within readTimeout.
+    // -----------------------------------------------------------------
+
+    @Test
+    void bodyReadTimeoutFiresOnSlowUpstream() {
+        Duration readTimeout = Duration.ofSeconds(1);
+        server.createContext("/slow", exchange -> {
+            exchange.getResponseHeaders().add("Content-Type", "application/octet-stream");
+            exchange.sendResponseHeaders(200, 5_000_000);
+            OutputStream out = exchange.getResponseBody();
+            try {
+                // Write headers + a handful of bytes immediately so
+                // the JDK HttpClient receives the response headers
+                // (HttpRequest.timeout() bounds headers only). Then
+                // stall longer than readTimeout — the per-read body
+                // watchdog must fire.
+                out.write(new byte[16]);
+                out.flush();
+                Thread.sleep(readTimeout.multipliedBy(2).toMillis());
+                // Writes after the wrapper closes the connection will
+                // throw; that's fine, the wrapper has already raised.
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } catch (IOException e) {
+                // Expected: wrapper closed the connection after timeout.
+            } finally {
+                try {
+                    out.close();
+                } catch (IOException ignored) {
+                    // Connection already gone.
+                }
+            }
+        });
+
+        SsrfGuardedHttpClient client = new SsrfGuardedHttpClient(
+            new LoopbackPermitting(),
+            Duration.ofSeconds(2),
+            // Long request-timeout so the failure cannot be the
+            // request-level timeout instead of the per-read watchdog.
+            Duration.ofSeconds(30),
+            readTimeout,
+            10L * 1024 * 1024,
+            3);
+
+        long start = System.currentTimeMillis();
+        SsrfPolicyException ex = assertThrows(SsrfPolicyException.class,
+            () -> client.get(URI.create("http://127.0.0.1:" + port + "/slow")));
+        long elapsed = System.currentTimeMillis() - start;
+
+        assertTrue(ex.getMessage().startsWith("body read timeout"),
+            "must surface the literal \"body read timeout\" prefix; "
+            + "got: " + ex.getMessage());
+        assertTrue(elapsed < (readTimeout.toMillis() + 500),
+            "timeout must fire within readTimeout + 500ms; elapsed="
+            + elapsed + "ms (readTimeout=" + readTimeout.toMillis() + "ms)");
+    }
+
     private SsrfGuardedHttpClient testModeClient() {
         return new SsrfGuardedHttpClient(
             new LoopbackPermitting(),
             Duration.ofSeconds(2),
+            Duration.ofSeconds(5),
             Duration.ofSeconds(5),
             10L * 1024,
             3);

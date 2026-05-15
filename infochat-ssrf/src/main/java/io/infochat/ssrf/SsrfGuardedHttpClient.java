@@ -12,7 +12,18 @@ import java.net.http.HttpHeaders;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Function;
 
 /**
  * Fail-closed outbound HTTP gate for Collector and Provider per
@@ -32,41 +43,51 @@ import java.util.Optional;
  *       {@code user[:password]@} is rejected before the dial. The
  *       {@link UrlRedactor} exists for log/exception output; this
  *       gate prevents credential laundering at intake.</li>
- *   <li><strong>DNS resolution</strong> — every resolved address is
- *       checked against {@link IpBlocklist}; ANY blocked address in
- *       the result set rejects the request.</li>
- *   <li><strong>HTTP send</strong> with non-zero connect + request
- *       timeouts, {@code Redirect.NEVER}, and a length-bounded body
- *       reader (default 10 MiB).</li>
+ *   <li><strong>DNS resolution</strong> — the resolver seam returns
+ *       the candidate {@link InetAddress} set; every entry is
+ *       checked against {@link IpBlocklist}; ANY blocked address
+ *       rejects the request.</li>
+ *   <li><strong>DNS pinning (M1-025, Finding 2 remediation)</strong>
+ *       — the IP set just validated is installed in the JVM-wide
+ *       {@link PinnedDnsResolver.Provider}'s pin slot for the
+ *       hostname, so the subsequent JDK {@code HttpClient.send}
+ *       resolves the host to those same IPs. The wrapper holds the
+ *       provider's {@link ReentrantLock} for the duration of the
+ *       call, serializing concurrent wrapper invocations JVM-wide.
+ *       This closes the within-hop DNS-rebind window the M1-024
+ *       redteam flagged: validate-time and connect-time DNS results
+ *       are now provably identical.</li>
+ *   <li><strong>HTTP send</strong> via a per-call
+ *       {@link HttpClient} (no connection pool reuse across calls,
+ *       so cached connections cannot leak DNS state) with non-zero
+ *       connect + request timeouts, {@code Redirect.NEVER}, and a
+ *       per-read length- AND wall-clock-bounded body reader
+ *       (default 10 MiB + 30 s per read).</li>
  *   <li><strong>Redirect handling</strong> — on 3xx the wrapper
  *       parses the {@code Location} header, increments a per-call
- *       counter, and re-enters the pipeline from step 1. JDK
- *       {@code Redirect.NORMAL} does NOT re-resolve DNS on follow,
- *       which leaves a DNS-rebind window the spec explicitly
- *       closes ("DNS is re-resolved after every redirect"). The
- *       redirect cap (default 3) bounds the attacker window.</li>
+ *       counter, and re-enters the pipeline from step 1, REPLACING
+ *       the pin slot (still under the same lock).</li>
  * </ol>
  *
- * <p>Production callers always use the no-arg constructor, which
- * wires the strict {@link IpBlocklist}. The package-private
- * constructor accepting an arbitrary {@link IpBlocklist} is for the
- * {@code SsrfGuardedHttpClientTest} fixture only: tests that need
- * to dial a localhost {@code HttpServer} construct an explicit
- * non-default {@link IpBlocklist} that permits 127.0.0.1. The
- * carve-out is a deliberate API surface, NOT a global flag —
- * accidentally enabling it in production requires passing a custom
- * {@link IpBlocklist} instance, which is impossible to do by
- * configuration mistake.
+ * <p>Production callers always use the no-arg constructor. The
+ * parameterized constructor is the test-mode seam plus a knob
+ * surface for future per-source policy. The package-private
+ * resolver-seam constructor lets tests substitute the validation-
+ * time DNS resolver (separate from the JVM-wide pinning resolver).
  *
- * <p>This class is thread-safe by sharing one immutable
- * {@link HttpClient} and stateless {@link IpBlocklist}; one wrapper
- * instance can be reused across calls.
+ * <p>This class is NOT itself thread-safe for the pinning surface
+ * — the static pin slot is JVM-wide. Multiple wrapper instances can
+ * coexist, but concurrent {@link #get(URI)} calls (across instances
+ * or threads) serialize on the {@link PinnedDnsResolver.Provider}
+ * lock.
  */
 public final class SsrfGuardedHttpClient {
 
     private static final Duration DEFAULT_CONNECT_TIMEOUT = Duration.ofSeconds(10);
 
     private static final Duration DEFAULT_REQUEST_TIMEOUT = Duration.ofSeconds(30);
+
+    private static final Duration DEFAULT_READ_TIMEOUT = Duration.ofSeconds(30);
 
     // 10 MiB — large enough for the longest RSS / Atom feeds observed
     // in the wild, small enough to bound the worst-case allocation
@@ -81,24 +102,50 @@ public final class SsrfGuardedHttpClient {
 
     private final IpBlocklist blocklist;
 
+    private final Duration connectTimeout;
+
     private final Duration requestTimeout;
+
+    private final Duration readTimeout;
 
     private final long bodyCap;
 
     private final int redirectCap;
 
-    private final HttpClient httpClient;
+    private final Function<String, List<InetAddress>> resolverSeam;
 
     /**
-     * Production constructor. Wires the strict {@link IpBlocklist}
-     * and the profile-driven default timeouts / caps.
+     * Production constructor. Wires the strict {@link IpBlocklist},
+     * profile-driven default timeouts / caps, and
+     * {@link InetAddress#getAllByName} as the validation resolver.
      */
     public SsrfGuardedHttpClient() {
         this(new IpBlocklist(),
              DEFAULT_CONNECT_TIMEOUT,
              DEFAULT_REQUEST_TIMEOUT,
+             DEFAULT_READ_TIMEOUT,
              DEFAULT_BODY_CAP,
              DEFAULT_REDIRECT_CAP);
+    }
+
+    /**
+     * M1-024 parameterized constructor — preserved as a stable
+     * public API surface for cross-module test fixtures
+     * (notably {@code infochat-collector}'s {@code RssFetcherTest})
+     * that constructed the wrapper before M1-025 introduced
+     * {@code readTimeout}. Supplies the default read timeout so
+     * existing M1-024 call sites continue to compile and behave
+     * identically. New M1-025 call sites that need to customize
+     * the read-timeout use the 6-arg form below.
+     */
+    public SsrfGuardedHttpClient(IpBlocklist blocklist,
+                                 Duration connectTimeout,
+                                 Duration requestTimeout,
+                                 long bodyCap,
+                                 int redirectCap) {
+        this(blocklist, connectTimeout, requestTimeout,
+             DEFAULT_READ_TIMEOUT, bodyCap, redirectCap,
+             defaultResolverSeam());
     }
 
     /**
@@ -116,8 +163,29 @@ public final class SsrfGuardedHttpClient {
     public SsrfGuardedHttpClient(IpBlocklist blocklist,
                                  Duration connectTimeout,
                                  Duration requestTimeout,
+                                 Duration readTimeout,
                                  long bodyCap,
                                  int redirectCap) {
+        this(blocklist, connectTimeout, requestTimeout, readTimeout,
+             bodyCap, redirectCap, defaultResolverSeam());
+    }
+
+    /**
+     * Package-private resolver-seam constructor. Lets tests replace
+     * the validation-time DNS lookup with a deterministic
+     * {@link Function} without installing a JVM-global resolver
+     * provider — the seam covers the wrapper's own resolve-and-
+     * validate step. The JVM-wide pinning resolver remains in
+     * effect and forces the JDK {@link HttpClient}'s actual
+     * connect-time DNS to match what the seam returned.
+     */
+    SsrfGuardedHttpClient(IpBlocklist blocklist,
+                          Duration connectTimeout,
+                          Duration requestTimeout,
+                          Duration readTimeout,
+                          long bodyCap,
+                          int redirectCap,
+                          Function<String, List<InetAddress>> resolverSeam) {
         if (blocklist == null) {
             throw new IllegalArgumentException("blocklist must be configured");
         }
@@ -127,24 +195,35 @@ public final class SsrfGuardedHttpClient {
         if (requestTimeout == null || requestTimeout.isZero() || requestTimeout.isNegative()) {
             throw new IllegalArgumentException("timeout must be configured");
         }
+        if (readTimeout == null || readTimeout.isZero() || readTimeout.isNegative()) {
+            throw new IllegalArgumentException("read timeout must be configured");
+        }
         if (bodyCap <= 0) {
             throw new IllegalArgumentException("body cap must be configured");
         }
         if (redirectCap <= 0) {
             throw new IllegalArgumentException("redirect cap must be configured");
         }
+        if (resolverSeam == null) {
+            throw new IllegalArgumentException("resolver seam must be configured");
+        }
         this.blocklist = blocklist;
+        this.connectTimeout = connectTimeout;
         this.requestTimeout = requestTimeout;
+        this.readTimeout = readTimeout;
         this.bodyCap = bodyCap;
         this.redirectCap = redirectCap;
-        // Redirect.NEVER: we handle redirects manually so each hop
-        // re-runs the scheme / userinfo / DNS pipeline. NORMAL would
-        // follow without re-resolving DNS, leaving a rebind window
-        // the spec explicitly closes.
-        this.httpClient = HttpClient.newBuilder()
-            .connectTimeout(connectTimeout)
-            .followRedirects(HttpClient.Redirect.NEVER)
-            .build();
+        this.resolverSeam = resolverSeam;
+    }
+
+    private static Function<String, List<InetAddress>> defaultResolverSeam() {
+        return host -> {
+            try {
+                return Arrays.asList(InetAddress.getAllByName(host));
+            } catch (UnknownHostException e) {
+                throw new SsrfPolicyException("unknown host: " + host, e);
+            }
+        };
     }
 
     /**
@@ -158,41 +237,63 @@ public final class SsrfGuardedHttpClient {
     public HttpResponse<byte[]> get(URI uri) throws IOException, InterruptedException {
         URI current = uri;
         int redirectCount = 0;
-        while (true) {
-            validate(current);
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(current)
-                .timeout(requestTimeout)
-                .header("Accept", ACCEPT_HEADER)
-                .header("User-Agent", USER_AGENT)
-                .GET()
-                .build();
-            HttpResponse<InputStream> response =
-                httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+        ReentrantLock lock = PinnedDnsResolver.Provider.lock();
+        lock.lock();
+        try {
+            while (true) {
+                List<InetAddress> addresses = resolveAndValidate(current);
 
-            int status = response.statusCode();
-            if (status >= 300 && status < 400) {
-                try (InputStream discard = response.body()) {
-                    // Drain via close(); redirect bodies carry no
-                    // payload we need.
+                // Install the per-hop pin BEFORE constructing the
+                // per-call HttpClient. The JVM-wide resolver consults
+                // the pin slot on every lookup, so the connect's DNS
+                // lookup will return our pinned IPs.
+                PinnedDnsResolver.Provider.installPins(
+                    Map.of(current.getHost(), addresses));
+
+                // Redirect.NEVER — we handle redirects manually so each
+                // hop re-runs scheme / userinfo / DNS pipeline AND
+                // updates the pin slot.
+                HttpClient perCallClient = HttpClient.newBuilder()
+                    .connectTimeout(connectTimeout)
+                    .followRedirects(HttpClient.Redirect.NEVER)
+                    .build();
+                HttpRequest request = HttpRequest.newBuilder()
+                    .uri(current)
+                    .timeout(requestTimeout)
+                    .header("Accept", ACCEPT_HEADER)
+                    .header("User-Agent", USER_AGENT)
+                    .GET()
+                    .build();
+                HttpResponse<InputStream> response =
+                    perCallClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+
+                int status = response.statusCode();
+                if (status >= 300 && status < 400) {
+                    try (InputStream discard = response.body()) {
+                        // Drain via close(); redirect bodies carry no
+                        // payload we need.
+                    }
+                    redirectCount++;
+                    if (redirectCount > redirectCap) {
+                        throw new SsrfPolicyException("redirect cap exceeded");
+                    }
+                    String location = response.headers().firstValue("Location")
+                        .orElseThrow(() -> new SsrfPolicyException(
+                            "redirect response missing Location header"));
+                    current = current.resolve(location);
+                    continue;
                 }
-                redirectCount++;
-                if (redirectCount > redirectCap) {
-                    throw new SsrfPolicyException("redirect cap exceeded");
-                }
-                String location = response.headers().firstValue("Location")
-                    .orElseThrow(() -> new SsrfPolicyException(
-                        "redirect response missing Location header"));
-                current = current.resolve(location);
-                continue;
+
+                byte[] body = readBounded(response);
+                return new BoundedByteArrayResponse(response, body);
             }
-
-            byte[] body = readBounded(response);
-            return new BoundedByteArrayResponse(response, body);
+        } finally {
+            PinnedDnsResolver.Provider.clearPins();
+            lock.unlock();
         }
     }
 
-    private void validate(URI uri) {
+    private List<InetAddress> resolveAndValidate(URI uri) {
         String scheme = uri.getScheme();
         if (scheme == null || !(scheme.equals("http") || scheme.equals("https"))) {
             throw new SsrfPolicyException("scheme not allowed: " + scheme);
@@ -204,48 +305,84 @@ public final class SsrfGuardedHttpClient {
         if (host == null) {
             throw new SsrfPolicyException("host missing from URI");
         }
-        InetAddress[] addresses;
-        try {
-            addresses = InetAddress.getAllByName(host);
-        } catch (UnknownHostException e) {
-            throw new SsrfPolicyException("unknown host: " + host, e);
+        List<InetAddress> addresses = resolverSeam.apply(host);
+        if (addresses == null || addresses.isEmpty()) {
+            throw new SsrfPolicyException("unknown host: " + host);
         }
         for (InetAddress addr : addresses) {
             if (blocklist.isBlocked(addr)) {
                 throw new SsrfPolicyException("blocked IP: " + addr.getHostAddress());
             }
         }
+        return addresses;
     }
 
     private byte[] readBounded(HttpResponse<InputStream> response) throws IOException {
+        // Per-read wall-clock watchdog (M1-025, Finding 4 remediation).
+        // The JDK's HttpRequest.timeout() bounds only the receipt of
+        // response HEADERS; without this watchdog a malicious upstream
+        // can dribble body bytes one per minute and hold a fetcher
+        // thread for hours. We run each in.read(buf) call on a
+        // dedicated single-thread executor and supervise it from the
+        // caller thread; on timeout we cancel the future (interrupting
+        // the read) and raise SsrfPolicyException.
+        ExecutorService readerExecutor = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "ssrf-body-reader");
+            t.setDaemon(true);
+            return t;
+        });
         try (InputStream in = response.body();
              ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             byte[] buf = new byte[8192];
             long total = 0;
-            int n;
-            while ((n = in.read(buf)) != -1) {
+            while (true) {
+                Future<Integer> readFuture = readerExecutor.submit(() -> in.read(buf));
+                int n;
+                try {
+                    n = readFuture.get(readTimeout.toMillis(), TimeUnit.MILLISECONDS);
+                } catch (TimeoutException e) {
+                    readFuture.cancel(true);
+                    throw new SsrfPolicyException(
+                        "body read timeout after " + readTimeout.toMillis() + "ms");
+                } catch (ExecutionException e) {
+                    Throwable cause = e.getCause();
+                    if (cause instanceof IOException io) {
+                        throw io;
+                    }
+                    if (cause instanceof RuntimeException re) {
+                        throw re;
+                    }
+                    throw new IOException("body read failed", cause);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    readFuture.cancel(true);
+                    throw new IOException("interrupted during body read", e);
+                }
+                if (n == -1) {
+                    break;
+                }
                 total += n;
                 if (total > bodyCap) {
-                    // Closing the InputStream via try-with-resources
-                    // cancels the underlying socket so the hostile
-                    // peer cannot continue streaming.
                     throw new SsrfPolicyException(
                         "response body exceeded " + bodyCap + " bytes");
                 }
                 out.write(buf, 0, n);
             }
             return out.toByteArray();
+        } finally {
+            readerExecutor.shutdownNow();
         }
     }
 
     /**
      * Raised on any policy violation in the wrapper pipeline:
      * disallowed scheme, userinfo in URI, blocked IP, oversize
-     * body, exceeded redirect cap. Unchecked because the
-     * {@code Fetcher} SPI signature ({@code fetch(long, String)}
-     * returning {@code List<NormalizedPost>}) does not declare
-     * checked exceptions, so a checked policy exception would
-     * force an SPI change that is out of scope here.
+     * body, exceeded redirect cap, body-read timeout. Unchecked
+     * because the {@code Fetcher} SPI signature
+     * ({@code fetch(long, String)} returning
+     * {@code List<NormalizedPost>}) does not declare checked
+     * exceptions, so a checked policy exception would force an SPI
+     * change that is out of scope here.
      */
     public static final class SsrfPolicyException extends RuntimeException {
 

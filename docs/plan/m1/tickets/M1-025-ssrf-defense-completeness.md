@@ -1,13 +1,235 @@
 ---
 id: M1-025
 title: infochat-ssrf hardening (M1-024 remediation)
-status: pending
+status: done
 created: 2026-05-15
 last_updated: 2026-05-15
+reviews:
+  - round: 1
+    date: 2026-05-15
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 9
+      added: 932
+      removed: 121
+revisions:
+  - date: 2026-05-15
+    reason: |
+      budget-breach refine (pre-impl): the JDK 25 InetAddressResolverProvider
+      SPI does NOT support per-HttpClient or per-instance scoping; it loads
+      ONE resolver per JVM via ServiceLoader, requiring a resource at
+      META-INF/services/java.net.spi.InetAddressResolverProvider. Without
+      that resource the PinnedDnsResolver class is unreachable code (the
+      JDK HttpClient never calls it). The Plan subagent's outline flagged
+      this as Risk 1. Refinement: bump files_budget 6→7 to accommodate
+      the SPI resource, add it to files_scope, and rewrite acceptance
+      items 9/10 to reflect the actual JDK SPI shape (JVM-wide
+      installation + process-level lock that serializes wrapper calls
+      so per-call pinning behavior is preserved without concurrent
+      pin-leakage between calls).
+    prior:
+      files_budget: 6
+      files_scope:
+        - infochat-ssrf/src/main/java/io/infochat/ssrf/IpBlocklist.java
+        - infochat-ssrf/src/main/java/io/infochat/ssrf/SsrfGuardedHttpClient.java
+        - infochat-ssrf/src/test/java/io/infochat/ssrf/IpBlocklistTest.java
+        - infochat-ssrf/src/test/java/io/infochat/ssrf/SsrfGuardedHttpClientTest.java
+        - infochat-ssrf/src/main/java/io/infochat/ssrf/HostInterfaceSet.java
+        - infochat-ssrf/src/main/java/io/infochat/ssrf/PinnedDnsResolver.java
+      acceptance_item_9_excerpt: |
+        "... and exposes a constructor accepting a Map<String, List<InetAddress>>
+         of pinned hostname→IPs. lookupByName(host, lookupPolicy) returns the
+         pinned IPs for hosts in the map and DELEGATES to the platform default
+         for any unmapped host (the platform default is captured at construction
+         via InetAddressResolverProvider's Configuration.builtinResolver())."
+      acceptance_item_10_excerpt: |
+        "... Implementation: install a PinnedDnsResolver for the duration of
+         the get(uri) call (per-call HttpClient instance constructed inside
+         get, with the resolver scoped to that instance — InetAddressResolverProvider
+         supports per-instance scoping via the resolver-provider SPI). The
+         pinning re-applies on each redirect hop (re-resolve + re-pin)."
+escalations:
+  - date: 2026-05-15
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A (pre-implementation escalation). Developer triaged the
+      InetAddressResolverProvider SPI mechanism against JDK 25 before
+      writing any code and surfaced that the per-instance scoping the
+      acceptance items 9-10 describe is not supported by the JDK:
+      the SPI loads ONE provider per JVM via
+      ServiceLoader.load(InetAddressResolverProvider.class), which
+      requires a resource at
+      META-INF/services/java.net.spi.InetAddressResolverProvider
+      listing the provider class. HttpClient.Builder has no
+      .resolver(...) setter; there is no programmatic per-HttpClient
+      scoping. Making the wrapper's DNS pin actually affect
+      HttpClient.send() requires:
+        - one new resource file:
+          infochat-ssrf/src/main/resources/META-INF/services/
+            java.net.spi.InetAddressResolverProvider
+        - the provider class nested inside PinnedDnsResolver.java
+          (no new top-level Java file)
+      The Plan subagent's outline flagged exactly this as Risk 1.
+      The resource file is outside files_scope and would push the
+      file count to 7 (budget: 6).
+clarity_check:
+  date: 2026-05-15
+  verdict: WARN
+  warnings:
+    - "FORWARD-REFERENCE-CHECK: M1-026 is referenced in the \"Alternatives considered\" section as a contingent decomposition target (\"split off Finding 2 into M1-026\") but no M1-026 ticket file exists under docs/plan/m1/tickets/. This is a prose-only reference in an alternatives note (not load-bearing frontmatter), so it does not block start. If the contingency materializes during implementation and the developer actually needs to decompose, a ticket should be filed at that point. No action required before /m1-tick start."
+  blockers: []
+redteam_findings:
+  - date: 2026-05-15
+    category: DOS
+    severity: high
+    promise: |
+      "Redirect, body-size, connect-timeout, and read-timeout caps are
+      enforced; an unset timeout is a configuration error." (security.md
+      §SSRF and outbound connections). The companion expectation,
+      established by M1-024 redteam Finding 4 that this ticket
+      explicitly remediates (acceptance items 13–15 — "the redteam REPRO
+      showed 10 MiB at 1 byte/min ≈ 19 years of held thread"), is that
+      a slow-drip upstream cannot indefinitely hold a fetcher.
+    gap: |
+      infochat-ssrf/src/main/java/io/infochat/ssrf/SsrfGuardedHttpClient.java
+      `readBounded`. The watchdog times each individual `in.read(buf)`
+      call against `readTimeout` (default 30 s). It does NOT bound the
+      total wall-clock duration of the body-read phase. Each fresh read
+      iteration restarts the 30 s window, so an attacker who delivers a
+      single byte just before each 30 s tick keeps `in.read` returning
+      `n=1` repeatedly and the watchdog never fires. Worse,
+      `SsrfGuardedHttpClient.get(uri)` holds
+      `PinnedDnsResolver.Provider.lock()` (a JVM-wide ReentrantLock) for
+      the entire call, including the streaming body read. Per the diff's
+      own commentary "Concurrent wrapper calls serialize on the lock", so
+      a single hostile RSS feed dribbling bytes also blocks every other
+      outbound fetch (Collector RSS, Provider `/add-source` HEAD/GET
+      probes) JVM-wide for the drip's duration.
+    repro: |
+      1) Attacker controls an RSS feed (or any URL the Collector is
+         configured to fetch).
+      2) Server responds 200 with Content-Length: 10485760 (or chunked),
+         sends headers immediately, then writes exactly 1 byte every
+         29 seconds.
+      3) `in.read(buf)` returns n=1 on every call (well under the 30 s
+         watchdog), `total` grows by 1, the 10 MiB cap is never reached.
+      4) The pinning ReentrantLock stays held; the math is
+         10 MiB × 29 s = ~9.6 years per hostile feed, during which every
+         other `SsrfGuardedHttpClient.get(...)` invocation across the
+         Collector + Provider blocks on `lock.lock()`. A single malicious
+         feed → full outbound-HTTP DoS for both services until process
+         restart. The existing `bodyReadTimeoutFiresOnSlowUpstream` test
+         only exercises the "zero bytes for >readTimeout" case (test
+         fixture writes 16 bytes then sleeps), so the drip vector has no
+         regression coverage either.
+    suggested_fix_class: trust-boundary-tightening
+  - date: 2026-05-15
+    category: INFO-LEAK
+    severity: medium
+    promise: |
+      "DNS is re-resolved after every redirect (TOCTOU defense); the IP
+      blocklist re-applies each hop." plus the ticket's own remediation
+      that validate-time and connect-time DNS results are now provably
+      identical (the within-hop DNS-rebind window from M1-024 Finding 2,
+      security.md §SSRF and outbound connections).
+    gap: |
+      infochat-ssrf/src/main/java/io/infochat/ssrf/SsrfGuardedHttpClient.java
+      and PinnedDnsResolver.java `pins.get(host)`. The pin map is keyed
+      by `current.getHost()` — the host string as parsed by java.net.URI,
+      which preserves the case present in the URL text. The JVM-wide
+      forwarding resolver looks the host up in that map with
+      `Map<String,List<InetAddress>>.get(host)`, an equals-based exact-
+      match. If the JDK's HttpClient.send invokes the resolver with a
+      normalized form of the host (case-folded, trailing dot, IDN/
+      punycode transform) that differs from what URI.getHost() returned,
+      `pins.get(host)` returns null and ForwardingResolver falls through
+      to `BUILTIN.lookupByName(host, …)` — the real DNS, with no
+      IpBlocklist re-check. A DNS-rebind adversary controlling the
+      authoritative nameserver can return a public IP at validate-time
+      and a blocked/private IP on the JDK's connect-time lookup, exactly
+      the scenario the pinning was added to defeat.
+    repro: |
+      1) Attacker registers `Evil.Example.COM` (mixed case) and
+         configures the authoritative DNS to return 203.0.113.5 for the
+         first lookup and 192.168.1.1 within the same window.
+      2) Operator adds `http://Evil.Example.COM/feed` via /add-source.
+      3) Wrapper's seam resolves the host to [203.0.113.5], passes
+         IpBlocklist, installs pin under key "Evil.Example.COM".
+      4) JDK HttpClient internally lowercases the host (per common HTTP/
+         DNS normalization conventions) and calls the resolver with
+         "evil.example.com". `pins.get("evil.example.com") == null` →
+         falls through to BUILTIN → real DNS returns 192.168.1.1 →
+         connect lands on the internal target. The pinning never fires,
+         no log distinguishes the miss from a normal lookup. Whether
+         JDK 25 actually lowercases on the resolver call is
+         implementation-defined; the diff has no test asserting that the
+         JDK and URI.getHost() agree on form, so the defense is
+         contingent on undocumented internals. The same hazard applies
+         to trailing-dot variants and IDN ↔ punycode conversion.
+    suggested_fix_class: trust-boundary-tightening
+  - date: 2026-05-15
+    category: INFO-LEAK
+    severity: low
+    promise: |
+      "DNS-resolved IPs are checked against a blocklist of private,
+      loopback, link-local, multicast, CGNAT, and cloud-metadata ranges
+      (notably 169.254.169.254 and IPv6 equivalents) plus the host's
+      own non-loopback interfaces." (security.md §SSRF and outbound
+      connections — present tense, no "as of JVM start" qualifier).
+    gap: |
+      infochat-ssrf/src/main/java/io/infochat/ssrf/IpBlocklist.java and
+      HostInterfaceSet.java. The no-arg IpBlocklist() constructor calls
+      HostInterfaceSet.enumerate() once at construction time and stores
+      the result in a final Set<InetAddress> field. Interfaces that
+      come up after the Collector / Provider start — VPN tunnels
+      established after JVM start, container bridges added by a docker
+      daemon restart, hot-plugged NICs, Kubernetes sidecar IPs assigned
+      post-pod-init — are never added to the set, so a feed URL that
+      resolves to one of those post-startup IPs passes the blocklist.
+      The diff's own javadoc acknowledges this (snapshot intentionally
+      captures interfaces at JVM start; a cloud VM whose IPs change
+      after startup is treated as an out-of-scope refresh-cadence
+      concern) — but the spec text the ticket cites does not carve out
+      a "snapshot at startup" qualifier, so this is the spec-promise-vs-
+      delivery gap the redteam is meant to surface.
+    repro: |
+      1) Operator runs Collector on a host whose primary network
+         presence at JVM start is the public NIC 203.0.113.5.
+      2) Operator subsequently attaches a freshly-allocated EIP
+         203.0.113.99 post-startup.
+      3) Adversary adds an RSS feed whose authoritative DNS returns
+         203.0.113.99 (the host's own current public IP).
+      4) IpBlocklist does NOT block it because HostInterfaceSet.enumerate()
+         ran before the EIP was attached. Routing a feed URL to the
+         host's own current public IP can side-step a perimeter / firewall
+         rule that filters loopback-to-self traffic differently from
+         external-to-self traffic, which is exactly the bypass the spec's
+         "host's own non-loopback interfaces" clause was added to prevent
+         (M1-024 Finding 1 framing).
+    suggested_fix_class: trust-boundary-tightening
+redteam_out_of_model:
+  - date: 2026-05-15
+    note: |
+      The per-call Executors.newSingleThreadExecutor + readFuture.cancel(true)
+      strategy assumes the JDK HttpClient body InputStream honors thread
+      interrupts and closes the underlying socket. If the read is blocked
+      in native socket I/O on certain JDK builds, shutdownNow() will not
+      actually free the thread; orphan reader threads accumulate one per
+      hostile-fetch event. The diff itself flags this in the ticket body's
+      Risks section. Not a documented spec promise, so advisory only — if
+      the high-severity DoS finding above is accepted, the orphan-thread
+      compounding effect is the operational manifestation operators will
+      observe.
 blocked_by:
   - M1-024
 remediates: M1-024
-files_budget: 6
+files_budget: 7
 files_scope:
   - infochat-ssrf/src/main/java/io/infochat/ssrf/IpBlocklist.java
   - infochat-ssrf/src/main/java/io/infochat/ssrf/SsrfGuardedHttpClient.java
@@ -15,6 +237,7 @@ files_scope:
   - infochat-ssrf/src/test/java/io/infochat/ssrf/SsrfGuardedHttpClientTest.java
   - infochat-ssrf/src/main/java/io/infochat/ssrf/HostInterfaceSet.java
   - infochat-ssrf/src/main/java/io/infochat/ssrf/PinnedDnsResolver.java
+  - infochat-ssrf/src/main/resources/META-INF/services/java.net.spi.InetAddressResolverProvider
 complexity: high
 risk: high
 round_cap: 3
@@ -80,8 +303,8 @@ acceptance:
   # for the actual TCP connect. The remediation pins the validation-time
   # IPs for the duration of the connect.
   # ----------------------------------------------------------------------
-  - "A new class `io.infochat.ssrf.PinnedDnsResolver` exists at infochat-ssrf/src/main/java/io/infochat/ssrf/PinnedDnsResolver.java, implements `java.net.spi.InetAddressResolver` (Java 18+; project is on JDK 25 per CLAUDE.md/Stack), and exposes a constructor accepting a `Map<String, List<InetAddress>>` of pinned hostname→IPs. `lookupByName(host, lookupPolicy)` returns the pinned IPs for hosts in the map and DELEGATES to the platform default for any unmapped host (the platform default is captured at construction via `InetAddressResolverProvider`'s `Configuration.builtinResolver()`). grep -E 'implements InetAddressResolver' PinnedDnsResolver.java returns at least one match"
-  - "SsrfGuardedHttpClient.get(uri) pins the DNS resolution per call: the IP set returned by the wrapper's validation-time `InetAddress.getAllByName(host)` is the SAME set used by the JDK HttpClient for the actual TCP connection. The wrapper does NOT allow JDK HttpClient to perform an INDEPENDENT DNS lookup between validate and send. Implementation: install a `PinnedDnsResolver` for the duration of the `get(uri)` call (per-call HttpClient instance constructed inside `get`, with the resolver scoped to that instance — InetAddressResolverProvider supports per-instance scoping via the resolver-provider SPI). The pinning re-applies on each redirect hop (re-resolve + re-pin)"
+  - "A new class `io.infochat.ssrf.PinnedDnsResolver` exists at infochat-ssrf/src/main/java/io/infochat/ssrf/PinnedDnsResolver.java, implements `java.net.spi.InetAddressResolver` (Java 18+; project is on JDK 25 per CLAUDE.md/Stack), and exposes a constructor accepting a `Map<String, List<InetAddress>>` of pinned hostname→IPs plus an `InetAddressResolver` delegate (the platform default). `lookupByName(host, lookupPolicy)` returns the pinned IPs for hosts in the map and DELEGATES to the supplied platform default for any unmapped host. A nested `public static final class` within the same file extends `java.net.spi.InetAddressResolverProvider`; its `get(Configuration)` captures `configuration.builtinResolver()` and returns a JVM-wide forwarding resolver that consults a static, lock-guarded pin slot. The provider is registered for ServiceLoader discovery via the resource file `infochat-ssrf/src/main/resources/META-INF/services/java.net.spi.InetAddressResolverProvider` (single line: the FQN of the nested provider class), so the JDK loads it at JVM startup and routes every `InetAddress.getAllByName` call through it. grep -E 'implements InetAddressResolver' PinnedDnsResolver.java returns at least one match AND grep -E 'extends InetAddressResolverProvider' PinnedDnsResolver.java returns at least one match"
+  - "SsrfGuardedHttpClient.get(uri) pins the DNS resolution per call: the IP set returned by the wrapper's validation-time `InetAddress.getAllByName(host)` is the SAME set used by the JDK HttpClient for the actual TCP connection. The wrapper does NOT allow JDK HttpClient to perform an INDEPENDENT DNS lookup between validate and send. Implementation: because the JDK 25 `InetAddressResolverProvider` SPI loads ONE resolver per JVM at startup (no per-HttpClient scoping), per-call effect is achieved by (a) the JVM-wide forwarding resolver installed via the META-INF/services registration above, (b) a static pin slot guarded by a JVM-wide lock that the wrapper acquires for the duration of the `get(uri)` call, and (c) the wrapper constructing a per-call `HttpClient` inside `get`, setting the pin map for `uri.getHost()`, invoking `send`, then clearing the pin and releasing the lock in a `finally` block. Concurrent wrapper calls serialize on the lock — at most one pin is active per JVM at any moment, so concurrent calls cannot cross-leak pins. The pinning re-applies on each redirect hop: the manual redirect loop, still holding the lock, re-resolves the new target host, re-checks against IpBlocklist, and REPLACES the pin map entry before sending the next hop"
   - "SsrfGuardedHttpClient exposes a package-private constructor (or test-only static factory) accepting an injectable resolver-seam — `Function<String, List<InetAddress>>` — so tests can supply a deterministic `getAllByName` replacement without installing a JVM-global resolver. Production callers always use the no-arg constructor which uses `InetAddress::getAllByName` directly (the constructor-parameter override discipline M1-024 established)"
   - "SsrfGuardedHttpClientTest adds a @Test method `connectUsesValidationTimeIpsNotFreshLookup`: the resolver-seam returns `[127.0.0.1]` on the first invocation and `[<an IP no-one is listening on, e.g. 192.0.2.1 (TEST-NET-1)>]` on the second invocation for the same hostname. The test fixture is the in-process HttpServer bound to 127.0.0.1 + the test-mode IpBlocklist that permits 127.0.0.1 (per M1-024's existing carve-out). Assert: the wrapper's `get` succeeds against the test server (proving the connect went to the FIRST resolution's IP), NOT a connection-refused/timeout against 192.0.2.1 (which would prove the JDK did its own fresh lookup). At least one `assertEquals(200, response.statusCode())` and one assertion that the resolver-seam was invoked exactly once (not twice — the second invocation would indicate the JDK re-resolved)"
 
@@ -230,11 +453,31 @@ loopback range).
 
 Implements `java.net.spi.InetAddressResolver` (Java 18+; this project
 runs on JDK 25 per CLAUDE.md/Stack). Constructor accepts a
-`Map<String, List<InetAddress>>` of pinned hostname→IPs.
-`lookupByName(host, lookupPolicy)` returns the pinned IPs for hosts
-in the map and DELEGATES to the platform default
-(captured via `InetAddressResolverProvider.Configuration.builtinResolver()`)
-for any unmapped host. Thread-safe; immutable map.
+`Map<String, List<InetAddress>>` of pinned hostname→IPs plus an
+`InetAddressResolver delegate` (the platform default, supplied by
+the caller). `lookupByName(host, lookupPolicy)` returns the pinned
+IPs for hosts in the map and DELEGATES to the supplied delegate for
+any unmapped host. Thread-safe; immutable map.
+
+A nested `public static final class` within the same file extends
+`java.net.spi.InetAddressResolverProvider`. Its `get(Configuration)`
+captures `configuration.builtinResolver()` into a static field and
+returns a JVM-wide forwarding resolver. The forwarding resolver,
+per lookup, consults a static pin slot guarded by a JVM-wide
+`ReentrantLock`: if a pin is active, it constructs an ephemeral
+`PinnedDnsResolver(activePins, builtin)` and delegates the lookup
+to it; if no pin is active, it delegates straight to the builtin.
+
+### `META-INF/services/java.net.spi.InetAddressResolverProvider` (NEW)
+
+A one-line resource file at
+`infochat-ssrf/src/main/resources/META-INF/services/java.net.spi.InetAddressResolverProvider`
+containing the FQN of the nested provider class declared in
+`PinnedDnsResolver.java`. ServiceLoader discovers it at JVM startup
+and the JDK installs our provider as the active
+`InetAddressResolverProvider`. Without this file, the SPI does not
+fire and the JDK's default resolver runs unaffected — so the file is
+load-bearing for Finding 2's remediation, not an optional extra.
 
 ### `io.infochat.ssrf.SsrfGuardedHttpClient` (MODIFIED)
 
@@ -281,17 +524,21 @@ unchanged; the wrapper's public API surface is preserved.
 
 ## Implementation notes
 
-- **InetAddressResolver SPI is Java-18+.** The project runs on JDK 25
-  (CLAUDE.md / Stack; `project_quarkus_jdk25` memory). The SPI is
-  `java.net.spi.InetAddressResolver` + `java.net.spi.InetAddressResolverProvider`.
-  The provider is loaded via the standard `META-INF/services` mechanism
-  AND can be installed dynamically per-HttpClient via the builder API
-  (the JDK 18 release notes document this; verify against the JDK 25
-  Javadoc during implementation). If the per-instance scoping turns
-  out to be impractical, the fallback is a JVM-global resolver
-  installed once at startup with per-call pinned-host registration —
-  but this requires careful synchronization to avoid cross-call
-  pinning leakage.
+- **InetAddressResolver SPI is Java-18+ and JVM-wide-only.** The project
+  runs on JDK 25 (CLAUDE.md / Stack; `project_quarkus_jdk25` memory).
+  The SPI is `java.net.spi.InetAddressResolver` +
+  `java.net.spi.InetAddressResolverProvider`. The provider is loaded
+  exclusively via the `META-INF/services` ServiceLoader mechanism;
+  the JDK 25 `HttpClient.Builder` does NOT expose any per-instance
+  resolver setter, and there is no public programmatic registration
+  API. Per-call pinning effect is therefore achieved by a static pin
+  slot on the nested provider class, guarded by a JVM-wide
+  `ReentrantLock` that the wrapper acquires for the duration of each
+  `get(uri)` call. This serializes wrapper calls across the JVM, which
+  is acceptable for v1's FetchScheduler cadence (RSS feeds polled at
+  minute-or-coarser intervals) and is the necessary cost of using
+  the SPI. The pre-impl refinement against M1-025 captured this
+  design choice in `revisions:` so the reasoning is on the record.
 - **DNS pin must survive SNI for HTTPS.** When the wrapper connects
   to a pinned IP for an `https://host/` URL, the SNI handshake must
   carry the original hostname (not the IP) so cert validation
@@ -462,12 +709,19 @@ and behave identically.
   IpBlocklist; closing the host-interface gap once at the policy
   class is correct.
 - **Use a JVM-global `InetAddressResolverProvider` installed at
-  startup.** Rejected as primary path: global state is hard to
-  scope to a single call (cross-call pinning leakage risk). The
-  per-HttpClient resolver scoping is preferred. Falls back to
-  global only if the per-instance API turns out to be impractical
-  on JDK 25 — flagged as a Risk in the implementation outline a
-  Plan subagent will produce.
+  startup vs per-HttpClient scoping.** Resolved during the
+  pre-implementation refinement: JDK 25 does NOT support per-
+  HttpClient resolver scoping (the SPI loads one resolver per JVM
+  via ServiceLoader; `HttpClient.Builder` has no `.resolver(...)`
+  setter; no programmatic registration API exists). The JVM-global
+  provider IS the primary path. Cross-call pin leakage is prevented
+  by a JVM-wide `ReentrantLock` that the wrapper acquires for the
+  duration of each `get(uri)` call — serializing wrapper calls
+  process-wide but keeping per-call pin behavior unambiguous. The
+  Plan outline's Risk 1 anticipated exactly this resolution; the
+  refinement bumped `files_budget` 6→7 to accommodate the
+  META-INF/services resource and added the resource path to
+  `files_scope`.
 - **Defer Finding 4 (body-read timeout) on the rationale that the
   body-size cap (10 MiB) bounds total bytes.** Rejected: as the
   redteam REPRO showed, 10 MiB at 1 byte/min ≈ 19 years of held
@@ -481,3 +735,71 @@ and behave identically.
   reviewer disagrees, the escalation path is **spec-amend** to
   explicitly add 0.0.0.0/::/255.255.255.255 to the spec's listed
   ranges.
+
+## Implementation outline (M1-025, generated by Plan subagent on 2026-05-15)
+
+### Files to touch (7 of 7) — updated after pre-impl budget-breach refine
+- create: `infochat-ssrf/src/main/java/io/infochat/ssrf/HostInterfaceSet.java` — utility class with `public static Set<InetAddress> enumerate()` walking `NetworkInterface.getNetworkInterfaces()` and filtering out loopback addresses (Finding 1 enumeration source).
+- create: `infochat-ssrf/src/main/java/io/infochat/ssrf/PinnedDnsResolver.java` — `java.net.spi.InetAddressResolver` implementation backed by an immutable `Map<String, List<InetAddress>>` + caller-supplied delegate; plus a nested `public static final class` extending `java.net.spi.InetAddressResolverProvider` that captures `Configuration.builtinResolver()` and exposes a JVM-wide static pin slot + `ReentrantLock` to the wrapper (Finding 2 substrate).
+- create: `infochat-ssrf/src/main/resources/META-INF/services/java.net.spi.InetAddressResolverProvider` — single-line resource registering the nested provider FQN for ServiceLoader discovery; load-bearing for the SPI to fire at JVM startup (Finding 2 enablement).
+- modify: `infochat-ssrf/src/main/java/io/infochat/ssrf/IpBlocklist.java` — add no-arg constructor that snapshots `HostInterfaceSet.enumerate()` into a final field; add package-private constructor accepting `Set<InetAddress>`; extend `isBlocked` with host-IP equality check; extend `isBlockedV4`/`isBlockedV6` with `0.0.0.0/8`, `255.255.255.255`, `::` bypass forms. Preserve the existing `LoopbackPermitting` subclassing seam used by `SsrfGuardedHttpClientTest`.
+- modify: `infochat-ssrf/src/main/java/io/infochat/ssrf/SsrfGuardedHttpClient.java` — add `Duration readTimeout` constructor parameter (rejected null/zero/negative with `"read timeout must be configured"` literal); add no-arg default of `Duration.ofSeconds(30)`; introduce per-call `HttpClient` construction; acquire the provider's JVM-wide lock for the duration of `get(uri)`; set the static pin slot for `uri.getHost()` per hop, release in `finally`; preserve manual redirect loop but re-resolve + replace-pin per hop; rewrite `readBounded` with a per-read watchdog raising `SsrfPolicyException("body read timeout ...")`; add package-private resolver-seam constructor accepting `Function<String, List<InetAddress>>`.
+- modify: `infochat-ssrf/src/test/java/io/infochat/ssrf/IpBlocklistTest.java` — append 5 new `@Test` methods (preserve 19 existing).
+- modify: `infochat-ssrf/src/test/java/io/infochat/ssrf/SsrfGuardedHttpClientTest.java` — append 2 new `@Test` methods (preserve 10 existing; no-arg-constructor tests unaffected; parameterized-constructor tests need a one-line edit each to pass the new `readTimeout` arg).
+
+Budget check: 7 of 7. No surplus.
+
+### Tests
+- modify: `infochat-ssrf/src/test/java/io/infochat/ssrf/IpBlocklistTest.java` — authorized in ticket body §"Authorized test changes" item 1. Adds:
+  - `hostInterfaceIpIsBlocked` — constructs `IpBlocklist` via the package-private constructor with `{203.0.113.5}` host set; asserts `isBlocked(203.0.113.5) == true`. (acceptance items 3 + 4a)
+  - `nonHostPublicIpStillAllowed` — same host set; asserts `isBlocked(8.8.8.8) == false`. (acceptance item 4b)
+  - `unspecifiedV4IsBlocked` — asserts `isBlocked(0.0.0.0) == true`. (acceptance item 5 + 8)
+  - `unspecifiedV6IsBlocked` — asserts `isBlocked(::) == true`. (acceptance item 6 + 8)
+  - `limitedBroadcastIsBlocked` — asserts `isBlocked(255.255.255.255) == true`. (acceptance item 7 + 8)
+- modify: `infochat-ssrf/src/test/java/io/infochat/ssrf/SsrfGuardedHttpClientTest.java` — authorized in ticket body §"Authorized test changes" item 2. Adds:
+  - `connectUsesValidationTimeIpsNotFreshLookup` — resolver-seam returns `[127.0.0.1]` first call, `[192.0.2.1]` second call for the same host; asserts a 200 from the test server, and that the seam was invoked exactly once. (acceptance item 12)
+  - `bodyReadTimeoutFiresOnSlowUpstream` — server emits headers + 16 bytes then sleeps `readTimeout*2`; wrapper constructed with `readTimeout=1s`; asserts `SsrfPolicyException` with message starting `"body read timeout"` and elapsed time within `readTimeout + 500ms`. (acceptance item 15)
+  - One-line edit to the existing parameterized-constructor tests (`rejectsResponseBodyOverCap`, `constructorRejectsNullTimeout`, `constructorRejectsZeroTimeout`) to supply the new `readTimeout` parameter; substance preserved.
+
+Authorization confirmed: both modified test files are named explicitly in §"Authorized test changes".
+
+### Cross-cutting concerns
+- **Spec invariant: "DNS is re-resolved after every redirect; the IP blocklist re-applies each hop"** (security.md §SSRF). Per-call HttpClient construction must not move the re-resolution upstream of the redirect loop — the existing manual-redirect-loop discipline is the load-bearing piece that satisfies the spec. The new pinning must layer ON TOP of that, not replace it. Each redirect hop = new resolver pin, new IpBlocklist check.
+- **Spec invariant: "an unset timeout is a configuration error"** (security.md §SSRF). The new `readTimeout` joins `connectTimeout`/`requestTimeout` under the same fail-closed rule; constructor must reject null/zero/negative with the literal `"read timeout must be configured"` substring. The no-arg constructor's default supplies the value — RssFetcher's call site stays valid because the default is wired upstream.
+- **Public API surface preservation** (ticket out-of-scope item 2). `new SsrfGuardedHttpClient()` no-arg + `HttpResponse<byte[]> get(URI)` must continue compiling. RssFetcher (no-arg consumer) and RssFetcherTest stay untouched. The parameterized constructor's signature widens by exactly one `Duration` parameter; this is allowed because RssFetcher does not consume it.
+- **Test-mode IpBlocklist override seam preservation** (security.md §SSRF discipline + IpBlocklist javadoc). The existing `LoopbackPermitting` subclass in `SsrfGuardedHttpClientTest` overrides `isBlocked` to carve out loopback. The new no-arg constructor must initialize the host-IP-set field cleanly even when the subclass doesn't care about it; the new package-private host-set constructor must remain a peer entry point, not break the no-arg path subclasses use.
+- **SNI integrity for HTTPS** (impl notes). DNS pin must NOT rewrite the URI host — only the resolver delegate changes. The HttpClient still sees the original hostname, so the TLS ClientHello SNI remains correct.
+- **Resolver SPI is JVM-global; per-call effect via lock** (impl notes). `InetAddressResolverProvider` is a JVM-global SPI loaded via ServiceLoader at startup. JDK 25 does NOT support per-HttpClient resolver scoping. The wrapper achieves per-call pin behavior by acquiring a JVM-wide `ReentrantLock` for the duration of `get(uri)`, writing the per-call pin into the provider's static pin slot, calling `httpClient.send`, then clearing the pin and releasing the lock. Concurrent wrapper calls serialize on this lock — acceptable for v1's FetchScheduler cadence.
+- **Engineering rules §No defensive code**: production callers always use the no-arg constructor; the host-set and resolver-seam constructors are package-private test seams, mirroring M1-024's `IpBlocklist override is an API surface, not a flag` discipline. No "feature flag" property; no operator knob to disable enumeration.
+
+### Implementation order
+1. Add `HostInterfaceSet` first — pure utility, no consumers yet. Trivial to unit-verify before anything depends on it. Wrong order: starting with `IpBlocklist` modifications would leave the new no-arg constructor calling an unwritten method.
+2. Modify `IpBlocklist` — wire no-arg + package-private constructors, bypass-form byte checks. After this step the production `IpBlocklist()` constructor exists and enumerates host interfaces; existing `LoopbackPermitting` subclass continues to compile because the parent no-arg constructor still exists.
+3. Add `IpBlocklistTest` host-interface and bypass-form methods — verify steps 1-2 in isolation before touching the HTTP wrapper. Wrong order: skipping unit verification here means an HTTP-wrapper-level test failure could be either the resolver pinning OR the blocklist; isolating IpBlocklist first keeps the fault domains separate.
+4. Add `PinnedDnsResolver` (with the nested `InetAddressResolverProvider` static class, static pin slot, and `ReentrantLock`) AND register it via `META-INF/services/java.net.spi.InetAddressResolverProvider` in the same step. The class and the resource file are coupled — the class without the resource file is unreachable code, and the resource file without the class is a ClassNotFoundException at JVM startup. Landing them together avoids an intermediate state where one half compiles but the SPI doesn't fire.
+5. Modify `SsrfGuardedHttpClient` — add `readTimeout` to parameterized constructor, add resolver-seam package-private constructor, rewire `get()` to acquire the provider's JVM-wide lock, install per-call pin into the provider's static slot, construct a per-call HttpClient, call send, clear the pin in `finally`, release the lock. Rewrite `readBounded` with watchdog. Each redirect hop replaces the pin (still under the same lock). Wrong order: skipping `readTimeout` plumbing first and only adding the resolver pin would leave one failing test for the watchdog after redirect-pin tests already pass — masking which change broke what.
+6. Add `SsrfGuardedHttpClientTest` connect-pinning + body-read-timeout methods, edit existing parameterized-constructor tests to supply the new `readTimeout` arg. The one-line edits to existing tests are mechanical and must NOT change substance (engineering rule: surgical changes).
+7. Run `mvn -B -pl infochat-ssrf test`, then `mvn -B clean verify` from repo root. RssFetcherTest must pass unchanged (validates the public-API-surface invariant).
+
+### Risks
+- **Per-instance `InetAddressResolverProvider` scoping was confirmed unavailable in JDK 25** — resolved during the pre-impl budget-breach refine. The SPI loads ONE resolver per JVM via ServiceLoader; `HttpClient.Builder` has no `.resolver(...)` setter; no programmatic registration. The chosen path is (a) JVM-wide provider registered via `META-INF/services`, (b) static pin slot guarded by a JVM-wide `ReentrantLock`, (c) wrapper acquires the lock for the duration of `get(uri)` so per-call pinning is unambiguous. This serializes concurrent wrapper calls JVM-wide — acceptable for v1's RSS cadence. If a future ticket needs higher fetch concurrency, that ticket would lift the serialization (e.g. by keying the pin slot by hostname instead of holding a global lock); out of scope here.
+- **Per-read watchdog implementation choice has correctness traps** — impl notes list `CompletableFuture` vs `ScheduledExecutorService` vs `setSoTimeout`. `HttpClient.BodyHandlers.ofInputStream()` does NOT expose the underlying socket, so `setSoTimeout` is unreachable. The `CompletableFuture.supplyAsync(... read ...).get(readTimeout)` approach spawns one thread per `read()` (typical 8KiB buffer → many threads per body). The `ScheduledExecutorService` interrupt approach requires `InputStream` to honor interrupts (the JDK HttpClient's body stream does respond to thread interrupt by closing the underlying connection). Escalation: **refine** if implementer hits a JDK-level "InputStream does not respect interrupt" wall.
+- **Host-interface enumeration on container/laptop dev machines may pick up Docker bridges and Tailscale interfaces**, blocking legitimate test traffic. The test-mode seam (package-private host-set constructor) is the explicit mitigation; production cannot inject. If a CI runner's host-interface enumeration overlaps with a legitimate test target, the test-mode seam must be used. No escalation expected; the test-only constructor exists for this reason.
+- **`InetAddress.getByName("0.0.0.0")` may resolve to platform-specific behavior on some JVMs** (e.g. returning a special "any" address). The acceptance criterion mandates byte-pattern matching after construction via `InetAddress.getByName`, so the impl must verify the parser returns the expected `0.0.0.0` raw bytes on JDK 25 before relying on `isAnyLocalAddress()`. If parser behavior is surprising, fall back to byte-pattern checks (the acceptance criterion permits both). No escalation expected.
+
+### Out-of-scope (echoed from ticket)
+- Any change to the `io.infochat.core.ingest.Fetcher` SPI or `NormalizedPost` record
+- Any change to `RssFetcher.java` or `RssFeedParser.java` (wrapper public API preserved)
+- Any change to `RssFetcherTest.java`
+- Any WebSocket / ws / wss wrapping (NostrStreamSource ticket)
+- Any Provider-side `/add-source` HEAD/GET probe wiring
+- Any FetchScheduler / `@Scheduled` / per-tick cadence selection
+- Any outbox sink, RAW-row INSERT, post-table write, OutboxRehydrator, LISTEN/NOTIFY new_post, provider_state high-water-mark, NewPostReconciler wiring
+- Any Stage 1 HTML sanitization, NFKC normalization, regex redaction, canonical-body UID hashing
+- Any source-row UPDATE for last_fetch_at / last_success_at / consecutive_failures
+- Any retry / backoff / Retry-After / per-source politeness window
+- Any change to V1..V8 Flyway migrations
+- Any LLM tool surface, prompt-injection sanitizer, LLM-output redactor
+- Any audit_log write or AuditLogger code path
+- Any port-based filtering (OUT-OF-MODEL)
+- Any operator-facing knob to disable host-interface enumeration or DNS pinning

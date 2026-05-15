@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -129,5 +130,68 @@ class IpBlocklistTest {
     void allowsPublicIpv6() throws UnknownHostException {
         assertFalse(blocklist.isBlocked(InetAddress.getByName("2606:4700:4700::1111")),
             "2606:4700:4700::1111 is a public IPv6 address; must NOT be blocked");
+    }
+
+    // -----------------------------------------------------------------
+    // M1-025 host-interface seam (Finding 1: INFO-LEAK / high). The
+    // spec's "plus the host's own non-loopback interfaces" clause
+    // must be enforceable with a deterministic host-IP set so tests
+    // do not depend on the test machine's network configuration.
+    // -----------------------------------------------------------------
+
+    @Test
+    void hostInterfaceIpIsBlocked() throws UnknownHostException {
+        // 203.0.113.5 is TEST-NET-3 (RFC 5737), reserved for
+        // documentation and never assigned in the real internet —
+        // so it cannot be the test machine's actual interface IP
+        // by accident.
+        InetAddress hostIp = InetAddress.getByName("203.0.113.5");
+        IpBlocklist withHost = new IpBlocklist(Set.of(hostIp));
+        assertTrue(withHost.isBlocked(InetAddress.getByName("203.0.113.5")),
+            "an IP in the host-interface set must block; "
+            + "spec's \"host's own non-loopback interfaces\" clause");
+    }
+
+    @Test
+    void nonHostPublicIpStillAllowed() throws UnknownHostException {
+        // Negative control: the host-IP seam adds host IPs WITHOUT
+        // affecting the public-IP allowlist. 8.8.8.8 must still pass.
+        InetAddress hostIp = InetAddress.getByName("203.0.113.5");
+        IpBlocklist withHost = new IpBlocklist(Set.of(hostIp));
+        assertFalse(withHost.isBlocked(InetAddress.getByName("8.8.8.8")),
+            "a public IP not in the host-interface set must remain "
+            + "allowed even when the seam is populated");
+    }
+
+    // -----------------------------------------------------------------
+    // M1-025 loopback bypass forms (Finding 3: INFO-LEAK / medium).
+    // Spec lists "loopback" as a blocked category. On Linux/BSD/
+    // Windows the kernel rewrites connect(0.0.0.0) -> connect(127.0.0.1),
+    // so 0.0.0.0 is a loopback bypass; ::/0 is the IPv6 analog;
+    // 255.255.255.255 is limited broadcast. All three are spec-
+    // intent loopback bypasses that the literal range checks would
+    // otherwise miss.
+    // -----------------------------------------------------------------
+
+    @Test
+    void unspecifiedV4IsBlocked() throws UnknownHostException {
+        assertTrue(blocklist.isBlocked(InetAddress.getByName("0.0.0.0")),
+            "0.0.0.0 (IPv4 unspecified / 'this host', RFC 1122) is a "
+            + "loopback bypass per kernel connect-rewrite behavior");
+    }
+
+    @Test
+    void unspecifiedV6IsBlocked() throws UnknownHostException {
+        assertTrue(blocklist.isBlocked(InetAddress.getByName("::")),
+            ":: (IPv6 unspecified) is the IPv6 analog of 0.0.0.0; "
+            + "spec's loopback intent must cover its bypass forms");
+    }
+
+    @Test
+    void limitedBroadcastIsBlocked() throws UnknownHostException {
+        assertTrue(blocklist.isBlocked(InetAddress.getByName("255.255.255.255")),
+            "255.255.255.255 (IPv4 limited broadcast, RFC 919) "
+            + "must block — sending here from userland is meaningless "
+            + "and risks hitting the local segment");
     }
 }
