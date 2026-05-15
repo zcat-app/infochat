@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>M1-028 Outbox Test Fixture</title>
+    <link>https://example.test/outbox-fixture</link>
+    <description>Two-item RSS 2.0 fixture used by FetchSchedulerIT to exercise the
+      Fetcher -&gt; PostPersister -&gt; EvalQueueProducer path. Distinct from the
+      M1-023 fixtures under fixtures/rss/ to keep ticket boundaries clean.</description>
+    <language>en-us</language>
+    <pubDate>Fri, 15 May 2026 12:00:00 +0000</pubDate>
+
+    <item>
+      <title>Outbox fixture post one</title>
+      <link>https://example.test/outbox-fixture/posts/1</link>
+      <guid isPermaLink="false">urn:example:outbox:post:1</guid>
+      <description>Plain text body for outbox fixture post one.</description>
+      <pubDate>Fri, 15 May 2026 12:00:00 +0000</pubDate>
+    </item>
+
+    <item>
+      <title>Outbox fixture post two</title>
+      <link>https://example.test/outbox-fixture/posts/2</link>
+      <guid isPermaLink="false">urn:example:outbox:post:2</guid>
+      <description>Plain text body for outbox fixture post two.</description>
+      <pubDate>Fri, 15 May 2026 12:05:00 +0000</pubDate>
+    </item>
+
+  </channel>
+</rss>

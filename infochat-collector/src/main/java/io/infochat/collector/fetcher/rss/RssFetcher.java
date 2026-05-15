@@ -4,6 +4,7 @@ import io.infochat.core.ingest.Fetcher;
 import io.infochat.core.ingest.NormalizedPost;
 import io.infochat.ssrf.SsrfGuardedHttpClient;
 import io.infochat.ssrf.UrlRedactor;
+import jakarta.enterprise.context.ApplicationScoped;
 
 import java.io.IOException;
 import java.net.URI;
@@ -40,6 +41,7 @@ import java.util.List;
  * identifier, never the raw value — feed URLs may carry credentials or
  * query-string tokens that must not reach exception traces.
  */
+@ApplicationScoped
 public class RssFetcher implements Fetcher {
 
     // SsrfGuardedHttpClient is thread-safe; the FetchScheduler in

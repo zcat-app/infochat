@@ -1,22 +1,166 @@
 ---
 id: M1-028
 title: Collector outbox (FetchScheduler + PostPersister + OutboxRehydrator)
-status: pending
+status: done
 created: 2026-05-15
-last_updated: 2026-05-15
+last_updated: 2026-05-16
+reviews:
+  - round: 1
+    date: 2026-05-16
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 13
+      added: 1646
+      removed: 30
+escalations:
+  - date: 2026-05-15
+    reason: premise-fail
+    reviewer_verdict_excerpt: |
+      N/A — pre-implementation premise conflict surfaced by developer reading
+      the M1-007a SPI contract against this ticket's DoD before any code
+      was written.
+
+      The DoD requires PostPersister to implement a content-hash UID
+      fallback when `normalized.upstreamIdentifier` is null or empty
+      (acceptance item 2, Definition of Done bullet on UID derivation).
+      The M1-007a SPI at
+      `infochat-core/src/main/java/io/infochat/core/ingest/NormalizedPost.java:17`
+      declares `upstreamIdentifier` as "Never null", and M1-023's
+      `RssFeedParser.java:158-161` enforces this — RSS items lacking both
+      `<guid>` and `<link>` throw `IllegalArgumentException`. The fallback
+      branch is therefore defensive code for a scenario the SPI contract
+      forbids, in conflict with CLAUDE.md §"No defensive code for
+      impossible scenarios" (PostPersister is internal code consuming an
+      internal SPI). Additionally, design notes §2.3.1 do not inline the
+      per-kind "RSS-volatile" canonicalization rules the spec §UID
+      derivation defers to design.
+
+      The clarity reviewer flagged the canonicalization-delegation as a
+      judgment-call WARN (SELF-CONTAINED-CHECK warning #2), but did not
+      cross-check against the SPI contract; the deeper rule conflict was
+      surfaced in main-session validation post-clarity.
+revisions:
+  - date: 2026-05-16
+    reason: "post-impl senior-review: eliminate four v1-shortcut shapes in favor of long-term-optimal alternatives"
+    summary: |
+      Fresh-eyes review after the round-1 implementation passed `mvn
+      verify` flagged four places where the in-progress code traded
+      correctness / performance / coupling cleanliness for short-term
+      simplicity. All four promoted to first-class fixes; ticket
+      amended for scope/acceptance consistency.
+
+      (1) `infochat-collector/pom.xml` adds `quarkus-messaging`. The
+      prior out_of_scope claim that "SmallRye Reactive Messaging is
+      already on the Quarkus BOM" was incorrect — `@Channel` /
+      `@Incoming` injection points fail to resolve without the
+      `quarkus-messaging` extension. pom.xml moves into `files_scope`;
+      the corresponding `out_of_scope` line is dropped.
+
+      (2) `OutboxRehydrator.rehydrate()` was emitting to the eval-queue
+      channel INSIDE the JDBC `ResultSet` loop, holding the
+      `Connection` slot for the duration. Under SmallRye back-pressure
+      (a realistic outcome after a long outage with N RAW posts and a
+      saturated in-memory channel buffer) the `emitter.send` blocks,
+      pinning the connection — Agroal pool starvation against the live
+      serving path. Fix: collect `PersistedPostKey`s into a `List`,
+      release the Connection via try-with-resources exit, THEN emit.
+      Connection slot is freed before any back-pressure can block.
+
+      (3) The `DEFAULT_RSS_INTERVAL = "5m"` constant in `FetchScheduler`
+      existed solely to satisfy acceptance item 11's literal `"5m"`
+      grep (the `@Scheduled(every = "{infochat.fetch.rss.interval:5m}")`
+      annotation contains the substring `:5m}` — quote-5-m-quote is not
+      present). The default value belongs in `application.properties`
+      where Quarkus config defaults conventionally live; the
+      `@Scheduled` annotation references the property without an inline
+      default. Acceptance item 11 is rewritten to grep
+      `application.properties` for the property declaration. The
+      orphaned constant is removed.
+      `infochat-collector/src/main/resources/application.properties`
+      moves into `files_scope`.
+
+      (4) `FetchScheduler` was instantiating `new RssFetcher()` inline,
+      defeating the Fetcher SPI's polymorphism point and forcing
+      `FetchSchedulerIT` into a `TestRssFetcher extends RssFetcher`
+      override hack to bypass the SSRF gate (the test seam pattern
+      degenerated further when direct field assignment failed against
+      the CDI client proxy, requiring an awkward setter/getter pair).
+      Fix: `@ApplicationScoped` on `RssFetcher` (one-line change),
+      `@Inject RssFetcher` on `FetchScheduler` (drops the test seam
+      entirely), `QuarkusMock.installMockForType` in the IT (the
+      Quarkus-idiomatic CDI bean substitution). Future Fetcher kinds
+      (Bluesky, Nostr, Reddit, etc.) plug into the same injection
+      surface via `Instance<Fetcher>` without further scheduler
+      changes. `RssFetcher.java` moves into `files_scope`; the
+      out_of_scope entry forbidding RssFetcher modifications is
+      narrowed to forbid changes beyond the `@ApplicationScoped`
+      annotation.
+
+      Additionally `TestEvalQueueConsumer.java` (test-only helper
+      consumer added during round-1 implementation) is formalized in
+      `files_scope`; it was an unlisted addition before this revision.
+
+      `files_budget` grows 8 → 12 to accommodate pom.xml,
+      application.properties, RssFetcher.java, and
+      TestEvalQueueConsumer.java.
+  - date: 2026-05-15
+    reason: "premise-fail rework (Option 1 — drop spec's content-hash UID fallback; trust SPI's never-null contract)"
+    summary: |
+      Dropped the content-hash UID fallback path from acceptance item 2,
+      from the Definition of Done's UID-derivation bullet, and from the
+      Implementation notes "UID derivation lives in PostPersister" bullet.
+      PostPersister now trusts the M1-007a SPI's
+      `NormalizedPost.upstreamIdentifier` "Never null" contract and
+      throws on a null arrival (system-boundary validation against
+      SPI-contract violation, not defensive code). Added one out_of_scope
+      entry covering the fallback's deliberate omission and one
+      "Alternatives considered" entry documenting the security /
+      performance / complexity rationale (NFKC homoglyph collisions,
+      multi-MB body DoS on the ingest hot path, cross-JRE NFKC drift,
+      canonicalization-rule version drift). A follow-up `spec:` commit
+      aligns docs/spec/schema.md §UID derivation with this reality.
+    prior_acceptance_item_2: |
+      "PostPersister.java computes the post UID per docs/spec/schema.md
+      §UID derivation as `sha256(source_id || '|' || upstream_identifier)`
+      lower-case hex when upstream_identifier is non-null, with the
+      content-hash fallback path when upstream_identifier is null —
+      grep -E 'sha-?256|SHA-256|MessageDigest\\.getInstance\\(\"SHA-256\"\\)'
+      PostPersister.java returns at least one match AND
+      grep -E 'upstream_?[Ii]dentifier' PostPersister.java returns at
+      least one match AND
+      grep -E 'canonical_?[Bb]ody|content_?[Hh]ash|null|isEmpty\\(\\)'
+      PostPersister.java returns at least one match in the UID-derivation
+      context (the fallback branch when upstream_identifier is absent)"
+clarity_check:
+  date: 2026-05-15
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-VS-DOD-CONSISTENT: Item 18 uses a heterogeneous aggregate count (\"at least three new matches across the three new IT classes\" in failsafe-reports). The count is satisfiable, but the aggregate form hides per-class structural differences (PostPersisterIT ≥2 tests, OutboxRehydratorIT ≥3 tests, FetchSchedulerIT ≥1 test per prior items). Recommend splitting into three per-class assertions: (a) \"PostPersisterIT appears in failsafe-reports with Tests run ≥ 1\", (b) \"OutboxRehydratorIT appears in failsafe-reports with Tests run ≥ 1\", (c) \"FetchSchedulerIT appears in failsafe-reports with Tests run ≥ 1\". This makes each class's execution independently verifiable."
+    - "SELF-CONTAINED-CHECK: Acceptance item 2's content-hash fallback path delegates the exact RSS-volatile canonicalization rules to docs/design/02-schema.md §2.3.1 uid comment. The delegation is narrow (one per-kind rule, only RSS in scope for T1-C) and the grep assertion tests for the fallback branch's existence, not for the canonicalization rule's correctness, so the implementer can produce a passing test without reading the design notes for this specific detail. Judgment-call WARN; the implementer may still wish to read §2.3.1 for the exact volatile-stripping rules."
+  blockers: []
 blocked_by:
   - M1-007a
   - M1-008c
   - M1-022
   - M1-023
-files_budget: 8
+files_budget: 12
 files_scope:
+  - infochat-collector/pom.xml
+  - infochat-collector/src/main/resources/application.properties
   - infochat-collector/src/main/java/io/infochat/collector/outbox/PostPersister.java
   - infochat-collector/src/main/java/io/infochat/collector/outbox/EvalQueueProducer.java
   - infochat-collector/src/main/java/io/infochat/collector/outbox/OutboxRehydrator.java
   - infochat-collector/src/main/java/io/infochat/collector/fetch/FetchScheduler.java
+  - infochat-collector/src/main/java/io/infochat/collector/fetcher/rss/RssFetcher.java
   - infochat-collector/src/test/java/io/infochat/collector/outbox/PostPersisterIT.java
   - infochat-collector/src/test/java/io/infochat/collector/outbox/OutboxRehydratorIT.java
+  - infochat-collector/src/test/java/io/infochat/collector/outbox/TestEvalQueueConsumer.java
   - infochat-collector/src/test/java/io/infochat/collector/fetch/FetchSchedulerIT.java
   - infochat-collector/src/test/resources/fixtures/outbox/feed-fixture.xml
 complexity: medium
@@ -37,25 +181,29 @@ out_of_scope:
   - any Stage 1 HTML strip / NFKC / regex redaction on `NormalizedPost.body` (T1-D — Stage 1 is the sanitization boundary per docs/spec/security.md §Ingest pipeline; the persisted post body in `'RAW'` carries the raw HTML the Fetcher returned, with HTML strip happening downstream)
   - any messaging adapter / CommandRouter / `/help` / `/add-source` / first-command implementation (T1-E and T1-F territory)
   - any infochat-provider module change (this ticket is collector-side only)
-  - any modification to the M1-007a Fetcher SPI / NormalizedPost record shape, or to the M1-023 RssFetcher / RssFeedParser classes (the SPI and the RssFetcher are consumed unchanged; if the consumer reveals a missing field, escalate via the workflow)
-  - any infochat-collector/pom.xml change (SmallRye Reactive Messaging in-memory channels are already on the Quarkus BOM; no new dependency is introduced)
+  - any modification to the M1-007a Fetcher SPI / NormalizedPost record shape, or to the M1-023 RssFeedParser class (the SPI is consumed unchanged; if the consumer reveals a missing field, escalate via the workflow)
+  - any modification to M1-023's RssFetcher beyond adding `@ApplicationScoped` for CDI injection — the `fetch()` implementation, the package-private `RssFetcher(SsrfGuardedHttpClient)` test-seam constructor, the `RssFetchException` class, and the `SsrfGuardedHttpClient` interaction all remain frozen. The annotation is the only allowed delta; if a wider RssFetcher change is needed, escalate (Option 4 in the post-impl review revision is bounded to one annotation)
+  - "any content-hash UID fallback path for posts with null `upstreamIdentifier` (the spec §UID derivation `sha256(source_id || '|' || canonical_body)` fallback). The M1-007a SPI declares `NormalizedPost.upstreamIdentifier` as 'Never null' (`infochat-core/src/main/java/io/infochat/core/ingest/NormalizedPost.java:17`) and M1-023's RssFeedParser enforces this (RSS items with neither `<guid>` nor `<link>` throw); implementing the fallback would be defensive code for an SPI-forbidden scenario per CLAUDE.md §No defensive code for impossible scenarios. A separate `spec:` commit aligns spec wording with this reality. If a future Fetcher kind needs nullable `upstreamIdentifier`, that's a focused future ticket loosening the SPI + landing per-kind canonicalization rules in design + adding the fallback in PostPersister in one coordinated change."
 acceptance:
   - "PostPersister.java exists and inserts one post row per call with `status='RAW'` and all per-stage `*_done` flags FALSE per docs/spec/schema.md §Invariants (Invariant 5) and docs/design/02-schema.md §2.3.1 — grep -E 'public\\s+class\\s+PostPersister' PostPersister.java returns at least one match AND grep -E 'INSERT\\s+INTO\\s+post' PostPersister.java returns at least one match AND grep -E \"'RAW'|status\\s*=\\s*'RAW'\" PostPersister.java returns at least one match"
-  - "PostPersister.java computes the post UID per docs/spec/schema.md §UID derivation as `sha256(source_id || '|' || upstream_identifier)` lower-case hex when upstream_identifier is non-null, with the content-hash fallback path when upstream_identifier is null — grep -E 'sha-?256|SHA-256|MessageDigest\\.getInstance\\(\"SHA-256\"\\)' PostPersister.java returns at least one match AND grep -E 'upstream_?[Ii]dentifier' PostPersister.java returns at least one match AND grep -E 'canonical_?[Bb]ody|content_?[Hh]ash|null|isEmpty\\(\\)' PostPersister.java returns at least one match in the UID-derivation context (the fallback branch when upstream_identifier is absent)"
+  - "PostPersister.java computes the post UID as `sha256(source_id || '|' || upstream_identifier)` lower-case hex. The M1-007a SPI at `infochat-core/src/main/java/io/infochat/core/ingest/NormalizedPost.java:17` declares `upstreamIdentifier` as 'Never null'; PostPersister trusts the contract — no content-hash fallback (the spec §UID derivation fallback is deliberately not implemented in M1; see Implementation notes and Alternatives considered). A null arrival surfaces as `IllegalArgumentException` (system-boundary validation against an SPI-contract violation, not defensive code) — grep -E 'sha-?256|SHA-256|MessageDigest\\.getInstance\\(\"SHA-256\"\\)' PostPersister.java returns at least one match AND grep -E 'upstream_?[Ii]dentifier' PostPersister.java returns at least one match AND grep -E 'canonical_?[Bb]ody|content_?[Hh]ash' PostPersister.java returns zero matches (no fallback path implemented) AND grep -E 'requireNonNull|throw\\s+new\\s+IllegalArgumentException|Objects\\.requireNonNull' PostPersister.java returns at least one match in the UID-derivation context (the SPI-contract assertion on `upstreamIdentifier`)"
   - "PostPersister.java uses `ON CONFLICT (source_id, upstream_identifier, fetched_at) DO NOTHING` to silently dedup duplicate fetches in the same partition per docs/design/02-schema.md §2.3.1 belt-and-suspenders UNIQUE — grep -E 'ON CONFLICT\\s*\\(\\s*source_id\\s*,\\s*upstream_identifier\\s*,\\s*fetched_at\\s*\\)\\s+DO NOTHING' PostPersister.java returns at least one match"
   - "EvalQueueProducer.java is a SmallRye Reactive Messaging emitter that writes the post id to the in-memory channel named `eval-queue` per CLAUDE.md §Stack ('SmallRye Reactive Messaging (in-memory channels v1, Kafka optional later)') and decision D4 — grep -E '@Channel\\s*\\(\\s*\"eval-queue\"\\s*\\)|@Outgoing\\s*\\(\\s*\"eval-queue\"' EvalQueueProducer.java returns at least one match AND grep -E 'public\\s+class\\s+EvalQueueProducer' EvalQueueProducer.java returns at least one match"
   - "OutboxRehydrator.java is a Quarkus @Startup bean at @Priority(300) per docs/design/01-architecture.md §1.4.3 Collector table — grep -E '@Startup' OutboxRehydrator.java returns at least one match AND grep -E '@Priority\\s*\\(\\s*300\\s*\\)' OutboxRehydrator.java returns at least one match"
   - "OutboxRehydrator.java scans `WHERE status='RAW'` ONLY (no `'EVALUATING'` predicate) per docs/spec/schema.md §Invariants Invariant 5 ('There is no distinct \"evaluating\" status — `RAW` plus the flag bitmap is the complete representation of in-flight evaluation state') — grep -E \"status\\s*=\\s*'RAW'\" OutboxRehydrator.java returns at least one match AND grep -E \"'EVALUATING'\" OutboxRehydrator.java returns zero matches"
   - "OutboxRehydrator.java orders the scan by `(fetched_at, id)` so re-enqueue is deterministic across crashes — grep -E 'ORDER BY\\s+fetched_at\\s*,\\s*id' OutboxRehydrator.java returns at least one match"
+  - "OutboxRehydrator.java releases its JDBC `Connection` BEFORE emitting to the `eval-queue` channel so the rehydrator does not pin an Agroal connection slot if SmallRye applies back-pressure (the in-memory channel's overflow strategy is `BUFFER` by default; on a saturated buffer `emitter.send` blocks). The scan loop populates a `List<PersistedPostKey>` inside the try-with-resources block; the emit loop runs AFTER the block exits — grep -E 'List<PostPersister\\.PersistedPostKey>|ArrayList<PostPersister\\.PersistedPostKey>' OutboxRehydrator.java returns at least one match AND the source structure is verifiable by reading: a try-with-resources block that does the SELECT and populates the List, then (outside the block, after Connection close) a for-loop that calls `evalQueueProducer.emit`"
   - "OutboxRehydrator.java emits each scanned post id to the SAME `eval-queue` channel that the FetchScheduler's live path emits to (shared producer — the rehydrator does NOT carry its own bespoke channel name) — grep -E 'EvalQueueProducer' OutboxRehydrator.java returns at least one match AND grep -rE '@Channel|@Outgoing' infochat-collector/src/main/java/io/infochat/collector/outbox/ returns matches ONLY in EvalQueueProducer.java (no other production class declares the eval-queue channel)"
   - "FetchScheduler.java is a Quarkus @Startup bean at @Priority(400) per docs/design/01-architecture.md §1.4.3 Collector table — grep -E '@Startup' FetchScheduler.java returns at least one match AND grep -E '@Priority\\s*\\(\\s*400\\s*\\)' FetchScheduler.java returns at least one match"
   - "FetchScheduler.java reads enabled `kind='rss'` rows from `source` at startup (the only Fetcher kind landed in M1) — grep -E 'SELECT.*FROM\\s+source|FROM\\s+source\\s+WHERE' FetchScheduler.java returns at least one match AND grep -E \"kind\\s*=\\s*'rss'|'rss'\" FetchScheduler.java returns at least one match"
-  - "FetchScheduler.java reads the global RSS interval from the property `infochat.fetch.rss.interval` with default `5m` and registers per-source ticks via Quarkus @Scheduled — grep -E 'infochat\\.fetch\\.rss\\.interval' FetchScheduler.java returns at least one match AND grep -E '\"5m\"' FetchScheduler.java returns at least one match AND grep -E '@Scheduled|Scheduler\\b' FetchScheduler.java returns at least one match"
+  - "FetchScheduler.java reads the global RSS interval from the property `infochat.fetch.rss.interval` and registers per-source ticks via Quarkus @Scheduled. The default value lives in `infochat-collector/src/main/resources/application.properties` (Quarkus config defaults convention) rather than as an inline `:5m` fallback in the @Scheduled annotation or a `static final` constant in source — grep -E 'infochat\\.fetch\\.rss\\.interval' FetchScheduler.java returns at least one match AND grep -E '@Scheduled|Scheduler\\b' FetchScheduler.java returns at least one match AND grep -E 'infochat\\.fetch\\.rss\\.interval\\s*=\\s*5m' infochat-collector/src/main/resources/application.properties returns at least one match AND grep -E 'DEFAULT_RSS_INTERVAL' FetchScheduler.java returns zero matches (the orphaned constant from the round-1 implementation is removed)"
   - "FetchScheduler.java persists posts BEFORE enqueueing (the outbox discipline per docs/spec/architecture.md §Pipelines 'persist as RAW → enqueue' and §Architectural principles 2 and docs/spec/schema.md §Invariants Invariant 5) — the per-tick code path calls PostPersister and then EvalQueueProducer in that order — grep -E 'PostPersister' FetchScheduler.java returns at least one match AND grep -E 'EvalQueueProducer' FetchScheduler.java returns at least one match AND the two call sites appear in persist→enqueue order in the per-tick body (assert by reading the file; if the developer wishes they may pull a helper method into PostPersister that returns the inserted post id and the enqueue line follows in the same method body)"
+  - "FetchScheduler.java consumes the `RssFetcher` via CDI injection (`@Inject RssFetcher`) rather than instantiating it inline (`new RssFetcher()`). This decouples the scheduler from the concrete Fetcher implementation, future-proofs the polymorphic `Instance<Fetcher>` dispatch shape for Bluesky / Nostr / Reddit / etc., and lets `FetchSchedulerIT` substitute via `QuarkusMock.installMockForType` (the Quarkus-idiomatic CDI bean replacement) instead of a setter/getter test seam that does not survive the CDI client proxy — grep -E '@Inject\\s+(\\w+\\s+)?RssFetcher|@Inject[^;{]*\\n\\s*RssFetcher' FetchScheduler.java returns at least one match AND grep -E 'new\\s+RssFetcher\\s*\\(' FetchScheduler.java returns zero matches AND grep -E 'setRssFetcher|getRssFetcher' FetchScheduler.java returns zero matches"
+  - "RssFetcher.java is a CDI bean annotated `@ApplicationScoped` (the sole allowed modification per the out_of_scope amendment) so FetchScheduler can `@Inject` it — grep -E '@ApplicationScoped' infochat-collector/src/main/java/io/infochat/collector/fetcher/rss/RssFetcher.java returns at least one match AND the rest of the class (the `fetch()` implementation, `RssFetchException`, both constructors, the SsrfGuardedHttpClient interaction) is unchanged from M1-023's frozen state"
   - "FetchScheduler.java handles per-tick fetch / persist / enqueue failures by logging at WARN with the source id and the exception — grep -E 'Log(ger)?\\.warn|\\.warn\\s*\\(|@Slf4j|jboss.*Logger' FetchScheduler.java returns at least one match AND grep -E 'catch\\s*\\(' FetchScheduler.java returns at least one match in a per-tick body context (NO update to `source.consecutive_failures` / `last_fetch_at` / `last_success_at` — those are T2-B's D42 wiring per the out-of-scope list)"
   - "PostPersisterIT.java is a @QuarkusTest against Quarkus DevServices Postgres that seeds a `source` row (kind='rss'), calls PostPersister with a fixture NormalizedPost, and asserts: (a) one post row exists with `status='RAW'`, all four `*_done` flags FALSE, and the expected UID; (b) a second call with the SAME `(source_id, upstream_identifier, fetched_at)` is a NO-OP (ON CONFLICT silently dedups; the post count remains 1) — grep -E '@Test' PostPersisterIT.java returns at least two matches"
   - "OutboxRehydratorIT.java is a @QuarkusTest that seeds N posts directly via JDBC with a mix of `status` values ('RAW' AND 'READY') and `*_done` flag combinations, runs OutboxRehydrator, and asserts: (a) the EvalQueueProducer received exactly the posts whose status was 'RAW' (NOT the 'READY' ones), in `(fetched_at, id)` order; (b) a re-run after no state change re-emits the SAME set (the rehydrator does NOT mark posts as 're-enqueued'; it scans the live `status='RAW'` set on every call — re-enqueueing the same post twice is idempotent at the eval-worker boundary per the outbox discipline); (c) marking some 'RAW' posts to 'READY' and re-running shrinks the re-enqueue set to the remaining 'RAW' posts — grep -E '@Test' OutboxRehydratorIT.java returns at least three matches"
-  - "FetchSchedulerIT.java is a @QuarkusTest that seeds a `source` row pointing at an in-process HTTP fixture (com.sun.net.httpserver.HttpServer per the M1-023 pattern), lets one tick fire (via Awaitility polling or a manually-triggered scheduler invoke), and asserts: (a) N `post(status='RAW')` rows appear in the DB matching the fixture's `<item>` count; (b) N corresponding post ids land on the eval-queue channel (test consumer drains the channel and asserts the count + ordering); (c) the post ids on the channel match the inserted rows' ids — grep -E '@Test' FetchSchedulerIT.java returns at least one match AND grep -E 'HttpServer\\.create|com\\.sun\\.net\\.httpserver' FetchSchedulerIT.java returns at least one match"
+  - "FetchSchedulerIT.java is a @QuarkusTest that seeds a `source` row pointing at an in-process HTTP fixture (com.sun.net.httpserver.HttpServer per the M1-023 pattern), substitutes the production `RssFetcher` via `QuarkusMock.installMockForType` (so the test-mode Fetcher reaches the FetchScheduler through the CDI client proxy, not via a field/setter back-door), lets one tick fire (via a manually-triggered `fetchScheduler.tickOnce(...)` invoke), and asserts: (a) N `post(status='RAW')` rows appear in the DB matching the fixture's `<item>` count; (b) N corresponding post ids land on the eval-queue channel (test consumer drains the channel and asserts the count + ordering); (c) the post ids on the channel match the inserted rows' ids — grep -E '@Test' FetchSchedulerIT.java returns at least one match AND grep -E 'HttpServer\\.create|com\\.sun\\.net\\.httpserver' FetchSchedulerIT.java returns at least one match AND grep -E 'QuarkusMock\\.installMockForType' FetchSchedulerIT.java returns at least one match"
   - "infochat-collector/src/test/resources/fixtures/outbox/feed-fixture.xml is a valid RSS 2.0 document with at least 2 `<item>` elements (each with `<guid>`, `<title>`, `<link>`, `<pubDate>` parseable by `DateTimeFormatter.RFC_1123_DATE_TIME`) — `xmllint --noout fixture.xml` (or equivalent JDK-side XML validator in the test) exits 0; this fixture is consumed by FetchSchedulerIT only (the M1-023 fixtures under fixtures/rss/ remain consumed by the M1-023 tests unchanged)"
   - "mvn -B -pl infochat-collector -am verify exits 0; failsafe reports show PostPersisterIT, OutboxRehydratorIT, and FetchSchedulerIT executed (grep -rE 'Tests run: [1-9]' infochat-collector/target/failsafe-reports returns at least three new matches across the three new IT classes)"
   - "mvn -B clean verify from the repo root exits 0; the existing M1-003, M1-007, M1-007a/b/c, M1-008, M1-008a/b/c, M1-009, M1-017, M1-022, M1-023, M1-024, M1-025, and M1-026 tests continue to pass alongside the new collector outbox code (M1-027's tests pass too if M1-027 has merged before this ticket runs; otherwise N/A)"
@@ -158,19 +306,29 @@ an unused abstraction.
     (the implementer is free to name the return type; an
     `Optional<UUID>` covering the ON-CONFLICT-no-op path is one
     acceptable shape).
-  - Body computes the UID per `docs/spec/schema.md` §UID derivation:
-    - When `normalized.upstreamIdentifier` is non-null and non-empty:
-      `uid = sha256(source_id || '|' || upstream_identifier)` lower-case
-      hex.
-    - When `normalized.upstreamIdentifier` is null or empty:
-      `uid = sha256(source_id || '|' || canonical_body)` lower-case
-      hex, where the canonical body is the Unicode-NFKC-normalized
-      body with source-kind-specific volatile sections stripped
-      (per `docs/spec/schema.md` §UID derivation; the per-kind
-      canonicalization rules live in design notes — in T1-C scope
-      with only `kind='rss'` plumbed, the canonical body is the
-      NFKC-normalized body with the RSS-volatile rules per
-      `docs/design/02-schema.md` §2.3.1 `uid` comment).
+  - Body computes the UID as
+    `uid = sha256(source_id || '|' || upstream_identifier)` lower-case
+    hex. The M1-007a SPI declares
+    `NormalizedPost.upstreamIdentifier` as "Never null"
+    (`infochat-core/src/main/java/io/infochat/core/ingest/NormalizedPost.java:17`);
+    PostPersister trusts the contract. The content-hash fallback
+    that `docs/spec/schema.md` §UID derivation defines for null
+    `upstream_identifier` is **intentionally not implemented in
+    M1** — it is defensive code for a scenario the SPI forbids
+    (CLAUDE.md §"No defensive code for impossible scenarios"), it
+    introduces a permanent attack surface (NFKC homoglyph
+    collisions, multi-MB body DoS on the ingest hot path,
+    cross-JRE NFKC implementation drift, canonicalization-rule
+    version drift breaking dedup silently), and the per-kind
+    canonicalization rules the spec defers to design are not
+    authored. A null `upstreamIdentifier` arriving at PostPersister
+    indicates a Fetcher bug; the persister asserts the contract via
+    `Objects.requireNonNull` (or an explicit `IllegalArgumentException`
+    on empty) so the bug surfaces loudly rather than persisting an
+    ID-less row. A follow-up `spec:` commit aligns
+    `docs/spec/schema.md` §UID derivation with this reality
+    (drops the fallback paragraph or marks it deferred to v2 when
+    a Fetcher legitimately needs it).
   - INSERT shape (one statement, one PreparedStatement):
     ```sql
     INSERT INTO post (
@@ -325,15 +483,26 @@ an unused abstraction.
   deliberate T1-D handoff.
 - **UID derivation lives in `PostPersister`.** The Fetcher does
   not compute the UID; the Fetcher returns `NormalizedPost` with
-  `upstreamIdentifier` populated, and the persister hashes
-  `(source_id, upstream_identifier)` at INSERT time. This
-  centralizes the UID rule in one place per
-  `docs/spec/schema.md` §UID derivation; future Fetchers
-  (Bluesky, Nostr, etc.) feed the same persister and the same
-  rule applies. The implementer may pull the UID computation
-  into a static helper (`PostUidDerivation`) if it clarifies the
-  diff; the helper stays inside `PostPersister.java` to honor
-  the files_budget.
+  `upstreamIdentifier` populated (the M1-007a SPI declares the
+  field "Never null"), and the persister hashes
+  `(source_id, upstream_identifier)` at INSERT time via SHA-256.
+  One code path, no canonicalization step, no null-branching.
+  This centralizes the UID rule in one place per
+  `docs/spec/schema.md` §UID derivation; future Fetchers (Bluesky
+  AT-URI, Nostr event id, Reddit fullname, Atom `<id>`) all have
+  protocol-mandated IDs and feed the same persister. The
+  implementer may pull the UID computation into a static helper
+  (`PostUidDerivation`) if it clarifies the diff; the helper
+  stays inside `PostPersister.java` to honor the files_budget.
+  PostPersister asserts non-null `upstreamIdentifier` via
+  `Objects.requireNonNull` (or an explicit `IllegalArgumentException`
+  on empty) — this is system-boundary validation against an
+  SPI-contract violation, not defensive code per CLAUDE.md §"No
+  defensive code for impossible scenarios" (the throw surfaces a
+  Fetcher bug loudly rather than persisting an ID-less row). The
+  spec's content-hash fallback is deliberately omitted from M1;
+  see Alternatives considered for the security / performance /
+  maintenance rationale.
 - **`fetched_at` semantics match M1-023.** Per
   `docs/design/02-schema.md` §2.3.1 `post` is partitioned by
   `fetched_at`. The Fetcher's `fetch()` call captures
@@ -558,6 +727,59 @@ an unused abstraction.
   `infochat-provider`.)
 
 ## Alternatives considered
+
+- **Implement the spec's content-hash UID fallback for posts with
+  null `upstreamIdentifier`.** Considered and explicitly rejected
+  via the premise-fail escalation on 2026-05-15 (see
+  `escalations[0]` and `revisions[0]` in frontmatter).
+  Three independent reasons:
+  1. **SPI contract.** The M1-007a SPI declares
+     `NormalizedPost.upstreamIdentifier` as "Never null"
+     (`infochat-core/src/main/java/io/infochat/core/ingest/NormalizedPost.java:17`),
+     and M1-023's RssFeedParser enforces this by throwing
+     `IllegalArgumentException` on RSS items lacking both
+     `<guid>` and `<link>`. The fallback branch in PostPersister
+     would be defensive code for a scenario the SPI contract
+     forbids, in conflict with CLAUDE.md §"No defensive code
+     for impossible scenarios".
+  2. **Security surface.** Content-hash dedup is adversarial.
+     A hostile feed can craft bodies that NFKC-normalize
+     identically (homoglyphs, zero-width joiners, combining
+     marks) but appear visually distinct. `ON CONFLICT DO
+     NOTHING` then silently drops one — the attacker chooses
+     which post survives. NFKC implementations also have
+     documented cross-JRE divergences for certain scripts;
+     deployments on different JDK versions would compute
+     different UIDs for the same body, silently breaking the
+     spec's "stable globally" promise. Multi-MB bodies pushed
+     by a malicious feed translate to real CPU on every
+     refetch (NFKC + regex + SHA-256 on arbitrary-length
+     input on the ingest hot path; no `body`-size TOAST-DoS
+     guard parallel to the 2048-char `upstream_identifier`
+     cap).
+  3. **Maintenance.** The per-kind canonicalization rules the
+     spec §UID derivation defers to design notes are not
+     authored — only one example exists (RSS: strip
+     ad-tracking query params and `<pubDate>`). Versioning
+     canonicalization rules across upgrades is a known-hard
+     problem; if the rule changes between v1 and v2, every
+     old content-hash UID becomes irreproducible, breaking
+     cross-relay dedup silently. Dead-code maintenance cost
+     for the fallback branch is also non-trivial — every
+     planned Fetcher (RSS, Bluesky AT-URI, Nostr event id,
+     Reddit fullname, Atom `<id>`, YouTube video id) has a
+     protocol-mandated ID; the fallback would be
+     never-exercised production code paid for in every code
+     review and refactor forever.
+
+  Drop the fallback; trust the SPI; throw on null arrival;
+  align the spec via a follow-up `spec:` commit. If a future
+  Fetcher genuinely lacks IDs (e.g. an HTML-only blog scrape
+  without permalinks), that's a focused future ticket
+  coordinating: SPI loosening + per-kind canonicalization
+  rules in design + PostPersister fallback path + adversarial
+  test vectors. v1 ships the simpler, safer, faster, more
+  debuggable single path.
 
 - **Option B: one combined ticket covering both T1-C halves.**
   Rejected at the top of this authoring session per the operator's
