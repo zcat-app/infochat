@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 28 |
 | deferred | 3 |
-| **total** | **31** |
+| **total** | **32** |
 
 ---
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-026 — infochat-ssrf hardening followup (M1-025 remediation) (complexity: high, risk: high)
 
 ---
 
@@ -112,6 +112,7 @@ M1-001 (done)
   │     └── M1-023 (done)
   │           └── M1-024 (done)
   │                 └── M1-025 (done)
+  │                       └── M1-026 (pending) ← runnable
   ├── M1-007b (done)
   │     └── M1-007 (done) [see above]
   └── M1-007c (done)
