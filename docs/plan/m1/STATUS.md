@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 29 |
+| done | 30 |
 | deferred | 3 |
-| **total** | **32** |
+| **total** | **34** |
 
 ---
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-028 — Collector outbox (FetchScheduler + PostPersister + OutboxRehydrator) (complexity: medium, risk: medium)
 
 ---
 
@@ -60,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-027 | Provider catch-up (provider_state + NewPostReconciler + new_post listener) | 2026-05-15 | round 1 APPROVE |
 | M1-026 | infochat-ssrf hardening followup (M1-025 remediation) | 2026-05-15 | round 1 APPROVE |
 | M1-025 | infochat-ssrf hardening (M1-024 remediation) | 2026-05-15 | round 1 APPROVE |
 | M1-024 | infochat-ssrf module + RssFetcher hardening (M1-023 remediation) | 2026-05-15 | round 1 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-008b | Sources and tags catalogues (§2.2.1, §2.2.2) | 2026-05-14 | round 1 APPROVE |
 | M1-008 | MVP schema umbrella — per-(user, scope) isolation IT | 2026-05-14 | round 1 APPROVE |
 | M1-018 | Clarity check validates forward references to ticket IDs | 2026-05-13 | round 1 APPROVE |
-| M1-017 | Relocate Flyway migrations from infochat-collector to infochat-core | 2026-05-13 | round 1 APPROVE |
 
 ---
 
@@ -96,9 +96,12 @@ M1-001 (done)
   │     │     ├── M1-008a (done)
   │     │     │     ├── M1-008 (done)
   │     │     │     ├── M1-008c (done)
-  │     │     │     │     └── M1-008 (done) [see above]
+  │     │     │     │     ├── M1-008 (done) [see above]
+  │     │     │     │     ├── M1-027 (done)
+  │     │     │     │     └── M1-028 (pending) ← runnable
   │     │     │     ├── M1-021 (deferred)
   │     │     │     └── M1-022 (done)
+  │     │     │           └── M1-028 (pending) [see above]
   │     │     ├── M1-008b (done)
   │     │     │     ├── M1-008 (done) [see above]
   │     │     │     ├── M1-008c (done) [see above]
@@ -109,10 +112,12 @@ M1-001 (done)
   │     └── M1-009 (done) [see above]
   ├── M1-007a (done)
   │     ├── M1-007 (done)
-  │     └── M1-023 (done)
-  │           └── M1-024 (done)
-  │                 └── M1-025 (done)
-  │                       └── M1-026 (done)
+  │     ├── M1-023 (done)
+  │     │     ├── M1-024 (done)
+  │     │     │     └── M1-025 (done)
+  │     │     │           └── M1-026 (done)
+  │     │     └── M1-028 (pending) [see above]
+  │     └── M1-028 (pending) [see above]
   ├── M1-007b (done)
   │     └── M1-007 (done) [see above]
   └── M1-007c (done)
