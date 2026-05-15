@@ -1,9 +1,10 @@
 ---
 id: M1-021
 title: Identity/audit redteam remediation (V6 — actor checks, search_path, ban-self trigger, audit-actor integrity)
-status: pending
+status: deferred
+deferred_reason: end-of-tier-1-redteam
 created: 2026-05-13
-last_updated: 2026-05-13
+last_updated: 2026-05-15
 blocked_by:
   - M1-008a
 files_budget: 4
