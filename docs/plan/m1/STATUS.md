@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 30 |
 | deferred | 3 |
-| **total** | **34** |
+| **total** | **36** |
 
 ---
 
@@ -25,6 +25,8 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-028 — Collector outbox (FetchScheduler + PostPersister + OutboxRehydrator) (complexity: medium, risk: medium)
+- M1-029 — Loosen wall-clock tolerance on bodyReadTimeoutFiresOnSlowUpstream (complexity: low, risk: low)
+- M1-030 — Provider catch-up hardening backlog (3 redteam OUT-OF-MODEL advisories) (complexity: medium, risk: low)
 
 ---
 
@@ -141,4 +143,6 @@ M1-017 (done)
 M1-018 (done)
 M1-019 (deferred)
   └── M1-020 (deferred)
+M1-029 (pending) ← runnable
+M1-030 (pending) ← runnable
 ```
