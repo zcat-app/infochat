@@ -1,7 +1,7 @@
 ---
 id: M1-029
 title: Loosen wall-clock tolerance on bodyReadTimeoutFiresOnSlowUpstream
-status: pending
+status: done
 created: 2026-05-15
 last_updated: 2026-05-15
 blocked_by: []
@@ -43,7 +43,22 @@ spec_refs:
     threat-surface that the SUT defends; this ticket touches the test,
     not the SUT)
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-05-15
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+      spec_conformance: PASS
+    diff_stats:
+      files: 3
+      added: 26
+      removed: 14
+    agent_run: a1c12f6f23fd210b5
 escalations:
   - date: 2026-05-15
     reason: clarity-fail
@@ -73,7 +88,11 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-05-15
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-029: Loosen wall-clock tolerance on bodyReadTimeoutFiresOnSlowUpstream

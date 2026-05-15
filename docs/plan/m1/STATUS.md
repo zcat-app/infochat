@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 30 |
+| done | 31 |
 | deferred | 3 |
 | **total** | **36** |
 
@@ -25,7 +25,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-028 — Collector outbox (FetchScheduler + PostPersister + OutboxRehydrator) (complexity: medium, risk: medium)
-- M1-029 — Loosen wall-clock tolerance on bodyReadTimeoutFiresOnSlowUpstream (complexity: low, risk: low)
 - M1-030 — Provider catch-up hardening backlog (3 redteam OUT-OF-MODEL advisories) (complexity: medium, risk: low)
 
 ---
@@ -62,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-029 | Loosen wall-clock tolerance on bodyReadTimeoutFiresOnSlowUpstream | 2026-05-15 | round 1 APPROVE |
 | M1-027 | Provider catch-up (provider_state + NewPostReconciler + new_post listener) | 2026-05-15 | round 1 APPROVE |
 | M1-026 | infochat-ssrf hardening followup (M1-025 remediation) | 2026-05-15 | round 1 APPROVE |
 | M1-025 | infochat-ssrf hardening (M1-024 remediation) | 2026-05-15 | round 1 APPROVE |
@@ -71,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-008c | Joins, scope preferences, posts (§2.2.3..§2.2.5 + §2.3) | 2026-05-14 | round 1 APPROVE |
 | M1-008b | Sources and tags catalogues (§2.2.1, §2.2.2) | 2026-05-14 | round 1 APPROVE |
 | M1-008 | MVP schema umbrella — per-(user, scope) isolation IT | 2026-05-14 | round 1 APPROVE |
-| M1-018 | Clarity check validates forward references to ticket IDs | 2026-05-13 | round 1 APPROVE |
 
 ---
 
@@ -143,6 +142,6 @@ M1-017 (done)
 M1-018 (done)
 M1-019 (deferred)
   └── M1-020 (deferred)
-M1-029 (pending) ← runnable
+M1-029 (done)
 M1-030 (pending) ← runnable
 ```

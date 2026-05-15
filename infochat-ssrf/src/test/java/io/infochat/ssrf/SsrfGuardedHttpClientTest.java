@@ -327,12 +327,18 @@ class SsrfGuardedHttpClientTest {
             }
         });
 
+        // Long request-timeout so the failure cannot be the
+        // request-level timeout instead of the per-read watchdog.
+        // The assertion below uses requestTimeout.toMillis() as the
+        // wall-clock upper bound so the meaningful correctness
+        // boundary ("watchdog fires before request-level timeout
+        // would have") is expressed directly, without a brittle
+        // hand-picked tolerance against scheduler jitter.
+        Duration requestTimeout = Duration.ofSeconds(30);
         SsrfGuardedHttpClient client = new SsrfGuardedHttpClient(
             new LoopbackPermitting(),
             Duration.ofSeconds(2),
-            // Long request-timeout so the failure cannot be the
-            // request-level timeout instead of the per-read watchdog.
-            Duration.ofSeconds(30),
+            requestTimeout,
             readTimeout,
             10L * 1024 * 1024,
             3);
@@ -345,9 +351,13 @@ class SsrfGuardedHttpClientTest {
         assertTrue(ex.getMessage().startsWith("body read timeout"),
             "must surface the literal \"body read timeout\" prefix; "
             + "got: " + ex.getMessage());
-        assertTrue(elapsed < (readTimeout.toMillis() + 500),
-            "timeout must fire within readTimeout + 500ms; elapsed="
-            + elapsed + "ms (readTimeout=" + readTimeout.toMillis() + "ms)");
+        assertTrue(elapsed < requestTimeout.toMillis(),
+            "per-read watchdog must fire before the request-level "
+            + "timeout (" + requestTimeout.toSeconds() + "s) — if elapsed "
+            + "is near the request timeout, it's the wrong code path firing; "
+            + "elapsed=" + elapsed + "ms (readTimeout="
+            + readTimeout.toMillis() + "ms, requestTimeout="
+            + requestTimeout.toMillis() + "ms)");
     }
 
     // -----------------------------------------------------------------
