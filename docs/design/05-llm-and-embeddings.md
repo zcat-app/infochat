@@ -163,7 +163,7 @@
 ```                                                                                   
   Output is parsed by exact match against the four labels; anything else is treated as UNKNOWN.                                                                                                                                                         
    
-  ###  5.4.2 Tagger                                                                                                                                                                                                                                          
+  ### 5.4.2 Tagger                                                                                                                                                                                                                                          
                                                                                    
   prompts/tagger.md:
 
@@ -274,7 +274,9 @@
   ```
   **`social score` computation.** The `{{score}}` value rendered into the summarizer prompt is computed **deterministically in SQL** before the prompt is built — it is **not** asked of the LLM. The formula is:
 
+  ```sql
   social_score = 2 * COALESCE(reposts, 0) + COALESCE(likes, 0)
+  ```
   
 
   Posts without social signals (e.g., RSS items) have `social_score = 0` and the `{{#has_social}}…{{/has_social}}` block is suppressed. This formula is canonical; see also [02-schema.md §2.6](02-schema.md) for the column source.
