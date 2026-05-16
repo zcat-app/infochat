@@ -126,21 +126,53 @@ If the output doesn't parse, treat as MANUAL: print verbatim, ask the user how t
 
 ### 7. Persist findings
 
-- **Single-ticket target.** Append each finding to the ticket's `redteam_findings:` list:
-  ```yaml
-  redteam_findings:
-    - date: <YYYY-MM-DD>
-      category: <CATEGORY>
-      severity: <severity>
-      promise: |
-        <verbatim>
-      gap: |
-        <verbatim>
-      repro: |
-        <verbatim>
-      suggested_fix_class: <fix-class>
-  ```
-- **Other targets.** Write the verbatim verdict to `docs/plan/<active-milestone>/redteam/<target-slug>-<YYYY-MM-DD>.md`. Slug rule: target form's args, lowercased, hyphenated (e.g. `milestone-m1`, `id-range-m1-005-to-m1-012`, `release-v0-1-0`).
+**Every audit — regardless of target form and regardless of verdict (CLEAN or FINDINGS) — writes the verbatim verdict to a per-audit markdown file under `docs/plan/<active-milestone>/redteam/<target-slug>-<YYYY-MM-DD>.md`.** Slug rule: target form's args, lowercased, hyphenated:
+
+| Target form | Slug |
+|---|---|
+| `<ticket-id>` | the ticket ID verbatim (e.g. `M1-033`) |
+| `milestone <name>` | `milestone-<name>` (e.g. `milestone-m1`) |
+| `id-range <a..b>` | `id-range-<a>-to-<b>` (e.g. `id-range-M1-005-to-M1-012`), lowercased |
+| `release <tag>` | `release-<tag>`, lowercased, dots → hyphens (e.g. `release-v0-1-0`) |
+
+The verdict file's frontmatter carries `target`, `date`, `base`, `head`, `verdict`, `findings_count` (per-severity), `out_of_model_count`, and a free-form `disposition:` note for any follow-up reasoning (e.g. which findings were fixed on the branch before squash-merge, which were deferred to a remediation ticket). The body is the verbatim verdict the threat-actor returned. This file is the durable audit record; ticket frontmatter pointers index into it.
+
+**Single-ticket targets ALSO update the ticket frontmatter** in two ways:
+
+1. Append each FINDING (not OUT-OF-MODEL items) to `redteam_findings:`:
+   ```yaml
+   redteam_findings:
+     - date: <YYYY-MM-DD>
+       category: <CATEGORY>
+       severity: <severity>
+       promise: |
+         <verbatim>
+       gap: |
+         <verbatim>
+       repro: |
+         <verbatim>
+       suggested_fix_class: <fix-class>
+   ```
+   On a CLEAN verdict, set `redteam_findings: []` (the empty list is the explicit "audit ran, no findings" signal).
+
+2. Append an audit-record entry to `redteam_audits:`:
+   ```yaml
+   redteam_audits:
+     - date: <YYYY-MM-DD>
+       verdict: <CLEAN | FINDINGS>
+       base: <BASE_REF>
+       head: <HEAD_REF>
+       verdict_file: docs/plan/<active-milestone>/redteam/<ticket-id>-<YYYY-MM-DD>.md
+       findings_count: <integer>          # omit when CLEAN; redundant when 0
+       out_of_model_count: <integer>
+       note: |
+         <one-paragraph summary of disposition / what feeds future tickets>
+   ```
+   `verdict_file:` MUST point at the persistent markdown file (NOT at any path under `target/`, which is git-ignored and wiped by `mvn clean` — using a `target/` path here produces a broken pointer the moment `mvn clean` runs).
+
+**Why both pointers and a separate file:** `redteam_findings:` is structured data the milestone-driver and future remediation tickets can query mechanically (e.g. "list all critical findings across the milestone"). `redteam_audits:` is the audit index — one entry per audit run, regardless of finding count, so a CLEAN audit is still discoverable from the ticket. The separate markdown file is the verbatim record (full PROMISE / GAP / REPRO text, OUT-OF-MODEL observations) that survives `mvn clean` and ages well alongside the ticket.
+
+**Lifecycle-path exemption alignment.** The verdict file at `docs/plan/<active-milestone>/redteam/<slug>-<date>.md` is a workflow-byproduct of `/redteam`, NOT a developer choice — analogous to STATUS.md and the ticket file being byproducts of `/m1-tick`. When a single-ticket audit runs between `/m1-tick review APPROVE` and `/m1-tick commit`, the new audit file appears in the working tree and gets folded into the eventual ticket commit. The reviewer's lifecycle-path exemption (see `docs/process/reviewer-prompt.md` §"Lifecycle-path exemption") MUST include this directory; the reviewer prompt template lists the exempt paths and is updated in lockstep with this rule.
 
 ### 8. Escalate findings to the lifecycle workflow
 
@@ -181,7 +213,7 @@ The adversary subagent never edits files, runs commands, or fires escalations on
 
 ## Cross-cutting rules this skill must obey
 
-- **Read-only.** This skill never edits code, commits, or pushes. It only reads, spawns the subagent, and writes audit reports under `docs/plan/<active-milestone>/redteam/` plus `redteam_findings:` frontmatter on single-ticket targets.
+- **Read-only on implementation surfaces.** This skill never edits code, commits, or pushes. It only reads, spawns the subagent, and writes audit artifacts: the verbatim verdict file under `docs/plan/<active-milestone>/redteam/<slug>-<date>.md` (always, per step 7), and on single-ticket targets the `redteam_findings:` + `redteam_audits:` frontmatter blocks on the ticket file. No source-code, test, or property-file writes.
 - **Fresh context for the adversary.** The subagent must NOT be given conversation history, design notes (`docs/design/**`), or ticket bodies. It sees only the threat model and the diff. Anchoring it on implementer rationale defeats the point.
 - **No auto-escalation.** Recommend, don't execute. The user (or Claude in the next turn) decides which findings become tickets.
 - **If `docs/spec/security.md` does not exist or is empty, REFUSE.** The threat model is the system's commitments; without it the audit has nothing to compare against.
