@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-034a — Tagger pipeline + V11 (post_embedding + embedding_metadata) (complexity: medium, risk: medium)
+- M1-034a — Tagger pipeline + V11 (post_embedding + embedding_metadata) (complexity: high, risk: medium)
 
 ---
 

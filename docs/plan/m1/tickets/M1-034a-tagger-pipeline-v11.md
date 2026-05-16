@@ -5,6 +5,44 @@ status: pending
 created: 2026-05-17
 last_updated: 2026-05-17
 decomposed_from: M1-034
+escalations:
+  - date: 2026-05-17
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      SPEC-REFS-VALID: FAIL
+        docs/spec/schema.md §Tag stored form — ANCHOR-NOT-FOUND
+          "Tag stored form" is bold prose text inside ### Sources and tags
+          subsection of docs/spec/schema.md (~lines 207-215), not a heading.
+        docs/design/02-schema.md §2.2.1 tag — ANCHOR-NOT-FOUND
+          §2.2.1 is `source`; the tag table lives under §2.2.2.
+revisions:
+  - date: 2026-05-17
+    reason: clarity-fail rework
+    note: |
+      Resolved both SPEC-REFS-VALID blockers and both clarity warnings:
+        - spec_refs: docs/spec/schema.md §Tag stored form
+          → docs/spec/schema.md §Sources and tags (the actual enclosing
+          heading; the stored-form definition lives as bold prose inside
+          that subsection).
+        - spec_refs: docs/design/02-schema.md §2.2.1 tag
+          → docs/design/02-schema.md §2.2.2 tag (off-by-one correction;
+          §2.2.1 is `source`, §2.2.2 is `tag`).
+        - acceptance item 22 regex tightened: `tagger\.partial_valid|
+          valid.*invalid|tagger_partial` → `tagger_partial_valid|
+          tagger\.partial_valid|valid tags.*invalid|tagger.*valid.*invalid`
+          (closes the loophole where a comment or unrelated line containing
+          "valid" + "invalid" would satisfy the grep without the tagger
+          actually emitting partial-valid counts).
+        - complexity: medium → high, formally authorizing round_cap: 3
+          (workflow requires complexity:high or risk:high for round_cap:3;
+          the V11 migration + TagVocabulary + TaggerWorker + 2 prompts +
+          application.properties amendment + 7-scenario IT scope justifies
+          the high claim and the 3-round headroom that was the rationale
+          for the M1-034 split).
+        - body Implementation notes and acceptance item 19 reference text
+          updated to the corrected spec section paths.
+      No DoD / acceptance / files_scope / out_of_scope changes beyond the
+      spec_ref + regex + complexity adjustments above.
 blocked_by:
   - M1-008b
   - M1-008c
@@ -18,7 +56,7 @@ files_scope:
   - infochat-collector/src/main/java/io/infochat/collector/eval/tagger/TaggerWorker.java
   - infochat-collector/src/main/resources/application.properties
   - infochat-collector/src/test/java/io/infochat/collector/eval/tagger/TaggerWorkerIT.java
-complexity: medium
+complexity: high
 risk: medium
 round_cap: 3
 security_relevant: false
@@ -58,10 +96,10 @@ acceptance:
   - "V11 does NOT create post_entity, post_reference, or any LinkingJob-related tables (T2 territory per the session-grouping-plan T1-D row) — grep -E 'CREATE TABLE\\s+(post_entity|post_reference)' V11__post_embedding.sql returns zero matches"
   - "infochat-llm-adapter/src/main/resources/prompts/tagger.md exists and follows the JSON-primary template at docs/design/05-llm-and-embeddings.md §5.4.2: instructs the model to assign 1..4 tags from a controlled vocabulary; demands JSON output {\"tags\": [\"tag1\",\"tag2\"]}; lists the vocabulary inline via Mustache/Qute iteration; wraps the post body in the per-call random delimiter — grep -E '\\{\"tags\":' tagger.md returns at least one match AND grep -E '<<<UNTRUSTED_CONTENT' tagger.md returns at least one match AND grep -E '\\{#tags\\}|\\{\\{#tags\\}\\}' tagger.md returns at least one match"
   - "infochat-llm-adapter/src/main/resources/prompts/tagger-fallback.md exists and follows the line-oriented fallback template (single 'TAGS: tag1, tag2, tag3' line, no JSON; designed for small models that struggle with JSON mode) — grep -E 'TAGS:' tagger-fallback.md returns at least one match AND grep -E '\\{#tags\\}|\\{\\{#tags\\}\\}' tagger-fallback.md returns at least one match AND grep -E '<<<UNTRUSTED_CONTENT' tagger-fallback.md returns at least one match"
-  - "TagVocabulary.java is an @ApplicationScoped CDI bean that loads the controlled vocabulary from the tag table (seeded in M1-008b) into an immutable Set<String> ONCE at startup. The loaded names are normalized to NFC + Locale.ROOT lower-case + character class [a-z0-9][a-z0-9-]{0,47} (the tag stored form per docs/spec/schema.md §Tag stored form / docs/design/02-schema.md §2.2.1) so the membership check is byte-equal against the tagger output's same-rule normalization — grep -E 'class\\s+TagVocabulary' TagVocabulary.java returns at least one match AND grep -E 'SELECT\\s+name\\s+FROM\\s+tag|FROM\\s+tag\\s+ORDER' TagVocabulary.java returns at least one match AND grep -E 'Locale\\.ROOT|toLowerCase\\s*\\(\\s*Locale' TagVocabulary.java returns at least one match"
+  - "TagVocabulary.java is an @ApplicationScoped CDI bean that loads the controlled vocabulary from the tag table (seeded in M1-008b) into an immutable Set<String> ONCE at startup. The loaded names are normalized to NFC + Locale.ROOT lower-case + character class [a-z0-9][a-z0-9-]{0,47} (the tag stored form per docs/spec/schema.md §Sources and tags / docs/design/02-schema.md §2.2.2) so the membership check is byte-equal against the tagger output's same-rule normalization — grep -E 'class\\s+TagVocabulary' TagVocabulary.java returns at least one match AND grep -E 'SELECT\\s+name\\s+FROM\\s+tag|FROM\\s+tag\\s+ORDER' TagVocabulary.java returns at least one match AND grep -E 'Locale\\.ROOT|toLowerCase\\s*\\(\\s*Locale' TagVocabulary.java returns at least one match"
   - "TaggerWorker.java is a Collector-side @Scheduled polling worker (matching the M1-028 FetchScheduler / M1-033 Stage2Worker pattern). Pickup criteria: status='RAW' AND stage1_done=true AND (stage1_flagged=false OR stage2_done=true) AND tagger_done=false. Quarantined posts are excluded by the status='RAW' filter (Stage 2 INJ/MAL/UNK and Stage 1 watchdog fail-closed both set status='QUARANTINED') — grep -E 'class\\s+TaggerWorker' TaggerWorker.java returns at least one match AND grep -E \"status\\s*=\\s*'RAW'\" TaggerWorker.java returns at least one match AND grep -E 'tagger_done\\s*=\\s*FALSE|tagger_done\\s*=\\s*false' TaggerWorker.java returns at least one match AND grep -E '@Scheduled' TaggerWorker.java returns at least one match"
   - "TaggerWorker.java invokes the M1-033 LlmRouter with ModelTask.TAGGER and scope language 'en' (Tagger output is fixed-vocabulary tag names, not user-visible prose; scope language doesn't drive the tagger) — grep -E 'ModelTask\\.TAGGER|router\\.forTask\\s*\\(\\s*TAGGER' TaggerWorker.java returns at least one match"
-  - "TaggerWorker.java's primary tagging path: load prompts/tagger.md, substitute the controlled vocabulary loaded from TagVocabulary + the per-call random {{id}} UUID + the post body + title; invoke provider.generate; parse strict JSON {\"tags\": [...]}; for each parsed tag normalize per the same NFC + Locale.ROOT lower-case + character class [a-z0-9][a-z0-9-]{0,47} rule used in TagVocabulary; check membership; keep valid tags, silently drop invalid per docs/spec/llm.md §Failure handling 'Partial-valid handling. ... the valid tags are kept and the invalid tags are silently dropped'. Records an INFO log entry naming the count of valid + invalid tags so a future operator alert on sustained high invalid rates has the data — grep -E 'tagger\\.partial_valid|valid.*invalid|tagger_partial' TaggerWorker.java returns at least one match"
+  - "TaggerWorker.java's primary tagging path: load prompts/tagger.md, substitute the controlled vocabulary loaded from TagVocabulary + the per-call random {{id}} UUID + the post body + title; invoke provider.generate; parse strict JSON {\"tags\": [...]}; for each parsed tag normalize per the same NFC + Locale.ROOT lower-case + character class [a-z0-9][a-z0-9-]{0,47} rule used in TagVocabulary; check membership; keep valid tags, silently drop invalid per docs/spec/llm.md §Failure handling 'Partial-valid handling. ... the valid tags are kept and the invalid tags are silently dropped'. Records an INFO log entry naming the count of valid + invalid tags so a future operator alert on sustained high invalid rates has the data — grep -E 'tagger_partial_valid|tagger\\.partial_valid|valid tags.*invalid|tagger.*valid.*invalid' TaggerWorker.java returns at least one match"
   - "TaggerWorker.java's three-surface fallback chain per docs/spec/security.md §Failure handling 'Tagger failure → fall back to source.bootstrap_tags, mark the post, throttled admin notify' AND docs/spec/llm.md §Failure handling (recap): (a) schema-violating output (JSON parse throws OR the parsed object lacks a 'tags' array) → retry once with tagger-fallback.md (different prompt because re-issuing the same JSON-mode prompt to the same model produces the same garbage); (b) zero valid tags after partial-valid handling (the JSON parsed but ZERO entries passed vocabulary validation) → retry once with the SAME primary prompt (vocabulary mismatch is a content issue, not a prompt-shape issue); (c) LLM unreachable / timeout → retry once with the SAME primary prompt (transient infrastructure issue). On second failure of any path: post.tags = source.bootstrap_tags AND post.tagger_fallback=true AND log WARN with canonical error_class='tagger.fallback_to_bootstrap'. Document the per-path retry choice in TaggerWorker's class JDoc — grep -E 'tagger_fallback|tagger\\.fallback_to_bootstrap' TaggerWorker.java returns at least one match AND grep -E 'bootstrap_tags|source\\.bootstrap_tags' TaggerWorker.java returns at least one match"
   - "TaggerWorker.java's tagger_done=true UPDATE is the persistence cursor for the Tagger boundary per Invariant 5 (docs/spec/schema.md §Invariants 'the per-stage flags are the durable cursor'). UPDATE post SET tags=:tags, tagger_done=true, tagger_fallback=:fallback WHERE id=:post_id AND fetched_at=:fetched_at — the same statement writes both the tag array and the cursor flags atomically — grep -E 'tagger_done\\s*=\\s*TRUE|tagger_done\\s*=\\s*true' TaggerWorker.java returns at least one match AND grep -E 'tags\\s*=' TaggerWorker.java returns at least one match"
   - "TaggerWorker.java's concurrency is bounded by infochat.llm.tagger.max-concurrency (laptop default 4 per docs/design/05-llm-and-embeddings.md §5.7); the bounded-concurrency shape matches M1-033's Stage 2 semaphore — grep -E 'infochat\\.llm\\.tagger\\.max-concurrency|tagger\\.maxConcurrency' TaggerWorker.java returns at least one match"
@@ -96,10 +134,10 @@ spec_refs:
   - docs/spec/llm.md §Hardware profile contract
   - docs/spec/schema.md §Posts and derivatives
   - docs/spec/schema.md §Invariants
-  - docs/spec/schema.md §Tag stored form
+  - docs/spec/schema.md §Sources and tags
   - docs/spec/architecture.md §Pipelines
   - docs/design/01-architecture.md §1.3.4 Eval pipeline workers
-  - docs/design/02-schema.md §2.2.1 tag
+  - docs/design/02-schema.md §2.2.2 tag
   - docs/design/02-schema.md §2.3.1 post
   - docs/design/02-schema.md §2.4.2 post_embedding
   - docs/design/02-schema.md §2.8 Embedding model migration
@@ -203,8 +241,8 @@ M1-034b picks up where this ticket leaves off (post.tagger_done=true).
   normalized using the **tag normalization rule** —
   **NFC + Locale.ROOT lower-case + character class
   `[a-z0-9][a-z0-9-]{0,47}`** (the tag stored form per
-  `docs/spec/schema.md` §Tag stored form / `docs/design/02-schema.md`
-  §2.2.1; this rule is **inlined here** rather than cross-referenced,
+  `docs/spec/schema.md` §Sources and tags / `docs/design/02-schema.md`
+  §2.2.2; this rule is **inlined here** rather than cross-referenced,
   addressing the M1-034 clarity SELF-CONTAINED-CHECK warning). The
   TaggerWorker output is normalized with the same rule so membership
   is byte-equal.
