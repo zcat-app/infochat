@@ -51,20 +51,15 @@
   
   ### Stage 1 — deterministic, runs on every post                                                                                                                                                                                                       
   Implemented in pure Java, no LLM. Fast (≤5 ms per post). Outputs: a sanitized body plus a list of suspicious spans.
-                                                                                                                                                                                                                                                        
-  Steps in order:                                                                  
-                                                                                                                                                                                                                                                        
-  1. **Parse with OWASP Java HTML Sanitizer**                                      
-     - Allowlist: `p, br, a (href only, http/https), strong, em, ul, ol, li, code, pre, blockquote, h1-h6`                                                                                                                                              
-     - Strip everything else (script, style, iframe, object, form, on*, javascript:, data:, file:, etc.)  
-     - Convert allowed-but-formatted HTML to plain text equivalent for storage in `post.body`                                                                                                                                                           
-                                                                                                                                                                                                                                                        
-  2. **Unicode normalization**                                                                                                                                                                                                                          
-     - NFKC normalize                                                                                                                                                                                                                                   
-     - Strip bidi control characters (U+202A–U+202E, U+2066–U+2069)                                                                                                                                                                                     
+
+  Steps in order — **Unicode-first, OWASP-last** so the canonicalization the regex set depends on isn't defeated by HTML-entity escaping. The OWASP Java HTML Sanitizer's default renderer HTML-encodes non-ASCII codepoints (e.g. `ｉ` → `&#65353;`), which would defeat NFKC if OWASP ran first: a fullwidth-Latin injection (`ｉｇｎｏｒｅ previous instructions`) would survive sanitization in entity-encoded form, NFKC would have nothing to decompose, and the regex set would not match. Running NFKC first canonicalises the body; running OWASP last sanitises the placeholder-redacted result (the `[REDACTED:[A-Z2-7]{26}]` marker is pure ASCII non-HTML-significant, so OWASP leaves it intact):
+
+  1. **Unicode normalization**
+     - NFKC normalize
+     - Strip bidi control characters (U+202A–U+202E, U+2066–U+2069)
      - Strip zero-width characters (U+200B, U+200C, U+200D, U+FEFF) unless inside fenced code
-                                                                                                                                                                                                                                                        
-  3. **Prompt-injection regex set** (case-insensitive, applied to normalized text):                                                                                                                                                                     
+
+  2. **Prompt-injection regex set** (case-insensitive, applied to normalized text):                                                                                                                                                                     
      - `\b(ignore|disregard|forget)\b.{0,40}\b(previous|prior|above|all|earlier)\b.{0,40}\b(instruction|prompt|rule|directive)s?\b`                                                                                                                     
      - `\b(you are|act as|pretend to be|roleplay)\b.{0,40}(admin|root|system|developer)`                                                                                                                                                                
      - `\b(system|assistant)\s*[:>]\s*` at line start (impersonation prefix)                                                                                                                                                                            
@@ -84,11 +79,16 @@
 
      The choice of `java.util.regex` over a true linear-time engine (RE2/J or similar) is a **deliberate v1 commitment** so that an implementation choosing a linear-time engine does so as a v2 amendment, not a silent design tweak. **An RE2-style swap is a v2 candidate** — re-evaluating the engine after v1 ships is the recommended next step if the watchdog turns out to fire often enough on legitimate content to motivate the change. v2 may also reconsider the per-stage failure handling (a linear-time engine eliminates the catastrophic-backtracking failure mode the watchdog exists to bound).                                                                                                                                                                              
                                                                                                                                                                                                                                                         
-  4. **For each match:**                                                                                                                                                                                                                                
+  3. **For each match:**
      - Record `(span_start, span_end, rule_id)`.
      - Replace the match in `post.body` with the **spec-committed placeholder marker** `[REDACTED:<id>]` ([../spec/security.md](../spec/security.md) §Ingest pipeline). The brackets and the `REDACTED:` literal are byte-identical across every implementation so user-facing prose, snapshot bodies, and tests recognise the marker by exact-match. The `<id>` is a **per-row random opaque token** generated by the Collector at insert time (encoded as base32 over 16 random bytes — 26 chars; encoding choice is design-only, length is profile-driven). Per-row randomization stops attackers from pre-crafting a fake placeholder that would survive the Stage 1 `<<<UNTRUSTED>>>` marker strip ([../spec/llm.md](../spec/llm.md) §Prompt-injection-aware prompt shape).
-     - Insert a row into `quarantine` with `flagged_by='stage1'`, `status='PENDING'`, `placeholder_id=<id>` (the same token used in the body), and the original text in `original_html`.                                                                                                                                  
-                                                                                                                                                                                                                                                        
+     - Insert a row into `quarantine` with `flagged_by='stage1'`, `status='PENDING'`, `placeholder_id=<id>` (the same token used in the body), and the original text in `original_html`.
+
+  4. **Parse with OWASP Java HTML Sanitizer** on the placeholder-redacted body.
+     - Allowlist: `p, br, a (href only, http/https), strong, em, ul, ol, li, code, pre, blockquote, h1-h6`
+     - Strip everything else (script, style, iframe, object, form, on*, javascript:, data:, file:, etc.)
+     - Convert allowed-but-formatted HTML to plain text equivalent for storage in `post.body`
+
   5. **Set `post.stage1_flagged = true`** if any match.
 
   Stage 1 NEVER blocks posts from being released. It scrubs and routes to quarantine for admin review while the post still goes through the rest of the pipeline with the redacted body.
