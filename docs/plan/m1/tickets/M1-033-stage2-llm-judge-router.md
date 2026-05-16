@@ -1,7 +1,7 @@
 ---
 id: M1-033
 title: Stage 2 LLM judge + first OpenAI-compatible LlmProvider + (ModelTask, scope_language) router
-status: pending
+status: escalated
 created: 2026-05-16
 last_updated: 2026-05-16
 blocked_by:
@@ -131,6 +131,49 @@ decision_refs:
   - D22
   - D27
   - D32
+clarity_check:
+  date: 2026-05-16
+  verdict: FAIL
+  warnings: []
+  blockers:
+    - |
+      SPEC-REFS-VALID FAIL: Four spec_refs in
+      docs/design/05-llm-and-embeddings.md point to plain-text section
+      titles that have no markdown `#` heading markers — they cannot be
+      resolved by the anchor resolution algorithm. The sections exist
+      in the file but as plain prose lines (line 88: "  5.3 Provider
+      implementations", line 147: "  5.4.1 Security Stage 2 judge",
+      line 434: "  5.7 Profile defaults table (canonical)", line 489:
+      "  5.8 Failure handling per task"). Fix: either (a) add `##`
+      heading markers to these sections in
+      docs/design/05-llm-and-embeddings.md (a `spec:` commit changing
+      only the design file), or (b) remove the four unresolvable
+      spec_refs from M1-033's frontmatter and replace them with
+      references to sections that do have `##` markers (e.g., §5.1 SPI
+      overview). The four affected spec_ref entries are:
+      docs/design/05-llm-and-embeddings.md §5.3 Provider
+      implementations; §5.4.1 Security Stage 2 judge; §5.7 Profile
+      defaults table; §5.8 Failure handling per task.
+escalations:
+  - date: 2026-05-16
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      SPEC-REFS-VALID: FAIL
+        - docs/design/05-llm-and-embeddings.md §5.3 Provider
+          implementations: ANCHOR-NOT-FOUND — line 88 reads
+          "  5.3 Provider implementations" with NO `#` marker.
+        - docs/design/05-llm-and-embeddings.md §5.4.1 Security
+          Stage 2 judge: ANCHOR-NOT-FOUND — line 147 reads
+          "  5.4.1 Security Stage 2 judge" with NO `#` marker.
+        - docs/design/05-llm-and-embeddings.md §5.7 Profile
+          defaults table: ANCHOR-NOT-FOUND — line 434 reads
+          "  5.7 Profile defaults table (canonical)" with NO `#`
+          marker.
+        - docs/design/05-llm-and-embeddings.md §5.8 Failure
+          handling per task: ANCHOR-NOT-FOUND — line 489 reads
+          "  5.8 Failure handling per task" with NO `#` marker.
+        Four ANCHOR-NOT-FOUND entries for
+        docs/design/05-llm-and-embeddings.md → FAIL.
 ---
 
 # M1-033: Stage 2 LLM judge + first OpenAI-compatible LlmProvider + (ModelTask, scope_language) router
