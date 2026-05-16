@@ -4,3 +4,4 @@ target/
 *.iml
 docker-compose.override.yml
 scripts/__pycache__/
+.reviews/
