@@ -60,6 +60,33 @@
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-messaging</artifactId>
         </dependency>
+        <!--
+             OWASP Java HTML Sanitizer — step 1 of the Stage 1
+             ingest pipeline per docs/design/04-security.md §4.2.
+             Allowlist HTML strip on feed bodies before Unicode
+             normalization and the prompt-injection regex set.
+             Version pinned here (no project-wide BOM coverage) at
+             the latest stable release as of M1-032's authoring.
+        -->
+        <dependency>
+            <groupId>com.googlecode.owasp-java-html-sanitizer</groupId>
+            <artifactId>owasp-java-html-sanitizer</artifactId>
+            <version>20240325.1</version>
+        </dependency>
+        <!--
+             Apache Commons Text — used by Stage1Pipeline for the
+             HTML-entity pre-decode step (StringEscapeUtils.unescapeHtml4).
+             The pre-decode runs BEFORE NFKC + regex so the regex set
+             sees fully-decoded text rather than entity-encoded forms
+             that the OWASP sanitizer would later decode out of the
+             regex's reach. Version pinned alongside OWASP (no BOM
+             coverage). See Stage1Pipeline §"Step order".
+        -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-text</artifactId>
+            <version>1.12.0</version>
+        </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-junit5</artifactId>

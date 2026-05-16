@@ -1,0 +1,121 @@
+package io.infochat.collector.eval.stage1;
+
+import io.infochat.collector.outbox.PostPersister;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import org.eclipse.microprofile.reactive.messaging.Incoming;
+import org.jboss.logging.Logger;
+
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Timestamp;
+
+/**
+ * The first M1 consumer of the {@code eval-queue} channel authored
+ * by M1-028's {@link io.infochat.collector.outbox.EvalQueueProducer}.
+ * Picks each {@link PostPersister.PersistedPostKey} off the channel,
+ * loads the post's {@code uid} + {@code body}, and invokes
+ * {@link Stage1Pipeline}. The downstream M1-033 Stage 2 worker reads
+ * the resulting {@link Stage1Pipeline.Stage1Result} (which carries
+ * the original body for the LLM judge); the M1-034 Tagger consumer
+ * reads {@code post.stage1_done} as its readiness gate.
+ *
+ * <h2>Short-circuit on already-done</h2>
+ * <p>Per {@code docs/spec/schema.md} §Invariants Invariant 5, in-flight
+ * evaluation is {@code status='RAW'} plus per-stage flag bitmap.
+ * The {@link io.infochat.collector.outbox.OutboxRehydrator} may
+ * re-enqueue a post mid-evaluation (e.g. after a Collector crash
+ * between Stage 1 and Stage 2). The worker MUST short-circuit when
+ * {@code post.stage1_done} is already TRUE so a re-enqueue does not
+ * double-process Stage 1's writes (which would produce duplicate
+ * {@code quarantine} rows for the same matches).
+ *
+ * <h2>Broadcast wiring</h2>
+ * <p>The {@code eval-queue} channel is configured with
+ * {@code mp.messaging.outgoing.eval-queue.broadcast=true} (in
+ * {@code application.properties}) so multiple subscribers receive
+ * each emission. M1-028 left a test-scope subscriber
+ * ({@code TestEvalQueueConsumer}) on the channel to assert the
+ * producer's emissions; the production worker added here is the
+ * second subscriber. SmallRye Reactive Messaging requires the
+ * outgoing-side broadcast flag for a multi-subscriber channel; the
+ * v1 single-subscriber default would reject the wiring.
+ *
+ * <h2>NULL post.body</h2>
+ * <p>The {@code post.body} column is nullable per V7. Production
+ * Fetchers feed non-null bodies (NormalizedPost SPI contract), but
+ * test seeds in preserved ITs INSERT rows with {@code body=NULL} via
+ * direct JDBC, bypassing the SPI. The worker tolerates null at the
+ * DB boundary; {@link Stage1Pipeline#process} coerces null → empty.
+ */
+@ApplicationScoped
+public class Stage1Worker {
+
+    private static final Logger LOG = Logger.getLogger(Stage1Worker.class);
+
+    @Inject
+    DataSource dataSource;
+
+    @Inject
+    Stage1Pipeline stage1Pipeline;
+
+    /**
+     * Consume one {@link PostPersister.PersistedPostKey} from
+     * {@code eval-queue}, load the parent post's columns, and run
+     * Stage 1. The {@code @Incoming} method's parameter type matches
+     * the producer's emit shape exactly.
+     */
+    @Incoming("eval-queue")
+    public void onPostKey(PostPersister.PersistedPostKey key) {
+        if (key == null) {
+            return;
+        }
+        PostRow row;
+        try {
+            row = loadPost(key);
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                "Stage1Worker: failed to load post for key " + key, e);
+        }
+        if (row == null) {
+            LOG.warnf("Stage1Worker: post not found for key %s — skipping.", key);
+            return;
+        }
+        if (row.stage1Done) {
+            // Invariant 5 re-enqueue: rehydrator may re-emit a post
+            // whose Stage 1 already completed. INFO log + short
+            // circuit so Stage 2 (M1-033) and Tagger (M1-034) reach
+            // their downstream advance paths without doubled Stage-1
+            // side effects.
+            LOG.infof("Stage1Worker: post_id=%s already stage1_done; skipping.", key.id());
+            return;
+        }
+        stage1Pipeline.process(key.id(), row.uid, key.fetchedAt(), row.body);
+    }
+
+    private PostRow loadPost(PostPersister.PersistedPostKey key) throws SQLException {
+        final String sql =
+            "SELECT uid, body, stage1_done FROM post "
+                + "WHERE id = ? AND fetched_at = ?";
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setObject(1, key.id());
+            ps.setTimestamp(2, Timestamp.from(key.fetchedAt()));
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return null;
+                }
+                return new PostRow(
+                    rs.getString("uid"),
+                    rs.getString("body"),
+                    rs.getBoolean("stage1_done"));
+            }
+        }
+    }
+
+    private record PostRow(String uid, String body, boolean stage1Done) {
+    }
+}

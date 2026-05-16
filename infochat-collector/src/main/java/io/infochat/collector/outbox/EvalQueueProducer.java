@@ -1,5 +1,6 @@
 package io.infochat.collector.outbox;
 
+import io.smallrye.reactive.messaging.annotations.Broadcast;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.reactive.messaging.Channel;
@@ -32,12 +33,21 @@ import org.eclipse.microprofile.reactive.messaging.Emitter;
  * to the configured size and applies back-pressure to the producer
  * per {@code docs/design/01-architecture.md} §1.6. T1-D's eval
  * workers attach the consumer.
+ *
+ * <p>{@link Broadcast @Broadcast} allows the M1-032 production
+ * {@code Stage1Worker} and the M1-028 {@code TestEvalQueueConsumer}
+ * to subscribe to the same channel; SmallRye otherwise rejects
+ * multiple subscribers with
+ * {@code TooManyDownstreamCandidatesException}. M1-032 widened
+ * {@code files_scope} to cover this annotation under the
+ * "bare consumer wiring needed" carve-out from its {@code out_of_scope}.
  */
 @ApplicationScoped
 public class EvalQueueProducer {
 
     @Inject
     @Channel("eval-queue")
+    @Broadcast
     Emitter<PostPersister.PersistedPostKey> emitter;
 
     /**
