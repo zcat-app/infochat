@@ -15,8 +15,8 @@
 | in-review | 0 |
 | escalated | 0 |
 | done | 33 |
-| deferred | 3 |
-| **total** | **36** |
+| deferred | 4 |
+| **total** | **37** |
 
 ---
 
@@ -78,9 +78,10 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 ### end-of-tier-1-redteam (1)
 - M1-021 → unspecified
 
-### post-mvp-hardening (2)
+### post-mvp-hardening (3)
 - M1-019 → unspecified
 - M1-020 → unspecified
+- M1-031 → unspecified
 
 ---
 
@@ -143,4 +144,5 @@ M1-019 (deferred)
   └── M1-020 (deferred)
 M1-029 (done)
 M1-030 (done)
+M1-031 (deferred)
 ```
