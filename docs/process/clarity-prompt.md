@@ -47,11 +47,38 @@ Write tools accept either form when the agent's CWD is the repo root.
 
    **`spec_refs` anchor resolution algorithm.** For each entry:
    1. Use the Read tool to read `<file-path>`.
-   2. Find every line beginning with `#`-markers (`#`, `##`, `###`,
-      etc.).
-   3. Strip the `#`-markers and surrounding whitespace from each
-      candidate heading.
-   4. Lowercase both the candidate heading and the searched
+   2. Walk the file line-by-line maintaining a `fence_open` flag
+      (initially false). For each line, in order:
+      a. If the line is a CommonMark fenced code-block delimiter —
+         0–3 spaces of leading indent, then a run of three or more
+         backtick characters (U+0060) or three or more tilde
+         characters (U+007E), optionally followed by an info string
+         such as a language tag — toggle `fence_open` and continue
+         to the next line. Fence delimiter lines are themselves
+         never headings, regardless of what follows the delimiter
+         (a language tag after the opening run does not change
+         the line's role).
+      b. If `fence_open` is true after step (a), skip the line.
+         Anything inside a fenced code block is content, not
+         document structure — a line that reads `## Foo` inside a
+         fence is a literal `## Foo` in the rendered code block, not
+         a section heading. This is the rule whose absence caused
+         the §5.4–§5.11 anchors in
+         docs/design/05-llm-and-embeddings.md to disappear when an
+         unclosed fence in §8.7.3 swallowed everything below it
+         (see commit 7de7e515).
+      c. If the line matches `^[ ]{0,3}#{1,6}[ \t]+\S` (a CommonMark
+         ATX heading: 0–3 leading spaces, then 1–6 `#` markers, then
+         one or more spaces or tabs, then a non-empty title body),
+         record the line as a candidate heading with its line number
+         and the count of `#` markers as its depth. Otherwise skip.
+   3. For each candidate, derive the heading text by stripping, in
+      order: the leading whitespace, the `#`-marker run, the
+      whitespace between the markers and the title, and any trailing
+      whitespace or trailing `#`-run (per CommonMark, a trailing
+      run of `#` characters preceded by whitespace is decorative
+      and not part of the heading text).
+   4. Lowercase both the candidate heading text and the searched
       section-title; do a substring match (the searched title must
       appear as a substring of the candidate, or vice-versa for
       partial titles).
