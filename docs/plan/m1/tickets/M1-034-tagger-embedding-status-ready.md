@@ -3,7 +3,20 @@ id: M1-034
 title: Tagger + Embedding pipeline + status→READY + new_post NOTIFY
 status: pending
 created: 2026-05-16
-last_updated: 2026-05-16
+last_updated: 2026-05-17
+aborted_attempts:
+  - date: 2026-05-17
+    prior_status: in-progress
+    reviews_at_abort: []
+    clarity_check_at_abort:
+      date: 2026-05-17
+      verdict: WARN
+      warnings:
+        - "TEST-CHANGES-AUTHORIZED (WARN): DbRoleMatrixIT validates the DB role grant matrix. V11 adds post_embedding and embedding_metadata with new GRANT statements. If DbRoleMatrixIT asserts a closed expected-grants list, it will need a new entry for these two tables. The ticket lists the IT under \"preserves\" but does not include it under \"Authorized test changes.\" Verify at start time whether DbRoleMatrixIT requires update; if so, list it under Authorized test changes with the new expected rows."
+        - "SELF-CONTAINED-CHECK (WARN): The tag normalization character class is referenced via \"docs/spec/commands.md §Surface conventions\" without being inlined in the DoD or acceptance criteria. Implementation notes explicitly acknowledge the implementer may need to read spec/commands.md or design/02-schema.md. Recommended fix: inline the character class in the DoD TaggerWorker bullet: [a-z0-9][a-z0-9-]{0,47} (the stored form from schema.md §Tag stored form)."
+      blockers: []
+    revisions_at_abort: []
+    reason: "Aborted before any implementation rounds — splitting the 14-file scope into M1-034a (Tagger pipeline + V11 + EmbeddingProvider, ~9 files) and M1-034b (Embedding pipeline + ReadyPromoter, ~6 files) to give each round-cap budget to a smaller diff. Plan outline (Tagger/Embedding boundary cut) confirmed the split is mechanical; ReadyPromoter naturally lives in 034b because it consumes embedding_done. See M1-034a, M1-034b under replaced_by."
 blocked_by:
   - M1-008b
   - M1-008c
