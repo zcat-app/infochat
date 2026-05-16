@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 33 |
 | deferred | 4 |
-| **total** | **37** |
+| **total** | **40** |
 
 ---
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-032 — Stage 1 deterministic security (HTML sanitizer + Unicode + regex + watchdog + quarantine) (complexity: medium, risk: high)
 
 ---
 
@@ -41,7 +41,8 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-033 — blocked_by: M1-007b (done), M1-032 (pending)
+- M1-034 — blocked_by: M1-008b (done), M1-008c (done), M1-033 (pending)
 
 ---
 
@@ -79,7 +80,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 - M1-021 → unspecified
 
 ### post-mvp-hardening (3)
-- M1-019 → unspecified
+- M1-019 → M1-033
 - M1-020 → unspecified
 - M1-031 → unspecified
 
@@ -99,14 +100,22 @@ M1-001 (done)
   │     │     │     ├── M1-008c (done)
   │     │     │     │     ├── M1-008 (done) [see above]
   │     │     │     │     ├── M1-027 (done)
-  │     │     │     │     └── M1-028 (done)
+  │     │     │     │     ├── M1-028 (done)
+  │     │     │     │     │     └── M1-032 (pending) ← runnable
+  │     │     │     │     │           └── M1-033 (pending)
+  │     │     │     │     │                 ├── M1-019 (deferred)
+  │     │     │     │     │                 │     └── M1-020 (deferred)
+  │     │     │     │     │                 └── M1-034 (pending)
+  │     │     │     │     ├── M1-032 (pending) [see above]
+  │     │     │     │     └── M1-034 (pending) [see above]
   │     │     │     ├── M1-021 (deferred)
   │     │     │     └── M1-022 (done)
   │     │     │           └── M1-028 (done) [see above]
   │     │     ├── M1-008b (done)
   │     │     │     ├── M1-008 (done) [see above]
   │     │     │     ├── M1-008c (done) [see above]
-  │     │     │     └── M1-022 (done) [see above]
+  │     │     │     ├── M1-022 (done) [see above]
+  │     │     │     └── M1-034 (pending) [see above]
   │     │     └── M1-009 (done)
   │     ├── M1-008a (done) [see above]
   │     ├── M1-008b (done) [see above]
@@ -120,7 +129,8 @@ M1-001 (done)
   │     │     └── M1-028 (done) [see above]
   │     └── M1-028 (done) [see above]
   ├── M1-007b (done)
-  │     └── M1-007 (done) [see above]
+  │     ├── M1-007 (done) [see above]
+  │     └── M1-033 (pending) [see above]
   └── M1-007c (done)
         └── M1-007 (done) [see above]
 M1-002 (done)
@@ -140,8 +150,6 @@ M1-017 (done)
   ├── M1-008a (done) [see above]
   └── M1-008b (done) [see above]
 M1-018 (done)
-M1-019 (deferred)
-  └── M1-020 (deferred)
 M1-029 (done)
 M1-030 (done)
 M1-031 (deferred)
