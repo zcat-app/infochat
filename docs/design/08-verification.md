@@ -389,8 +389,9 @@
     "post-text-1-sha256...": [0.012, -0.045, ...],                                                                                                                                                                                                      
     "post-text-2-sha256...": [0.011, -0.043, ...]                                  
   }                                                                                                                                                                                                                                                     
-   
-  8.7.4 SimpleX WS recordings                                                                                                                                                                                                                           
+  ``` 
+
+  ### 8.7.4 SimpleX WS recordings                                                                                                                                                                                                                           
                                                                                                                                                                                                                                                         
   fixtures/simplex/:
                                                                                                                                                                                                                                                         
@@ -402,11 +403,11 @@
   Used by SimplexAdapterIT and AdapterContractTest. Capturing new recordings: there's a documented procedure in docs/test-fixtures.md (out of scope for v1 spec — committed alongside the test code).                                                   
                                                                                                                                                                                                                                                         
   ---                                                                                                                                                                                                                                                   
-  8.8 Performance and load                                                         
+  ## 8.8 Performance and load                                                         
                           
   Not part of CI; run pre-release on representative hardware.
                                                                                                                                                                                                                                                         
-  8.8.1 Fetch-and-eval throughput                                                                                                                                                                                                                       
+  ### 8.8.1 Fetch-and-eval throughput                                                                                                                                                                                                                       
                                                                                                                                                                                                                                                         
   Synthetic load: 1 source emitting 10 posts/min for 1 hour. Measure:                                                                                                                                                                                   
                                                                                    
@@ -419,28 +420,28 @@
   - vps: 5 posts/min sustained.                                                                                                                                                                                                                         
   - pi: 2 posts/min sustained. 
                                                                                                                                                                                                                                                         
-  8.8.2 Summary latency                                                            
+  ### 8.8.2 Summary latency                                                            
                                                                                                                                                                                                                                                         
   /summary -w 24h against ~200 candidate posts:                                                                                                                                                                                                         
   - laptop: < 8 s (cluster + LLM + render).                                                                                                                                                                                                             
   - vps: < 20 s.                                                                                                                                                                                                                                        
   - pi: < 60 s; if longer, scope narrowing or cluster cap reductions per infochat.summary.cluster-cap.
                                                                                                                                                                                                                                                         
-  8.8.3 Vector search latency                                                                                                                                                                                                                           
+  ### 8.8.3 Vector search latency                                                                                                                                                                                                                           
                                                                                                                                                                                                                                                         
-  SELECT post_id FROM post_embedding ORDER BY embedding <=> $1 LIMIT 10 with a warm HNSW index over 50K vectors:                                                                                                                                        
+  `SELECT post_id FROM post_embedding ORDER BY embedding <=> $1 LIMIT 10` with a warm HNSW index over 50K vectors:                                                                                                                                        
   - laptop: < 50 ms median.                                                                                                                                                                                                                             
   - vps: < 100 ms.                                                                                                                                                                                                                                      
   - pi: with IVFFlat over 10K vectors: < 150 ms.                                   
                                                                                                                                                                                                                                                         
-  8.8.4 Memory ceiling
+  ### 8.8.4 Memory ceiling
                                                                                                                                                                                                                                                         
   - Provider JVM RSS: < 1 GB on vps/pi; < 2 GB on laptop.                                                                                                                                                                                               
   - Collector JVM RSS: similar.
   - Ollama model memory dominates; profile-driven model choice keeps it under hardware capacity.                                                                                                                                                        
                                                                                                                                                                                                                                                         
   ---                                                                                                                                                                                                                                                   
-  8.9 Continuous integration                                                                                                                                                                                                                            
+  ## 8.9 Continuous integration                                                                                                                                                                                                                            
                                                                                                                                                                                                                                                         
   GitHub Actions or equivalent. Pipeline:
                                                                                                                                                                                                                                                         
@@ -457,7 +458,7 @@
   Manual @Tag("manual") tests (live SimpleX, live Ollama) excluded from CI; release manager runs them locally per the runbook.                                                                                                                          
                                                                                    
   ---                                                                                                                                                                                                                                                   
-  8.10 Release verification (manual checklist)                                     
+  ## 8.10 Release verification (manual checklist)                                     
                                                                                                                                                                                                                                                         
   Before tagging a release, the release manager runs:
                                                                                                                                                                                                                                                         
@@ -473,7 +474,7 @@
   - Release notes mention any schema changes and migration time estimate.                                                                                                                                                                               
                                                                                                                                                                                                                                                         
   ---                                                                                                                                                                                                                                                   
-  8.11 What's intentionally NOT in v1 testing                                                                                                                                                                                                           
+  ## 8.11 What's intentionally NOT in v1 testing                                                                                                                                                                                                           
                                                                                                                                                                                                                                                         
   - Property-based fuzz testing — JQwik etc. nice-to-have; targeted fuzzing in IsolationIT is enough for v1.
   - Mutation testing — PIT etc. deferred.                                                                                                                                                                                                               

@@ -302,25 +302,25 @@
     NOT in v1).
                                                                                    
   ---                                                                                                                                                                                                                                                   
-  6.3 Contract every adapter MUST honor                                            
+  ## 6.3 Contract every adapter MUST honor                                            
                                                                                                                                                                                                                                                         
   These rules are part of the SPI contract. Tests in 08-verification.md enforce them via the AdapterContractTest suite, parameterized over every adapter.
                                                                                                                                                                                                                                                         
-  6.3.1 Identity                                                                                                                                                                                                                                        
+  ### 6.3.1 Identity                                                                                                                                                                                                                                        
                                                                                                                                                                                                                                                         
   - Identity.contactId is stable for the lifetime of the underlying user. Adapters must use the most stable identifier their protocol provides (SimpleX contact ID, Telegram user_id, Matrix MXID).                                                     
   - Identity.contactId is cryptographic when possible. Adapters that can't bind identity to a keypair must declare trustLevel = LOW.
   - Identity.displayName is never authoritative and may change. Provider stores it only for UX (e.g., showing "you" the right way).                                                                                                                     
   - Two messages with the same contactId from the same adapter MUST come from the same user. Spoofing requires private-key compromise (HIGH) or admin opt-in to a LOW-trust adapter.                                                                    
                                                                                                                                                                                                                                                         
-  6.3.2 Scope                                                                                                                                                                                                                                           
+  ### 6.3.2 Scope                                                                                                                                                                                                                                           
                                                                                                                                                                                                                                                         
   - Every InboundMessage must carry a ScopeRef:                                                                                                                                                                                                         
     - Dm(contactId) for direct messages — the contact id of the human, not the bot.
     - Group(adapterGroupId) for group messages — a stable group identifier the adapter assigns.                                                                                                                                                         
   - A user's DM scope and any group scope are independent. Adapter must never collapse them.                                                                                                                                                            
                                                                                                                                                                                                                                                         
-  6.3.3 @mention semantics in groups                                                                                                                                                                                                                    
+  ### 6.3.3 @mention semantics in groups                                                                                                                                                                                                                    
                                                                                                                                                                                                                                                         
   - In a group, the adapter MUST only deliver messages that contain an @mention **of the bot's per-adapter cryptographic contact id** to InboundHandler.onMessage. Recognition is by byte-equality against the bot's contact id (§6.2.3), not by string matching the bot's display name.
   - The mention is taken from the adapter's mention payload (SimpleX mention metadata; Signal envelope mention list). An inbound group message that has no mention payload referencing the bot is silently dropped, even if the message body textually contains a string that resembles the bot's display name.
@@ -328,7 +328,7 @@
   - An adapter that declares `supportsMentionByContactId = false` MUST refuse to start in a deployment that enables its group SPI; the registration-time check (§6.7) catches the mismatch.
   - DM messages are delivered as-is.                                                                                                                                                                                                                    
                                                                                                                                                                                                                                                         
-  6.3.4 Output formatting                                                                                                                                                                                                                               
+  ### 6.3.4 Output formatting                                                                                                                                                                                                                               
                                                                                                                                                                                                                                                         
   - Adapter receives OutboundMessage.text already formatted with the project's plain-text-plus-backticks convention (see 03-commands.md §3.1).                                                                                                          
   - If capabilities.supportsCodeFormatting = true, the adapter MAY translate single backticks to its protocol's monospace formatting. Otherwise it MUST send the text verbatim — the recipient sees raw backticks (still readable).
@@ -336,19 +336,19 @@
   - The adapter MUST NOT inject extra formatting (no auto-markdown link conversion, no auto-emoji, no auto-mention).                                                                                                                                    
   - The adapter MUST chunk messages exceeding maxMessageBytes at line boundaries when possible, otherwise at maxMessageBytes - 1. Chunked messages MUST preserve code-block fences (close before chunk, reopen after).                                  
                                                                                                                                                                                                                                                         
-  6.3.5 Idempotency                                                                                                                                                                                                                                     
+  ### 6.3.5 Idempotency                                                                                                                                                                                                                                     
                                                                                                                                                                                                                                                         
   - The provider may retry send() after a transient failure. Adapters SHOULD deduplicate by OutboundMessage.correlationId over a 60-second window when the underlying protocol allows.                                                                  
   - If the adapter cannot deduplicate, the operator must accept occasional duplicate messages on retry. This is acceptable; bot output is not safety-critical.
                                                                                                                                                                                                                                                         
-  6.3.6 Delivery semantics
+  ### 6.3.6 Delivery semantics
 
   - `send()` returns when the adapter has accepted the message for transmission, NOT when the recipient has read it.
   - **Concurrency** is governed by `capabilities.maxInflightSends`: the adapter MUST NOT have more than that many `send()` calls actively transmitting at once. Excess callers either block briefly on an internal semaphore or are queued.
   - **Rate** is governed independently by `capabilities.maxSendsPerSecond`: even if `maxInflightSends` is high, the adapter MUST NOT exceed this many sends per second averaged over a 1s window. The two limits compose — whichever is reached first applies. (Concurrency caps "how many at once"; rate caps "how many per second".)
   - The adapter MUST NOT block the calling thread for more than a small bounded interval; if either cap would be violated, it must enqueue internally rather than stall the caller.
 
-  ### Failure categorisation and retry policy
+  #### Failure categorisation and retry policy
 
   Per [../spec/messaging.md](../spec/messaging.md) §Failure handling, every send/update/finalize failure raised by an adapter is categorised as `TRANSIENT` or `PERMANENT` (the `FailureCategory category()` accessor on `MessagingException`). The adapter MUST set the category at throw site; an adapter that cannot tell the two apart MUST default to `PERMANENT`.
 
@@ -374,7 +374,7 @@
   - **Transport-internal back-pressure** (e.g., an HTTP 429 returned by a Signal proxy, a SimpleX `/_send` rejection with retry-after) surfaces as a `TRANSIENT` failure and counts toward the same attempt budget.
   - **No silent extension.** An adapter MUST NOT swallow a `TRANSIENT` failure to retry internally before surfacing it; the attempt budget belongs to Provider, not to the adapter.
 
-  ### Permanent-delivery-failure cleanup
+  #### Permanent-delivery-failure cleanup
 
   - A `PERMANENT` failure aborts the affected reply **without advancing chat session state** — the context window remains as if the message was never generated, and `chat_memory` is not written ([../spec/messaging.md](../spec/messaging.md) §Failure handling — Permanent delivery failure cleanup).
   - For periodic group digests, the failure is logged and the next slot retries.
@@ -389,7 +389,7 @@
   - **Group-deleted-upstream** (adapter signal: SimpleX group-not-found; Signal group-no-longer-exists) is treated identically to bot-removed.
   - **User-left-group:** when the adapter exposes a per-user left-group signal (`supportsMembershipEvents = true`) **or** surfaces a `PERMANENT` send failure to a specific user in the group, Provider soft-clears the `group_membership` row by setting `removed_at = NOW()` per [02-schema.md §2.1.4](02-schema.md). Adapters with `supportsMembershipEvents = false` MUST NOT synthesise a left-group event from inactivity; in that case the row stays `removed_at IS NULL` until an explicit bot-removed-from-group / group-deleted signal fires.
                                                                                                                                                                                                                                                         
-  6.3.7 Inbound back-pressure                                                                                                                                                                                                                           
+  ### 6.3.7 Inbound back-pressure                                                                                                                                                                                                                           
                                                                                                                                                                                                                                                         
   - InboundHandler.onMessage may take time (LLM calls, DB queries). The adapter MUST NOT drop inbound messages while the handler is busy.                                                                                                               
   - The adapter SHOULD enqueue inbound messages with a bounded queue (default 1000). On overflow, the adapter MUST drop the **NEWEST** message — the one that just arrived — and MUST send a synchronous throttle reply to its sender. Older messages already in the queue are preserved because they have already been acknowledged to the user (the bot didn't reject them on arrival) and may carry context the user is still waiting on a reply for.
@@ -397,7 +397,7 @@
   - Drops are recorded as `adapter.inbound.dropped{adapter, scope_kind, reason='queue_full'}` and logged at WARN with the dropped message's `adapterMessageId` and `sender.contactId` (redacted). Persistent overflow from a single user is a hint that rate-limiting (§4.9) needs tightening — the throttle reply alone is not a substitute for `LlmRateLimiter`.
   - Per-user fairness: the adapter SHOULD NOT let one chatty user starve others. InMemoryAdapter and SimplexAdapter both implement a per-user-fair scheduler.
 
-  6.3.8 Progress notifications
+  ### 6.3.8 Progress notifications
 
   Long-running user requests (`/summary`, `/digest`, chat-mode generation) publish
   progress events to the Provider's `ProgressNotifier` (see 01-architecture.md §1.5
@@ -423,7 +423,7 @@
     Provider-side logic relies on this fallback to remain transport-neutral —
     callers MUST NOT condition on the capability flag themselves.
 
-  6.3.9 Typing indicators
+  ### 6.3.9 Typing indicators
 
   - Adapters with `supportsTypingIndicator = true` SHOULD render the indicator while
     a long-running operation is in progress. Provider invokes `setTyping(scope, true)`
@@ -432,22 +432,22 @@
     its own debouncing. The adapter MUST NOT block the caller.
   - Adapters with the capability disabled MUST treat both calls as silent no-ops.
 
-  6.3.10 Inbound message size cap
+  ### 6.3.10 Inbound message size cap
 
   - Per §6.2.2, every adapter SHOULD enforce a transport-layer size ceiling on inbound messages, dropping anything above `capabilities.maxInboundMessageBytes()` **before** delivery to `InboundHandler.onMessage`.
   - The drop is recorded at `adapter.inbound.dropped{adapter, scope_kind, reason='oversize'}` and logged at WARN with the redacted `sender.contactId` and the message's `adapterMessageId`. A fixed friendly reply is emitted via the same priority `OutboundMessage` path used for queue-overflow drops in §6.3.7 (`correlationId = <dropped inbound message id>`).
   - The application-level chat-mode body cap from [03-commands.md §3.1](03-commands.md) fires as the **second defense** on anything that slips past — typically on adapters whose protocol provides no enforceable transport ceiling and which therefore declare `maxInboundMessageBytes = Integer.MAX_VALUE`. The two caps are layered, not redundant: the transport cap bounds resource cost from a hostile sender at the adapter boundary; the application cap bounds prompt-injection blast radius once the message has been parsed.
 
-  6.3.11 Membership events
+  ### 6.3.11 Membership events
 
   - Adapters with `supportsMembershipEvents = true` deliver native group-membership signals through `InboundHandler.onUserJoinedGroup(adapterGroupId, identity)` and `InboundHandler.onUserLeftGroup(adapterGroupId, identity)`.
   - Adapters with `supportsMembershipEvents = false` MUST NOT call either method. Provider falls back to permanent-delivery-failure-driven cleanup per §6.3.6 — a left-group event is **never** synthesised from inactivity, send-receipt absence, or any other indirect signal at the adapter layer.
   - The bot-removed-from-group and group-deleted-upstream events are separate from per-user membership events (they fire whether or not `supportsMembershipEvents` is true) and continue to flow through their existing adapter signals — typically a top-level error or an adapter-specific "you are no longer a member" event, not the per-user membership stream.
                                                                                                                                                                                                                                                         
   ---                                                                                                                                                                                                                                                   
-  6.4 SimpleX Chat adapter                                                                                                                                                                                                                              
-                                                                                   
-  6.4.1 Underlying protocol
+  ## 6.4 SimpleX Chat adapter                                                                                                                                                                                                                              
+
+  ### 6.4.1 Underlying protocol
 
   SimpleX provides a self-hosted Chat CLI / SimpleX Chat server with a WebSocket-based bot API. The adapter speaks that WebSocket protocol.                                                                                                             
    
@@ -457,8 +457,8 @@
   - Identity: the SimpleX contact display ID (e.g., xftp://...); cryptographically bound. trustLevel = HIGH.
   - **Mention anchoring:** SimpleX's group event payloads carry a structured mention list. The adapter compares the bot's queue address (derived from bot identity material above) byte-equal against the mention target's contact id; it does NOT scan the message body for the bot's display name. `supportsMentionByContactId = true`.
   - **Auth-failure distinction:** the adapter classifies WebSocket close codes into two buckets — *auth failures* (401-equivalent codes from simplex-cli, e.g., revoked or invalid session token) and *network failures* (everything else: TCP reset, server unreachable, idle timeout). The two are handled with different reconnection policies; see §6.4.6. After 3 consecutive auth failures the adapter transitions to the terminal `state=AUTH_FAILED` and stops reconnecting until process restart.                                                                                                                                            
-                                                                                                                                                                                                                                                        
-  6.4.2 Capabilities (declared)                                                                                                                                                                                                                         
+
+  ### 6.4.2 Capabilities (declared)                                                                                                                                                                                                                         
 
   supportsMentionByContactId = true   // SimpleX mention payload references queue address (§6.2.3)
   supportsMembershipEvents   = false  // OPEN — SimpleX has a join event but no documented per-user
@@ -480,8 +480,8 @@
   supportsMessageEdit        = true   // APIUpdateChatItem ("/_update item …") with live=on/off
   supportsTypingIndicator    = false  // SimpleX has no first-class typing indicator
   minEditInterval            = 600ms  // conservative floor; refine after observation                                                                                                                                                                               
-                                                                                                                                                                                                                                                        
-  6.4.3 Lifecycle                                                                                                                                                                                                                                       
+
+  ### 6.4.3 Lifecycle                                                                                                                                                                                                                                       
                                                                                                                                                                                                                                                         
   SimplexAdapter.start(handler):                                                                                                                                                                                                                        
     1. Open WS to simplex-cli URL
@@ -495,8 +495,8 @@
     2. Drain outbound queue (best-effort, max 5s)                                  
     3. Close WS                                                                                                                                                                                                                                         
     4. Idempotent: second stop is a no-op
-                                                                                                                                                                                                                                                        
-  6.4.4 Event decoding                                                                                                                                                                                                                                  
+
+  ### 6.4.4 Event decoding                                                                                                                                                                                                                                  
    
   SimplexEventDecoder maps SimpleX chatItem events to InboundMessage:                                                                                                                                                                                   
                                                                                    
@@ -506,8 +506,8 @@
   - Other event kinds: logged at DEBUG, dropped.                                                                                                                                                                                                        
                                                                                                                                                                                                                                                         
   The decoder is pure (no I/O) and unit-tested with recorded JSON fixtures.                                                                                                                                                                             
-                                                                                                                                                                                                                                                        
-  6.4.5 Command encoding                                                                                                                                                                                                                                
+
+  ### 6.4.5 Command encoding                                                                                                                                                                                                                                
                                                                                    
   SimplexCommandEncoder serializes OutboundMessage to SimpleX /sendMessage commands:                                                                                                                                                                    
    
@@ -516,7 +516,7 @@
                                                                                                                                                                                                                                                         
   Chunking: messages over 4000 bytes are split at the nearest line break before the limit; if a single line is longer, it's split at the limit. Code-block fences are preserved across chunks.
 
-  ### Update encoding
+  #### Update encoding
 
   `update(handle, text)` and `finalize(handle, text)` both serialize to the SimpleX
   `APIUpdateChatItem` command:
@@ -529,7 +529,7 @@
   - The `chatItemId` is captured from each `APISendMessages` response and stored
     inside `SimplexMessageHandle`; callers never see it.
 
-  ### Update failure handling
+  #### Update failure handling
 
   A `CRChatCmdError` carrying `CEInvalidChatItemUpdate` (item too old, deleted, or
   not the bot's own message) is non-recoverable for that handle. The adapter falls
@@ -537,8 +537,8 @@
   increments `adapter.outbound.update.fail{reason=…}`, and increments
   `adapter.outbound.update.total{outcome=fallback_send}`. Subsequent `update` calls
   on the same handle continue to fall back; `finalize` clears the fallback path.                                                          
-                                                                                                                                                                                                                                                        
-  6.4.6 Reconnection
+
+  ### 6.4.6 Reconnection
 
   - **Network failures** (TCP reset, server unreachable, idle timeout, etc.) → exponential backoff reconnect (1s → 2s → 5s → 15s → 60s, then steady at 60s).
   - Reconnect attempts are logged; first failure logged at WARN, subsequent at INFO.
@@ -547,8 +547,8 @@
   - **Auth failures** (401-equivalent close codes — invalid or revoked session token) are handled separately: the adapter does NOT use the network-failure backoff schedule, because retrying with the same revoked token is futile and produces a tight reconnect loop that fills the log and burns CPU.
   - Auth-failure policy: each auth failure increments a counter; the adapter waits 5s then retries up to **3 consecutive auth failures**. On the 3rd consecutive auth failure the adapter transitions to **`state=AUTH_FAILED` (terminal)**, reports unhealthy via `adapter.connection.status=0`, stops reconnecting, and does NOT recover until the Provider process is restarted (typically with a new `infochat.adapters.simplex.session-token`). Each auth failure increments `adapter.simplex.auth.fail` (see §6.12) and is logged at ERROR; the terminal transition triggers the admin notifier (not throttled — operator must intervene).
   - A successful authenticated reconnect at any point resets both the network-failure and auth-failure counters.                                                                                                                                              
-                                                                                                                                                                                                                                                        
-  6.4.7 Failure surfaces                                                                                                                                                                                                                                
+
+  ### 6.4.7 Failure surfaces                                                                                                                                                                                                                                
                                                                                                                                                                                                                                                         
   ┌──────────────────────────────────────────┬────────────────────────────────────┬───────────────────────────────────────────────────────────┐                                                                                                         
   │                 Failure                  │          Adapter behavior          │                    User-visible effect                    │
@@ -572,9 +572,9 @@
                                                                                    
   ---
 
-  6.5 Signal adapter
+  ## 6.5 Signal adapter
 
-  6.5.1 Underlying protocol — open decision
+  ### 6.5.1 Underlying protocol — open decision
 
   The Signal adapter implements the same `MessagingAdapter` SPI as the
   SimpleX adapter. The wire-protocol path between the adapter and Signal's
@@ -591,7 +591,7 @@
 
   Regardless of path, the adapter exposes the same SPI surface; downstream code (§6.3 contract, §6.7 selection, ProgressNotifier) does not care which transport variant is in use.
 
-  6.5.2 Capabilities (declared)
+  ### 6.5.2 Capabilities (declared)
 
   supportsMentionByContactId = true   // Signal mention payload references ACI (mentionUuid) — §6.2.3
   supportsMembershipEvents   = true   // Signal exposes group-join and group-leave events at the
@@ -617,7 +617,7 @@
   supportsTypingIndicator    = true   // Signal's typing indicator is first-class
   minEditInterval            = 600ms  // matches SimpleX; coalescing floor for ProgressNotifier
 
-  6.5.3 Identity assertion
+  ### 6.5.3 Identity assertion
 
   The Signal **ACI** (Account Identifier — a UUID Signal binds to its identity keys) is the cryptographic anchor (D10). `signal-cli` surfaces the ACI on every inbound envelope as `mentionUuid` for mention payloads and as the sender envelope identifier for the message itself. The adapter's `assertIdentity` returns:
 
@@ -634,7 +634,7 @@
 
   trustLevel = HIGH for ordinary user identity. The recovery-flow caveat for *admin* placement (SIM-swap, port-out fraud) lives at [04-security.md §4.4](04-security.md) "Per-adapter admin threat profile"; the design-side commitment in this section is mechanical (capability flags, identity assertion, wire path), not threat modelling.
 
-  6.5.4 Bot identity material
+  ### 6.5.4 Bot identity material
 
   Per [../spec/deployment.md](../spec/deployment.md) §Operator inputs item 7, the Signal adapter owns its own bot identity material. The on-disk shape depends on the §6.5.1 wire-protocol decision; for the provisional `signal-cli` JSON-RPC default:
 
@@ -644,7 +644,7 @@
 
   An alternative wire-protocol path (`libsignal-service-java` or `signald`) would substitute its own identity-material shape; the spec-level commitment is "the adapter owns its identity material and validates it at startup," which is path-independent.
 
-  6.5.5 Lifecycle
+  ### 6.5.5 Lifecycle
 
   SignalAdapter.start(handler):
     1. Validate `infochat.adapters.signal.identity-dir` (§6.5.4)
@@ -660,7 +660,7 @@
     3. Send SIGTERM to the `signal-cli` subprocess (if owned), wait up to 3s, escalate to SIGKILL
     4. Idempotent: second stop is a no-op
 
-  6.5.6 Event decoding
+  ### 6.5.6 Event decoding
 
   SignalEventDecoder maps `signal-cli` JSON-RPC envelopes to InboundMessage:
 
@@ -673,7 +673,7 @@
 
   The decoder is pure (no I/O) and unit-tested with recorded JSON fixtures, mirroring the SimplexEventDecoder structure.
 
-  6.5.7 Command encoding
+  ### 6.5.7 Command encoding
 
   SignalCommandEncoder serializes OutboundMessage to `signal-cli` JSON-RPC `send` / `sendEdit` calls:
 
@@ -685,14 +685,14 @@
 
   Edit failure handling: a `signal-cli` JSON-RPC error indicating the original message is no longer editable (deleted by user, edit window expired) is non-recoverable for that handle. The adapter falls back to a fresh `send` with the original `correlationId` and increments `adapter.outbound.update.fail{reason='edit_window_expired' | 'item_deleted' | …}`, paralleling the SimpleX `CEInvalidChatItemUpdate` handling in §6.4.5.
 
-  6.5.8 Reconnection
+  ### 6.5.8 Reconnection
 
   - **Network failures** (subprocess died, JSON-RPC pipe broken, signal-server unreachable from `signal-cli`'s perspective surfaced as a transient signal-cli error) → exponential backoff reconnect (1s → 2s → 5s → 15s → 60s, then steady at 60s), matching the SimpleX reconnection cadence in §6.4.6.
   - First failure logged at WARN, subsequent at INFO. After 5 consecutive failures the Provider's admin notifier is invoked (throttled).
   - **Auth failures** (account no longer registered with Signal — typically a remote unregister, account compromise, or rate-limit-driven disable) are handled separately: each auth failure increments a counter; after **3 consecutive auth failures** the adapter transitions to terminal `state=AUTH_FAILED`, reports unhealthy via `adapter.connection.status=0`, stops reconnecting, and does NOT recover until the Provider process is restarted (typically with a freshly-registered identity directory). The terminal transition triggers the admin notifier (not throttled — operator intervention required).
   - A successful authenticated reconnect resets both the network-failure and auth-failure counters.
 
-  6.5.9 Failure surfaces
+  ### 6.5.9 Failure surfaces
 
   ┌───────────────────────────────────────────────┬────────────────────────────────────┬───────────────────────────────────────────────────────────┐
   │                    Failure                    │          Adapter behavior          │                    User-visible effect                    │
@@ -716,7 +716,7 @@
   └───────────────────────────────────────────────┴────────────────────────────────────┴───────────────────────────────────────────────────────────┘
 
   ---
-  6.6 InMemoryAdapter (test double)                                                
+  ## 6.6 InMemoryAdapter (test double)                                                
                                                                                                                                                                                                                                                         
   Purpose
 
@@ -810,7 +810,7 @@
   InMemoryAdapter.capabilities() declares `supportsCodeFormatting = true` so tests exercise the code-formatting render path; the SimpleX adapter declares it false so tests of the plain-text fallback also run. The `supportsMarkdownLinks = false` declaration must match every other v1 adapter — the §6.2.1 startup gate would refuse to register an InMemoryAdapter that flipped it true, even in tests.
    
   ---
-  6.7 Adapter selection (multi-adapter, D46)
+  ## 6.7 Adapter selection (multi-adapter, D46)
 
   One Provider may run **any non-empty subset of** the available `MessagingAdapter` implementations simultaneously (D46; [../spec/deployment.md](../spec/deployment.md) §Topology). The set is closed at startup — adding or removing an adapter is a Provider restart.
 
@@ -848,7 +848,7 @@
   **Per-adapter bot identity material.** Each adapter owns its own bot identity material (SimpleX queue keypair, Signal account directory; §6.4.1, §6.5.4) and validates it at adapter startup. Provider does not synthesize bot identity. The bot's per-adapter contact id used for mention recognition is derived from this material at adapter startup; it is not an operator-typed property.
                                                                                    
   ---
-  6.8 Trust levels and operator opt-in
+  ## 6.8 Trust levels and operator opt-in
 
   AdapterTrustLevel.HIGH   — adapter binds identity to cryptographic keys
   AdapterTrustLevel.LOW    — adapter trusts protocol-level user IDs (e.g., chat handles)
@@ -873,14 +873,14 @@
   If any adapter reports `trustLevel = LOW` and the matching `allow-low-trust=true` is missing, Provider refuses to start, naming the adapter. This forces a conscious per-adapter choice: lifting LOW-trust opt-in from one adapter does not implicitly lift it from another in the same deployment.
                                                                                                                                                                                                                                                         
   ---                                                                                                                                                                                                                                                   
-  6.9 Translation interaction                                                      
+  ## 6.9 Translation interaction                                                      
                              
   The provider always hands OutboundMessage.text to the adapter in the per-scope language already (after TranslationProvider, see 05-llm-and-embeddings.md §5.6). Adapters do not translate.
                                                                                                                                                                                                                                                         
   For inbound text, adapters do not translate either. Commands (slash-prefix) are English-only; chat-mode text is passed through verbatim to the chat agent, which receives scope_lang in its prompt and replies in that language.                      
                                                                                                                                                                                                                                                         
   ---                                                                                                                                                                                                                                                   
-  6.10 @mention rules in groups
+  ## 6.10 @mention rules in groups
 
   Mention recognition is anchored to the bot's per-adapter cryptographic contact id (§6.2.3). There is **no operator-typed mention name** — the prior `infochat.adapter.bot-mention-name=@infochat-bot` property has been removed. The bot's per-adapter contact id is derived from the adapter's bot identity material at adapter startup (SimpleX queue address; Signal ACI / `mentionUuid`).
 
@@ -896,14 +896,14 @@
   If a deployment runs more than one bot identity on the same protocol (a v2 candidate, not a v1 shape), each bot's per-adapter contact id is naturally distinct because adapter contact ids are cryptographic — no naming-collision discipline is required at the property layer.
                                                                                    
   ---                                                                                                                                                                                                                                                   
-  6.11 Audit considerations                                                        
+  ## 6.11 Audit considerations                                                        
                            
   Adapters do not write to audit_log directly. The Provider records auditable events (admin actions, ban, etc.) using Identity.contactId as the actor key.
                                                                                                                                                                                                                                                         
   Adapter-internal events (connection lost, reconnect, decode failure) go to application logs at appropriate levels and to AdapterMetrics, NOT to audit_log.                                                                                            
                                                                                                                                                                                                                                                         
   ---                                                                                                                                                                                                                                                   
-  6.12 Observability                                                               
+  ## 6.12 Observability                                                               
                     
   AdapterMetrics (Micrometer):
                                                                                                                                                                                                                                                         
@@ -923,7 +923,7 @@
   /status (admin) reports adapter name, trust level, connection status, and the inbound/outbound queue sizes.                                                                                                                                           
                                                                                                                                                                                                                                                         
   ---                                                                                                                                                                                                                                                   
-  6.13 What's intentionally NOT in v1
+  ## 6.13 What's intentionally NOT in v1
 
   - Telegram, Matrix, IRC, XMPP adapters — the SPI is designed to accept them but the v1 production set is closed at SimpleX + Signal (D32, D46). Adding a new adapter requires it to declare its trust level and identity-assertion shape per §6.2.3 and [04-security.md §4.8](04-security.md) before it can be enabled in production.
   - Voice / file attachments — `supportsAttachments` capability exists but is unused.
@@ -937,7 +937,7 @@
   - Runtime adapter add/remove — the activated adapter list is closed at startup (§6.7); changing it is a Provider restart.
                                                                                                                                                                                                                                                         
   ---                                                                                                                                                                                                                                                   
-  6.14 Verification (what 08-verification.md will assert)
+  ## 6.14 Verification (what 08-verification.md will assert)
 
   - `AdapterContractTest` runs the same suite against every registered adapter (SimpleX, Signal, InMemory).
   - Identity stability: same contact id across multiple inbound messages.
@@ -964,7 +964,7 @@
 
   ---
 
-  6.15 Capability matrix (non-normative)
+  ## 6.15 Capability matrix (non-normative)
 
   Reference for **prospective** adapter authors. The two v1 adapters (SimpleX, Signal) ship in-tree and have their own normative sections (§6.4, §6.5). This table captures how other common messaging protocols are likely to map onto the SPI capabilities introduced in §6.2, §6.3.8/9, §6.3.10/11. Non-normative — an adapter that does better than this table is welcome to declare it.
 
