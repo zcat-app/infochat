@@ -1,7 +1,7 @@
 ---
 id: M1-033
 title: Stage 2 LLM judge + first OpenAI-compatible LlmProvider + (ModelTask, scope_language) router
-status: escalated
+status: pending
 created: 2026-05-16
 last_updated: 2026-05-16
 blocked_by:
@@ -131,29 +131,6 @@ decision_refs:
   - D22
   - D27
   - D32
-clarity_check:
-  date: 2026-05-16
-  verdict: FAIL
-  warnings: []
-  blockers:
-    - |
-      SPEC-REFS-VALID FAIL: Four spec_refs in
-      docs/design/05-llm-and-embeddings.md point to plain-text section
-      titles that have no markdown `#` heading markers — they cannot be
-      resolved by the anchor resolution algorithm. The sections exist
-      in the file but as plain prose lines (line 88: "  5.3 Provider
-      implementations", line 147: "  5.4.1 Security Stage 2 judge",
-      line 434: "  5.7 Profile defaults table (canonical)", line 489:
-      "  5.8 Failure handling per task"). Fix: either (a) add `##`
-      heading markers to these sections in
-      docs/design/05-llm-and-embeddings.md (a `spec:` commit changing
-      only the design file), or (b) remove the four unresolvable
-      spec_refs from M1-033's frontmatter and replace them with
-      references to sections that do have `##` markers (e.g., §5.1 SPI
-      overview). The four affected spec_ref entries are:
-      docs/design/05-llm-and-embeddings.md §5.3 Provider
-      implementations; §5.4.1 Security Stage 2 judge; §5.7 Profile
-      defaults table; §5.8 Failure handling per task.
 escalations:
   - date: 2026-05-16
     reason: clarity-fail
@@ -174,6 +151,22 @@ escalations:
           "  5.8 Failure handling per task" with NO `#` marker.
         Four ANCHOR-NOT-FOUND entries for
         docs/design/05-llm-and-embeddings.md → FAIL.
+revisions:
+  - date: 2026-05-16
+    reason: clarity-fail rework
+    note: |
+      Underlying defect (4 ANCHOR-NOT-FOUND in
+      docs/design/05-llm-and-embeddings.md) resolved in spec commits
+      7de7e51, 0ce4049, 155d808 (heading markers + fence repairs)
+      and clarity-algorithm hardening in fa1832e (fence-state +
+      whitespace canon). spec_refs unchanged — the four cited
+      anchors now resolve under the hardened algorithm:
+        §5.3 Provider implementations    → line 88  (## marker)
+        §5.4.1 Security Stage 2 judge    → line 149 (### marker)
+        §5.7 Profile defaults table      → line 444 (## marker)
+        §5.8 Failure handling per task   → line 499 (## marker)
+      No frontmatter or body edits required; this revision is a
+      clarity-check reset only.
 ---
 
 # M1-033: Stage 2 LLM judge + first OpenAI-compatible LlmProvider + (ModelTask, scope_language) router

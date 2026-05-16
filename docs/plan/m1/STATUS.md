@@ -10,10 +10,10 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
-| escalated | 1 |
+| escalated | 0 |
 | done | 34 |
 | deferred | 4 |
 | **total** | **40** |
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-033 — Stage 2 LLM judge + first OpenAI-compatible LlmProvider + (ModelTask, scope_language) router (complexity: high, risk: high)
 
 ---
 
@@ -41,7 +41,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-034 — blocked_by: M1-008b (done), M1-008c (done), M1-033 (escalated)
+- M1-034 — blocked_by: M1-008b (done), M1-008c (done), M1-033 (pending)
 
 ---
 
@@ -49,7 +49,8 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
 | ID | Title | Trigger | Date |
 |---|---|---|---|
-| M1-033 | Stage 2 LLM judge + first OpenAI-compatible LlmProvider + (ModelTask, scope_language) router | ? | 2026-05-16 |
+
+_(none)_
 
 ---
 
@@ -100,7 +101,7 @@ M1-001 (done)
   │     │     │     │     ├── M1-027 (done)
   │     │     │     │     ├── M1-028 (done)
   │     │     │     │     │     └── M1-032 (done)
-  │     │     │     │     │           └── M1-033 (escalated)
+  │     │     │     │     │           └── M1-033 (pending) ← runnable
   │     │     │     │     │                 ├── M1-019 (deferred)
   │     │     │     │     │                 │     └── M1-020 (deferred)
   │     │     │     │     │                 └── M1-034 (pending)
@@ -128,7 +129,7 @@ M1-001 (done)
   │     └── M1-028 (done) [see above]
   ├── M1-007b (done)
   │     ├── M1-007 (done) [see above]
-  │     └── M1-033 (escalated) [see above]
+  │     └── M1-033 (pending) [see above]
   └── M1-007c (done)
         └── M1-007 (done) [see above]
 M1-002 (done)
