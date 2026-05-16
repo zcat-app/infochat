@@ -1,19 +1,20 @@
 ---
 id: M1-033
 title: Stage 2 LLM judge + first OpenAI-compatible LlmProvider + (ModelTask, scope_language) router
-status: pending
+status: done
 created: 2026-05-16
 last_updated: 2026-05-16
 blocked_by:
   - M1-007b
   - M1-032
-files_budget: 12
+files_budget: 13
 files_scope:
   - infochat-llm-adapter/pom.xml
   - infochat-llm-adapter/src/main/java/io/infochat/llm/impl/OpenAiCompatibleProvider.java
   - infochat-llm-adapter/src/main/java/io/infochat/llm/routing/LlmRouter.java
   - infochat-llm-adapter/src/main/java/io/infochat/llm/routing/LlmRouterStartupGuard.java
   - infochat-llm-adapter/src/main/resources/prompts/security-judge.md
+  - infochat-collector/src/main/java/io/infochat/collector/eval/stage1/Stage1Worker.java
   - infochat-collector/src/main/java/io/infochat/collector/eval/stage2/Stage2Worker.java
   - infochat-collector/src/main/java/io/infochat/collector/eval/stage2/Stage2VerdictHandler.java
   - infochat-collector/src/main/java/io/infochat/collector/eval/stage2/StartupReleaseOnStage2FailureWarn.java
@@ -27,7 +28,7 @@ round_cap: 3
 security_relevant: true
 migration_touch: false
 out_of_scope:
-  - any Stage 1 deterministic security worker, HTML sanitizer integration, prompt-injection regex set, watchdog implementation, placeholder-id generation, or quarantine-row insertion code (M1-032 territory — Stage 2 fires ONLY on Stage 1 hits per docs/spec/security.md §Ingest pipeline; the Stage1Pipeline + Stage1RegexSet + PlaceholderIds + QuarantineDao classes are consumed unchanged)
+  - any change to Stage 1 deterministic security logic — the regex set, HTML sanitizer integration, prompt-injection patterns, watchdog implementation, placeholder-id generation, or quarantine-row insertion code (M1-032 territory — Stage 2 fires ONLY on Stage 1 hits per docs/spec/security.md §Ingest pipeline; the Stage1Pipeline + Stage1RegexSet + PlaceholderIds + QuarantineDao classes are consumed unchanged). **The Stage1Worker.java edit in files_scope is BOUNDED to the in-process Stage 2 hand-off** — (a) injecting `Stage2Worker` as a constructor dependency, and (b) consuming the `Stage1Result` returned from `stage1Pipeline.process(...)` and conditionally invoking `stage2Worker.judge(result)` (or equivalent) when `result.flagged() && !result.quarantinedByWatchdog()`. No other Stage1Worker behavior may change — the existing `stage1Done` short-circuit at line 87, the SQL post-load query, and the watchdog/sanitizer code paths are preserved verbatim. The Stage 1 → Tagger hand-off (currently absent — `stage1Pipeline.process` returns and Stage1Worker exits) remains M1-034's concern.
   - any Tagger LLM call, controlled-vocabulary validation, partial-valid handling, bootstrap-tags fallback, tagger_done advance, or tagger_fallback flag — M1-034 territory; Stage 2 advances stage2_done (and optionally stage2_failed) but does NOT touch tagger_done
   - any EmbeddingProvider impl, embedding worker, post_embedding table, dimensionality guard, or model-identity startup guard — M1-034 territory
   - any post.status → READY UPDATE, post.ready_at set, post.status_changed_at advance for READY, or pg_notify('new_post', …) emit — M1-034 territory at Stage 5
@@ -74,9 +75,22 @@ acceptance:
   - "StartupReleaseOnStage2FailureWarn.java is a Quarkus @Startup bean on the Collector. When the active profile has infochat.security.release-on-stage2-failure=true (laptop / pi defaults per docs/design/04-security.md §4.7), the bean: (a) emits the WARN-level startup line from §4.7 verbatim (or close — the exact wording is design-tier; pick a phrasing that includes the key facts 'release-on-stage2-failure=true', 'Stage 1 only', 'English-language coarse filter', 'multilingual or obfuscated injection content can reach LLM call sites'); (b) writes ONE audit_log row with action='STARTUP_RELEASE_ON_STAGE2_FAILURE_TRUE' (the spec calls for an audit row per docs/design/04-security.md §4.7 'is also written to the audit_log once per process start with action=STARTUP_RELEASE_ON_STAGE2_FAILURE_TRUE so the operating posture is reconstructible from audit history'). The spec design wording says 'the Provider emits the WARN' but Stage 2 runs in the Collector — treat as another doc-bug routing call and wire the WARN + audit on the Collector. Document the routing choice in Implementation notes — grep -E '@Startup' StartupReleaseOnStage2FailureWarn.java returns at least one match AND grep -E 'STARTUP_RELEASE_ON_STAGE2_FAILURE_TRUE' StartupReleaseOnStage2FailureWarn.java returns at least one match AND grep -E 'release-on-stage2-failure|infochat\\.security\\.release-on-stage2-failure' StartupReleaseOnStage2FailureWarn.java returns at least one match"
   - "Bounded concurrency per provider per docs/spec/llm.md §Bounded concurrency and observability 'Per-provider concurrency is bounded so a slow provider applies back-pressure to the eval queue rather than exhausting threads' and docs/design/05-llm-and-embeddings.md §5.7 — the security task's max-concurrency value is read from infochat.llm.security.max-concurrency (laptop 4 / vps 2 / pi 1 / remote-llm 8). Implementation: a worker semaphore (Quarkus vert.x worker pool, java.util.concurrent.Semaphore, or @ApplicationScoped @Inject ManagedExecutor — pick one and document) that bounds concurrent Stage 2 invocations. Verify: grep -E 'infochat\\.llm\\.security\\.max-concurrency' Stage2Worker.java returns at least one match OR grep -E 'Semaphore|ManagedExecutor|max-concurrency' Stage2Worker.java returns at least one match"
   - "application.properties under infochat-collector/src/main/resources declares the security-judge default property surface keys (operators override per profile via Quarkus's @ConfigProperty profile mechanism). Required keys: infochat.security.release-on-stage2-failure (a default value here — laptop profile's true OR a no-default-property-with-required-injection pattern); infochat.security.stage1.regex-timeout-ms (read by M1-032's Stage1Pipeline — declared here even though M1-032 owns the source code, because property declarations live with the consumer module not with the SPI); infochat.llm.security.base-url, infochat.llm.security.api-key, infochat.llm.security.model (the OpenAI-compatible provider config; default values acceptable for local Ollama: http://localhost:11434/v1 + ignored + llama3.2:3b); infochat.llm.security.max-concurrency (the per-provider worker semaphore bound). Verify: grep -E 'infochat\\.security\\.release-on-stage2-failure' application.properties returns at least one match AND grep -E 'infochat\\.llm\\.security\\.base-url' application.properties returns at least one match AND grep -E 'infochat\\.llm\\.security\\.model' application.properties returns at least one match AND grep -E 'infochat\\.llm\\.security\\.max-concurrency' application.properties returns at least one match"
-  - "LlmRouterTest.java is a unit test (NOT a @QuarkusTest — router resolution is in-process Java) that asserts: (a) the router returns a provider for ModelTask.SECURITY_JUDGE when the profile default is configured; (b) the per-task override property (infochat.llm.security.provider) takes priority over the profile default — verify by setting the override to a different provider key and asserting the resolved provider matches the override, not the default; (c) the router returns exactly one LlmProvider per call (signature: LlmProvider, not List<LlmProvider> — assert at compile time + at runtime); (d) the language-aware capability check is exercised for SUMMARIZER (even though Stage 2 doesn't need it, the router code path must exist) — a SUMMARIZER call with scope_language='cs' AND a provider declaring SUPPORTS_LANGUAGE_CS capability resolves to that provider; a SUMMARIZER call with scope_language='cs' AND only providers WITHOUT SUPPORTS_LANGUAGE_CS forces the caller to use TranslationProvider downstream (the router still returns a provider but the caller observes the missing capability and dispatches the two-call shape — this is documented behavior, not an error) — grep -E '@Test' LlmRouterTest.java returns at least four matches"
-  - "Stage2WorkerIT.java is a @QuarkusTest IT against a real Postgres + a STUB LlmProvider (Quarkus DevServices acceptable per M1-027/M1-028 pattern; the stub is a Quarkus @Alternative or @Mock-annotated bean that replaces OpenAiCompatibleProvider for the test). Scenarios end-to-end: (1) BENIGN verdict: stub returns 'BENIGN'; one Stage-1-flagged post with stage1_flagged=true, status='RAW', and one PENDING quarantine row is processed → post.stage2_done=true, post.status stays 'RAW' (Tagger/Embedding still need to run; status='READY' transition happens in M1-034 Stage 5), quarantine row PENDING → BENIGN_CLOSED, [REDACTED:<id>] placeholders RETAINED in post.body; (2) INJECTION: stub returns 'INJECTION' → post.status='QUARANTINED', post.stage2_done=true, quarantine row stays PENDING; (3) MALWARE: same shape as INJECTION; (4) UNKNOWN: same shape as INJECTION; (5) schema-violating reply: stub returns 'BENIGN_PLEASE' on first call AND 'BENIGN_PLEASE' again on retry — the post follows the infra-failure path under the active profile's release-on-stage2-failure setting; (6) empty reply: stub returns '' on both calls → same as (5); (7) unreachable LLM (stub throws on every call) → retry-once-then-fallback to infra path; (8) release-on-stage2-failure=true profile: infra failure path → post.stage2_done=true, post.stage2_failed=true, post.status STAYS 'RAW' (Tagger/Embedding still need to run; the release-to-READY transition happens in Stage 5), redactions retained, log at WARN with error_class='stage2.infra_failure'; (9) release-on-stage2-failure=false profile: infra failure path → post.status='QUARANTINED', post.stage2_done=true, post.stage2_failed=true. The test exercises both profile-flag values via @ConfigProperty override per scenario (or via @TestProfile splitting if simpler) — grep -E '@Test' Stage2WorkerIT.java returns at least nine matches AND grep -E 'BENIGN|INJECTION|MALWARE|UNKNOWN' Stage2WorkerIT.java returns at least four matches"
-  - "Stage2WorkerIT.java's stub LlmProvider is REAL Java (not a Mockito mock at the SPI level — Mockito is fine for verification but the @Alternative bean is a hand-written class that implements LlmProvider directly so the SPI contract is exercised end-to-end). The Stage 2 call site invokes LlmRouter.forTask(SECURITY_JUDGE, …), receives the stub, invokes stub.generate(...) with the assembled prompt, and the stub returns the canned response. Verify by reading: the stub class is in the test source root (NOT the main source root); the stub is selected by Quarkus's @Alternative + @Priority(Integer.MAX_VALUE) or equivalent mechanism for the test profile"
+  - "LlmRouterTest.java is a plain JUnit5 unit test (NOT a @QuarkusTest — router resolution is in-process Java). It is the harness for the four per-behavior acceptance items 26a-26d below; each item pins one named test method so per-behavior coverage is mechanically checkable without an aggregate @Test count. grep -E '@Test' LlmRouterTest.java MUST return at least four matches across the four named items"
+  - "26a (LlmRouterTest profile-default resolution for SECURITY_JUDGE): a @Test method named with substring `profileDefault` AND `securityJudge` (case-insensitive) asserts that LlmRouter.forTask(SECURITY_JUDGE, \"en\") returns the configured profile-default provider when no per-task override property is set. Verify: grep -iE '@Test\\s*\\n[^}]*(profileDefault|profile_default)[^}]*(securityJudge|security_judge)|@Test\\s*\\n[^}]*(securityJudge|security_judge)[^}]*(profileDefault|profile_default)' LlmRouterTest.java returns at least one match (the test method dispatches on profile default; method name carries both substrings)"
+  - "26b (LlmRouterTest per-task override priority): a @Test method named with substring `override` asserts that infochat.llm.security.provider=<alternate> takes priority over the profile default — set the override to a distinct provider key, invoke forTask(SECURITY_JUDGE, \"en\"), assert the resolved provider matches the override, NOT the default. Verify: grep -iE '@Test\\s*\\n[^}]*override' LlmRouterTest.java returns at least one match"
+  - "26c (LlmRouterTest singular-return-type contract): a @Test method asserts that LlmRouter.forTask's return type is LlmProvider (singular), NOT List<LlmProvider> or Optional<LlmProvider>. The assertion has two parts: (i) a compile-time signature check (the test method invokes `LlmProvider p = router.forTask(...)` and the test compiles only if the return type is assignable to LlmProvider — a List<LlmProvider> return would fail compilation; this is the load-bearing static check); (ii) a runtime non-null assertion. Verify: grep -E 'LlmProvider\\s+\\w+\\s*=\\s*\\w+\\.forTask\\s*\\(' LlmRouterTest.java returns at least one match (the singular-return assignment is the compile-time witness)"
+  - "26d (LlmRouterTest language-aware capability check for SUMMARIZER): a @Test method named with substring `Summarizer` OR `language` (case-insensitive) exercises the language-aware branch even though Stage 2 doesn't use it — the code path must exist in v1 per docs/spec/llm.md §Per-task routing rules. Scenario: register two LlmProvider candidates for ModelTask.SUMMARIZER — one declaring SUPPORTS_LANGUAGE_CS via the M1-007b capabilities mechanism, the other not — and assert forTask(SUMMARIZER, \"cs\") returns the capability-declaring provider. Verify: grep -iE '@Test\\s*\\n[^}]*(summarizer|languageCapab|supportsLanguage)' LlmRouterTest.java returns at least one match"
+  - "Stage2WorkerIT.java is a @QuarkusTest IT against a real Postgres (DevServices acceptable per M1-027/M1-028 pattern) + a STUB LlmProvider (a hand-written Quarkus @Alternative bean implementing LlmProvider directly — see acceptance Item 29 for the stub's shape). It is the harness for the nine per-scenario acceptance items 28a-28i below; each item pins one named test method so per-scenario coverage is mechanically checkable without an aggregate @Test count. grep -E '@Test' Stage2WorkerIT.java MUST return at least nine matches across the nine named items; grep -E 'BENIGN|INJECTION|MALWARE|UNKNOWN' Stage2WorkerIT.java MUST return at least four matches (one per label, across the BENIGN/INJECTION/MALWARE/UNKNOWN scenario method bodies)"
+  - "28a (Stage2WorkerIT BENIGN verdict end-to-end): a @Test method named with substring `benign` (case-insensitive) sets the stub to return 'BENIGN'; persists one Stage-1-flagged post with stage1_flagged=true, status='RAW', and one PENDING quarantine row (flagged_by='stage1'); invokes Stage2Worker; asserts post.stage2_done=true, post.status stays 'RAW' (NOT 'READY' — Tagger/Embedding still need to run, status='READY' is M1-034 Stage 5), quarantine row transitions PENDING → BENIGN_CLOSED, [REDACTED:<id>] placeholders RETAINED in post.body. Verify: grep -iE '@Test\\s*\\n[^}]*benign' Stage2WorkerIT.java returns at least one match AND the matching method body references both 'BENIGN_CLOSED' and 'RAW'"
+  - "28b (Stage2WorkerIT INJECTION verdict end-to-end): a @Test method named with substring `injection` (case-insensitive) sets the stub to return 'INJECTION'; asserts post.status='QUARANTINED', post.stage2_done=true, quarantine row stays PENDING (no state-machine move). Verify: grep -iE '@Test\\s*\\n[^}]*injection' Stage2WorkerIT.java returns at least one match"
+  - "28c (Stage2WorkerIT MALWARE verdict end-to-end): a @Test method named with substring `malware` (case-insensitive) sets the stub to return 'MALWARE'; same DB-state shape as 28b — post.status='QUARANTINED', post.stage2_done=true, quarantine row stays PENDING. Verify: grep -iE '@Test\\s*\\n[^}]*malware' Stage2WorkerIT.java returns at least one match"
+  - "28d (Stage2WorkerIT UNKNOWN verdict end-to-end): a @Test method named with substring `unknown` (case-insensitive) sets the stub to return 'UNKNOWN'; same DB-state shape as 28b/28c — post.status='QUARANTINED', post.stage2_done=true, quarantine row stays PENDING. The re-eval feed implicit in (stage2_done=true AND stage2_failed=false AND status='QUARANTINED') is T2-G's input, not this ticket's assertion. Verify: grep -iE '@Test\\s*\\n[^}]*unknown' Stage2WorkerIT.java returns at least one match"
+  - "28e (Stage2WorkerIT schema-violating reply on both calls takes infra-failure path): a @Test method named with substring `schemaViolat` OR `unparseable` OR `invalidLabel` (case-insensitive) sets the stub to return 'BENIGN_PLEASE' on the first call AND 'BENIGN_PLEASE' again on the retry (verifies retry-once policy). Asserts the post follows the infra-failure path per the active test profile's release-on-stage2-failure value (the active profile is the test's own; assertion shape depends on which profile the test runs under — document the chosen profile). Verify: grep -iE '@Test\\s*\\n[^}]*(schemaViolat|unparseable|invalidLabel)' Stage2WorkerIT.java returns at least one match"
+  - "28f (Stage2WorkerIT empty reply on both calls takes infra-failure path): a @Test method named with substring `empty` (case-insensitive) sets the stub to return '' on both calls; asserts retry-once-then-fallback to the infra-failure path under the active profile. Verify: grep -iE '@Test\\s*\\n[^}]*empty' Stage2WorkerIT.java returns at least one match"
+  - "28g (Stage2WorkerIT unreachable-LLM takes infra-failure path): a @Test method named with substring `unreachable` OR `throws` (case-insensitive) configures the stub to throw on every call (e.g. IOException simulating connection refused); asserts retry-once-then-fallback to the infra-failure path; asserts the stub was invoked exactly twice (once + retry). Verify: grep -iE '@Test\\s*\\n[^}]*(unreachable|throws|exception)' Stage2WorkerIT.java returns at least one match"
+  - "28h (Stage2WorkerIT release-on-stage2-failure=true profile infra-failure path): a @Test method named with substring `releaseOnFailureTrue` OR `releaseOnStage2FailureTrue` (case-insensitive) runs under a @TestProfile that sets infochat.security.release-on-stage2-failure=true; triggers an infra-failure (e.g. via the stub throwing); asserts post.stage2_done=true, post.stage2_failed=true, post.status STAYS 'RAW' (Tagger/Embedding still need to run; release-to-READY is M1-034 Stage 5), [REDACTED:<id>] placeholders retained; asserts a WARN log line with error_class='stage2.infra_failure' was emitted. Verify: grep -iE '@Test\\s*\\n[^}]*releaseOn(Failure|Stage2Failure)True' Stage2WorkerIT.java returns at least one match"
+  - "28i (Stage2WorkerIT release-on-stage2-failure=false profile infra-failure path): a @Test method named with substring `releaseOnFailureFalse` OR `releaseOnStage2FailureFalse` (case-insensitive) runs under a @TestProfile that sets infochat.security.release-on-stage2-failure=false; triggers an infra-failure; asserts post.status='QUARANTINED', post.stage2_done=true, post.stage2_failed=true; asserts a WARN log line with error_class='stage2.infra_failure'. Verify: grep -iE '@Test\\s*\\n[^}]*releaseOn(Failure|Stage2Failure)False' Stage2WorkerIT.java returns at least one match"
+  - "Stage2WorkerIT.java's stub LlmProvider is REAL Java (not a Mockito mock at the SPI level — Mockito is fine for verification but the @Alternative bean is a hand-written class that implements LlmProvider directly so the SPI contract is exercised end-to-end) AND is implemented as a **nested static class inside Stage2WorkerIT.java** (NOT a top-level class in its own .java file — this keeps files_scope at 13 entries; the Implementation notes bullet for the test stub pins this choice). The Stage 2 call site invokes LlmRouter.forTask(SECURITY_JUDGE, …), receives the stub, invokes stub.generate(...) with the assembled prompt, and the stub returns the canned response. Verify by reading: grep -E 'static\\s+(final\\s+)?class\\s+TestStubLlmProvider\\s+implements\\s+LlmProvider' Stage2WorkerIT.java returns at least one match (the nested static class declaration); the stub class is NOT a top-level type at the file's primary class declaration; the stub is selected by Quarkus's @Alternative + @Priority(Integer.MAX_VALUE) or equivalent mechanism for the test profile"
   - "LocalOnlyConflictStartupIT.java is a @QuarkusTest IT that asserts the local-only conflict detection from acceptance items 8/9/10. Test profile: infochat.llm.local-only=true AND infochat.llm.security.base-url=https://api.openai.com/v1 (or any non-loopback host). The Collector startup FAILS with the fatal log line naming the SECURITY_JUDGE task and the offending base-url. The test verifies the FAIL via Quarkus's @QuarkusTestResource pattern OR via expecting an exception during Quarkus boot — the precise mechanism depends on how the guard signals failure (System.exit, throwing from @Startup, or @Observes StartupEvent throwing). Document the mechanism in the file's class JDoc. grep -E '@Test' LocalOnlyConflictStartupIT.java returns at least one match AND grep -E 'local-only|SECURITY_JUDGE' LocalOnlyConflictStartupIT.java returns at least one match"
   - "mvn -B -pl infochat-collector -am verify exits 0; failsafe reports show Stage2WorkerIT and LocalOnlyConflictStartupIT executed — grep -rE 'Tests run: [1-9]' infochat-collector/target/failsafe-reports returns at least two new matches across the two new IT classes"
   - "mvn -B -pl infochat-llm-adapter -am test exits 0; surefire reports show LlmRouterTest executed — grep -rE 'Tests run: [1-9]' infochat-llm-adapter/target/surefire-reports returns at least one new match for LlmRouterTest"
@@ -151,6 +165,39 @@ escalations:
           "  5.8 Failure handling per task" with NO `#` marker.
         Four ANCHOR-NOT-FOUND entries for
         docs/design/05-llm-and-embeddings.md → FAIL.
+  - date: 2026-05-16
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A — pre-implementation escalation. The clarity pre-flight
+      returned WARN (not FAIL) with 4 warnings; the Plan subagent's
+      outline then surfaced one scope ambiguity that requires a
+      files_scope edit before implementation can proceed:
+
+        "Stage1Worker.java wiring is required but not in files_scope.
+         The ticket's Implementation notes say 'M1-032's Stage1Worker
+         calls Stage1Pipeline → if stage1_flagged=true, calls
+         Stage2Worker directly with the Stage1Result.' But
+         Stage1Worker.java is NOT in the M1-033 files_scope list.
+         The in-process hand-off requires injecting Stage2Worker
+         into Stage1Worker and adding the conditional dispatch — a
+         non-trivial diff to a file not authorized for change."
+
+      User invoked: /m1-tick escalate M1-033 refine and address all
+      warnings. Resolution: refine. Scope of the refine:
+        1. Add Stage1Worker.java to files_scope; bump files_budget
+           12 → 13 (resolves the outline-surfaced scope ambiguity).
+        2. Pin "each label on its own dedicated line" in the
+           security-judge.md DoD bullet (resolves clarity Warning 1).
+        3. Split acceptance Item 26 (LlmRouterTest @Test >= 4) into
+           four per-behavior acceptance items 26a-26d (resolves
+           clarity Warning 2 HETEROGENEOUS-AGGREGATE smell).
+        4. Split acceptance Item 28 (Stage2WorkerIT @Test >= 9) into
+           nine per-scenario acceptance items 28a-28i (resolves
+           clarity Warning 3 HETEROGENEOUS-AGGREGATE smell).
+        5. Pin "TestStubLlmProvider as a nested static class inside
+           Stage2WorkerIT.java" in the Implementation notes test-stub
+           bullet (resolves clarity Warning 4 off-by-one; no
+           files_scope addition).
 revisions:
   - date: 2026-05-16
     reason: clarity-fail rework
@@ -167,6 +214,129 @@ revisions:
         §5.8 Failure handling per task   → line 499 (## marker)
       No frontmatter or body edits required; this revision is a
       clarity-check reset only.
+  - date: 2026-05-16
+    reason: budget-breach rework
+    note: |
+      Pre-implementation refine triggered by the Plan subagent's
+      outline-surfaced scope ambiguity (Stage1Worker.java required
+      but not in files_scope) plus the four clarity-WARN findings
+      from the start-time pre-flight. No implementation rounds had
+      run; refine applied on the per-ticket branch
+      m1/M1-033-stage2-llm-judge-router before any code lands.
+      Pre-refine frontmatter snapshot (the diff this revision
+      replaces):
+        files_budget: 12
+        files_scope: 12 entries (no Stage1Worker.java)
+        acceptance: 32 items (Items 26 + 28 were single aggregate
+          @Test count assertions)
+        DoD security-judge.md bullet: did not pin "each label on
+          its own dedicated line"
+        Implementation notes TestStubLlmProvider bullet: said
+          "in the test source root" without pinning nested vs
+          top-level
+      Post-refine frontmatter:
+        files_budget: 13
+        files_scope: 13 entries (Stage1Worker.java added)
+        acceptance: items 26 + 28 expanded to per-behavior /
+          per-scenario sets (26a-26d, 28a-28i); total item count
+          rises from 32 to 43
+        DoD: security-judge.md bullet now pins per-label-per-line
+        Implementation notes: TestStubLlmProvider pinned as nested
+          static class inside Stage2WorkerIT.java
+      The expanded acceptance set is per-element-asserting (the
+      pattern recommended in docs/process/ticket-template.md
+      §acceptance) so each behavior / scenario is mechanically
+      checkable in isolation; the HETEROGENEOUS-AGGREGATE smell is
+      resolved by construction. clarity_check is preserved as the
+      historical record of the warnings this refine addresses;
+      per the M1 workflow refine arm for budget-breach, clarity
+      pre-flight does NOT re-run.
+clarity_check:
+  date: 2026-05-16
+  verdict: WARN
+  warnings:
+    - |
+      ACCEPTANCE-VS-DOD-CONSISTENT (Item 11 — security-judge.md
+      label-line format): the acceptance asserts "at least four
+      matches" for grep -E 'BENIGN|INJECTION|MALWARE|UNKNOWN' against
+      security-judge.md with the parenthetical "(one per label,
+      distinct lines)." Design §5.4.1 shows all four labels on one
+      line, which grep would match as 1 line, not 4. The DoD does
+      not commit to the separate-lines format. Recommend adding to
+      the DoD: "each label BENIGN, INJECTION, MALWARE, and UNKNOWN
+      appears on its own dedicated line in security-judge.md."
+    - |
+      ACCEPTANCE-VS-DOD-CONSISTENT (Item 26 — LlmRouterTest @Test
+      aggregate count): "grep -E '@Test' returns at least four
+      matches" is a HETEROGENEOUS-AGGREGATE over four structurally
+      distinct routing behaviors enumerated in the DoD. Omitting
+      any one behavior is undetectable if the total @Test count
+      still reaches 4. Recommend splitting into four per-behavior
+      acceptance items with method-name-pattern greps so structural
+      gaps are mechanically visible.
+    - |
+      ACCEPTANCE-VS-DOD-CONSISTENT (Item 28 — Stage2WorkerIT @Test
+      aggregate count): "grep -E '@Test' returns at least nine
+      matches" is a HETEROGENEOUS-AGGREGATE over nine scenarios
+      with structurally different DB-state shapes (BENIGN quarantine
+      transition vs. INJECTION/MALWARE/UNKNOWN no transition vs.
+      infra-failure stage2_failed flag). Recommend splitting into
+      nine per-scenario acceptance items each asserting the specific
+      post.status and quarantine-row outcome.
+    - |
+      FILES-BUDGET-PLAUSIBLE (potential off-by-one on
+      TestStubLlmProvider): if implemented as a top-level class in
+      its own file (as the implementation notes wording implies),
+      it is file #13 not listed in files_scope. Clarify before
+      starting: if top-level, add the stub file to files_scope and
+      set files_budget: 13. If nested inside Stage2WorkerIT.java,
+      no change needed.
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-05-16
+    verdict: REWORK
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 15
+      added: 2746
+      removed: 29
+  - round: 2
+    date: 2026-05-16
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 15
+      added: 2759
+      removed: 29
+redteam_findings: []
+redteam_audits:
+  - date: 2026-05-16
+    verdict: CLEAN
+    base: main
+    head: m1/M1-033-stage2-llm-judge-router (pre-commit branch tip)
+    verdict_file: docs/plan/m1/redteam/M1-033-2026-05-16.md
+    out_of_model_count: 4
+    note: |
+      CLEAN — no findings. 4 OUT-OF-MODEL observations (informational,
+      not threat-model gaps): SSRF-allowlist scope vs LLM endpoints
+      (in-spec; operator-trusted config); LLM response-body preview
+      logging vs M1-019 stdout redaction (deferred ticket);
+      audit_log raw-JDBC inserts vs spec's redaction-hook layer
+      (project-wide pattern, no user-content fields in this row);
+      @Incoming method invoking blocking Stage2Worker without
+      @Blocking annotation (eval-queue not user-facing event-loop;
+      worth defensive annotation in follow-up).
 ---
 
 # M1-033: Stage 2 LLM judge + first OpenAI-compatible LlmProvider + (ModelTask, scope_language) router
@@ -282,7 +452,13 @@ the post body in DB carries the redacted form throughout.
   wraps content in `<<<UNTRUSTED_CONTENT id="{{id}}">>>...
   <<<END id="{{id}}">>>` with a per-call random UUID;
   enumerates the four labels `BENIGN`, `INJECTION`, `MALWARE`,
-  `UNKNOWN`; demands a single-token reply.
+  `UNKNOWN` **each on its own dedicated line in the prompt
+  template body** (one label per line, not a comma-separated
+  inline list — this is the structural format the acceptance
+  Item 11 grep counts against, distinct from design §5.4.1's
+  one-line illustrative phrasing which is a doc-shape choice,
+  not a prompt-shape requirement); demands a single-token
+  reply.
 - **`Stage2Worker.java`** under
   `infochat-collector/src/main/java/io/infochat/collector/eval/stage2/`
   is the Collector-side worker. It is invoked downstream of
@@ -468,14 +644,30 @@ the post body in DB carries the redacted form throughout.
   exception's stack trace. Pick (1); document (3) as an
   alternative.
 - **Test stub for `LlmProvider`.** Hand-written
-  `TestStubLlmProvider` in the test source root implementing
-  `LlmProvider` directly. The stub takes a canned response
-  (settable via a `setNextResponse(...)` method) and an
-  optional `failNextCall` boolean. The stub is selected via
-  Quarkus's `@Alternative @Priority(Integer.MAX_VALUE)` for
-  the test profile. Mockito at the SPI level is acceptable
-  but a hand-written stub is simpler for the four scenarios
-  in `Stage2WorkerIT` and matches the M1-027/M1-028 style.
+  `TestStubLlmProvider` **implemented as a nested static
+  class inside `Stage2WorkerIT.java`** (NOT a top-level
+  class in its own .java file — the nested placement keeps
+  `files_scope` at 13 entries and binds the stub's lifecycle
+  to the test class that exercises it). The stub implements
+  `LlmProvider` directly and exposes:
+  - `setNextResponse(String)` — canned reply for the next
+    `generate(...)` call; FIFO queue if multiple are set.
+  - `setNextResponses(String...)` — convenience for the
+    schema-violating / empty-reply scenarios where the stub
+    must return distinct values on call 1 and call 2.
+  - `failNext()` / `failAll()` — make the next call (or
+    every call) throw an `IOException` simulating
+    LLM-unreachable.
+  - `callCount()` — exposes the per-test invocation count
+    for the retry-policy assertions (scenarios 28e-28g).
+  The stub is selected via Quarkus's `@Alternative
+  @Priority(Integer.MAX_VALUE)` for the test profile, so
+  CDI resolves it in place of `OpenAiCompatibleProvider`.
+  Mockito at the SPI level is acceptable but a hand-written
+  stub is simpler for the nine `Stage2WorkerIT` scenarios
+  and matches the M1-027/M1-028 style. Nesting also keeps
+  the stub out of any production source root and out of
+  Quarkus's main-context CDI scan.
 - **The `StartupReleaseOnStage2FailureWarn` placement on the
   Collector.** Per `docs/design/04-security.md` §4.7 the
   warning is described as "the Provider emits a prominent
@@ -754,3 +946,132 @@ the post body in DB carries the redacted form throughout.
   row.** Rejected on spec grounds. The design explicitly
   says "once per process start" — per-call would drown
   the audit_log under sustained Stage 2 outages.
+
+## Implementation outline (M1-033, generated by Plan subagent on 2026-05-16)
+
+### Files to touch (12 of 12)
+
+1. **modify**: `infochat-llm-adapter/pom.xml` — keep current minimal deps; verify `java.net.http` (JDK 25 built-in) suffices, add nothing. Documents the "no third-party HTTP client" choice as a no-op modification to confirm acceptance Item 1.
+2. **create**: `infochat-llm-adapter/src/main/java/io/infochat/llm/impl/OpenAiCompatibleProvider.java` — first concrete `LlmProvider`; `POST <base-url>/chat/completions` via `java.net.http.HttpClient`; reads `(base-url, api-key, model, timeout-ms)` per-task via `@ConfigProperty`; not CDI-eager (resolved through router lookup).
+3. **create**: `infochat-llm-adapter/src/main/java/io/infochat/llm/routing/LlmRouter.java` — `@ApplicationScoped` CDI bean exposing `forTask(ModelTask, String scopeLanguage) → LlmProvider`; priority chain: per-task override → language-aware capability → profile default; returns exactly one provider, no fallback chain.
+4. **create**: `infochat-llm-adapter/src/main/java/io/infochat/llm/routing/LlmRouterStartupGuard.java` — `@Startup @Priority(150) @ApplicationScoped`; when `infochat.llm.local-only=true`, enumerates every per-task `base-url`, rejects non-loopback hosts; throws from `@PostConstruct` so Quarkus refuses to start; log line names offending `ModelTask` + `base-url`.
+5. **create**: `infochat-llm-adapter/src/main/resources/prompts/security-judge.md` — system+user prompt template; `<<<UNTRUSTED_CONTENT id="{{id}}">>>...{{content}}...<<<END id="{{id}}">>>` wrapper; each of the four labels `BENIGN`, `INJECTION`, `MALWARE`, `UNKNOWN` on its OWN distinct line (clarity Warning 1 resolution); demands a single-token reply.
+6. **create**: `infochat-collector/src/main/java/io/infochat/collector/eval/stage2/Stage2Worker.java` — `@ApplicationScoped`; invoked **in-process** from `Stage1Worker` when `Stage1Result.flagged()=true` AND `!quarantinedByWatchdog` (Stage 1 watchdog/sanitizer paths already wrote `QUARANTINED` directly; Stage 2 only runs on regex hits that left `RAW`). Calls `router.forTask(SECURITY_JUDGE, "en")`; loads template via `String.replace` substitution; uses `originalBody`; bounded by `Semaphore` sized from `infochat.llm.security.max-concurrency`; retry-once on (unparseable / exception / timeout); dispatches to `Stage2VerdictHandler`.
+7. **create**: `infochat-collector/src/main/java/io/infochat/collector/eval/stage2/Stage2VerdictHandler.java` — `@ApplicationScoped`; switch expression on parsed label; per-verdict SQL UPDATE on `post` + state-machine UPDATE on `quarantine`. Single-transaction writes via the same `inTransaction(...)` shape as `Stage1Pipeline`. Reads `@ConfigProperty infochat.security.release-on-stage2-failure`. Canonical error_class string `stage2.infra_failure` (public static final).
+8. **create**: `infochat-collector/src/main/java/io/infochat/collector/eval/stage2/StartupReleaseOnStage2FailureWarn.java` — Collector-side `@Startup @Priority(150)` bean (sits alongside the router guard — neither needs to run before the other). When the flag is `true`, logs the WARN line verbatim from design §4.7 and writes ONE `audit_log` row with `action='STARTUP_RELEASE_ON_STAGE2_FAILURE_TRUE'`, `target_kind='system'` (the closed CHECK enumerates `system`), `target_id=<host_id-pid>`, `details_json={"profile":"<active-profile-name>"}`.
+9. **modify**: `infochat-collector/src/main/resources/application.properties` — append the new keys: `infochat.security.release-on-stage2-failure` (true at base for test-profile fallback parallel to existing pattern); `infochat.llm.security.base-url` / `api-key` / `model` / `max-concurrency` / `timeout-ms`; `infochat.llm.local-only` (default false). Add `%laptop` / `%vps` / `%pi` / `%remote-llm` namespaced overrides per §5.7 profile table (laptop 4 / vps 2 / pi 1 / remote-llm 8 for max-concurrency; true/true/false/false for release-on-stage2-failure). Keys stay lexicographically sorted within each profile block per the existing convention.
+10. **create**: `infochat-llm-adapter/src/test/java/io/infochat/llm/routing/LlmRouterTest.java` — plain JUnit5 unit test (no `@QuarkusTest`); covers the four named behaviors with distinct `@Test` methods.
+11. **create**: `infochat-collector/src/test/java/io/infochat/collector/eval/stage2/Stage2WorkerIT.java` — `@QuarkusTest` IT against DevServices Postgres; **nests** `TestStubLlmProvider` as a `@Alternative @Priority(Integer.MAX_VALUE)` static inner class (resolves clarity Warning 4 without adding file #13); nine per-scenario `@Test` methods with descriptive names.
+12. **create**: `infochat-collector/src/test/java/io/infochat/collector/eval/stage2/LocalOnlyConflictStartupIT.java` — `@QuarkusTest` + `@TestProfile` setting `infochat.llm.local-only=true` and `infochat.llm.security.base-url=https://api.openai.com/v1`; uses `QuarkusTestProfile` to assert that Quarkus boot fails (e.g. `@TestProfile` + an `assertThrows` on the test method body that re-bootstraps an isolated `Quarkus.run`, OR — simpler — write the test to assert that the guard's check method, exposed as package-private for test, throws when invoked with the conflict configuration; document the chosen mechanism in the class JDoc per ticket Item 30).
+
+**Budget check**: 12 of 12 files used; `TestStubLlmProvider` nested inside `Stage2WorkerIT.java` per clarity Warning 4 (recommended decision).
+
+### Tests
+- **add**: `infochat-llm-adapter/src/test/java/io/infochat/llm/routing/LlmRouterTest.java` — four per-behavior `@Test` methods covering acceptance Item 26's four behaviors with method names that mechanically reveal coverage (clarity Warning 2 resolution):
+  - `forTaskReturnsConfiguredProviderForSecurityJudgeWithProfileDefault` — base profile default resolution.
+  - `perTaskOverridePropertyTakesPriorityOverProfileDefault` — set `infochat.llm.security.provider=<other>` and assert override wins.
+  - `forTaskReturnsExactlyOneProviderNotAList` — compile-time signature assertion (`LlmProvider`, not `List<LlmProvider>`) + runtime assert non-null singular return.
+  - `summarizerWithCzechScopeLanguagePrefersProviderWithSupportsLanguageCsCapability` — exercise the language-aware branch even though Stage 2 doesn't use it; assert a provider declaring `SUPPORTS_LANGUAGE_CS` is preferred over one without when `lang="cs"` and task is `SUMMARIZER`.
+- **add**: `infochat-collector/src/test/java/io/infochat/collector/eval/stage2/Stage2WorkerIT.java` — nine per-scenario `@Test` methods (clarity Warning 3 resolution) covering acceptance Item 28:
+  - `benignVerdictAdvancesStage2DoneAndTransitionsQuarantineToBenignClosedAndKeepsPostRaw`
+  - `injectionVerdictMovesPostToQuarantinedAndLeavesQuarantineRowsPending`
+  - `malwareVerdictMovesPostToQuarantinedAndLeavesQuarantineRowsPending`
+  - `unknownVerdictMovesPostToQuarantinedAndLeavesQuarantineRowsPending`
+  - `schemaViolatingReplyOnBothCallsTakesInfraFailurePathUnderActiveProfile`
+  - `emptyReplyOnBothCallsTakesInfraFailurePathUnderActiveProfile`
+  - `unreachableLlmAfterRetryExhaustionTakesInfraFailurePath`
+  - `releaseOnStage2FailureTrueProfileAdvancesPostWithStage2FailedTrueKeepsRawRetainsRedactions`
+  - `releaseOnStage2FailureFalseProfileQuarantinesPostWithStage2FailedTrue`
+  - Plus nested `TestStubLlmProvider implements LlmProvider` + helper static methods for `setNextResponse` / `failNextCall` / counters for "called twice on retry" assertions.
+- **add**: `infochat-collector/src/test/java/io/infochat/collector/eval/stage2/LocalOnlyConflictStartupIT.java` — single `@Test` `localOnlyTrueWithRemoteSecurityJudgeBaseUrlRefusesStartup` asserting startup-failure mechanism (acceptance Item 30).
+- **modify**: none. **No pre-existing test modifications.** Confirmed against ticket §"Authorized test changes" — "(none)". Authorization clause is well-formed.
+
+### Cross-cutting concerns
+- **Determinism boundary** (`docs/spec/llm.md` §Determinism boundary): the verdict label set is closed; the parser MUST be exact-match-against-4-strings, never a fuzzy match or "contains BENIGN" check. Anything outside the closed set is unparseable per spec.
+- **Plain-text formatting** (CLAUDE.md key conventions): Stage 2 outputs are never user-visible, so no rendering concern, but the WARN startup line goes to logs not users — keep it plain text without markdown.
+- **Per-(user, scope) isolation**: not applicable here (Stage 2 is ingest-side, no user context).
+- **Audit-log INSERT-only on Collector role** (`docs/spec/security.md` §DB roles): the `STARTUP_RELEASE_ON_STAGE2_FAILURE_TRUE` row is the first new `audit_log` write outside of `BootstrapLoader` — confirm the collector role has INSERT on `audit_log` (V5 confirms it does); the bean uses raw JDBC, not an ORM.
+- **Invariant 5** (`docs/spec/schema.md` §Invariants): `post.status='RAW'` is the in-flight cursor; the per-stage `*_done` flags are the durable cursor. **BENIGN and infra-fail-release MUST NOT touch `post.status`** — leave it `RAW`; only the verdicts that yield QUARANTINED touch status. The literal flip to `READY` is M1-034's Stage 5 concern.
+- **Stage 2 fires ONLY when `stage1_flagged=true`** AND `!quarantinedByWatchdog` — the watchdog/sanitizer paths in M1-032 already wrote `status='QUARANTINED'` and set `stage1_done=true`; re-invoking Stage 2 against those rows would be incorrect. The hand-off branch in `Stage1Worker` must check `Stage1Result.flagged() && !Stage1Result.quarantinedByWatchdog()`.
+- **Per-call random UUID** (`docs/design/04-security.md` §4.3): fresh `UUID.randomUUID()` per individual prompt assembly. Cannot be cached on the worker bean or per-post.
+- **Original (pre-redaction) body** (`docs/spec/security.md` §Ingest pipeline): the LLM judge sees `Stage1Result.originalBody()`, not `redactedBody()`. The DB `post.body` retains the redacted form throughout — Stage 2 never writes back the original body even on BENIGN.
+- **Retain redactions on every release path** (acceptance Item 22): neither BENIGN nor `release-on-stage2-failure=true` replaces `[REDACTED:<id>]` placeholders in `post.body`. Only `/quarantine approve` (T2-G) lifts redactions.
+- **Idempotency on re-enqueue** (`OutboxRehydrator` Invariant 5 commentary): Stage 2 must short-circuit when `post.stage2_done=true` — parallel to `Stage1Worker`'s `stage1_done` short-circuit. If re-invocation happens after Stage 1 advances but before the Stage 2 transaction commits, the retry of Stage 2 is idempotent because the verdict handler's SQL is `UPDATE` on `post` keyed by `(id, fetched_at)` — repeating the UPDATE is harmless; the quarantine state-machine `PENDING → BENIGN_CLOSED` is also idempotent (the `WHERE status='PENDING'` predicate blocks double-transitions).
+- **No defensive code for impossible scenarios** (CLAUDE.md §No defensive code): no null-checks on `Stage1Result` fields when the caller is `Stage1Worker` (both internal); but DO validate at the LLM-reply-string boundary (system boundary — `trim().equals()` is the system-boundary check, the four-label switch is the closed match).
+- **Bounded concurrency back-pressure** (`docs/spec/llm.md` §Bounded concurrency): the semaphore caps in-flight Stage 2 calls; when saturated, the `@Incoming` chain back-pressures rather than dropping work. Failed `tryAcquire` after a timeout is itself an infra failure (treat as the retry-once-then-fallback path).
+- **Doc-bug routing of the startup guard + WARN bean to the Collector**: the spec wording in `docs/spec/llm.md` §Per-task routing rules ("fails Provider startup") and `docs/design/04-security.md` §4.7 ("the Provider emits...") names the Provider, but Stage 2 runs in the Collector. Document this routing call in each file's JDoc per Implementation notes; do not propose a spec edit in this ticket.
+
+### Implementation order
+1. **`security-judge.md` prompt template** — pure resource file, no Java dependencies; landing this first lets every Stage 2 unit/IT test load the real template instead of an inline stub. Each label on its own distinct line per clarity Warning 1.
+2. **`OpenAiCompatibleProvider.java`** — first concrete `LlmProvider`. Build with `java.net.http.HttpClient`, per-task `@ConfigProperty` injection. Compiles against M1-007b's frozen SPI. Standalone module: build + unit-test before wiring routing.
+3. **`LlmRouter.java`** — depends on `OpenAiCompatibleProvider` being discoverable (CDI lookup or constructor injection). Priority resolution method first; the language-aware branch is the second layer; the profile-default lookup last. Returns singular `LlmProvider`.
+4. **`LlmRouterStartupGuard.java`** — depends on `LlmRouter` only conceptually (it inspects properties, not the router instance). Wire `@Startup @Priority(150)` BEFORE the worker — otherwise a test boot under a misconfiguration would reach Stage 2's call site before refusing startup.
+5. **`LlmRouterTest.java`** — unit test for the router; can be written in parallel with step 3 but commit after the router so the test isn't speculative. Confirms the four behaviors in isolation.
+6. **`application.properties`** — declare new keys + profile defaults BEFORE `Stage2Worker` reads them, otherwise Quarkus boot fails on a missing required property. Properties land here in source order: `infochat.llm.local-only`, then the `infochat.llm.security.*` block, then the new `infochat.security.release-on-stage2-failure`. Keep lexicographic order inside each `%profile.` block per existing convention.
+7. **`Stage2VerdictHandler.java`** — the SQL writer. Build the BENIGN / INJECTION / MALWARE / UNKNOWN / infra-true / infra-false branches as a switch expression on an internal enum (`Verdict { BENIGN, INJECTION, MALWARE, UNKNOWN, INFRA_FAILURE }`). The handler is independent of `Stage2Worker` and can be unit-tested in isolation if useful. Transactional shape matches `Stage1Pipeline.inTransaction(...)` — same JDBC pattern, ApplicationScoped service uses `DataSource` injection.
+8. **`Stage2Worker.java`** — the orchestrator. Reads `Stage1Result.originalBody()`, builds prompt, calls `LlmRouter.forTask(SECURITY_JUDGE, "en")`, parses verdict via switch, dispatches to `Stage2VerdictHandler`. Semaphore allocation in `@PostConstruct` from the max-concurrency property.
+9. **Wire `Stage1Worker → Stage2Worker`** — modify is **not** authorized; the ticket's `files_scope` does not include `Stage1Worker.java`. **THIS IS A RISK** — see Risks section.
+10. **`StartupReleaseOnStage2FailureWarn.java`** — `@Startup @Priority(150)` bean. Standalone, no compile dependency on Stage 2 code; can land anytime after `application.properties` declares the flag. Writes one `audit_log` row.
+11. **`Stage2WorkerIT.java`** — full end-to-end IT covering all nine scenarios. Stub provider as nested `@Alternative` class. Requires DevServices Postgres + the alternative wins resolution against the real `OpenAiCompatibleProvider`.
+12. **`LocalOnlyConflictStartupIT.java`** — startup-refusal test. Either via `@QuarkusTestProfile` that triggers the conflict and asserts boot failure via `@QuarkusTestResource`, or by exposing a package-private `validateLocalOnlyConfiguration(...)` on the guard for direct invocation. Document the chosen mechanism in the test class JDoc.
+13. **Full `mvn -B clean verify`** — confirms no regression on M1-022..M1-029 + M1-032.
+
+**Why this order**: provider before router (router resolves providers); router + guard before worker (worker depends on the router); properties before worker (Quarkus boot reads them); verdict handler before worker (worker dispatches to it); WARN bean is fully independent so it lands wherever; IT tests last because they require the full chain.
+
+**Wrong order pitfalls**:
+- Declaring `application.properties` keys AFTER writing `Stage2Worker` will fail Quarkus boot in any IT.
+- Adding the local-only guard AFTER the worker means a misconfigured base-url could exercise the worker's call path before the guard's refusal — broken intermediate state.
+- Writing the WARN bean BEFORE the property declaration would fail boot under base profile.
+
+### Risks
+- **`Stage1Worker.java` wiring is required but not in `files_scope`**. The ticket's Implementation notes say "M1-032's Stage1Worker calls Stage1Pipeline → if `stage1_flagged=true`, calls Stage2Worker directly with the `Stage1Result`." But `Stage1Worker.java` is NOT in the M1-033 `files_scope` list. This is a **scope ambiguity**: the in-process hand-off requires injecting `Stage2Worker` into `Stage1Worker` and adding the conditional dispatch — a non-trivial diff to a file not authorized for change. **Escalation: refine**. Either (a) add `Stage1Worker.java` to `files_scope` and bump `files_budget` to 13 (this raises off-by-one to clarity Warning 4 territory), or (b) accept the alternative channel-based shape (`@Channel("stage2-queue")`) which the Implementation notes explicitly reject — that shape would let Stage 2 subscribe via `@Incoming` without modifying `Stage1Worker`, but it contradicts the documented "pick the in-process shape" guidance. Recommend refine to add `Stage1Worker.java` to the scope before implementation begins.
+- **`Stage1Worker`'s test (`Stage1WatchdogIT`, `Stage1PipelineIT`) may break when `Stage2Worker` is injected**. If `Stage2Worker` autowires a `LlmRouter` that demands `infochat.llm.security.base-url` at boot, the Stage 1 tests will fail to start unless they either (a) provide the property in the test fixture's `application.properties`, or (b) the Stage1 path short-circuits before invoking Stage2 in those tests' scenarios. Item (a) is the safer path: the test-fixture `application.properties` at `infochat-collector/src/test/resources/application.properties` declares Ollama defaults for the new `infochat.llm.security.*` keys. **Escalation: refine** if this requires modifying the test-fixture properties file — which IS in the `files_scope` indirectly through the main `application.properties` modification. Reviewer interpretation may vary.
+- **`@TestProfile` mechanism for `LocalOnlyConflictStartupIT`**: Quarkus `@TestProfile` triggers per-test JVM context; if the guard throws from `@PostConstruct`, the entire test class fails to instantiate — there's no clean way to assert "boot refused" from within a `@Test` method in the same class. Options: (a) split the conflict-config test into a `QuarkusTestProfile` that runs in its own JVM via Maven Failsafe configuration, (b) expose a package-private `validateLocalOnlyConfiguration(Map<String, String> configValues)` method on the guard and call it directly. The Implementation notes acknowledge "the precise mechanism depends on how the guard signals failure ... document the mechanism in the file's class JDoc" — so this is a documented design point, not an escalation. Recommend option (b) for simplicity; the `@QuarkusTest` annotation still exercises the CDI wiring.
+- **`audit_log.target_kind` closed CHECK**: V5 enumerates `('user','group','source','post','invite','quarantine','asset','memory','system')`. The startup audit row uses `target_kind='system'` — this is allowed. Confirmed against the schema; no escalation needed.
+- **Quarkus `@Startup` ordering at priority 150**: this slot is currently unused (50, 100, 200, 300, 400, 450 are taken on the Collector). Confirm no migration ticket has reserved 150. Reading the architecture table at design 01 §1.4.3 — slot 150 is free. No risk.
+- **The `infochat.llm.security.timeout-ms` property** is mentioned in Implementation notes but is NOT in the acceptance grep checks. Add it to `application.properties` for completeness, but the reviewer may flag it as unverified surface. Recommend documenting in the commit message under `Property surface added:` trailer.
+
+### Out-of-scope (echoed from ticket)
+- Any Stage 1 worker, HTML sanitizer integration, regex set, watchdog, placeholder ids, quarantine-row insertion (M1-032 territory; consumed unchanged).
+- Any Tagger LLM call, controlled-vocabulary validation, partial-valid handling, bootstrap-tags fallback, `tagger_done` advance, `tagger_fallback` flag (M1-034).
+- Any `EmbeddingProvider` impl, embedding worker, `post_embedding` table, dimensionality guard, model-identity guard (M1-034).
+- Any `post.status → READY` UPDATE, `post.ready_at` set, `pg_notify('new_post', …)` emit (M1-034 Stage 5).
+- Any `EntityExtractor`, `post_entity` table, `post_reference` table, `LinkingJob` (T2).
+- Any re-evaluation job, per-post attempt counter, `QUARANTINED → NEEDS_REVIEW` transition, per-source UNKNOWN auto-disable, `RE_EVAL_RELEASED` audit row, `source.status='failed'` mutation (T2-G).
+- Any throttled admin notifier wiring (T2-G); only emit canonical error_class log lines.
+- Any LLM output sanitizer (T1-F).
+- Any `/quarantine list/approve/reject` admin command or `approve_quarantine` / `reject_quarantine` stored procedures (T2-G).
+- Any Provider-side `quarantine_review` LISTEN listener (M2).
+- Any new Flyway migration (`migration_touch: false`; V10 covers Stage 2 needs; V11 is M1-034).
+- Any `AnthropicProvider` native messages API impl (T3-D).
+- Any `TranslationProvider` concrete impl (T1-F).
+- Any chat-agent recall tool, five-tool allowlist (T2-D).
+- Any embedding-provider router (M1-034 separate resolution path).
+- Any per-task fallback chain (v2 candidate).
+- Any Prometheus / Micrometer metric emit (observability ticket later).
+- Any V1..V10 migration edits (frozen).
+- Any M1-007b SPI surface change (`LlmProvider`, `EmbeddingProvider`, `ModelTask` frozen — this ticket WIRES INTO them, doesn't widen).
+- Any `infochat-provider` module change (Stage 2 lives in Collector + llm-adapter only).
+- Any user-visible rendering of Stage 2 verdicts (internal-only signal).
+
+### Post-refine status (2026-05-16, after `/m1-tick escalate M1-033 refine`)
+
+The outline above was generated by the Plan subagent BEFORE the refine and is preserved verbatim as the at-start snapshot. After the refine, the following items in the outline are resolved or superseded:
+
+- **"Files to touch (12 of 12)"** is now **13 of 13** — `Stage1Worker.java` was added to `files_scope` and `files_budget` was bumped 12 → 13. The implementation order step 9 ("Wire `Stage1Worker → Stage2Worker` — modify is **not** authorized") is now **authorized** — proceed with the in-process hand-off per the outline's recommended path.
+- **Risk #1 (Stage1Worker.java wiring not in files_scope)** is **resolved** — refine added the file to scope; the bounded edit is documented in the refined `out_of_scope` entry 1 (constructor injection of `Stage2Worker` + conditional dispatch on `result.flagged() && !result.quarantinedByWatchdog()` only).
+- **Risk #2 (Stage1WatchdogIT / Stage1PipelineIT might break)** is **still open** — refine did not address it because the test-fixture `application.properties` is the same `infochat-collector/src/main/resources/application.properties` already in `files_scope` (Quarkus reads it for both main and test profiles unless a separate test fixture overrides). Add `%test.infochat.llm.security.base-url=http://stub` (or equivalent) to the properties file during implementation if the pre-existing Stage 1 ITs fail to boot.
+- **Risk #3 (`@TestProfile` mechanism for `LocalOnlyConflictStartupIT`)** is **still open** — refine did not narrow this design choice (the Implementation notes already document both options). Pick the package-private validator method (option b) per the outline's recommendation when implementing.
+- **Risk #6 (timeout-ms property not in acceptance grep)** is **still open** — declare the key in `application.properties` for completeness; document under `Property surface added:` trailer in the commit message.
+- **Tests section** — acceptance Item 26 (now 26a-26d) and Item 28 (now 28a-28i) pin the test method names + per-behavior/per-scenario greps. The outline's test method names match the refined acceptance items' substring greps; the developer follows the outline's naming verbatim.
+- **Cross-cutting concerns** — unchanged; all invariants remain load-bearing.
+
+The clarity warnings the refine addresses are recorded in `clarity_check:` (preserved as historical record) and in the most recent `revisions:` entry. The refined acceptance set (43 items including 26a-26d + 28a-28i) is the implementation contract; the original aggregate Items 26 and 28 were replaced.
+
+## Round 1 rework
+
+Round 1 verdict: REWORK (1 item). All five frontmatter checks PASS; SPEC-CONFORMANCE PASS. The single rework item is a §7 violation ("No defensive code for impossible scenarios") in `Stage2Worker.judge(...)`.
+
+1. **Remove the defensive precondition checks at the top of `Stage2Worker.judge(...)`** in `infochat-collector/src/main/java/io/infochat/collector/eval/stage2/Stage2Worker.java` (the `if (stage1Result == null) throw ...` block AND the `if (!stage1Result.flagged() || stage1Result.quarantinedByWatchdog()) throw ...` block at the top of the method body, ~lines 129-144). These violate `engineering-rules-verbatim.md` §7 "No defensive code for impossible scenarios" and contradict the ticket's own Cross-cutting concerns bullet: "no null-checks on Stage1Result fields when the caller is Stage1Worker (both internal)." `Stage1Worker` is the sole caller and already gates the call on `result.flagged() && !result.quarantinedByWatchdog()` before invoking `judge(...)`. The internal-to-internal defensive throws are exactly the pattern §7 forbids; delete the entire precondition block (and the `IllegalArgumentException` import if it becomes unused after the deletion). A single short comment above the deletion site noting "precondition enforced by the sole caller Stage1Worker" is acceptable per the project's "comment hidden invariants" rule, but not required.
+
+Address only the named item; re-run `mvn -B verify`; then `/m1-tick review M1-033`.

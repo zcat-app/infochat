@@ -15,15 +15,81 @@
 
     <!--
          infochat-llm-adapter is a plain library jar: LLM-side SPI types
-         only (LlmProvider, EmbeddingProvider, ModelTask, LlmResponse,
-         EmbeddingResult). NO Quarkus extensions in production scope so
-         the SPI surface stays provider-agnostic and the LangChain4j-backed
-         impls (each in its own Tier-3 ticket) layer the extension they
-         need without forcing every consumer to inherit it. JUnit is
+         (LlmProvider, EmbeddingProvider, ModelTask, LlmResponse,
+         EmbeddingResult) plus M1-033's first concrete impl
+         (OpenAiCompatibleProvider) and the (ModelTask, scope_language)
+         router. NO Quarkus extensions in production scope so the SPI
+         surface stays provider-agnostic and the LangChain4j-backed impls
+         (each in its own Tier-3 ticket) layer the extension they need
+         without forcing every consumer to inherit it. JUnit is
          BOM-managed via the parent's quarkus-bom import; no <version>
          appears on dependencies in this POM (M1-001 invariant).
+
+         New runtime deps for M1-033:
+           jakarta.enterprise.cdi-api — @ApplicationScoped on
+             OpenAiCompatibleProvider + LlmRouter so the Collector's
+             CDI container resolves them. Provided-scope-only; the
+             consumer module (infochat-collector) brings the runtime
+             via quarkus-arc.
+           org.eclipse.microprofile.config:microprofile-config-api —
+             @ConfigProperty on per-task base-url / api-key / model /
+             timeout-ms injection. Same provided-scope shape.
+           com.fasterxml.jackson.core:jackson-databind — assembles the
+             OpenAI /chat/completions request body and parses the
+             response. Pulled by Quarkus transitively in every
+             consumer; declared here so the library jar compiles
+             standalone.
+           org.jboss.logging:jboss-logging — WARN log lines on retry +
+             infra failure paths; same shape as Stage1Pipeline.
+         The HTTP client is java.net.http.HttpClient (built into JDK 25);
+         the rejected `quarkus-rest-client-reactive` alternative is
+         documented in the M1-033 ticket's Implementation notes.
     -->
     <dependencies>
+        <dependency>
+            <groupId>jakarta.enterprise</groupId>
+            <artifactId>jakarta.enterprise.cdi-api</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.inject</groupId>
+            <artifactId>jakarta.inject-api</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.annotation</groupId>
+            <artifactId>jakarta.annotation-api</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.eclipse.microprofile.config</groupId>
+            <artifactId>microprofile-config-api</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <!--
+             quarkus-core (provided scope) brings the
+             io.quarkus.runtime.Startup annotation used by
+             LlmRouterStartupGuard. The consumer (infochat-collector)
+             pulls quarkus-core transitively through its own Quarkus
+             extensions, so this provided declaration only widens
+             the library jar's compile-time classpath without forcing
+             downstream consumers to inherit a Quarkus extension at
+             runtime they wouldn't otherwise need.
+        -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-core</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.jboss.logging</groupId>
+            <artifactId>jboss-logging</artifactId>
+            <scope>provided</scope>
+        </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>

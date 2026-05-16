@@ -1,5 +1,6 @@
 package io.infochat.collector.eval.stage1;
 
+import io.infochat.collector.eval.stage2.Stage2Worker;
 import io.infochat.collector.outbox.PostPersister;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -63,6 +64,19 @@ public class Stage1Worker {
     Stage1Pipeline stage1Pipeline;
 
     /**
+     * M1-033 hand-off: when Stage 1 flags a post via the regex set
+     * (NOT the watchdog fail-closed path), this worker hands the
+     * Stage1Result to Stage 2 in-process per
+     * {@code docs/spec/security.md} §Ingest pipeline ("Stage 2 —
+     * LLM judge. Only invoked when Stage 1 flagged something").
+     * The alternative @Channel("stage2-queue") shape was rejected
+     * in M1-033 Implementation notes — extra machinery for no
+     * benefit at v1 scale.
+     */
+    @Inject
+    Stage2Worker stage2Worker;
+
+    /**
      * Consume one {@link PostPersister.PersistedPostKey} from
      * {@code eval-queue}, load the parent post's columns, and run
      * Stage 1. The {@code @Incoming} method's parameter type matches
@@ -93,7 +107,16 @@ public class Stage1Worker {
             LOG.infof("Stage1Worker: post_id=%s already stage1_done; skipping.", key.id());
             return;
         }
-        stage1Pipeline.process(key.id(), row.uid, key.fetchedAt(), row.body);
+        Stage1Pipeline.Stage1Result result =
+            stage1Pipeline.process(key.id(), row.uid, key.fetchedAt(), row.body);
+        // Stage 2 fires only on regex hits. The watchdog/sanitizer
+        // fail-closed branches set quarantinedByWatchdog=true and
+        // have already written status='QUARANTINED' — re-judging
+        // them would be incorrect (those posts never reach RAW
+        // again).
+        if (result.flagged() && !result.quarantinedByWatchdog()) {
+            stage2Worker.judge(key.id(), key.fetchedAt(), result);
+        }
     }
 
     private PostRow loadPost(PostPersister.PersistedPostKey key) throws SQLException {
