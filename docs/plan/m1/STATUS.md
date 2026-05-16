@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 32 |
+| done | 33 |
 | deferred | 3 |
 | **total** | **36** |
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-030 — Provider catch-up hardening backlog (3 redteam OUT-OF-MODEL advisories) (complexity: medium, risk: low)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -60,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-030 | Provider catch-up hardening backlog (3 redteam OUT-OF-MODEL advisories) | 2026-05-16 | round 1 APPROVE |
 | M1-028 | Collector outbox (FetchScheduler + PostPersister + OutboxRehydrator) | 2026-05-16 | round 1 APPROVE |
 | M1-029 | Loosen wall-clock tolerance on bodyReadTimeoutFiresOnSlowUpstream | 2026-05-15 | round 1 APPROVE |
 | M1-027 | Provider catch-up (provider_state + NewPostReconciler + new_post listener) | 2026-05-15 | round 1 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-023 | RSS Fetcher implementation (Fetcher SPI, kind='rss') | 2026-05-14 | round 1 APPROVE |
 | M1-022 | Bootstrap-sources loader (Collector @Startup + bootstrap_meta) | 2026-05-14 | round 1 OVERRIDE-APPROVE |
 | M1-008c | Joins, scope preferences, posts (§2.2.3..§2.2.5 + §2.3) | 2026-05-14 | round 1 APPROVE |
-| M1-008b | Sources and tags catalogues (§2.2.1, §2.2.2) | 2026-05-14 | round 1 APPROVE |
 
 ---
 
@@ -142,5 +142,5 @@ M1-018 (done)
 M1-019 (deferred)
   └── M1-020 (deferred)
 M1-029 (done)
-M1-030 (pending) ← runnable
+M1-030 (done)
 ```

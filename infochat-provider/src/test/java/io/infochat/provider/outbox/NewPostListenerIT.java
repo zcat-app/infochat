@@ -2,12 +2,15 @@ package io.infochat.provider.outbox;
 
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -45,6 +48,19 @@ class NewPostListenerIT {
     private static final Duration AWAIT_TIMEOUT = Duration.ofSeconds(10);
     private static final Duration AWAIT_POLL = Duration.ofMillis(50);
 
+    /**
+     * Marker prefix for test-seeded {@code post} rows so each test
+     * starts from a clean slate. The fixture rows exist solely to
+     * satisfy advisory #1's existence check on
+     * {@link NewPostHandler#handle} — without them the check correctly
+     * rejects every NOTIFY this IT emits and the cursor never advances.
+     * Per M1-030 Authorized test changes, this seeding is the
+     * fixture-only modification authorized for this IT.
+     */
+    private static final String TEST_UID_PREFIX = "listener-it/";
+
+    private static final Instant FETCHED_AT = Instant.parse("2026-05-15T12:00:00Z");
+
     @Inject
     DataSource dataSource;
 
@@ -54,10 +70,15 @@ class NewPostListenerIT {
     @Inject
     ProviderStateDao providerStateDao;
 
+    private UUID testSourceId;
+
     @BeforeEach
     void resetCursor() throws Exception {
         assertTrue(newPostListener.isWorkerAlive(),
             "the production @Startup listener worker thread must be running before each test");
+        // Broad cleanup so live-listener cursor advances are deterministic
+        // regardless of which IT in this module seeded READY rows previously.
+        clearAllItPosts();
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                  "UPDATE provider_state "
@@ -68,12 +89,19 @@ class NewPostListenerIT {
                      + " WHERE channel = 'new_post'")) {
             ps.executeUpdate();
         }
+        testSourceId = ensureTestSource();
+    }
+
+    @AfterEach
+    void clearListenerItPosts() throws Exception {
+        clearTestPosts();
     }
 
     @Test
     void notifyWakesListenerAndCursorAdvancesToPayload() throws Exception {
         UUID postId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
         Instant readyAt = Instant.parse("2026-05-15T14:00:00Z");
+        seedReadyRow(postId, readyAt);
 
         emitNewPostNotify(readyAt, postId);
 
@@ -93,6 +121,7 @@ class NewPostListenerIT {
     void duplicateNotifyIsRejectedByCasNoOpAtCursorLevel() throws Exception {
         UUID postId = UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
         Instant readyAt = Instant.parse("2026-05-15T15:00:00Z");
+        seedReadyRow(postId, readyAt);
 
         emitNewPostNotify(readyAt, postId);
         awaitCursor(c -> readyAt.equals(c.cursorHigh()) && postId.toString().equals(c.cursorLowId()),
@@ -127,6 +156,7 @@ class NewPostListenerIT {
     void earlierNotifyAfterAdvanceIsAlsoCasNoOp() throws Exception {
         UUID firstPostId = UUID.fromString("cccccccc-cccc-cccc-cccc-cccccccccccc");
         Instant firstReadyAt = Instant.parse("2026-05-15T16:00:00Z");
+        seedReadyRow(firstPostId, firstReadyAt);
 
         emitNewPostNotify(firstReadyAt, firstPostId);
         awaitCursor(c -> firstReadyAt.equals(c.cursorHigh()),
@@ -139,6 +169,7 @@ class NewPostListenerIT {
         // order).
         UUID earlierPostId = UUID.fromString("dddddddd-dddd-dddd-dddd-dddddddddddd");
         Instant earlierReadyAt = firstReadyAt.minus(5, ChronoUnit.SECONDS);
+        seedReadyRow(earlierPostId, earlierReadyAt);
 
         emitNewPostNotify(earlierReadyAt, earlierPostId);
         Thread.sleep(500);
@@ -150,6 +181,62 @@ class NewPostListenerIT {
             "earlier-ready_at NOTIFY must NOT roll the cursor back");
         assertEquals(firstPostId.toString(), cursor.get().cursorLowId(),
             "cursor_low_id must still point at the first post — the second NOTIFY was a CAS no-op");
+    }
+
+    /**
+     * Seeds a real READY {@code post} row matching the supplied
+     * {@code (postId, readyAt)} pair so advisory #1's existence check
+     * on {@link NewPostHandler#handle} accepts the NOTIFY this test
+     * subsequently emits. Without the seeded row, the handler
+     * (correctly) rejects the payload and the cursor never advances.
+     * The fixture rows are deleted in {@link #resetCursor()}'s
+     * {@code clearTestPosts} call between tests.
+     */
+    private void seedReadyRow(UUID postId, Instant readyAt) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "INSERT INTO post (id, uid, source_id, title, status, fetched_at, ready_at) "
+                     + "VALUES (?, ?, ?, ?, 'READY', ?, ?)")) {
+            ps.setObject(1, postId);
+            ps.setString(2, TEST_UID_PREFIX + postId);
+            ps.setObject(3, testSourceId);
+            ps.setString(4, "listener-it post " + postId);
+            ps.setTimestamp(5, Timestamp.from(FETCHED_AT));
+            ps.setTimestamp(6, Timestamp.from(readyAt));
+            ps.executeUpdate();
+        }
+    }
+
+    private void clearTestPosts() throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "DELETE FROM post WHERE uid LIKE ?")) {
+            ps.setString(1, TEST_UID_PREFIX + "%");
+            ps.executeUpdate();
+        }
+    }
+
+    private void clearAllItPosts() throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "DELETE FROM post WHERE uid LIKE '%-it/%'")) {
+            ps.executeUpdate();
+        }
+    }
+
+    private UUID ensureTestSource() throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "INSERT INTO source (kind, identifier, display_name, category) "
+                     + "VALUES ('rss', 'listener-it://test', 'listener-it', 'news') "
+                     + "ON CONFLICT (kind, identifier) DO UPDATE "
+                     + "SET display_name = EXCLUDED.display_name "
+                     + "RETURNING id")) {
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(), "test source upsert must yield an id");
+                return rs.getObject("id", UUID.class);
+            }
+        }
     }
 
     private void emitNewPostNotify(Instant readyAt, UUID postId) throws Exception {

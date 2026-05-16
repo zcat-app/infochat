@@ -75,6 +75,21 @@ public class NewPostListener {
     /** Maximum @PreDestroy wait for the worker thread to drain. */
     static final long SHUTDOWN_JOIN_TIMEOUT_MS = 5000;
 
+    /**
+     * Initial reconnect backoff after a connection-loss or
+     * getNotifications failure. The backoff doubles each successive
+     * failure up to {@link #MAX_BACKOFF_MS} and resets to this value on
+     * the first successful {@code getNotifications} call.
+     */
+    static final long INITIAL_BACKOFF_MS = 1000;
+
+    /**
+     * Backoff ceiling. Bounds the reconnect cadence so persistent
+     * Postgres unavailability does not produce a tight retry loop that
+     * burns CPU and floods the log.
+     */
+    static final long MAX_BACKOFF_MS = 30_000;
+
     private static final Pattern READY_AT_PATTERN =
         Pattern.compile("\"ready_at\"\\s*:\\s*\"([^\"]+)\"");
     private static final Pattern POST_ID_PATTERN =
@@ -98,11 +113,7 @@ public class NewPostListener {
     @PostConstruct
     void onStartup() {
         try {
-            listenConnection = dataSource.getConnection();
-            listenConnection.setAutoCommit(true);
-            try (Statement stmt = listenConnection.createStatement()) {
-                stmt.execute("LISTEN new_post");
-            }
+            openListenConnection();
         } catch (SQLException e) {
             throw new IllegalStateException(
                 "NewPostListener could not acquire its dedicated Postgres session "
@@ -117,49 +128,155 @@ public class NewPostListener {
     void onShutdown() {
         stopRequested = true;
         if (workerThread != null) {
+            // Interrupt unblocks any in-flight Thread.sleep in the
+            // backoff path so shutdown does not stall for up to 30s on
+            // the maximum backoff sleep.
+            workerThread.interrupt();
             try {
                 workerThread.join(SHUTDOWN_JOIN_TIMEOUT_MS);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
         }
-        if (listenConnection != null) {
+        closeListenConnectionQuietly();
+    }
+
+    /**
+     * Reconnect-resilient main loop. Each iteration:
+     *
+     * <ol>
+     *   <li>ensures the listen connection is open, re-issuing
+     *       {@code LISTEN new_post} after a reconnect;</li>
+     *   <li>blocks on {@code getNotifications} up to
+     *       {@link #NOTIFICATION_TIMEOUT_MS};</li>
+     *   <li>on SQLException, closes the dead connection so the next
+     *       iteration must reconnect, sleeps the current backoff, then
+     *       doubles the backoff up to {@link #MAX_BACKOFF_MS};</li>
+     *   <li>on success, resets the backoff to {@link #INITIAL_BACKOFF_MS}
+     *       and dispatches notifications.</li>
+     * </ol>
+     *
+     * <p>The backoff is bounded so a persistent Postgres outage does not
+     * spin. The reconciler-on-restart catches up any NOTIFY arrivals
+     * dropped during the outage, so the worst-case live-NOTIFY blackout
+     * for a single blip is one backoff cycle.
+     */
+    private void runLoop() {
+        long backoffMs = INITIAL_BACKOFF_MS;
+        while (!stopRequested) {
+            PGConnection pg;
             try {
-                listenConnection.close();
-            } catch (SQLException ignored) {
-                // Shutdown path; the backend session ends regardless.
+                pg = ensureListenConnection();
+            } catch (SQLException e) {
+                if (stopRequested) {
+                    return;
+                }
+                LOG.errorf(e,
+                    "NewPostListener: cannot (re)acquire LISTEN connection; backing off %dms",
+                    backoffMs);
+                if (!sleepBackoff(backoffMs)) {
+                    return;
+                }
+                backoffMs = Math.min(backoffMs * 2, MAX_BACKOFF_MS);
+                continue;
+            }
+            PGNotification[] notifications;
+            try {
+                notifications = pg.getNotifications(NOTIFICATION_TIMEOUT_MS);
+            } catch (SQLException e) {
+                if (stopRequested) {
+                    return;
+                }
+                LOG.errorf(e,
+                    "NewPostListener: getNotifications failed; will reconnect after %dms backoff",
+                    backoffMs);
+                // Drop the dead connection so the next iteration's
+                // ensureListenConnection() forces a fresh session + LISTEN.
+                closeListenConnectionQuietly();
+                if (!sleepBackoff(backoffMs)) {
+                    return;
+                }
+                backoffMs = Math.min(backoffMs * 2, MAX_BACKOFF_MS);
+                continue;
+            }
+            // Healthy poll — reset backoff so the next failure starts at
+            // the floor rather than wherever the last failure left off.
+            backoffMs = INITIAL_BACKOFF_MS;
+            if (notifications == null) {
+                continue;
+            }
+            for (PGNotification n : notifications) {
+                dispatch(n);
             }
         }
     }
 
-    private void runLoop() {
-        try {
-            PGConnection pg = listenConnection.unwrap(PGConnection.class);
-            while (!stopRequested) {
-                PGNotification[] notifications;
-                try {
-                    notifications = pg.getNotifications(NOTIFICATION_TIMEOUT_MS);
-                } catch (SQLException e) {
-                    if (stopRequested) {
-                        return;
-                    }
-                    LOG.errorf(e, "NewPostListener: getNotifications failed");
-                    continue;
-                }
-                if (notifications == null) {
-                    continue;
-                }
-                for (PGNotification n : notifications) {
-                    dispatch(n);
-                }
-            }
-        } catch (SQLException e) {
-            // unwrap() failure — fatal for the listener, but stopRequested
-            // shutdown should not log as an error.
-            if (!stopRequested) {
-                LOG.error("NewPostListener loop terminated unexpectedly", e);
+    /**
+     * Acquires the dedicated LISTEN connection if it is null or closed,
+     * re-issuing {@code LISTEN new_post} so a fresh backend session is
+     * subscribed to the channel. Returns the unwrapped {@link PGConnection}
+     * for the caller to poll. Idempotent — repeated calls with a live
+     * connection short-circuit.
+     */
+    private PGConnection ensureListenConnection() throws SQLException {
+        if (listenConnection == null || listenConnection.isClosed()) {
+            // Defensive: a non-null but closed reference still gets closed
+            // (no-op) so we do not leak Agroal accounting for the dead
+            // handle before swapping in the new one.
+            closeListenConnectionQuietly();
+            openListenConnection();
+            LOG.info(
+                "NewPostListener: (re)acquired LISTEN connection and re-issued LISTEN new_post");
+        }
+        return listenConnection.unwrap(PGConnection.class);
+    }
+
+    private void openListenConnection() throws SQLException {
+        listenConnection = dataSource.getConnection();
+        listenConnection.setAutoCommit(true);
+        try (Statement stmt = listenConnection.createStatement()) {
+            stmt.execute("LISTEN new_post");
+        }
+    }
+
+    private void closeListenConnectionQuietly() {
+        if (listenConnection != null) {
+            try {
+                listenConnection.close();
+            } catch (SQLException ignored) {
+                // The session is being abandoned regardless; the only
+                // observable effect of close() failing is a stray
+                // backend-side notice when Postgres notices the dropped
+                // socket — out-of-band noise that the operator does not
+                // need surfaced here.
             }
         }
+    }
+
+    /**
+     * Sleeps the given duration. Returns {@code true} on normal wake,
+     * {@code false} if the sleep was interrupted (shutdown signal) so the
+     * caller can exit promptly instead of resuming the loop.
+     */
+    private boolean sleepBackoff(long ms) {
+        try {
+            Thread.sleep(ms);
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
+    /**
+     * Test hook (M1-030 advisory #3): closes the LISTEN connection so
+     * the worker's next loop iteration is forced through the reconnect
+     * path. Package-private — never invoked by production code; the
+     * @PreDestroy shutdown path uses {@link #closeListenConnectionQuietly()}
+     * directly.
+     */
+    void closeListenConnectionForTest() {
+        closeListenConnectionQuietly();
     }
 
     private void dispatch(PGNotification n) {

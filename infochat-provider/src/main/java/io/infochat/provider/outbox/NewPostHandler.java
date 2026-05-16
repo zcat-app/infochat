@@ -5,7 +5,12 @@ import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 import org.jboss.logging.Logger;
 
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -65,6 +70,9 @@ public class NewPostHandler {
     private static final Logger LOG = Logger.getLogger(NewPostHandler.class);
 
     @Inject
+    DataSource dataSource;
+
+    @Inject
     ProviderStateDao providerStateDao;
 
     /**
@@ -73,12 +81,37 @@ public class NewPostHandler {
      * the second call's CAS update to be a no-op (the stored cursor is
      * already at or past the supplied one).
      *
+     * <p><b>Pre-advance existence check.</b> A poisoned NOTIFY whose
+     * payload references a non-existent post (or an existing post at a
+     * mismatched {@code ready_at}) would otherwise advance the cursor
+     * past every real READY row downstream. The SELECT below runs INSIDE
+     * the same {@code @Transactional} boundary as the cursor advance, so
+     * a concurrent writer cannot turn an extant row absent between check
+     * and advance.
+     *
      * @return {@code true} if the cursor advanced (this was a real event);
-     *     {@code false} if the cursor was already at or past the supplied
-     *     value (duplicate or out-of-order arrival).
+     *     {@code false} if no matching READY row exists OR if the stored
+     *     cursor was already at or past the supplied value (duplicate or
+     *     out-of-order arrival).
      */
     @Transactional
     public boolean handle(UUID postId, Instant readyAt) throws SQLException {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT 1 FROM post WHERE id = ? AND ready_at = ? AND status = 'READY'")) {
+            ps.setObject(1, postId);
+            ps.setTimestamp(2, Timestamp.from(readyAt));
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    LOG.warnf(
+                        "new_post payload (post_id=%s ready_at=%s) does not match a READY post row; "
+                            + "not advancing cursor",
+                        postId, readyAt);
+                    return false;
+                }
+            }
+        }
+
         boolean advanced = providerStateDao.advanceCursor(
             CHANNEL_NEW_POST, readyAt, CURSOR_LOW_KIND_POST, postId.toString());
         if (advanced) {

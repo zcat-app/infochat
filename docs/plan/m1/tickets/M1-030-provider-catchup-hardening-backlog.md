@@ -1,16 +1,17 @@
 ---
 id: M1-030
 title: Provider catch-up hardening backlog (3 redteam OUT-OF-MODEL advisories)
-status: pending
+status: done
 created: 2026-05-15
-last_updated: 2026-05-15
+last_updated: 2026-05-16
 blocked_by: []
-files_budget: 6
+files_budget: 7
 files_scope:
   - infochat-provider/src/main/java/io/infochat/provider/outbox/NewPostHandler.java
   - infochat-provider/src/main/java/io/infochat/provider/outbox/NewPostListener.java
   - infochat-provider/src/main/java/io/infochat/provider/outbox/NewPostReconciler.java
   - infochat-provider/src/test/java/io/infochat/provider/outbox/NewPostHandlerHardeningIT.java
+  - infochat-provider/src/test/java/io/infochat/provider/outbox/NewPostListenerIT.java
   - infochat-provider/src/test/java/io/infochat/provider/outbox/NewPostListenerReconnectIT.java
   - infochat-provider/src/test/java/io/infochat/provider/outbox/NewPostReconcilerPagingIT.java
 complexity: medium
@@ -25,10 +26,15 @@ out_of_scope:
   - any change to ProviderStateDao.java (the CAS update is correct;
     the gap is upstream of the DAO — in the handler's payload-validation
     and in the catch-up scan's paging)
-  - any modification to the three M1-027 IT classes (ProviderStateDaoIT,
-    NewPostReconcilerIT, NewPostListenerIT) — those pin the M1-027
-    correctness contract verbatim; hardening assertions land in new
-    sibling IT files so the M1-027 contract is not mutated
+  - any modification to ProviderStateDaoIT or NewPostReconcilerIT —
+    those two pin the M1-027 correctness contract verbatim; hardening
+    assertions land in new sibling IT files so their contracts are
+    not mutated. NewPostListenerIT IS modifiable in this ticket but
+    only for the narrow purpose of seeding real READY post rows so
+    advisory #1's existence check accepts the test fixtures; no
+    production-code rejection path is weakened and no listener
+    behavioral assertion is removed (the rejection paths live in
+    NewPostHandlerHardeningIT)
   - any spec or design doc edit (the threat model's "DB is internal —
     only the two services and the operator reach it" carve-out stands;
     this ticket adds defense-in-depth inside that carve-out, it does
@@ -44,29 +50,110 @@ acceptance:
   - "NewPostListener.runLoop (infochat-provider/src/main/java/io/infochat/provider/outbox/NewPostListener.java:142-148) detects a closed/severed listenConnection in the SQLException catch branch and re-acquires the connection via dataSource.getConnection() + re-issues `LISTEN new_post` before continuing the loop. A bounded retry budget (e.g. exponential backoff up to 30s) prevents tight-loop reconnect on persistent failure — grep -E 'isClosed\\(\\)|isValid\\(|dataSource\\.getConnection|LISTEN\\s+new_post' NewPostListener.java returns at least two matches inside or adjacent to the runLoop method"
   - "NewPostListenerReconnectIT.java is a new @QuarkusTest IT that: (a) starts the listener; (b) force-closes the listener's underlying connection (or restarts the DevServices Postgres container if accessible from the test harness; if not, simulate via a wrapper DataSource that vends a closeable proxy); (c) emits a fresh NOTIFY via a separate JDBC connection AFTER the listener has had time to re-establish; (d) asserts the listener received and dispatched the post-reconnect notification within a 30s Awaitility window — grep -E '@Test' NewPostListenerReconnectIT.java returns at least one match"
   - "mvn -B -pl infochat-provider -am verify exits 0; failsafe reports show NewPostHandlerHardeningIT, NewPostReconcilerPagingIT, and NewPostListenerReconnectIT all executed (grep -rE 'Tests run: [1-9]' infochat-provider/target/failsafe-reports returns matches for each)"
-  - "mvn -B clean verify from the repo root exits 0; the existing M1-027 ITs (ProviderStateDaoIT, NewPostReconcilerIT, NewPostListenerIT) continue to pass unchanged"
+  - "NewPostListenerIT.java modifications are limited to seeding real READY `post` rows that match each test's NOTIFY payload (so advisory #1's existence check accepts the fixture) — no production-code rejection path is bypassed and no listener behavioral assertion (LISTEN/NOTIFY plumbing, idempotency CAS no-op, monotonicity CAS no-op) is removed. grep -E 'INSERT\\s+INTO\\s+post' NewPostListenerIT.java returns at least one match"
+  - "mvn -B clean verify from the repo root exits 0; ProviderStateDaoIT and NewPostReconcilerIT continue to pass unchanged; NewPostListenerIT continues to pass with the scoped seeding modifications described in the prior acceptance item"
 test_plan:
   adds:
     - infochat-provider/src/test/java/io/infochat/provider/outbox/NewPostHandlerHardeningIT.java
     - infochat-provider/src/test/java/io/infochat/provider/outbox/NewPostReconcilerPagingIT.java
     - infochat-provider/src/test/java/io/infochat/provider/outbox/NewPostListenerReconnectIT.java
+  modifies:
+    - infochat-provider/src/test/java/io/infochat/provider/outbox/NewPostListenerIT.java (M1-027 — scoped: seed READY post rows in each test before emitting NOTIFY so advisory #1's existence check accepts the fixture; no behavioral assertion removed)
   preserves:
     - infochat-provider/src/test/java/io/infochat/provider/outbox/ProviderStateDaoIT.java (M1-027)
     - infochat-provider/src/test/java/io/infochat/provider/outbox/NewPostReconcilerIT.java (M1-027)
-    - infochat-provider/src/test/java/io/infochat/provider/outbox/NewPostListenerIT.java (M1-027)
     - all prior M1 tests
 spec_refs:
   - docs/spec/architecture.md §Inter-service communication
   - docs/spec/security.md §Trust boundaries
 decision_refs: []
-reviews: []
-escalations: []
-revisions: []
+reviews:
+  - round: 1
+    date: 2026-05-16
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 9
+      added: 1103
+      removed: 80
+escalations:
+  - date: 2026-05-16
+    reason: premise-fail
+    reviewer_verdict_excerpt: |
+      N/A — premise-fail detected at implementation-planning time
+      (before any code was written, no review round was opened).
+
+      Developer analysis: acceptance items #1 and #8 are in direct
+      conflict. Item #1 requires NewPostHandler.handle() to verify a
+      READY post row exists at (post_id, ready_at) before advancing
+      the cursor; rejection returns false. Item #8 requires
+      NewPostListenerIT (an M1-027 IT in test_plan.preserves) to
+      continue passing unchanged. NewPostListenerIT's three @Tests
+      emit pg_notify('new_post', {...}) with synthetic UUIDs
+      (aaaaaaaa-..., bbbbbbbb-..., cccccccc-...) and assert the
+      cursor advances. No post rows are seeded — M1-027's handler
+      didn't check existence. With advisory #1's check in place,
+      every NewPostListenerIT NOTIFY is correctly rejected by the
+      existence check, cursor never advances, all three awaitCursor
+      calls time out, and the IT fails. The ticket's out_of_scope
+      ("any modification to the three M1-027 IT classes") and
+      Authorized test changes ("none — no pre-existing test is
+      modified") forbid the test update that would fix this.
+
+      The fix is to refine the ticket to authorize the
+      NewPostListenerIT modification (seed real READY post rows in
+      @BeforeEach so the existence check passes); the production
+      hardening lands at full strength and the rejection paths are
+      tested by the new NewPostHandlerHardeningIT.
+revisions:
+  - date: 2026-05-16
+    reason: premise-fail refine — authorize NewPostListenerIT seeding so advisory #1's existence check accepts the M1-027 fixture
+    prior_values: |
+      files_budget: 6
+      files_scope (7 entries): omitted NewPostListenerIT.java
+      out_of_scope clause (lines 28-31, prior wording):
+        "any modification to the three M1-027 IT classes (ProviderStateDaoIT,
+         NewPostReconcilerIT, NewPostListenerIT) — those pin the M1-027
+         correctness contract verbatim; hardening assertions land in new
+         sibling IT files so the M1-027 contract is not mutated"
+      acceptance #8 (final item, prior wording):
+        "mvn -B clean verify from the repo root exits 0; the existing M1-027
+         ITs (ProviderStateDaoIT, NewPostReconcilerIT, NewPostListenerIT)
+         continue to pass unchanged"
+      test_plan.preserves listed all three M1-027 ITs; test_plan.modifies did
+        not exist.
+      Body §Definition of Done bullet: "All M1-027 ITs continue to pass
+        unchanged."
+      Body §Authorized test changes: "(none — this ticket adds three NEW IT
+        files; no pre-existing test is modified. ...)"
+      Body §Out-of-scope expansion bullet on M1-027 IT classes mirrored the
+        frontmatter out_of_scope wording.
+    why: |
+      Advisory #1's existence check rejects NOTIFY payloads whose (post_id,
+      ready_at) do not match a real READY post row. NewPostListenerIT's
+      three @Tests emit NOTIFY with synthetic UUIDs and no seeded post
+      rows; the new check correctly rejects them all, breaking the IT.
+      Refine authorizes the test fixture update (seed real rows) so the
+      M1-027 IT's plumbing/idempotency/monotonicity assertions still
+      fire under the stricter contract. Production hardening lands at
+      full strength; the rejection paths are tested explicitly by the
+      new NewPostHandlerHardeningIT.
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-05-16
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE item 3: The conjunct \"AND the SELECT runs inside a loop that exits when fewer than page-size rows are returned\" is not a mechanically checkable command. The paging IT (item 4) partially covers this behaviorally, but the structural assertion (loop present) cannot be verified by grep alone. Consider strengthening: add a grep targeting the loop-exit condition (e.g., grep -E 'while|for\\s*\\(' NewPostReconciler.java) or rely entirely on item 4's paging IT as the behavioral gate and drop the non-runnable conjunct from item 3."
+    - "FILES-BUDGET-PLAUSIBLE: The configurable property `infochat.provider.catchup.page-size` must have its default value assigned in the @ConfigProperty annotation in NewPostReconciler.java (in scope), NOT in application.properties (not in scope). If application.properties is touched, it falls outside files_scope and the reviewer's negative-space check will flag it as an unintended file. The ticket should either (a) explicitly state in Implementation notes that the default lives in the annotation, or (b) add application.properties to files_scope and increment files_budget to 7."
+  blockers: []
 ---
 
 # M1-030: Provider catch-up hardening backlog (3 redteam OUT-OF-MODEL advisories)
@@ -135,7 +222,13 @@ The three advisories, in order of acceptance items:
   exponential backoff and re-issues `LISTEN new_post`.
 - One new @QuarkusTest IT per advisory, covering the
   happy/sad/edge paths.
-- All M1-027 ITs continue to pass unchanged.
+- ProviderStateDaoIT and NewPostReconcilerIT continue to pass
+  unchanged.
+- NewPostListenerIT continues to pass with scoped fixture
+  modifications: each @Test seeds a real READY `post` row matching
+  its NOTIFY payload so advisory #1's existence check accepts the
+  fixture. The IT's behavioral assertions (LISTEN/NOTIFY plumbing,
+  duplicate-CAS-no-op, earlier-CAS-no-op) are preserved verbatim.
 - `mvn -B clean verify` exits 0 from the repo root.
 
 ## Implementation notes
@@ -207,11 +300,19 @@ The three advisories, in order of acceptance items:
   reconciler, and reconnect in the listener — all code changes.
 - **ProviderStateDao.** The CAS update is correct; the gap is
   upstream of the DAO. The DAO stays untouched.
-- **M1-027 IT classes.** The three M1-027 ITs pin the M1-027
-  contract verbatim. Hardening assertions land in three new IT
-  files so the M1-027 contract is not mutated. (Per §Engineering
-  rules: "Don't 'improve' adjacent code... Match existing style
-  even if you'd write it differently.")
+- **M1-027 IT classes.** ProviderStateDaoIT and NewPostReconcilerIT
+  pin their portions of the M1-027 contract verbatim and stay
+  untouched. NewPostListenerIT requires a scoped fixture update:
+  advisory #1's existence check rejects its synthetic-UUID NOTIFY
+  payloads (no real `post` row is seeded in M1-027), so each @Test
+  must seed a matching READY row before emitting NOTIFY. The
+  modification is fixture-only — every behavioral assertion the M1-027
+  IT carries (LISTEN/NOTIFY plumbing, duplicate-CAS-no-op,
+  earlier-CAS-no-op) is preserved. New hardening assertions still
+  land in the three new sibling IT files (NewPostHandlerHardeningIT,
+  NewPostReconcilerPagingIT, NewPostListenerReconnectIT) so the
+  hardening behavior is tested explicitly and independently of the
+  M1-027 ITs.
 - **Threat-model amendment.** Out-of-scope for this ticket;
   optional follow-up after M1 close.
 - **Other modules.** infochat-collector, infochat-core,
@@ -219,11 +320,41 @@ The three advisories, in order of acceptance items:
 
 ## Authorized test changes
 
-- (none — this ticket adds three NEW IT files; no pre-existing
-  test is modified. If advisory #3's reconnect test genuinely
-  requires a `@IfBuildProfile("test")`-gated test hook on
-  NewPostListener, that hook is production code carrying a
-  test-only profile annotation, not a test modification.)
+- **NewPostListenerIT.java** (M1-027) — fixture-scoped modification
+  only. Authorized changes:
+  - Each @Test (or a shared helper invoked from each @Test) seeds a
+    real `post` row with `status='READY'` whose `(id, ready_at)`
+    matches the NOTIFY payload it emits, before calling
+    `emitNewPostNotify(...)`. Without the seeded row, advisory #1's
+    existence check rejects the NOTIFY (correct production behavior)
+    and the IT's `awaitCursor(...)` would time out.
+  - The seeding helper may add a `source` row (via the same
+    `ensureTestSource` pattern as NewPostReconcilerIT) and may
+    add a `@BeforeEach` cleanup of test-seeded `post` rows by
+    `uid` prefix.
+  - No behavioral assertion is removed or weakened. Every
+    `awaitCursor(...)`, `Thread.sleep(...)`, `assertEquals(...)`
+    that exists today is preserved. The grep in the matching
+    acceptance item enforces that an `INSERT INTO post` appears
+    in the file; absence of any such INSERT proves the seeding
+    was omitted.
+  - The synthetic UUIDs the M1-027 IT uses
+    (`aaaaaaaa-...`, `bbbbbbbb-...`, `cccccccc-...`,
+    `dddddddd-...`) MAY be kept as test-fixture identifiers — they
+    were never meant to imply non-existence; the M1-027 IT just
+    didn't care. Pinning them under a real seeded row makes them
+    legitimate test data.
+
+- The other two M1-027 ITs (ProviderStateDaoIT, NewPostReconcilerIT)
+  are NOT modifiable. ProviderStateDaoIT tests the DAO directly and
+  is unaffected by advisory #1. NewPostReconcilerIT already seeds
+  real `post` rows (`seedReadyRows`), so advisory #1's check passes
+  for every row it processes.
+
+- If advisory #3's reconnect test genuinely requires a
+  `@IfBuildProfile("test")`-gated test hook on NewPostListener,
+  that hook is production code carrying a test-only profile
+  annotation, not a test modification.
 
 ## Alternatives considered
 

@@ -5,6 +5,7 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Priority;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import javax.sql.DataSource;
@@ -83,7 +84,22 @@ public class NewPostReconciler {
     @Inject
     NewPostHandler newPostHandler;
 
+    /**
+     * Catch-up scan batch size. The default of 500 bounds the SQL result
+     * set per page so a long-outage backlog of millions of READY rows
+     * does not block @Startup arbitrarily; subsequent pages let other
+     * startup beans observe progress and let a concurrent NOTIFY arrival
+     * see a partially-advanced cursor. Operator override via
+     * {@code -Dinfochat.provider.catchup.page-size=N} or environment
+     * variable; the default lives in the annotation per the M1-030
+     * files_scope constraint.
+     */
+    @Inject
+    @ConfigProperty(name = "infochat.provider.catchup.page-size", defaultValue = "500")
+    int pageSize;
+
     private int caughtUpCount;
+    private int pagesProcessed;
     private Instant startCursorHigh;
     private String startCursorLowId;
     private Instant endCursorHigh;
@@ -104,6 +120,7 @@ public class NewPostReconciler {
         // delta — used by NewPostReconcilerIT to assert per-run idempotency
         // (the second call must count zero additional handler invocations).
         caughtUpCount = 0;
+        pagesProcessed = 0;
 
         Optional<ProviderStateDao.Cursor> maybeCursor =
             providerStateDao.readCursor(NewPostHandler.CHANNEL_NEW_POST);
@@ -116,25 +133,49 @@ public class NewPostReconciler {
         startCursorHigh = cursor.cursorHigh();
         startCursorLowId = cursor.cursorLowId();
 
-        UUID lowIdParam = cursor.cursorLowId().isEmpty()
+        // Local paging cursor: tracks the highest (ready_at, id) observed
+        // in the current scan and serves as the SQL predicate's lower
+        // bound for the NEXT page. The persistent cursor
+        // (provider_state.cursor_high, cursor_low_id) is what each handler
+        // call advances atomically with its side effect; the local cursor
+        // mirrors that monotonic advance so successive pages skip rows we
+        // just processed without re-reading provider_state mid-scan.
+        Instant pagingHigh = cursor.cursorHigh();
+        UUID pagingLowId = cursor.cursorLowId().isEmpty()
             ? ZERO_UUID
             : UUID.fromString(cursor.cursorLowId());
 
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(
-                 "SELECT id, ready_at FROM post "
-                     + "WHERE status = 'READY' "
-                     + "  AND (ready_at, id) > (?, ?) "
-                     + "ORDER BY ready_at, id")) {
-            ps.setTimestamp(1, java.sql.Timestamp.from(cursor.cursorHigh()));
-            ps.setObject(2, lowIdParam);
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    UUID postId = rs.getObject("id", UUID.class);
-                    Instant readyAt = rs.getTimestamp("ready_at").toInstant();
-                    newPostHandler.handle(postId, readyAt);
-                    caughtUpCount++;
+        while (true) {
+            int rowsInPage = 0;
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement ps = conn.prepareStatement(
+                     "SELECT id, ready_at FROM post "
+                         + "WHERE status = 'READY' "
+                         + "  AND (ready_at, id) > (?, ?) "
+                         + "ORDER BY ready_at, id "
+                         + "LIMIT ?")) {
+                ps.setTimestamp(1, java.sql.Timestamp.from(pagingHigh));
+                ps.setObject(2, pagingLowId);
+                ps.setInt(3, pageSize);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        UUID postId = rs.getObject("id", UUID.class);
+                        Instant readyAt = rs.getTimestamp("ready_at").toInstant();
+                        newPostHandler.handle(postId, readyAt);
+                        pagingHigh = readyAt;
+                        pagingLowId = postId;
+                        rowsInPage++;
+                        caughtUpCount++;
+                    }
                 }
+            }
+            pagesProcessed++;
+            // Loop exit: a partial page means the SELECT exhausted the
+            // backlog. Equal-to-pageSize means there MIGHT be more rows,
+            // so a subsequent page is issued; the final empty page closes
+            // the loop.
+            if (rowsInPage < pageSize) {
+                break;
             }
         }
 
@@ -144,13 +185,23 @@ public class NewPostReconciler {
         endCursorLowId = after.map(ProviderStateDao.Cursor::cursorLowId).orElse(startCursorLowId);
 
         LOG.infof(
-            "NewPostReconciler: caught up %d posts from cursor=(ready_at=%s, id=%s) "
+            "NewPostReconciler: caught up %d posts in %d page(s) from cursor=(ready_at=%s, id=%s) "
                 + "to cursor=(ready_at=%s, id=%s)",
-            caughtUpCount, startCursorHigh, startCursorLowId, endCursorHigh, endCursorLowId);
+            caughtUpCount, pagesProcessed, startCursorHigh, startCursorLowId,
+            endCursorHigh, endCursorLowId);
     }
 
     /** Test-visible accessor — number of rows processed by the most recent run. */
     public int caughtUpCount() {
         return caughtUpCount;
+    }
+
+    /**
+     * Test-visible accessor — number of pages issued by the most recent
+     * run. Used by NewPostReconcilerPagingIT to assert the catch-up
+     * actually pages when the backlog exceeds {@code pageSize}.
+     */
+    public int pagesProcessed() {
+        return pagesProcessed;
     }
 }
