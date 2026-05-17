@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 40 |
-| deferred | 5 |
-| **total** | **46** |
+| deferred | 6 |
+| **total** | **49** |
 
 ---
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-035 — Adapter + router umbrella — first-DM auto-register + /help IT (complexity: low, risk: low)
+- M1-035d — Wire AutoRegisterService into InboundRouter intake (complexity: low, risk: low)
 
 ---
 
@@ -41,7 +41,8 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-036 — blocked_by: M1-035 (deferred)
+- M1-037 — blocked_by: M1-035 (deferred)
 
 ---
 
@@ -74,6 +75,9 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 ---
 
 ## Deferred
+
+### blocked-on-new-ticket (1)
+- M1-035 → M1-035d
 
 ### decomposed (1)
 - M1-034 → M1-034a
@@ -141,12 +145,14 @@ M1-001 (done)
   └── M1-007c (done)
         ├── M1-007 (done) [see above]
         └── M1-035a (done)
-              ├── M1-035 (pending) ← runnable
+              ├── M1-035 (deferred)
+              │     ├── M1-036 (pending)
+              │     └── M1-037 (pending)
               └── M1-035b (done)
                     ├── M1-020 (deferred) [see above]
-                    ├── M1-035 (pending) [see above]
+                    ├── M1-035 (deferred) [see above]
                     └── M1-035c (done)
-                          └── M1-035 (pending) [see above]
+                          └── M1-035 (deferred) [see above]
 M1-002 (done)
 M1-003 (done)
   └── M1-005 (done) [see above]
@@ -167,4 +173,6 @@ M1-018 (done)
 M1-029 (done)
 M1-030 (done)
 M1-031 (deferred)
+M1-035d (pending) ← runnable
+  └── M1-035 (deferred) [see above]
 ```

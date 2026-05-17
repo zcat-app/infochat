@@ -1,9 +1,34 @@
 ---
 id: M1-035
 title: Adapter + router umbrella — first-DM auto-register + /help IT
-status: pending
+status: deferred
 created: 2026-05-17
 last_updated: 2026-05-17
+deferred_on: M1-035d
+deferred_reason: blocked-on-new-ticket
+clarity_check:
+  date: 2026-05-17
+  verdict: PASS
+  warnings: []
+  blockers: []
+escalations:
+  - date: 2026-05-17
+    reason: premise-fail
+    reviewer_verdict_excerpt: "N/A — pre-implementation premise-fail surfaced during start"
+    developer_note: |
+      AutoRegisterService.resolveOrRegister is never invoked from
+      production code. InboundRouter.onMessage goes directly from
+      normalize() to handleSlash() with no AutoRegisterService
+      injection; grep -rn 'resolveOrRegister' infochat-provider/src/main/
+      returns only the method definition. Acceptance item 5(a) (users
+      row inserted on deliverDm "/help") cannot be satisfied without
+      editing InboundRouter (M1-035b territory, FROZEN per
+      out_of_scope) or AutoRegisterService (M1-035c territory,
+      FROZEN per out_of_scope). M1-035c's ticket body line 146-160
+      committed to "the auto-register-on-first-DM service the
+      InboundRouter calls before slash-prefix dispatch" but the
+      production wiring is absent in commit a6e97ec.
+    resolution: defer-on-M1-035d
 blocked_by:
   - M1-035a
   - M1-035b
