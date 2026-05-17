@@ -115,6 +115,27 @@ decision_refs:
   - D10
   - D30
   - D46
+redteam_findings: []
+redteam_audits:
+  - date: 2026-05-18
+    verdict: CLEAN
+    base: 6378e6dd91a4f942d4e72f743c0d6e292e3442ea^
+    head: 6378e6dd91a4f942d4e72f743c0d6e292e3442ea
+    verdict_file: docs/plan/m1/redteam/M1-035-2026-05-18.md
+    findings_count: 0
+    out_of_model_count: 2
+    note: |
+      Umbrella diff is test-only (one new @QuarkusTest IT + STATUS regen
+      + this ticket's review-block frontmatter); the threat model's
+      promises are unaffected. Two OUT-OF-MODEL advisories surfaced for
+      the user: (1) the IT asserts registration_state='invited' for a
+      first-DM auto-registered user that arrived with no invite code —
+      a possible retrospective signal about M1-035d's intake-gate
+      compliance with §Authorization step 2 (invite required for
+      unknown DM contacts), but the production wiring is not in this
+      diff; (2) the TestProfile sets allow-low-trust=true on the
+      in-memory adapter — @TestProfile-scoped only, not exploitable in
+      production.
 ---
 
 # M1-035: Adapter + router umbrella — first-DM auto-register + /help IT
