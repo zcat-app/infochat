@@ -82,9 +82,10 @@ class AdapterRegistryTest {
         // Verify the handler that InMemoryAdapter received is the
         // Provider's InboundRouter bean: a deliverDm round-trip
         // should route through the router and produce the
-        // unknown-command reply (no /help handler is registered in
-        // this subticket; M1-035c lands the first impl).
-        inMemoryAdapter.deliverDm("alice", "/help");
+        // unknown-command reply. The probe uses /xyz — a name that
+        // will never be implemented — so the assertion stays valid
+        // as the milestone fills in real CommandHandlers.
+        inMemoryAdapter.deliverDm("alice", "/xyz");
         List<OutboundMessage> sent = inMemoryAdapter.sentMessages();
         assertEquals(1, sent.size(),
                 "router should have produced exactly one outbound reply");

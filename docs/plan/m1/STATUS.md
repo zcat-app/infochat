@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 39 |
+| done | 40 |
 | deferred | 5 |
 | **total** | **46** |
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-035c — /help command + auto-register-on-first-DM (complexity: medium, risk: medium)
+- M1-035 — Adapter + router umbrella — first-DM auto-register + /help IT (complexity: low, risk: low)
 
 ---
 
@@ -41,7 +41,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-035 — blocked_by: M1-035a (done), M1-035b (done), M1-035c (pending)
+_(none)_
 
 ---
 
@@ -60,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-035c | /help command + auto-register-on-first-DM | 2026-05-17 | round 2 APPROVE |
 | M1-035b | AdapterRegistry, InboundRouter, startup gates | 2026-05-17 | round 2 APPROVE |
 | M1-035a | InMemoryAdapter + SPI fill-in | 2026-05-17 | round 2 APPROVE |
 | M1-034b | Embedding pipeline + ReadyPromoter + first new_post NOTIFY | 2026-05-17 | round 1 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-030 | Provider catch-up hardening backlog (3 redteam OUT-OF-MODEL advisories) | 2026-05-16 | round 1 APPROVE |
 | M1-028 | Collector outbox (FetchScheduler + PostPersister + OutboxRehydrator) | 2026-05-16 | round 1 APPROVE |
 | M1-029 | Loosen wall-clock tolerance on bodyReadTimeoutFiresOnSlowUpstream | 2026-05-15 | round 1 APPROVE |
-| M1-027 | Provider catch-up (provider_state + NewPostReconciler + new_post listener) | 2026-05-15 | round 1 APPROVE |
 
 ---
 
@@ -141,11 +141,11 @@ M1-001 (done)
   └── M1-007c (done)
         ├── M1-007 (done) [see above]
         └── M1-035a (done)
-              ├── M1-035 (pending)
+              ├── M1-035 (pending) ← runnable
               └── M1-035b (done)
                     ├── M1-020 (deferred) [see above]
                     ├── M1-035 (pending) [see above]
-                    └── M1-035c (pending) ← runnable
+                    └── M1-035c (done)
                           └── M1-035 (pending) [see above]
 M1-002 (done)
 M1-003 (done)

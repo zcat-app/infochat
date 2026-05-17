@@ -1,12 +1,17 @@
 ---
 id: M1-035c
 title: /help command + auto-register-on-first-DM
-status: pending
+status: done
 created: 2026-05-17
 last_updated: 2026-05-17
+clarity_check:
+  date: 2026-05-17
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by:
   - M1-035b
-files_budget: 9
+files_budget: 10
 files_scope:
   - infochat-provider/src/main/java/io/infochat/provider/messaging/HelpCommandHandler.java
   - infochat-provider/src/main/java/io/infochat/provider/messaging/AutoRegisterService.java
@@ -16,6 +21,7 @@ files_scope:
   - infochat-provider/src/test/java/io/infochat/provider/messaging/HelpCommandHandlerTest.java
   - infochat-provider/src/test/java/io/infochat/provider/messaging/AutoRegisterServiceTest.java
   - infochat-provider/src/test/java/io/infochat/provider/bundle/BundleLoaderTest.java
+  - infochat-provider/src/test/java/io/infochat/provider/messaging/AdapterRegistryTest.java  # user-authorized round-1 addition per Authorized test changes; one-line probe rename to avoid collision with this ticket's /help handler
 complexity: medium
 risk: medium
 round_cap: 2
@@ -64,6 +70,8 @@ test_plan:
     - infochat-provider/src/test/java/io/infochat/provider/messaging/HelpCommandHandlerTest.java (≥3 @Test methods covering bundle-composition correctness, missing-key regression-guard, plain-text-no-markdown invariant)
     - infochat-provider/src/test/java/io/infochat/provider/messaging/AutoRegisterServiceTest.java (≥4 @Test methods covering first-DM insert, idempotency, concurrent-race protection, cross-adapter isolation)
     - infochat-provider/src/test/java/io/infochat/provider/bundle/BundleLoaderTest.java (≥2 @Test methods covering bundle-completeness CI check + unknown-key exception)
+  modifies:
+    - infochat-provider/src/test/java/io/infochat/provider/messaging/AdapterRegistryTest.java — change the round-trip probe in singleAdapterHappyPathActivatesInMemoryAndRegistersRouter from "/help" to "/xyz" (a name that will never be implemented) so the UNKNOWN_COMMAND_REPLY assertion stays valid now that M1-035c lands a real /help handler. The test's intent (verify router wiring via deliverDm round-trip) is preserved verbatim; only the probe name changes. User-authorized mid-implementation; see "Authorized test changes" section below for the root-cause + the follow-up clarity check to prevent recurrence.
   preserves:
     - infochat-collector/src/test/java/io/infochat/collector/QuarkusBootstrapTest.java (M1-003)
     - infochat-provider/src/test/java/io/infochat/provider/QuarkusBootstrapTest.java (M1-003)
@@ -71,7 +79,6 @@ test_plan:
     - infochat-llm-adapter/src/test/java/io/infochat/llm/LlmSpisLoadTest.java (M1-007b)
     - infochat-messaging-adapter/src/test/java/io/infochat/messaging/MessagingSpisLoadTest.java (M1-007c, possibly modified by M1-035a)
     - infochat-messaging-adapter/src/test/java/io/infochat/messaging/impl/inmemory/InMemoryAdapterTest.java (M1-035a)
-    - infochat-provider/src/test/java/io/infochat/provider/messaging/AdapterRegistryTest.java (M1-035b)
     - infochat-provider/src/test/java/io/infochat/provider/messaging/StartupGatesTest.java (M1-035b)
     - infochat-provider/src/test/java/io/infochat/provider/messaging/InboundRouterTest.java (M1-035b)
     - infochat-provider/src/test/java/io/infochat/provider/spi/AllSpisLoadIT.java (M1-007)
@@ -95,6 +102,35 @@ decision_refs:
   - D43
   - D44
   - D45
+reviews:
+  - round: 1
+    date: 2026-05-17
+    verdict: REWORK
+    checks:
+      scope_drift: FAIL
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+      spec_conformance: PASS
+    diff_stats:
+      files: 11
+      added: 802
+      removed: 14
+  - round: 2
+    date: 2026-05-17
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+      spec_conformance: PASS
+    diff_stats:
+      files: 11
+      added: 837
+      removed: 15
 ---
 
 # M1-035c: /help command + auto-register-on-first-DM
@@ -507,8 +543,35 @@ first-DMs @Test is the regression guard.
 
 ## Authorized test changes
 
-- (none — this subticket adds three new test classes in
-  `infochat-provider` and modifies no pre-existing tests.)
+- **`infochat-provider/src/test/java/io/infochat/provider/messaging/AdapterRegistryTest.java`** — in
+  `singleAdapterHappyPathActivatesInMemoryAndRegistersRouter`,
+  change the round-trip probe from `inMemoryAdapter.deliverDm("alice", "/help")`
+  to `inMemoryAdapter.deliverDm("alice", "/xyz")`. The
+  `assertEquals(InboundRouter.UNKNOWN_COMMAND_REPLY, ...)` assertion is
+  preserved verbatim; only the inbound probe name changes.
+  - **Why this is needed:** M1-035b's test was authored with `/help` as
+    the probe because no handler was registered at that commit; the
+    test's own comment said *"no /help handler is registered in this
+    subticket; M1-035c lands the first impl."* Now that M1-035c ships
+    `HelpCommandHandler`, the probe collides with the new handler and
+    the assertion fails. Switching to `/xyz` (a name that will never
+    be implemented) restores the intent — "verify the router is wired
+    to the adapter via a deliverDm round-trip" — without depending on
+    the absence of future code.
+  - **Why this wasn't anticipated:** the M1-035b author chose a
+    too-close-to-real probe value; the M1-035c author copied
+    AdapterRegistryTest into `test_plan.preserves` without grepping
+    the preserved tests for collisions with the new
+    `CommandHandler.name()`.
+  - **Follow-up (filed post-merge):** add a clarity-check that, when a
+    ticket introduces a `CommandHandler.name()` (or analogous
+    registrable name) and lists tests in `test_plan.preserves`, greps
+    those preserved tests for literal occurrences of the new name and
+    WARNs on any match. Plus a one-line guideline in
+    `docs/process/ticket-template.md`: probes of the form "X doesn't
+    exist yet" should use a sentinel namespace
+    (`/__unknown_*`, `/xyz`) reserved for that purpose.
+- (no other pre-existing tests modified.)
 
 ## Alternatives considered
 
@@ -579,3 +642,21 @@ first-DMs @Test is the regression guard.
   `@Named("help")`. If M1-035b chose a typed `Instance<
   CommandHandler>` lookup, this handler implements
   CommandHandler. Either shape meets acceptance.
+
+## Round 1 rework
+
+Reviewer verdict: REWORK (round 1). One item — frontmatter-only,
+no code change. Every per-check besides SCOPE-DRIFT was PASS; the
+diff itself is well-formed and the new tests + bundle infra +
+auto-register service all match spec.
+
+1. **Admit `infochat-provider/src/test/java/io/infochat/provider/messaging/AdapterRegistryTest.java`
+   into `files_scope` and bump `files_budget` from 9 → 10.** The
+   user-authorized one-line probe rename (`/help` → `/xyz` in
+   `singleAdapterHappyPathActivatesInMemoryAndRegistersRouter`) is
+   independently justified by the body's "Authorized test changes"
+   section and the `test_plan.modifies` entry. The reviewer's
+   mechanical SCOPE-DRIFT-CHECK fires because the frontmatter
+   wasn't reconciled with the body's authorization. No code change
+   required; the rework is purely a frontmatter edit. Both
+   adjustments applied in this round's edit.
