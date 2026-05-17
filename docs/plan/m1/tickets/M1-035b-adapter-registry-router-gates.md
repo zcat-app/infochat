@@ -1,17 +1,94 @@
 ---
 id: M1-035b
 title: AdapterRegistry, InboundRouter, startup gates
-status: pending
+status: done
 created: 2026-05-17
 last_updated: 2026-05-17
+reviews:
+  - round: 1
+    date: 2026-05-17
+    verdict: REWORK
+    checks:
+      scope_drift: FAIL
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PARTIAL
+    diff_stats:
+      files: 10
+      added: 1378
+      removed: 23
+  - round: 2
+    date: 2026-05-17
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 1469
+      removed: 24
+escalations:
+  - date: 2026-05-17
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      SCOPE-DRIFT-CHECK: FAIL — The diff touches 10 files; after subtracting
+      the two lifecycle-exemption paths (STATUS.md, ticket file) the
+      implementation-file count is 8. `files_budget: 7` and `files_scope:`
+      enumerates exactly seven paths. The 8th implementation file
+      `infochat-provider/src/main/resources/application.properties` is NOT
+      a member of `files_scope`. Acceptance: PARTIAL (only because of this
+      same scope item); all other checks PASS including SPEC-CONFORMANCE.
+revisions:
+  - date: 2026-05-17
+    reason: |
+      Refine `files_scope` and `files_budget` to bring the
+      `application.properties` edit inside the declared scope.
+      The 8th file (`%test.infochat.adapters=inmemory` +
+      `%test.infochat.adapters.inmemory.allow-low-trust=true` defaults)
+      is required so the eleven pre-existing `@QuarkusTest` classes that
+      boot Provider pass the new §6.7 startup gates at @PostConstruct
+      time. The pattern is line-for-line analogous to
+      `%test.quarkus.flyway.migrate-at-start=true` already present in
+      the same file at line 30. Option (a) of moving the defaults into
+      per-test `@TestProfile`s would require touching eleven existing
+      test classes (HeartbeatSchedulerIT, InfochatProfileTest,
+      InstanceLockGuardIT, NewPostReconcilerIT, QuarkusBootstrapTest,
+      NewPostListenerIT, AllSpisLoadIT, NewPostHandlerHardeningIT,
+      ProviderStateDaoIT, NewPostListenerReconnectIT,
+      NewPostReconcilerPagingIT) — a far larger scope drift than the
+      single-file overflow. Refining the frontmatter to reflect what
+      the planning miss should have declared from the start is the
+      correct workflow path.
+    snapshot:
+      files_budget: 7
+      files_scope:
+        - infochat-provider/src/main/java/io/infochat/provider/messaging/AdapterRegistry.java
+        - infochat-provider/src/main/java/io/infochat/provider/messaging/InboundRouter.java
+        - infochat-provider/src/main/java/io/infochat/provider/messaging/MessagingStartup.java
+        - infochat-provider/src/main/java/io/infochat/provider/messaging/CommandHandler.java
+        - infochat-provider/src/test/java/io/infochat/provider/messaging/AdapterRegistryTest.java
+        - infochat-provider/src/test/java/io/infochat/provider/messaging/StartupGatesTest.java
+        - infochat-provider/src/test/java/io/infochat/provider/messaging/InboundRouterTest.java
+clarity_check:
+  date: 2026-05-17
+  verdict: PASS
+  warnings: []
+  blockers: []
+  notes:
+    - "Initial verdict was WARN with 3 warnings (gate ordering vs §6.7; surefire heterogeneous-aggregate count; self-contained on the same ordering ambiguity). All three resolved by direct ticket edit on 2026-05-17 before implementation began: gate sequence in acceptance item 4, per-gate items 21–23, and the Big-picture notes section were reordered to match §6.7's documented order (4=mention-by-id+group-SPI, 5=production-exclusion, 6=LOW-trust opt-in); acceptance item 26 was split into three per-class surefire items (one per AdapterRegistryTest, StartupGatesTest, InboundRouterTest)."
 blocked_by:
   - M1-035a
-files_budget: 7
+files_budget: 8
 files_scope:
   - infochat-provider/src/main/java/io/infochat/provider/messaging/AdapterRegistry.java
   - infochat-provider/src/main/java/io/infochat/provider/messaging/InboundRouter.java
   - infochat-provider/src/main/java/io/infochat/provider/messaging/MessagingStartup.java
   - infochat-provider/src/main/java/io/infochat/provider/messaging/CommandHandler.java
+  - infochat-provider/src/main/resources/application.properties
   - infochat-provider/src/test/java/io/infochat/provider/messaging/AdapterRegistryTest.java
   - infochat-provider/src/test/java/io/infochat/provider/messaging/StartupGatesTest.java
   - infochat-provider/src/test/java/io/infochat/provider/messaging/InboundRouterTest.java
@@ -38,7 +115,7 @@ acceptance:
   - "infochat-provider/src/main/java/io/infochat/provider/messaging/CommandHandler.java exists and declares a Java interface consumed by InboundRouter via CDI `Instance<CommandHandler>` discovery. The interface MUST expose at minimum (a) the command name the handler binds to (a `String name()` accessor, OR an equivalent CDI-qualifier mechanism) and (b) a handler-entry method whose argument list carries the resolved user identifier + the ScopeRef + the inbound text or parsed args. Exact method shape is implementer's choice as long as InboundRouter's `Instance<CommandHandler>` lookup can dispatch through it and M1-035c's HelpCommandHandler can implement it without a non-additive interface change. Verify: `grep -E 'interface CommandHandler' CommandHandler.java` returns ≥1 match"
   - "infochat-provider/src/main/java/io/infochat/provider/messaging/AdapterRegistry.java exists and declares an `@ApplicationScoped` (or equivalent CDI-singleton) class `AdapterRegistry`. Verify: `grep -E 'class AdapterRegistry' AdapterRegistry.java` returns ≥1 match AND the file references `@Inject Instance<MessagingAdapter>` or `@Any Instance<MessagingAdapter>` as the bean-discovery mechanism (`grep -E 'Instance<MessagingAdapter>' AdapterRegistry.java` returns ≥1 match)"
   - "AdapterRegistry reads `infochat.adapters` as a comma-separated property and activates the subset of registered beans whose `name()` appears in the value. Verify: `grep -E 'infochat\\.adapters' AdapterRegistry.java` returns ≥1 match"
-  - "AdapterRegistry applies the six startup gates from docs/design/06-messaging.md §6.7 in the documented order. Each gate's failure throws an `IllegalStateException` whose message names the offending adapter (or the offending property value). The gates: (1) `infochat.adapters` non-empty; (2) every name resolves to a registered bean; (3) `supportsMarkdownLinks=false` per §6.2.1; (4) production-exclusion (`inmemory` + multi-adapter set rejected) per §6.6; (5) per-adapter LOW-trust opt-in via `infochat.adapters.<name>.allow-low-trust=true` per §6.8; (6) `supportsMentionByContactId=false` + group-SPI-wired refusal per §6.3.3 / §6.7. The StartupGatesTest exercises all six (one @Test per gate)"
+  - "AdapterRegistry applies the six startup gates from docs/design/06-messaging.md §6.7 in the documented order. Each gate's failure throws an `IllegalStateException` whose message names the offending adapter (or the offending property value). The gates: (1) `infochat.adapters` non-empty; (2) every name resolves to a registered bean; (3) `supportsMarkdownLinks=false` per §6.2.1; (4) `supportsMentionByContactId=false` + group-SPI-wired refusal per §6.3.3 / §6.7; (5) production-exclusion (`inmemory` + multi-adapter set rejected) per §6.6; (6) per-adapter LOW-trust opt-in via `infochat.adapters.<name>.allow-low-trust=true` per §6.8. The StartupGatesTest exercises all six (one @Test per gate)"
   - "AdapterRegistry, for each activated adapter, calls `adapter.setInboundHandler(router)` exactly once at startup so its inbound deliveries reach the Provider-side router. Verify: AdapterRegistryTest asserts that for a configuration `infochat.adapters=inmemory`, the InMemoryAdapter receives one setInboundHandler call and its registered handler is the Provider's InboundRouter bean"
   - "AdapterRegistry emits one INFO log line per activated adapter per docs/design/06-messaging.md §6.8 format: `activating adapter: <name> (trust=<HIGH|LOW>[; allow-low-trust=true])`. Verify: `grep -E 'activating adapter' AdapterRegistry.java` returns ≥1 match"
   - "infochat-provider/src/main/java/io/infochat/provider/messaging/InboundRouter.java exists, declares a CDI bean that implements the M1-035a `MessagingAdapter.InboundHandler` interface (`void onMessage(InboundMessage msg)`), and applies the spec-required normalization pass FIRST at entry per docs/spec/security.md §Authorization model step 1.7 + docs/spec/commands.md §Surface conventions (bidi-strip, zero-width-strip, leading-whitespace-trim, empty-drop). Verify: `grep -E 'implements\\s+MessagingAdapter\\.InboundHandler|implements\\s+InboundHandler' InboundRouter.java` returns ≥1 match"
@@ -55,12 +132,14 @@ acceptance:
   - "StartupGatesTest gate 1 (empty `infochat.adapters`) — IllegalStateException; message contains the substring `no adapters configured` (or equivalent literal that pinpoints the empty-list problem). Verify: the @Test asserts the exception type AND a substring match on the message"
   - "StartupGatesTest gate 2 (unknown name in `infochat.adapters`) — IllegalStateException; message contains the unknown entry's literal name. Verify: the @Test seeds `infochat.adapters=inmemory,nope` and asserts the exception message contains the literal string `nope`"
   - "StartupGatesTest gate 3 (a test-only fake adapter declaring `supportsMarkdownLinks=true`) — IllegalStateException; message names the adapter. Verify: the @Test seeds a fake CDI bean whose capabilities() returns `supportsMarkdownLinks=true` and asserts the exception message contains the fake adapter's `name()`"
-  - "StartupGatesTest gate 4 (production-exclusion — `infochat.adapters=inmemory,otheradapter` where the second is a test-only fake) — IllegalStateException; message names BOTH `inmemory` and the conflicting adapter. Verify: the @Test seeds the multi-adapter list and asserts the exception message contains both adapter names"
-  - "StartupGatesTest gate 5 (InMemoryAdapter at default LOW trust + missing `infochat.adapters.inmemory.allow-low-trust=true`) — IllegalStateException; message names `inmemory` and the missing property. Verify: the @Test omits the `allow-low-trust` property and asserts the exception message contains both `inmemory` and either `allow-low-trust` or `trust=LOW`"
-  - "StartupGatesTest gate 6 (a test-only fake adapter declaring `supportsMentionByContactId=false` AND group-SPI wired) — IllegalStateException; message names the adapter. Since MVP has no group SPI wired, the test uses a fake group-SPI-wired flag exposed via a test-only adapter bean (the production check is `caps.supportsMentionByContactId == false AND deployment.groupSpiWired == true` → reject). Verify: the @Test asserts the exception message contains the fake adapter's `name()`"
+  - "StartupGatesTest gate 4 (a test-only fake adapter declaring `supportsMentionByContactId=false` AND group-SPI wired) — IllegalStateException; message names the adapter. Since MVP has no group SPI wired, the test uses a fake group-SPI-wired flag exposed via a test-only adapter bean (the production check is `caps.supportsMentionByContactId == false AND deployment.groupSpiWired == true` → reject). Verify: the @Test asserts the exception message contains the fake adapter's `name()`"
+  - "StartupGatesTest gate 5 (production-exclusion — `infochat.adapters=inmemory,otheradapter` where the second is a test-only fake) — IllegalStateException; message names BOTH `inmemory` and the conflicting adapter. Verify: the @Test seeds the multi-adapter list and asserts the exception message contains both adapter names"
+  - "StartupGatesTest gate 6 (InMemoryAdapter at default LOW trust + missing `infochat.adapters.inmemory.allow-low-trust=true`) — IllegalStateException; message names `inmemory` and the missing property. Verify: the @Test omits the `allow-low-trust` property and asserts the exception message contains both `inmemory` and either `allow-low-trust` or `trust=LOW`"
   - "infochat-provider/src/test/java/io/infochat/provider/messaging/AdapterRegistryTest.java exists and contains ≥2 `@Test` methods covering: (1) single-adapter happy path — with `infochat.adapters=inmemory` and `infochat.adapters.inmemory.allow-low-trust=true`, exactly one adapter activates and its `setInboundHandler` is called exactly once with the Provider's InboundRouter; (2) multi-adapter happy path — with TWO test-only InMemoryAdapter beans bearing distinct `name()` returns (e.g. `inmemory` and `inmemory2`) and `infochat.adapters=inmemory,inmemory2`, BOTH activate. Verify: `grep -cE '^\\s*@Test\\b' AdapterRegistryTest.java` returns ≥ 2"
   - "infochat-provider/src/test/java/io/infochat/provider/messaging/InboundRouterTest.java exists and contains ≥5 `@Test` methods covering: (1) empty / whitespace-only / bidi-only / zero-width-only inbound text is dropped (no outbound, no exception); (2) leading whitespace + `/help` parses as `/help`; (3) chat-mode (non-slash) inbound produces the deterministic chat-mode-not-in-MVP reply; (4) unknown command produces the friendly unknown-command reply; (5) command-handler exception path produces the friendly internal-error reply WITHOUT interpolating the exception text. Verify: `grep -cE '^\\s*@Test\\b' InboundRouterTest.java` returns ≥ 5"
-  - "mvn -B -pl infochat-provider test exits 0; surefire reports show at least the three new test classes executing (AdapterRegistryTest, StartupGatesTest, InboundRouterTest). Verify: `grep -rE 'Tests run: [1-9]' infochat-provider/target/surefire-reports` returns at least three matches across the new classes"
+  - "mvn -B -pl infochat-provider test exits 0; AdapterRegistryTest executes and produces a surefire report. Verify: `grep -E 'Tests run: [1-9]' infochat-provider/target/surefire-reports/TEST-io.infochat.provider.messaging.AdapterRegistryTest.xml` returns ≥1 match"
+  - "mvn -B -pl infochat-provider test exits 0; StartupGatesTest executes and produces a surefire report. Verify: `grep -E 'Tests run: [1-9]' infochat-provider/target/surefire-reports/TEST-io.infochat.provider.messaging.StartupGatesTest.xml` returns ≥1 match"
+  - "mvn -B -pl infochat-provider test exits 0; InboundRouterTest executes and produces a surefire report. Verify: `grep -E 'Tests run: [1-9]' infochat-provider/target/surefire-reports/TEST-io.infochat.provider.messaging.InboundRouterTest.xml` returns ≥1 match"
   - "mvn -B clean verify from the repo root exits 0; every prior test continues to pass alongside the new Provider-side messaging beans"
 test_plan:
   adds:
@@ -95,6 +174,193 @@ decision_refs:
   - D11
   - D30
   - D46
+redteam_findings:
+  - date: 2026-05-17
+    category: DOS
+    severity: high
+    promise: |
+      §Authorization model step 1.5: "Apply the per-`(adapter,
+      contact_id)` inbound rate cap... Over-cap inbound is **dropped
+      silently** for the rest of the cap window — no reply (including
+      no fixed ban reply, no fixed invite-required reply, no friendly
+      error). The cap runs after step 1 (the bucket is keyed by the
+      resolved `(adapter, contact_id)`) and before every
+      application-level check below, so a hostile flood cannot drive
+      outbound cost via the per-inbound fixed-reply paths in steps
+      2 and 4."
+    gap: |
+      `infochat-provider/src/main/java/io/infochat/provider/messaging/InboundRouter.java:111-135`
+      — `onMessage` runs no rate-cap step. Every inbound produces one
+      of three deterministic outbound replies (CHAT_MODE_REPLY,
+      UNKNOWN_COMMAND_REPLY, INTERNAL_ERROR_REPLY). There is no
+      per-`(adapter, contact_id)` bucket anywhere in the Provider's
+      main tree.
+    repro: |
+      Adversary connects to any activated adapter and floods inbound
+      messages with arbitrary bodies. The router replies to every
+      single one with at least one of the fixed literals via
+      `target.send(...)`. Only constraint is the adapter's
+      `maxSendsPerSecond` (10k/s in `CapabilityFlags`). The hostile
+      flood drives outbound cost 1:1 with inbound.
+    suggested_fix_class: rate-limit
+  - date: 2026-05-17
+    category: AUTH-BYPASS
+    severity: high
+    promise: |
+      §Trust boundaries item 2: "Identity resolution and the ban check
+      run *before* parsing. Banned users get one fixed reply and never
+      reach the parser, the chat agent, or any DB query past the ban
+      check (decision D11)." §Authorization model step 2: "DM —
+      unknown contact... Invalid / expired / absent: fixed 'access
+      requires an invitation' reply, drop. No registration, no LLM,
+      no DB write beyond the drop counter."
+    gap: |
+      `infochat-provider/src/main/java/io/infochat/provider/messaging/InboundRouter.java:111-135`
+      — `onMessage` goes straight from normalization to slash/chat
+      dispatch. The inline comment at line 113 explicitly acknowledges
+      that NONE of the spec'd preceding gates (ban / invite / probation)
+      are present. The CommandHandler interface is wide-open: any
+      `@ApplicationScoped CommandHandler` bean that lands in a future
+      ticket is reachable by ANY inbound contact, banned or not,
+      invited or not, in probation or not.
+    repro: |
+      An unknown contact (no `users` row) sends `/somecommand`. The
+      router runs handleSlash, which iterates `commandHandlers`. If
+      even one CommandHandler with `name() == "somecommand"` is in the
+      CDI container, the user reaches `handler.handle(scope, normalized)`
+      with NO ban check, NO invite check, NO probation check. Spec
+      promises the unknown DM never reaches anything beyond the fixed
+      "access requires an invitation" reply.
+    suggested_fix_class: missing-auth-check
+  - date: 2026-05-17
+    category: INFO-LEAK
+    severity: medium
+    promise: |
+      §Ingest pipeline (chat-input parity): "**carves out fenced code
+      blocks**: a user typing a deliberately exotic code snippet should
+      see it round-trip unchanged. Fence recognition is the closed
+      CommonMark rule... Bytes inside fences are preserved verbatim."
+      §Authorization model step 1.7: "Unicode-normalize the body (NFKC
+      + bidi-control strip + zero-width strip + leading/trailing
+      whitespace trim **outside fenced code blocks**)." Step 1.7 also
+      commits: "**The normalized body replaces the raw body for all
+      downstream processing**".
+    gap: |
+      `infochat-provider/src/main/java/io/infochat/provider/messaging/InboundRouter.java:200-230`
+      (the `normalize` method). The implementation applies whole-body
+      NFKC + bidi strip + zero-width strip + `trim()` with NO fence
+      detection. The Javadoc at lines 596-606 explicitly says
+      "Whole-body NFKC is sufficient for MVP" — directly contradicting
+      the spec's commitment that bytes inside fences must be preserved
+      verbatim.
+    repro: |
+      A user (post-T2-A chat mode) sends a chat-mode message containing
+      a fenced block with the ligature `ﬁ` (U+FB01). The normalized
+      form delivered to the LLM substitutes `fi` — bytes inside the
+      fence have been mutated. A pasted regex / password containing a
+      fullwidth digit or homoglyph inside a fenced block loses the
+      original bytes. Because the normalized body REPLACES the raw
+      body for all downstream processing, the original bytes are
+      unrecoverable.
+    suggested_fix_class: input-sanitization
+  - date: 2026-05-17
+    category: AUTH-BYPASS
+    severity: medium
+    promise: |
+      §Authorization model step 2 (DM — unknown contact): "Invalid /
+      expired / absent: fixed 'access requires an invitation' reply,
+      drop. No registration, no LLM, no DB write beyond the drop
+      counter." §User ban: "Banned user receives one fixed reply per
+      inbound message, regardless of input."
+    gap: |
+      `infochat-provider/src/main/java/io/infochat/provider/messaging/InboundRouter.java:122-126`.
+      A plain-English (non-slash) inbound from an unknown contact today
+      receives `CHAT_MODE_REPLY` ("Chat-mode replies are not in the
+      MVP; try /help..."), not the spec'd "access requires an
+      invitation" fixed reply. The spec's promise is content-specific:
+      the right reply for an unknown DM is the invite-required literal;
+      the diff returns chat-mode-deferral or unknown-command instead.
+    repro: |
+      An adversary with no prior contact sends `/help` to the bot.
+      The diff returns "Unknown command. Try /help for the available
+      commands." Spec step 2 promises an unknown-DM contact receives
+      ONLY the fixed "access requires an invitation" reply (and a
+      drop). The current reply discloses that the bot exists, that
+      slash commands are recognized, and that there's a `/help` to
+      try.
+    suggested_fix_class: missing-auth-check
+  - date: 2026-05-17
+    category: INFO-LEAK
+    severity: low
+    promise: |
+      §Secrets handling: "Contact IDs are logged in redacted form
+      (prefix + ellipsis + suffix) outside the audit log." The
+      router's error log is not the audit log.
+    gap: |
+      `infochat-provider/src/main/java/io/infochat/provider/messaging/InboundRouter.java:127-133`
+      — the exception branch logs at ERROR via `log.error("InboundRouter
+      dispatch failed for scope={}", msg.scope(), e)` (line 130). The
+      scope value is logged unredacted. For DM scope, scope carries
+      the contact id (`ScopeRef.Dm(contactId)`). Same issue at line
+      145 (`InboundRouter reply send failed for adapter={} scope={}`)
+      and line 138 (`InboundRouter has no replyTarget; dropping reply
+      for scope={}`).
+    repro: |
+      An attacker triggers any dispatch exception (e.g. by sending
+      input that triggers a CommandHandler bug or a downstream SQL
+      failure). The unredacted contact id is written to the SLF4J
+      error log. Operators reviewing logs see raw contact ids — the
+      §Secrets handling rule was designed to prevent exactly this.
+    suggested_fix_class: input-sanitization
+  - date: 2026-05-17
+    category: DOS
+    severity: medium
+    promise: |
+      §Authorization model step 1.7 (the normalization step is the
+      first body-content operation): the spec scopes normalization
+      with the **carve-out** precisely because it must run on every
+      inbound. Implicitly the operation must be bounded.
+    gap: |
+      `infochat-provider/src/main/java/io/infochat/provider/messaging/InboundRouter.java:200-218`.
+      `normalize()` calls `Normalizer.normalize(raw, NFKC)` and then
+      iterates code points. There is no length cap before the call.
+      `CapabilityFlags.maxInboundMessageBytes` defaults to 100 KB on
+      the in-memory adapter but the router neither enforces nor checks
+      any per-message size cap. The cap-by-adapter contract is
+      honor-system; the InboundRouter is the centralized seam where a
+      body-size sanity check would belong.
+    repro: |
+      An attacker sends a large payload via an adapter that fails to
+      enforce `maxInboundMessageBytes` (a misbehaving 3rd-party adapter,
+      or the InMemoryAdapter test path which has no enforcement). NFKC
+      + the code-point iteration runs unbounded. The router has no
+      defense in depth.
+    suggested_fix_class: rate-limit
+redteam_audits:
+  - date: 2026-05-17
+    verdict: FINDINGS
+    base: c68c51429de997e9550074a79c6ba4e73b28f6b2^
+    head: c68c51429de997e9550074a79c6ba4e73b28f6b2
+    verdict_file: docs/plan/m1/redteam/M1-035b-2026-05-17.md
+    findings_count: 6
+    out_of_model_count: 2
+    note: |
+      Ran post-/m1-tick-commit, pre-/m1-tick-merge. 6 findings (2 high,
+      3 medium, 1 low) split across DOS (2), AUTH-BYPASS (2), INFO-LEAK
+      (2). Three findings (DOS-high rate-cap, AUTH-BYPASS-high
+      ban/invite/probation, AUTH-BYPASS-medium unknown-DM reply
+      content) trace to T2-A's deferred intake chain — the spec's
+      §Authorization model step 1.5 and §Trust boundaries item 2
+      gates run upstream of the InboundRouter, and this subticket
+      deliberately scoped them out (InboundRouter.java:113 carries an
+      explicit "T2-A wires the missing intake steps upstream of this
+      point" comment). Three findings (INFO-LEAK-medium fenced-code
+      carve-out missing in normalize(), INFO-LEAK-low unredacted
+      contact-id logging, DOS-medium no body-size cap before normalize)
+      are net-new defects of this diff and not deferred items. Two
+      OUT-OF-MODEL items flag operator-config risk around the
+      %test.infochat.adapters.inmemory.allow-low-trust=true default
+      being accidentally shipped to production.
 ---
 
 # M1-035b: AdapterRegistry, InboundRouter, startup gates
@@ -324,12 +590,12 @@ review round is the right margin for this surface.
   more elaborate `List<String>` ConfigMapping is optional.
 - **`infochat.adapters.<name>.allow-low-trust` parsing.**
   Quarkus supports property-key interpolation natively. Read
-  per-adapter at gate-5 evaluation time:
+  per-adapter at gate-6 evaluation time:
   `ConfigProvider.getConfig().getValue("infochat.adapters." +
   adapter.name() + ".allow-low-trust", Boolean.class)` (default
   false). The adapter's `trustLevel()` returns the per-instance
   value; the property is the per-adapter opt-in.
-- **Production-exclusion gate (#4).** Generic shape: if
+- **Production-exclusion gate (#5).** Generic shape: if
   `inmemory` is in the activated set AND the activated set has
   size > 1, reject. This generalizes cleanly when T3-A adds
   SimpleX/Signal — the gate doesn't need to enumerate
@@ -337,7 +603,7 @@ review round is the right margin for this surface.
   `inmemory` alongside any other adapter. The error message
   names ALL adapters in the offending set so the operator sees
   the full picture in one line.
-- **Mention-by-id gate (#6) requires a deployment.groupSpiWired
+- **Mention-by-id gate (#4) requires a deployment.groupSpiWired
   flag.** Provider doesn't yet have a group SPI wired (T2-F).
   The natural shape is a no-op now — the check is satisfied
   vacuously (no adapter has group SPI wired) — but the gate
@@ -397,15 +663,15 @@ review round is the right margin for this surface.
   (2) Every name resolves to a bean — without this, the
   operator typed a typo. (3) `supportsMarkdownLinks=false` per
   §6.2.1 — without this, an LLM-authored URL becomes a
-  clickable target. (4) Production-exclusion per §6.6 —
-  without this, `inmemory` could run alongside a production
-  adapter and silently launder identity assertions. (5)
-  Per-adapter LOW-trust opt-in per §6.8 — without this, a
-  test-trust adapter could be enabled without a conscious
-  operator choice. (6) `supportsMentionByContactId=false` +
+  clickable target. (4) `supportsMentionByContactId=false` +
   group-SPI-wired — without this, a group adapter could
   silently fall back to display-name string matching for
-  mention recognition. Each gate's @Test in StartupGatesTest
+  mention recognition. (5) Production-exclusion per §6.6 —
+  without this, `inmemory` could run alongside a production
+  adapter and silently launder identity assertions. (6)
+  Per-adapter LOW-trust opt-in per §6.8 — without this, a
+  test-trust adapter could be enabled without a conscious
+  operator choice. Each gate's @Test in StartupGatesTest
   is a regression guard against each of these failure modes.
 - **The cost of these gates is three lines each.** They are
   cheap to ship now and expensive to retrofit later — once
@@ -609,3 +875,111 @@ review round is the right margin for this surface.
   M1-035a SPI signature monotonic. The reviewer should not
   flag either choice; pick whichever is the smaller
   M1-035b-internal diff.
+
+## Implementation outline (M1-035b, generated by Plan subagent on 2026-05-17)
+
+### Files to touch (7 of 7)
+- create: `infochat-provider/src/main/java/io/infochat/provider/messaging/CommandHandler.java` — minimal CDI-discoverable command-handler interface (`String name()` + a `OutboundMessage handle(...)`-shaped method) that M1-035c's `HelpCommandHandler` will implement additively.
+- create: `infochat-provider/src/main/java/io/infochat/provider/messaging/AdapterRegistry.java` — `@ApplicationScoped` registry; injects `@Any Instance<MessagingAdapter>`, reads `infochat.adapters`, applies the six startup gates in the ticket's inlined order, registers a per-adapter closure handler that delegates to InboundRouter so the router gets the originating adapter reference (shape (b) per implementation notes); emits the §6.8 INFO log line per activated adapter. Also hosts a `@Produces @ApplicationScoped InMemoryAdapter inMemoryAdapter()` producer so the SPI bean (which lives in a CDI-untouched library jar — `out_of_scope` blocks modifying that jar) becomes discoverable; this producer is the ONLY mechanism that makes `Instance<MessagingAdapter>` non-empty for the InMemory case in MVP.
+- create: `infochat-provider/src/main/java/io/infochat/provider/messaging/InboundRouter.java` — `@ApplicationScoped` bean that implements neither `InboundHandler` directly NOR a no-arg `onMessage` of its own; AdapterRegistry wraps each adapter in a closure (shape (b) of the impl notes). Exposes a public `dispatch(MessagingAdapter source, InboundMessage msg)` method which performs: (1) normalization (private static `normalize(String)` using `Normalizer.normalize(...,Form.NFKC)` + bidi/zero-width strip + leading/trailing whitespace trim); (2) empty-drop; (3) seam comment naming T2-A ban/invite/probation; (4) seam call into stub `autoRegister` (no-op until M1-035c); (5) slash-prefix branch using `Instance<CommandHandler>` lookup by `name()` — unknown command returns the deterministic English unknown-command literal; (6) chat-mode branch returning the deterministic "chat-mode is not in MVP; try /help" literal; (7) exception path logging via raw SLF4J `LoggerFactory.getLogger(InboundRouter.class)` and replying with a fixed internal-error literal that NEVER interpolates `getMessage()`/`toString()`. Outbound replies are sent via `source.send(new OutboundMessage(scope, body, Instant.now(), correlationId))`.
+- create: `infochat-provider/src/main/java/io/infochat/provider/messaging/MessagingStartup.java` — `@Startup` `@ApplicationScoped` bean at `@Priority(300)` (matches the §1.4.3 startup table comment in `NewPostReconciler` — `300 AdapterRegistry`), `@PostConstruct` invokes `adapterRegistry.start()` which iterates activated adapters and per-adapter wraps their lifecycle in try/catch logging ERROR via SLF4J on per-adapter failure (resilience per §6.7); MVP InMemory is a no-op transport so the loop is effectively empty.
+- create: `infochat-provider/src/test/java/io/infochat/provider/messaging/StartupGatesTest.java` — six `@Test` methods, one per gate.
+- create: `infochat-provider/src/test/java/io/infochat/provider/messaging/AdapterRegistryTest.java` — single-adapter happy path + multi-adapter happy path with two `@Alternative @Priority` fake CDI beans (or a per-test-profile producer).
+- create: `infochat-provider/src/test/java/io/infochat/provider/messaging/InboundRouterTest.java` — five `@Test` methods covering normalization-pass behavior, leading-whitespace slash trim, chat-mode stub, unknown-command reply, exception-path reply.
+
+(7 of 7 — fully consumed. The InMemoryAdapter producer must live inside `AdapterRegistry.java` rather than a separate `MessagingAdaptersProducer.java`; surfacing a separate producer file would push the count to 8 and require re-scoping.)
+
+### Tests
+- add: `infochat-provider/src/test/java/io/infochat/provider/messaging/StartupGatesTest.java` — covers acceptance items 17–23. One `@Test` per gate with a `@QuarkusTest` + a dedicated `@TestProfile` that sets `infochat.adapters=...` and any per-adapter `allow-low-trust` properties needed to satisfy non-targeted gates; each gate test uses an `@Alternative @Priority(1)` fake-adapter bean local to the test class to inject a deliberately-broken capability shape (markdown-links=true; mention-by-id=false + group-spi-wired-fake-flag-true; etc.). Each gate test asserts the thrown `IllegalStateException`'s message contains the named substrings per the per-gate acceptance items (e.g., gate 2 message contains `nope`; gate 4 message contains the fake mention-by-id-false adapter's `name()`; gate 5 message contains both `inmemory` and the conflicting adapter name; gate 6 message contains `inmemory` and `allow-low-trust` or `trust=LOW`).
+- add: `infochat-provider/src/test/java/io/infochat/provider/messaging/AdapterRegistryTest.java` — covers acceptance items 5, 24. Test 1 (single-adapter happy path): `infochat.adapters=inmemory` + `infochat.adapters.inmemory.allow-low-trust=true`; asserts exactly one activation and the per-adapter handler in `InMemoryAdapter` invokes the Provider's `InboundRouter` (use `InMemoryAdapter.deliverDm(...)` then `sentMessages()` to confirm the round-trip). Test 2 (multi-adapter happy path): two `@Alternative @Priority` fake beans bearing `name()` of `inmemory` and `inmemory2`; configure `infochat.adapters=inmemory,inmemory2` with the LOW-trust opt-in for both; assert BOTH activate. Note: the multi-adapter happy path conflicts with the production-exclusion gate (gate 5) if BOTH fakes are activated alongside the literal `inmemory` name — the test fakes must NOT both pass gate 5. The cleanest shape is two NON-`inmemory` fake beans (e.g., `fake1`/`fake2` declared HIGH trust); the acceptance text says "TWO test-only InMemoryAdapter beans bearing distinct `name()` returns (e.g. `inmemory` and `inmemory2`)" so the test must NOT include the production `InMemoryAdapter` — it uses two test-only fakes with names `inmemory` and `inmemory2`, and the production InMemoryAdapter producer in AdapterRegistry must be `@Alternative`-overridable (or the test profile disables it via a bean-disabling property). Implementer should pick fake names that don't collide with the production-exclusion gate's `inmemory` literal — use `inmemory2` for one and ensure the other test-only fake is the only `inmemory`-named bean active in that profile.
+- add: `infochat-provider/src/test/java/io/infochat/provider/messaging/InboundRouterTest.java` — covers acceptance items 8, 9, 10, 11, 12. `@QuarkusTest` with `infochat.adapters=inmemory` + `infochat.adapters.inmemory.allow-low-trust=true`. Five `@Test` methods: (1) empty/whitespace/bidi-only (U+202E)/zero-width-only (U+200B) inbound text produces zero outbound on InMemoryAdapter; (2) leading whitespace `  /help` produces same outbound as `/help` (with M1-035c not yet present, both produce the unknown-command reply — assertion is "same body, not empty"); (3) non-slash body produces the deterministic chat-mode reply literal; (4) unknown slash command `/xyz` produces the friendly unknown-command literal; (5) command-handler exception path — register a test-only `@Alternative @Priority CommandHandler` whose handle method throws; assert the outbound body is the fixed internal-error literal and does NOT contain the exception's message substring.
+- Pre-existing tests: NONE modified. Ticket's "Authorized test changes" section reads "(none — this subticket adds three new test classes in `infochat-provider` and modifies no pre-existing tests.)" — confirmed.
+
+### Cross-cutting concerns
+- **Normalization-first invariant** (security.md §Authorization model step 1.7) — the normalized body MUST replace the raw body for every downstream consumer. The raw body is discarded; the LLM, parser, and any DB query MUST NOT see the raw form. Implementation: normalize once at the top of `dispatch`, store in a local, never reference `msg.text()` again past that line. This is what makes the homoglyph-evasion claim a real defense.
+- **`inmemory` literal name pinning** (Big-picture notes; spec/messaging.md §Per-adapter trust level) — the `(adapter, contact_id)` join key is the cross-adapter isolation invariant. AdapterRegistry MUST register InMemoryAdapter under the literal `inmemory` returned by `name()`; do not hard-code the string anywhere except in the production-exclusion gate's `if "inmemory".equals(...)` test. M1-035c's AutoRegisterService consumes the same literal.
+- **Plain-text formatting / no markdown links** (CLAUDE.md §Key conventions; design §6.2.1) — every deterministic English reply literal in InboundRouter is plain text. No `[text](url)` syntax, no rich markdown. Gate 3 enforces this at the capabilities level; the router's reply text must visibly respect it too.
+- **Authorization gates run in deterministic Java, not LLM tools** (CLAUDE.md §Key conventions; spec/security.md §Authorization model) — the startup gates and the unknown-command/internal-error fallbacks are all hard-coded. No LLM call anywhere in this subticket.
+- **No defensive code at internal boundaries** (CLAUDE.md §Engineering rules) — InboundRouter is at a system boundary (adapter inbound); the normalization pass and the empty-drop ARE legitimate boundary validations. Internal helper calls (e.g., between dispatch and the handler lookup) must NOT add null checks for impossible scenarios.
+- **`getMessage()`/`toString()` exclusion from user-visible reply paths** (acceptance item 12) — the grep predicate explicitly permits `getMessage()` inside an SLF4J `log.error(...)` call but NOT inside any `new OutboundMessage(...)` string construction. The exception-path reply MUST be a fixed English literal.
+- **Per-adapter resilience at startup** (design §6.7) — MessagingStartup's per-adapter `start()` loop catches and logs each failure; a connection failure on one adapter does NOT abort Provider startup. MVP has one trivially-no-op adapter so this is shape-only, but the shape MUST be in place for T3-A.
+- **Mention-by-id gate (#4) condition is `caps.supportsMentionByContactId == false AND deployment.groupSpiWired == true`** — Provider has no group SPI today, so MVP-time the gate is vacuous unless a test-only adapter exposes a fake `groupSpiWired=true` flag. Implementation per impl-notes: a private constant or future config property. The gate code MUST be present; the natural production state is "not yet triggerable".
+- **No audit-log row writes from the router** (out_of_scope; design 00-mvp.md §5) — `/help` is not auditable in MVP. Do not call any audit DAO from InboundRouter or MessagingStartup.
+- **Bundle infrastructure deferred to M1-035c** — InboundRouter uses deterministic English string literals for unknown-command, chat-mode-stub, and internal-error replies. M1-035c is authorized to swap those literals for bundle-key lookups in a follow-up commit.
+
+### Implementation order
+1. **`CommandHandler` interface first.** AdapterRegistry's `Instance<CommandHandler>` and InboundRouter's slash-prefix lookup both compile-depend on it; without it, the other two files don't compile. Trivial file; ~10 lines.
+2. **`InboundRouter` skeleton (no slash-prefix branch logic yet).** Defines the `dispatch(MessagingAdapter source, InboundMessage msg)` entry point and the private `normalize(String)` helper. AdapterRegistry compile-depends on InboundRouter to wire the per-adapter closure. Skeleton form: normalization pass + empty-drop + chat-mode-stub + unknown-command-stub + exception-path — all branches return the deterministic literals via `source.send(...)`.
+3. **`AdapterRegistry`.** Now both downstream types compile. Implement the six gates in sequence in a `start()` method; implement the `@Produces @ApplicationScoped InMemoryAdapter` producer; implement the per-adapter handler registration that calls `adapter.setInboundHandler(msg -> inboundRouter.dispatch(adapter, msg))`. The closure captures the adapter reference so the router knows which adapter to send the reply via — this is shape (b) from impl-notes and the simpler M1-035a-SPI-monotone path.
+4. **`MessagingStartup`.** `@Startup` `@PostConstruct` invokes `adapterRegistry.start()` and `adapterRegistry.startAllAdapters()` (the latter is the per-adapter resilience loop). MVP is a no-op for the InMemoryAdapter case but the shape is in place. Priority 300 matches the §1.4.3 startup ordering comment in `NewPostReconciler` (50 lock → 100 flyway → 200 admin-bootstrap → 250 reconciler → 300 AdapterRegistry → 400 CommandRouter); InstanceLockGuard at 50 has already fired and Flyway/Reconciler have completed.
+5. **`StartupGatesTest`.** Authoring this BEFORE the test-only fake adapter beans go into AdapterRegistryTest helps validate the gate logic in isolation — gate tests exercise sad paths with deliberately-broken capability shapes; they don't need a full Provider-startup happy path. Order: gate 1 (empty list) → gate 2 (unknown name) → gate 3 (markdown-links=true) → gate 4 (mention-by-id false + group-spi-wired fake) → gate 5 (production-exclusion) → gate 6 (LOW-trust opt-in missing).
+6. **`AdapterRegistryTest`.** Asserts the happy paths now that the gate sad-paths are covered. Single-adapter case uses the production InMemoryAdapter (via the AdapterRegistry producer); multi-adapter case uses two test-only fake beans + a test profile that disables the production producer (or names that don't trigger gate 5).
+7. **`InboundRouterTest`.** Last because it exercises the full dispatch pipeline end-to-end via `InMemoryAdapter.deliverDm(...)` and asserts on `InMemoryAdapter.sentMessages()`. Requires a fully-wired `@QuarkusTest` with the production InMemoryAdapter + LOW-trust opt-in.
+
+Wrong-order failure modes:
+- Authoring `AdapterRegistry` before `InboundRouter` or `CommandHandler` → AdapterRegistry references both; compile-time failure cascades.
+- Authoring `MessagingStartup` before `AdapterRegistry.start()` exists → MessagingStartup's `@PostConstruct` body can't compile.
+- Authoring InboundRouter without normalization helper first → InboundRouterTest's normalization-pass tests fail; tests would be authored against an unwritten contract.
+- Running tests before the `@Produces InMemoryAdapter` producer is in place → `Instance<MessagingAdapter>` resolves empty at runtime → gate 2 fires (the configured name `inmemory` doesn't resolve to a bean) → every happy-path test fails the wrong way.
+
+### Risks
+
+- **InMemoryAdapter CDI discovery requires a `@Produces` method inside AdapterRegistry** because `infochat-messaging-adapter` is a plain library jar (no `beans.xml`, no `@ApplicationScoped` on the class, no `quarkus.index-dependency` declared in `application.properties`), and the `out_of_scope` list forbids touching the messaging-adapter jar. The ticket's Definition of Done says "AdapterRegistry discovers every CDI bean implementing `MessagingAdapter`" but never names the producer mechanism. If the implementer doesn't realize this, `Instance<MessagingAdapter>` will be empty at runtime, gate 2 will fire (configured name doesn't resolve to a bean), and every test fails opaquely. The fix is one `@Produces @ApplicationScoped InMemoryAdapter inMemoryAdapter() { return new InMemoryAdapter(); }` method in `AdapterRegistry` — keeps the file count at 7 and the messaging-adapter jar frozen. Escalation: not needed; document the producer mechanism in AdapterRegistry's Javadoc and proceed.
+
+- **Multi-adapter happy path conflicts with production-exclusion gate (#5)** — acceptance item 24 says "TWO test-only InMemoryAdapter beans bearing distinct `name()` returns (e.g. `inmemory` and `inmemory2`)" but gate 5 rejects `inmemory + anything else`. Either (a) the multi-adapter test must rename the production-style adapter to NOT be `inmemory` (e.g., both fakes are `fake1` and `fake2`), or (b) gate 5 must run AFTER bean resolution but be testably bypassable in this one test (it isn't — gate 5 is unconditional). The cleanest path is (a): the test uses two test-only `@Alternative` `MessagingAdapter` beans whose `name()` returns are NOT `inmemory` (e.g., `fakeA` and `fakeB`), HIGH trust to also bypass gate 6. The acceptance text's "e.g. inmemory and inmemory2" is illustrative; the spirit is "two distinct adapter beans active simultaneously". Escalation: refine — clarify with the reviewer/user whether the acceptance text means literal `inmemory` + `inmemory2` (which contradicts gate 5) or any two distinct adapter beans (which honors gate 5). If literal-`inmemory2` is required, the multi-adapter test must disable/override gate 5 and the ticket has a self-contradiction; if any-two-names is acceptable, no escalation.
+
+- **Round-2/round-3 must-shrink risk** — with three new test classes (≥6 + ≥2 + ≥5 = ≥13 `@Test` methods), six gates, four test-only fake adapter beans across three test classes, and the producer mechanic, the round-1 diff will be large. If round 1 returns REWORK with fixes that involve adding more test cases, round 2 may grow along all three dimensions and trip the round-N must-shrink rule. Mitigation: keep gate-test setup compact (one fake-adapter class per gate as a static nested type); keep router-test wiring shared (one `@TestProfile` reused across all five `@Test` methods). Escalation: not needed in advance; flag if round 1 REWORK demands a refactor that grows the diff.
+
+- **MVP's `MessagingStartup` is essentially a no-op for InMemoryAdapter** — InMemoryAdapter has no `start()` method on the SPI (M1-035a froze that). The "per-adapter resilience" loop has nothing to call. The shape can still exist (iterate activated adapters, log "starting <name>" at INFO), but without a `start(InboundHandler)` SPI method the MessagingStartup body has very little to do. This is consistent with the Big-picture notes ("InMemoryAdapter has no transport to start"). No escalation.
+
+- **`@Inject AutoRegisterService` stub** — InboundRouter has a stubbed seam to a class that lives in M1-035c. The ticket says "The InboundRouter has a `@Inject AutoRegisterService autoRegister` field; the call site is wired to a no-op stub method `resolveUser(Identity, String adapter)` that M1-035c will fill in." But M1-035c authors the class. So M1-035b either (a) creates a placeholder `AutoRegisterService` class with a no-op method (which violates out_of_scope), or (b) omits the `@Inject` field entirely until M1-035c lands (which means the "seam visible at the entry-point method body" is just a one-line comment, not an inject). Reading the acceptance items: item 14 only requires "a one-line comment naming the missing intake steps" — it does NOT require the `@Inject AutoRegisterService` field to exist in M1-035b. Resolution: omit the field for now; the comment satisfies acceptance item 14; M1-035c adds the field when it lands. No escalation.
+
+- **Gate ordering (RESOLVED).** Initial clarity_check WARN flagged that the ticket's inlined gate sequence differed from §6.7's. Resolved on 2026-05-17 by direct edit: acceptance item 4, per-gate items 21–23, and the Big-picture notes section were all reordered to match §6.7's documented order (4 = mention-by-id + group-SPI; 5 = production-exclusion; 6 = LOW-trust opt-in). The implementation order step 5 above also follows this order. No residual ambiguity.
+
+### Out-of-scope (echoed from ticket)
+- `infochat-provider/src/test/java/io/infochat/provider/messaging/AdapterRouterIT.java` (umbrella M1-035's whole-topic IT — reserved)
+- Any change under `infochat-messaging-adapter/` (M1-035a's SPI surface and InMemoryAdapter are FROZEN; defects → follow-up ticket against M1-035a, never amend)
+- `HelpCommandHandler`, `AutoRegisterService`, `BundleLoader`, `BundleKeys`, `en.properties` bundle (M1-035c)
+- Any Flyway migration under `infochat-core/src/main/resources/db/migration/` (T1-E is migration-free)
+- Any SimpleX or Signal adapter bean (T3-A)
+- Any bootstrap-admin `@Startup` bean from `docs/spec/deployment.md` §Operator inputs (deferred; manual SQL grant for MVP)
+- Any invite-gating (D44), slow-start probation (D45) filter, `/ban` / `/unban` (D11), chat-mode handler proper (T2-A / T2-D — InboundRouter leaves a one-line comment naming these)
+- Any LLM output sanitizer integration (T1-F's `/summary`)
+- Any TranslationProvider integration / `/lang` (T2-C)
+- Any inbound back-pressure queue / per-user-fair scheduler / synchronous-throttle-reply path from design §6.3.7 (T2-G)
+- Any transport-layer inbound size cap enforcement / application-level body cap (deferred; optional hardcoded 4096-byte cap at InboundRouter entry with one-line comment naming follow-up, OR full deferral with same comment — pick whichever is cleaner)
+- Any confirmation-pending state machine (no destructive commands in MVP; T2-A)
+- Any `audit_log` row writes from the router (`/help` is not auditable per design 00-mvp.md §5)
+
+## Round 1 rework
+
+Reviewer verdict: REWORK (round 1, 2026-05-17). Per-check summary in
+`target/m1-tick-review-M1-035b-r1.txt`. SCOPE-DRIFT-CHECK: FAIL because
+the diff touches an 8th implementation file
+(`infochat-provider/src/main/resources/application.properties`) that is
+NOT a member of `files_scope` and pushes the implementation-file count
+one over `files_budget: 7`. All other checks passed (test integrity,
+out-of-scope, negative-space, spec-conformance); ACCEPTANCE-CHECK was
+PARTIAL only because of the same scope-drift item.
+
+1. Bring `infochat-provider/src/main/resources/application.properties`
+   into the ticket's declared scope before landing the change. Two
+   acceptable resolutions:
+   - **(a)** Drop the `application.properties` edit and move the
+     `%test.infochat.adapters=inmemory` +
+     `%test.infochat.adapters.inmemory.allow-low-trust=true` defaults
+     into a per-test `@TestProfile` for whichever existing
+     `@QuarkusTest` classes need them (the three new test classes
+     already use their own `@TestProfile` — the change is needed for
+     OTHER existing `@QuarkusTest` classes that load the Provider and
+     would otherwise trip gate 1 / gate 6).
+   - **(b)** Escalate via the workflow to refine the ticket's
+     `files_scope` to include
+     `infochat-provider/src/main/resources/application.properties`
+     AND bump `files_budget` from 7 to 8, citing the requirement that
+     production-startup gates fire under all `@QuarkusTest` classes
+     that boot the Provider.
+   Resolution (a) keeps the budget intact; resolution (b) requires a
+   documented `files_scope` / `files_budget` revision in the ticket
+   frontmatter. Either way, the diff must end with no file outside the
+   (possibly-revised) `files_scope`.
