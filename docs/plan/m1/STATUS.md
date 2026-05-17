@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 37 |
 | deferred | 5 |
-| **total** | **42** |
+| **total** | **46** |
 
 ---
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-035a — InMemoryAdapter + SPI fill-in (complexity: medium, risk: medium)
 
 ---
 
@@ -41,7 +41,9 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-035 — blocked_by: M1-035a (pending), M1-035b (pending), M1-035c (pending)
+- M1-035b — blocked_by: M1-035a (pending)
+- M1-035c — blocked_by: M1-035b (pending)
 
 ---
 
@@ -83,7 +85,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 ### post-mvp-hardening (3)
 - M1-019 → M1-033
-- M1-020 → unspecified
+- M1-020 → M1-035b
 - M1-031 → unspecified
 
 ---
@@ -139,7 +141,14 @@ M1-001 (done)
   │     ├── M1-007 (done) [see above]
   │     └── M1-033 (done) [see above]
   └── M1-007c (done)
-        └── M1-007 (done) [see above]
+        ├── M1-007 (done) [see above]
+        └── M1-035a (pending) ← runnable
+              ├── M1-035 (pending)
+              └── M1-035b (pending)
+                    ├── M1-020 (deferred) [see above]
+                    ├── M1-035 (pending) [see above]
+                    └── M1-035c (pending)
+                          └── M1-035 (pending) [see above]
 M1-002 (done)
 M1-003 (done)
   └── M1-005 (done) [see above]

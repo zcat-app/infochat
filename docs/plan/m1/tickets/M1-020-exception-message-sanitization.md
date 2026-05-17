@@ -3,9 +3,9 @@ id: M1-020
 title: Sanitize user content in exception messages and stack traces
 status: deferred
 created: 2026-05-12
-last_updated: 2026-05-13
+last_updated: 2026-05-17
 deferred_reason: post-mvp-hardening
-deferred_on: []
+deferred_on: M1-035b
 blocked_by:
   - M1-019
 files_budget: 10
