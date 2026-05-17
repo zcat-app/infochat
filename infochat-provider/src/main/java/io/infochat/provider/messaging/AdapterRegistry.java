@@ -205,11 +205,17 @@ public class AdapterRegistry {
         // emit the §6.8 activation log line. Order matters: setReplyTarget
         // first so a misbehaving adapter that synchronously delivers from
         // inside setInboundHandler still finds a non-null reply target.
+        // The setInboundHandler lambda captures adapter.name() so the
+        // router sees the real source adapter even when more than one
+        // adapter is activated; the SPI's InboundMessage stays free of an
+        // adapter-identity field (the registry is the single source of
+        // adapter-name truth).
         for (MessagingAdapter adapter : activating) {
             inboundRouter.setReplyTarget(adapter);
-            adapter.setInboundHandler(inboundRouter);
+            String adapterName = adapter.name();
+            adapter.setInboundHandler(msg -> inboundRouter.onMessage(msg, adapterName));
             log.info("activating adapter: {} (trust={}{})",
-                    adapter.name(),
+                    adapterName,
                     adapter.trustLevel(),
                     adapter.trustLevel() == AdapterTrustLevel.LOW
                             ? "; allow-low-trust=true"

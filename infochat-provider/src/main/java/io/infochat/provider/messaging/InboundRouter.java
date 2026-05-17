@@ -16,10 +16,16 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Provider-side inbound dispatch. Registered as the
- * {@link MessagingAdapter.InboundHandler} on every activated adapter
- * by {@link AdapterRegistry}; the registry also tells the router
- * which adapter to send replies through via {@link #setReplyTarget}.
+ * Provider-side inbound dispatch. {@link AdapterRegistry} wraps the
+ * router with a per-adapter {@link MessagingAdapter.InboundHandler}
+ * lambda that captures the source adapter's {@code name()} and calls
+ * {@link #onMessage(InboundMessage, String)}; the registry also tells
+ * the router which adapter to send replies through via
+ * {@link #setReplyTarget}. The adapter-name plumbing keeps the
+ * messaging-adapter SPI ({@link io.infochat.messaging.InboundMessage})
+ * free of an adapter-identity field — the registry knows which adapter
+ * it just wired, so the name reaches the router through the wiring
+ * surface, not the payload.
  *
  * <p><b>Normalization-first invariant.</b> The first thing
  * {@link #onMessage} does is run the Unicode normalization pass spec'd
@@ -55,7 +61,7 @@ import java.util.UUID;
  * <b>ban check</b> (T2-A / D11), <b>invite-code gating</b> (T2-A /
  * D44), <b>slow-start probation filter</b> (T2-A / D45). The one-line
  * comment in {@link #onMessage} below pins the deferred ordering so a
- * future reader sees the seam. M1-035c adds the
+ * future reader sees the seam. M1-035d adds the
  * {@code AutoRegisterService} at the same intake point.</p>
  *
  * <p><b>Multi-adapter reply.</b> {@link #replyTarget} is a single
@@ -70,7 +76,7 @@ import java.util.UUID;
  * real consumer.</p>
  */
 @ApplicationScoped
-public class InboundRouter implements MessagingAdapter.InboundHandler {
+public class InboundRouter {
 
     private static final Logger log = LoggerFactory.getLogger(InboundRouter.class);
 
@@ -94,6 +100,9 @@ public class InboundRouter implements MessagingAdapter.InboundHandler {
     @Inject
     Instance<CommandHandler> commandHandlers;
 
+    @Inject
+    AutoRegisterService autoRegisterService;
+
     private volatile MessagingAdapter replyTarget;
 
     /**
@@ -107,14 +116,27 @@ public class InboundRouter implements MessagingAdapter.InboundHandler {
         this.replyTarget = adapter;
     }
 
-    @Override
-    public void onMessage(InboundMessage msg) {
+    /**
+     * Entry point for one inbound message routed from the named
+     * source adapter. {@link AdapterRegistry} wires every activated
+     * adapter to a lambda that captures {@code adapter.name()} and
+     * calls this method, so {@code adapterName} reflects the real
+     * source adapter even in multi-adapter deployments (T3-A).
+     */
+    public void onMessage(InboundMessage msg, String adapterName) {
         // T2-A wires the missing intake steps upstream of this point:
         // ban check (D11), invite-code gate (D44), slow-start probation (D45).
         String normalized = normalize(msg.text());
         if (normalized.isEmpty()) {
             return;
         }
+
+        // MVP-legacy auto-register-on-first-DM per docs/design/00-mvp.md §4.
+        // Returns the users.id; MVP discards it (T2-A wires invite-gating
+        // upstream and consumes the id at that seam). The call must be
+        // upstream of the slash-vs-chat split so chat-mode inbound also
+        // produces a users row.
+        autoRegisterService.resolveOrRegister(msg.sender(), adapterName);
 
         String body;
         try {

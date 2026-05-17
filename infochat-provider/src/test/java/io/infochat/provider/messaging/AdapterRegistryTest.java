@@ -17,6 +17,9 @@ import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -66,9 +69,20 @@ class AdapterRegistryTest {
     @Inject
     InboundRouter inboundRouter;
 
+    @Inject
+    DataSource dataSource;
+
     @BeforeEach
-    void resetAdapterState() {
+    void resetAdapterState() throws Exception {
         inMemoryAdapter.reset();
+        // M1-035d wired AutoRegisterService into the router, so the
+        // singleAdapter happy-path's deliverDm("alice", ...) now inserts
+        // a users row. Clean it up so re-runs do not accumulate.
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "DELETE FROM users WHERE adapter = 'inmemory' AND contact_id = 'alice'")) {
+            ps.executeUpdate();
+        }
     }
 
     @Test

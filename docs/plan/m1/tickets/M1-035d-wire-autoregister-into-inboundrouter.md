@@ -1,7 +1,7 @@
 ---
 id: M1-035d
 title: Wire AutoRegisterService into InboundRouter intake
-status: pending
+status: done
 created: 2026-05-17
 last_updated: 2026-05-17
 blocked_by: []
@@ -50,14 +50,31 @@ spec_refs:
   - "docs/design/00-mvp.md §4. Messaging adapter and commands"
   - "docs/design/00-mvp.md §6. MVP exit criteria"
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-05-17
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 135
+      removed: 20
 escalations: []
 revisions: []
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-05-17
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-035d: Wire AutoRegisterService into InboundRouter intake
