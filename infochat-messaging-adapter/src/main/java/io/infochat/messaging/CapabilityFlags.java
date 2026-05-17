@@ -5,76 +5,101 @@ import java.time.Duration;
 /**
  * Static description of what a {@link MessagingAdapter} supports —
  * the "Capability flags (minimum set)" enumerated in
- * {@code docs/spec/messaging.md} §Capability flags. The record shape is
- * closed deliberately: each transport declares one immutable
- * {@code CapabilityFlags} instance and Provider's startup-fail-fast
- * validation (rejection of {@code supportsMarkdownLinks == true}) can
- * inspect it without a virtual call.
+ * {@code docs/spec/messaging.md} §Capability flags and shaped per
+ * {@code docs/design/06-messaging.md} §6.2. The record is closed:
+ * each transport declares one immutable {@code CapabilityFlags}
+ * instance and Provider's startup-fail-fast validation (rejection of
+ * {@code supportsMarkdownLinks == true}) can inspect it without a
+ * virtual call.
+ *
+ * <p>Trust level is intentionally NOT a capability flag — it is an
+ * adapter-instance property accessed via the
+ * {@link AdapterTrustLevel}-returning method on
+ * {@link MessagingAdapter}, so a single adapter implementation
+ * (notably the in-memory test double) can ship two trust postures
+ * from the same class without two parallel capability records. The
+ * M1-007c nested {@code TrustLevel} enum was removed in this
+ * evolution; see {@link AdapterTrustLevel}.</p>
  *
  * <p>Adding a new flag is a spec amendment. Provider treats an unknown
  * flag as "not supported" by default; flags here represent the v1
  * floor.</p>
  *
- * @param trustLevel                cryptographically-anchored identity
- *                                  ({@link TrustLevel#HIGH}) or weaker
- *                                  ({@link TrustLevel#LOW}). Provider
- *                                  rejects {@code LOW} identity
- *                                  assertions unless the operator opts
- *                                  in.
- * @param supportsCodeFormatting    true when code spans render as
- *                                  monospace; false renders raw
- *                                  backticks. URLs are always rendered
- *                                  bare (decision D30) — this flag does
- *                                  NOT widen to markdown links.
- * @param supportsMarkdownLinks     MUST be false for every v1 adapter.
- *                                  Provider validates this at adapter
- *                                  registration (startup) and fails
- *                                  fast on a true declaration.
- * @param supportsMessageEdit       true when the adapter can edit a
- *                                  previously sent message; drives
- *                                  in-place progress updates.
- * @param minEditInterval           adapter-imposed floor between edits
- *                                  on the same message. The progress
- *                                  notifier honors
- *                                  {@code max(adapterMin, systemFloor)}.
- * @param supportsTypingIndicator   true when typing-on/off pulses are
- *                                  available.
  * @param supportsMentionByContactId true when the protocol carries an
- *                                  {@code @mention} anchored to the
- *                                  mentioned user's cryptographic
- *                                  contact id. Required-true for any
- *                                  adapter that exposes group mode in
- *                                  v1; display-name string matching is
- *                                  never an acceptable fallback.
- * @param supportsMembershipEvents  true when the adapter exposes native
- *                                  user-joined / user-left signals.
- *                                  When false, Provider relies on
- *                                  permanent-delivery-failure-driven
- *                                  cleanup and does NOT synthesise
- *                                  membership events from inactivity.
+ *                                   {@code @mention} anchored to the
+ *                                   mentioned user's cryptographic
+ *                                   contact id. Required-true for any
+ *                                   adapter that exposes group mode in
+ *                                   v1; display-name string matching is
+ *                                   never an acceptable fallback.
+ * @param supportsMembershipEvents   true when the adapter exposes
+ *                                   native user-joined / user-left
+ *                                   signals. When false, Provider
+ *                                   relies on permanent-delivery-
+ *                                   failure-driven cleanup and does NOT
+ *                                   synthesise membership events from
+ *                                   inactivity.
+ * @param supportsCodeFormatting     true when single-backtick spans
+ *                                   render as monospace; false renders
+ *                                   the raw backticks. URLs are always
+ *                                   rendered bare (decision D30) — this
+ *                                   flag does NOT widen to markdown
+ *                                   links.
+ * @param supportsMarkdownLinks      MUST be false for every v1 adapter.
+ *                                   Provider validates this at adapter
+ *                                   registration (startup) and fails
+ *                                   fast on a true declaration.
+ * @param supportsMultilineCode      true when triple-backtick blocks
+ *                                   render as a code block; false
+ *                                   renders the raw backticks.
+ * @param supportsAttachments        true when the protocol supports
+ *                                   attachments at the API layer
+ *                                   (future use).
+ * @param supportsThreading          true when the protocol supports
+ *                                   threaded replies (future use).
+ * @param maxMessageBytes            outbound chunking threshold —
+ *                                   Provider splits longer messages
+ *                                   into ≤ this many bytes per send().
+ * @param maxInboundMessageBytes     transport-layer first-defense cap
+ *                                   on inbound message size per design
+ *                                   §6.2.2. Tighter than the
+ *                                   application-level chat-mode body
+ *                                   cap; messages over this size are
+ *                                   dropped by the adapter before
+ *                                   delivery to Provider.
+ * @param maxInflightSends           concurrency: maximum
+ *                                   {@link MessagingAdapter#send}
+ *                                   calls allowed in flight at once.
+ * @param maxSendsPerSecond          rate: token-bucket cap on
+ *                                   {@link MessagingAdapter#send}
+ *                                   calls per second averaged over a
+ *                                   one-second window.
+ * @param supportsMessageEdit        true when the adapter can edit a
+ *                                   previously-sent message; drives
+ *                                   in-place progress updates.
+ * @param supportsTypingIndicator    true when typing-on/off pulses are
+ *                                   available.
+ * @param minEditInterval            adapter-imposed floor between
+ *                                   edits on the same message; the
+ *                                   progress notifier honors
+ *                                   {@code max(adapterMin, systemFloor)}.
+ *                                   {@link Duration#ZERO} when the
+ *                                   transport imposes no floor (e.g.,
+ *                                   the in-memory test double).
  */
 public record CapabilityFlags(
-        TrustLevel trustLevel,
+        boolean supportsMentionByContactId,
+        boolean supportsMembershipEvents,
         boolean supportsCodeFormatting,
         boolean supportsMarkdownLinks,
+        boolean supportsMultilineCode,
+        boolean supportsAttachments,
+        boolean supportsThreading,
+        int maxMessageBytes,
+        int maxInboundMessageBytes,
+        int maxInflightSends,
+        int maxSendsPerSecond,
         boolean supportsMessageEdit,
-        Duration minEditInterval,
         boolean supportsTypingIndicator,
-        boolean supportsMentionByContactId,
-        boolean supportsMembershipEvents) {
-
-    /**
-     * Identity-assertion strength for a messaging transport. Nested
-     * inside {@link CapabilityFlags} to keep the SPI module's file
-     * count to one record + one enum here; a future spec amendment
-     * that widens the trust dimension can promote {@code TrustLevel}
-     * to a top-level type without breaking the {@code trustLevel}
-     * component name.
-     */
-    public enum TrustLevel {
-        /** Cryptographically-anchored contact id (SimpleX queue address, Signal ACI). */
-        HIGH,
-        /** Weaker identity assertion; operator must explicitly opt in. */
-        LOW
-    }
+        Duration minEditInterval) {
 }
