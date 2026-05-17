@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 35 |
+| done | 36 |
 | deferred | 5 |
 | **total** | **42** |
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-034a — Tagger pipeline + V11 (post_embedding + embedding_metadata) (complexity: high, risk: medium)
+- M1-034b — Embedding pipeline + ReadyPromoter + first new_post NOTIFY (complexity: medium, risk: medium)
 
 ---
 
@@ -41,7 +41,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-034b — blocked_by: M1-034a (pending)
+_(none)_
 
 ---
 
@@ -60,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-034a | Tagger pipeline + V11 (post_embedding + embedding_metadata) | 2026-05-17 | round 2 APPROVE |
 | M1-033 | Stage 2 LLM judge + first OpenAI-compatible LlmProvider + (ModelTask, scope_language) router | 2026-05-16 | round 2 APPROVE |
 | M1-032 | Stage 1 deterministic security (HTML sanitizer + Unicode + regex + watchdog + quarantine) | 2026-05-16 | round 2 APPROVE |
 | M1-030 | Provider catch-up hardening backlog (3 redteam OUT-OF-MODEL advisories) | 2026-05-16 | round 1 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-026 | infochat-ssrf hardening followup (M1-025 remediation) | 2026-05-15 | round 1 APPROVE |
 | M1-025 | infochat-ssrf hardening (M1-024 remediation) | 2026-05-15 | round 1 APPROVE |
 | M1-024 | infochat-ssrf module + RssFetcher hardening (M1-023 remediation) | 2026-05-15 | round 1 APPROVE |
-| M1-023 | RSS Fetcher implementation (Fetcher SPI, kind='rss') | 2026-05-14 | round 1 APPROVE |
 
 ---
 
@@ -108,12 +108,12 @@ M1-001 (done)
   │     │     │     │     │                 ├── M1-019 (deferred)
   │     │     │     │     │                 │     └── M1-020 (deferred)
   │     │     │     │     │                 ├── M1-034 (deferred)
-  │     │     │     │     │                 └── M1-034a (pending) ← runnable
+  │     │     │     │     │                 └── M1-034a (done)
   │     │     │     │     │                       ├── M1-034 (deferred) [see above]
-  │     │     │     │     │                       └── M1-034b (pending)
+  │     │     │     │     │                       └── M1-034b (pending) ← runnable
   │     │     │     │     ├── M1-032 (done) [see above]
   │     │     │     │     ├── M1-034 (deferred) [see above]
-  │     │     │     │     └── M1-034a (pending) [see above]
+  │     │     │     │     └── M1-034a (done) [see above]
   │     │     │     ├── M1-021 (deferred)
   │     │     │     └── M1-022 (done)
   │     │     │           └── M1-028 (done) [see above]
@@ -122,7 +122,7 @@ M1-001 (done)
   │     │     │     ├── M1-008c (done) [see above]
   │     │     │     ├── M1-022 (done) [see above]
   │     │     │     ├── M1-034 (deferred) [see above]
-  │     │     │     └── M1-034a (pending) [see above]
+  │     │     │     └── M1-034a (done) [see above]
   │     │     └── M1-009 (done)
   │     ├── M1-008a (done) [see above]
   │     ├── M1-008b (done) [see above]

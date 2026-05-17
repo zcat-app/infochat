@@ -1,10 +1,15 @@
 ---
 id: M1-034a
 title: Tagger pipeline + V11 (post_embedding + embedding_metadata)
-status: pending
+status: done
 created: 2026-05-17
 last_updated: 2026-05-17
 decomposed_from: M1-034
+clarity_check:
+  date: 2026-05-17
+  verdict: PASS
+  warnings: []
+  blockers: []
 escalations:
   - date: 2026-05-17
     reason: clarity-fail
@@ -15,7 +20,143 @@ escalations:
           subsection of docs/spec/schema.md (~lines 207-215), not a heading.
         docs/design/02-schema.md §2.2.1 tag — ANCHOR-NOT-FOUND
           §2.2.1 is `source`; the tag table lives under §2.2.2.
+  - date: 2026-05-17
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A (escalation surfaced by developer during implementation, not by a
+      reviewer verdict).
+
+      Trigger: TaggerWorkerIT requires a stub LlmProvider so per-test
+      scenarios can drive the LLM round-trip (canned valid JSON, partial-
+      valid, schema-violating, zero-valid, unreachable). The only existing
+      reusable stub is `Stage2WorkerIT.TestStubLlmProvider`, defined as a
+      `public static` nested class inside a package-private outer class
+      (`class Stage2WorkerIT`, not `public class`). Cross-package import
+      is blocked by the outer-class visibility — the nested type is
+      effectively package-private.
+
+      Three workarounds were verified with `mvn -B -pl infochat-collector
+      -am verify` against the in-progress branch:
+
+        1. Add a second nested @Alternative @Priority(Integer.MAX_VALUE)
+           stub in TaggerWorkerIT → Quarkus ArC reports
+           AmbiguousResolutionException at deployment (verified verbatim
+           below); both ITs fail to boot.
+        2. QuarkusMock.installMockForType(myStub, LlmProvider.class) →
+           ClassCastException: the resolved bean is Stage2's stub class;
+           QuarkusMock requires the mock to be assignable to that
+           specific bean class, which my mock is not.
+        3. Custom CDI qualifier on a new @ApplicationScoped stub → my
+           stub becomes invisible to LlmRouter's `Instance<LlmProvider>`
+           injection (which carries the @Default qualifier), so TaggerWorker
+           still routes to Stage2's stub at runtime.
+
+      Verbatim Quarkus error from approach 1:
+
+        Ambiguous dependencies for type io.infochat.llm.LlmProvider and
+        qualifiers [@Default]
+          - injection target: io.infochat.collector.eval.stage2.Stage2WorkerIT#llmProvider
+          - available beans:
+            - Stage2WorkerIT$TestStubLlmProvider (@Default)
+            - TaggerWorkerIT$CannedStubLlmProvider (@Default)
+            - OpenAiCompatibleProvider (@Default)
+
+      Resolution requires either (a) modifying Stage2WorkerIT (not
+      authorized — body §"Authorized test changes" = "(none)") or
+      (b) introducing a shared test-stub utility in a new file (would
+      take files_budget from 7 → 8 or 9). Both are frontmatter changes
+      that must flow through `/m1-tick escalate refine`.
+
+      User direction (from chat): extract a shared StubLlmProvider into
+      a `testing/` sub-package and refactor Stage2WorkerIT to consume it
+      — the test-utility abstraction is naturally reusable by future ITs
+      (M1-034b EmbeddingWorker, T2 chat-agent), keeping dependency arrows
+      pointing from per-test ITs to a shared utility rather than from
+      one IT to another.
+  - date: 2026-05-17
+    reason: premise-fail
+    reviewer_verdict_excerpt: |
+      N/A (escalation surfaced by the commit-step `mvn verify` safety re-run
+      for high-complexity tickets, not by a reviewer verdict).
+
+      Trigger: round-1 was APPROVE; the commit-step verify caught a 25%
+      structural flake in Stage2WorkerIT. Stack frames in
+      target/m1-tick-test-M1-034a-rcommit.log (lines 830, 950, 985) show
+      TaggerWorker.onTick (the @Scheduled poll, default every 5s) firing
+      in the background during Stage2WorkerIT.@Order(7). The shared
+      @ApplicationScoped StubLlmProvider that production code resolves to
+      ALSO gets called by the background scheduler tick when it picks up
+      Tagger-eligible posts from a prior IT's seeds. Result:
+      Stage2WorkerIT.unreachableLlmAfterRetryExhaustionTakesInfraFailurePath
+      asserts `callCount=2` but observes `4` (its own 2 + scheduler's 2).
+
+      Per-test stub-instance isolation does NOT fix this: the race is
+      background-thread-vs-test-thread, not state-leak-between-tests.
+      Any per-test stub mechanism (QuarkusMock.installMockForType,
+      @Dependent, ThreadLocal-scoped producer) still produces one bean
+      instance in scope during the test method, and the background
+      scheduler thread calls that same instance through CDI.
+
+      The test's premise — that the @Scheduled tick wouldn't pollute the
+      shared stub during a @QuarkusTest — was wrong. Structural fix:
+      switch the test profile to `quarkus.scheduler.start-mode=halted` so
+      no @Scheduled tick fires automatically; tests that need a tick
+      (HeartbeatSchedulerIT) inject `io.quarkus.scheduler.Scheduler` and
+      call `scheduler.resume()` (or invoke the @Scheduled method
+      directly). One-time fix that pre-empts the same race for every
+      future @Scheduled eval-pipeline worker (M1-034b EmbeddingWorker,
+      T2 chat-agent re-eval, ...).
 revisions:
+  - date: 2026-05-17
+    reason: budget-breach rework
+    note: |
+      Resolved the budget-breach escalation by widening files_budget 7 → 9
+      to authorize a shared test-stub extraction. Two new files_scope
+      entries:
+        - infochat-collector/src/test/java/io/infochat/collector/eval/testing/StubLlmProvider.java
+          (NEW) — extracted public top-level @Alternative @Priority(MAX)
+          @ApplicationScoped stub implementing LlmProvider. Replaces the
+          nested Stage2WorkerIT.TestStubLlmProvider (M1-033) and the
+          in-progress nested TaggerWorkerIT.CannedStubLlmProvider that
+          triggered the budget breach (the Stage2 stub is enclosed in a
+          package-private outer class and is therefore not importable
+          from io.infochat.collector.eval.tagger; a second @Alternative
+          @Priority(MAX) bean in the same module yielded ArC
+          AmbiguousResolutionException at deployment per the
+          budget-breach escalation reviewer_verdict_excerpt). Public
+          top-level placement so any future LLM-evaluation IT (M1-034b
+          EmbeddingWorker, T2 chat-agent) can consume the same stub
+          without re-declaring its own @Alternative bean.
+        - infochat-collector/src/test/java/io/infochat/collector/eval/stage2/Stage2WorkerIT.java
+          (MODIFIED — see body §"Authorized test changes") — delete the
+          nested `public static class TestStubLlmProvider`; rewrite the
+          `(TestStubLlmProvider) llmProvider` cast at the @Inject site to
+          `(StubLlmProvider) llmProvider`; add the import
+          `io.infochat.collector.eval.testing.StubLlmProvider`. All nine
+          @Test methods (28a–28i) keep their behavior and assertions
+          byte-equal — only the test-utility class moves. M1-033's
+          behavioral contract (nine scenarios + release-on-stage2-failure
+          flag toggling) is preserved.
+      Snapshot of the pre-refine frontmatter (only the changed fields
+      are listed; everything else carries through unchanged):
+        files_budget: 7
+        files_scope:
+          - infochat-core/src/main/resources/db/migration/V11__post_embedding.sql
+          - infochat-llm-adapter/src/main/resources/prompts/tagger.md
+          - infochat-llm-adapter/src/main/resources/prompts/tagger-fallback.md
+          - infochat-collector/src/main/java/io/infochat/collector/eval/tagger/TagVocabulary.java
+          - infochat-collector/src/main/java/io/infochat/collector/eval/tagger/TaggerWorker.java
+          - infochat-collector/src/main/resources/application.properties
+          - infochat-collector/src/test/java/io/infochat/collector/eval/tagger/TaggerWorkerIT.java
+      Acceptance items 1–29 are NOT modified — they describe the Tagger
+      pipeline contract, and the shared-stub extraction is test
+      scaffolding. Item 27 ("≥7 @Test in TaggerWorkerIT") still holds:
+      the nested CannedStubLlmProvider class carried zero @Test methods,
+      so deleting it leaves the seven scenario @Test methods untouched.
+      The change is forward-compatible with M1-034b's EmbeddingWorker IT
+      (which will @Inject the same LlmProvider) and avoids the visibility
+      hack of widening Stage2WorkerIT to public solely so its nested
+      stub can be imported cross-package.
   - date: 2026-05-17
     reason: clarity-fail rework
     note: |
@@ -43,11 +184,114 @@ revisions:
           updated to the corrected spec section paths.
       No DoD / acceptance / files_scope / out_of_scope changes beyond the
       spec_ref + regex + complexity adjustments above.
+  - date: 2026-05-17
+    reason: premise-fail rework (commit-step scheduler-race)
+    note: |
+      Resolved the premise-fail escalation surfaced by the commit-step
+      `mvn verify` safety re-run. Round-1 was APPROVE on a diff that
+      assumed the TaggerWorker's @Scheduled background tick would not
+      fire during @QuarkusTest method bodies; the safety re-run
+      revealed a 25% structural flake where the background tick fires
+      every 5s and pollutes shared @ApplicationScoped beans (concretely:
+      Stage2WorkerIT's callCount assertion against the shared
+      StubLlmProvider). The premise the round-1 IT relied on was wrong.
+
+      The structural fix is a one-line property in the test profile
+      (`%test.quarkus.scheduler.start-mode=halted` in
+      infochat-collector/src/main/resources/application.properties),
+      which halts the Quarkus scheduler at boot so no @Scheduled tick
+      fires automatically. Tests that need a tick
+      (HeartbeatSchedulerIT from M1-009) inject
+      io.quarkus.scheduler.Scheduler and call scheduler.resume() (or
+      invoke the @Scheduled method directly). This is preferred over a
+      per-worker poll-interval override because every future @Scheduled
+      eval-pipeline worker (M1-034b EmbeddingWorker, T2 chat-agent
+      re-eval, ...) would otherwise need the same patch — forgetting it
+      would re-introduce the same 5s-cadence flake silently.
+
+      Audit of collector ITs against the start-mode=halted profile:
+        - HeartbeatSchedulerIT (M1-009) — Thread.sleep(7_000) waiting on
+          background tick; MUST be adjusted to inject Scheduler +
+          scheduler.resume() (or invoke tick() directly). The original
+          contract (heartbeat row updates after the tick) is preserved;
+          only the trigger source changes from implicit-background-tick
+          to explicit-scheduler-resume.
+        - FetchSchedulerIT (M1-028) — calls fetchScheduler.tickOnce(row)
+          directly; not affected by start-mode=halted; no change needed.
+        - TaggerWorkerIT, Stage2WorkerIT, OutboxRehydratorIT,
+          PostPersisterIT, Stage1PipelineIT, Stage1WatchdogIT,
+          LocalOnlyConflictStartupIT, FlywayMigrationIT, DbRoleMatrixIT,
+          and the provider-module ITs — all invoke their @Scheduled
+          methods directly or do not depend on any tick; no change
+          needed.
+
+      Snapshot of the pre-refine frontmatter (only the changed fields
+      are listed; everything else carries through unchanged):
+        files_budget: 9
+        files_scope:
+          - infochat-core/src/main/resources/db/migration/V11__post_embedding.sql
+          - infochat-llm-adapter/src/main/resources/prompts/tagger.md
+          - infochat-llm-adapter/src/main/resources/prompts/tagger-fallback.md
+          - infochat-collector/src/main/java/io/infochat/collector/eval/tagger/TagVocabulary.java
+          - infochat-collector/src/main/java/io/infochat/collector/eval/tagger/TaggerWorker.java
+          - infochat-collector/src/main/resources/application.properties
+          - infochat-collector/src/test/java/io/infochat/collector/eval/tagger/TaggerWorkerIT.java
+          - infochat-collector/src/test/java/io/infochat/collector/eval/testing/StubLlmProvider.java
+          - infochat-collector/src/test/java/io/infochat/collector/eval/stage2/Stage2WorkerIT.java
+        acceptance: 29 items (the round-1 APPROVED set). This refine
+          adds a 30th acceptance item asserting the
+          %test.quarkus.scheduler.start-mode=halted property; the 29
+          prior items are NOT modified.
+      Diff impact (refine widens by exactly one file):
+        files_budget: 9 → 10
+        files_scope adds:
+          - infochat-collector/src/test/java/io/infochat/collector/startup/HeartbeatSchedulerIT.java
+            (MODIFIED — see body §"Authorized test changes" — inject
+            io.quarkus.scheduler.Scheduler; call scheduler.resume() in
+            @BeforeEach OR invoke tick() directly, whichever is the
+            minimum-change variant. The original M1-009-asserted
+            contract — heartbeat.last_seen_at advances after a tick —
+            is preserved; only the trigger source changes.)
+        application.properties (already in files_scope) gains one new
+          line: `%test.quarkus.scheduler.start-mode=halted` plus a
+          block comment documenting the cross-worker rationale.
+      Round-numbering: round-1 was the APPROVE just received; this
+      refine is "(round 1 rework)" by the escalate-skill's convention
+      (the round number that just escalated, even though here the
+      escalation was triggered by commit-step verify rather than a
+      review verdict). The next reviewer round is round 2.
+reviews:
+  - round: 1
+    date: 2026-05-17
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 11
+      added: 1637
+      removed: 109
+  - round: 2
+    date: 2026-05-17
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 12
+      added: 1838
+      removed: 109
 blocked_by:
   - M1-008b
   - M1-008c
   - M1-033
-files_budget: 7
+files_budget: 10
 files_scope:
   - infochat-core/src/main/resources/db/migration/V11__post_embedding.sql
   - infochat-llm-adapter/src/main/resources/prompts/tagger.md
@@ -56,6 +300,9 @@ files_scope:
   - infochat-collector/src/main/java/io/infochat/collector/eval/tagger/TaggerWorker.java
   - infochat-collector/src/main/resources/application.properties
   - infochat-collector/src/test/java/io/infochat/collector/eval/tagger/TaggerWorkerIT.java
+  - infochat-collector/src/test/java/io/infochat/collector/eval/testing/StubLlmProvider.java
+  - infochat-collector/src/test/java/io/infochat/collector/eval/stage2/Stage2WorkerIT.java
+  - infochat-collector/src/test/java/io/infochat/collector/startup/HeartbeatSchedulerIT.java
 complexity: high
 risk: medium
 round_cap: 3
@@ -107,6 +354,7 @@ acceptance:
   - "TaggerWorkerIT.java is a @QuarkusTest IT against real Postgres + a stub LlmProvider replacing the production provider for the test profile (@Alternative @Priority(MAX_VALUE) — same pattern as M1-033's Stage2WorkerIT). Seven @Test methods covering: (1) happy path — stub returns valid JSON {\"tags\":[\"security\",\"news\"]} where both are vocabulary members → post.tags=[\"security\",\"news\"], tagger_done=true, tagger_fallback=false; (2) partial-valid — stub returns {\"tags\":[\"security\",\"news\",\"NOTAVALIDTAG\"]} → post.tags=[\"security\",\"news\"], tagger_fallback=false, INFO log mentions partial-valid count; (3) zero-valid → bootstrap fallback (post.tags=<source.bootstrap_tags>, tagger_fallback=true); (4) schema-violating ('this is not json') → retry with fallback prompt; if retry returns 'TAGS: security, news', uses those (tagger_done=true, tagger_fallback=false); (5) total-fail (both prompts return garbage) → bootstrap fallback; (6) LLM unreachable (stub throws on every call) → retry once → bootstrap fallback; (7) status='QUARANTINED' post NOT picked up (tagger_done stays false) — grep -E '@Test' TaggerWorkerIT.java returns at least seven matches"
   - "mvn -B -pl infochat-collector -am verify exits 0; failsafe reports include TaggerWorkerIT — grep -rE 'Tests run: [1-9]' infochat-collector/target/failsafe-reports returns at least one new match for TaggerWorkerIT"
   - "mvn -B clean verify from the repo root exits 0; all prior tests (M1-003, M1-006, M1-007/007a/b/c, M1-008/008a/b/c, M1-009, M1-017, M1-022..M1-029, M1-032, M1-033) continue to pass alongside the new V11 migration and the Tagger pipeline. DbRoleMatrixIT (M1-006) continues to pass without modification — it asserts only role-presence + NOLOGIN, not a closed expected-grants list, so the new V11 GRANTs are non-breaking (this addresses the M1-034 clarity_check_at_abort TEST-CHANGES-AUTHORIZED warning). FlywayMigrationIT (M1-017) applies V11 alongside V1..V10 without edit"
+  - "infochat-collector/src/main/resources/application.properties declares %test.quarkus.scheduler.start-mode=halted under the test profile so background @Scheduled ticks (TaggerWorker today, and future EmbeddingWorker / re-eval / chat-agent workers) do not pollute @QuarkusTest assertions on shared @ApplicationScoped beans during the test phase. Tests that need the scheduler to fire (HeartbeatSchedulerIT) inject io.quarkus.scheduler.Scheduler and call scheduler.resume() OR invoke the @Scheduled method directly — grep -E '%test\\.quarkus\\.scheduler\\.start-mode\\s*=\\s*halted' infochat-collector/src/main/resources/application.properties returns at least one match AND grep -E 'io\\.quarkus\\.scheduler\\.Scheduler|scheduler\\.resume\\s*\\(\\s*\\)|HeartbeatScheduler\\s*\\.\\s*tick|heartbeatScheduler\\.tick\\s*\\(' infochat-collector/src/test/java/io/infochat/collector/startup/HeartbeatSchedulerIT.java returns at least one match"
 test_plan:
   adds:
     - infochat-collector/src/test/java/io/infochat/collector/eval/tagger/TaggerWorkerIT.java (@QuarkusTest IT against real Postgres + stub LlmProvider exercising happy / partial-valid / zero-valid / schema-violating / total-fail / LLM-unreachable / quarantined-exclusion paths)
@@ -338,11 +586,25 @@ M1-034b picks up where this ticket leaves off (post.tagger_done=true).
   TODO comment to extract to `infochat-core` later. The reviewer's
   negative-space check should not flag a missing `infochat-core`
   file if the helper exists already.
-- **Stub provider in the IT.** `TestStubLlmProvider` selected via
-  `@Alternative @Priority(Integer.MAX_VALUE)` for the test
-  profile. Same shape as M1-033's Stage 2 stub. Per-test scenario
-  configures the stub's response (valid JSON, partial-valid JSON,
-  zero-valid JSON, garbage, throws).
+- **Stub provider in the IT.** A single shared
+  `StubLlmProvider` at
+  `infochat-collector/src/test/java/io/infochat/collector/eval/testing/`
+  is selected via `@Alternative @Priority(Integer.MAX_VALUE)
+  @ApplicationScoped` for every IT in the module that @Inject-s
+  `LlmProvider`. Per-test scenario configures the stub's response
+  (valid JSON, partial-valid JSON, zero-valid JSON, garbage, throws).
+  This file lands here in M1-034a — the first ticket with a second
+  consumer — and replaces M1-033's nested `Stage2WorkerIT.TestStubLlmProvider`
+  (which is enclosed in a package-private outer class and therefore
+  not importable from `io.infochat.collector.eval.tagger`; a second
+  @Alternative @Priority(MAX) bean in the same module triggered ArC
+  AmbiguousResolutionException, see the budget-breach escalation's
+  `reviewer_verdict_excerpt`). Public top-level placement means
+  future IT classes (M1-034b EmbeddingWorker, T2 chat-agent) can
+  consume it without re-declaring a stub. The choice to extract here
+  rather than widen `Stage2WorkerIT` to `public` keeps test classes
+  package-private (the Quarkus + JUnit 5 default) while making the
+  test-utility class explicitly part of the test classpath surface.
 - **Mustache vs Qute templating.** Qute is built-in to Quarkus
   and supports the `{#tags}...{/tags}` iteration syntax the
   prompts need. Use Qute, avoid the Mustache dependency.
@@ -354,6 +616,28 @@ M1-034b picks up where this ticket leaves off (post.tagger_done=true).
   warning; verified by reading
   `infochat-collector/src/test/java/io/infochat/collector/db/DbRoleMatrixIT.java`
   at authoring time of this replacement ticket).
+- **Halt the Quarkus scheduler in the test profile.** Round-1 of this
+  ticket shipped a diff that the reviewer APPROVED, but the commit-step
+  `mvn verify` safety re-run (high-complexity tickets re-execute verify
+  before commit) caught a 25% structural flake: TaggerWorker's
+  `@Scheduled` poll fires every 5s in the background during
+  @QuarkusTest method bodies and calls the shared @ApplicationScoped
+  `StubLlmProvider` that production code resolves to. The race surfaces
+  in Stage2WorkerIT's `callCount` assertion (asserts 2; observes 4 when
+  the scheduler tick adds two of its own calls). The fix is a one-line
+  property in this module's `application.properties`:
+  `%test.quarkus.scheduler.start-mode=halted` — halts the Quarkus
+  scheduler at boot so no `@Scheduled` tick fires automatically. Tests
+  that need a tick (HeartbeatSchedulerIT from M1-009) inject
+  `io.quarkus.scheduler.Scheduler` and call `scheduler.resume()` (or
+  invoke the @Scheduled method directly). Preferred over a per-worker
+  poll-interval override because every future @Scheduled
+  eval-pipeline worker (M1-034b EmbeddingWorker, T2 chat-agent re-eval,
+  ...) would otherwise need the same patch and forgetting one
+  re-introduces the same 5s-cadence flake silently. The new property
+  carries a block comment explaining the cross-worker rationale so a
+  future contributor reading `application.properties` sees the
+  invariant without having to dig through ticket history.
 
 ## Big-picture notes
 
@@ -415,11 +699,62 @@ M1-034b picks up where this ticket leaves off (post.tagger_done=true).
 
 ## Authorized test changes
 
-- (none — this ticket adds one new test file `TaggerWorkerIT.java`
-  and one new Flyway migration. No pre-existing tests are
-  modified. `DbRoleMatrixIT` (M1-006) and `FlywayMigrationIT`
-  (M1-017) continue to pass against the new V11 GRANTs without
-  edit per the Implementation notes.)
+- **`infochat-collector/src/test/java/io/infochat/collector/eval/stage2/Stage2WorkerIT.java`**
+  (M1-033) — authorized scope (added during the budget-breach refine,
+  see `revisions:` 2026-05-17 entry):
+  - Delete the nested `public static class TestStubLlmProvider` block
+    (the @Alternative @Priority(MAX) @ApplicationScoped stub) and
+    rewrite the `(TestStubLlmProvider) llmProvider` cast sites at the
+    @Inject `LlmProvider` field consumers to
+    `(StubLlmProvider) llmProvider`.
+  - Add the import
+    `io.infochat.collector.eval.testing.StubLlmProvider`.
+  - All nine @Test methods (28a-28i) keep their behavior, ordering,
+    and assertions byte-equal — only the test-utility class moves.
+    M1-033's behavioral contract (nine scenarios +
+    release-on-stage2-failure flag toggling at items 28h/28i) is
+    preserved. No assertions, no @Order values, no helper methods,
+    no field declarations other than the cast-site changes above
+    are modified.
+  - DbRoleMatrixIT (M1-006) and FlywayMigrationIT (M1-017) continue
+    to pass against the new V11 GRANTs without edit per the
+    Implementation notes (asserts role-presence + NOLOGIN, not a
+    closed grants list).
+
+- **`infochat-collector/src/test/java/io/infochat/collector/eval/testing/StubLlmProvider.java`**
+  (NEW shared test-utility class) — added during the budget-breach
+  refine (see `revisions:` 2026-05-17 entry). Public top-level
+  `@Alternative @Priority(Integer.MAX_VALUE) @ApplicationScoped`
+  bean implementing `LlmProvider`. Same shape as the prior nested
+  Stage2 stub (reset / setNextResponse / setNextResponses / failAll /
+  callCount + an `LlmResponse generate(ModelTask, String, String)`
+  override). Replaces both M1-033's nested `TestStubLlmProvider` and
+  M1-034a's in-progress nested `CannedStubLlmProvider`. Forward-
+  compatible with M1-034b's EmbeddingWorker IT and any future
+  eval-pipeline or chat-agent IT @Inject-ing `LlmProvider`.
+
+- **`infochat-collector/src/test/java/io/infochat/collector/startup/HeartbeatSchedulerIT.java`**
+  (M1-009) — authorized scope (added during the premise-fail refine,
+  see `revisions:` 2026-05-17 entry):
+  - Inject `io.quarkus.scheduler.Scheduler` and call
+    `scheduler.resume()` from `@BeforeEach` so the @Scheduled tick
+    fires for this IT (which the `%test.quarkus.scheduler.start-mode=halted`
+    property otherwise suppresses), OR invoke `HeartbeatScheduler.tick()`
+    directly — whichever is the minimum-change variant against the
+    in-tree shape.
+  - No assertions, no @Test method names, no helper methods are
+    modified. The original M1-009-asserted contract — `heartbeat.last_seen_at`
+    advances after a tick — is preserved; only the trigger source
+    changes from implicit-background-tick to explicit
+    `scheduler.resume()` / direct tick invocation.
+  - The collector module's `FetchSchedulerIT` (M1-028) already calls
+    `fetchScheduler.tickOnce(row)` directly and is not affected by
+    `start-mode=halted`; it is intentionally left untouched and not
+    added to `files_scope`.
+  - The provider module's `HeartbeatSchedulerIT` is governed by the
+    provider's own `application.properties` and is not affected by
+    this collector-only change; it is intentionally left untouched
+    and not added to `files_scope`.
 
 ## Alternatives considered
 
@@ -445,3 +780,71 @@ M1-034b picks up where this ticket leaves off (post.tagger_done=true).
   `TagVocabulary` is a @ApplicationScoped singleton with its
   own startup loading lifecycle; conflating it with the worker
   obscures both. Two classes, single responsibility each.
+
+## Implementation outline (M1-034a, generated by Plan subagent on 2026-05-17)
+
+### Files to touch (7 of 7)
+- create: `infochat-core/src/main/resources/db/migration/V11__post_embedding.sql` — Flyway V11: `post_embedding` partitioned table + HNSW index + `embedding_metadata` singleton seeded with `(nomic-embed-text, 768)` + per-role GRANTs. Header comment documents the pi/remote-llm operator overrides (vector dimension + IVFFlat index alternative).
+- create: `infochat-llm-adapter/src/main/resources/prompts/tagger.md` — Qute JSON-primary prompt template per design §5.4.2; iterates vocabulary with `{#tags}…{/tags}`; wraps body in `<<<UNTRUSTED_CONTENT id="{id}">>>…<<<END id="{id}">>>`; demands `{"tags": [...]}` output.
+- create: `infochat-llm-adapter/src/main/resources/prompts/tagger-fallback.md` — Qute line-oriented retry template; demands single `TAGS: tag1, tag2, tag3` line; same vocabulary iteration + delimiter wrapper.
+- create: `infochat-collector/src/main/java/io/infochat/collector/eval/tagger/TagVocabulary.java` — `@ApplicationScoped` CDI bean; `@PostConstruct` loads `SELECT name FROM tag` once into an immutable `Set<String>`; exposes `boolean contains(String normalized)` + `Set<String> names()` (for prompt rendering); applies the inlined tag normalization rule (NFC + `Locale.ROOT.toLowerCase` + regex `^[a-z0-9][a-z0-9-]{0,47}$`) on loaded names for byte-equal membership.
+- create: `infochat-collector/src/main/java/io/infochat/collector/eval/tagger/TaggerWorker.java` — `@ApplicationScoped` + `@Scheduled(every = "${infochat.llm.tagger.poll-interval}")` poller; pickup SQL `status='RAW' AND stage1_done=true AND (stage1_flagged=false OR stage2_done=true) AND tagger_done=false`; invokes `LlmRouter.forTask(TAGGER, "en")`; three-surface fallback chain documented in class JDoc; bounded by `Semaphore(infochat.llm.tagger.max-concurrency)`; atomic UPDATE writes `tags`, `tagger_done=true`, `tagger_fallback`; inlines `normalizeTag` helper with TODO referencing the shared T1-D extraction tracked in `BootstrapLoader`.
+- modify: `infochat-collector/src/main/resources/application.properties` — append tagger property surface keys (`infochat.llm.tagger.base-url`, `.api-key`, `.model`, `.max-concurrency`, `.poll-interval`) at base + per-profile (`%laptop`, `%vps`, `%pi`, `%remote-llm`) per design §5.7 (laptop: `llama3.1:8b`, concurrency 4, poll 5s); comments explain the 5s cadence (matches `FetchScheduler`/`Stage2Worker`).
+- create: `infochat-collector/src/test/java/io/infochat/collector/eval/tagger/TaggerWorkerIT.java` — `@QuarkusTest` IT against real Postgres + `TestStubLlmProvider` (`@Alternative @Priority(Integer.MAX_VALUE)` scoped to test); seven `@Test` methods (see Tests).
+
+### Tests
+- add: `infochat-collector/src/test/java/io/infochat/collector/eval/tagger/TaggerWorkerIT.java` — covers acceptance items 27 (seven scenarios) + 28 (failsafe report includes IT):
+  - `tagsHappyPathPersistsValidVocabularyTags()` — stub returns `{"tags":["security","news"]}`; assert `post.tags=["security","news"]`, `tagger_done=true`, `tagger_fallback=false`.
+  - `tagsPartialValidDropsInvalidAndKeepsValid()` — stub returns `{"tags":["security","news","NOTAVALIDTAG"]}`; assert kept `["security","news"]`, `tagger_fallback=false`, INFO log mentions partial-valid count.
+  - `zeroValidTagsFallsBackToBootstrap()` — stub returns `{"tags":["NOTAVALIDTAG"]}` twice (primary + same-prompt retry); assert `post.tags = source.bootstrap_tags`, `tagger_fallback=true`, WARN log with `error_class='tagger.fallback_to_bootstrap'`.
+  - `schemaViolatingRetriesWithFallbackPromptThenUsesIt()` — primary returns `"this is not json"`, retry with `tagger-fallback.md` returns `"TAGS: security, news"`; assert tags persisted, `tagger_fallback=false`.
+  - `totalFailureOnBothPromptsFallsBackToBootstrap()` — primary garbage, fallback garbage; assert bootstrap fallback + WARN log.
+  - `llmUnreachableRetriesOnceThenBootstrapFallback()` — stub throws on every call; assert one retry attempt, then bootstrap fallback.
+  - `quarantinedPostIsNotPickedUp()` — seed a `status='QUARANTINED'` post that otherwise matches; assert `tagger_done` stays `false`, stub never invoked.
+- modify (preservation only, no edits): `DbRoleMatrixIT` (M1-006) and `FlywayMigrationIT` (M1-017) continue to pass against V11 unchanged — confirmed by ticket body §"Authorized test changes" item: "(none — this ticket adds one new test file…No pre-existing tests are modified.)" Authorization present.
+
+### Cross-cutting concerns
+- **Tag normalization rule must be byte-identical at every site.** `BootstrapLoader.normalizeTag` (already in tree) does `NFC + Locale.ROOT.toLowerCase`. `TagVocabulary` and `TaggerWorker` must apply the SAME rule (plus the `^[a-z0-9][a-z0-9-]{0,47}$` character-class validation that the `tag` table's CHECK constraint enforces) so set membership is byte-equal. Diverging on this rule silently breaks partial-valid handling.
+- **Per-stage flags are the durable cursor (Invariant 5).** The atomic UPDATE writing `tags + tagger_done + tagger_fallback` in one statement is non-negotiable; splitting into two UPDATEs creates a crash window where `tagger_done=true` but `tags` is empty.
+- **Pickup predicate must exclude QUARANTINED.** `status='RAW'` is load-bearing: Stage 1 watchdog fail-closed and Stage 2 INJ/MAL/UNK both set `status='QUARANTINED'`. Filtering on `tagger_done=false` alone would re-process quarantined posts.
+- **No `post_embedding` INSERT here.** Per out-of-scope: V11 creates the table but nothing in this ticket writes a row. The EmbeddingWorker in M1-034b is the sole writer; conflating responsibilities would void the M1-034 split rationale.
+- **`embedding_metadata` seed values are the M1-034b handoff.** The shipped row `(nomic-embed-text, 768)` MUST match M1-034b's default `infochat.embeddings.model` and `infochat.embeddings.dimension`; mismatch would fatal-fail M1-034b's startup guard on first boot.
+- **Determinism boundary.** Tagger is on the LLM-evaluation side of the determinism boundary (`docs/spec/llm.md`); vocabulary lookup + partial-valid filtering are deterministic Java, but the tag set the LLM emits is non-deterministic — the per-call random UUID `{id}` in the delimiter is the prompt-injection mitigation, not a determinism mechanism.
+- **Plain-text formatting / no scope leakage.** Tagger never produces user-visible prose; scope language is hardcoded to `"en"` for the LLM router call. No per-(user, scope) state is touched.
+- **No new SPI surfaces.** The M1-007b `LlmProvider` / `EmbeddingProvider` / `ModelTask` SPI is frozen; `TaggerWorker` consumes `ModelTask.TAGGER` (already in the enum) via `LlmRouter` (already shipped in M1-033).
+- **GRANTs follow the §DB roles least-privilege model.** Collector: SELECT/INSERT on `post_embedding`, SELECT/INSERT/UPDATE on `embedding_metadata`. Provider: SELECT only on both. No grants for `infochat_admin` (operator uses superuser for raw SQL per §DB roles).
+
+### Implementation order
+1. **V11 migration first.** The Flyway baseline must apply before any Quarkus boot, otherwise `FlywayMigrationIT` and any IT touching the DB fails at startup. Confirm no migration was added between M1-033 and now (re-grep `migration/` directory at start time; if V11 was taken, slide this to V12 and rename — per Implementation note "Migration version is V11" caveat).
+2. **`TagVocabulary` second.** Pure read-side bean with no LLM dependency — landing it before `TaggerWorker` lets `TagVocabulary` compile and exposes the `contains()` / `names()` API surface the worker depends on.
+3. **`tagger.md` + `tagger-fallback.md` third.** Resource files with no Java compile cost; landing them now lets `TaggerWorker` reference the classpath paths as constants.
+4. **`TaggerWorker` fourth.** The bulk of the logic; depends on (1) for the pickup SQL columns (`tagger_done`, `tagger_fallback` already exist from M1-008b; verify), (2) for vocabulary membership, (3) for prompt resource paths, and on the existing `LlmRouter` + `LlmProvider` SPI from M1-033.
+5. **`application.properties` fifth.** Adding the `infochat.llm.tagger.*` keys after `TaggerWorker` is written ensures the `@ConfigProperty` injection sites + `@Scheduled` interval references are known; landing properties earlier risks orphan-key warnings until the worker references them.
+6. **`TaggerWorkerIT` sixth.** Real Postgres + stub provider; depends on all of (1)-(5) for the seven scenarios to compile and execute. The stub provider's `@Alternative @Priority(Integer.MAX_VALUE)` is scoped to the test source set so it doesn't shadow production `OpenAiCompatibleProvider`.
+7. **Run `mvn -B clean verify` from repo root last.** Per acceptance item 29 — confirms V11 applies cleanly to `FlywayMigrationIT` alongside V1..V10, `DbRoleMatrixIT` still passes against the new GRANTs (no edit needed — it asserts role-presence + NOLOGIN, not a closed grants list), and no M1-003..M1-033 regression.
+
+Wrong-order risks: (a) writing `TaggerWorker` before V11 → its INSERT/UPDATE references to `post.tagger_done` would compile but `FlywayMigrationIT` would fail to apply if a migration mistake breaks earlier ITs; (b) writing the IT before the worker → cannot run; (c) deferring `application.properties` to last → `@Scheduled(every = "${infochat.llm.tagger.poll-interval}")` resolves to missing-property failure at IT boot.
+
+### Risks
+- **`files_budget: 7` is exactly tight.** No room for a separate `TagNormalizer` helper class in `infochat-core` even though the existing `BootstrapLoader.normalizeTag` is marked "Temporary inline placement; T1-D's…shared helper." Per Implementation notes the ticket explicitly authorizes a second inlined copy in `TaggerWorker` with a TODO. If the developer feels strongly about extracting, that is scope drift — escalation: `refine` (request +1 file for extraction).
+- **`@Scheduled` + `Semaphore`-bounded concurrency interaction.** `@Scheduled` invocations are serialized per method by default in Quarkus; the spec wants bounded concurrency across in-flight tagger calls. The Stage2Worker pattern uses a `@Scheduled` poll that enqueues to an executor + acquires permits in worker threads. Matching that pattern matters; deviating risks single-threaded effective concurrency. If the existing `FetchScheduler` / `Stage2Worker` shape doesn't carry over cleanly, escalation: `refine`.
+- **`vector(768)` requires the pgvector extension to be loaded.** V1 already does `CREATE EXTENSION vector`; V11 depends on that. If a future test profile or alternative deployment strips the extension, V11 fails. No action — verify V1 still declares the extension at start time.
+- **HNSW build cost on first deploy.** `WITH (m=16, ef_construction=64)` is the design-mandated tuning. Empty partition at migration time means index build is O(1); no risk for V11 itself, but documenting in the header that the operator should expect rebuild cost on profile-switch migrations is the spec contract.
+- **No risk requires `decompose`/`defer`/`spec-amend` at this stage.** The split from M1-034 already happened; this ticket is sized correctly for `complexity: high` + `round_cap: 3`.
+
+### Out-of-scope (echoed from ticket)
+- any Stage 1 HTML sanitizer / Unicode normalization / prompt-injection regex set / watchdog / placeholder-id generation / quarantine-row insertion (M1-032 territory — consumed unchanged)
+- any Stage 2 LLM judge call / verdict handling / `stage2_done` advance / `OpenAiCompatibleProvider` / `LlmRouter` (M1-033 territory — `LlmRouter` CONSUMED for TAGGER task)
+- any concrete `EmbeddingProvider` impl (`OpenAiCompatibleEmbeddingProvider`) — M1-034b
+- any `EmbeddingMetadataDao` / `EmbeddingMetadataStartupGuard` / `EmbeddingWorker` / `ReadyPromoter` / `pg_notify('new_post', ...)` — M1-034b
+- any `post_embedding` INSERT — table created here in V11, EmbeddingWorker in M1-034b is sole writer
+- any `EntityExtractor` / `post_entity` / `post_reference` / `LinkingJob` — T2
+- any re-evaluation job / attempt counter / `QUARANTINED → NEEDS_REVIEW` transition — T2-G
+- any throttled admin notifier wiring — T2-G; fallback path logs canonical `error_class` strings
+- any LLM output sanitizer — T1-F (tagger output validated against vocabulary, invalid dropped)
+- any change to V1..V10 Flyway migrations (V11 is purely additive)
+- any change to M1-007b `LlmProvider` / `EmbeddingProvider` / `ModelTask` SPI surfaces (frozen)
+- any `infochat-provider` module change
+- any `partition_pruner` job — T2
+- any embedding-model migration script (`scripts/reembed.sh`)
+- any Prometheus/Micrometer metric emit

@@ -1,7 +1,9 @@
 package io.infochat.collector.startup;
 
+import io.quarkus.scheduler.Scheduler;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
@@ -22,6 +24,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code infochat.heartbeat.interval=5s}, so the test waits a small buffer
  * over that interval and re-reads the timestamp.
  *
+ * <p>The {@code %test} profile sets
+ * {@code quarkus.scheduler.start-mode=halted} (see
+ * {@code application.properties}) so background {@code @Scheduled} ticks
+ * do not pollute other ITs' assertions on shared beans. This IT — which
+ * specifically exists to validate that the heartbeat {@code @Scheduled}
+ * handler fires — explicitly resumes the scheduler before the test body.
+ *
  * <p>Named with the {@code IT} suffix and bound to the failsafe plugin (see
  * {@code infochat-collector/pom.xml}) so this test runs in the verify phase.
  */
@@ -30,6 +39,14 @@ class HeartbeatSchedulerIT {
 
     @Inject
     DataSource dataSource;
+
+    @Inject
+    Scheduler scheduler;
+
+    @BeforeEach
+    void resumeScheduler() {
+        scheduler.resume();
+    }
 
     @Test
     void lastSeenAtAdvancesAfterOneInterval() throws Exception {
