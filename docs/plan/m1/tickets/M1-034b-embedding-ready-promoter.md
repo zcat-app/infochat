@@ -296,6 +296,20 @@ M1-027's NewPostListener wakes, invokes NewPostHandler.handle(...)
   timeout elapses.
 - **ReadyPromoter invocation shape.** Same — `@Scheduled`
   polling for posts ready to promote.
+- **Test-profile scheduler is halted (set by M1-034a).**
+  `infochat-collector/src/main/resources/application.properties`
+  carries `%test.quarkus.scheduler.start-mode=halted` so
+  background `@Scheduled` ticks do not pollute `@QuarkusTest`
+  assertions on shared `@ApplicationScoped` beans across ITs.
+  `EmbeddingWorkerIT` and `ReadyPromoterIT` MUST drive their
+  workers explicitly — invoke the `@Scheduled` method on
+  `EmbeddingWorker` and `ReadyPromoter` directly per the M1-034a
+  `TaggerWorkerIT` and M1-033 `Stage2WorkerIT` pattern (direct
+  method call against the injected bean; no `Thread.sleep` on a
+  background tick). No edit to `application.properties` is needed
+  in this ticket — the property is already on `main` from M1-034a;
+  the `infochat.embeddings.poll-interval` key this ticket adds
+  governs production cadence only.
 - **One-failure-fails-batch and the not-split-on-retry rule.**
   Per `docs/spec/llm.md` §Failure handling (recap): "Retry
   policy: on a batch failure the same batch is resubmitted
