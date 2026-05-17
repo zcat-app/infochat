@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 41 |
+| done | 42 |
 | deferred | 5 |
 | **total** | **49** |
 
@@ -24,7 +24,8 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-035 — Adapter + router umbrella — first-DM auto-register + /help IT (complexity: low, risk: low)
+- M1-036 — /add-source command (handler + kind resolver + URL probe + upsert + audit) (complexity: high, risk: high)
+- M1-037 — /summary command (eligible-post SQL + cluster traversal + LLM prose + sanitizer + degraded fallback) (complexity: high, risk: high)
 
 ---
 
@@ -41,8 +42,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-036 — blocked_by: M1-035 (pending)
-- M1-037 — blocked_by: M1-035 (pending)
+_(none)_
 
 ---
 
@@ -61,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-035 | Adapter + router umbrella — first-DM auto-register + /help IT | 2026-05-18 | round 1 APPROVE |
 | M1-035d | Wire AutoRegisterService into InboundRouter intake | 2026-05-17 | round 1 APPROVE |
 | M1-035c | /help command + auto-register-on-first-DM | 2026-05-17 | round 2 APPROVE |
 | M1-035b | AdapterRegistry, InboundRouter, startup gates | 2026-05-17 | round 2 APPROVE |
@@ -70,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-033 | Stage 2 LLM judge + first OpenAI-compatible LlmProvider + (ModelTask, scope_language) router | 2026-05-16 | round 2 APPROVE |
 | M1-032 | Stage 1 deterministic security (HTML sanitizer + Unicode + regex + watchdog + quarantine) | 2026-05-16 | round 2 APPROVE |
 | M1-030 | Provider catch-up hardening backlog (3 redteam OUT-OF-MODEL advisories) | 2026-05-16 | round 1 APPROVE |
-| M1-028 | Collector outbox (FetchScheduler + PostPersister + OutboxRehydrator) | 2026-05-16 | round 1 APPROVE |
 
 ---
 
@@ -142,14 +142,14 @@ M1-001 (done)
   └── M1-007c (done)
         ├── M1-007 (done) [see above]
         └── M1-035a (done)
-              ├── M1-035 (pending) ← runnable
-              │     ├── M1-036 (pending)
-              │     └── M1-037 (pending)
+              ├── M1-035 (done)
+              │     ├── M1-036 (pending) ← runnable
+              │     └── M1-037 (pending) ← runnable
               └── M1-035b (done)
                     ├── M1-020 (deferred) [see above]
-                    ├── M1-035 (pending) [see above]
+                    ├── M1-035 (done) [see above]
                     └── M1-035c (done)
-                          └── M1-035 (pending) [see above]
+                          └── M1-035 (done) [see above]
 M1-002 (done)
 M1-003 (done)
   └── M1-005 (done) [see above]
