@@ -1,11 +1,14 @@
 ---
 id: M1-035
 title: Adapter + router umbrella — first-DM auto-register + /help IT
-status: deferred
+status: pending
 created: 2026-05-17
-last_updated: 2026-05-17
-deferred_on: M1-035d
-deferred_reason: blocked-on-new-ticket
+last_updated: 2026-05-18
+reopens:
+  - date: 2026-05-18
+    prior_deferred_reason: blocked-on-new-ticket
+    prior_deferred_on: M1-035d
+    reason: M1-035d landed; umbrella IT now unblocked
 clarity_check:
   date: 2026-05-17
   verdict: PASS
