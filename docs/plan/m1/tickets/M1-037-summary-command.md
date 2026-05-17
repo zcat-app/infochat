@@ -14,7 +14,7 @@ files_scope:
   - infochat-provider/src/main/java/io/infochat/provider/summary/ClusterTraversal.java
   - infochat-provider/src/main/java/io/infochat/provider/summary/SummaryProseGenerator.java
   - infochat-provider/src/main/java/io/infochat/provider/llm/LlmOutputSanitizer.java
-  - infochat-provider/src/main/resources/bundle/en.properties
+  - infochat-provider/src/main/resources/bundles/en.properties
   - infochat-provider/src/test/java/io/infochat/provider/command/SummaryArgsTest.java
   - infochat-provider/src/test/java/io/infochat/provider/summary/EligiblePostQueryIT.java
   - infochat-provider/src/test/java/io/infochat/provider/summary/ClusterTraversalTest.java
@@ -92,7 +92,7 @@ acceptance:
     - cap excess: 250 eligible posts on `laptop` profile (cap=200) → reply prefix `bundle('reply.summary.cap_excess_notice')` interpolated with the cap value and excluded count, top-200 are summarized"
   - "SummaryIT exercises MVP exit criterion §6 end-to-end via the InMemoryAdapter: (a) seed 2 sources, subscribe DM `mvp-user-1` to both, seed 4 READY posts (2 per source) within 24h, mock the LlmProvider to return a fixed prose blob per cluster; (b) `adapter.deliverDm(\"mvp-user-1\", \"/summary -w 24h\")` produces exactly ONE outbound message; (c) the reply body contains all 4 post UIDs; (d) the reply body contains the 2 source URLs (bare, per docs/spec/commands.md §Surface conventions Plain-text-no-markdown); (e) the reply body contains NO markdown-link syntax `[text](url)` (sanitizer + format invariant); (f) the LlmProvider was invoked 4 times (4 singleton clusters); (g) when LlmProvider is configured to throw, the same `/summary -w 24h` produces the degraded-fallback reply"
   - "Plain-text invariant docs/spec/commands.md §Surface conventions: replies use single backticks for inline code and bare URLs (no markdown link syntax). Verify: `grep -E '\\]\\(http' en.properties` returns zero matches AND SummaryIT's response-body assertion confirms no `](http` substring in any LLM-pass-through prose (the sanitizer enforces this on LLM output too — a small LLM emitting `[link](http://...)` MUST be stripped to bare URL)"
-  - "en.properties under infochat-provider/src/main/resources/bundle/ ships ALL the bundle keys referenced above. Per-key assertions:
+  - "en.properties under infochat-provider/src/main/resources/bundles/ ships ALL the bundle keys referenced above. Per-key assertions:
     - `error.summary.window_minutes_not_accepted` present
     - `error.summary.window_out_of_range` present
     - `error.summary.unknown_tag` present

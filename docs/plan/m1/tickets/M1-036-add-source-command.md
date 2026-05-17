@@ -13,7 +13,7 @@ files_scope:
   - infochat-provider/src/main/java/io/infochat/provider/source/KindResolver.java
   - infochat-provider/src/main/java/io/infochat/provider/source/UrlProbe.java
   - infochat-provider/src/main/java/io/infochat/provider/source/SourceUpsertService.java
-  - infochat-provider/src/main/resources/bundle/en.properties
+  - infochat-provider/src/main/resources/bundles/en.properties
   - infochat-provider/src/test/java/io/infochat/provider/command/AddSourceArgsTest.java
   - infochat-provider/src/test/java/io/infochat/provider/source/KindResolverTest.java
   - infochat-provider/src/test/java/io/infochat/provider/source/UrlProbeTest.java
@@ -72,7 +72,7 @@ acceptance:
   - "Fresh-insert reply includes the URL-visibility disclosure literal docs/spec/commands.md §Source management — 'URL visibility disclosure': 'Note: source URLs are global state and are visible to bot admins via /list-sources --all.' Verify: en.properties has bundle key `reply.add_source.url_visibility_disclosure` whose value contains the literal substring `visible to bot admins` AND AddSourceCommandHandlerTest asserts the fresh-insert reply contains this substring; Branch B / Branch C tests assert the reply does NOT contain it"
   - "Bot-admin tag replacement (Branch C) writes one `audit_log` row in the same transaction as the source update. Verify: SourceUpsertServiceIT runs Branch C and asserts `SELECT COUNT(*) FROM audit_log WHERE user_id=<bot-admin> AND source_id=<source>` returns 1 (the action-verb closed catalogue from M1-024 is consumed as-is; no new verb is added in this ticket)"
   - "AddSourceIT exercises MVP exit criterion §4 end-to-end via the InMemoryAdapter: (a) `adapter.deliverDm(\"mvp-user-1\", \"/add-source https://example.com/feed.xml --tags news,tech\")` — using a WireMock-backed feed URL or an in-process Vert.x stub so the probe succeeds — produces exactly ONE outbound message whose body equals the fresh-insert reply + URL-visibility disclosure; (b) `SELECT COUNT(*) FROM source WHERE kind='rss' AND identifier='https://example.com/feed.xml'` returns 1; (c) `SELECT COUNT(*) FROM source_subscription WHERE source_id=<that source>` returns 1; (d) `SELECT bootstrap_tags FROM source WHERE id=<that source>` returns `{news,tech}` (or the equivalent array form); (e) `SELECT COUNT(*) FROM tag WHERE name IN ('news','tech')` returns 2 (both unioned into vocab)"
-  - "en.properties under infochat-provider/src/main/resources/bundle/ ships ALL the bundle keys referenced above. Per-key assertions (one per key — heterogeneous string set, count is NOT load-bearing):
+  - "en.properties under infochat-provider/src/main/resources/bundles/ ships ALL the bundle keys referenced above. Per-key assertions (one per key — heterogeneous string set, count is NOT load-bearing):
     - `error.add_source.tags_required` present
     - `error.add_source.unknown_kind` present
     - `error.add_source.unknown_category` present
@@ -214,7 +214,7 @@ Non-binding hints — the developer reads these as context, not a recipe.
   pulled by M1-024 for SSRF tests). Reuse the existing WireMock harness
   rather than spinning up a parallel one.
 - **Bundle keys.** en.properties under
-  `infochat-provider/src/main/resources/bundle/` is the file M1-035c
+  `infochat-provider/src/main/resources/bundles/` is the file M1-035c
   authors; this ticket APPENDS keys to it. The BundleKeys constants
   class is also M1-035c's; this ticket APPENDS new constants (one per
   new key — compile-time safety per M1-035c's design). The bundle-
