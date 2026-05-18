@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>infochat</groupId>
+        <groupId>app.zcat.infochat</groupId>
         <artifactId>infochat-parent</artifactId>
         <version>1.0.0-SNAPSHOT</version>
     </parent>
@@ -15,15 +15,15 @@
 
     <dependencies>
         <dependency>
-            <groupId>infochat</groupId>
+            <groupId>app.zcat.infochat</groupId>
             <artifactId>infochat-core</artifactId>
         </dependency>
         <dependency>
-            <groupId>infochat</groupId>
+            <groupId>app.zcat.infochat</groupId>
             <artifactId>infochat-ssrf</artifactId>
         </dependency>
         <dependency>
-            <groupId>infochat</groupId>
+            <groupId>app.zcat.infochat</groupId>
             <artifactId>infochat-llm-adapter</artifactId>
         </dependency>
         <dependency>

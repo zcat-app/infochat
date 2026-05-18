@@ -4,7 +4,7 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>infochat</groupId>
+    <groupId>app.zcat.infochat</groupId>
     <artifactId>infochat-parent</artifactId>
     <version>1.0.0-SNAPSHOT</version>
     <packaging>pom</packaging>
@@ -40,7 +40,7 @@
                  (preserves the M1-001 BOM-managed-versions invariant).
             -->
             <dependency>
-                <groupId>infochat</groupId>
+                <groupId>app.zcat.infochat</groupId>
                 <artifactId>infochat-core</artifactId>
                 <version>${project.version}</version>
             </dependency>
@@ -52,7 +52,7 @@
                  here keeps consumers version-less per the M1-001 invariant.
             -->
             <dependency>
-                <groupId>infochat</groupId>
+                <groupId>app.zcat.infochat</groupId>
                 <artifactId>infochat-ssrf</artifactId>
                 <version>${project.version}</version>
             </dependency>
@@ -63,7 +63,7 @@
                  impl modules) version-less.
             -->
             <dependency>
-                <groupId>infochat</groupId>
+                <groupId>app.zcat.infochat</groupId>
                 <artifactId>infochat-llm-adapter</artifactId>
                 <version>${project.version}</version>
             </dependency>
@@ -74,7 +74,7 @@
                  consumer and future messaging-impl modules version-less.
             -->
             <dependency>
-                <groupId>infochat</groupId>
+                <groupId>app.zcat.infochat</groupId>
                 <artifactId>infochat-messaging-adapter</artifactId>
                 <version>${project.version}</version>
             </dependency>
