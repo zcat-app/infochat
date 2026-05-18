@@ -45,32 +45,70 @@ that as a risk.)
    exceeds it, name the surplus and recommend escalation BEFORE
    the developer starts).
 
-2. **Test-scaffolding plan.** List the test files to add or modify.
+2. **API-surface audit.** For every method, attribute, or
+   constructor that an acceptance criterion pins on a named
+   pre-existing class (e.g. "calls `X.foo(URI)`", "passes header
+   `Y` through `Z.send()`", "uses `Foo.bar(...)` for HEAD-then-GET
+   fallback"), Read the cited class file and verify the method
+   actually exists with the cited signature, parameter types, and
+   any side-channels (header maps, response shape) the acceptance
+   pins. Naming the class is not enough — the **method shape** the
+   acceptance pins must already exist, OR the class must be inside
+   `files_scope` so the implementer can add the missing surface.
+   Mismatches are common when an acceptance item is written by
+   pattern-matching against the spec rather than against the actual
+   code. If you find one, OUTLINE FAILED with reason "API-surface
+   mismatch": the ticket is unimplementable without (a) widening
+   `files_scope` to allow modifying the class, (b) citing a
+   different class that already exposes the needed method, or
+   (c) dropping the acceptance item. Quote the cited class's
+   actual relevant signatures in your evidence so the user can
+   refine against the real surface.
+
+3. **Test-scaffolding plan.** List the test files to add or modify.
    For each, name the test cases that must exist for the acceptance
    criteria to be checkable. If the ticket modifies any pre-existing
    tests, confirm that the "Authorized test changes" body section
    names them; if not, FAIL the outline with "Test-modification
    authorization missing — escalate via /m1-tick escalate refine".
 
-3. **Cross-cutting concerns.** From the spec_refs, identify any
+4. **Cross-cutting concerns.** From the spec_refs, identify any
    invariants the implementation must preserve that aren't obvious
    from the immediate diff (e.g. per-(user, scope) isolation rules,
    determinism boundaries, plain-text formatting, audit log
    coverage). Name them so the developer keeps them in mind.
 
-4. **Implementation order with rationale.** Why this order? Where
+5. **Implementation order with rationale.** Why this order? Where
    would a wrong order produce broken intermediate states (e.g.
    "create the migration before the entity, otherwise integration
    tests will fail")?
 
-5. **Risks and escalation triggers.** Anything you noticed that
+6. **Risks and escalation triggers.** Anything you noticed that
    suggests the ticket should be re-scoped, blocked on a missing
    dependency, or carries hidden complexity not reflected in
    `complexity: high`. Each risk → which escalation reason fits
    (refine | decompose | defer | spec-amend).
 
-6. **Out-of-scope reminders.** Echo the ticket's `out_of_scope`
+7. **Out-of-scope reminders.** Echo the ticket's `out_of_scope`
    list so the developer keeps it visible while implementing.
+
+8. **Audit-coverage enumeration.** In your return, list every
+   audit dimension above (1 through 6 — items 7 and this one are
+   echo/meta, not audits) with one of three statuses:
+   - **audited (pass)** — you checked it and found no problems.
+   - **audited (fail)** — you checked it and an OUTLINE FAILED
+     above is what you found.
+   - **not audited** — you did not check this pass. Name the
+     reason in one line (e.g. "the acceptance items pin no
+     methods on any pre-existing class, so API-surface had
+     nothing to audit"; "ran out of time after item 1 found
+     a blocker — recommend re-Plan after refine").
+   This enumeration is the safety net for the refinement step.
+   An OUTLINE FAILED block only proves the dimensions Plan
+   audited; dimensions marked "not audited" may still hide
+   blockers and must be re-checked on the next Plan pass after
+   the user refines the ticket. Do NOT silently skip a
+   dimension — every dimension gets a status line.
 
 ---
 
@@ -116,18 +154,46 @@ that as a risk.)
 ### Out-of-scope (echoed from ticket)
 - <path or feature>
 - ...
+
+### Audit coverage
+- file accounting — <audited (pass) | audited (fail) | not audited: reason>
+- API-surface — <audited (pass) | audited (fail) | not audited: reason>
+- test-scaffolding — <audited (pass) | audited (fail) | not audited: reason>
+- cross-cutting concerns — <audited (pass) | audited (fail) | not audited: reason>
+- implementation order — <audited (pass) | audited (fail) | not audited: reason>
+- risks — <audited (pass) | audited (fail) | not audited: reason>
 ```
 
-If the outline fails any check (files_budget exceeded; test-modification
-unauthorized; ANCHOR-NOT-FOUND on a load-bearing spec_ref), return:
+If the outline fails any check (files_budget exceeded; API-surface
+mismatch; test-modification unauthorized; ANCHOR-NOT-FOUND on a
+load-bearing spec_ref), return:
 
 ```markdown
 ## OUTLINE FAILED — escalation recommended
 
 REASON: <one paragraph>
 SUGGESTED ESCALATION: <refine | decompose | defer | spec-amend>
-EVIDENCE: <pointer to the failing item in the ticket or spec>
+EVIDENCE: <pointer to the failing item in the ticket or spec, with
+verbatim quotes of the cited class signatures when the failure is
+API-surface mismatch>
+
+### Audit coverage
+- file accounting — <audited (pass) | audited (fail) | not audited: reason>
+- API-surface — <audited (pass) | audited (fail) | not audited: reason>
+- test-scaffolding — <audited (pass) | audited (fail) | not audited: reason>
+- cross-cutting concerns — <audited (pass) | audited (fail) | not audited: reason>
+- implementation order — <audited (pass) | audited (fail) | not audited: reason>
+- risks — <audited (pass) | audited (fail) | not audited: reason>
 ```
+
+The audit-coverage block appears in **both** the success outline and
+the OUTLINE FAILED return. Its purpose in the failed case is the
+safety net for the refinement step: an OUTLINE FAILED block with
+"file accounting — audited (fail), API-surface — not audited" tells
+the user (and the next Plan run) that the API surface remains
+un-audited and may hide a separate blocker the next Plan pass will
+discover. Without this enumeration, an OUTLINE FAILED block reads
+as exhaustive when it's actually one observation pass.
 
 The skill will surface OUTLINE FAILED to the user as a pre-implementation
 escalation rather than letting the developer start.
