@@ -3,7 +3,7 @@ id: M1-037
 title: /summary command (eligible-post SQL + cluster traversal + LLM prose + sanitizer + degraded fallback)
 status: pending
 created: 2026-05-17
-last_updated: 2026-05-17
+last_updated: 2026-05-18
 blocked_by:
   - M1-035
 files_budget: 14
@@ -38,9 +38,10 @@ out_of_scope:
   - any post_reference graph row INSERT / mutation (T2 / Tier-3 territory; this ticket READS post_reference for the cluster traversal — when the table has zero rows the connected-components algorithm returns N singleton clusters where N is the eligible-post count — but does NOT write to it; the M1-034a V11 migration does NOT create post_reference, so the cluster traversal MUST tolerate a missing table OR the ticket adds a NO-OP V12 ... actually the table is reached only through the query layer; since post_reference is not created in MVP, ClusterTraversal MUST NOT issue any SQL against it — instead it returns N singleton clusters unconditionally; T2-D adds the real graph traversal when the table lands)
   - any TranslationProvider integration / `/lang` (T2-C; outbound replies use English BundleKeys only — translation pre-pass through TranslationProvider is T2-C's wiring)
   - any LLM SPI / OpenAI-compatible LlmProvider client change (M1-033 ships the client and the per-task router; this ticket CONSUMES `LlmProvider` for the prose generation task — see docs/spec/llm.md §Per-task routing — but does NOT modify the SPI or the M1-033 client surface)
-  - any new ModelTask enum value or scope_language router lookup change (M1-033 territory; the prose task uses an existing ModelTask enum value, NOT a new one. If the existing enum lacks a `SUMMARY_PROSE` value, this is an escalation trigger — escalate to M1-033 to add it, do NOT add it inline here)
+  - any new ModelTask enum value or scope_language router lookup change (M1-033 territory; the prose task uses the existing `ModelTask.SUMMARIZER` enum value — verified during the 2026-05-18 outline-fail refine. If `SUMMARIZER` has been renamed or removed since then, this is an escalation trigger — escalate to refine, do NOT add an inline enum value here)
   - any prompt-injection defense BEYOND the spec-mandated retention of `[REDACTED:<id>]` placeholders in the prompt (docs/spec/security.md §Failure handling); the Stage 1 / Stage 2 ingest defenses live in M1-032 / M1-033 and run upstream of `READY` — this ticket trusts that the eligible-post set is post-Stage-2 BENIGN per the `status='READY'` filter
-  - any new `audit_log.action` verb (the closed catalogue from M1-024 is consumed as-is; the spec docs/spec/security.md §LLM output sanitizer requires per-match audit logging — this ticket calls into the existing AuditLogWriter for sanitizer matches and assumes the catalogue already exposes a `llm_output.sanitized` verb OR an equivalent; if the verb is missing, escalate to refine — do NOT add it inline)
+  - any new `audit_log.action` verb (the closed catalogue from M1-008a / V5 is consumed as-is — V5 ships 23 verbs as of M1-008a, none of which is `LLM_OUTPUT_SANITIZED` or equivalent; the spec docs/spec/security.md §LLM output sanitizer requires per-match audit logging, but the persistent `audit_log` row INSERT for sanitizer matches is **deferred to a T2 follow-up** that lands the V12 migration adding `LLM_OUTPUT_SANITIZED` + an `AuditLogWriter` class + the coordinated update to M1-008a's verb-count grep test. The v1 observable for the per-match property here is a structured log emission from the sanitizer; the persistent table row is the T2 promise. This deferral is post-outline-fail per the 2026-05-18 `escalations:` entry.)
+  - any `AuditLogWriter` Java class (no such class exists in the repo as of M1-036; the two existing audit-write call sites issue raw JDBC inline. Authoring `AuditLogWriter` here would expand scope beyond /summary; the v1 sanitizer emits per-match observability via JBoss Logging and the persistent writer ships with the T2 audit-log follow-up cited above)
   - any RetrievalCache, SummaryCache, or in-memory cluster cache (the spec's on-the-fly /summary path docs/design/03-commands.md §`/summary` is uncached; periodic-group-digest's `summary_cache` is T2-F)
   - any future LLM-emitted output surface BEYOND /summary (the sanitizer ships here per M1-035b out_of_scope which explicitly defers it to T1-F's /summary — but the sanitizer is a SHARED component callable from chat-mode, periodic digests, and /retry; this ticket lands the sanitizer + its FIRST consumer surface (/summary); chat-mode + periodic digests + /retry wire their own call sites in T2-D / T2-F)
 acceptance:
@@ -82,7 +83,7 @@ acceptance:
     - bot-admin set: `/grant-admin`, `/revoke-admin`, `/ban`, `/unban`, `/promote`, `/demote`, `/vouch`, `/invite create`, `/invite list`, `/invite revoke`, `/quarantine list`, `/quarantine approve`, `/quarantine reject`, `/audit`, `/remove-source`, `/source-enable`, `/source-disable`, `/list-sources --all`, `/list-sources --include-deleted`
     - group-admin set: `/add-source` in groups, `/unfollow-source` in groups, `/lang` in groups, `/group-timezone`, `/follow-tag` in groups, `/unfollow-tag` in groups
     Each @Test feeds an LLM-prose blob containing the exact command string and asserts the sanitizer either STRIPS the command or REFUSES the output (exact contract per docs/spec/security.md §LLM output sanitizer — implementer chooses strip-or-refuse; the test asserts the chosen behavior is applied uniformly across all closed-list commands)"
-  - "LlmOutputSanitizer audit-logs EVERY match (per-occurrence, NOT throttled) per docs/spec/security.md §LLM output sanitizer. Verify: LlmOutputSanitizerTest feeds a blob containing 3 distinct matches and asserts `SELECT COUNT(*) FROM audit_log WHERE action='<sanitizer verb from M1-024 catalogue>'` returns 3 (the action verb is consumed from M1-024's closed catalogue as-is; the test asserts the count, NOT the verb spelling)"
+  - "LlmOutputSanitizer emits a structured log line on EVERY match (per-occurrence, NOT throttled — per docs/spec/security.md §LLM output sanitizer's per-occurrence promise). The v1 observable is a JBoss Logging emission; the persistent `audit_log` row INSERT is **deferred to a T2 follow-up** that lands the V12 migration adding `LLM_OUTPUT_SANITIZED` + an `AuditLogWriter` class + the coordinated M1-008a verb-count test update (see `out_of_scope`). Verify: LlmOutputSanitizerTest registers a JBoss Logging test handler against the category `io.infochat.provider.llm.LlmOutputSanitizer`, feeds a blob containing 3 distinct matches (e.g. `/grant-admin`, `/ban`, `/promote`), and asserts the handler captured exactly 3 records at level WARN whose message contains the matched command string. The per-occurrence (not-throttled) property is verified by the count-of-3, NOT by message content shape (which is implementation-defined)."
   - "LlmOutputSanitizer CI completeness check per docs/spec/security.md §LLM output sanitizer §Match-set derivation: a startup or test-tier assertion fails when the sanitizer's match set diverges from the spec's closed list (a new admin command added without a matching sanitizer entry, or a sanitizer entry that no longer corresponds to a listed command). Verify: LlmOutputSanitizerTest contains one @Test that asserts the sanitizer's runtime match-set EQUALS the closed-list constants (sourced from a shared constant holder or parsed from a versioned resource); the @Test fails if either side has an entry the other side lacks"
   - "SummaryCommandHandler stitches the pieces: SummaryArgs → EligiblePostQuery → ClusterTraversal → SummaryProseGenerator → LlmOutputSanitizer → outbound reply. Per-branch assertions in SummaryCommandHandlerTest:
     - happy path: 3 eligible posts → 3 singleton clusters → 3 LLM calls (mocked) → sanitizer pass → reply contains 3 cluster blocks in the documented output structure (`[topic_id=<id>]` / headline / `covered by:` / `score:` / `summary:` / `tags:`)
@@ -140,8 +141,56 @@ decision_refs:
   - D43
 
 reviews: []
-escalations: []
-revisions: []
+escalations:
+  - date: 2026-05-18
+    reason: outline-fail
+    reviewer_verdict_excerpt: |
+      ## OUTLINE FAILED — escalation recommended
+
+      REASON: The ticket has an `audit_log.action` verb gap that the ticket's own `out_of_scope` flags as an immediate escalation trigger. The acceptance item "LlmOutputSanitizer audit-logs EVERY match" mandates a verifiable `SELECT COUNT(*) FROM audit_log WHERE action='<sanitizer verb from M1-024 catalogue>'` assertion. The closed V5 catalogue (`infochat-core/src/main/resources/db/migration/V5__identity_audit.sql` lines 272–298, mirrored in `docs/design/02-schema.md` §2.1.8 lines 381–410) enumerates exactly 23 verbs: `BOOTSTRAP_ADMIN, BOOTSTRAP_SOURCE_LOAD, BOOTSTRAP_ASSET_LOAD, GRANT_ADMIN, REVOKE_ADMIN, BAN, UNBAN, UNBAN_PREBAN_DELETE, VOUCH, INVITE_CREATE, INVITE_REVOKE, INVITE_CONSUME, PROMOTE_GROUP_ADMIN, DEMOTE_GROUP_ADMIN, ADD_SOURCE, REMOVE_SOURCE, SOURCE_ENABLE, SOURCE_DISABLE, APPROVE_QUARANTINE, REJECT_QUARANTINE, FORGET, SET_LANG, SET_TIMEZONE`. None of these are an `LLM_OUTPUT_SANITIZED` / `llm_output.sanitized` verb or any equivalent. The ticket's `out_of_scope` explicitly states: "the spec docs/spec/security.md §LLM output sanitizer requires per-match audit logging — this ticket calls into the existing AuditLogWriter for sanitizer matches and assumes the catalogue already exposes a `llm_output.sanitized` verb OR an equivalent; **if the verb is missing, escalate to refine — do NOT add it inline**." The verb is missing. Compounding this, no `AuditLogWriter` Java class exists in the repo — the two existing audit-write call sites (`infochat-collector/.../bootstrap/BootstrapLoader.java:215`, `infochat-collector/.../eval/stage2/StartupReleaseOnStage2FailureWarn.java:114`) each issue raw JDBC inline; the ticket references a writer surface that does not exist.
+
+      SUGGESTED ESCALATION: refine
+
+      The refinement choice is between:
+      - (a) **Spec-amend**: add an `LLM_OUTPUT_SANITIZED` (or equivalent) verb to the closed catalogue in `docs/design/02-schema.md` §2.1.8 and to V5's per-verb commentary block (note: this is a design-tier edit per §2.1.8 wording "extending the catalogue is a design-note edit", BUT M1-008a's acceptance item pins a `grep -cE` count of 23 verbs against V5 — adding a 24th verb breaks that test, so a migration touch and a coordinated test update on M1-008a's sibling test must be in scope, which conflicts with M1-037's `migration_touch: false`). Picking this path widens this ticket's scope or spawns a paired prerequisite migration ticket.
+      - (b) **Refine**: drop the audit-logging acceptance item from M1-037 (sanitizer still strips/refuses, but does not write `audit_log` rows; defer audit wiring to a follow-up that lands the verb + migration + writer together). This keeps M1-037 migration-free per its current frontmatter and respects the spec-said-but-mechanism-missing reality.
+      - (c) **Refine + clarify**: rewrite the acceptance item to assert sanitizer behavior via a different observable (log line, in-memory counter, test-tier hook) rather than `audit_log` SQL, decoupling the audit-logging promise from the v1 verifiable test.
+
+      Either way the verb-catalogue gap is the load-bearing blocker the implementer cannot route around without the explicitly-forbidden inline catalogue extension.
+
+      EVIDENCE:
+
+      Ticket frontmatter (`docs/plan/m1/tickets/M1-037-summary-command.md` line 43):
+      > "any new `audit_log.action` verb (the closed catalogue from M1-024 is consumed as-is; the spec docs/spec/security.md §LLM output sanitizer requires per-match audit logging — this ticket calls into the existing AuditLogWriter for sanitizer matches and assumes the catalogue already exposes a `llm_output.sanitized` verb OR an equivalent; if the verb is missing, escalate to refine — do NOT add it inline)"
+
+      Acceptance item that requires the verb (`docs/plan/m1/tickets/M1-037-summary-command.md` lines 85):
+      > "LlmOutputSanitizer audit-logs EVERY match (per-occurrence, NOT throttled) per docs/spec/security.md §LLM output sanitizer. Verify: LlmOutputSanitizerTest feeds a blob containing 3 distinct matches and asserts `SELECT COUNT(*) FROM audit_log WHERE action='<sanitizer verb from M1-024 catalogue>'` returns 3"
+
+      Closed catalogue source of truth (`infochat-core/src/main/resources/db/migration/V5__identity_audit.sql` lines 272–298): 23 verbs (BOOTSTRAP_ADMIN, BOOTSTRAP_SOURCE_LOAD, BOOTSTRAP_ASSET_LOAD, GRANT_ADMIN, REVOKE_ADMIN, BAN, UNBAN, UNBAN_PREBAN_DELETE, VOUCH, INVITE_CREATE, INVITE_REVOKE, INVITE_CONSUME, PROMOTE_GROUP_ADMIN, DEMOTE_GROUP_ADMIN, ADD_SOURCE, REMOVE_SOURCE, SOURCE_ENABLE, SOURCE_DISABLE, APPROVE_QUARANTINE, REJECT_QUARANTINE, FORGET, SET_LANG, SET_TIMEZONE) — no sanitizer-related entry.
+
+      M1-008a sibling test pin (`docs/plan/m1/tickets/M1-008a-identity-audit-last-admin.md` line 199): `grep -cE '^\-\-\s+(BOOTSTRAP_ADMIN|...|SET_TIMEZONE)\b' V5 returns >= 23`. This test fails if M1-037 adds a 24th verb to V5 without coordinating an M1-008a test update.
+
+      Missing Java surface (`AuditLogWriter`): no file matches `AuditLogWriter*` anywhere in repo. The ticket text "this ticket calls into the existing AuditLogWriter" cites a class that does not exist; existing audit-write call sites are inline `INSERT INTO audit_log` JDBC (`infochat-collector/.../BootstrapLoader.java:215`, `infochat-collector/.../StartupReleaseOnStage2FailureWarn.java:114`).
+
+      Misattribution: ticket out_of_scope cites "the closed catalogue from M1-024", but M1-024 is the SSRF-module ticket. The catalogue actually lives in M1-008a / V5. Refinement should fix the attribution.
+
+      ### Audit coverage
+      - file accounting — audited (pass) — 14 files in `files_scope` matches `files_budget: 14`; no surplus; `PrivilegedCommandCatalogue.java` is explicitly carved into `LlmOutputSanitizer.java` per Implementation notes so no extra file required.
+      - API-surface — audited (fail) — confirmed `LlmProvider.generate(ModelTask, String, String)` exists with `ModelTask.SUMMARIZER` (not the `SUMMARY_PROSE` non-binding hint — implementer must use `SUMMARIZER`); confirmed `CommandHandler` interface, `BundleLoader`, `BundleKeys` shape, `InboundRouter.handleSlash` CDI discovery pattern all consumable as-is. The fail is the missing `AuditLogWriter` class AND the missing `audit_log.action` verb both required by the audit-logging acceptance item.
+      - test-scaffolding — audited (pass) — all 7 new test files are listed in `test_plan.adds`; `preserves` covers prior tests; "Authorized test changes" body section explicitly says "(none — this ticket adds the seven tests enumerated in `test_plan.adds` and does not modify existing ones)" — no test-modification authorization needed.
+      - cross-cutting concerns — audited (pass) — identified: determinism boundary (deterministic SQL before LLM, ORDER BY published_at DESC, id DESC), per-(user, scope) isolation (filter by subscriptions), plain-text-only invariant (sanitizer strips markdown links), `[REDACTED:<id>]` placeholder retention through to prompt, English-only bundle keys (T2-C will add translation), uncached on-the-fly path.
+      - implementation order — not audited: stopped at the verb-catalogue blocker. The natural order would be Args → EligiblePostQuery → ClusterTraversal → SummaryProseGenerator → LlmOutputSanitizer → SummaryCommandHandler → IT, with bundle keys + en.properties authored alongside the first consumer, but the audit-logging gap blocks the sanitizer step.
+      - risks — not audited: stopped at the verb-catalogue blocker. Other un-audited risk areas the next Plan pass after refinement should look at: (a) cluster-cap excess message interpolation (laptop=200 in acceptance vs `bundle('reply.summary.cap_excess_notice')` — the cap-excess prefix needs to be readable for the IT to assert it without depending on adapter-level rendering); (b) the fuzzy-suggestion footer for `error.summary.unknown_tag` — the controlled-vocabulary read path (tag table SELECT) is not in `files_scope`; (c) the `>5 followed tags` top-3 selection rule — the "most-active by post count" query is a second SELECT in EligiblePostQuery that the IT must seed with uneven post distribution to pass.
+revisions:
+  - date: 2026-05-18
+    reason: outline-fail refine — sanitizer per-match observability switched from `audit_log` SQL row INSERT to JBoss Logging emission; persistent `audit_log` row write deferred to a T2 follow-up that lands the V12 migration adding `LLM_OUTPUT_SANITIZED` + an `AuditLogWriter` class + the coordinated update to M1-008a's verb-count grep test
+    changes:
+      - "acceptance: item 10 (audit-logging count) rewritten — now asserts via a JBoss Logging test handler against category `io.infochat.provider.llm.LlmOutputSanitizer` capturing 3 records at WARN, instead of `SELECT COUNT(*) FROM audit_log` returning 3"
+      - "out_of_scope: line previously excluding `audit_log.action` verb additions now spells out the T2 deferral plus the M1-024-vs-M1-008a misattribution fix (the closed catalogue lives in M1-008a / V5, not M1-024)"
+      - "out_of_scope: new entry added — any `AuditLogWriter` Java class (no such class exists in the repo as of M1-036; the v1 sanitizer uses JBoss Logging; the persistent writer ships with the T2 follow-up)"
+      - "implementation notes: `ModelTask` hint updated — Plan subagent confirmed the existing enum value is `ModelTask.SUMMARIZER`, not the speculative `SUMMARY_PROSE`"
+      - "out_of_scope (ModelTask): updated to cite `SUMMARIZER` as the verified-extant value"
+      - "Big-picture notes: 'Sanitizer audit logging is per-occurrence, not throttled' clarified — the per-occurrence property holds in both v1 (one log line per match) and post-T2 (one audit_log row per match)"
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -219,12 +268,14 @@ Non-binding hints — the developer reads these as context, not a recipe.
   pipeline; do NOT add a new normalizer.
 - **LlmProvider.** M1-033 ships `LlmProvider` + the per-task router
   + the OpenAI-compatible HTTP client. SummaryProseGenerator's
-  prompt task uses the existing `ModelTask.SUMMARY_PROSE` enum value
-  (or whichever value the M1-033 ticket already declared for the
-  summary use case — verify by inspecting `infochat-llm-adapter/src/
-  main/java/io/infochat/llm/ModelTask.java` before authoring; if no
-  such value exists, this is an escalation trigger, NOT an inline
-  enum addition).
+  prompt task uses the existing `ModelTask.SUMMARIZER` enum value
+  (verified during the 2026-05-18 outline-fail refine; Plan subagent
+  confirmed `LlmProvider.generate(ModelTask, String, String)` and
+  `ModelTask.SUMMARIZER` exist as authored by M1-033). Verify the
+  shape once more before authoring by inspecting
+  `infochat-llm-adapter/src/main/java/io/infochat/llm/ModelTask.java`;
+  if `SUMMARIZER` is missing or has been renamed, this is an
+  escalation trigger, NOT an inline enum addition.
 - **post_reference is empty in MVP.** docs/design/00-mvp.md §2 lists
   the MVP tables: `post`, `source`, `source_subscription`,
   `scope_preferences`, `tag`, `audit_log`, `users`. post_reference
@@ -304,13 +355,20 @@ What the implementer must keep in mind that isn't in the immediate diff.
   reader. The dispatch-side defense (admin commands routed only
   through the deterministic command path) is the necessary half;
   the sanitizer closes the social-engineering surface.
-- **Sanitizer audit logging is per-occurrence, not throttled.**
+- **Sanitizer per-match observability is per-occurrence, not throttled.**
   docs/spec/security.md §LLM output sanitizer: "Every match is
   audit-logged (per-occurrence, not throttled)." Two matches in one
-  reply produce two audit_log rows. This is intentional — the audit
-  log is the operator's signal that a model is producing
+  reply produce two records. This is intentional — the record stream
+  is the operator's signal that a model is producing
   privileged-looking output, and throttling would mask a worsening
-  pattern.
+  pattern. In v1 the records are JBoss Logging emissions at level
+  WARN under category `io.infochat.provider.llm.LlmOutputSanitizer`;
+  the persistent `audit_log` row write is **deferred to a T2 follow-up**
+  that lands the V12 migration adding `LLM_OUTPUT_SANITIZED` + an
+  `AuditLogWriter` class + the coordinated update to M1-008a's
+  verb-count grep test (see `out_of_scope`). The per-occurrence
+  property holds in both transports: one log line per match in v1,
+  one audit_log row per match after the T2 wiring.
 - **Plain-text-only invariant.** docs/spec/commands.md §Surface
   conventions + CLAUDE.md §Key conventions: bare URLs, no markdown
   link syntax. The sanitizer strips `[text](url)` patterns from LLM
