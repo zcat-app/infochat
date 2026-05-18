@@ -6,8 +6,9 @@ created: 2026-05-17
 last_updated: 2026-05-18
 blocked_by:
   - M1-035
-files_budget: 14
+files_budget: 15
 files_scope:
+  - infochat-ssrf/src/main/java/io/infochat/ssrf/SsrfGuardedHttpClient.java
   - infochat-provider/pom.xml
   - infochat-provider/src/main/java/io/infochat/provider/command/AddSourceCommandHandler.java
   - infochat-provider/src/main/java/io/infochat/provider/command/AddSourceArgs.java
@@ -29,6 +30,7 @@ security_relevant: true
 migration_touch: false
 out_of_scope:
   - any change under infochat-messaging-adapter/ (SPI + InMemoryAdapter are FROZEN at M1-035a; defects file a follow-up per docs/process/workflow.md §M1 workflow — never amend a passed commit)
+  - any change to SsrfGuardedHttpClient.java EXCEPT a narrow additive carve-out: appending one new method overload `get(URI uri, Map<String,String> extraHeaders)` is permitted (UrlProbe needs Range-header injection to probe a feed without downloading its full body; the existing `get(URI)` constructs requests with a fixed Accept/User-Agent and offers no header injection). Modifying or removing the existing `get(URI)` overload is FORBIDDEN; existing callers (Collector RSS fetcher) must continue to use the bare `get(URI)` form unchanged. The new overload SHARES the existing SSRF guards (DNS resolution + IP-policy check + redirect handling); it differs only in the per-request headers attached to the underlying HttpRequest builder.
   - any change to AdapterRegistry, InboundRouter, MessagingStartup, CommandHandler interface, AutoRegisterService, BundleLoader, HelpCommandHandler, or the M1-035c bundle infrastructure (the T1-E surface is FROZEN at the M1-035 umbrella's round; this ticket consumes the CommandHandler SPI as-is). BundleKeys is a NARROW carve-out from the freeze: appending new `public static final String` constants for this ticket's new bundle keys is permitted (the BundleLoader CI completeness check requires constant-and-value parity), but modifying or removing existing constants is FORBIDDEN.
   - any Flyway migration under infochat-core/src/main/resources/db/migration/ (T1-F is migration-free; the `source`, `source_subscription`, `tag`, and `audit_log` tables exist from M1-008b; reaching for V12 is an escalation trigger, not an authoring choice)
   - any /summary command surface (M1-037 territory; this ticket adds NO new BundleKeys / handler / DAO that /summary would also need — the two T1-F handlers share no implementation files)
@@ -60,8 +62,8 @@ acceptance:
     - `https://example.com/about` returns `AMBIGUOUS`
     - IDN host `https://блюски.рф/feed` is folded via `java.net.IDN.toASCII(host, IDN.ALLOW_UNASSIGNED)` before comparison (a separate per-rule @Test verifies the IDN-folded host compares against the ASCII pattern correctly)"
   - "UrlProbe reaches the URL via `io.infochat.ssrf.SsrfGuardedHttpClient` (the same client M1-024/M1-025 ship for Collector fetcher traffic) — NOT via `java.net.http.HttpClient` directly. Verify: `grep -E 'SsrfGuardedHttpClient' UrlProbe.java` returns ≥1 match AND `grep -E 'java\\.net\\.http\\.HttpClient' UrlProbe.java` returns zero matches"
-  - "UrlProbe issues `HEAD` first; on 405 / 501 / connection-reset-after-headers it falls back to a range-`GET` (`Range: bytes=0-0`) per docs/spec/commands.md §Source management. UrlProbeTest covers (using a Vert.x or JDK-stub HTTP server / WireMock): (a) HEAD returning 200 with `Content-Type: application/rss+xml` → probe SUCCESS with detected content-type returned; (b) HEAD returning 405, range-GET returning 200 with body byte → SUCCESS; (c) HEAD returning 4xx/5xx → FAILURE referencing `error.add_source.url_unreachable`; (d) SsrfGuardedHttpClient rejection (e.g. localhost / RFC1918 / metadata IP) propagates as FAILURE referencing `error.add_source.url_blocked_ssrf`; (e) timeout → FAILURE referencing `error.add_source.url_timeout`"
-  - "UrlProbe's success result includes the detected `Content-Type` so the caller can confirm an RSS-pattern URL against the response's `application/rss+xml | application/atom+xml | application/xml`. AddSourceCommandHandlerTest asserts: a URL `https://example.com/about` with HEAD `text/html` AND no --type AND no RSS path-pattern → AMBIGUOUS friendly error (the probe response contradicts the URL-pattern hint per spec §Source management)"
+  - "UrlProbe issues a small-range `GET` (`Range: bytes=0-0`) via a new `SsrfGuardedHttpClient.get(URI uri, Map<String,String> extraHeaders)` overload (additive carve-out per `out_of_scope`). The probe verifies reachability and surfaces the response `Content-Type` so the caller can confirm or contradict the URL-pattern hint (per docs/design/03-commands.md §`/add-source`, which permits 'lightweight HEAD (or, for servers that reject HEAD, a small-range GET)'; this ticket chooses small-range GET as the single probe shape to stay within the existing SSRF-client surface area + one additive overload). UrlProbeTest covers (using the same `com.sun.net.httpserver.HttpServer` fixture pattern as `SsrfGuardedHttpClientTest` — no WireMock dep in the repo): (a) range-GET returning 206 (or 200 ignoring Range) with `Content-Type: application/rss+xml` → probe SUCCESS with detected content-type returned; (b) range-GET returning 4xx/5xx → FAILURE referencing `error.add_source.url_unreachable`; (c) SsrfGuardedHttpClient rejection (e.g. localhost / RFC1918 / metadata IP) propagates as FAILURE referencing `error.add_source.url_blocked_ssrf`; (d) timeout → FAILURE referencing `error.add_source.url_timeout`. Verify the new overload preserves SSRF guards: `grep -E 'isAllowed|SsrfPolicy|resolveAndCheck' SsrfGuardedHttpClient.java` returns ≥1 match in the `get(URI, Map)` body (the new overload MUST share the same DNS-resolution + IP-policy guard the existing `get(URI)` runs)."
+  - "UrlProbe's success result includes the detected `Content-Type` so the caller can confirm an RSS-pattern URL against the response's `application/rss+xml | application/atom+xml | application/xml`. AddSourceCommandHandlerTest asserts: a URL `https://example.com/about` with the range-GET probe returning `text/html` AND no --type AND no RSS path-pattern → AMBIGUOUS friendly error (the probe response contradicts the URL-pattern hint per spec §Source management)"
   - "SourceUpsertService performs a single transaction that (1) upserts the `source` row by `(kind, identifier)` per decision D38, (2) for a fresh insert unions `--tags` into the controlled `tag` vocabulary table per decision D5 BEFORE the source row write, (3) upserts the `source_subscription` row for the caller's scope. SourceUpsertServiceIT covers: (a) fresh insert writes one source row with `status='active'`, `deleted_at IS NULL`, `kind=<resolved>`, `bootstrap_tags=<--tags array>`, `category=<--category-or-default-news>`; (b) the same `--tags` values appear as `tag` rows (UPSERT — pre-existing tag rows are not duplicated); (c) one `source_subscription` row exists for the caller's scope; (d) a SECOND `/add-source` for the same URL by the SAME caller is idempotent — no second `source` row, the existing subscription row remains, `--tags` are NOT rewritten on the source row"
   - "Permission gate enforces docs/spec/commands.md §Source management: DM-any-non-banned + group-group-admin-only. Per-element assertions in AddSourceCommandHandlerTest:
     - DM scope, non-banned non-admin user → handler proceeds to URL probe (mock the probe so the test stays unit-scoped)
@@ -74,7 +76,7 @@ acceptance:
     - **Branch C (bot-admin caller against existing row with --tags):** `bootstrap_tags` is REPLACED with the supplied `--tags`, vocab union runs over the new values, one `audit_log` row is INSERTed referencing `source.id` and the caller's `user.id` (the action verb is whatever M1-024's closed catalogue exposes for source-tag mutation — see docs/design/04-security.md §Audit log; the IT asserts presence of a row with `source_id = <the source>` AND `user_id = <the bot admin>`, NOT the specific action-verb string), reply equals `bundle('reply.add_source.admin_tags_replaced')`. **NO URL-visibility disclosure** on Branch B or Branch C (URL already in the global set)"
   - "Fresh-insert reply includes the URL-visibility disclosure literal docs/spec/commands.md §Source management — 'URL visibility disclosure': 'Note: source URLs are global state and are visible to bot admins via /list-sources --all.' Verify: en.properties has bundle key `reply.add_source.url_visibility_disclosure` whose value contains the literal substring `visible to bot admins` AND AddSourceCommandHandlerTest asserts the fresh-insert reply contains this substring; Branch B / Branch C tests assert the reply does NOT contain it"
   - "Bot-admin tag replacement (Branch C) writes one `audit_log` row in the same transaction as the source update. Verify: SourceUpsertServiceIT runs Branch C and asserts `SELECT COUNT(*) FROM audit_log WHERE user_id=<bot-admin> AND source_id=<source>` returns 1 (the action-verb closed catalogue from M1-024 is consumed as-is; no new verb is added in this ticket)"
-  - "AddSourceIT exercises MVP exit criterion §4 end-to-end via the InMemoryAdapter: (a) `adapter.deliverDm(\"mvp-user-1\", \"/add-source https://example.com/feed.xml --tags news,tech\")` — using a WireMock-backed feed URL or an in-process Vert.x stub so the probe succeeds — produces exactly ONE outbound message whose body equals the fresh-insert reply + URL-visibility disclosure; (b) `SELECT COUNT(*) FROM source WHERE kind='rss' AND identifier='https://example.com/feed.xml'` returns 1; (c) `SELECT COUNT(*) FROM source_subscription WHERE source_id=<that source>` returns 1; (d) `SELECT bootstrap_tags FROM source WHERE id=<that source>` returns `{news,tech}` (or the equivalent array form); (e) `SELECT COUNT(*) FROM tag WHERE name IN ('news','tech')` returns 2 (both unioned into vocab)"
+  - "AddSourceIT exercises MVP exit criterion §4 end-to-end via the InMemoryAdapter: (a) `adapter.deliverDm(\"mvp-user-1\", \"/add-source https://example.com/feed.xml --tags news,tech\")` — using a JDK `com.sun.net.httpserver.HttpServer` fixture bound to a loopback-allowed test port (the SsrfGuardedHttpClient test seam from `SsrfGuardedHttpClientTest`) so the range-GET probe succeeds — produces exactly ONE outbound message whose body equals the fresh-insert reply + URL-visibility disclosure; (b) `SELECT COUNT(*) FROM source WHERE kind='rss' AND identifier='https://example.com/feed.xml'` returns 1; (c) `SELECT COUNT(*) FROM source_subscription WHERE source_id=<that source>` returns 1; (d) `SELECT bootstrap_tags FROM source WHERE id=<that source>` returns `{news,tech}` (or the equivalent array form); (e) `SELECT COUNT(*) FROM tag WHERE name IN ('news','tech')` returns 2 (both unioned into vocab)"
   - "en.properties under infochat-provider/src/main/resources/bundles/ ships ALL the bundle keys referenced above. Per-key assertions (one per key — heterogeneous string set, count is NOT load-bearing):
     - `error.add_source.tags_required` present
     - `error.add_source.unknown_kind` present
@@ -98,7 +100,7 @@ test_plan:
   adds:
     - infochat-provider/src/test/java/io/infochat/provider/command/AddSourceArgsTest.java (unit)
     - infochat-provider/src/test/java/io/infochat/provider/source/KindResolverTest.java (unit)
-    - infochat-provider/src/test/java/io/infochat/provider/source/UrlProbeTest.java (unit; WireMock or in-process stub HTTP server)
+    - infochat-provider/src/test/java/io/infochat/provider/source/UrlProbeTest.java (unit; JDK com.sun.net.httpserver.HttpServer fixture, same pattern as SsrfGuardedHttpClientTest)
     - infochat-provider/src/test/java/io/infochat/provider/source/SourceUpsertServiceIT.java (DB-tier @QuarkusTest)
     - infochat-provider/src/test/java/io/infochat/provider/command/AddSourceCommandHandlerTest.java (handler-tier @QuarkusTest with mocked UrlProbe)
     - infochat-provider/src/test/java/io/infochat/provider/command/AddSourceIT.java (end-to-end via InMemoryAdapter — MVP exit criterion §4)
@@ -156,7 +158,86 @@ escalations:
       AuditLogWriter" body sentence, (c) decompose into two tickets, or
       (d) defer until a separate spec-amend ticket grants Provider
       INSERT/UPDATE on source/tag and lands the AuditWriter helper.
+  - date: 2026-05-18
+    reason: outline-fail
+    reviewer_verdict_excerpt: |
+      ## OUTLINE FAILED (round 2 — Plan subagent flagged via Risks
+      section rather than literal "## OUTLINE FAILED" prefix; treated
+      as outline-fail per CLAUDE.md §"Never trade rules against each
+      other" because acceptance item 7 cannot be satisfied within the
+      refined frozen scope).
+
+      REASON: Acceptance item 7 mandates "UrlProbe issues HEAD first;
+      on 405/501/connection-reset it falls back to a range-GET
+      (Range: bytes=0-0)". But infochat-ssrf's SsrfGuardedHttpClient
+      exposes only get(URI) — no head(URI) sibling, and the get(URI)
+      builder constructs the request internally with a fixed
+      Accept/User-Agent so the caller cannot inject Range: bytes=0-0
+      either. Two viable paths:
+        (a) Issue a range-GET via two get(URI) calls, one with the
+            Range: bytes=0-0 header — BLOCKED because the wrapper does
+            not expose header injection.
+        (b) Add sibling overloads on SsrfGuardedHttpClient — touches
+            infochat-ssrf, which is in the M1-024 frozen module and
+            not in this ticket's files_scope.
+
+      Round-1 OUTLINE FAILED caught the POM-dep accounting problem
+      ("UrlProbe needs the dep, adding it would breach the 12-file
+      budget"). The fix widened files_budget 12→14 and added pom.xml
+      + BundleKeys.java to files_scope. But it never drilled into the
+      *method-level surface* of SsrfGuardedHttpClient itself; it only
+      verified the *file-level dep* would compile. Round-2 Plan
+      caught the API-surface gap.
+
+      Process gap recorded in:
+      .claude/projects/-home-ubuntu5-Projects-quarkus-projects-
+      infochat/memory/feedback_replan_after_outline_fail_refine.md
+
+      SUGGESTED ESCALATION: refine — replace "HEAD first; range-GET
+      fallback" in acceptance item 7 with "range-GET only (Range:
+      bytes=0-0) via a new SsrfGuardedHttpClient.get(URI, Map<String,
+      String> extraHeaders) overload". Add SsrfGuardedHttpClient.java
+      to files_scope as a NARROW carve-out (additive new method only;
+      existing get(URI) FORBIDDEN to modify). Bump files_budget 14→15.
 revisions:
+  - date: 2026-05-18
+    reason: outline-fail-refine (round 2 — SsrfGuardedHttpClient API surface)
+    snapshot: |
+      files_budget: 14
+      files_scope:
+        - infochat-provider/pom.xml
+        - infochat-provider/src/main/java/io/infochat/provider/command/AddSourceCommandHandler.java
+        - infochat-provider/src/main/java/io/infochat/provider/command/AddSourceArgs.java
+        - infochat-provider/src/main/java/io/infochat/provider/source/KindResolver.java
+        - infochat-provider/src/main/java/io/infochat/provider/source/UrlProbe.java
+        - infochat-provider/src/main/java/io/infochat/provider/source/SourceUpsertService.java
+        - infochat-provider/src/main/java/io/infochat/provider/messaging/BundleKeys.java
+        - infochat-provider/src/main/resources/bundles/en.properties
+        - infochat-provider/src/test/java/io/infochat/provider/command/AddSourceArgsTest.java
+        - infochat-provider/src/test/java/io/infochat/provider/source/KindResolverTest.java
+        - infochat-provider/src/test/java/io/infochat/provider/source/UrlProbeTest.java
+        - infochat-provider/src/test/java/io/infochat/provider/source/SourceUpsertServiceIT.java
+        - infochat-provider/src/test/java/io/infochat/provider/command/AddSourceCommandHandlerTest.java
+        - infochat-provider/src/test/java/io/infochat/provider/command/AddSourceIT.java
+      acceptance item 7 (verbatim, pre-refine):
+        "UrlProbe issues `HEAD` first; on 405 / 501 / connection-reset-after-headers
+         it falls back to a range-`GET` (`Range: bytes=0-0`) per
+         docs/spec/commands.md §Source management. UrlProbeTest covers (using a
+         Vert.x or JDK-stub HTTP server / WireMock): (a) HEAD returning 200 with
+         `Content-Type: application/rss+xml` → probe SUCCESS with detected
+         content-type returned; (b) HEAD returning 405, range-GET returning 200
+         with body byte → SUCCESS; (c) HEAD returning 4xx/5xx → FAILURE
+         referencing `error.add_source.url_unreachable`; (d) SsrfGuardedHttpClient
+         rejection (e.g. localhost / RFC1918 / metadata IP) propagates as FAILURE
+         referencing `error.add_source.url_blocked_ssrf`; (e) timeout → FAILURE
+         referencing `error.add_source.url_timeout`"
+      out_of_scope (relevant frozen entry, pre-refine):
+        - "any change under infochat-messaging-adapter/ ... BundleKeys is a
+           NARROW carve-out: appending new constants is permitted, modifying or
+           removing existing constants is FORBIDDEN."
+        - "SsrfGuardedHttpClient is NOT mentioned in out_of_scope; the freeze on
+           the infochat-ssrf module is implicit (M1-024 territory) — refining now
+           adds an explicit narrow carve-out."
   - date: 2026-05-18
     reason: outline-fail-refine
     snapshot: |
@@ -239,9 +320,12 @@ for `/add-source` ships in this ticket; the sibling section commands
 - Kind resolution applies the closed host-pattern table from
   docs/spec/commands.md §Source management in the documented order;
   IDN hosts fold via `IDN.toASCII` before compare.
-- UrlProbe issues HEAD via `io.infochat.ssrf.SsrfGuardedHttpClient`
-  (NOT a raw `HttpClient`), with a range-`GET` fallback; failures
-  produce a friendly error and no row is written.
+- UrlProbe issues a small-range `GET` (`Range: bytes=0-0`) via a new
+  `SsrfGuardedHttpClient.get(URI, Map<String,String> extraHeaders)`
+  overload (additive, preserves existing SSRF guards). NOT a raw
+  `HttpClient`; the wrapper's DNS-resolution + IP-policy check fires
+  before the byte hits the wire. Failures produce a friendly error
+  and no row is written.
 - SourceUpsertService runs a single DB transaction: vocab union →
   `(kind, identifier)` upsert → subscription upsert; the fresh-insert
   branch emits the URL-visibility disclosure; the bot-admin
@@ -268,11 +352,21 @@ Non-binding hints — the developer reads these as context, not a recipe.
   `@TestProfile` to set `infochat.adapters=inmemory` +
   `infochat.adapters.inmemory.allow-low-trust=true` (M1-035b
   startup gates 5 + 6).
-- **infochat-ssrf dependency.** The provider POM does NOT currently
-  depend on `infochat-ssrf`; this ticket adds the dependency in
-  `infochat-provider/pom.xml` (now in `files_scope`). The dependency
-  shape matches the existing collector-side dep on `infochat-ssrf`
+- **infochat-ssrf dependency + narrow API-surface carve-out.** The
+  provider POM does NOT currently depend on `infochat-ssrf`; this ticket
+  adds the dependency in `infochat-provider/pom.xml` (in `files_scope`).
+  Dependency shape matches the existing collector-side dep
   (compile-time, project-version-pinned via `${project.version}`).
+  Additionally, `SsrfGuardedHttpClient.java` itself is in `files_scope`
+  as a NARROW additive carve-out: append ONE new method overload
+  `public HttpResponse<InputStream> get(URI uri, Map<String,String> extraHeaders)`
+  that mirrors the existing `get(URI)` body — same DNS resolution, same
+  IP-policy check, same redirect handling — and additionally calls
+  `extraHeaders.forEach(reqBuilder::header)` on the `HttpRequest.Builder`
+  before `build()`. Modifying or removing the existing `get(URI)`
+  overload is FORBIDDEN; the new overload exists for UrlProbe's
+  `Range: bytes=0-0` injection and any future caller that needs to
+  attach per-request headers.
 - **Audit-log write (inline JDBC).** No standalone `AuditLogWriter`
   helper exists in the codebase as of M1-035 — M1-024 was the
   infochat-ssrf module ticket, not an audit-writer commit. The
@@ -289,12 +383,15 @@ Non-binding hints — the developer reads these as context, not a recipe.
   key authored in en.properties. Do NOT modify existing constants
   or remove keys; the BundleLoader CI completeness check requires
   constant-and-value parity in both directions.
-- **WireMock or stub HTTP server.** UrlProbeTest needs a probe target
-  that returns controlled status codes + Content-Type headers. The
-  Quarkus test guide recommends WireMock for HTTP-stub tests
-  (https://quarkus.io/guides/getting-started-testing#wiremock — already
-  pulled by M1-024 for SSRF tests). Reuse the existing WireMock harness
-  rather than spinning up a parallel one.
+- **JDK HttpServer fixture (no WireMock).** UrlProbeTest needs a probe
+  target that returns controlled status codes + Content-Type headers
+  for a range-GET request. The repo does NOT have a WireMock dependency;
+  `SsrfGuardedHttpClientTest` already uses `com.sun.net.httpserver.HttpServer`
+  bound to a loopback-allowed test port via an SSRF test-seam (see the
+  `SsrfPolicy.testSeamAllowLoopback` toggle the M1-024 ticket ships).
+  Reuse the same harness: spin up an `HttpServer` per test, register
+  per-test handlers that echo the range-byte and the configured
+  Content-Type, tear down after the test.
 - **Bundle keys.** en.properties under
   `infochat-provider/src/main/resources/bundles/` is the file M1-035c
   authors; this ticket APPENDS keys to it. The BundleKeys constants
@@ -436,4 +533,7 @@ docs/process/engineering-rules-verbatim.md §8.
   (docs/plan/m1/drafts/session-grouping-plan.md §Tier 1) commits to
   2 tickets for /add-source + /summary, not 4+. The decomposition
   path is documented in Big-picture notes so the workflow path is
-  clear if it triggers.
+  clear if it triggers. After round-2 outline-fail-refine, the
+  evaluation stands: the pieces interlock around one command surface,
+  the IT (MVP exit §4) cannot pass until everything lands, so a
+  single tight ticket is correct.
