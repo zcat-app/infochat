@@ -307,7 +307,95 @@ revisions:
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
+redteam_findings:
+  - date: 2026-05-18
+    category: AUTH-BYPASS
+    severity: high
+    promise: |
+      §"Slow-start tier": Every newly registered user enters a probation
+      period (decision D45). Blocked during probation: chat mode,
+      `/add-source`, `/save`, `/unsave`, `/follow-tag`, `/unfollow-tag`,
+      `/clear`, `/compress`, `/group-timezone`, `/retry`. §"Authorization
+      model" step 7: probation restrictions are part of the permission
+      matrix; blocked commands return a friendly "probation period" reply
+      and never reach execution.
+    gap: |
+      AddSourceCommandHandler.java lines 76 + 120-170: actor lookup loads
+      `id, is_admin, is_banned` only — `probation_until` is never read.
+      No upstream probation gate visible in the diff; the handler's own
+      comment confirms T2-A gating is "not yet wired".
+    repro: |
+      Adversary registers as a new contact, then issues `/add-source
+      https://attacker.example/feed --tags news` inside the probation
+      window. The handler resolves the user (banned=false, admin=false),
+      passes the ban check, runs the URL probe, and writes a `source`
+      row + `source_subscription` for the probation user. Spec required
+      the call to be rejected with the "probation period" friendly reply.
+    suggested_fix_class: missing-auth-check
+  - date: 2026-05-18
+    category: INFO-LEAK
+    severity: medium
+    promise: |
+      §"User ban": Banned-user check is the first thing after identity
+      resolution. Banned user receives one fixed reply per inbound
+      message, regardless of input. §"Authorization model" step 4: if
+      `is_banned=true`, fixed reply, stop — no parser, no DB query past
+      the ban check, no LLM.
+    gap: |
+      AddSourceCommandHandler.java lines 108-118 (group-scope
+      short-circuit): the handler returns `error.add_source.group_admin_only`
+      for ANY group inbound BEFORE running the ban check at lines
+      126-127. The DM branch checks `is_banned`; the group branch does
+      not.
+    repro: |
+      Bot admin bans contact `evil-1`. `evil-1` is a member of a group
+      the bot serves. `evil-1` sends `/add-source ... --tags news` in
+      the group. The bot replies "Only group admins can add sources to
+      a group." instead of the fixed ban reply, leaking that the bot is
+      alive, that `/add-source` is recognised, and that the ban gate
+      did not fire on this surface.
+    suggested_fix_class: trust-boundary-tightening
+  - date: 2026-05-18
+    category: INFO-LEAK
+    severity: low
+    promise: |
+      §"Secrets handling": Contact IDs are logged in redacted form
+      (prefix + ellipsis + suffix) outside the audit log.
+    gap: |
+      AddSourceCommandHandler.java lines 178-181:
+      `IllegalStateException("...contact_id=" + contactId, e)` embeds
+      the raw, unredacted contact id. SourceUpsertService.java lines
+      138-141 has the equivalent shape with the user-supplied URL
+      (less load-bearing because URLs are bot-admin-visible per
+      §Source URL visibility).
+    repro: |
+      Adversary triggers any SQL-layer hiccup (transient connection
+      refusal, pool exhaustion). The Provider's default exception
+      logger writes the unredacted contact_id to stdout / structured
+      log. An operator reading the log sees the full contact id,
+      defeating the §Secrets handling redaction discipline.
+    suggested_fix_class: input-sanitization
+redteam_audits:
+  - date: 2026-05-18
+    verdict: FINDINGS
+    base: f2ca176bb2c5a40c635c4b2c092187e7c913c95f^
+    head: f2ca176bb2c5a40c635c4b2c092187e7c913c95f
+    verdict_file: docs/plan/m1/redteam/M1-036-2026-05-18.md
+    findings_count: 3
+    out_of_model_count: 2
+    note: |
+      /redteam M1-036 ran post-/m1-tick-commit, pre-/m1-tick-merge.
+      Three findings: 1 net-new code-defect fix for the group-scope
+      banned-user reply path (medium); 1 net-new code-defect fix for
+      contact-id log redaction (low); 1 deferred-to-T2-A AUTH-BYPASS
+      (high) for the probation-block gate that mirrors M1-035b's
+      vintage T2-A deferred findings. Two OUT-OF-MODEL advisories
+      (no rate limit on /add-source; no DM-only gate for group_only
+      users) — both T2-A territory. Disposition + suggested fixes in
+      the verdict file. NOT YET committed; commit on `main` after
+      `/m1-tick merge M1-036` to avoid the post-commit pre-merge
+      branch-tip pitfall recorded in
+      memory/feedback_redteam_postcommit_merge_pitfall.md.
 clarity_check:
   date: 2026-05-18
   verdict: WARN
