@@ -3,16 +3,18 @@ id: M1-036
 title: /add-source command (handler + kind resolver + URL probe + upsert + audit)
 status: pending
 created: 2026-05-17
-last_updated: 2026-05-17
+last_updated: 2026-05-18
 blocked_by:
   - M1-035
-files_budget: 12
+files_budget: 14
 files_scope:
+  - infochat-provider/pom.xml
   - infochat-provider/src/main/java/io/infochat/provider/command/AddSourceCommandHandler.java
   - infochat-provider/src/main/java/io/infochat/provider/command/AddSourceArgs.java
   - infochat-provider/src/main/java/io/infochat/provider/source/KindResolver.java
   - infochat-provider/src/main/java/io/infochat/provider/source/UrlProbe.java
   - infochat-provider/src/main/java/io/infochat/provider/source/SourceUpsertService.java
+  - infochat-provider/src/main/java/io/infochat/provider/messaging/BundleKeys.java
   - infochat-provider/src/main/resources/bundles/en.properties
   - infochat-provider/src/test/java/io/infochat/provider/command/AddSourceArgsTest.java
   - infochat-provider/src/test/java/io/infochat/provider/source/KindResolverTest.java
@@ -27,7 +29,7 @@ security_relevant: true
 migration_touch: false
 out_of_scope:
   - any change under infochat-messaging-adapter/ (SPI + InMemoryAdapter are FROZEN at M1-035a; defects file a follow-up per docs/process/workflow.md §M1 workflow — never amend a passed commit)
-  - any change to AdapterRegistry, InboundRouter, MessagingStartup, CommandHandler interface, AutoRegisterService, BundleLoader, BundleKeys, HelpCommandHandler, or the M1-035c bundle infrastructure (the T1-E surface is FROZEN at the M1-035 umbrella's round; this ticket consumes the CommandHandler SPI and BundleKeys as-is)
+  - any change to AdapterRegistry, InboundRouter, MessagingStartup, CommandHandler interface, AutoRegisterService, BundleLoader, HelpCommandHandler, or the M1-035c bundle infrastructure (the T1-E surface is FROZEN at the M1-035 umbrella's round; this ticket consumes the CommandHandler SPI as-is). BundleKeys is a NARROW carve-out from the freeze: appending new `public static final String` constants for this ticket's new bundle keys is permitted (the BundleLoader CI completeness check requires constant-and-value parity), but modifying or removing existing constants is FORBIDDEN.
   - any Flyway migration under infochat-core/src/main/resources/db/migration/ (T1-F is migration-free; the `source`, `source_subscription`, `tag`, and `audit_log` tables exist from M1-008b; reaching for V12 is an escalation trigger, not an authoring choice)
   - any /summary command surface (M1-037 territory; this ticket adds NO new BundleKeys / handler / DAO that /summary would also need — the two T1-F handlers share no implementation files)
   - any /list-sources, /unfollow-source, /remove-source, /source-enable, /source-disable command (T2-B territory; the source-status state machine `active ↔ disabled ↔ failed` is not exercised here — fresh `/add-source` writes `status='active'` and stops)
@@ -40,7 +42,8 @@ out_of_scope:
   - any RSS Fetcher / FetchScheduler change (M1-022 + M1-023 territory; this ticket's URL probe reaches the URL once via `infochat-ssrf.SsrfGuardedHttpClient` to confirm reachability, then writes the source row; the Collector's FetchScheduler picks up the new `status='active'` source row on its next per-kind tick — NO `pg_notify('new_source', ...)` channel is added, the per-kind tick model from docs/spec/architecture.md §Inter-service communication is the existing pickup mechanism)
   - any post-tier / scope_preferences / scope_tag DAO changes (the only writes are: 1 INSERT/UPSERT into `source`, 1 INSERT/UPSERT into `source_subscription`, 0–N INSERT into `tag` for new vocab values, 1 INSERT into `audit_log` for the bot-admin tag-replacement path or the fresh-insert path per docs/design/00-mvp.md §2 — no `scope_preferences` write)
   - any `/add-source --tags` against an existing row by a BOT ADMIN where the supplied `--tags` differs from `bootstrap_tags` — i.e. the audit-logged `bootstrap_tags` REWRITE path on an existing row is implemented (it is in spec scope per docs/spec/commands.md §Source management) but no test ASSERTS the audit_log row's `action` verb beyond "is present and references the source_id" because the action-verb closed catalogue per docs/design/04-security.md is M1-024's commit and continues to pass unchanged; the ticket may use the existing `source.tags.replace` (or equivalent name from M1-024's catalogue) verb without adding a new one
-  - any AuditLogWriter helper class change (M1-024 ships AuditLogWriter; this ticket calls into it but does NOT modify its surface — if a new verb is required, escalate, do NOT add it inline)
+  - any new AuditLogWriter helper class (no standalone AuditLogWriter exists in the codebase as of M1-035 — M1-024 was the infochat-ssrf module ticket, not an audit-writer commit; the audit_log writes in this ticket are inline JDBC INSERT statements in SourceUpsertService's transaction, matching the inline-SQL style used elsewhere for audit writes; if a separate writer-class abstraction is needed later, that is a T2-A onboarding-tier ticket, not this one)
+  - any new `audit_log.action` verb (the V5 §2.1.8 closed verb catalogue already names `ADD_SOURCE` — this ticket consumes that verb as-is; adding a new verb is an escalation trigger, not an authoring choice)
 acceptance:
   - "infochat-provider/src/main/java/io/infochat/provider/command/AddSourceCommandHandler.java exists, is `@ApplicationScoped`, and implements `io.infochat.provider.messaging.CommandHandler`. Verify: `grep -E '@ApplicationScoped' AddSourceCommandHandler.java` returns ≥1 match AND `grep -E 'implements\\s+CommandHandler' AddSourceCommandHandler.java` returns ≥1 match"
   - "AddSourceCommandHandler.name() returns the literal string \"add-source\" (no leading slash; InboundRouter strips the slash before lookup per M1-035b InboundRouter.handleSlash). Verify: `grep -E '\"add-source\"' AddSourceCommandHandler.java` returns ≥1 match in a `name()` accessor"
@@ -121,8 +124,79 @@ decision_refs:
   - D38
 
 reviews: []
-escalations: []
-revisions: []
+escalations:
+  - date: 2026-05-18
+    reason: outline-fail
+    reviewer_verdict_excerpt: |
+      ## OUTLINE FAILED — escalation recommended
+
+      REASON: The ticket has three independent showstoppers that must be
+      reconciled before implementation can start. (1) The clarity_check
+      WARN on infochat-ssrf POM dependency is confirmed real — UrlProbe
+      cannot satisfy acceptance item 6 ("UrlProbe uses
+      SsrfGuardedHttpClient") without the dep, and adding the dep takes
+      the file count to 13, violating both files_budget: 12 and the
+      explicit files_scope enumeration. (2) BundleKeys.java is listed in
+      out_of_scope as FROZEN AND excluded from files_scope, but the
+      acceptance items + BundleLoader CI shape effectively require
+      appending 14 named constants there; the implementation-notes
+      carve-out contradicts the out_of_scope freeze. (3) The ticket body
+      claims "M1-024 ships AuditLogWriter; this ticket calls into it"
+      but M1-024 is the infochat-ssrf module ticket and no
+      AuditLogWriter class exists anywhere in the codebase; the handler
+      must either author inline INSERT INTO audit_log SQL (matching
+      BootstrapLoader's style — acceptable but contradicts the ticket
+      body) or introduce a new helper class (15th file).
+
+      SUGGESTED ESCALATION: refine — surface the five-way menu so the
+      user can decide for each of the three blockers whether to (a)
+      widen files_budget to 14 + add infochat-provider/pom.xml and
+      BundleKeys.java to files_scope, (b) accept inline INSERT INTO
+      audit_log SQL in SourceUpsertService and strike the "M1-024 ships
+      AuditLogWriter" body sentence, (c) decompose into two tickets, or
+      (d) defer until a separate spec-amend ticket grants Provider
+      INSERT/UPDATE on source/tag and lands the AuditWriter helper.
+revisions:
+  - date: 2026-05-18
+    reason: outline-fail-refine
+    snapshot: |
+      files_budget: 12
+      files_scope:
+        - infochat-provider/src/main/java/io/infochat/provider/command/AddSourceCommandHandler.java
+        - infochat-provider/src/main/java/io/infochat/provider/command/AddSourceArgs.java
+        - infochat-provider/src/main/java/io/infochat/provider/source/KindResolver.java
+        - infochat-provider/src/main/java/io/infochat/provider/source/UrlProbe.java
+        - infochat-provider/src/main/java/io/infochat/provider/source/SourceUpsertService.java
+        - infochat-provider/src/main/resources/bundles/en.properties
+        - infochat-provider/src/test/java/io/infochat/provider/command/AddSourceArgsTest.java
+        - infochat-provider/src/test/java/io/infochat/provider/source/KindResolverTest.java
+        - infochat-provider/src/test/java/io/infochat/provider/source/UrlProbeTest.java
+        - infochat-provider/src/test/java/io/infochat/provider/source/SourceUpsertServiceIT.java
+        - infochat-provider/src/test/java/io/infochat/provider/command/AddSourceCommandHandlerTest.java
+        - infochat-provider/src/test/java/io/infochat/provider/command/AddSourceIT.java
+      out_of_scope (relevant frozen entries):
+        - "any change to AdapterRegistry, InboundRouter, MessagingStartup,
+           CommandHandler interface, AutoRegisterService, BundleLoader,
+           BundleKeys, HelpCommandHandler, or the M1-035c bundle infrastructure
+           (the T1-E surface is FROZEN at the M1-035 umbrella's round; this
+           ticket consumes the CommandHandler SPI and BundleKeys as-is)"
+        - "any AuditLogWriter helper class change (M1-024 ships AuditLogWriter;
+           this ticket calls into it but does NOT modify its surface — if a new
+           verb is required, escalate, do NOT add it inline)"
+      Implementation notes (contradicting clauses):
+        - "infochat-ssrf dependency. The provider POM does NOT currently
+           depend on infochat-ssrf — add the dependency in this ticket's POM
+           edit if and only if the dependency is missing (the file-budget
+           enumeration above does NOT list infochat-provider/pom.xml; if the
+           dep is missing, that is a 13th file and an escalation trigger ...)"
+        - "Bundle keys. en.properties under infochat-provider/src/main/
+           resources/bundles/ is the file M1-035c authors; this ticket APPENDS
+           keys to it. The BundleKeys constants class is also M1-035c's; this
+           ticket APPENDS new constants (one per new key — compile-time safety
+           per M1-035c's design)."
+        - "AuditLogWriter. M1-024 ships an audit-log writer with a closed
+           catalogue of action verbs (docs/design/04-security.md §Audit log).
+           Consume it as-is; do NOT add a new verb."
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -195,18 +269,26 @@ Non-binding hints — the developer reads these as context, not a recipe.
   `infochat.adapters.inmemory.allow-low-trust=true` (M1-035b
   startup gates 5 + 6).
 - **infochat-ssrf dependency.** The provider POM does NOT currently
-  depend on `infochat-ssrf` — add the dependency in this ticket's POM
-  edit if and only if the dependency is missing (the file-budget
-  enumeration above does NOT list infochat-provider/pom.xml; if the
-  dep is missing, that is a 13th file and an escalation trigger per
-  docs/process/workflow.md §M1 workflow — escalate to refine the
-  files_scope rather than add it inline; the alternative is for
-  M1-007c or M1-035a to have already taken the dep, in which case
-  no POM edit is needed).
-- **AuditLogWriter.** M1-024 ships an audit-log writer with a closed
-  catalogue of action verbs (docs/design/04-security.md §Audit log).
-  Consume it as-is; do NOT add a new verb. The IT asserts the audit
-  row exists, not its verb spelling.
+  depend on `infochat-ssrf`; this ticket adds the dependency in
+  `infochat-provider/pom.xml` (now in `files_scope`). The dependency
+  shape matches the existing collector-side dep on `infochat-ssrf`
+  (compile-time, project-version-pinned via `${project.version}`).
+- **Audit-log write (inline JDBC).** No standalone `AuditLogWriter`
+  helper exists in the codebase as of M1-035 — M1-024 was the
+  infochat-ssrf module ticket, not an audit-writer commit. The
+  audit_log writes in this ticket are inline JDBC `INSERT` statements
+  in `SourceUpsertService`'s single transaction, matching the
+  inline-SQL style used in `BootstrapLoader` for the
+  `BOOTSTRAP_SOURCE_LOAD` audit row. The action verb is the literal
+  `'ADD_SOURCE'` from V5 §2.1.8 — already in the closed catalogue;
+  do NOT add a new verb. The IT asserts the audit row exists with
+  the correct `target_kind`/`target_id`, not its verb spelling.
+- **BundleKeys append.** `BundleKeys.java` is in `files_scope` for
+  this ticket as a narrow additive carve-out from the T1-E freeze:
+  append one `public static final String` constant per new bundle
+  key authored in en.properties. Do NOT modify existing constants
+  or remove keys; the BundleLoader CI completeness check requires
+  constant-and-value parity in both directions.
 - **WireMock or stub HTTP server.** UrlProbeTest needs a probe target
   that returns controlled status codes + Content-Type headers. The
   Quarkus test guide recommends WireMock for HTTP-stub tests
