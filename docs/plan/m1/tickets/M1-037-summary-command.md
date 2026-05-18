@@ -6,7 +6,7 @@ created: 2026-05-17
 last_updated: 2026-05-18
 blocked_by:
   - M1-035
-files_budget: 14
+files_budget: 15
 files_scope:
   - infochat-provider/src/main/java/io/infochat/provider/command/SummaryCommandHandler.java
   - infochat-provider/src/main/java/io/infochat/provider/command/SummaryArgs.java
@@ -14,6 +14,7 @@ files_scope:
   - infochat-provider/src/main/java/io/infochat/provider/summary/ClusterTraversal.java
   - infochat-provider/src/main/java/io/infochat/provider/summary/SummaryProseGenerator.java
   - infochat-provider/src/main/java/io/infochat/provider/llm/LlmOutputSanitizer.java
+  - infochat-provider/src/main/java/io/infochat/provider/bundle/BundleKeys.java
   - infochat-provider/src/main/resources/bundles/en.properties
   - infochat-provider/src/test/java/io/infochat/provider/command/SummaryArgsTest.java
   - infochat-provider/src/test/java/io/infochat/provider/summary/EligiblePostQueryIT.java
@@ -29,7 +30,7 @@ security_relevant: true
 migration_touch: false
 out_of_scope:
   - any change under infochat-messaging-adapter/ (SPI + InMemoryAdapter are FROZEN at M1-035a; defects file a follow-up per docs/process/workflow.md §M1 workflow — never amend a passed commit)
-  - any change to AdapterRegistry, InboundRouter, MessagingStartup, CommandHandler interface, AutoRegisterService, BundleLoader, BundleKeys, HelpCommandHandler, or the M1-035c bundle infrastructure (the T1-E surface is FROZEN at the M1-035 umbrella's round; this ticket consumes the CommandHandler SPI and BundleKeys as-is)
+  - any change to AdapterRegistry, InboundRouter, MessagingStartup, CommandHandler interface, AutoRegisterService, BundleLoader, HelpCommandHandler, or the M1-035c bundle infrastructure (the T1-E surface is FROZEN at the M1-035 umbrella's round; this ticket consumes the CommandHandler SPI as-is). NOTE: `BundleKeys.java` is in `files_scope` for the LIMITED purpose of APPENDING /summary's eight new bundle-key constants (matching M1-036's commit `bc9b78f` precedent that appended the `ERROR_ADD_SOURCE_*` / `REPLY_ADD_SOURCE_*` constants); existing `BundleKeys` constants must not be modified, renamed, or removed. The reflection-driven `BundleLoaderTest` (M1-035c) automatically picks up the new constants and asserts each resolves to a non-empty en.properties value — no test edit required.
   - any Flyway migration under infochat-core/src/main/resources/db/migration/ (T1-F is migration-free; the `post`, `source_subscription`, `scope_preferences`, `scope_tag`, `tag` tables exist from M1-008b/c; `post_embedding` exists from M1-034a V11; reaching for V12 is an escalation trigger, not an authoring choice)
   - any /add-source command surface (M1-036 territory; this ticket adds NO new BundleKeys / handler / DAO that /add-source would also need — the two T1-F handlers share no implementation files)
   - any /save, /saved, /unsave, /retry, /stop, /clear, /compress, /forget, /export command (T2-D/E territory; this ticket has NO interaction with chat_memory, chat_session, saved_post, or summary_anchor)
@@ -56,7 +57,7 @@ acceptance:
     - `/summary -w 5m` → friendly error `error.summary.window_minutes_not_accepted` (the suffix `m` is intentionally rejected per design 03-commands.md §Time window flag)
     - `/summary -w 200h` → friendly error `error.summary.window_out_of_range` (range is 1h–168h | 1d–30d | 1w–4w)
     - `/summary an-invalid-tag-not-in-vocab` → friendly error `error.summary.unknown_tag` with fuzzy-suggestion footer over the controlled vocabulary
-    - `/summary security-with-very-long-name-exceeding-48-chars-aaaaaaa` → tag rejected by TagNormalizer (>48 chars) → friendly error `error.summary.tag_malformed`"
+    - `/summary security-with-very-long-name-exceeding-48-chars-aaaaaaa` → tag rejected by SummaryArgs's inline normalizer (>48 chars, OR fails the V6 schema's `tag.name` regex `^[a-z0-9][a-z0-9-]{0,47}$`) → friendly error `error.summary.tag_malformed`"
   - "EligiblePostQuery returns READY posts deterministically, ordered by `published_at DESC, id DESC` (the secondary id key breaks ties stably so retest order is reproducible). Per-rule assertions in EligiblePostQueryIT (DB-tier, @QuarkusTest with seed fixtures):
     - filter `status='READY'` — QUARANTINED / NEEDS_REVIEW / RAW posts are EXCLUDED
     - filter `published_at >= now() - window` — older posts EXCLUDED
@@ -67,7 +68,7 @@ acceptance:
     - empty-result case: subscribed but no READY posts in window → returns empty List<Post>
     - retained-redaction case: a post with `stage2_failed=true` and `[REDACTED:<id>]` in the body IS included in the eligible set (docs/spec/security.md §Failure handling; the placeholder is NOT stripped before retrieval — the prose generator sees it as-is per docs/spec/commands.md §Content)
     - cap enforcement: when more than `infochat.summary.cluster-cap` (laptop=200) posts match, the OLDEST posts are dropped and the response surfaces `Showing 100 of 137 posts (cap: <profile>=<n>; <m> oldest excluded)`"
-  - "EligiblePostQuery applies the `no-arg with >5 followed tags` rule per docs/design/03-commands.md §`/summary`: when SummaryArgs.tag is NONE AND `scope_tag` rows for the scope count >5, retrieval is restricted to the 3 most-active tags in the window (by post count) AND the reply is prefixed with `bundle('reply.summary.top_3_of_n_prefix')` interpolated with N=count(scope_tag). Verify: EligiblePostQueryIT seeds 7 followed tags + 15 posts unevenly distributed and asserts the result set contains only posts whose `tags` array intersects the top-3 tag set"
+  - "EligiblePostQuery applies the `no-arg with >5 followed tags` rule per docs/design/03-commands.md §`/summary`: when SummaryArgs.tag is NONE AND `scope_tag` rows for the scope count >5, retrieval is restricted to the 3 most-active tags in the window — ordered by post count DESC, then by `tag.name` ASC (lexicographic) so ties break deterministically across runs — AND the reply is prefixed with `bundle('reply.summary.top_3_of_n_prefix')` interpolated with N=count(scope_tag). Verify: EligiblePostQueryIT seeds 7 followed tags + 15 posts unevenly distributed (deliberately including at least one pair of tags with the same post count to exercise the lexicographic tie-break), asserts the result set contains only posts whose `tags` array intersects the top-3 tag set, AND asserts the selected top-3 tag set matches the count-DESC + name-ASC ordering rule"
   - "ClusterTraversal returns connected components of the post_reference graph. For MVP — post_reference table has zero rows — every eligible post becomes its OWN singleton cluster: input List<Post> of size N → output List<Cluster> of size N where each cluster's posts list has exactly 1 element. Per-rule assertions in ClusterTraversalTest:
     - empty input List<Post> → empty List<Cluster>
     - one Post → one Cluster, cluster.posts.size()==1, cluster.posts.get(0)==<the input post>
@@ -79,20 +80,24 @@ acceptance:
     - the prompt body contains the literal substring `[REDACTED:` when the input post had a redaction placeholder (assert via captured-prompt argument)
     - the LLM response is treated as PROSE — no markdown link syntax `[text](url)` is allowed in the response; if present the sanitizer strips it (next acceptance item)
     - LLM unreachable (mock throws): the generator falls back to the SAME degraded form as a saturated periodic digest per docs/design/03-commands.md §`/summary`: headlines (title) + source URLs bare + post UIDs, no prose. Reply prefix = `bundle('reply.summary.degraded_notice')`. The deterministic post selection is UNAFFECTED"
-  - "LlmOutputSanitizer applies a deterministic outbound regex pass over the closed privileged-tier command list from docs/spec/commands.md §Permission model §Closed list of privileged-tier commands. The match set is DERIVED FROM THE CLOSED LIST at boot — NOT hand-maintained. Per-command assertions in LlmOutputSanitizerTest (one @Test per command in the closed list — heterogeneous string set, count is NOT load-bearing):
+  - "LlmOutputSanitizer applies a deterministic outbound regex pass over the closed privileged-tier command list from docs/spec/commands.md §Permission model §Closed list of privileged-tier commands. The match set is a constant list IN CODE: a `private static final List<String> CLOSED_LIST` field on LlmOutputSanitizer.java (or a sibling holder class also inside `files_scope`, at the developer's choice — Implementation notes specify the inside-class placement is the default). The CI completeness @Test from acceptance item 11 is what keeps this constant in sync with the spec markdown — see item 11 for the parse-spec-at-test-tier mechanism. Per-command assertions in LlmOutputSanitizerTest (one @Test per command in the closed list — heterogeneous string set, count is NOT load-bearing):
     - bot-admin set: `/grant-admin`, `/revoke-admin`, `/ban`, `/unban`, `/promote`, `/demote`, `/vouch`, `/invite create`, `/invite list`, `/invite revoke`, `/quarantine list`, `/quarantine approve`, `/quarantine reject`, `/audit`, `/remove-source`, `/source-enable`, `/source-disable`, `/list-sources --all`, `/list-sources --include-deleted`
     - group-admin set: `/add-source` in groups, `/unfollow-source` in groups, `/lang` in groups, `/group-timezone`, `/follow-tag` in groups, `/unfollow-tag` in groups
-    Each @Test feeds an LLM-prose blob containing the exact command string and asserts the sanitizer either STRIPS the command or REFUSES the output (exact contract per docs/spec/security.md §LLM output sanitizer — implementer chooses strip-or-refuse; the test asserts the chosen behavior is applied uniformly across all closed-list commands)"
+    Each @Test feeds an LLM-prose blob containing the exact command string (e.g. the prose `Please run /grant-admin @bob to elevate Bob's role.`) and asserts the sanitizer STRIPS the matched command — replacing the literal command-string match with the fixed replacement `[redacted command]`. Strip-not-refuse is the v1 choice across all surfaces consuming the sanitizer (per docs/spec/security.md §LLM output sanitizer the spec leaves strip-or-refuse open; this ticket picks strip for graceful degradation: the reader still sees the surrounding summary minus the matched string, rather than an empty/failed reply). The @Test asserts (a) the original matched command string is absent from the output, AND (b) `[redacted command]` appears at the position the match was. Behavior is uniform across all closed-list commands."
   - "LlmOutputSanitizer emits a structured log line on EVERY match (per-occurrence, NOT throttled — per docs/spec/security.md §LLM output sanitizer's per-occurrence promise). The v1 observable is a JBoss Logging emission; the persistent `audit_log` row INSERT is **deferred to a T2 follow-up** that lands the V12 migration adding `LLM_OUTPUT_SANITIZED` + an `AuditLogWriter` class + the coordinated M1-008a verb-count test update (see `out_of_scope`). Verify: LlmOutputSanitizerTest registers a JBoss Logging test handler against the category `io.infochat.provider.llm.LlmOutputSanitizer`, feeds a blob containing 3 distinct matches (e.g. `/grant-admin`, `/ban`, `/promote`), and asserts the handler captured exactly 3 records at level WARN whose message contains the matched command string. The per-occurrence (not-throttled) property is verified by the count-of-3, NOT by message content shape (which is implementation-defined)."
-  - "LlmOutputSanitizer CI completeness check per docs/spec/security.md §LLM output sanitizer §Match-set derivation: a startup or test-tier assertion fails when the sanitizer's match set diverges from the spec's closed list (a new admin command added without a matching sanitizer entry, or a sanitizer entry that no longer corresponds to a listed command). Verify: LlmOutputSanitizerTest contains one @Test that asserts the sanitizer's runtime match-set EQUALS the closed-list constants (sourced from a shared constant holder or parsed from a versioned resource); the @Test fails if either side has an entry the other side lacks"
+  - "LlmOutputSanitizer CI completeness @Test per docs/spec/security.md §LLM output sanitizer §Match-set derivation. Verify: LlmOutputSanitizerTest contains a @Test named `matchSetEqualsSpecClosedList` that performs the parse-vs-runtime equality check: (a) reads `docs/spec/commands.md` (resolved via `java.nio.file.Path` from the module's working directory — the path-resolution shape is an implementation detail of the @Test), (b) locates the two bulleted lists immediately following the section heading `## Permission model` containing the heading text `Closed list of privileged-tier commands` — the bullet groups labeled `**Bot-admin only:**` and `**Group-admin (or bot admin acting in the group):**`, (c) parses every backticked token of the form `` `/<word>` `` (or `` `/<word> <flags>` ``) from those bullets into a `Set<String>`, (d) compares to the sanitizer's runtime `CLOSED_LIST` set and asserts equality. The @Test fails if either side has an entry the other side lacks — a spec-side addition without a sanitizer update fails CI; a sanitizer entry that no longer corresponds to a listed command also fails CI. This is what makes the constant list in code spec-sync'd despite being a hand-maintained Java constant."
   - "SummaryCommandHandler stitches the pieces: SummaryArgs → EligiblePostQuery → ClusterTraversal → SummaryProseGenerator → LlmOutputSanitizer → outbound reply. Per-branch assertions in SummaryCommandHandlerTest:
-    - happy path: 3 eligible posts → 3 singleton clusters → 3 LLM calls (mocked) → sanitizer pass → reply contains 3 cluster blocks in the documented output structure (`[topic_id=<id>]` / headline / `covered by:` / `score:` / `summary:` / `tags:`)
+    - happy path: 3 eligible posts → 3 singleton clusters → 3 LLM calls (mocked) → sanitizer pass → reply contains 3 cluster blocks in the documented output structure (`[topic_id=<id>]` / headline / `covered by:` / `score:` / `summary:` / `classification:` / `tags:`). Of these fields, ONLY `summary:` is LLM-authored prose (the value comes from the mocked LlmProvider's per-cluster blob, after sanitizer pass); the remaining six fields are deterministic strings computed by SummaryCommandHandler from cluster.posts metadata: `[topic_id=<id>]` is derived from cluster.posts (per acceptance item 7's "deterministic function of cluster.posts" rule), `headline` is the cluster's first post's `title`, `covered by:` lists the cluster posts' source display names + UIDs, `score:` summarizes the cluster's source count + category set (e.g. `high (3 sources, news+social)`), `classification:` joins cluster.posts.tags into a comma-separated list, and `tags:` lists the union of cluster.posts.tags. The test verifies field ordering matches the structure above AND asserts the deterministic fields against their computed values (e.g. `headline` equals the seeded first-post title literally) so that an implementation accidentally LLM-authoring a deterministic field would fail the test
     - empty window: zero eligible posts → bundle `reply.summary.no_posts_yet` reply, NO LLM call, NO sanitizer call (a `@Test` asserts `verifyNoInteractions(llmProvider)` and `verifyNoInteractions(sanitizer)`)
     - zero subscriptions: same friendly `no_posts_yet` reply path
     - LLM unreachable: degraded fallback reply with `reply.summary.degraded_notice` prefix + headlines + bare URLs + UIDs, NO sanitizer call (degraded prose is deterministic, not LLM-authored)
     - cap excess: 250 eligible posts on `laptop` profile (cap=200) → reply prefix `bundle('reply.summary.cap_excess_notice')` interpolated with the cap value and excluded count, top-200 are summarized"
   - "SummaryIT exercises MVP exit criterion §6 end-to-end via the InMemoryAdapter: (a) seed 2 sources, subscribe DM `mvp-user-1` to both, seed 4 READY posts (2 per source) within 24h, mock the LlmProvider to return a fixed prose blob per cluster; (b) `adapter.deliverDm(\"mvp-user-1\", \"/summary -w 24h\")` produces exactly ONE outbound message; (c) the reply body contains all 4 post UIDs; (d) the reply body contains the 2 source URLs (bare, per docs/spec/commands.md §Surface conventions Plain-text-no-markdown); (e) the reply body contains NO markdown-link syntax `[text](url)` (sanitizer + format invariant); (f) the LlmProvider was invoked 4 times (4 singleton clusters); (g) when LlmProvider is configured to throw, the same `/summary -w 24h` produces the degraded-fallback reply"
-  - "Plain-text invariant docs/spec/commands.md §Surface conventions: replies use single backticks for inline code and bare URLs (no markdown link syntax). Verify: `grep -E '\\]\\(http' en.properties` returns zero matches AND SummaryIT's response-body assertion confirms no `](http` substring in any LLM-pass-through prose (the sanitizer enforces this on LLM output too — a small LLM emitting `[link](http://...)` MUST be stripped to bare URL)"
+  - "Plain-text invariant per docs/spec/commands.md §Surface conventions: replies use single backticks for inline code and bare URLs (no markdown link syntax). LlmOutputSanitizer enforces this on LLM output via a markdown-link STRIP pass that runs BEFORE the closed-list strip pass. Ordering matters: a hostile LLM emitting `[Click for admin](/grant-admin)` would otherwise hide the `/grant-admin` token inside the markdown structure and evade the closed-list match. The markdown pass first flattens to `Click for admin (/grant-admin)`, then the closed-list pass replaces `/grant-admin` with `[redacted command]`. Regex: `\\[([^\\]]+)\\]\\(([^)]+)\\)` → `$1 ($2)` (preserves link text AND bare URL — the user's choice in the 2026-05-18 refine). Verify (three assertions):
+    - `grep -E '\\]\\(http' en.properties` returns zero matches (the bundle never ships markdown-link syntax — Provider-authored strings are already compliant)
+    - LlmOutputSanitizerTest feeds the literal input `[Bleeping Computer](https://www.bleepingcomputer.com)` and asserts the output is `Bleeping Computer (https://www.bleepingcomputer.com)` exactly — i.e. the substring `](` is absent and the substring `Bleeping Computer (https://www.bleepingcomputer.com)` is present at the position of the original markdown link
+    - LlmOutputSanitizerTest feeds `[Click for admin](/grant-admin)` and asserts the output is `Click for admin ([redacted command])` — exercises the BOTH-passes ordering (markdown-link first, then closed-list)
+    - SummaryIT's response-body assertion confirms no `](http` substring in any LLM-pass-through prose for the happy-path mocked LLM output"
   - "en.properties under infochat-provider/src/main/resources/bundles/ ships ALL the bundle keys referenced above. Per-key assertions:
     - `error.summary.window_minutes_not_accepted` present
     - `error.summary.window_out_of_range` present
@@ -100,10 +105,10 @@ acceptance:
     - `error.summary.tag_malformed` present
     - `reply.summary.no_posts_yet` present
     - `reply.summary.degraded_notice` present
-    - `reply.summary.cap_excess_notice` present (interpolation tokens for profile, cap, excluded)
+    - `reply.summary.cap_excess_notice` present with FOUR interpolation tokens (`{0}` = cap value e.g. `200`; `{1}` = total eligible posts before cap e.g. `250`; `{2}` = profile name e.g. `laptop`; `{3}` = excluded count e.g. `50`). The bundle template shape matches acceptance item 5's `Showing 100 of 137 posts (cap: <profile>=<n>; <m> oldest excluded)` form — e.g. `Showing {0} of {1} posts (cap: {2}={0}; {3} oldest excluded)`. (Note: acceptance item 5's example happens to set the included count equal to the cap value, which is the intended steady-state behavior — `included == cap` whenever `total > cap`; the four tokens nonetheless remain independent because the IT may use any cap/total/excluded combination.)
     - `reply.summary.top_3_of_n_prefix` present (interpolation token for N)
     Verify per key: `grep -E '^<key>=' en.properties` returns exactly 1 match"
-  - "BundleLoader's bundle-completeness CI check (M1-035c's commit) continues to pass: every BundleKeys constant has a matching en.properties value AND no orphan en.properties entries exist. Verify: `mvn -B clean verify` exits 0 — the BundleLoaderTest from M1-035c asserts no missing-key and no orphan-key on boot"
+  - "BundleLoader's bundle-completeness CI check (M1-035c's commit) continues to pass with the eight new constants added to BundleKeys: every BundleKeys constant — including the new ones this ticket appends — resolves to a non-empty en.properties value. Verify: `mvn -B clean verify` exits 0 — the BundleLoaderTest from M1-035c iterates BundleKeys via reflection and asserts each constant resolves to a non-empty bundle value. NOTE: BundleLoaderTest is forward-direction only (BundleKeys → en.properties); the reverse-direction orphan check (no en.properties entries WITHOUT a matching BundleKeys constant) is NOT enforced in v1 and is NOT part of this ticket's contract. If a future ticket adds the orphan-direction check, the developer of THAT ticket reconciles any orphans then."
   - "Cluster cap is read from `infochat.summary.cluster-cap` property (per docs/design/03-commands.md §`/summary`); the default value per profile MUST live in application.properties or an @ConfigProperty default — laptop=200, vps=100, pi=50, remote-llm=500. Verify: `grep -E 'infochat\\.summary\\.cluster-cap' SummaryCommandHandler.java SummaryProseGenerator.java EligiblePostQuery.java` returns ≥1 match in at least one of those files"
   - "Every prior test continues to pass: M1-003 @QuarkusTest stubs, M1-007 cross-module AllSpisLoadIT, M1-007a/b/c SPI smoke tests, M1-008 per-scope isolation IT, M1-008a/b/c per-row schema tests, M1-022/023/024/025/026 ingest-source tests, M1-027/028 outbox/NOTIFY tests, M1-032/033/034a/034b eval-pipeline tests (including the M1-033 LlmProvider client + per-task router), M1-035/035a/035b/035c T1-E surface (including AdapterRouterIT). Verify: `mvn -B clean verify` from the repo root exits 0 AND failsafe / surefire reports show zero failures"
 test_plan:
@@ -181,6 +186,41 @@ escalations:
       - cross-cutting concerns — audited (pass) — identified: determinism boundary (deterministic SQL before LLM, ORDER BY published_at DESC, id DESC), per-(user, scope) isolation (filter by subscriptions), plain-text-only invariant (sanitizer strips markdown links), `[REDACTED:<id>]` placeholder retention through to prompt, English-only bundle keys (T2-C will add translation), uncached on-the-fly path.
       - implementation order — not audited: stopped at the verb-catalogue blocker. The natural order would be Args → EligiblePostQuery → ClusterTraversal → SummaryProseGenerator → LlmOutputSanitizer → SummaryCommandHandler → IT, with bundle keys + en.properties authored alongside the first consumer, but the audit-logging gap blocks the sanitizer step.
       - risks — not audited: stopped at the verb-catalogue blocker. Other un-audited risk areas the next Plan pass after refinement should look at: (a) cluster-cap excess message interpolation (laptop=200 in acceptance vs `bundle('reply.summary.cap_excess_notice')` — the cap-excess prefix needs to be readable for the IT to assert it without depending on adapter-level rendering); (b) the fuzzy-suggestion footer for `error.summary.unknown_tag` — the controlled-vocabulary read path (tag table SELECT) is not in `files_scope`; (c) the `>5 followed tags` top-3 selection rule — the "most-active by post count" query is a second SELECT in EligiblePostQuery that the IT must seed with uneven post distribution to pass.
+  - date: 2026-05-18
+    reason: outline-fail (round 2 — post-refine Plan pass found two structural blockers round 1 did not audit)
+    reviewer_verdict_excerpt: |
+      ## OUTLINE FAILED — escalation recommended
+
+      REASON: Two load-bearing API-surface/scope contradictions block implementation as written.
+
+      (1) **BundleKeys constant indirection vs files_scope / out_of_scope.** Acceptance item 4 and item 14 together mandate eight NEW bundle keys (`error.summary.window_minutes_not_accepted`, `error.summary.window_out_of_range`, `error.summary.unknown_tag`, `error.summary.tag_malformed`, `reply.summary.no_posts_yet`, `reply.summary.degraded_notice`, `reply.summary.cap_excess_notice`, `reply.summary.top_3_of_n_prefix`). The established codebase pattern (`AddSourceCommandHandler.java` lines 115, 123, 127, 133, 151, 170, 173, 176, 178) uses `bundleLoader.get(BundleKeys.XXX)` — every bundle key has a `public static final String` constant on `BundleKeys.java`. The ticket's `out_of_scope` explicitly forbids "any change to ... BundleKeys ..." and `files_scope` does not list `BundleKeys.java`. With `files_budget: 14` fully consumed, the developer cannot add `BundleKeys.java`. The only paths are (a) reference bundle keys as inline string literals (diverges from the established pattern AND creates orphan en.properties entries that acceptance item 16 explicitly flags as forbidden), or (b) widen `files_scope` to include `BundleKeys.java` AND raise `files_budget` to 15 (an explicit out_of_scope override). Neither is achievable without refine.
+
+      (2) **TagNormalizer non-existence vs Implementation notes' "consume it as-is".** Implementation notes say: "`infochat-core` ships `TagNormalizer.normalize(String)`; consume it from SummaryArgs's tag parser. Do NOT re-implement the pipeline; do NOT add a new normalizer." Verified that NO class `TagNormalizer` exists in the repository (`find . -name TagNormalizer.java` returns zero hits). The closest extant surface is `AddSourceArgs.normalizeTag(String)` (private static, NFC + lowercase only, NO regex check, NO length cap). Acceptance item 4 requires rejecting `>48 chars` tags with `error.summary.tag_malformed` — i.e. the `[a-z0-9][a-z0-9-]{0,47}` regex must run inside the parser. The developer's options: (a) inline the regex check into `SummaryArgs.java` (contradicts "do NOT re-implement"), or (b) create a new `TagNormalizer.java` in `infochat-core` (contradicts "do NOT add a new normalizer" AND would need a file outside `files_scope` and outside `files_budget`).
+
+      SUGGESTED ESCALATION: refine
+
+      Two complementary refinement paths:
+      - For (1): widen `files_scope` to include `infochat-provider/src/main/java/io/infochat/provider/bundle/BundleKeys.java`, raise `files_budget` to 15, and qualify the out_of_scope BundleKeys entry: "BundleKeys constants may be APPENDED; existing constants may not be modified or removed." This matches M1-036's commit `bc9b78f` (which added the M1-036 `ERROR_ADD_SOURCE_*` and `REPLY_ADD_SOURCE_*` constants).
+      - For (2): replace the Implementation-notes paragraph with "inline the trim + NFC + lowercase + `[a-z0-9][a-z0-9-]{0,47}` regex check inside SummaryArgs's tag parser, mirroring the AddSourceArgs.normalizeTag shape augmented with the spec's regex check", OR carve a new `TagNormalizer` utility into `infochat-core` and widen `files_scope` + `files_budget` to land it.
+
+      EVIDENCE:
+      - Ticket out_of_scope: "any change to ... BundleKeys ... (the T1-E surface is FROZEN at the M1-035 umbrella's round; this ticket consumes the CommandHandler SPI and BundleKeys as-is)"
+      - `files_scope`: 14 entries, `BundleKeys.java` NOT listed, `TagNormalizer.java` NOT listed.
+      - Acceptance items 4 + 14 enumerate 8 new bundle keys.
+      - Acceptance item 16: "no orphan en.properties entries exist" — closes the inline-string-literal escape hatch.
+      - `BundleLoaderTest` only iterates BundleKeys → en.properties (forward direction), not the reverse — orphan-check is asserted by acceptance item 16 as a desideratum but is NOT currently enforced by an automated test (separate inconsistency worth flagging during refine).
+      - AddSourceCommandHandler.java line 115: `bundleLoader.get(BundleKeys.ERROR_ADD_SOURCE_GROUP_ADMIN_ONLY)`.
+      - Implementation notes lines 269-274: "consume `TagNormalizer.normalize(String)` from infochat-core ... do NOT re-implement the pipeline; do NOT add a new normalizer."
+      - `find ... -name TagNormalizer.java` → zero hits.
+      - AddSourceArgs.normalizeTag (lines 225-227): `Normalizer.normalize(raw.trim(), Form.NFC).toLowerCase(Locale.ROOT)` — NO regex, NO length cap.
+
+      ### Audit coverage
+      - file accounting — audited (fail) — `files_scope` lists 14 matching `files_budget: 14`. Adding `BundleKeys.java` (Blocker 1) exceeds budget; adding `TagNormalizer.java` (Blocker 2 path b) also exceeds budget AND falls outside scope.
+      - API-surface — audited (fail) — confirmed `CommandHandler`, `InboundRouter.handleSlash`, `BundleLoader.get`, `LlmProvider.generate(ModelTask, String, String)`, `ModelTask.SUMMARIZER`, `ScopeRef`, `OutboundMessage` all exist as authored. FAILS on missing `TagNormalizer` and on BundleKeys-vs-files_scope contradiction.
+      - test-scaffolding — audited (pass) — 7 new test files in `test_plan.adds`; `preserves` lists prior tests; "Authorized test changes" body section explicitly states no pre-existing test modifications.
+      - cross-cutting concerns — audited (pass) — identified: determinism boundary (deterministic SQL ORDER BY before LLM, per-cluster invocation), per-(user, scope) isolation via source_subscription filter, plain-text-only + markdown-link strip in sanitizer, [REDACTED:<id>] placeholder retention end-to-end, English-only bundle keys with T2-C translation deferral, uncached on-the-fly path (D18), JBoss Logging WARN observability (per 2026-05-18 revision), post_reference table absence forces singleton clusters, profile-driven cluster-cap, degraded-fallback parity with periodic digests (D17).
+      - implementation order — not audited: stopped at blockers above. Natural order would be (a) en.properties + BundleKeys constants, (b) SummaryArgs + Test, (c) EligiblePostQuery + IT, (d) ClusterTraversal + Test, (e) SummaryProseGenerator + Test, (f) LlmOutputSanitizer + Test, (g) SummaryCommandHandler + Test, (h) SummaryIT. Re-audit after refine.
+      - risks — not audited: stopped at blockers above. Un-audited risks for the next Plan pass: (i) `>5 followed tags` top-3 tie-break rule not pinned by acceptance text — needs design check or acceptance clarification; (ii) `reply.summary.cap_excess_notice` 3-token interpolation (profile, cap, excluded) — IT must assert interpolated text without adapter-rendering dependency; (iii) sanitizer match-set "DERIVED FROM THE CLOSED LIST at boot — NOT hand-maintained" (acceptance item 9) is hard to satisfy without parsing markdown at boot, which is not a v1 pattern — Implementation notes suggest a hand-maintained constant holder, contradicting the acceptance text; (iv) sanitizer strip-vs-refuse is "implementer chooses" (acceptance item 9) — unusual for a security control and may need spec-tier clarification; (v) the markdown-link strip pass (`[text](url) → bare URL`) is mentioned in Big-picture notes but the regex shape is not pinned by acceptance, and it's a SECOND sanitizer pass separate from the closed-list strip — both must run before reply leaves the provider.
 revisions:
   - date: 2026-05-18
     reason: outline-fail refine — sanitizer per-match observability switched from `audit_log` SQL row INSERT to JBoss Logging emission; persistent `audit_log` row write deferred to a T2 follow-up that lands the V12 migration adding `LLM_OUTPUT_SANITIZED` + an `AuditLogWriter` class + the coordinated update to M1-008a's verb-count grep test
@@ -191,6 +231,26 @@ revisions:
       - "implementation notes: `ModelTask` hint updated — Plan subagent confirmed the existing enum value is `ModelTask.SUMMARIZER`, not the speculative `SUMMARY_PROSE`"
       - "out_of_scope (ModelTask): updated to cite `SUMMARIZER` as the verified-extant value"
       - "Big-picture notes: 'Sanitizer audit logging is per-occurrence, not throttled' clarified — the per-occurrence property holds in both v1 (one log line per match) and post-T2 (one audit_log row per match)"
+  - date: 2026-05-18
+    reason: outline-fail refine (round 2) — comprehensive sweep addressing two API-surface blockers Plan caught on round 2 PLUS the un-audited risks (i)-(v) Plan flagged for the next pass PLUS the carried-over clarity WARNs (Item 12 missing `classification:` and the deterministic-vs-LLM split)
+    changes:
+      - "files_budget: 14 → 15 (one slot for the BundleKeys.java carve-out)"
+      - "files_scope: appended `infochat-provider/.../bundle/BundleKeys.java` for limited APPEND-ONLY use (matches M1-036's `bc9b78f` precedent)"
+      - "out_of_scope (Round-2 Blocker 1, BundleKeys carve-out): removed `BundleKeys` from the frozen-class list AND added an explicit qualifier: BundleKeys constants may be appended for /summary's 8 new keys; existing constants must not be modified, renamed, or removed"
+      - "acceptance item 4 (Round-2 Blocker 2, TagNormalizer): replaced `tag rejected by TagNormalizer` with `rejected by SummaryArgs's inline normalizer` and inlined the V6 `tag.name` regex `^[a-z0-9][a-z0-9-]{0,47}$`. The non-existent TagNormalizer class is no longer referenced."
+      - "acceptance item 6 (Risk i: tie-break): pinned the top-3 followed-tags ordering as count DESC then `tag.name` ASC so EligiblePostQueryIT's tied-count seed is deterministically resolvable"
+      - "acceptance item 9 (Risk iii, iv: sanitizer match-set + strip-vs-refuse): rewrote — match set is a `private static final List<String> CLOSED_LIST` IN CODE inside LlmOutputSanitizer.java (not derived at boot); STRIP behavior pinned (not implementer-choose); replacement string is the fixed literal `[redacted command]`"
+      - "acceptance item 11 (CI completeness): rewrote — the @Test `matchSetEqualsSpecClosedList` reads docs/spec/commands.md at TEST tier, parses the backticked tokens under §Permission model §Closed list of privileged-tier commands, and asserts equality with the runtime CLOSED_LIST. Spec-side additions without a CLOSED_LIST update → CI fails."
+      - "acceptance item 12 (Clarity WARN carryover: missing `classification:`; deterministic-vs-LLM): added `classification:` to the field list AND pinned which fields are deterministic (six) vs LLM-authored (only `summary:`). Test verifies field ordering AND deterministic-field content against seeded values."
+      - "acceptance item 14 (Risk v: markdown-link strip regex + ordering): pinned the regex `\\[([^\\]]+)\\]\\(([^)]+)\\)` → `$1 ($2)` (preserve both text and bare URL per the 2026-05-18 user choice). Added the strip-pass ordering rule (markdown FIRST, closed-list SECOND) with the `[Click for admin](/grant-admin)` → `Click for admin ([redacted command])` evasion case as a test vector."
+      - "acceptance item 15 (Risk ii: cap_excess_notice tokens): corrected from 3 tokens (profile, cap, excluded) to 4 tokens (cap, total, profile, excluded) matching acceptance item 5's template shape `Showing {0} of {1} posts (cap: {2}={0}; {3} oldest excluded)`. The item-5/item-15 mismatch is resolved."
+      - "acceptance item 16 (BundleLoaderTest scope correction): dropped the false claim that BundleLoaderTest asserts orphan-direction (no en.properties WITHOUT BundleKeys constant). Verified by reading the test: it only iterates BundleKeys → en.properties (forward). The orphan-direction check is a desideratum, not enforced in v1, and explicitly NOT this ticket's contract."
+      - "Implementation notes: rewrote the `TagNormalizer` paragraph to inline-normalization-in-SummaryArgs (signature sketch included). Documented the M1-036/M1-037 divergence as deliberate technical debt to be retired when /follow-tag (T2-B) adds a third consumer."
+      - "Implementation notes: rewrote the `Sanitizer match-set source` paragraph — CLOSED_LIST is hand-maintained in code; the CI @Test parses the spec markdown to enforce sync."
+      - "Implementation notes: NEW section `Sanitizer behavior: STRIP, replacement [redacted command]` pinning the strip-not-refuse v1 choice."
+      - "Implementation notes: NEW section `Sanitizer pass ordering: markdown-link strip FIRST, closed-list strip SECOND` with the link-evasion rationale."
+      - "Big-picture notes: rewrote `Plain-text-only invariant` to describe the two-pass sanitizer with explicit ordering."
+      - "Big-picture notes: NEW bullet `Per-cluster output: ONE field is LLM-authored; the other six are deterministic` listing exactly which fields the handler computes vs which the LLM emits."
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -260,12 +320,42 @@ Non-binding hints — the developer reads these as context, not a recipe.
   handle(ScopeRef, String)`. The router has normalized the body and
   confirmed the leading slash; the handler sees `/summary [tag]
   [-w <window>]` verbatim with the leading slash.
-- **TagNormalizer.** docs/design/03-commands.md §Tag arguments
+- **Tag normalization (inline in SummaryArgs).** docs/design/03-commands.md §Tag arguments
   specifies the closed normalization pipeline (trim + NFC +
-  toLowerCase(Locale.ROOT) + `[a-z0-9][a-z0-9-]{0,47}` regex).
-  `infochat-core` ships `TagNormalizer.normalize(String)`; consume
-  it from SummaryArgs's tag parser. Do NOT re-implement the
-  pipeline; do NOT add a new normalizer.
+  toLowerCase(Locale.ROOT) + `^[a-z0-9][a-z0-9-]{0,47}$` regex, matching
+  the V6 `tag.name` CHECK constraint). Verified during the 2026-05-18
+  round-2 outline-fail refine: NO `TagNormalizer` class exists in
+  `infochat-core`; the closest extant surface is the private static
+  `AddSourceArgs.normalizeTag(String)` (NFC + lowercase only, no regex
+  check — that handler is write-side, so the SQL CHECK catches invalid
+  chars on INSERT). /summary is a read-side filter, so it MUST reject
+  at parse time (no SQL CHECK to fall back on for a read).
+
+  Implementation choice for THIS ticket: inline the full normalization
+  inside SummaryArgs.java as a private static method shaped like
+  AddSourceArgs.normalizeTag plus the regex/length check. Concretely
+  (signatures only — no code):
+  ```
+  private static String normalizeTag(String raw)
+      // returns Normalizer.normalize(raw.trim(), NFC).toLowerCase(Locale.ROOT)
+  private static boolean isValidTag(String normalized)
+      // returns normalized.matches("^[a-z0-9][a-z0-9-]{0,47}$")
+  ```
+  A bad-tag input (`>48 chars`, leading hyphen, uppercase letters
+  surviving NFC, etc.) fails `isValidTag` → SummaryArgs returns a
+  parse error keyed `error.summary.tag_malformed`.
+
+  Do NOT carve out a shared `TagNormalizer` class in this ticket —
+  that would expand scope to `infochat-core` files outside
+  `files_scope` AND require touching `AddSourceArgs` (which is
+  `out_of_scope`). When a third tag consumer lands (e.g. /follow-tag
+  in T2-B), THAT ticket extracts the shared utility and refactors
+  both /add-source and /summary to use it. The inline duplication
+  is a deliberate, time-bounded acceptance of the M1-036/M1-037
+  divergence (`/add-source` accepts NFC+lowercase tags relying on
+  SQL CHECK; `/summary` rejects at parse time with the regex). The
+  divergence is documented here so the future refactor has a paper
+  trail.
 - **LlmProvider.** M1-033 ships `LlmProvider` + the per-task router
   + the OpenAI-compatible HTTP client. SummaryProseGenerator's
   prompt task uses the existing `ModelTask.SUMMARIZER` enum value
@@ -310,19 +400,52 @@ Non-binding hints — the developer reads these as context, not a recipe.
   ```
   Cluster blocks are spec'd at design tier; the reviewer treats the
   layout as the contract for the IT's response-body grep assertions.
-- **Sanitizer match-set source.** docs/spec/commands.md §Permission
-  model §Closed list of privileged-tier commands. Author a constant
-  holder (e.g.
-  `infochat-provider/src/main/java/io/infochat/provider/command/
-  PrivilegedCommandCatalogue.java`) that mirrors the spec list, and
-  have LlmOutputSanitizer derive its match set from that constant.
-  The CI completeness @Test asserts the constant equals the spec
-  list — file an issue and FAIL CI if they diverge. Note:
-  PrivilegedCommandCatalogue.java is NOT in the files_scope budget
-  because the constant can live INSIDE LlmOutputSanitizer.java as
-  a private constant `List<String>` field; if the developer prefers
-  a separate class, the choice triggers a files_scope refine, NOT
-  inline scope expansion.
+- **Sanitizer match-set source — in-code constant + CI test parses the spec.**
+  The runtime match set is a `private static final List<String>
+  CLOSED_LIST` field inside LlmOutputSanitizer.java. The developer
+  hand-maintains this list to mirror docs/spec/commands.md §Permission
+  model §Closed list of privileged-tier commands. The "hand-maintained
+  in code" choice is intentional: parsing the spec markdown at boot
+  is not a v1 codebase pattern, and a versioned resource file would
+  add a separate sync problem. The CI completeness @Test from
+  acceptance item 11 (`LlmOutputSanitizerTest.matchSetEqualsSpecClosedList`)
+  is what enforces sync: it parses the spec markdown at TEST tier,
+  builds the expected Set<String>, and asserts equality with
+  `LlmOutputSanitizer.CLOSED_LIST`. A spec-side addition without a
+  CLOSED_LIST update → CI fails. A CLOSED_LIST entry that no longer
+  corresponds to a listed command → CI fails. Either direction
+  surfaces the divergence before the diff merges.
+
+  Optional placement: the developer may move CLOSED_LIST to a sibling
+  holder class (e.g. `PrivilegedCommandCatalogue.java` in the same
+  package) IF they prefer; that file is INSIDE the current
+  `files_budget: 15` if SummaryArgs / SummaryCommandHandler / etc.
+  do not need their own files (they do, so the holder spends one of
+  the existing 15 slots — see file accounting). Default placement
+  is INSIDE LlmOutputSanitizer.java to avoid the slot question.
+- **Sanitizer behavior: STRIP, replacement `[redacted command]`.**
+  docs/spec/security.md §LLM output sanitizer leaves the
+  strip-or-refuse choice open ("strips or refuses output containing
+  admin command strings"). This ticket pins STRIP across all surfaces
+  consuming the sanitizer because /summary's graceful-degradation
+  property is load-bearing: if a small LLM emits a privileged command
+  inside otherwise-useful prose, the reader should still see the
+  surrounding summary (minus the redacted string), not an empty/failed
+  reply. Replacement string: the fixed literal `[redacted command]`.
+  Uniform across all CLOSED_LIST entries.
+- **Sanitizer pass ordering: markdown-link strip FIRST, closed-list strip SECOND.**
+  Two passes run in sequence inside LlmOutputSanitizer:
+  1. Markdown-link strip: regex `\[([^\]]+)\]\(([^)]+)\)` →
+     replacement `$1 ($2)` (preserves both link text and bare URL,
+     per the 2026-05-18 user choice). Runs FIRST so that a hostile
+     `[Click for admin](/grant-admin)` flattens to
+     `Click for admin (/grant-admin)` BEFORE the closed-list pass
+     sees it.
+  2. Closed-list strip: each CLOSED_LIST entry, replaced by the
+     fixed literal `[redacted command]`. Runs SECOND, after markdown
+     flattening, so it sees the un-obfuscated command tokens.
+  Without this ordering, a markdown-hidden admin command would
+  evade the closed-list strip and reach the user.
 
 ## Big-picture notes
 
@@ -334,6 +457,22 @@ What the implementer must keep in mind that isn't in the immediate diff.
   input DB state produces the same cluster set across runs — only
   the prose varies. This is the docs/spec/llm.md §Determinism
   boundary commitment.
+- **Per-cluster output: ONE field is LLM-authored; the other six are deterministic.**
+  Of the cluster-block fields (`[topic_id=<id>]`, `headline`,
+  `covered by:`, `score:`, `summary:`, `classification:`, `tags:`),
+  only `summary:` is LLM-authored prose. SummaryCommandHandler
+  computes the other six from `cluster.posts` metadata:
+  `[topic_id=<id>]` from the lexicographically-smallest post UID
+  (per acceptance item 7), `headline` from the cluster's first post
+  `title`, `covered by:` from the cluster posts' source names + UIDs,
+  `score:` from cluster source count + category set, `classification:`
+  from the comma-joined union of `cluster.posts.tags`, `tags:` from
+  the deduplicated union of `cluster.posts.tags`. SummaryProseGenerator
+  invokes the LlmProvider with a prompt that asks ONLY for the
+  prose body that fills the `summary:` field — not for the surrounding
+  structural fields. A future small-LLM that "helpfully" echoes the
+  field labels back gets the labels stripped at the prompt-parsing
+  layer (the prompt asks for prose, not for the field skeleton).
 - **Determinism extends to ordering.** EligiblePostQuery's `ORDER BY
   published_at DESC, id DESC` is load-bearing: ties broken stably
   on id ensure that two `/summary` calls one second apart against
@@ -371,10 +510,16 @@ What the implementer must keep in mind that isn't in the immediate diff.
   one audit_log row per match after the T2 wiring.
 - **Plain-text-only invariant.** docs/spec/commands.md §Surface
   conventions + CLAUDE.md §Key conventions: bare URLs, no markdown
-  link syntax. The sanitizer strips `[text](url)` patterns from LLM
-  output as part of its plain-text enforcement (the closed-list
-  regex pass is separate from the markdown-strip pass; both run
-  before the reply leaves the provider).
+  link syntax. Two distinct sanitizer passes enforce this on LLM
+  output:
+   1. The markdown-link strip pass rewrites `[text](url)` → `text (url)`
+      (preserves both link text and bare URL).
+   2. The closed-list strip pass replaces every CLOSED_LIST command
+      occurrence with `[redacted command]`.
+  The markdown pass runs FIRST so it flattens any LLM attempt to
+  hide a privileged command behind link syntax (e.g.
+  `[Click for admin](/grant-admin)` → `Click for admin (/grant-admin)`
+  → `Click for admin ([redacted command])`).
 - **Per-task routing is M1-033's job.** SummaryProseGenerator hands
   the LlmProvider a `(ModelTask, prompt)` pair; M1-033's per-task
   router resolves it to an actual model + endpoint. SummaryProse-
