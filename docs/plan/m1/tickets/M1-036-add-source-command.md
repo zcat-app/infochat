@@ -117,8 +117,8 @@ spec_refs:
   - docs/spec/security.md §Source URL visibility
   - docs/spec/architecture.md §Inter-service communication
   - docs/design/03-commands.md §`/add-source`
-  - docs/design/00-mvp.md §6 MVP exit criteria (criterion §4)
-  - docs/design/00-mvp.md §2 Schema (MVP audit_log scope: bot-admin bootstrap + /add-source)
+  - docs/design/00-mvp.md §6. MVP exit criteria
+  - docs/design/00-mvp.md §2. Schema (MVP tables only)
 decision_refs:
   - D5
   - D7
