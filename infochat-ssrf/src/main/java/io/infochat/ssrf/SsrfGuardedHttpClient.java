@@ -369,6 +369,84 @@ public final class SsrfGuardedHttpClient {
         return new BoundedByteArrayResponse(terminalResponse, body);
     }
 
+    /**
+     * Issue a GET against {@code uri} with caller-supplied per-request
+     * headers attached to each hop in addition to the default
+     * {@code Accept} / {@code User-Agent}. The full SSRF guard
+     * pipeline runs identically to {@link #get(URI)} — scheme
+     * allowlist, userinfo gate, host canonicalization, DNS
+     * resolution + {@link IpBlocklist} check, DNS pinning, redirect
+     * loop with per-hop re-validation, lock-released body read with
+     * the same bounds. The extra headers are attached on every
+     * redirect hop (matching how the default {@code Accept} /
+     * {@code User-Agent} propagate).
+     *
+     * <p>The JDK's {@link HttpRequest.Builder#header(String, String)}
+     * is additive: passing {@code Map.of("Accept", "text/xml")} adds
+     * a second {@code Accept} header rather than replacing the
+     * default. This overload exists for header INJECTION (the
+     * primary caller is the Provider's URL probe injecting
+     * {@code Range: bytes=0-0} to avoid downloading a full feed
+     * body), not for header overrides. {@link SsrfPolicyException}
+     * is raised on any policy violation, matching {@link #get(URI)}.
+     */
+    public HttpResponse<byte[]> get(URI uri, Map<String, String> extraHeaders)
+            throws IOException, InterruptedException {
+        HttpResponse<InputStream> terminalResponse;
+        ReentrantLock lock = PinnedDnsResolver.Provider.lock();
+        lock.lock();
+        try {
+            URI current = uri;
+            int redirectCount = 0;
+            while (true) {
+                ResolvedHost resolved = resolveAndValidate(current);
+                PinnedDnsResolver.Provider.installPins(
+                    Map.of(resolved.canonicalHost(), resolved.addresses()));
+
+                HttpClient perCallClient = HttpClient.newBuilder()
+                    .connectTimeout(connectTimeout)
+                    .followRedirects(HttpClient.Redirect.NEVER)
+                    .build();
+                HttpRequest.Builder reqBuilder = HttpRequest.newBuilder()
+                    .uri(current)
+                    .timeout(requestTimeout)
+                    .header("Accept", ACCEPT_HEADER)
+                    .header("User-Agent", USER_AGENT)
+                    .GET();
+                extraHeaders.forEach(reqBuilder::header);
+                HttpRequest request = reqBuilder.build();
+                HttpResponse<InputStream> response =
+                    perCallClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+
+                int status = response.statusCode();
+                if (status >= 300 && status < 400) {
+                    try (InputStream discard = response.body()) {
+                        // Drain via close(); redirect bodies carry
+                        // no payload we need.
+                    }
+                    redirectCount++;
+                    if (redirectCount > redirectCap) {
+                        throw new SsrfPolicyException("redirect cap exceeded");
+                    }
+                    String location = response.headers().firstValue("Location")
+                        .orElseThrow(() -> new SsrfPolicyException(
+                            "redirect response missing Location header"));
+                    current = current.resolve(location);
+                    continue;
+                }
+
+                terminalResponse = response;
+                break;
+            }
+        } finally {
+            PinnedDnsResolver.Provider.clearPins();
+            lock.unlock();
+        }
+
+        byte[] body = readBounded(terminalResponse);
+        return new BoundedByteArrayResponse(terminalResponse, body);
+    }
+
     private ResolvedHost resolveAndValidate(URI uri) {
         String scheme = uri.getScheme();
         if (scheme == null || !(scheme.equals("http") || scheme.equals("https"))) {

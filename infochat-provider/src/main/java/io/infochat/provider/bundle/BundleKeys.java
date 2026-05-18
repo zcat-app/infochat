@@ -41,6 +41,63 @@ public final class BundleKeys {
     /** Deterministic reply for non-slash chat input until T2-D wires the chat dispatcher. Same M1-035b literal/bundle divergence note. */
     public static final String CHAT_MODE_NOT_IN_MVP = "chat_mode.not_in_mvp";
 
+    // ----- /add-source friendly errors (M1-036) ---------------------------
+    // Per docs/spec/commands.md §Source management. Every parse / probe
+    // / permission rejection path the spec assigns a friendly error to
+    // is keyed here so the handler never interpolates an exception
+    // message into the user-visible body. {0}/{1} interpolation tokens
+    // are filled by the caller via java.text.MessageFormat.
+
+    /** {@code /add-source} called without {@code --tags}, or with empty {@code --tags=}. */
+    public static final String ERROR_ADD_SOURCE_TAGS_REQUIRED = "error.add_source.tags_required";
+
+    /** {@code /add-source --type=<unknown>} — value is not in the closed {@code source.kind} set. */
+    public static final String ERROR_ADD_SOURCE_UNKNOWN_KIND = "error.add_source.unknown_kind";
+
+    /** {@code /add-source --category=<unknown>} — value is not in {@code news|blog|social}. */
+    public static final String ERROR_ADD_SOURCE_UNKNOWN_CATEGORY = "error.add_source.unknown_category";
+
+    /** {@code /add-source <url>} where {@code <url>} lacks a scheme or host. */
+    public static final String ERROR_ADD_SOURCE_MALFORMED_URL = "error.add_source.malformed_url";
+
+    /** URL probe got 4xx/5xx or a connect failure that is not SSRF/timeout. */
+    public static final String ERROR_ADD_SOURCE_URL_UNREACHABLE = "error.add_source.url_unreachable";
+
+    /** SSRF guard rejected the probe (localhost / RFC1918 / metadata IP / blocked scheme). */
+    public static final String ERROR_ADD_SOURCE_URL_BLOCKED_SSRF = "error.add_source.url_blocked_ssrf";
+
+    /** Probe exceeded the per-read or total wall-clock deadline. */
+    public static final String ERROR_ADD_SOURCE_URL_TIMEOUT = "error.add_source.url_timeout";
+
+    /** Resolver could not pick a kind AND the probe's {@code Content-Type} contradicted the URL hint. */
+    public static final String ERROR_ADD_SOURCE_AMBIGUOUS_URL = "error.add_source.ambiguous_url";
+
+    /** Caller is banned (handler's own ban check; defense-in-depth — T2-A also gates upstream). */
+    public static final String ERROR_ADD_SOURCE_BANNED = "error.add_source.banned";
+
+    /** Caller invoked {@code /add-source} in a group scope without group-admin privilege. */
+    public static final String ERROR_ADD_SOURCE_GROUP_ADMIN_ONLY = "error.add_source.group_admin_only";
+
+    // ----- /add-source successful replies (M1-036) ------------------------
+
+    /** Branch A — fresh insert. {@code {0}} = source display name. */
+    public static final String REPLY_ADD_SOURCE_FRESH_INSERT = "reply.add_source.fresh_insert";
+
+    /** Branch B — non-admin caller subscribed to an existing source (tags ignored). */
+    public static final String REPLY_ADD_SOURCE_SUBSCRIBED_EXISTING = "reply.add_source.subscribed_existing";
+
+    /** Branch C — bot-admin caller replaced {@code bootstrap_tags} on an existing source. */
+    public static final String REPLY_ADD_SOURCE_ADMIN_TAGS_REPLACED = "reply.add_source.admin_tags_replaced";
+
+    /**
+     * Branch A appendix — operator-visibility disclosure per
+     * {@code docs/spec/security.md} §Source URL visibility. The literal
+     * substring {@code visible to bot admins} is asserted by
+     * {@code AddSourceCommandHandlerTest}.
+     */
+    public static final String REPLY_ADD_SOURCE_URL_VISIBILITY_DISCLOSURE =
+            "reply.add_source.url_visibility_disclosure";
+
     private BundleKeys() {
         throw new AssertionError("BundleKeys is a constant holder and must not be instantiated");
     }
