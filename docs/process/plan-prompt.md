@@ -1,8 +1,8 @@
 # Plan subagent prompt template
 
-Used when `/m1-tick start <id>` encounters a ticket with `complexity: high`. The skill spawns the built-in `Plan` subagent (`Agent(subagent_type: "Plan")`) with the prompt below to produce an implementation outline before any code is written. The outline is appended to the ticket body under a new "Implementation outline" section; the developer (the main conversation) reads it before touching code.
+Used when `/m1-tick start <id>` encounters a ticket with `complexity: high`. The skill spawns the built-in `Plan` subagent (`Agent(subagent_type: "Plan")`) with the prompt below to produce an implementation outline before any code is written. The successful outline is Written by the subagent to a sidecar file (`target/m1-tick-outline-{ID}.md`); the ticket frontmatter gains an `outline_file:` pointer so future Reads of the ticket don't drag the outline body back into context. The developer (the main conversation) reads the sidecar before touching code. An OUTLINE FAILED block is returned inline (not Written to the sidecar) so the skill can append it to the ticket's `escalations:` frontmatter entry as the persistent audit trail.
 
-The Plan subagent is a Claude Code built-in (one of `claude-code-guide`, `Explore`, `general-purpose`, `Plan`, `statusline-setup`); we do not define a custom agent for it. The prompt below is what the skill substitutes and passes as the `prompt` argument.
+The Plan subagent is a Claude Code built-in (one of `claude-code-guide`, `Explore`, `general-purpose`, `Plan`, `statusline-setup`); we do not define a custom agent for it. The prompt below is what the skill substitutes and passes as the `prompt` argument. The path-based slimming pattern mirrors [`clarity-prompt.md`](clarity-prompt.md): only path placeholders are substituted, and the subagent loads the ticket and each cited spec file via its own Read tool in fresh context.
 
 ---
 
@@ -11,28 +11,90 @@ The Plan subagent is a Claude Code built-in (one of `claude-code-guide`, `Explor
 ```
 You are producing an implementation outline for a single ticket
 that has been classified `complexity: high`. You have NO conversation
-context; everything you know is in the ticket below and the spec/design
+context; everything you know is in the ticket and the spec/design
 files it references. You will NOT write any code. Your output is a
 markdown outline that the developer (a separate agent in the main
 conversation) will follow.
 
 The ticket is: {{TICKET_ID}}
+Ticket file (Read this with the Read tool): {{TICKET_FILE_PATH}}
+Outline file (Write the full implementation outline here using the
+Write tool BEFORE returning your short chat reply — but ONLY in the
+success case; on OUTLINE FAILED, return the failure block inline as
+your chat reply and do NOT Write the outline file):
+{{OUTLINE_FILE_PATH}}
+
+Paths above are repo-relative unless prefixed with `/`. The Read and
+Write tools accept either form when the agent's CWD is the repo root.
 
 ---
 
-## Ticket
+## Inputs to load
 
-{{TICKET_FILE_CONTENT}}
+1. Use the Read tool to read the ticket file at {{TICKET_FILE_PATH}}.
+2. Before evaluating anything else, verify the ticket file you Read
+   has `id: {{TICKET_ID}}` in its YAML frontmatter. If the frontmatter
+   id does not match, abort the audit, return an OUTLINE FAILED block
+   citing the mismatch ("frontmatter id was X, prompt id was
+   {{TICKET_ID}}") as your chat reply, and do NOT Write the outline
+   file.
+3. For each entry in the ticket's `spec_refs:` list (frontmatter),
+   resolve the anchor yourself using the algorithm below. The skill
+   no longer pre-resolves spec_refs in the main session; you resolve
+   each spec_ref in your fresh context. Every spec_ref entry has the
+   form `<file-path> §<section-title>`.
 
----
+   **`spec_refs` anchor resolution algorithm.** For each entry:
+   1. Use the Read tool to read `<file-path>`.
+   2. Walk the file line-by-line maintaining a `fence_open` flag
+      (initially false). For each line, in order:
+      a. If the line is a CommonMark fenced code-block delimiter —
+         0–3 spaces of leading indent, then a run of three or more
+         backtick characters (U+0060) or three or more tilde
+         characters (U+007E), optionally followed by an info string
+         such as a language tag — toggle `fence_open` and continue
+         to the next line. Fence delimiter lines are themselves
+         never headings, regardless of what follows the delimiter
+         (a language tag after the opening run does not change
+         the line's role).
+      b. If `fence_open` is true after step (a), skip the line.
+         Anything inside a fenced code block is content, not
+         document structure — a line that reads `## Foo` inside a
+         fence is a literal `## Foo` in the rendered code block, not
+         a section heading. This is the rule whose absence caused
+         the §5.4–§5.11 anchors in
+         docs/design/05-llm-and-embeddings.md to disappear when an
+         unclosed fence in §8.7.3 swallowed everything below it
+         (see commit 7de7e515).
+      c. If the line matches `^[ ]{0,3}#{1,6}[ \t]+\S` (a CommonMark
+         ATX heading: 0–3 leading spaces, then 1–6 `#` markers, then
+         one or more spaces or tabs, then a non-empty title body),
+         record the line as a candidate heading with its line number
+         and the count of `#` markers as its depth. Otherwise skip.
+   3. For each candidate, derive the heading text by stripping, in
+      order: the leading whitespace, the `#`-marker run, the
+      whitespace between the markers and the title, and any trailing
+      whitespace or trailing `#`-run (per CommonMark, a trailing
+      run of `#` characters preceded by whitespace is decorative
+      and not part of the heading text).
+   4. Lowercase both the candidate heading text and the searched
+      section-title; do a substring match (the searched title must
+      appear as a substring of the candidate, or vice-versa for
+      partial titles).
+   5. If exactly one heading matches, the resolution is
+      `FOUND (line N: "<heading>")`.
+   6. If zero match, the resolution is `ANCHOR-NOT-FOUND`. Flag
+      ANCHOR-NOT-FOUND as a risk in the outline. If the anchor is
+      load-bearing on an acceptance item — i.e. the implementer
+      cannot proceed without re-reading the cited section — escalate
+      via OUTLINE FAILED instead.
+   7. If multiple match, prefer the heading whose depth (count of
+      `#` markers) is closest to the most recently resolved anchor's
+      depth; tie-break by line number ascending. If still tied, the
+      resolution is `AMBIGUOUS (lines: N, M, ...)`. Treat AMBIGUOUS
+      the same way as ANCHOR-NOT-FOUND.
 
-## Spec sections cited (verbatim, for cross-referencing)
-
-{{SPEC_REF_RESOLUTIONS}}
-
-(Each spec_ref in the ticket frontmatter is resolved here. If a ref's
-anchor wasn't found, the resolution will say "ANCHOR-NOT-FOUND" — flag
-that as a risk.)
+   Resolve every spec_ref before beginning the outline.
 
 ---
 
@@ -123,7 +185,11 @@ that as a risk.)
 
 ---
 
-## Return format
+## Return format — success path
+
+Use the Write tool to write the markdown body below to
+{{OUTLINE_FILE_PATH}}. This is the developer's reading material;
+the file is the only artifact the main session will see in detail.
 
 ```markdown
 ## Implementation outline (M<N>-NNN, generated by Plan subagent on YYYY-MM-DD)
@@ -164,9 +230,29 @@ that as a risk.)
 - risks — <audited (pass) | audited (fail) | not audited: reason>
 ```
 
+After the Write call returns, send exactly these three lines as your
+chat reply — nothing else, no preamble, no postscript:
+
+OUTLINE: PASS
+Outline file: {{OUTLINE_FILE_PATH}}
+Risks: <integer count>
+
+The skill parses these three lines literally; the full outline body
+lives only in the file you Wrote, which the skill records via an
+`outline_file:` pointer in the ticket frontmatter (not by inlining
+the outline body).
+
+---
+
+## Return format — failure path
+
 If the outline fails any check (files_budget exceeded; API-surface
 mismatch; test-modification unauthorized; ANCHOR-NOT-FOUND on a
-load-bearing spec_ref), return:
+load-bearing spec_ref), return the following block inline as your
+chat reply. Do NOT call the Write tool. Do NOT write the outline
+file. The failure reasoning belongs in the persistent audit trail
+(the ticket's `escalations:` frontmatter), not in a gitignored
+sidecar.
 
 ```markdown
 ## OUTLINE FAILED — escalation recommended
@@ -186,30 +272,30 @@ API-surface mismatch>
 - risks — <audited (pass) | audited (fail) | not audited: reason>
 ```
 
-The audit-coverage block appears in **both** the success outline and
-the OUTLINE FAILED return. Its purpose in the failed case is the
-safety net for the refinement step: an OUTLINE FAILED block with
-"file accounting — audited (fail), API-surface — not audited" tells
-the user (and the next Plan run) that the API surface remains
-un-audited and may hide a separate blocker the next Plan pass will
-discover. Without this enumeration, an OUTLINE FAILED block reads
-as exhaustive when it's actually one observation pass.
+The skill detects the OUTLINE FAILED block by the leading
+`## OUTLINE FAILED` heading and surfaces it as a pre-implementation
+escalation rather than letting the developer start. The block is
+recorded in the ticket's `escalations:` frontmatter entry.
 
-The skill will surface OUTLINE FAILED to the user as a pre-implementation
-escalation rather than letting the developer start.
-
-Return ONLY the outline (or the OUTLINE FAILED block). No preamble, no
-postscript. The skill appends your output verbatim to the ticket body.
+The audit-coverage block in the OUTLINE FAILED return is the safety
+net for the refinement step: an OUTLINE FAILED block with "file
+accounting — audited (fail), API-surface — not audited" tells the
+user (and the next Plan run) that the API surface remains un-audited
+and may hide a separate blocker the next Plan pass will discover.
+Without this enumeration, an OUTLINE FAILED block reads as
+exhaustive when it's actually one observation pass.
 ```
 
 ---
 
 ## Skill responsibilities (what `/m1-tick start` does around the prompt)
 
-1. After the clarity pre-flight passes, check the ticket's `complexity` field.
-2. If `complexity: high`, read this file and substitute `{{TICKET_ID}}`, `{{TICKET_FILE_CONTENT}}`, and `{{SPEC_REF_RESOLUTIONS}}` (the same resolved-anchors block built for clarity).
-3. Spawn `Agent(subagent_type: "Plan", prompt: <substituted>, description: "Implementation outline M<N>-NNN")`. Foreground.
-4. Capture the response. If it begins with `## OUTLINE FAILED`, treat as a `clarity-fail`-equivalent escalation: refuse the start, append the OUTLINE FAILED block to the ticket body, and prompt the user to `/m1-tick escalate <id> refine` (or whichever escalation the outline suggested).
-5. Otherwise append the outline to the ticket body under a new `## Implementation outline` section, then proceed with the rest of the start procedure (set status, create branch, etc.).
+1. After the clarity pre-flight passes, check the ticket's `complexity` field. If `complexity: high`, continue; otherwise skip the Plan step.
+2. Pre-allocate the outline sidecar path at `target/m1-tick-outline-{{ID}}.md` (the directory `target/` already exists by Maven convention and is excluded from version control).
+3. Read this file to load the template. Substitute three placeholders only: `{{TICKET_ID}}`, `{{TICKET_FILE_PATH}}` (repo-relative path to the ticket file the skill resolved from the ID), and `{{OUTLINE_FILE_PATH}}` (the path pre-allocated in step 2). No content placeholders — the subagent loads the ticket and each cited spec file via Read in its own fresh context, and runs the spec_refs anchor resolution algorithm itself.
+4. Spawn `Agent(subagent_type: "Plan", prompt: <substituted>, description: "Implementation outline M<N>-NNN")`. Foreground.
+5. Branch on the chat reply:
+   - If the reply begins with `## OUTLINE FAILED`, treat as a `clarity-fail`-equivalent escalation: append the OUTLINE FAILED block to the ticket's `escalations:` frontmatter entry (existing escalation flow) and fire `escalate` with `reason: outline-fail`. Do NOT add an `outline_file:` pointer; the sidecar was not written.
+   - Otherwise the reply begins with `OUTLINE: PASS`; parse the three-line reply for the outline file path and risk count. Set the ticket frontmatter `outline_file: target/m1-tick-outline-M<N>-NNN.md` as a one-line pointer. Do NOT append the outline body to the ticket — the sidecar IS the outline.
 
-The Plan subagent never edits files or runs commands. It reads the prompt, returns the outline, and exits.
+The Plan subagent never edits files (other than the outline sidecar in the success case) or runs commands. It Reads the inputs, Writes the outline sidecar (success) or returns the OUTLINE FAILED block inline (failure), and exits.

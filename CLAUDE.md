@@ -146,6 +146,21 @@ These are project-level coding-style preferences. They are NOT reviewer-enforced
 - Already covered by the §Engineering rules: §"No workarounds" ("Never sacrifice ... simplicity to reach a goal"), §"Push back when simpler exists" (surface a simpler design before implementing), and the system-prompt rule "Don't add features, refactor, or introduce abstractions beyond what the task requires."
 - The bias holds at every level — design, structure, line-by-line. If a simpler form meets the same goal, prefer it. Three similar lines beats a premature abstraction. A flat function beats an unnecessary class. The simpler the implementation, the less commenting it needs (which is the point of pairing this with the comment policy above).
 
+## Context budget heuristics
+
+These are working-style heuristics for keeping the main conversation's context usable across long sessions. They complement (not replace) the system-prompt's general guidance about when to spawn agents.
+
+### Survey via Explore, not sequential Reads
+- When you are about to Read 3+ source files in a row to understand an existing API surface ("what's the shape of these classes I'll consume; what method signatures exist; how does this SPI work"), spawn an `Explore` subagent instead. Hand it the file list plus the specific questions; receive a 1–2K summary. The full file bytes stay in Explore's context, not yours.
+- Excludes spec/design files under `docs/spec/` and `docs/design/` — read those directly. They are authoritative, and re-reading them later is normal.
+- Excludes files you are about to modify — you need the full content in your context for the Edit calls that follow.
+- The heuristic is "code-surface survey of files you will not modify". Anything else, prefer direct Read.
+
+### Diagnose framework failures via subagent; diagnose your own-diff failures yourself
+- For test failures whose stack lives entirely outside the diff you just wrote — intermittent flakes, infra failures, OOM, long framework traces (Quarkus, Spring, Hibernate internals), Maven plugin errors — route the diagnosis through an `Explore` subagent reading the raw output. Take back a 2–3 line summary plus a suggested fix location.
+- Do NOT use a subagent for "the code I just wrote doesn't work" failures. The main session has the diff context the subagent lacks; a fresh subagent would propose any of several plausible fixes without knowing which one respects your recent intent.
+- The dividing line: is the failure's signal mostly in the framework's bytes (use subagent) or mostly in the diff's bytes (do it yourself)?
+
 ## M1 workflow (in force for the v1 build)
 
 M1 work is ticket-driven via the `/m1-tick` skill. The universal workflow specification lives in `docs/process/workflow.md`; M1-specific framing lives in `docs/plan/m1/README.md`; the rules below are the always-loaded summary.
