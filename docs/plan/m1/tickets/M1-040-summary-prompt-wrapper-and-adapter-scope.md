@@ -4,6 +4,27 @@ title: /summary prompt-injection wrapper + adapter-scoped users lookup across ha
 status: pending
 created: 2026-05-19
 last_updated: 2026-05-19
+escalations:
+  - date: 2026-05-19
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      N/A (clarity pre-flight failed before any review)
+revisions:
+  - date: 2026-05-19
+    reason: clarity-fail rework
+    snapshot:
+      status: escalated
+      spec_refs:
+        - docs/spec/security.md §Prompt-injection defenses
+        - docs/spec/security.md §Per-(user, scope) isolation
+        - docs/spec/security.md §Trust boundaries
+        - docs/spec/llm.md §Prompt-injection wrapper
+      clarity_check:
+        date: 2026-05-19
+        verdict: FAIL
+        blockers:
+          - "SPEC-REFS-VALID FAIL: `docs/spec/security.md §Per-(user, scope) isolation` does not exist as a section heading in docs/spec/security.md."
+          - "SPEC-REFS-VALID FAIL: `docs/spec/llm.md §Prompt-injection wrapper` does not exist as a heading in docs/spec/llm.md."
 blocked_by:
   - M1-039
 files_budget: 10
@@ -54,9 +75,9 @@ test_plan:
     - all other tests currently green on main
 spec_refs:
   - docs/spec/security.md §Prompt-injection defenses
-  - docs/spec/security.md §Per-(user, scope) isolation
+  - docs/spec/schema.md §Per-user state (scope-independent)
   - docs/spec/security.md §Trust boundaries
-  - docs/spec/llm.md §Prompt-injection wrapper
+  - docs/spec/llm.md §Prompt-injection-aware prompt shape
 decision_refs:
   - D10
 ---
