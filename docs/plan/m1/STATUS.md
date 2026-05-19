@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 47 |
 | deferred | 7 |
-| **total** | **55** |
+| **total** | **61** |
 
 ---
 
@@ -25,6 +25,7 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-043 — SummaryProseGenerator refusal-marker interception (degrade on `[REFUSAL: ...]` output) (complexity: low, risk: medium)
+- M1-044a — Intake-step services — rate cap, invite consumer, ban check, brute-force migration (complexity: high, risk: high)
 
 ---
 
@@ -41,7 +42,11 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-044 — blocked_by: M1-044a (pending), M1-044b (pending), M1-044c (pending)
+- M1-044b — blocked_by: M1-044a (pending)
+- M1-044c — blocked_by: M1-044a (pending)
+- M1-045 — blocked_by: M1-044 (pending)
+- M1-046 — blocked_by: M1-044 (pending)
 
 ---
 
@@ -180,4 +185,12 @@ M1-038 (done)
               └── M1-043 (pending) ← runnable
 M1-041 (deferred)
 M1-042 (deferred)
+M1-044a (pending) ← runnable
+  ├── M1-044 (pending)
+  │     ├── M1-045 (pending)
+  │     └── M1-046 (pending)
+  ├── M1-044b (pending)
+  │     └── M1-044 (pending) [see above]
+  └── M1-044c (pending)
+        └── M1-044 (pending) [see above]
 ```
