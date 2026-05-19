@@ -11,7 +11,7 @@ Reasons (auto-set by `review`/`start` or passed explicitly):
 - `budget-breach` — developer is about to exceed `files_budget`.
 - `premise-fail` — tests fail in a way that suggests the ticket's premise is wrong.
 - `loop` — two consecutive failures with the same root cause.
-- `redteam-finding` — [`/redteam`](../../redteam/SKILL.md) returned non-CLEAN and the user opened the lifecycle escalation for the affected ticket. **REFUSED if the operand ticket has `status: done`** — done commits are immutable (per `CLAUDE.md` §M1 workflow "never amend a passed commit"). The redteam SKILL prints the alternative recommendation in this case: draft a new remediation ticket with `remediates: <done-id>` pointing back at the done ticket, then run `/m1-tick start <new-id>`. The done ticket's `redteam_findings:` is still populated for traceability.
+- `redteam-finding` — [`/redteam`](../../redteam/SKILL.md) returned non-CLEAN and the user opened the lifecycle escalation for the affected ticket. **REFUSED if the operand ticket has `status: done`** — done commits are immutable (per the §M1 workflow rules section in this skill's SKILL.md, "never amend a passed commit"). The redteam SKILL prints the alternative recommendation in this case: draft a new remediation ticket with `remediates: <done-id>` pointing back at the done ticket, then run `/m1-tick start <new-id>`. The done ticket's `redteam_findings:` is still populated for traceability.
 
 Steps:
 

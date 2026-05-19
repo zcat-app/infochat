@@ -1,11 +1,11 @@
 ---
 name: m1-tick
-description: Drive the M1 ticket workflow — pick the next runnable ticket, start work on a branch, run review via the code-reviewer subagent, commit on approval, or surface the five-way escalation menu when a round cap or trigger fires. Use when the user invokes `/m1-tick <subcommand>` (next | start <id> | review <id> | commit <id> | escalate <id> | abort <id> | show <id> | reopen <id> | status). For adversarial security review, see the separate `/redteam` skill. The universal workflow specification is in `docs/process/workflow.md`; M1-specific framing is in `docs/plan/m1/README.md`; the engineering rules are in `CLAUDE.md` §Engineering rules + §M1 workflow + `docs/process/engineering-rules-verbatim.md` — those are the source of truth; this skill is the procedure that applies them.
+description: Drive the M1 ticket workflow — pick the next runnable ticket, start work on a branch, run review via the code-reviewer subagent, commit on approval, or surface the five-way escalation menu when a round cap or trigger fires. Use when the user invokes `/m1-tick <subcommand>` (next | start <id> | review <id> | commit <id> | escalate <id> | abort <id> | show <id> | reopen <id> | status). For adversarial security review, see the separate `/redteam` skill. The universal workflow specification is in `docs/process/workflow.md`; M1-specific framing is in `docs/plan/m1/README.md`; the engineering rules are in `CLAUDE.md` §Engineering rules + this SKILL.md §M1 workflow rules + `docs/process/engineering-rules-verbatim.md` — those are the source of truth; this skill is the procedure that applies them.
 ---
 
 # /m1-tick — M1 ticket workflow
 
-This skill is the procedure. The rules live in `CLAUDE.md` §Engineering rules + §M1 workflow and verbatim in [`engineering-rules-verbatim.md`](../../../docs/process/engineering-rules-verbatim.md). The universal workflow specification is [`docs/process/workflow.md`](../../../docs/process/workflow.md); M1-specific framing is [`docs/plan/m1/README.md`](../../../docs/plan/m1/README.md). If this skill conflicts with any of those, those win — flag the drift and stop.
+This skill is the procedure. The engineering rules live in `CLAUDE.md` §Engineering rules and verbatim in [`engineering-rules-verbatim.md`](../../../docs/process/engineering-rules-verbatim.md); the M1-specific workflow rules live in the §M1 workflow rules section of this file (moved here from `CLAUDE.md` so they load only when `/m1-tick` fires). The universal workflow specification is [`docs/process/workflow.md`](../../../docs/process/workflow.md); M1-specific framing is [`docs/plan/m1/README.md`](../../../docs/plan/m1/README.md). If this skill conflicts with any of those, those win — flag the drift and stop.
 
 Adversarial security review (formerly `/m1-tick redteam`) is now its own skill: [`/redteam`](../redteam/SKILL.md). The two skills are intentionally decoupled — redteam findings reach this workflow only via the user invoking `/m1-tick escalate <id> redteam-finding`.
 
@@ -39,6 +39,28 @@ If the args don't match any row, print the table above and stop. For `redteam`, 
 
 ---
 
+## M1 workflow rules
+
+These are the lifecycle / process rules the skill applies. Previously the always-loaded summary lived in `CLAUDE.md` §M1 workflow; it now loads here on `/m1-tick` invocation so non-M1 conversations no longer pay the context cost. If these conflict with `docs/process/workflow.md`, that file wins — flag the drift and stop.
+
+- **Tickets** live in `docs/plan/m1/tickets/M1-NNN-<slug>.md`, one file per ticket, YAML frontmatter — see `docs/process/ticket-template.md` for the full schema (key fields: `id`, `status`, `blocked_by`, `acceptance`, `files_budget`, `out_of_scope`, `complexity`, `risk`, `round_cap`, `security_relevant`, `migration_touch`).
+- **Status board** is `docs/plan/m1/STATUS.md`, regenerated from frontmatter; never hand-edit, always derive.
+- **Lifecycle**: `pending` → `in-progress` → `in-review` → `done` (or `escalated` / `deferred`).
+- **One ticket = one branch = one commit on `main` after `/m1-tick merge` squash-merges the branch.** Branch name `m1/M1-NNN-<slug>`. Commit subject `M1-NNN: <imperative summary>`. Body includes a `Reviewed-by:` trailer with the reviewer's verdict line. `/m1-tick commit` lands the commit on the per-ticket branch (status: done); `/m1-tick merge` performs the squash-merge into `main` as a separate explicit step.
+- **Never amend a passed commit.** Defects found after a passed review become a new ticket and a new commit.
+- **Round cap: 2 by default.** Implement → `mvn verify` → reviewer (round 1). If `REWORK`, fix only the named items → `mvn verify` → reviewer (round 2). If round 2 isn't `APPROVE`, escalate. Tickets with `complexity: high` or `risk: high` may set `round_cap: 3` in frontmatter.
+- **Capture `mvn verify` output to a fixed path.** During implementation, always redirect: `mvn -B clean verify > target/m1-tick-test-<ID>-r<round>.log 2>&1` (run from the repo root; create `target/` first if absent). `/m1-tick review` and `/m1-tick commit` read this exact path — if the file is missing they must re-run, which wastes minutes. The round number matches the upcoming review round (1 for the first review, 2 for round-2 rework, etc.).
+- **Every rework round must shrink (round-N must-shrink, N ≥ 2).** The round-N diff must be smaller than round-(N−1) along **at least one** of: files-touched, lines added, lines removed. Growth along **all three** dimensions simultaneously → automatic SCOPE-DRIFT-CHECK fail unless the prior round's REWORK explicitly required a refactor that grows the diff (citation required). Applies to round 2 by default and to round 3 when `round_cap: 3`.
+- **Ticket-clarity pre-flight at start.** `/m1-tick start` spawns a fresh-context subagent that validates the ticket itself (testable acceptance, non-empty `out_of_scope`, valid `spec_refs`, plausible `files_budget`) before implementation begins. Failures block the start.
+- **Immediate escalation triggers** (skip remaining rounds): reviewer returns `MANUAL`; developer about to exceed `files_budget` or touch a path outside `files_scope` (when set); tests fail in a way that suggests the ticket's premise is wrong; two consecutive test failures with the same root cause.
+- **Escalation surfaces a five-way menu** to the user in chat: refine / override / decompose / defer / spec-amend.
+- **Reviewer is a fresh-context subagent** (`Agent` with `subagent_type: "code-reviewer"`); developer-as-subagent is forbidden. The reviewer's prompt template lives in `docs/process/reviewer-prompt.md`. When the ticket sets `files_scope`, the reviewer also receives the list of files in that scope that were NOT touched (the "negative space"), so unintended skips are visible.
+- **Threat-actor (red-team) review** runs at milestone boundaries, on tickets with `security_relevant: true`, and before release tags. The fresh-context adversary subagent reads `docs/spec/security.md` (threat model only) plus the diff and looks for the gap between promise and delivery. Invoked via the separate `/redteam` skill (`.claude/skills/redteam/SKILL.md`); findings reach the lifecycle workflow only when the user runs `/m1-tick escalate <id> redteam-finding`.
+- **Commit safety re-runs `mvn verify`.** For `complexity: high` or `risk: high` tickets, `/m1-tick commit` re-executes the full suite rather than trusting the prior log. For other tickets, the commit step verifies the most recent test-log mtime is newer than the latest source mtime.
+- **Default sequential.** Parallel tickets only when both tickets declare a non-empty `files_scope` AND those `files_scope` plus `out_of_scope` lists are provably disjoint AND no in-flight ticket has `migration_touch: true`. Tickets with only a numeric `files_budget` (no `files_scope`) cannot be parallelized — disjointness can't be proven mechanically.
+
+---
+
 ## Cross-cutting rules this skill must obey
 
 - **Never push.** That's the user's call. The skill performs squash-merge locally on demand via `/m1-tick merge <id>`, but never pushes the result.
@@ -51,4 +73,4 @@ If the args don't match any row, print the table above and stop. For `redteam`, 
 - **Never set `status: in-progress` manually.** The `pending → in-progress` transition happens only inside `/m1-tick start <id>`, which runs the clarity pre-flight and (for `complexity: high`) the Plan subagent. Flipping `status` by hand — including immediately after `escalate refine` — skips those gates. The same applies after an `outline-fail` refine: the refined ticket commits to `main` with `status: pending`, and the next implementation pass must go through `/m1-tick start` so Plan re-runs against the rewritten acceptance.
 - **Never use destructive shortcuts** (`--no-verify`, `git reset --hard`, `--skip-tests`, force-push) to make obstacles disappear. Escalate instead.
 - **`abort` is destructive and requires explicit user confirmation.** Branch deletion uses `git branch -D` only after the user types `yes`.
-- **If this skill's procedure conflicts with `CLAUDE.md` §Engineering rules, §M1 workflow, `docs/process/workflow.md`, `docs/plan/m1/README.md`, or `docs/process/engineering-rules-verbatim.md`, those win.** Stop and surface the conflict; do not proceed.
+- **If this skill's procedure conflicts with `CLAUDE.md` §Engineering rules, `docs/process/workflow.md`, `docs/plan/m1/README.md`, or `docs/process/engineering-rules-verbatim.md`, those win.** Stop and surface the conflict; do not proceed. (The §M1 workflow rules section above is part of this file and is the source of truth for the M1-specific rules it enumerates.)

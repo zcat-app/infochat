@@ -14,7 +14,28 @@ Preconditions (refuse and explain if any fail):
 
 Steps:
 
-1. **Ticket-clarity pre-flight.** Pre-allocate the verdict file path at `target/m1-tick-clarity-{{ID}}.txt` (the directory `target/` already exists by Maven convention and is excluded from version control). Read `docs/process/clarity-prompt.md` to load the template. Substitute three placeholders only: `{{TICKET_ID}}`, `{{TICKET_FILE_PATH}}` (the repo-relative path to the ticket file the skill resolved from the ID), and `{{VERDICT_FILE_PATH}}` (the path pre-allocated above). No content placeholders are substituted — the clarity subagent loads the ticket and each cited spec file via its own Read tool in fresh context, and runs the spec_refs anchor resolution algorithm itself (the algorithm body is inlined into clarity-prompt.md and plan-prompt.md; the main session never runs it directly). **PROMPT-SIZE-ALARM** (clarity-reviewer, threshold 15000 bytes): compute the UTF-8 byte length of the substituted prompt string just built. If that length exceeds 15000, print one chat line: `⚠ PROMPT-SIZE-ALARM clarity-reviewer: substituted prompt is <N> bytes (threshold 15000). This may indicate a regression — a placeholder may have been re-inlined that should reference a file by path. Proceeding anyway.` The alarm is warn-only and does not block the spawn; proceed regardless. Spawn `Agent(subagent_type: "clarity-reviewer", prompt: <substituted>, description: "Clarity pre-flight M1-NNN")`. Foreground.
+1. **Ticket-clarity pre-flight.** Pre-allocate the verdict file path at `target/m1-tick-clarity-{{ID}}.txt` and the substituted-prompt path at `target/m1-tick-prompt-clarity-{{ID}}.txt` (the directory `target/` already exists by Maven convention and is excluded from version control). Render the prompt via Bash — do NOT Read `docs/process/clarity-prompt.md` into main-session context; the script extracts the fenced template body and substitutes placeholders, then the subagent Reads the rendered file in its own fresh context:
+
+   ```
+   python3 scripts/m1-render-prompt.py \
+     docs/process/clarity-prompt.md \
+     target/m1-tick-prompt-clarity-{{ID}}.txt \
+     TICKET_ID={{ID}} \
+     TICKET_FILE_PATH=<repo-relative path to the ticket file> \
+     VERDICT_FILE_PATH=target/m1-tick-clarity-{{ID}}.txt
+   ```
+
+   The script substitutes three placeholders only: `{{TICKET_ID}}`, `{{TICKET_FILE_PATH}}`, `{{VERDICT_FILE_PATH}}`. No content placeholders are substituted — the clarity subagent loads the ticket and each cited spec file via its own Read tool in fresh context, and runs the spec_refs anchor resolution algorithm itself (the algorithm body is inlined into clarity-prompt.md and plan-prompt.md; the main session never runs it directly). Spawn the subagent with a short stub that points at the rendered file:
+
+   ```
+   Agent(
+     subagent_type: "clarity-reviewer",
+     description: "Clarity pre-flight M1-NNN",
+     prompt: "Read target/m1-tick-prompt-clarity-{{ID}}.txt and execute the instructions in that file. Everything you need (ticket path, verdict path, the full procedure) is in that file."
+   )
+   ```
+
+   Foreground. The render-script approach replaces the previous "Read template → inline substitute → pass as Agent prompt" pattern; the PROMPT-SIZE-ALARM check is no longer needed (the main session no longer holds the template).
 2. Parse the four-line short chat reply for the verdict + integer blocker/warning counts. Read `target/m1-tick-clarity-{{ID}}.txt` (the same `{{VERDICT_FILE_PATH}}` substituted above) from disk to extract the BLOCKERS / WARNINGS strings the subagent wrote there. Append to ticket frontmatter:
    ```yaml
    clarity_check:
@@ -32,7 +53,28 @@ Steps:
 6. Branch:
    - **Sequential:** `git checkout -b m1/M1-NNN-<slug>` from `main`.
    - **Parallel:** create a worktree via `Agent(isolation: "worktree")` and run the rest of the flow inside it.
-7. If `complexity: high`: pre-allocate the outline sidecar path at `target/m1-tick-outline-{{ID}}.md`. Read `docs/process/plan-prompt.md` to load the template. Substitute three placeholders only: `{{TICKET_ID}}`, `{{TICKET_FILE_PATH}}` (the repo-relative path to the ticket file the skill resolved from the ID), and `{{OUTLINE_FILE_PATH}}` (the path pre-allocated above). No content placeholders are substituted — the Plan subagent loads the ticket and each cited spec file via its own Read tool in fresh context, and runs the spec_refs anchor resolution algorithm itself (the algorithm body is inlined in plan-prompt.md). **PROMPT-SIZE-ALARM** (Plan, threshold 15000 bytes): compute the UTF-8 byte length of the substituted prompt string just built. If that length exceeds 15000, print one chat line: `⚠ PROMPT-SIZE-ALARM Plan: substituted prompt is <N> bytes (threshold 15000). This may indicate a regression — a placeholder may have been re-inlined that should reference a file by path. Proceeding anyway.` The alarm is warn-only and does not block the spawn; proceed regardless. Spawn `Agent(subagent_type: "Plan", prompt: <substituted>, description: "Implementation outline M1-NNN")`. Foreground.
+7. If `complexity: high`: pre-allocate the outline sidecar path at `target/m1-tick-outline-{{ID}}.md` and the substituted-prompt path at `target/m1-tick-prompt-plan-{{ID}}.txt`. Render the prompt via Bash (same pattern as step 1 — the main session never Reads `docs/process/plan-prompt.md`):
+
+   ```
+   python3 scripts/m1-render-prompt.py \
+     docs/process/plan-prompt.md \
+     target/m1-tick-prompt-plan-{{ID}}.txt \
+     TICKET_ID={{ID}} \
+     TICKET_FILE_PATH=<repo-relative path to the ticket file> \
+     OUTLINE_FILE_PATH=target/m1-tick-outline-{{ID}}.md
+   ```
+
+   The script substitutes three placeholders only: `{{TICKET_ID}}`, `{{TICKET_FILE_PATH}}`, `{{OUTLINE_FILE_PATH}}`. No content placeholders are substituted — the Plan subagent loads the ticket and each cited spec file via its own Read tool in fresh context, and runs the spec_refs anchor resolution algorithm itself (the algorithm body is inlined in plan-prompt.md). Spawn the subagent with the stub:
+
+   ```
+   Agent(
+     subagent_type: "Plan",
+     description: "Implementation outline M1-NNN",
+     prompt: "Read target/m1-tick-prompt-plan-{{ID}}.txt and execute the instructions in that file. Everything you need (ticket path, outline sidecar path, the full procedure) is in that file."
+   )
+   ```
+
+   Foreground.
    - If the chat reply begins with `## OUTLINE FAILED`, append the OUTLINE FAILED block to the ticket's `escalations:` frontmatter entry (existing escalation behavior) and fire `escalate` with `reason: outline-fail`. The Plan subagent did not Write the sidecar in this branch; do NOT set an `outline_file:` pointer on the ticket. The branch created in step 6 is left in place (it'll be deleted by `abort` if the user chooses to abandon, or reused after `refine`).
    - Otherwise the chat reply is the three-line success form (`OUTLINE: PASS` / `Outline file: <path>` / `Risks: <integer>`). Parse it to confirm the success verdict and capture the risk count. Set ticket frontmatter `outline_file: target/m1-tick-outline-M1-NNN.md` as a one-line pointer to the sidecar the subagent Wrote. Do NOT append the outline body to the ticket — the sidecar IS the outline. The developer (the main conversation) reads the sidecar before touching code.
 8. Regenerate `STATUS.md` via `scripts/regen-status.py 'docs/plan/m1/tickets/M1-*.md' docs/plan/m1/STATUS.md` (Bash tool). The script writes only the destination path; if it exits non-zero, surface stderr and refuse to proceed.

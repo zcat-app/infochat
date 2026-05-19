@@ -163,7 +163,9 @@ These are working-style heuristics for keeping the main conversation's context u
 
 ## M1 workflow (in force for the v1 build)
 
-M1 work is ticket-driven via the `/m1-tick` skill. The universal workflow specification lives in `docs/process/workflow.md`; M1-specific framing lives in `docs/plan/m1/README.md`; the rules below are the always-loaded summary.
+M1 work is ticket-driven via the `/m1-tick` skill. The full rule set — lifecycle, round cap, must-shrink, clarity preflight, escalation, reviewer, parallelism, `mvn verify` log capture — lives in [`.claude/skills/m1-tick/SKILL.md`](.claude/skills/m1-tick/SKILL.md) §M1 workflow rules and loads when you invoke the skill. The universal workflow specification is [`docs/process/workflow.md`](docs/process/workflow.md); M1-specific framing is [`docs/plan/m1/README.md`](docs/plan/m1/README.md).
+
+Tickets live in `docs/plan/m1/tickets/M1-NNN-<slug>.md`; status board at `docs/plan/m1/STATUS.md` (regenerated, never hand-edited). Invoke `/m1-tick next` to see the next runnable ticket; `/m1-tick start <id>` to begin work. Adversarial security review is a separate skill: `/redteam`.
 
 ### Commit prefixes (not every change is a ticket)
 
@@ -176,20 +178,3 @@ The ticket flow exists for code, tests, migrations, and spec changes coordinated
 | `process:` | `.claude/`, `docs/process/`, `docs/plan/`, or `CLAUDE.md` edit, no code change | `process: Replace status-regenerator subagent with script` |
 
 If a change touches both code and docs, it's a ticket. `git log --grep "^M1-"` keeps cleanly enumerating ticketed work because no non-ticket prefix starts with `M`. Full rules in `docs/process/workflow.md` §Non-ticket commits.
-
-- **Tickets** live in `docs/plan/m1/tickets/M1-NNN-<slug>.md`, one file per ticket, YAML frontmatter — see `docs/process/ticket-template.md` for the full schema (key fields: `id`, `status`, `blocked_by`, `acceptance`, `files_budget`, `out_of_scope`, `complexity`, `risk`, `round_cap`, `security_relevant`, `migration_touch`).
-- **Status board** is `docs/plan/m1/STATUS.md`, regenerated from frontmatter; never hand-edit, always derive.
-- **Lifecycle**: `pending` → `in-progress` → `in-review` → `done` (or `escalated` / `deferred`).
-- **One ticket = one branch = one commit on `main` after `/m1-tick merge` squash-merges the branch.** Branch name `m1/M1-NNN-<slug>`. Commit subject `M1-NNN: <imperative summary>`. Body includes a `Reviewed-by:` trailer with the reviewer's verdict line. `/m1-tick commit` lands the commit on the per-ticket branch (status: done); `/m1-tick merge` performs the squash-merge into `main` as a separate explicit step.
-- **Never amend a passed commit.** Defects found after a passed review become a new ticket and a new commit.
-- **Round cap: 2 by default.** Implement → `mvn verify` → reviewer (round 1). If `REWORK`, fix only the named items → `mvn verify` → reviewer (round 2). If round 2 isn't `APPROVE`, escalate. Tickets with `complexity: high` or `risk: high` may set `round_cap: 3` in frontmatter.
-- **Every rework round must shrink (round-N must-shrink, N ≥ 2).** The round-N diff must be smaller than round-(N−1) along **at least one** of: files-touched, lines added, lines removed. Growth along **all three** dimensions simultaneously → automatic SCOPE-DRIFT-CHECK fail unless the prior round's REWORK explicitly required a refactor that grows the diff (citation required). Applies to round 2 by default and to round 3 when `round_cap: 3`.
-- **Ticket-clarity pre-flight at start.** `/m1-tick start` spawns a fresh-context subagent that validates the ticket itself (testable acceptance, non-empty `out_of_scope`, valid `spec_refs`, plausible `files_budget`) before implementation begins. Failures block the start.
-- **Immediate escalation triggers** (skip remaining rounds): reviewer returns `MANUAL`; developer about to exceed `files_budget` or touch a path outside `files_scope` (when set); tests fail in a way that suggests the ticket's premise is wrong; two consecutive test failures with the same root cause.
-- **Escalation surfaces a five-way menu** to the user in chat: refine / override / decompose / defer / spec-amend.
-- **Reviewer is a fresh-context subagent** (`Agent` with `subagent_type: "code-reviewer"`); developer-as-subagent is forbidden. The reviewer's prompt template lives in `docs/process/reviewer-prompt.md`. When the ticket sets `files_scope`, the reviewer also receives the list of files in that scope that were NOT touched (the "negative space"), so unintended skips are visible.
-- **Threat-actor (red-team) review** runs at milestone boundaries, on tickets with `security_relevant: true`, and before release tags. The fresh-context adversary subagent reads `docs/spec/security.md` (threat model only) plus the diff and looks for the gap between promise and delivery. Invoked via the separate `/redteam` skill (`.claude/skills/redteam/SKILL.md`); findings reach the lifecycle workflow only when the user runs `/m1-tick escalate <id> redteam-finding`.
-- **Commit safety re-runs `mvn verify`.** For `complexity: high` or `risk: high` tickets, `/m1-tick commit` re-executes the full suite rather than trusting the prior log. For other tickets, the commit step verifies the most recent test-log mtime is newer than the latest source mtime.
-- **Default sequential.** Parallel tickets only when both tickets declare a non-empty `files_scope` AND those `files_scope` plus `out_of_scope` lists are provably disjoint AND no in-flight ticket has `migration_touch: true`. Tickets with only a numeric `files_budget` (no `files_scope`) cannot be parallelized — disjointness can't be proven mechanically.
-
-Invoke `/m1-tick next` to see the next runnable ticket; `/m1-tick start <id>` to begin work. Other subcommands: `review`, `commit`, `merge`, `escalate`, `abort`, `show`, `reopen`, `status`. Adversarial security review is a separate skill: `/redteam`.

@@ -18,19 +18,42 @@ Steps:
    - Build the negative-space list: if the ticket has a non-empty `files_scope`, take the union of paths matched by those globs minus paths actually present in the diff. If `files_scope` is empty or absent, the negative-space list is the literal sentinel string `(no path-level scope declared — files_budget is purely numeric, no negative-space evaluation applicable)` and the reviewer reports PASS on `NEGATIVE-SPACE-CHECK` by definition.
    - The path of the most recent `mvn verify` log at `target/m1-tick-test-{{ID}}-r{{CURRENT_ROUND}}.log` (the reviewer Reads this path; the skill no longer captures the tail into the prompt).
    - The ticket file path (the reviewer Reads this path; the skill no longer inlines the ticket body into the prompt).
-3. Pre-allocate the verdict file path at `target/m1-tick-review-{{ID}}-r{{CURRENT_ROUND}}.txt`. Read `docs/process/reviewer-prompt.md` and substitute the placeholders. The role-based stats placeholders carry the round-N-vs-round-(N−1) must-shrink machinery:
-   - `{{TICKET_ID}}` = the ticket ID
-   - `{{TICKET_FILE_PATH}}` = the repo-relative path to the ticket file
-   - `{{DIFF_FILE_PATH}}` = the path of the diff written in step 2
-   - `{{TEST_LOG_PATH}}` = the test-log path from step 2
-   - `{{VERDICT_FILE_PATH}}` = the path pre-allocated at the top of this step
-   - `{{BRANCH}}` = the per-ticket branch resolved per the workflow's branch resolution procedure
-   - `{{CURRENT_ROUND}}` = `N`; `{{CURRENT_FILES}}` / `{{CURRENT_ADDED}}` / `{{CURRENT_REMOVED}}` = the current diff stats from step 2
-   - `{{PREVIOUS_ROUND}}` = `N−1` when `N ≥ 2`, else the literal `(N/A — round 1)`. `{{PREVIOUS_FILES}}` / `{{PREVIOUS_ADDED}}` / `{{PREVIOUS_REMOVED}}` = the prior round's stats from frontmatter when `N ≥ 2`, else the literal `(N/A — round 1, no previous round)`.
-   - `{{NEGATIVE_SPACE_LIST}}` = the negative-space list from step 2 (or the no-scope-declared sentinel)
-4. **PROMPT-SIZE-ALARM** (code-reviewer, threshold 19000 bytes): compute the UTF-8 byte length of the substituted prompt string built in step 3. If that length exceeds 19000, print one chat line: `⚠ PROMPT-SIZE-ALARM code-reviewer: substituted prompt is <N> bytes (threshold 19000). This may indicate a regression — a placeholder may have been re-inlined that should reference a file by path. Proceeding anyway.` The alarm is warn-only and does not block the spawn; proceed regardless. Spawn `Agent(subagent_type: "code-reviewer", prompt: <substituted>, description: "Review M1-NNN")`. Foreground (the verdict gates the next step). The `code-reviewer` agent is defined at `.claude/agents/code-reviewer.md` (Read/Grep/Glob/Write tool allowlist, opus model).
-5. Parse the three-line short chat reply for the verdict line + integer rework-item count. Read `target/m1-tick-review-{{ID}}-r{{CURRENT_ROUND}}.txt` (the same `{{VERDICT_FILE_PATH}}` substituted above) from disk to extract per-check results (SCOPE-DRIFT-CHECK / TEST-INTEGRITY-CHECK / OUT-OF-SCOPE-CHECK / NEGATIVE-SPACE-CHECK / ACCEPTANCE-CHECK) and the REWORK ITEMS / UNCERTAINTY strings the subagent wrote there.
-6. Append to ticket frontmatter under `reviews:`:
+3. Pre-allocate the verdict file path at `target/m1-tick-review-{{ID}}-r{{CURRENT_ROUND}}.txt` and the substituted-prompt path at `target/m1-tick-prompt-review-{{ID}}-r{{CURRENT_ROUND}}.txt`. If the negative-space list from step 2 is multi-line, write it first to `target/m1-tick-negspace-{{ID}}-r{{CURRENT_ROUND}}.txt` so it can be passed via the `@file` form. Render the prompt via Bash — do NOT Read `docs/process/reviewer-prompt.md` into main-session context; the script extracts the fenced template body and substitutes placeholders. The role-based stats placeholders carry the round-N-vs-round-(N−1) must-shrink machinery:
+
+   ```
+   python3 scripts/m1-render-prompt.py \
+     docs/process/reviewer-prompt.md \
+     target/m1-tick-prompt-review-{{ID}}-r{{CURRENT_ROUND}}.txt \
+     TICKET_ID={{ID}} \
+     TICKET_FILE_PATH=<repo-relative path to the ticket file> \
+     DIFF_FILE_PATH=<diff path from step 2> \
+     TEST_LOG_PATH=<test-log path from step 2> \
+     VERDICT_FILE_PATH=target/m1-tick-review-{{ID}}-r{{CURRENT_ROUND}}.txt \
+     BRANCH=<per-ticket branch> \
+     CURRENT_ROUND=<N> \
+     CURRENT_FILES=<n> CURRENT_ADDED=<n> CURRENT_REMOVED=<n> \
+     PREVIOUS_ROUND=<N−1 or "(N/A — round 1)"> \
+     PREVIOUS_FILES=<n or sentinel> PREVIOUS_ADDED=<n or sentinel> PREVIOUS_REMOVED=<n or sentinel> \
+     NEGATIVE_SPACE_LIST=@target/m1-tick-negspace-{{ID}}-r{{CURRENT_ROUND}}.txt
+   ```
+
+   Notes on the per-placeholder values:
+   - `{{PREVIOUS_ROUND}}` = `N−1` when `N ≥ 2`, else the literal `(N/A — round 1)`. `{{PREVIOUS_FILES}}` / `{{PREVIOUS_ADDED}}` / `{{PREVIOUS_REMOVED}}` = the prior round's stats from `reviews[N−2].diff_stats` when `N ≥ 2`, else the literal `(N/A — round 1, no previous round)`.
+   - `{{NEGATIVE_SPACE_LIST}}` = the list from step 2. Pass via `@file` form for multi-line; for a single-line sentinel (the no-scope-declared case), pass inline.
+
+   Spawn the subagent with a short stub that points at the rendered file:
+
+   ```
+   Agent(
+     subagent_type: "code-reviewer",
+     description: "Review M1-NNN",
+     prompt: "Read target/m1-tick-prompt-review-{{ID}}-r{{CURRENT_ROUND}}.txt and execute the instructions in that file. Everything you need (ticket path, diff path, test-log path, verdict path, stats, negative-space list) is in that file."
+   )
+   ```
+
+   Foreground (the verdict gates the next step). The `code-reviewer` agent is defined at `.claude/agents/code-reviewer.md` (Read/Grep/Glob/Write tool allowlist, opus model). The render-script approach replaces the previous "Read template → inline substitute → pass as Agent prompt" pattern; the PROMPT-SIZE-ALARM check is no longer needed (the main session no longer holds the template).
+4. Parse the three-line short chat reply for the verdict line + integer rework-item count. Read `target/m1-tick-review-{{ID}}-r{{CURRENT_ROUND}}.txt` (the same `{{VERDICT_FILE_PATH}}` substituted above) from disk to extract per-check results (SCOPE-DRIFT-CHECK / TEST-INTEGRITY-CHECK / OUT-OF-SCOPE-CHECK / NEGATIVE-SPACE-CHECK / ACCEPTANCE-CHECK) and the REWORK ITEMS / UNCERTAINTY strings the subagent wrote there.
+5. Append to ticket frontmatter under `reviews:`:
    ```yaml
    reviews:
      - round: <1|2|3>
@@ -47,7 +70,7 @@ Steps:
          added: <n>
          removed: <n>
    ```
-7. Branch on verdict:
+6. Branch on verdict:
 
    - **APPROVE.** Set `status: in-review`. Update `last_updated`. If `negative_space: WARN`, print the negative-space note to chat as informational. Print:
      ```
@@ -64,4 +87,4 @@ Steps:
 
    - **MANUAL.** Set `status: escalated`. Fire `escalate` with `reason: manual-verdict`.
 
-8. Update `last_updated`. Regenerate `STATUS.md`.
+7. Update `last_updated`. Regenerate `STATUS.md`.

@@ -4,9 +4,9 @@ This document is the universal workflow specification — the lifecycle, ticket 
 
 The verbatim engineering rules and test-integrity rules the reviewer enforces live in [`engineering-rules-verbatim.md`](engineering-rules-verbatim.md). That file is the editing source; this document references it rather than duplicating the rule prose. The reviewer prompt embeds it inline because the reviewer subagent runs in fresh context.
 
-The always-loaded summary lives in `CLAUDE.md` §M1 workflow. Per-milestone framing (what's in scope this milestone, deltas from this universal workflow) lives in `docs/plan/<milestone>/README.md` (e.g. `docs/plan/m1/README.md`).
+The skill-loaded summary lives in [`.claude/skills/m1-tick/SKILL.md`](../../.claude/skills/m1-tick/SKILL.md) §M1 workflow rules (loads when `/m1-tick` fires). A slim pointer + the commit-prefix table stay in `CLAUDE.md` §M1 workflow. Per-milestone framing (what's in scope this milestone, deltas from this universal workflow) lives in `docs/plan/<milestone>/README.md` (e.g. `docs/plan/m1/README.md`).
 
-Precedence on conflict: `CLAUDE.md` summary < this document < [`engineering-rules-verbatim.md`](engineering-rules-verbatim.md) (the rules themselves are canonical). If anything here contradicts `CLAUDE.md`, sync `CLAUDE.md`. If anything here contradicts `engineering-rules-verbatim.md`, this file is wrong.
+Precedence on conflict: the SKILL.md / CLAUDE.md summary content < this document < [`engineering-rules-verbatim.md`](engineering-rules-verbatim.md) (the rules themselves are canonical). If anything here contradicts the summary, sync the summary. If anything here contradicts `engineering-rules-verbatim.md`, this file is wrong.
 
 > **Milestone tokens used below.** Examples use `M<N>` (e.g. `M1`, `M2`) for ticket-ID prefixes and `m<N>` (e.g. `m1`, `m2`) for branch and directory tokens. The currently active milestone is M1, driven by the `/m1-tick` skill. Future milestones may instantiate their own driver skill or extend the existing one.
 
@@ -385,7 +385,7 @@ OUT-OF-MODEL: (optional)
 **What happens with findings:** Findings are NOT auto-converted to REWORK. The path depends on the affected ticket's status:
 
 - For `in-progress` or `in-review` tickets — the user opens the standard five-way menu (trigger reason: `redteam-finding`) on that ticket; `redteam_findings:` is populated on it. The user can choose `refine` to widen acceptance, `decompose`, `defer`, or `spec-amend`.
-- For `done` tickets — the original commit is **never amended** (per `CLAUDE.md` §M1 workflow "never amend a passed commit"). Instead, the user creates a **new remediation ticket** with `remediates: M<N>-XXX` set on the new ticket pointing back at the done ticket. The new ticket carries the fix; the done ticket's `redteam_findings:` is populated for traceability but its commit stays untouched. This preserves the one-commit-per-ticket invariant of `main`.
+- For `done` tickets — the original commit is **never amended** (per `.claude/skills/m1-tick/SKILL.md` §M1 workflow rules "never amend a passed commit"). Instead, the user creates a **new remediation ticket** with `remediates: M<N>-XXX` set on the new ticket pointing back at the done ticket. The new ticket carries the fix; the done ticket's `redteam_findings:` is populated for traceability but its commit stays untouched. This preserves the one-commit-per-ticket invariant of `main`.
 - For findings that span multiple tickets or describe an architectural gap with no clear owner, the user files a fresh ticket (no `remediates:`) or raises a spec amendment via `spec-amend` on a related ticket.
 
 The `/redteam` skill itself never opens escalations or creates tickets; it prints recommendations and writes to `redteam_findings:` only.

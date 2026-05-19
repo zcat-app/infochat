@@ -2,7 +2,7 @@
 
 The v1 vertical-slice build of infochat. M1 takes the project from greenfield to a deployable system that satisfies the spec end-to-end on at least one stack profile.
 
-The **procedure** for running M1 — ticket lifecycle, reviewer behavior, escalation, commit conventions — is universal and lives in [`docs/process/workflow.md`](../../process/workflow.md). The always-loaded summary lives in `CLAUDE.md` §M1 workflow. This README is for M1-specific framing only.
+The **procedure** for running M1 — ticket lifecycle, reviewer behavior, escalation, commit conventions — is universal and lives in [`docs/process/workflow.md`](../../process/workflow.md). The skill-loaded summary lives in [`.claude/skills/m1-tick/SKILL.md`](../../../.claude/skills/m1-tick/SKILL.md) §M1 workflow rules (loads when `/m1-tick` fires, not in every conversation). This README is for M1-specific framing only.
 
 ## What's M1-specific
 
