@@ -1,9 +1,69 @@
 ---
 id: M1-039
 title: /add-source handler hardening — ban-check ordering + contact-ID redaction in exceptions
-status: pending
+status: done
 created: 2026-05-19
 last_updated: 2026-05-19
+reviews:
+  - round: 1
+    date: 2026-05-19
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 470
+      removed: 25
+clarity_check:
+  date: 2026-05-19
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE items 2 and 5: Acceptance items describing test scenarios (AddSourceBanCheckOrderingTest, AddSourceContactIdRedactionTest) do not include a runnable `mvn -pl infochat-provider test -Dtest=<ClassName>` invocation. The scenarios are behaviorally precise enough to be checkable, but the items are in weak form. No blocker; the developer can infer the mvn command."
+  blockers: []
+escalations:
+  - date: 2026-05-19
+    reason: premise-fail
+    reviewer_verdict_excerpt: |
+      Pre-implementation premise check (not a review verdict). Acceptance
+      item 2 scenarios (b) "banned user in group scope receives the fixed
+      ban reply" and (d) "non-banned group-admin user in group scope
+      proceeds past the discriminator into the URL probe / upsert path"
+      require the handler to identify the actor in group scope. The
+      CommandHandler SPI is handle(ScopeRef, String); ScopeRef.Group
+      carries only adapterGroupId, not the sender's contactId. The
+      handler's lookupActor returns Optional.empty() for any Group scope
+      today (contactIdOf returns null for ScopeRef.Group), so the
+      proposed "mechanical reorder" cannot fire the ban check
+      (scenario b) and cannot route a group-admin caller into the upsert
+      path (scenario d) without an SPI extension that is outside the
+      ticket's files_scope (no CommandHandler.java, no InboundRouter.java,
+      no ScopeRef.java) and outside the ticket's out_of_scope
+      ("any change to /add-source business logic ... beyond the reorder
+      + redaction"). T2-F is the deferred ticket that wires the actor
+      seam; the existing AddSourceCommandHandlerTest comment at the
+      groupScopeNonAdminCallerIsRejected location explicitly defers
+      scenario (d) to T2-F for this exact reason. Implementing item 1
+      mechanically + items 3, 4, 5, 6 is feasible within the stated
+      scope; items 2(b) and 2(d) cannot be tested or verified at this
+      layer without extending the SPI.
+revisions:
+  - date: 2026-05-19
+    reason: premise-fail rework — narrow acceptance item 2 to the testable scenarios for the SPI as-is
+    prior_values: |
+      acceptance item 2 (line 36, pre-rework):
+        "AddSourceBanCheckOrderingTest covers: (a) banned user in DM scope
+        receives the fixed ban reply (regression — already covered before
+        this ticket, the test pins the new ordering); (b) banned user in
+        group scope receives the fixed ban reply (NOT
+        `error.add_source.group_admin_only`) — this is the M1-036 finding
+        2 fix; (c) non-banned non-group-admin user in group scope receives
+        `error.add_source.group_admin_only`; (d) non-banned group-admin
+        user in group scope proceeds past the discriminator into the URL
+        probe / upsert path"
 blocked_by:
   - M1-038
 files_budget: 5
@@ -21,13 +81,15 @@ remediates: M1-036
 out_of_scope:
   - any change to the spec — §User ban and §Secrets handling already commit to the behavior; this ticket is pure code remediation
   - any T2-A intake-gate work — the upstream ban check, invite gate, probation gate, rate-limit cap stay deferred to T2-A; this ticket fixes the in-handler ban-check ordering only, which remains load-bearing as defense-in-depth even after T2-A lands
+  - any CommandHandler SPI widening — threading the inbound `Identity sender` into `CommandHandler.handle(...)` so the handler can identify the actor in group scope is T2-F territory; this ticket leaves the SPI as-is, which means group-scope ban enforcement and the group-admin proceed path observably stay at the discriminator until T2-F lands
   - any new bundle keys beyond the existing `error.add_source.banned` (re-use it; do NOT add `error.add_source.group_admin_banned` or equivalent variants — the spec's "one fixed reply regardless of input" precludes per-scope ban-reply variants)
   - any change to ContactIds.redact's API or implementation — that helper comes from M1-038 and is consumed unchanged
   - any change to /add-source business logic (URL probe, kind resolver, upsert flow, audit row) beyond the reorder + redaction
   - any change to AutoRegisterService or AdapterRegistry
+  - any change to ScopeRef, InboundMessage, InboundRouter, MessagingAdapter or other messaging-adapter SPI surfaces
 acceptance:
   - "AddSourceCommandHandler.handle reorders the intake gates so the actor lookup AND the ban check run BEFORE the scope discriminator (the `if (scope instanceof ScopeRef.Group)` branch). After the reorder: parse args → lookupActor → if `is_banned` return fixed ban reply → then scope discriminator → then group_admin_only / kind / probe / upsert. grep -E 'is_banned|isBanned' AddSourceCommandHandler.java returns at least one match BEFORE the line containing `instanceof ScopeRef.Group` (verify by reading: the ban check precedes the scope-discriminator branch in source order)"
-  - "AddSourceBanCheckOrderingTest covers: (a) banned user in DM scope receives the fixed ban reply (regression — already covered before this ticket, the test pins the new ordering); (b) banned user in group scope receives the fixed ban reply (NOT `error.add_source.group_admin_only`) — this is the M1-036 finding 2 fix; (c) non-banned non-group-admin user in group scope receives `error.add_source.group_admin_only`; (d) non-banned group-admin user in group scope proceeds past the discriminator into the URL probe / upsert path"
+  - "AddSourceBanCheckOrderingTest covers the two scenarios testable at the current CommandHandler SPI shape: (a) banned user in DM scope receives the fixed ban reply (`mvn -pl infochat-provider test -Dtest=AddSourceBanCheckOrderingTest#bannedDmUserReceivesFixedBanReply` returns success — the in-handler ban check, post-reorder, runs BEFORE any scope-dependent logic; assertion: the reply body contains the `error.add_source.banned` bundle literal AND the mock URL probe was never invoked); (c) non-banned non-group-admin user in group scope receives `error.add_source.group_admin_only` (`mvn -pl infochat-provider test -Dtest=AddSourceBanCheckOrderingTest#groupScopeNonAdminReceivesGroupAdminOnly` returns success — the discriminator is preserved after the reorder; assertion: the reply body contains the `error.add_source.group_admin_only` bundle literal). Scenarios (b) banned-user-in-group and (d) group-admin-proceeds are NOT covered here because `ScopeRef.Group` carries `adapterGroupId` only; `lookupActor` returns `Optional.empty()` for group scope, so the in-handler ban check cannot fire and the group-admin proceed path cannot be exercised without the actor-seam SPI widening that T2-F lands. The reorder itself remains load-bearing: once T2-F or T2-A wires the actor identity into the handler's reach, the existing acceptance item 1 structural reorder is what makes the ban check fire before the discriminator on those future scopes."
   - "AddSourceCommandHandler's IllegalStateException messages (the `lookupActor failed for contact_id=...` shape at the current line 178-181 region) interpolate the contact id via ContactIds.redact (consumed from M1-038). grep -E 'ContactIds\\.redact' AddSourceCommandHandler.java returns at least one match in the IllegalStateException construction path"
   - "SourceUpsertService's IllegalStateException messages (the equivalent shape with the source identifier / URL at the current line 138-141 region) interpolate the identifier through a redaction or truncation helper. The source URL is bot-admin-visible per docs/spec/security.md §Source URL visibility so full redaction is not required, but the raw URL in an exception message is still a defense-in-depth concern — implement EITHER ContactIds.redact (treats the URL like any string) OR a deliberate truncate-to-prefix helper, documented in Implementation notes. grep -E 'redact|truncateUrl|UrlRedactor' SourceUpsertService.java returns at least one match"
   - "AddSourceContactIdRedactionTest forces both IllegalStateException paths (a lookupActor SQL failure via a stubbed DataSource, and a SourceUpsertService SQL failure via the same mechanism), captures the exception message, and asserts the raw contact-id literal does NOT appear in the message. The exception's underlying SQL cause is preserved (the cause still carries the SQLException stack); only the user-derived string in the IllegalStateException message is redacted"
@@ -45,6 +107,57 @@ spec_refs:
   - docs/spec/security.md §Secrets handling
 decision_refs:
   - D11
+redteam_findings:
+  - date: 2026-05-19
+    category: INFO-LEAK
+    severity: low
+    promise: |
+      §User ban — "Banned user receives one fixed reply per inbound
+      message, regardless of input." §Authorization model — "Ban
+      check. If `is_banned=true`: fixed reply, stop. No parser, no
+      DB query past the ban check, no LLM."
+    gap: |
+      AddSourceCommandHandler.java:117-132 — In group scope,
+      `lookupActor` returns `Optional.empty()` (because `ScopeRef.Group`
+      carries no contact id and `contactIdOf` returns `null` for
+      Group), so the in-handler ban check at line 118 is a no-op.
+      The `ScopeRef.Group` discriminator at line 130 then returns
+      `error.add_source.group_admin_only` instead of the
+      spec-mandated `error.add_source.banned` literal. The diff
+      explicitly documents this as deferred to T2-A/T2-F but the
+      threat-model commitment "one fixed reply regardless of input"
+      remains unkept until those land.
+    repro: |
+      A user with `is_banned=TRUE` on the current adapter sends
+      `/add-source https://example.com/feed.xml --tags x` into a
+      group scope. The handler responds with
+      `error.add_source.group_admin_only` instead of the fixed
+      banned reply, observably violating the "one fixed reply
+      regardless of input" invariant. No admin action succeeds
+      (material impact is minor) but the invariant is broken.
+    suggested_fix_class: trust-boundary-tightening
+redteam_audits:
+  - date: 2026-05-19
+    verdict: FINDINGS
+    base: main
+    head: m1/M1-039-add-source-handler-hardening
+    verdict_file: docs/plan/m1/redteam/M1-039-2026-05-19.md
+    findings_count: 1
+    out_of_model_count: 2
+    note: |
+      Single low-severity INFO-LEAK finding restates M1-036's
+      group-scope banned-user reply-leak gap; M1-039's diff
+      acknowledges this in handler.java:113-115, the ticket DoD,
+      the out_of_scope list, and acceptance item 2, all naming
+      T2-F (SPI widening) and T2-A (router-level intake gate) as
+      the deferred remediation. No new remediation ticket required;
+      the deferred work is already enumerated. The audit record is
+      preserved so T2-A / T2-F authors inherit a concrete adversary
+      repro for their acceptance criteria. Two OUT-OF-MODEL items
+      (cross-adapter contact-id collision, ContactIds.redact on
+      URLs) flagged for record only; the first is pre-existing
+      from M1-036, the second is not a confidentiality leak per
+      §Source URL visibility.
 ---
 
 # M1-039: /add-source handler hardening — ban-check ordering + contact-ID redaction in exceptions
@@ -87,8 +200,14 @@ the canonical template) copies the same defect three more times.
 
 - `AddSourceCommandHandler.handle` performs the actor lookup AND
   the ban check BEFORE the scope discriminator. A banned user in
-  any scope (DM or group) receives the fixed ban reply, never the
-  group-admin error.
+  DM scope receives the fixed ban reply, never any other error.
+  (Group-scope ban enforcement awaits T2-A's upstream gate or T2-F's
+  actor-seam SPI widening: `ScopeRef.Group` carries only
+  `adapterGroupId` today, so `lookupActor` returns `Optional.empty()`
+  in group scope and the in-handler ban check is a no-op there. The
+  reorder is still the load-bearing structural commitment so that,
+  once those land, the discriminator does not silently steal the
+  ban path again.)
 - `AddSourceCommandHandler.lookupActor` interpolates the contact id
   via `ContactIds.redact` when constructing the
   `IllegalStateException` message. The exception's SQL cause stays
@@ -96,10 +215,11 @@ the canonical template) copies the same defect three more times.
 - `SourceUpsertService.upsert` interpolates the source identifier
   through a redaction or truncation helper when constructing its
   `IllegalStateException` message.
-- New tests pin the four ban-check-ordering scenarios (banned in
-  DM, banned in group, non-banned non-admin in group, non-banned
-  group-admin in group) and the absence of unredacted contact-id
-  literals in captured exception messages.
+- New `AddSourceBanCheckOrderingTest` pins the two ban-check-ordering
+  scenarios testable at the current SPI shape (banned-DM and
+  non-admin-group, per acceptance item 2). New
+  `AddSourceContactIdRedactionTest` pins the absence of unredacted
+  contact-id literals in both `IllegalStateException` paths.
 - `mvn -B clean verify` exits 0; M1-036's existing tests continue
   to pass.
 
@@ -168,6 +288,16 @@ the canonical template) copies the same defect three more times.
   limit, invite gate, transport-level rate cap are all T2-A
   territory and stay deferred here. The in-handler ordering fix
   is independent of them.
+- **CommandHandler SPI widening (T2-F).** Threading the inbound
+  `Identity sender` into `CommandHandler.handle(...)` so the
+  handler can identify the actor in group scope is T2-F territory.
+  This ticket leaves the SPI as-is; group-scope ban enforcement
+  observably stays at the discriminator until T2-F lands.
+  Consequence: acceptance item 2 covers only scenarios (a)
+  banned-DM and (c) non-admin-group; scenarios (b) banned-group and
+  (d) group-admin-proceeds are explicitly deferred and do not have
+  test coverage in this ticket. The structural reorder is what
+  makes them work the day T2-F arrives.
 - **Per-scope ban-reply variants.** Do NOT introduce
   `error.add_source.group_admin_banned` or similar; the spec's
   "one fixed reply regardless of input" means the same literal

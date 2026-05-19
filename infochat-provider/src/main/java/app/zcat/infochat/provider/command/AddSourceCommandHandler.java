@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.command;
 
+import app.zcat.infochat.core.log.ContactIds;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
@@ -103,6 +104,21 @@ public class AddSourceCommandHandler implements CommandHandler {
         }
         AddSourceArgs args = ((Success) parsed).args();
 
+        // Actor lookup + ban check BEFORE the scope discriminator: §User
+        // ban's "Banned user receives one fixed reply per inbound message,
+        // regardless of input" is a per-handler invariant, so no
+        // scope-specific branch is allowed to short-circuit ahead of it.
+        // ScopeRef.Group carries adapterGroupId only (no contactId), so
+        // lookupActor returns Optional.empty() for group scope today and
+        // the ban check is observably a no-op there until T2-F or T2-A
+        // wires the actor seam. The reorder is the structural commitment
+        // that ensures the discriminator below cannot silently steal the
+        // ban path once the actor identity becomes reachable.
+        Optional<UserRow> actor = lookupActor(scope);
+        if (actor.isPresent() && actor.get().isBanned) {
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADD_SOURCE_BANNED));
+        }
+
         // Group scope: MVP rejects unconditionally with group_admin_only.
         // The frozen CommandHandler SPI does not carry the inbound
         // actor's identity in group scope (ScopeRef.Group holds only
@@ -115,17 +131,13 @@ public class AddSourceCommandHandler implements CommandHandler {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADD_SOURCE_GROUP_ADMIN_ONLY));
         }
 
-        // DM scope: resolve actor + permission gate.
-        Optional<UserRow> actor = lookupActor(scope);
+        // DM scope: actor must be present (AutoRegisterService runs
+        // upstream of every dispatch). Surface as a generic friendly
+        // error if absent.
         if (actor.isEmpty()) {
-            // Shouldn't happen — AutoRegisterService runs upstream of
-            // every dispatch. Surface as a generic friendly error.
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL));
         }
         UserRow user = actor.get();
-        if (user.isBanned) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADD_SOURCE_BANNED));
-        }
 
         // Kind resolution.
         Resolution resolution = kindResolver.resolve(args.url(), args.typeOverride());
@@ -209,8 +221,16 @@ public class AddSourceCommandHandler implements CommandHandler {
                 return Optional.of(new UserRow(id, isAdmin, isBanned));
             }
         } catch (SQLException e) {
+            // Redact the contact id in the wrapping message: §Secrets
+            // handling commits "Contact IDs are logged in redacted form
+            // (prefix + ellipsis + suffix) outside the audit log." The
+            // SQLException cause is preserved as-is so ops still see the
+            // full SQL diagnostic in the cause's stack trace; only the
+            // user-derived string in the IllegalStateException message
+            // is redacted.
             throw new IllegalStateException(
-                    "AddSourceCommandHandler.lookupActor failed for contact_id=" + contactId, e);
+                    "AddSourceCommandHandler.lookupActor failed for contact_id="
+                            + ContactIds.redact(contactId), e);
         }
     }
 

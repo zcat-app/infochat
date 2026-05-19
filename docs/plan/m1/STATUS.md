@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 45 |
+| done | 46 |
 | deferred | 7 |
 | **total** | **54** |
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-039 — /add-source handler hardening — ban-check ordering + contact-ID redaction in exceptions (complexity: low, risk: medium)
+- M1-040 — /summary prompt-injection wrapper + adapter-scoped users lookup across handlers (complexity: medium, risk: high)
 
 ---
 
@@ -41,7 +41,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-040 — blocked_by: M1-039 (pending)
+_(none)_
 
 ---
 
@@ -60,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-039 | /add-source handler hardening — ban-check ordering + contact-ID redaction in exceptions | 2026-05-19 | round 1 APPROVE |
 | M1-038 | InboundRouter hardening — fenced-code carve-out + body-size cap + contact-ID redaction in logs | 2026-05-19 | round 1 APPROVE |
 | M1-037 | /summary command (eligible-post SQL + cluster traversal + LLM prose + sanitizer + degraded fallback) | 2026-05-19 | round 1 APPROVE |
 | M1-036 | /add-source command (handler + kind resolver + URL probe + upsert + audit) | 2026-05-18 | round 2 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-035b | AdapterRegistry, InboundRouter, startup gates | 2026-05-17 | round 2 APPROVE |
 | M1-035a | InMemoryAdapter + SPI fill-in | 2026-05-17 | round 2 APPROVE |
 | M1-034b | Embedding pipeline + ReadyPromoter + first new_post NOTIFY | 2026-05-17 | round 1 APPROVE |
-| M1-034a | Tagger pipeline + V11 (post_embedding + embedding_metadata) | 2026-05-17 | round 2 APPROVE |
 
 ---
 
@@ -175,8 +175,8 @@ M1-030 (done)
 M1-031 (deferred)
 M1-035d (done)
 M1-038 (done)
-  └── M1-039 (pending) ← runnable
-        └── M1-040 (pending)
+  └── M1-039 (done)
+        └── M1-040 (pending) ← runnable
 M1-041 (deferred)
 M1-042 (deferred)
 ```

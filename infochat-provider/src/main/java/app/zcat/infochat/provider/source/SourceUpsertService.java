@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.source;
 
+import app.zcat.infochat.core.log.ContactIds;
 import app.zcat.infochat.provider.source.KindResolver.SourceKind;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -157,9 +158,17 @@ public class SourceUpsertService {
                 conn.setAutoCommit(true);
             }
         } catch (SQLException e) {
+            // Redact the source identifier in the wrapping message: the
+            // URL is bot-admin-visible via /list-sources --all per §Source
+            // URL visibility, but defense-in-depth keeps the full URL out
+            // of any exception message that reaches stdout / structured
+            // logs. The redaction reuses ContactIds.redact (treating the
+            // URL as an opaque string) rather than introducing a separate
+            // URL-shape helper; the SQLException cause is preserved for
+            // ops debugging.
             throw new IllegalStateException(
                     "SourceUpsertService.upsert failed for kind=" + kind.wire()
-                            + " identifier=" + identifier, e);
+                            + " identifier=" + ContactIds.redact(identifier), e);
         }
     }
 
@@ -199,7 +208,8 @@ public class SourceUpsertService {
                     // change. Surface loudly.
                     throw new IllegalStateException(
                             "source upsert returned no rows for (kind, identifier)="
-                                    + "(" + kind.wire() + ", " + identifier + ")");
+                                    + "(" + kind.wire() + ", "
+                                    + ContactIds.redact(identifier) + ")");
                 }
                 return new SourceUpsertResultRow(
                         (UUID) rs.getObject("id"),
