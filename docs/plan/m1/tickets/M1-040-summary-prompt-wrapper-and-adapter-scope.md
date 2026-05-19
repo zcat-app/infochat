@@ -123,6 +123,37 @@ spec_refs:
   - docs/spec/llm.md §Prompt-injection-aware prompt shape
 decision_refs:
   - D10
+redteam_findings: []
+redteam_audits:
+  - date: 2026-05-20
+    verdict: CLEAN
+    base: 357ee03^
+    head: 357ee03
+    verdict_file: docs/plan/m1/redteam/M1-040-2026-05-20.md
+    out_of_model_count: 3
+    note: |
+      Zero findings against the documented threat model. The audit
+      confirmed (a) per-call random UUID marker for the /summary
+      prompt-injection wrapper, (b) adapter-scoped (adapter,
+      contact_id) users SELECT in SummaryCommandHandler and
+      AddSourceCommandHandler — closing the D46 multi-adapter
+      identity-bleed surface M1-037's redteam Finding 5 raised
+      against M1-036's handler, (c) contact-ID redaction in
+      SummaryCommandHandler's IllegalStateException, and (d) the
+      system-prompt never-follow + structured-refusal-marker
+      clauses. Three OUT-OF-MODEL observations: (1) the most
+      actionable is a downstream-handling question — confirm
+      LlmOutputSanitizer / the degraded-fallback path intercepts
+      `[REFUSAL: <reason>]`-shaped replies as the
+      SUMMARIZER_SYSTEM_PROMPT Javadoc claims; if not, a small
+      hardening ticket should land it. (2) Forward-looking reminder
+      that the wrapper's prompt-injection resilience rests on the
+      secrecy of the per-call UUID — never log it, never reuse it.
+      (3) `InboundContext.adapterName()` can return null for
+      non-router callers (test harnesses); the resulting
+      `adapter = NULL` SELECT is fail-closed (no rows match, no
+      cross-adapter leak). No remediation ticket required for items
+      2-3; item 1 is the operator's call.
 ---
 
 # M1-040: /summary prompt-injection wrapper + adapter-scoped users lookup across handlers
