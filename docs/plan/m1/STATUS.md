@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 47 |
 | deferred | 7 |
-| **total** | **54** |
+| **total** | **55** |
 
 ---
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-043 — SummaryProseGenerator refusal-marker interception (degrade on `[REFUSAL: ...]` output) (complexity: low, risk: medium)
 
 ---
 
@@ -177,6 +177,7 @@ M1-038 (done)
   ├── M1-020 (deferred) [see above]
   └── M1-039 (done)
         └── M1-040 (done)
+              └── M1-043 (pending) ← runnable
 M1-041 (deferred)
 M1-042 (deferred)
 ```
