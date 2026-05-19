@@ -98,6 +98,46 @@ public final class BundleKeys {
     public static final String REPLY_ADD_SOURCE_URL_VISIBILITY_DISCLOSURE =
             "reply.add_source.url_visibility_disclosure";
 
+    // ----- /summary friendly errors (M1-037) ------------------------------
+    // Per docs/spec/commands.md §Content (`/summary`) +
+    // docs/design/03-commands.md §Time window flag. The eight keys below
+    // mirror the friendly-error / reply paths the spec assigns to /summary.
+
+    /** {@code /summary -w 5m}: the {@code m} suffix is intentionally rejected per design §Time window flag. */
+    public static final String ERROR_SUMMARY_WINDOW_MINUTES_NOT_ACCEPTED =
+            "error.summary.window_minutes_not_accepted";
+
+    /** {@code /summary -w 200h}: window outside the 1h–168h / 1d–30d / 1w–4w range. */
+    public static final String ERROR_SUMMARY_WINDOW_OUT_OF_RANGE =
+            "error.summary.window_out_of_range";
+
+    /** {@code /summary <tag>}: tag is not in the controlled vocabulary; bundle template surfaces a fuzzy-suggestion footer. */
+    public static final String ERROR_SUMMARY_UNKNOWN_TAG = "error.summary.unknown_tag";
+
+    /** {@code /summary <tag>}: tag failed the {@code ^[a-z0-9][a-z0-9-]{0,47}$} inline regex / length cap. */
+    public static final String ERROR_SUMMARY_TAG_MALFORMED = "error.summary.tag_malformed";
+
+    // ----- /summary successful / informational replies (M1-037) -----------
+
+    /** Empty result — zero eligible posts in the window (or zero subscriptions). */
+    public static final String REPLY_SUMMARY_NO_POSTS_YET = "reply.summary.no_posts_yet";
+
+    /** LLM unreachable: reply prefix announcing the degraded-fallback form. */
+    public static final String REPLY_SUMMARY_DEGRADED_NOTICE = "reply.summary.degraded_notice";
+
+    /**
+     * Cluster-cap excess prefix. Four interpolation tokens:
+     * {@code {0}} = included count (= cap), {@code {1}} = total eligible
+     * before cap, {@code {2}} = profile name (e.g. {@code laptop}),
+     * {@code {3}} = excluded count.
+     */
+    public static final String REPLY_SUMMARY_CAP_EXCESS_NOTICE =
+            "reply.summary.cap_excess_notice";
+
+    /** {@code >5 followed tags} top-3 restriction prefix. {@code {0}} = N = followed-tag count. */
+    public static final String REPLY_SUMMARY_TOP_3_OF_N_PREFIX =
+            "reply.summary.top_3_of_n_prefix";
+
     private BundleKeys() {
         throw new AssertionError("BundleKeys is a constant holder and must not be instantiated");
     }

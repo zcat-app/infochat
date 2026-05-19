@@ -1,28 +1,30 @@
 ---
 id: M1-037
 title: /summary command (eligible-post SQL + cluster traversal + LLM prose + sanitizer + degraded fallback)
-status: pending
+status: done
 created: 2026-05-17
-last_updated: 2026-05-18
+last_updated: 2026-05-19
 blocked_by:
   - M1-035
-files_budget: 15
+files_budget: 17
 files_scope:
-  - infochat-provider/src/main/java/io/infochat/provider/command/SummaryCommandHandler.java
-  - infochat-provider/src/main/java/io/infochat/provider/command/SummaryArgs.java
-  - infochat-provider/src/main/java/io/infochat/provider/summary/EligiblePostQuery.java
-  - infochat-provider/src/main/java/io/infochat/provider/summary/ClusterTraversal.java
-  - infochat-provider/src/main/java/io/infochat/provider/summary/SummaryProseGenerator.java
-  - infochat-provider/src/main/java/io/infochat/provider/llm/LlmOutputSanitizer.java
-  - infochat-provider/src/main/java/io/infochat/provider/bundle/BundleKeys.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/command/SummaryCommandHandler.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/command/SummaryArgs.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/summary/EligiblePostQuery.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/summary/ClusterTraversal.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/summary/SummaryProseGenerator.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/llm/LlmOutputSanitizer.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
   - infochat-provider/src/main/resources/bundles/en.properties
-  - infochat-provider/src/test/java/io/infochat/provider/command/SummaryArgsTest.java
-  - infochat-provider/src/test/java/io/infochat/provider/summary/EligiblePostQueryIT.java
-  - infochat-provider/src/test/java/io/infochat/provider/summary/ClusterTraversalTest.java
-  - infochat-provider/src/test/java/io/infochat/provider/summary/SummaryProseGeneratorTest.java
-  - infochat-provider/src/test/java/io/infochat/provider/llm/LlmOutputSanitizerTest.java
-  - infochat-provider/src/test/java/io/infochat/provider/command/SummaryCommandHandlerTest.java
-  - infochat-provider/src/test/java/io/infochat/provider/command/SummaryIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryArgsTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/summary/EligiblePostQueryIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/summary/ClusterTraversalTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/summary/SummaryProseGeneratorTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/llm/LlmOutputSanitizerTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryCommandHandlerTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryIT.java
+  - infochat-provider/src/main/resources/application.properties
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/testing/TestLlmProvider.java
 complexity: high
 risk: high
 round_cap: 3
@@ -145,7 +147,30 @@ decision_refs:
   - D36
   - D43
 
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-05-19
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+      spec_conformance: PASS
+    diff_stats:
+      files: 19
+      added: 3266
+      removed: 26
+    note: |
+      Reviewer flagged one minor acceptance-vs-spec prose imprecision
+      (NOT a check failure, did not block APPROVE): acceptance item 13(d)
+      says the SummaryIT reply body "contains the 2 source URLs (bare,
+      per Surface conventions)"; the IT actually asserts the source
+      display names per docs/design/03-commands.md §`/summary` which
+      shows `covered by:` carries source display names, not URLs. The
+      diff follows the spec-correct shape; the acceptance prose is
+      loose against the spec. Surfaced informationally; no change needed.
 escalations:
   - date: 2026-05-18
     reason: outline-fail
@@ -221,7 +246,56 @@ escalations:
       - cross-cutting concerns — audited (pass) — identified: determinism boundary (deterministic SQL ORDER BY before LLM, per-cluster invocation), per-(user, scope) isolation via source_subscription filter, plain-text-only + markdown-link strip in sanitizer, [REDACTED:<id>] placeholder retention end-to-end, English-only bundle keys with T2-C translation deferral, uncached on-the-fly path (D18), JBoss Logging WARN observability (per 2026-05-18 revision), post_reference table absence forces singleton clusters, profile-driven cluster-cap, degraded-fallback parity with periodic digests (D17).
       - implementation order — not audited: stopped at blockers above. Natural order would be (a) en.properties + BundleKeys constants, (b) SummaryArgs + Test, (c) EligiblePostQuery + IT, (d) ClusterTraversal + Test, (e) SummaryProseGenerator + Test, (f) LlmOutputSanitizer + Test, (g) SummaryCommandHandler + Test, (h) SummaryIT. Re-audit after refine.
       - risks — not audited: stopped at blockers above. Un-audited risks for the next Plan pass: (i) `>5 followed tags` top-3 tie-break rule not pinned by acceptance text — needs design check or acceptance clarification; (ii) `reply.summary.cap_excess_notice` 3-token interpolation (profile, cap, excluded) — IT must assert interpolated text without adapter-rendering dependency; (iii) sanitizer match-set "DERIVED FROM THE CLOSED LIST at boot — NOT hand-maintained" (acceptance item 9) is hard to satisfy without parsing markdown at boot, which is not a v1 pattern — Implementation notes suggest a hand-maintained constant holder, contradicting the acceptance text; (iv) sanitizer strip-vs-refuse is "implementer chooses" (acceptance item 9) — unusual for a security control and may need spec-tier clarification; (v) the markdown-link strip pass (`[text](url) → bare URL`) is mentioned in Big-picture notes but the regex shape is not pinned by acceptance, and it's a SECOND sanitizer pass separate from the closed-list strip — both must run before reply leaves the provider.
-revisions:
+  - date: 2026-05-19
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      Implementation reached `mvn -B clean verify` green on the per-ticket
+      branch, but landing the tests required two paths outside the
+      ticket's `files_scope` (and one path beyond `files_budget: 15`):
+
+      (1) `infochat-provider/src/test/java/app/zcat/infochat/provider/testing/TestLlmProvider.java`
+          — shared `@Alternative @Priority(Integer.MAX_VALUE) @ApplicationScoped`
+          `LlmProvider` stub, mirroring the collector's `StubLlmProvider`.
+          Both `SummaryCommandHandlerTest` and `SummaryIT` inject the
+          `LlmRouter` (transitively through `SummaryProseGenerator`),
+          which iterates `Instance<LlmProvider>`; replacing the
+          production `OpenAiCompatibleProvider` requires a single CDI
+          alternative bean shared across both tests. Quarkus's `@Mock`
+          annotation can only apply once per type per module, and
+          embedding the stub as a static-nested class inside one of
+          the two tests would be a budget-cheat without principled
+          placement (the stub is shared infrastructure, not tied to
+          either test's behavior).
+
+          Additionally: the stub MUST expose state via methods, not
+          public fields. Quarkus ArC `@ApplicationScoped` beans are
+          accessed through a generated proxy subclass whose own
+          `final` fields are initialized by `super()` and shadow the
+          bean's. Setting `mock.responseText.set(...)` via the proxy
+          reference updates the proxy's shadowed field, not the bean's;
+          the bean (which serves the actual `generate(...)` calls
+          through delegation) keeps returning its original default.
+          Detected during round-1 implementation; the
+          `Stage2WorkerIT`/`StubLlmProvider` pattern (methods only) is
+          the canonical fix.
+
+      (2) `infochat-provider/src/main/resources/application.properties`
+          — three concerns added: (a) `infochat.summary.cluster-cap`
+          base + per-profile overrides, required by acceptance item 17;
+          (b) `infochat.llm.security.*` defaults — Provider's pom
+          depends on `infochat-llm-adapter` and Quarkus discovers
+          `OpenAiCompatibleProvider` from there, but the provider's
+          `@ConfigProperty` fields have no class-side defaults, so the
+          bean fails to construct without these — and `LlmRouter` then
+          fails injection into `SummaryProseGenerator`; (c)
+          `quarkus.index-dependency.llm-adapter.*` so ArC discovers
+          `LlmRouter` + `OpenAiCompatibleProvider` from the jar (mirrors
+          the collector's existing entry).
+
+      `files_budget: 15` → effective 17 touched files. Refine to bump
+      the budget and append the two paths to `files_scope`, OR drop
+      the test stub and ship the bundle/cluster-cap config another way.
+      Surface to user.
   - date: 2026-05-18
     reason: outline-fail refine — sanitizer per-match observability switched from `audit_log` SQL row INSERT to JBoss Logging emission; persistent `audit_log` row write deferred to a T2 follow-up that lands the V12 migration adding `LLM_OUTPUT_SANITIZED` + an `AuditLogWriter` class + the coordinated update to M1-008a's verb-count grep test
     changes:
@@ -251,11 +325,94 @@ revisions:
       - "Implementation notes: NEW section `Sanitizer pass ordering: markdown-link strip FIRST, closed-list strip SECOND` with the link-evasion rationale."
       - "Big-picture notes: rewrote `Plain-text-only invariant` to describe the two-pass sanitizer with explicit ordering."
       - "Big-picture notes: NEW bullet `Per-cluster output: ONE field is LLM-authored; the other six are deterministic` listing exactly which fields the handler computes vs which the LLM emits."
+revisions:
+  - date: 2026-05-19
+    reason: budget-breach rework — widen files_budget 15 → 17 and append two paths to files_scope (shared LlmProvider test stub + Provider application.properties) that round-1 implementation surfaced as unavoidable. Reviewer verdict excerpt and supporting reasoning are recorded in the 2026-05-19 escalations: entry above. The implementation diff on the per-ticket branch is unchanged by this refine; only the ticket frontmatter is touched so the existing diff falls inside scope when /m1-tick review M1-037 runs. ALSO migrates the 15 stale `io/infochat/provider/...` paths in files_scope to their post-migration `app/zcat/infochat/provider/...` equivalents per the 2026-05-18 commit `5253fb9` ("M1-037 (pending) still cites old package paths in files_scope — update before starting work"). The rewrite is name-for-name — same files, just the on-disk package path the SCOPE-CHECK actually matches against; no acceptance, out_of_scope, or implementation contract is modified. Acceptance-item prose still contains some `io/infochat/provider` references, deliberately left alone per the 5253fb9 commit body's exclusion of "prose references to io.infochat in done tickets / drafts" from the migration — the files_scope frontmatter is the only place the package path is load-bearing for the SCOPE-CHECK.
+    note: |
+      Two new files_scope entries authorized by this refine:
+
+        1. infochat-provider/src/test/java/app/zcat/infochat/provider/testing/TestLlmProvider.java
+           (NEW) — shared `@Alternative @Priority(Integer.MAX_VALUE) @ApplicationScoped`
+           LlmProvider stub, mirroring the collector's
+           `infochat-collector/.../eval/testing/StubLlmProvider.java`
+           (introduced by M1-034a's budget-breach refine). Used by
+           BOTH `SummaryCommandHandlerTest` AND `SummaryIT` to replace
+           the production `OpenAiCompatibleProvider` for per-test
+           canned responses. Cannot be a static-nested class inside
+           either test (a) because Quarkus ArC raises
+           AmbiguousResolutionException when two `@Alternative
+           @Priority(MAX)` LlmProvider beans live in the same module
+           (the M1-034a precedent), and (b) because nesting the stub
+           inside ONE of the two tests would be a budget-cheat without
+           principled placement — the stub is shared infrastructure,
+           not tied to either test's behavior. State is exposed via
+           methods (`setResponse(...)`, `setThrow(...)`, `callCount()`),
+           NOT public fields, because ArC `@ApplicationScoped` proxies
+           shadow fields: writing `mock.responseText.set(...)` via the
+           proxy reference updates the proxy's shadowed final field,
+           not the delegate bean's, so the bean keeps returning its
+           original default. The methods-only shape matches the
+           canonical `StubLlmProvider` pattern.
+
+        2. infochat-provider/src/main/resources/application.properties
+           (MODIFIED) — three concerns added in one file:
+             (a) `infochat.summary.cluster-cap` base + per-profile
+                 overrides (laptop=200, vps=100, pi=50, remote-llm=500)
+                 per acceptance item 17. Cannot live elsewhere — the
+                 property is read via `@ConfigProperty` and Quarkus
+                 resolves defaults from application.properties at
+                 deploy time, not from class-level annotations.
+             (b) `infochat.llm.security.*` defaults — Provider's
+                 `pom.xml` depends on `infochat-llm-adapter`, and
+                 Quarkus discovers `OpenAiCompatibleProvider` from that
+                 jar at deployment. The provider's `@ConfigProperty`
+                 fields have NO class-side defaults; without
+                 application.properties entries the bean fails to
+                 construct → `LlmRouter` injection fails →
+                 `SummaryProseGenerator` cannot wire → all 7 new test
+                 classes red. The collector's existing
+                 application.properties has the identical block (added
+                 by M1-033); the Provider needs the same.
+             (c) `quarkus.index-dependency.llm-adapter.*` — registers
+                 the `infochat-llm-adapter` jar with ArC so
+                 `LlmRouter` and `OpenAiCompatibleProvider` are
+                 discovered as beans. Mirrors the collector's existing
+                 `quarkus.index-dependency.llm-adapter.*` entry
+                 (M1-033). Without it, ArC sees `Instance<LlmProvider>`
+                 as empty and injection fails at deploy time.
+
+      Snapshot of the pre-refine frontmatter fields that this refine
+      changed (everything else carries through unchanged):
+        files_budget: 15
+        files_scope: (14 entries, all under `io/infochat/provider/...`
+          and `infochat-provider/.../bundles/en.properties`; see the
+          file's pre-refine state in the round-1 outline-fail refine
+          snapshot above plus the 14 entries authored by the round-2
+          outline-fail refine — the 15th slot was BundleKeys.java).
+        status: escalated (per the 2026-05-19 budget-breach
+          escalations: entry above).
+
+      No acceptance item is modified by this refine — the implemented
+      behavior matches the existing acceptance contract; the breach
+      was purely about file accounting (the test stub had no
+      principled in-budget placement, and application.properties was
+      missing the Provider's wiring entirely for the new dependency
+      surface). The clarity pre-flight does NOT re-run on the
+      branch-exists arm of refine (per
+      .claude/skills/m1-tick/subcommands/escalate.md step 5 third
+      arm); a fresh Plan pass is also not required because Plan
+      already passed on round 2 (2026-05-18) and the refine only
+      widens scope authorization, not the design.
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-05-18
+  verdict: PASS
+  warnings: []
+  blockers: []
+outline_file: target/m1-tick-outline-M1-037.md
 ---
 
 # M1-037: /summary command (eligible-post SQL + cluster traversal + LLM prose + sanitizer + degraded fallback)
