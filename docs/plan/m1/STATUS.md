@@ -86,7 +86,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 ### post-mvp-hardening (4)
 - M1-019 → M1-033
-- M1-020 → M1-035b
+- M1-020 → M1-038
 - M1-031 → unspecified
 - M1-042 → unspecified
 
@@ -149,7 +149,6 @@ M1-001 (done)
               │     ├── M1-036 (done)
               │     └── M1-037 (done)
               └── M1-035b (done)
-                    ├── M1-020 (deferred) [see above]
                     ├── M1-035 (done) [see above]
                     └── M1-035c (done)
                           └── M1-035 (done) [see above]
@@ -175,6 +174,7 @@ M1-030 (done)
 M1-031 (deferred)
 M1-035d (done)
 M1-038 (done)
+  ├── M1-020 (deferred) [see above]
   └── M1-039 (done)
         └── M1-040 (done)
 M1-041 (deferred)
