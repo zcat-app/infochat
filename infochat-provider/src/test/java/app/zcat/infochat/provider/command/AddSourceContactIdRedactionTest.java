@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.command;
 
 import app.zcat.infochat.messaging.ScopeRef;
+import app.zcat.infochat.provider.messaging.InboundContext;
 import app.zcat.infochat.provider.source.KindResolver;
 import app.zcat.infochat.provider.source.SourceUpsertService;
 import org.junit.jupiter.api.Test;
@@ -72,8 +73,15 @@ class AddSourceContactIdRedactionTest {
     @Test
     void lookupActorIllegalStateExceptionRedactsContactId() {
         AddSourceCommandHandler handler = new AddSourceCommandHandler();
-        // Package-private field — same package as the test.
+        // Package-private fields — same package as the test.
         handler.dataSource = new BrokenDataSource();
+        // M1-040 wired an InboundContext lookup into lookupActor
+        // (adapter + contact_id qualified SELECT). It runs BEFORE the
+        // SQLException short-circuit; supply an empty InboundContext
+        // so adapterName() returns null without an NPE — the adapter
+        // value never reaches the SELECT because getConnection()
+        // throws first.
+        handler.inboundContext = new InboundContext();
         // The other @Inject fields stay null; the SQLException short-
         // circuits before any of them is dereferenced.
 

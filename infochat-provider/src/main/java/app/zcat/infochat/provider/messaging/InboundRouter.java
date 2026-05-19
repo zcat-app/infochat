@@ -7,6 +7,7 @@ import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.context.control.ActivateRequestContext;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -156,6 +157,9 @@ public class InboundRouter {
     @Inject
     AutoRegisterService autoRegisterService;
 
+    @Inject
+    InboundContext inboundContext;
+
     /**
      * Defense-in-depth body cap. The default is below the in-memory
      * adapter's declared {@code maxInboundMessageBytes} so a
@@ -186,9 +190,27 @@ public class InboundRouter {
      * calls this method, so {@code adapterName} reflects the real
      * source adapter even in multi-adapter deployments (T3-A).
      */
+    @ActivateRequestContext
     public void onMessage(InboundMessage msg, String adapterName) {
+        // @ActivateRequestContext gives this dispatch its own CDI
+        // request-scope context so @RequestScoped collaborators
+        // (InboundContext) resolve correctly when invoked from threads
+        // that have no ambient request scope — adapter callbacks fire
+        // off virtual / pool threads in production and on the test
+        // thread in InMemoryAdapter-driven tests.
         // T2-A wires the missing intake steps upstream of this point:
         // ban check (D11), invite-code gate (D44), slow-start probation (D45).
+        //
+        // Set the per-request adapter name BEFORE any size-cap / normalize /
+        // dispatch step runs. Handlers and downstream collaborators that
+        // need to qualify a per-actor users lookup by (adapter, contact_id)
+        // — required for the V5 UNIQUE constraint and for cross-adapter
+        // isolation when D46's SimpleX+Signal lands — read it back via
+        // @Inject InboundContext. The router is the single producer of
+        // adapter-name truth for the dispatch (AdapterRegistry captures
+        // adapter.name() into the lambda that invokes onMessage).
+        inboundContext.setAdapterName(adapterName);
+
         String raw = msg.text();
 
         // Size cap fires BEFORE normalize so adversarial NFKC inputs

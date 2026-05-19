@@ -157,6 +157,9 @@ class InboundRouterNormalizeTest {
         router.maxInboundBodyBytes = 16; // tiny cap so a short ASCII body overflows
         router.commandHandlers = new EmptyHandlerInstance();
         router.autoRegisterService = new ThrowingAutoRegisterService();
+        // M1-040: InboundContext is set at the top of onMessage and
+        // must be non-null even when the size-cap path returns early.
+        router.inboundContext = new InboundContext();
         CapturingAdapter target = new CapturingAdapter();
         router.setReplyTarget(target);
 
@@ -194,6 +197,7 @@ class InboundRouterNormalizeTest {
         router.maxInboundBodyBytes = 16;
         router.commandHandlers = new EmptyHandlerInstance();
         router.autoRegisterService = new ThrowingAutoRegisterService();
+        router.inboundContext = new InboundContext();
         CapturingAdapter target = new CapturingAdapter();
         router.setReplyTarget(target);
 

@@ -9,6 +9,7 @@ import app.zcat.infochat.provider.command.SummaryArgs.ParseResult;
 import app.zcat.infochat.provider.command.SummaryArgs.Success;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.messaging.CommandHandler;
+import app.zcat.infochat.provider.messaging.InboundContext;
 import app.zcat.infochat.provider.summary.ClusterTraversal;
 import app.zcat.infochat.provider.summary.ClusterTraversal.Cluster;
 import app.zcat.infochat.provider.summary.EligiblePostQuery;
@@ -64,8 +65,18 @@ import java.util.UUID;
 @ApplicationScoped
 public class SummaryCommandHandler implements CommandHandler {
 
-    private static final String SELECT_USER_ID_BY_CONTACT_ID =
-            "SELECT id FROM users WHERE contact_id = ?";
+    /**
+     * Per the V5 {@code UNIQUE (adapter, contact_id)} constraint on
+     * {@code users}, the lookup MUST qualify on both columns: a
+     * {@code contact_id}-only WHERE would cross-resolve to a different
+     * adapter's user row in a multi-adapter deployment (decision D46:
+     * SimpleX + Signal running side-by-side). The adapter name reaches
+     * this handler through the {@link InboundContext} CDI bean that
+     * the {@link app.zcat.infochat.provider.messaging.InboundRouter}
+     * populates on every inbound dispatch.
+     */
+    private static final String SELECT_USER_ID_BY_ADAPTER_AND_CONTACT_ID =
+            "SELECT id FROM users WHERE adapter = ? AND contact_id = ?";
 
     /** Max fuzzy-suggestion entries surfaced in the unknown-tag error. */
     private static final int FUZZY_SUGGESTION_MAX = 5;
@@ -87,6 +98,9 @@ public class SummaryCommandHandler implements CommandHandler {
 
     @Inject
     LlmOutputSanitizer llmOutputSanitizer;
+
+    @Inject
+    InboundContext inboundContext;
 
     @Override
     public String name() {
@@ -220,9 +234,12 @@ public class SummaryCommandHandler implements CommandHandler {
             // querying with the adapter-side group id.
             return Optional.empty();
         }
+        String adapterName = inboundContext.adapterName();
         try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(SELECT_USER_ID_BY_CONTACT_ID)) {
-            ps.setString(1, dm.contactId());
+             PreparedStatement ps = conn.prepareStatement(
+                     SELECT_USER_ID_BY_ADAPTER_AND_CONTACT_ID)) {
+            ps.setString(1, adapterName);
+            ps.setString(2, dm.contactId());
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) {
                     return Optional.empty();
@@ -230,9 +247,11 @@ public class SummaryCommandHandler implements CommandHandler {
                 return Optional.of((UUID) rs.getObject("id"));
             }
         } catch (SQLException e) {
+            // Do NOT interpolate the raw contact_id into the wrapping
+            // message; the SQLException stack already carries the SQL
+            // diagnostic. The cause preserves the exception chain.
             throw new IllegalStateException(
-                    "SummaryCommandHandler.resolveScopeId failed for contact_id=" + dm.contactId(),
-                    e);
+                    "SummaryCommandHandler.resolveScopeId failed", e);
         }
     }
 

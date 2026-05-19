@@ -9,6 +9,7 @@ import app.zcat.infochat.provider.command.AddSourceArgs.Failure;
 import app.zcat.infochat.provider.command.AddSourceArgs.ParseResult;
 import app.zcat.infochat.provider.command.AddSourceArgs.Success;
 import app.zcat.infochat.provider.messaging.CommandHandler;
+import app.zcat.infochat.provider.messaging.InboundContext;
 import app.zcat.infochat.provider.source.KindResolver;
 import app.zcat.infochat.provider.source.KindResolver.Resolution;
 import app.zcat.infochat.provider.source.SourceUpsertService;
@@ -61,20 +62,23 @@ import java.util.UUID;
  *       reply from the returned {@link Outcome}.</li>
  * </ol>
  *
- * <p><b>Adapter-name absence in the SPI.</b> The frozen
+ * <p><b>Adapter-scoped actor lookup.</b> The frozen
  * {@code CommandHandler.handle(ScopeRef, String)} does not carry the
- * inbound adapter name, so the {@code (adapter, contact_id) UNIQUE}
- * on {@code users} cannot be qualified here. MVP runs a single
- * active adapter ({@code inmemory} only per D46), so a
- * {@code contact_id}-only lookup is unambiguous. T3-A (SimpleX +
- * Signal) is the right time to widen the SPI or add a thread-local
- * adapter context; the lookup below MUST be revisited then.</p>
+ * inbound adapter name as a parameter; the adapter reaches this
+ * handler via the {@link InboundContext} CDI request-scope bean that
+ * the {@link app.zcat.infochat.provider.messaging.InboundRouter}
+ * populates on every inbound dispatch. The {@code users} SELECT MUST
+ * qualify on {@code (adapter, contact_id)} per the V5 UNIQUE
+ * constraint; a {@code contact_id}-only lookup would cross-resolve
+ * to a different adapter's user row once D46's SimpleX+Signal
+ * deployment shape comes online (two distinct users can share a
+ * {@code contact_id} literal across adapters).</p>
  */
 @ApplicationScoped
 public class AddSourceCommandHandler implements CommandHandler {
 
     private static final String SELECT_USER_FLAGS_FOR_DM_SQL =
-            "SELECT id, is_admin, is_banned FROM users WHERE contact_id = ?";
+            "SELECT id, is_admin, is_banned FROM users WHERE adapter = ? AND contact_id = ?";
 
     @Inject
     BundleLoader bundleLoader;
@@ -90,6 +94,9 @@ public class AddSourceCommandHandler implements CommandHandler {
 
     @Inject
     DataSource dataSource;
+
+    @Inject
+    InboundContext inboundContext;
 
     @Override
     public String name() {
@@ -208,9 +215,11 @@ public class AddSourceCommandHandler implements CommandHandler {
         if (contactId == null) {
             return Optional.empty();
         }
+        String adapterName = inboundContext.adapterName();
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(SELECT_USER_FLAGS_FOR_DM_SQL)) {
-            ps.setString(1, contactId);
+            ps.setString(1, adapterName);
+            ps.setString(2, contactId);
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) {
                     return Optional.empty();

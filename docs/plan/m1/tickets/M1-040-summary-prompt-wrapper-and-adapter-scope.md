@@ -1,9 +1,41 @@
 ---
 id: M1-040
 title: /summary prompt-injection wrapper + adapter-scoped users lookup across handlers
-status: pending
+status: done
 created: 2026-05-19
-last_updated: 2026-05-19
+last_updated: 2026-05-20
+clarity_check:
+  date: 2026-05-19
+  verdict: PASS
+  warnings: []
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-05-19
+    verdict: REWORK
+    checks:
+      scope_drift: FAIL
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: FAIL
+    diff_stats:
+      files: 13
+      added: 730
+      removed: 31
+  - round: 2
+    date: 2026-05-19
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 13
+      added: 802
+      removed: 32
 escalations:
   - date: 2026-05-19
     reason: clarity-fail
@@ -25,9 +57,17 @@ revisions:
         blockers:
           - "SPEC-REFS-VALID FAIL: `docs/spec/security.md §Per-(user, scope) isolation` does not exist as a section heading in docs/spec/security.md."
           - "SPEC-REFS-VALID FAIL: `docs/spec/llm.md §Prompt-injection wrapper` does not exist as a heading in docs/spec/llm.md."
+  - date: 2026-05-19
+    reason: round-1 REWORK item 2 — scope_drift FAIL; raise files_budget to 13 and add three pre-existing test files to files_scope. The new @Inject InboundContext field on InboundRouter and AddSourceCommandHandler mechanically requires fixture-wiring updates in three direct-instantiation tests outside the M1-036/M1-037 surface enumerated in §Authorized test changes. Documented per the round-1 reviewer's recommendation (target/m1-tick-review-M1-040-r1.txt).
+    snapshot:
+      files_budget_was: 10
+      files_scope_added:
+        - infochat-provider/src/test/java/app/zcat/infochat/provider/command/AddSourceContactIdRedactionTest.java
+        - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterContactIdRedactionTest.java
+        - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterNormalizeTest.java
 blocked_by:
   - M1-039
-files_budget: 10
+files_budget: 13
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/InboundContext.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/InboundRouter.java
@@ -37,6 +77,9 @@ files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/summary/SummaryProseInjectionTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryAdapterScopeIT.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/AddSourceAdapterScopeIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/AddSourceContactIdRedactionTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterContactIdRedactionTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterNormalizeTest.java
 complexity: medium
 risk: high
 round_cap: 3
@@ -257,6 +300,20 @@ prompt construction into chat-mode would multiply the defect.
   users with adapter values (because AutoRegisterService's
   INSERT already includes it) need no INSERT change, only the
   context wiring.
+- **Direct-instantiation tests outside M1-036/M1-037
+  (added in round-1 REWORK refinement, 2026-05-19).** Three
+  pre-existing tests construct `InboundRouter` or
+  `AddSourceCommandHandler` via `new ...()` and assign
+  package-private fields directly. With M1-040's `@Inject
+  InboundContext`, they must also assign
+  `router.inboundContext = new InboundContext()` (or
+  `handler.inboundContext = new InboundContext()`) so the
+  setAdapterName / adapterName call on entry to onMessage or
+  lookupActor does not NPE. The wiring update is fixture-only;
+  no assertion changes. The three tests:
+  - `infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterNormalizeTest.java` (M1-035b)
+  - `infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterContactIdRedactionTest.java` (M1-038)
+  - `infochat-provider/src/test/java/app/zcat/infochat/provider/command/AddSourceContactIdRedactionTest.java` (M1-039)
 
 ## Alternatives considered
 
@@ -288,3 +345,36 @@ prompt construction into chat-mode would multiply the defect.
   prompts vary per-adapter.** Not applicable — the prompt does
   not depend on the originating adapter, only on the post
   content. The adapter affects only the upstream users SELECT.
+
+## Round 1 rework
+
+Round-1 reviewer (`target/m1-tick-review-M1-040-r1.txt`) returned
+REWORK with two items.
+
+1. **ACCEPTANCE item 3 grep mismatch.** The reformatted
+   `SELECT_USER_FLAGS_FOR_DM_SQL` literal in
+   `AddSourceCommandHandler` was split across two Java source
+   lines, breaking the line-oriented acceptance grep
+   `grep -E 'SELECT.*FROM\s+users\s+WHERE\s+adapter\s*=\s*\?\s+AND\s+contact_id\s*=\s*\?' AddSourceCommandHandler.java`.
+   The runtime SQL is correct (the AdapterScopeIT validates it
+   end-to-end); the literal acceptance check requires the SQL
+   string to live on one line. Fix: collapse the multi-line
+   string concatenation to a single source line.
+
+2. **SCOPE-DRIFT files_budget + files_scope overrun.** The diff
+   touches 11 implementation files (after subtracting the two
+   lifecycle-exempt paths `docs/plan/m1/STATUS.md` and the
+   ticket file itself), exceeding `files_budget: 10`, and three
+   of those files are not enumerated in `files_scope`:
+   `AddSourceContactIdRedactionTest.java`,
+   `InboundRouterContactIdRedactionTest.java`,
+   `InboundRouterNormalizeTest.java`. The modifications are
+   mechanically required by the new `@Inject InboundContext`
+   field on `InboundRouter` and `AddSourceCommandHandler` — each
+   test constructs its SUT via `new ...()` and assigns
+   package-private fields directly, so a non-null
+   `inboundContext` field assignment is the only viable fixture
+   wire-up. Fix: refine the ticket with a `revisions:`
+   frontmatter entry bumping `files_budget` to 13 and
+   extending `files_scope` + §Authorized test changes to
+   enumerate the three tests.

@@ -143,6 +143,10 @@ class InboundRouterContactIdRedactionTest {
         InboundRouter router = new InboundRouter();
         router.commandHandlers = new SingletonInstance<>();
         router.autoRegisterService = new NoopAutoRegisterService();
+        // M1-040 wired a @RequestScoped InboundContext into onMessage.
+        // Outside Quarkus boot, instantiate the bean directly — its
+        // @RequestScoped marker only matters when ARC proxies it.
+        router.inboundContext = new InboundContext();
         router.maxInboundBodyBytes = 65536;
         return router;
     }
