@@ -1,9 +1,29 @@
 ---
 id: M1-038
 title: InboundRouter hardening — fenced-code carve-out + body-size cap + contact-ID redaction in logs
-status: pending
+status: done
 created: 2026-05-19
 last_updated: 2026-05-19
+reviews:
+  - round: 1
+    date: 2026-05-19
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 1219
+      removed: 29
+clarity_check:
+  date: 2026-05-19
+  verdict: WARN
+  warnings:
+    - "SELF-CONTAINED-CHECK: Acceptance item 3 cites the fence-recognition rule per docs/spec/security.md §Authorization model step 1.7 (fence recognition per the CommonMark rule documented in §Ingest pipeline) rather than inlining the rule in the acceptance item itself. The rule IS inlined in the Implementation notes section, so the implementer has it in context — but the acceptance item alone would require loading the spec. Consider moving the inline rule from Implementation notes into the acceptance item text. Not a blocker because the full ticket body is self-contained."
+  blockers: []
 blocked_by: []
 files_budget: 6
 files_scope:
