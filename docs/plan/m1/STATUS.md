@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 44 |
-| deferred | 5 |
-| **total** | **49** |
+| deferred | 7 |
+| **total** | **54** |
 
 ---
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-038 — InboundRouter hardening — fenced-code carve-out + body-size cap + contact-ID redaction in logs (complexity: medium, risk: medium)
 
 ---
 
@@ -41,7 +41,8 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-039 — blocked_by: M1-038 (pending)
+- M1-040 — blocked_by: M1-039 (pending)
 
 ---
 
@@ -81,10 +82,14 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 ### end-of-tier-1-redteam (1)
 - M1-021 → unspecified
 
-### post-mvp-hardening (3)
+### post-mvp-audit-writer-consolidation (1)
+- M1-041 → unspecified
+
+### post-mvp-hardening (4)
 - M1-019 → M1-033
 - M1-020 → M1-035b
 - M1-031 → unspecified
+- M1-042 → unspecified
 
 ---
 
@@ -170,4 +175,9 @@ M1-029 (done)
 M1-030 (done)
 M1-031 (deferred)
 M1-035d (done)
+M1-038 (pending) ← runnable
+  └── M1-039 (pending)
+        └── M1-040 (pending)
+M1-041 (deferred)
+M1-042 (deferred)
 ```
