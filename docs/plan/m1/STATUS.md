@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 7 |
+| pending | 6 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 47 |
+| done | 48 |
 | deferred | 7 |
 | **total** | **61** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-043 — SummaryProseGenerator refusal-marker interception (degrade on `[REFUSAL: ...]` output) (complexity: low, risk: medium)
 - M1-044a — Intake-step services — rate cap, invite consumer, ban check, brute-force migration (complexity: high, risk: high)
 
 ---
@@ -65,6 +64,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-043 | SummaryProseGenerator refusal-marker interception (degrade on `[REFUSAL: ...]` output) | 2026-05-20 | round 1 APPROVE |
 | M1-040 | /summary prompt-injection wrapper + adapter-scoped users lookup across handlers | 2026-05-20 | round 2 APPROVE |
 | M1-039 | /add-source handler hardening — ban-check ordering + contact-ID redaction in exceptions | 2026-05-19 | round 1 APPROVE |
 | M1-038 | InboundRouter hardening — fenced-code carve-out + body-size cap + contact-ID redaction in logs | 2026-05-19 | round 1 APPROVE |
@@ -74,7 +74,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-035d | Wire AutoRegisterService into InboundRouter intake | 2026-05-17 | round 1 APPROVE |
 | M1-035c | /help command + auto-register-on-first-DM | 2026-05-17 | round 2 APPROVE |
 | M1-035b | AdapterRegistry, InboundRouter, startup gates | 2026-05-17 | round 2 APPROVE |
-| M1-035a | InMemoryAdapter + SPI fill-in | 2026-05-17 | round 2 APPROVE |
 
 ---
 
@@ -182,7 +181,7 @@ M1-038 (done)
   ├── M1-020 (deferred) [see above]
   └── M1-039 (done)
         └── M1-040 (done)
-              └── M1-043 (pending) ← runnable
+              └── M1-043 (done)
 M1-041 (deferred)
 M1-042 (deferred)
 M1-044a (pending) ← runnable

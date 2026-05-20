@@ -1,7 +1,7 @@
 ---
 id: M1-043
 title: SummaryProseGenerator refusal-marker interception (degrade on `[REFUSAL: ...]` output)
-status: pending
+status: done
 created: 2026-05-20
 last_updated: 2026-05-20
 blocked_by:
@@ -44,7 +44,20 @@ spec_refs:
 decision_refs:
   - D17
 
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-05-20
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 137
+      removed: 12
 escalations: []
 revisions: []
 overrides: []
@@ -52,7 +65,12 @@ aborted_attempts: []
 reopens: []
 redteam_findings: []
 redteam_audits: []
-clarity_check: {}
+clarity_check:
+  date: 2026-05-20
+  verdict: PASS
+  warnings:
+    - "Item 4 acceptance grep uses the informal qualifier 'SUMMARIZER_SYSTEM_PROMPT region' which a bare `grep -F 'LlmOutputSanitizer' SummaryProseGenerator.java` would not enforce — LlmOutputSanitizer likely appears elsewhere in the file (at the call site). Scope the grep to the Javadoc block (e.g., sed + grep) or verify by inspection. Execution-ambiguity warn, not a satisfiability failure."
+  blockers: []
 ---
 
 # M1-043: SummaryProseGenerator refusal-marker interception (degrade on `[REFUSAL: ...]` output)
