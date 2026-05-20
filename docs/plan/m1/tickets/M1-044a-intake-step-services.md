@@ -38,18 +38,30 @@ out_of_scope:
 acceptance:
   - "infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/RateCapBucket.java exists, is `@ApplicationScoped`, and exposes a public method `boolean tryAcquire(String adapter, String contactId)` that returns true on under-cap and false on over-cap. Verify: `grep -E '@ApplicationScoped' RateCapBucket.java` returns ≥1 match AND `grep -E 'public\\s+boolean\\s+tryAcquire' RateCapBucket.java` returns ≥1 match. The bucket holds in-memory state keyed by `(adapter, contactId)`; no JDBC, no `DataSource` injection — confirmed by `grep -E 'DataSource|java\\.sql' RateCapBucket.java` returning ZERO matches"
   - "RateCapBucket reads its cap value via `@ConfigProperty(name = \"infochat.rate-cap.inbound-per-minute\", defaultValue = \"60\")` so M1-044b's per-profile property edits land cleanly. Verify: `grep -E 'infochat\\.rate-cap\\.inbound-per-minute' RateCapBucket.java` returns ≥1 match"
-  - "RateCapBucketTest covers: (a) first N inbounds under the cap return true; (b) the (N+1)-th inbound from the same (adapter, contactId) returns false (the cap fires); (c) inbounds from a different (adapter, contactId) tuple are independently bucketed (asserted by interleaving two contact IDs and seeing each respect its own cap); (d) the bucket refills after the window elapses (advance the clock via a test-injectable clock seam or @Inject Clock, asserting the (N+1)-th call returns true again after the refill interval). `grep -E '@Test' RateCapBucketTest.java` returns ≥3 matches"
+  - "RateCapBucketTest has a @Test method whose name contains `underCap` (case-insensitive) that asserts the first N inbounds under the cap return true for one `(adapter, contactId)` tuple. Verify: `grep -iE '@Test\\s*\\n[^}]*underCap' RateCapBucketTest.java` returns ≥1 match"
+  - "RateCapBucketTest has a @Test method whose name contains `overCap` (case-insensitive) that asserts the (N+1)-th inbound from the same `(adapter, contactId)` returns false. Verify: `grep -iE '@Test\\s*\\n[^}]*overCap' RateCapBucketTest.java` returns ≥1 match"
+  - "RateCapBucketTest has a @Test method whose name contains `independent` (case-insensitive) that asserts two distinct `(adapter, contactId)` tuples are bucketed independently — interleaving two contact IDs sees each respect its own cap. Verify: `grep -iE '@Test\\s*\\n[^}]*independent' RateCapBucketTest.java` returns ≥1 match"
+  - "RateCapBucketTest has a @Test method whose name contains `refill` (case-insensitive) that asserts the bucket refills after the window elapses — the test advances a test-injectable Clock seam and asserts the (N+1)-th call returns true again after the refill interval. Verify: `grep -iE '@Test\\s*\\n[^}]*refill' RateCapBucketTest.java` returns ≥1 match"
   - "infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/InviteCodeConsumer.java exists, is `@ApplicationScoped`, and exposes a public method returning a typed result (sealed interface or record-based enum) over `{Accepted(UUID userId), Rejected, BruteForceThresholdBreached}` for a single consume attempt. Verify: `grep -E '@ApplicationScoped' InviteCodeConsumer.java` returns ≥1 match"
-  - "InviteCodeConsumer's consume SQL is the spec-committed race-safe conditional UPDATE per schema.md §Identity and access — Invite code: `UPDATE invite_code SET status = 'USED', used_at = NOW(), used_by_contact_id = ? WHERE code = ? AND status = 'PENDING' AND (expires_at IS NULL OR expires_at > NOW()) AND adapter = ? AND (invite_type = 'OPEN_ADAPTER' OR expected_contact_id = ?) RETURNING id`. Verify: `grep -E 'UPDATE\\s+invite_code\\s+SET\\s+status\\s*=\\s*''USED''' InviteCodeConsumer.java` returns ≥1 match AND `grep -E 'RETURNING\\s+id' InviteCodeConsumer.java` returns ≥1 match"
+  - "InviteCodeConsumer's consume SQL is the spec-committed race-safe conditional UPDATE per schema.md §Identity and access — Invite code: `UPDATE invite_code SET status = 'USED', used_at = NOW(), used_by_contact_id = ? WHERE code = ? AND status = 'PENDING' AND (expires_at IS NULL OR expires_at > NOW()) AND adapter = ? AND (invite_type = 'OPEN_ADAPTER' OR expected_contact_id = ?) RETURNING id`. Verify: `grep -E \"UPDATE\\s+invite_code\\s+SET\\s+status\\s*=\\s*'USED'\" InviteCodeConsumer.java` returns ≥1 match AND `grep -E 'RETURNING\\s+id' InviteCodeConsumer.java` returns ≥1 match"
   - "InviteCodeConsumer increments the per-`(adapter, contact_id)` brute-force counter on every Rejected outcome AND emits a single `INVITE_CONSUME` audit row on every Accepted outcome (audit-before-effect per Invariant 7 — the audit INSERT runs in the same transaction as the conditional UPDATE so a transaction roll-back leaves no audit row for a failed consume). Verify: `grep -E 'INSERT\\s+INTO\\s+invite_code_attempt' InviteCodeConsumer.java` returns ≥1 match AND `grep -E 'INSERT\\s+INTO\\s+audit_log' InviteCodeConsumer.java` returns ≥1 match"
   - "InviteCodeConsumer checks the per-`(adapter, contact_id)` brute-force counter BEFORE the conditional UPDATE and short-circuits with the BruteForceThresholdBreached outcome when the counter ≥ threshold within the window. The threshold value reads via `@ConfigProperty(name = \"infochat.invite.brute-force-threshold\", defaultValue = \"10\")` and the window via `@ConfigProperty(name = \"infochat.invite.brute-force-window\", defaultValue = \"1h\")` (Duration). When the threshold is breached, a single `INVITE_BRUTE_FORCE_BREACH` audit row is written (the brute-force breach audit row per spec §Invite-code registration). Verify: `grep -E 'infochat\\.invite\\.brute-force-threshold|infochat\\.invite\\.brute-force-window' InviteCodeConsumer.java` returns ≥2 matches. Note: the verb `INVITE_BRUTE_FORCE_BREACH` is NOT yet in the V5 audit catalogue; this ticket adds it as a comment-only entry in the V12 migration (audit catalogue is open-ended per V5 comments) and as a constant in InviteCodeConsumer"
   - "infochat-core/src/main/resources/db/migration/V12__invite_code_attempt.sql exists and applies cleanly on a fresh DB. The migration creates a table `invite_code_attempt` with columns `(adapter TEXT NOT NULL, contact_id TEXT NOT NULL, attempted_at TIMESTAMPTZ NOT NULL DEFAULT now())` and an index `idx_invite_code_attempt_lookup ON invite_code_attempt(adapter, contact_id, attempted_at DESC)` to back the window-bounded COUNT(*) query. Verify: `grep -E 'CREATE TABLE invite_code_attempt' V12__invite_code_attempt.sql` returns ≥1 match AND `grep -E 'CREATE INDEX idx_invite_code_attempt_lookup' V12__invite_code_attempt.sql` returns ≥1 match. The migration carries the V5-style per-table GRANT: `GRANT SELECT, INSERT ON invite_code_attempt TO infochat_provider;` — verify: `grep -E 'GRANT\\s+SELECT,\\s+INSERT\\s+ON\\s+invite_code_attempt\\s+TO\\s+infochat_provider' V12__invite_code_attempt.sql` returns ≥1 match. DELETE on the table is intentionally NOT granted (rows accumulate; operator-side TRUNCATE under the admin role is the only purge path, mirroring the audit-log append-only treatment for safety)"
   - "V12 adds the `INVITE_BRUTE_FORCE_BREACH` audit verb as a single line comment under the audit_log closed verb catalogue (mirroring V5's `-- VERB` documentation style at V5:276-298). Verify: `grep -E '^-- INVITE_BRUTE_FORCE_BREACH$' V12__invite_code_attempt.sql` returns ≥1 match"
-  - "InviteCodeConsumerTest covers: (a) Accepted on a valid PENDING CONTACT_BOUND code with matching (adapter, contact_id) — the row transitions to USED, `used_by_contact_id` populated, `INVITE_CONSUME` audit row written; (b) Accepted on a valid PENDING OPEN_ADAPTER code with no contact binding — the row transitions to USED, audit row written; (c) Rejected on a code already USED (idempotency — second consume returns Rejected, no second audit row); (d) Rejected on a code with `expires_at < NOW()` (boundary: the inclusive `NOW() >= expires_at` rule from spec §Invite-code registration — pin with a code at `expires_at = NOW() - 1s` and assert Rejected); (e) Rejected on a CONTACT_BOUND code whose `expected_contact_id` differs from the consume's `contact_id` (cross-contact isolation); (f) Rejected on a code bound to adapter A consumed from adapter B (cross-adapter isolation per §Invite-code registration); (g) brute-force threshold breach after N consecutive Rejected attempts from the same `(adapter, contact_id)` within the window — the (N+1)-th call returns `BruteForceThresholdBreached`, no UPDATE runs, the `INVITE_BRUTE_FORCE_BREACH` audit row is written exactly once for that breach event (NOT once per over-threshold attempt). `grep -E '@Test' InviteCodeConsumerTest.java` returns ≥7 matches"
+  - "InviteCodeConsumerTest has a @Test method whose name contains `acceptedContactBound` (case-insensitive) that asserts Accepted on a valid PENDING CONTACT_BOUND code with matching `(adapter, contact_id)` — the row transitions to USED, `used_by_contact_id` populated, `INVITE_CONSUME` audit row written. Verify: `grep -iE '@Test\\s*\\n[^}]*acceptedContactBound' InviteCodeConsumerTest.java` returns ≥1 match"
+  - "InviteCodeConsumerTest has a @Test method whose name contains `acceptedOpenAdapter` (case-insensitive) that asserts Accepted on a valid PENDING OPEN_ADAPTER code with no contact binding — the row transitions to USED, audit row written. Verify: `grep -iE '@Test\\s*\\n[^}]*acceptedOpenAdapter' InviteCodeConsumerTest.java` returns ≥1 match"
+  - "InviteCodeConsumerTest has a @Test method whose name contains `rejectedAlreadyUsed` (case-insensitive) that asserts idempotency on a code already USED — second consume returns Rejected, no second audit row written. Verify: `grep -iE '@Test\\s*\\n[^}]*rejectedAlreadyUsed' InviteCodeConsumerTest.java` returns ≥1 match"
+  - "InviteCodeConsumerTest has a @Test method whose name contains `rejectedExpired` (case-insensitive) that asserts Rejected on a code with `expires_at < NOW()` — pin with a code at `expires_at = NOW() - 1s` and assert the inclusive `NOW() >= expires_at` rule from spec §Invite-code registration. Verify: `grep -iE '@Test\\s*\\n[^}]*rejectedExpired' InviteCodeConsumerTest.java` returns ≥1 match"
+  - "InviteCodeConsumerTest has a @Test method whose name contains `rejectedCrossContact` (case-insensitive) that asserts Rejected on a CONTACT_BOUND code whose `expected_contact_id` differs from the consume's `contact_id`. Verify: `grep -iE '@Test\\s*\\n[^}]*rejectedCrossContact' InviteCodeConsumerTest.java` returns ≥1 match"
+  - "InviteCodeConsumerTest has a @Test method whose name contains `rejectedCrossAdapter` (case-insensitive) that asserts Rejected on a code bound to adapter A consumed from adapter B (cross-adapter isolation per §Invite-code registration). Verify: `grep -iE '@Test\\s*\\n[^}]*rejectedCrossAdapter' InviteCodeConsumerTest.java` returns ≥1 match"
+  - "InviteCodeConsumerTest has a @Test method whose name contains `bruteForceBreach` (case-insensitive) that asserts the threshold breach after N consecutive Rejected attempts from the same `(adapter, contact_id)` within the window — the (N+1)-th call returns `BruteForceThresholdBreached`, no UPDATE runs, the `INVITE_BRUTE_FORCE_BREACH` audit row is written EXACTLY ONCE for that breach event (NOT once per over-threshold attempt). Verify: `grep -iE '@Test\\s*\\n[^}]*bruteForceBreach' InviteCodeConsumerTest.java` returns ≥1 match"
   - "infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/BanCheck.java exists, is `@ApplicationScoped`, and exposes a public method `boolean isBanned(String adapter, String contactId)` that returns true iff a `users` row exists for `(adapter, contact_id)` with `is_banned = true`. Verify: `grep -E '@ApplicationScoped' BanCheck.java` returns ≥1 match AND `grep -E 'public\\s+boolean\\s+isBanned' BanCheck.java` returns ≥1 match AND `grep -E 'SELECT\\s+is_banned\\s+FROM\\s+users\\s+WHERE\\s+adapter\\s*=\\s*\\?\\s+AND\\s+contact_id\\s*=\\s*\\?' BanCheck.java` returns ≥1 match"
-  - "BanCheckTest covers: (a) returns true for a seeded `is_banned=true` row on (adapter, contact_id); (b) returns false for a seeded `is_banned=false` row on the same (adapter, contact_id); (c) returns false for an unknown (adapter, contact_id) — fail-closed shape: an absent row is not banned, so the path falls through to step 2's invite gate. `grep -E '@Test' BanCheckTest.java` returns ≥3 matches"
+  - "BanCheckTest has a @Test method whose name contains `bannedRow` (case-insensitive) that asserts the method returns true for a seeded `is_banned=true` row on `(adapter, contact_id)`. Verify: `grep -iE '@Test\\s*\\n[^}]*bannedRow' BanCheckTest.java` returns ≥1 match"
+  - "BanCheckTest has a @Test method whose name contains `unbannedRow` (case-insensitive) that asserts the method returns false for a seeded `is_banned=false` row on `(adapter, contact_id)`. Verify: `grep -iE '@Test\\s*\\n[^}]*unbannedRow' BanCheckTest.java` returns ≥1 match"
+  - "BanCheckTest has a @Test method whose name contains `unknownContact` (case-insensitive) that asserts the method returns false for an unknown `(adapter, contact_id)` — fail-closed shape: an absent row is not banned, so the path falls through to step 2's invite gate. Verify: `grep -iE '@Test\\s*\\n[^}]*unknownContact' BanCheckTest.java` returns ≥1 match"
   - "AutoRegisterService is rename-and-narrowed: the UPSERT INSERT changes to write `registration_state = 'group_only'` (NOT `'invited'`); a new public method shape distinguishes the group `@mention` entry point from the (now-forbidden) DM-unknown entry point. Verify: `grep -E '\"group_only\"' AutoRegisterService.java` returns ≥1 match AND `grep -E '\"invited\"' AutoRegisterService.java` returns ZERO matches (the DM-pathway-registered `'invited'` write is removed — `'invited'` writes now happen ONLY through M1-044b's InviteCodeConsumer-success path). The class name and package stay the same; the public method signature MAY change but every existing test in scope is updated to the new shape"
-  - "AutoRegisterServiceTest is updated to assert the narrowed behavior: (a) calling the group-registration path with a fresh `(adapter, contact_id)` inserts a row with `registration_state='group_only'` AND `probation_until = NOW() + slow_start_window` (the probation duration value reads via @ConfigProperty `infochat.probation.duration` with `defaultValue = \"24h\"` per `docs/design/03-commands.md` §3.3 laptop profile); (b) the group path is idempotent — a second call for the same (adapter, contact_id) does NOT insert a second row and does NOT modify the existing row's registration_state or probation_until. `grep -E '@Test' AutoRegisterServiceTest.java` returns ≥2 matches"
+  - "AutoRegisterServiceTest has a @Test method whose name contains `groupFreshInsert` (case-insensitive) that asserts the group-registration path with a fresh `(adapter, contact_id)` inserts a row with `registration_state='group_only'` AND `probation_until = NOW() + slow_start_window` (the probation duration value reads via @ConfigProperty `infochat.probation.duration` with `defaultValue = \"24h\"` per `docs/design/03-commands.md` §3.3 laptop profile). Verify: `grep -iE '@Test\\s*\\n[^}]*groupFreshInsert' AutoRegisterServiceTest.java` returns ≥1 match"
+  - "AutoRegisterServiceTest has a @Test method whose name contains `groupIdempotent` (case-insensitive) that asserts the group path is idempotent — a second call for the same `(adapter, contact_id)` does NOT insert a second row and does NOT modify the existing row's `registration_state` or `probation_until`. Verify: `grep -iE '@Test\\s*\\n[^}]*groupIdempotent' AutoRegisterServiceTest.java` returns ≥1 match"
   - "M1-035d's existing AutoRegisterService production wiring at InboundRouter.onMessage line 235 (`autoRegisterService.resolveOrRegister(msg.sender(), adapterName);`) continues to compile under the narrowed signature. If the public method signature changes, this ticket includes a one-line stub or compatibility shape that preserves the InboundRouter caller's compile until M1-044b lands the proper intake-splice replacement. The reviewer's NEGATIVE-SPACE-CHECK will note InboundRouter.java is NOT in this ticket's files_scope by design — confirming intentional"
   - "mvn -B clean verify from the repo root exits 0; every prior test continues to pass: M1-035c's HelpCommandHandlerTest, BundleLoaderTest, M1-035b's InboundRouterTest / StartupGatesTest / InboundRouterNormalizeTest, M1-035d's wiring tests, M1-036's AddSourceCommandHandler tests, M1-037's /summary tests, M1-038/M1-039/M1-040 hardening tests, M1-043's refusal-marker test"
 test_plan:
@@ -77,6 +89,46 @@ decision_refs:
   - D44
   - D45
   - D46
+clarity_check: {}
+escalations:
+  - date: 2026-05-20
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      CLARITY VERDICT: FAIL
+      BLOCKERS:
+        1. ACCEPTANCE-RUNNABLE item 5: bash single-quote quoting bug in the
+           `UPDATE invite_code SET status='USED'` grep command — single-quote
+           outer delimiters with embedded `''USED'''` produce a regex bash
+           silently strips of its apostrophes via empty-string concat (the
+           regex grep actually receives is `UPDATE … SET status = USED`,
+           no apostrophes). Fix: use double-quote outer delimiters.
+      WARNINGS:
+        1. SELF-CONTAINED: §Implementation notes claimed "an acceptance grep
+           confirms" for the `invite_drop_total` Micrometer counter but no
+           such acceptance item existed.
+        2. FILES-BUDGET-PLAUSIBLE: `files_scope` omitted Clock CDI producer
+           + TestClock helper that §Implementation notes prescribed.
+revisions:
+  - date: 2026-05-20
+    reason: clarity-fail rework
+    summary: |
+      B1 — fixed bash single-quote bug in item 5 (now uses double-quote outer
+           delimiters so embedded apostrophes are preserved). Scanned every
+           other grep in acceptance for the same `''<word>''` smell — none
+           found (item 5 was the only occurrence).
+      B2 — split aggregate `@Test ≥N` count items 3 (RateCapBucketTest),
+           10 (InviteCodeConsumerTest), 12 (BanCheckTest) into per-test-method
+           items naming each scenario by name substring (per
+           [[no-heterogeneous-aggregate-test-counts]]).
+      B3 — removed the self-contradicting "an acceptance grep confirms" claim
+           in §Implementation notes about `invite_drop_total`; the Micrometer
+           counter is now explicitly named as a deferred follow-up with a
+           TODO comment commitment, no acceptance gate.
+      B4 — added an explicit "Clock and TestClock are implemented as static
+           inner classes of RateCapBucket and RateCapBucketTest respectively
+           — no separate CDI producer file" disclaimer in §Implementation
+           notes (no files_scope expansion needed).
+      Linted clean via scripts/lint-ticket.py before re-running /m1-tick start.
 ---
 
 # M1-044a: Intake-step services — rate cap, invite consumer, ban check, brute-force migration
@@ -172,11 +224,16 @@ globally.
   AND `lastRefillEpochMillis < NOW() - evictionThreshold` to
   bound memory; a Quarkus `@Scheduled` method on the bean
   runs the sweep every N minutes (N is a `@ConfigProperty`).
-- **Clock injection.** RateCapBucket takes a `@Inject Clock`
-  so RateCapBucketTest can advance time without `Thread.sleep`.
-  Use `Clock.systemUTC()` as the production CDI producer; the
-  test profile produces a `TestClock` the test mutates. The
-  shape mirrors M1-035b's startup-gate timing.
+- **Clock injection.** RateCapBucket takes a `Clock` constructor
+  parameter (production code injects `Clock.systemUTC()` via the
+  default CDI binding; the test instantiates the bean with a
+  test-controlled clock). Both the production wiring and the
+  test seam are realized **inside existing files** — no separate
+  `ClockProducer.java` and no separate `TestClock.java`. The
+  test's clock is a small static inner class of
+  `RateCapBucketTest`. This keeps `files_scope` accurate at the
+  9 listed paths and avoids the NEGATIVE-SPACE-CHECK miss the
+  reviewer would otherwise flag.
 - **`InviteCodeConsumer` SQL.** Single transaction holds:
   - `SELECT count(*) FROM invite_code_attempt WHERE adapter = ?
     AND contact_id = ? AND attempted_at > NOW() - <window>` —
@@ -208,14 +265,17 @@ globally.
   §4.5 "The limit prevents a patient brute-force search ... The
   drop counter (`invite_drop_total`) increments on every
   invalid attempt regardless of rate-limit state") is a
-  Micrometer counter Quarkus registers via
-  `MeterRegistry.counter("invite_drop_total")`. This ticket
-  registers and increments it; an acceptance grep confirms.
-  (Optional: if Micrometer integration is heavier than
-  expected, defer the Prometheus counter wiring to a follow-up
-  ticket and write a one-line comment naming the deferred
-  counter — `// TODO M1-NNN: register `invite_drop_total`
-  Micrometer counter`.)
+  Micrometer counter. **This ticket DEFERS the Micrometer wiring
+  to a follow-up ticket.** Reason: Micrometer integration spans
+  Provider-level config, the metrics endpoint, the per-counter
+  registration, and operator-doc coverage — out-of-scope for the
+  intake-step services. The deferral is recorded as a one-line
+  `// TODO followup: register `invite_drop_total` Micrometer
+  counter (deferred from M1-044a)` comment near the
+  InviteCodeConsumer Rejected-outcome path. NO acceptance gate
+  for the counter exists in this ticket; the comment is the
+  load-bearing artifact and is verified by grep in the followup
+  ticket, not here.
 - **`BanCheck` shape.** One `DataSource` injection, one
   prepared statement, one boolean result. Fail-closed return
   on absent row (`false`, meaning "not banned" — step 2's
