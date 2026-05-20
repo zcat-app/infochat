@@ -182,3 +182,38 @@ why a less-obvious approach was chosen.
 
 - Alt A: <description>. Rejected because <reason>.
 - Alt B: <description>. Rejected because <reason>.
+
+## Pre-flight self-check (author-side)
+
+Before committing a new or revised ticket — and BEFORE running
+`/m1-tick start <id>` — run `scripts/lint-ticket.py` against the
+ticket file. The linter encodes the recurring clarity-check failure
+patterns from M1 (see `MEMORY.md`); catching them at author-time
+avoids paying ~4 minutes of clarity-subagent time per defect.
+
+```bash
+python3 scripts/lint-ticket.py docs/plan/<milestone>/tickets/M<N>-NNN-*.md
+```
+
+The linter runs seven static checks. If any reports BLOCKER, fix
+the ticket BEFORE `/m1-tick start`. WARN findings are advisory but
+worth resolving — every unresolved WARN turns into a clarity-check
+WARN later.
+
+| Check | Catches |
+|---|---|
+| **GREP-SHELL-PARSEABLE** | `grep` commands with shell-syntax errors. |
+| **GREP-EMBEDDED-QUOTE** | The `''<word>''` smell — author tries to embed a literal apostrophe inside a single-quoted bash regex; bash silently strips the apostrophes via empty-string concat. Use `'\''` or switch the outer delimiter to `"…"`. |
+| **REGEX-COMPILABLE** | Malformed regex (unbalanced brackets, missing `)`, etc.). |
+| **FILES-SCOPE-COVERAGE** | (a) `test_plan.adds` / `test_plan.modifies` paths missing from `files_scope`; (b) code files mentioned in §Implementation notes / §Authorized test changes / §Big-picture notes but not in `files_scope`. Either add the file to `files_scope` (with a `files_budget` bump if needed) or insert an explicit "inner class of X" disclaimer in the section that mentions it. |
+| **HETEROGENEOUS-AGGREGATE-TEST-COUNT** | Aggregate `grep -E '@Test' … ≥N` counts with N ≥ 3, which collapse structurally-different test methods into one count. See [[no-heterogeneous-aggregate-test-counts]] in author-memory; one assertion = one named test method. |
+| **PROSE-VERB-IN-VERIFY** | Verify clauses using "by reading", "by inspection", "should be present", or "loop exits" — not mechanically checkable. Rewrite as `grep` / `mvn test -Dtest=...` / etc. |
+| **IMPLEMENTATION-NOTES-ACCEPTANCE-CROSS-REF** | Body claims "an acceptance grep confirms X" but X has no matching acceptance item. Either add the acceptance item or remove the claim. |
+
+### Authoring conventions that prevent the most common findings
+
+- **Always wrap `grep` commands in backticks inside acceptance items.** The linter only extracts greps from backticked spans.
+- **Prefer double-quoted outer delimiters** in bash greps when the regex must contain a literal apostrophe: `grep -E "UPDATE … SET status = 'USED'" File.java`. This sidesteps the GREP-EMBEDDED-QUOTE class entirely. If you must use single-quoted outer delimiters, embed apostrophes via `'\''`.
+- **One assertion = one claim about one named element.** Heterogeneous-aggregate counts hide regressions; per-element greps force you to enumerate the elements at authoring time. See [[regex-test-vectors]].
+- **Every test file in `test_plan.adds` or `test_plan.modifies` belongs in `files_scope`** (so the reviewer's negative-space check covers it). If `files_scope` is intentionally narrow, omit it and rely on `files_budget` alone.
+- **If §Implementation notes prescribes an artifact (a CDI producer, a test helper, a properties file) that isn't in `files_scope`**, either add it to `files_scope` or add an explicit "implemented as an inner class of X" / "configured via constructor `defaultValue`" disclaimer in the section that mentions it.
