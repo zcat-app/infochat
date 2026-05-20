@@ -1,0 +1,391 @@
+---
+id: M1-044c
+title: Admin command handlers — /ban, /unban, /invite create/list/revoke
+status: pending
+created: 2026-05-20
+last_updated: 2026-05-20
+blocked_by:
+  - M1-044a
+files_budget: 11
+files_scope:
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/command/BanCommandHandler.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/command/UnbanCommandHandler.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/command/InviteCommandHandler.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
+  - infochat-provider/src/main/resources/bundles/en.properties
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/BanCommandHandlerTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/UnbanCommandHandlerTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/InviteCommandHandlerTest.java
+complexity: high
+risk: high
+round_cap: 3
+security_relevant: true
+migration_touch: false
+out_of_scope:
+  - any change to the spec — §User ban and §Invite-code registration are the source of truth
+  - any change to the M1-044a services (RateCapBucket, InviteCodeConsumer, BanCheck, AutoRegisterService, V12 migration) — consumed unchanged
+  - any change to InboundRouter — M1-044b's commit, FROZEN at its review round
+  - any change to the M1-044b bundle keys added for fixed replies (`error.invite.required`, `error.ban.fixed`, `reply.welcome.dm_fresh`, `reply.welcome.group_first_mention`) — this ticket adds its own handler-output keys but does NOT modify the intake-splice keys
+  - any change to the V5 `delete_preban_user` stored procedure — consumed unchanged via CALL
+  - any change to the V5 `invite_code` table or its `idx_invite_code_pending` index — consumed via SELECT/UPDATE
+  - any /vouch handler — M1-045 territory (probation graduation + group_only → vouched advance)
+  - any /grant-admin / /revoke-admin handler — M1-046 territory
+  - any /promote / /demote handler — T2-F territory
+  - the umbrella IT — M1-044 territory
+  - any new `--all` flag on `/invite list` (the spec/design fixes `[--page N]` only; --all is for /quarantine list, NOT /invite list)
+  - any audit-log-redaction-hook change — M1-041 territory; handlers write directly to `audit_log` with the same row shape M1-036's /add-source uses
+  - any TranslationProvider exercise — T2-C territory; new bundle entries are English only
+  - any test outside the eight files in files_scope — M1-035c/M1-036/M1-037/M1-038/M1-039/M1-040 tests stay green unchanged
+acceptance:
+  - "infochat-provider/src/main/java/app/zcat/infochat/provider/command/BanCommandHandler.java implements `CommandHandler` with `name() == \"ban\"`. The handler: (1) requires `users.is_admin = true` on the caller (consults the M1-040 InboundContext.adapterName() + `(adapter, contact_id)` SELECT) — non-admin returns the `error.admin_only` bundle reply; (2) parses one positional `<contact>` argument plus the optional `--reason \"...\"` flag; (3) rejects self-ban (`actor.id == target.id`) with a friendly `error.ban.cannot_ban_self` reply; (4) rejects last-admin ban — the V5 `trg_last_admin_protection_update` trigger raises on `UPDATE users SET is_banned = TRUE` against the only `is_admin=TRUE AND is_banned=FALSE` row; the handler catches the trigger's exception and surfaces a friendly `error.ban.last_admin` reply; (5) handles the unknown-contact path by MINTING a `preban` row (the spec's pre-ban carve-out): `INSERT INTO users (adapter, contact_id, is_banned, registration_state, banned_at, banned_by, ban_reason) VALUES (?, ?, TRUE, 'preban', NOW(), ?, ?)`; (6) on a known contact, `UPDATE users SET is_banned = TRUE, banned_at = NOW(), banned_by = ?, ban_reason = ? WHERE id = ?`; (7) in the SAME transaction as the ban, transitions every PENDING `invite_code` for `(adapter, contact_id)` to `REVOKED` (`UPDATE invite_code SET status = 'REVOKED' WHERE adapter = ? AND status = 'PENDING' AND (expected_contact_id = ? OR (invite_type = 'OPEN_ADAPTER' AND expected_contact_id IS NULL))` — pin the SQL by grep); (8) writes the `BAN` audit row audit-before-effect AND, if any PENDING invites were revoked, writes the `INVITE_REVOKE` audit rows with the same `request_id`. Verify: `grep -E 'public\\s+String\\s+name' BanCommandHandler.java` returns ≥1 match returning `\"ban\"`; `grep -E 'cannot_ban_self|self.ban|actor.*==.*target' BanCommandHandler.java` returns ≥1 match for self-ban guard; `grep -E 'UPDATE\\s+invite_code\\s+SET\\s+status\\s*=\\s*''REVOKED''' BanCommandHandler.java` returns ≥1 match for the pending-invite revoke; `grep -E 'INSERT\\s+INTO\\s+audit_log' BanCommandHandler.java` returns ≥1 match"
+  - "BanCommandHandlerTest covers, against a Testcontainers Postgres seeded with V1..V12 migrations: (a) non-admin caller receives `error.admin_only` and no DB write; (b) admin self-ban rejected with `error.ban.cannot_ban_self` and no DB write; (c) admin ban against an unknown contact MINTS a `preban` row with `is_banned=true`, `registration_state='preban'`, `banned_by=<actor.id>`, `ban_reason=<flag-value>`; (d) admin ban against a known invited user updates `is_banned=true` in place with `banned_at`/`banned_by`/`ban_reason` populated; (e) admin ban with one PENDING invite for the target transitions that invite to `REVOKED` in the same transaction (assert by writing two rows then running /ban then SELECTing the invite); (f) admin ban writes `BAN` + `INVITE_REVOKE` audit rows with the same `request_id`; (g) admin ban against the only `is_admin=TRUE AND is_banned=FALSE` row (a deployment with one admin) raises the V5 trigger; the handler surfaces `error.ban.last_admin` (catch + friendly reply, no exception bubbles up). `grep -E '@Test' BanCommandHandlerTest.java` returns ≥7 matches"
+  - "infochat-provider/src/main/java/app/zcat/infochat/provider/command/UnbanCommandHandler.java implements `CommandHandler` with `name() == \"unban\"`. The handler: (1) requires `users.is_admin = true` on the caller — non-admin returns `error.admin_only`; (2) parses one positional `<contact>` argument; (3) returns `error.contact_not_registered` if no `users` row exists for `(inbound_adapter, target_contact_id)` (the spec's Unknown-contact rule); (4) when the target row's `registration_state = 'preban'`, CALLs the V5 `delete_preban_user(target.id, actor.id)` stored procedure — the procedure writes the `UNBAN_PREBAN_DELETE` audit row + deletes the row in the same transaction; the handler's reply is `reply.unban.preban_deleted` (the bundle value contains the literal `pre-ban-only row removed` AND `fresh invite required`); (5) when the target row is non-`preban`, `UPDATE users SET is_banned = FALSE, banned_at = NULL, banned_by = NULL, ban_reason = NULL WHERE id = ?` AND writes the `UNBAN` audit row audit-before-effect; (6) the reply on the non-preban path enumerates restored group-admin rows when any exist (`SELECT g.id, g.display_name FROM group_membership gm JOIN groups g ON g.id = gm.group_id WHERE gm.user_id = ? AND gm.is_group_admin = TRUE`) — the reply uses the `reply.unban.group_admins_restored` template that interpolates the list AND includes a `/demote <contact>` hint per spec §User ban; (7) when no group-admin rows exist on the non-preban path, the reply is the plain `reply.unban.plain` value. Verify: `grep -E 'CALL\\s+delete_preban_user' UnbanCommandHandler.java` returns ≥1 match; `grep -E 'pre-ban-only row removed|preban_deleted' UnbanCommandHandler.java` returns ≥1 match (the bundle key referenced for the preban-delete reply); `grep -E 'is_group_admin' UnbanCommandHandler.java` returns ≥1 match"
+  - "UnbanCommandHandlerTest covers: (a) non-admin caller receives `error.admin_only`; (b) unknown contact receives `error.contact_not_registered` and no DB write; (c) preban row → CALL `delete_preban_user`, reply matches `reply.unban.preban_deleted` (literal contains both `pre-ban-only` AND `fresh invite`), audit row `UNBAN_PREBAN_DELETE` written (asserted via SELECT on `audit_log`); (d) non-preban + no group-admin rows → `UPDATE users` flips `is_banned=false`, reply matches `reply.unban.plain`, `UNBAN` audit row written; (e) non-preban + ONE group-admin row → reply matches `reply.unban.group_admins_restored` template AND contains the group's display name AND contains the `/demote <contact>` hint, `UNBAN` audit row's `details_json.restored_group_admin` carries the same list (per spec §User ban). `grep -E '@Test' UnbanCommandHandlerTest.java` returns ≥5 matches"
+  - "infochat-provider/src/main/java/app/zcat/infochat/provider/command/InviteCommandHandler.java implements `CommandHandler` with `name() == \"invite\"`. The handler dispatches on the first subcommand token (`create`, `list`, `revoke`); any other subcommand returns `error.invite.unknown_subcommand`. Verify: `grep -E 'public\\s+String\\s+name' InviteCommandHandler.java` returns ≥1 match returning `\"invite\"`; the class has dispatch logic on three subcommands"
+  - "`/invite create` flag parsing: requires `--adapter <name>`; requires EXACTLY ONE of `--contact <id>` or `--open`; neither → `error.invite.missing_flag` (lists both options per spec); both → `error.invite.mutually_exclusive`. The `--adapter <name>` value is validated against the set of currently-enabled adapters at parse time — naming an unknown adapter returns `error.invite.unknown_adapter` per spec §Admin `/invite create`. Pre-banned-contact rejection: `/invite create --contact <id>` where the (adapter, contact_id) row exists with `is_banned=true` returns `error.invite.banned_target` pointing the admin at `/unban`; NO invite is created. Pre-flight cap check: `/invite create --open` enforces the per-adapter open cap from `infochat.invite.open-cap-per-adapter` — the count query is `SELECT count(*) FROM invite_code WHERE adapter = ? AND invite_type = 'OPEN_ADAPTER' AND status = 'PENDING' AND (expires_at IS NULL OR expires_at > NOW())` per spec §Invite-code registration (`Codes that are USED, REVOKED, or whose expires_at has passed do not count toward either cap`); over-cap returns `error.invite.open_cap_met` with the current open-code list and a `/invite revoke` hint. `/invite create --contact <id>` enforces the global contact cap from `infochat.invite.contact-cap-global` via the same shape (filter on `invite_type='CONTACT_BOUND'`, no adapter scope); over-cap returns `error.invite.contact_cap_met`. Verify: `grep -E 'SELECT\\s+count\\(\\*\\)\\s+FROM\\s+invite_code\\s+WHERE.*invite_type\\s*=\\s*''OPEN_ADAPTER''' InviteCommandHandler.java` returns ≥1 match AND `grep -E 'invite_type\\s*=\\s*''CONTACT_BOUND''' InviteCommandHandler.java` returns ≥1 match AND `grep -E 'is_banned' InviteCommandHandler.java` returns ≥1 match"
+  - "`/invite create` happy-path: writes the row via `INSERT INTO invite_code (code, invite_type, adapter, expected_contact_id, status, created_by, created_at, expires_at) VALUES (gen_random_uuid(), ?, ?, ?, 'PENDING', ?, NOW(), NOW() + <ttl>)` — the V5 schema's iff-CHECK enforces that `expected_contact_id` is non-null iff `invite_type = 'CONTACT_BOUND'`. The reply (`reply.invite.created`) carries the new code's UUID literal once. The `INVITE_CREATE` audit row is written audit-before-effect with `target_kind='invite'`, `target_id=<code-uuid::text>`, `target_contact_id=<expected_contact_id or NULL>`, `details_json={\"invite_type\": \"...\", \"adapter\": \"...\"}`. The `--open` path REQUIRES confirm per spec — the handler returns `confirmation_required` for the first invocation, accepts the confirmation in the same conversation per the existing confirm-flow protocol if it exists, otherwise documents that the confirm flow lands in this ticket as a one-line UX shape consistent with M1-036's confirmation pattern (the M1-036 /add-source did not use confirm; the design's confirmation flow lives at docs/design/03-commands.md §Confirmation for destructive commands). For this ticket, the `--open` path's first invocation returns `reply.invite.confirm_open` with the canonical confirmation prompt; a follow-up message matching the confirm protocol creates the row. The `--contact` path requires NO confirm per spec"
+  - "`/invite list` lists `PENDING` rows from `invite_code` where `(expires_at IS NULL OR expires_at > NOW())` — implements the spec's active-pending filter. Sort by `created_at DESC`. Paginated; page size 20 (`docs/design/03-commands.md` §3.10). Output format from `reply.invite.list_entry` template: `<code prefix> · adapter=<adapter> · target=<contact_id or 'OPEN'> · expires=<ISO timestamp>` (exact field shape implementer's choice as long as the bundle template matches). Open-vs-contact-bound distinguishability is mandatory: every `invite_type='OPEN_ADAPTER'` row carries the literal `OPEN` marker per spec §Invite-code registration (`The list output must visually distinguish --open codes from --contact codes`). Verify: `grep -E 'OPEN' bundles/en.properties` returns ≥1 match in the `reply.invite.list_entry` template or its OPEN-variant key"
+  - "`/invite revoke <code>` requires confirm. On confirm: `UPDATE invite_code SET status = 'REVOKED' WHERE code = ? AND status = 'PENDING' RETURNING id`; zero rows returned (code already USED/REVOKED/absent) returns `error.invite.revoke_not_pending`; one row returned triggers `INVITE_REVOKE` audit-after-effect (the spec says audit-before-effect — pre-write the audit row BEFORE the UPDATE inside the same transaction so a UPDATE failure rolls back both) with reply `reply.invite.revoked`. Verify: `grep -E 'UPDATE\\s+invite_code\\s+SET\\s+status\\s*=\\s*''REVOKED''' InviteCommandHandler.java` returns ≥1 match"
+  - "InviteCommandHandlerTest covers: (a) `/invite` with no subcommand → error.invite.unknown_subcommand; (b) `/invite create` without `--contact` or `--open` → error.invite.missing_flag; (c) `/invite create` with both flags → error.invite.mutually_exclusive; (d) `/invite create --adapter unknown --contact x` → error.invite.unknown_adapter; (e) `/invite create --adapter inmemory --contact x` where x is banned → error.invite.banned_target, no row; (f) `/invite create --adapter inmemory --contact x` happy-path → PENDING row, reply with code, INVITE_CREATE audit row; (g) `/invite create --adapter inmemory --open` first call → confirm prompt; second call → PENDING OPEN_ADAPTER row, reply with code, INVITE_CREATE audit row; (h) `/invite create --adapter inmemory --contact y` when global contact cap met → error.invite.contact_cap_met; (i) `/invite create --adapter inmemory --open` when per-adapter open cap met → error.invite.open_cap_met; (j) `/invite list` with N PENDING rows of mixed type → returns N entries, every OPEN_ADAPTER row carries the `OPEN` marker, sorted by `created_at DESC`, paginated; (k) `/invite revoke <code>` happy-path → row transitions to REVOKED, INVITE_REVOKE audit row; (l) `/invite revoke <code>` against an already-REVOKED code → error.invite.revoke_not_pending. `grep -E '@Test' InviteCommandHandlerTest.java` returns ≥12 matches"
+  - "BundleKeys.java adds new public constants for every key the three handlers reference. At minimum: ERROR_ADMIN_ONLY, ERROR_CONTACT_NOT_REGISTERED, ERROR_BAN_CANNOT_BAN_SELF, ERROR_BAN_LAST_ADMIN, REPLY_UNBAN_PREBAN_DELETED, REPLY_UNBAN_GROUP_ADMINS_RESTORED, REPLY_UNBAN_PLAIN, ERROR_INVITE_UNKNOWN_SUBCOMMAND, ERROR_INVITE_MISSING_FLAG, ERROR_INVITE_MUTUALLY_EXCLUSIVE, ERROR_INVITE_UNKNOWN_ADAPTER, ERROR_INVITE_BANNED_TARGET, ERROR_INVITE_OPEN_CAP_MET, ERROR_INVITE_CONTACT_CAP_MET, ERROR_INVITE_REVOKE_NOT_PENDING, REPLY_INVITE_CREATED, REPLY_INVITE_CONFIRM_OPEN, REPLY_INVITE_LIST_HEADER, REPLY_INVITE_LIST_ENTRY, REPLY_INVITE_REVOKED, REPLY_BAN_SUCCESS. The exact constant names are implementer's choice as long as the bundle key strings match `error.*` / `reply.*` shape from the spec/design. Verify: every NEW constant on BundleKeys.java has a matching key in bundles/en.properties — this is the M1-035c reflective bundle-completeness assertion the existing BundleLoaderTest enforces"
+  - "bundles/en.properties adds the corresponding entries. The unban-preban-deleted entry's value contains the literal `pre-ban-only row removed` AND `fresh invite required` per spec §User ban. The unban-group-admins-restored entry uses MessageFormat `{0}` for the comma-joined group list AND includes the literal `/demote` (the hint) per spec. The ban-success entry interpolates the redacted target contact id (the actor sees their own command output; the contact id is the redacted form per §Secrets handling). Verify: `grep -E '^reply\\.unban\\.preban_deleted\\s*=' bundles/en.properties` returns 1 match AND the value contains both `pre-ban-only` AND `fresh invite`; `grep -E '^reply\\.unban\\.group_admins_restored\\s*=' bundles/en.properties` returns 1 match AND the value contains `/demote`"
+  - "Every audit-log write across the three handlers goes through `INSERT INTO audit_log (...)` directly (the M1-036 / M1-039 pattern). The M1-041 AuditLogWriter consolidation is deferred. Each handler's audit-write site uses `request_id = UUID.randomUUID().toString()` at the start of the dispatch and uses the same request_id for every audit row in the same dispatch (the BAN + INVITE_REVOKE pair on /ban is the canonical correlated-rows shape per spec — both must carry the same request_id). Verify: `grep -E 'request_id' BanCommandHandler.java` returns ≥1 match; the same in UnbanCommandHandler.java and InviteCommandHandler.java"
+  - "Every contact-id-bearing exception message in the three handlers (IllegalStateException construction paths around the SQL execute blocks) interpolates the contact id via ContactIds.redact from M1-038. Verify: `grep -E 'ContactIds\\.redact' BanCommandHandler.java UnbanCommandHandler.java InviteCommandHandler.java` returns ≥1 match per file in the IllegalStateException construction paths (M1-039 precedent — the contact id appears only in the redacted form in non-audit logs)"
+  - "mvn -B clean verify from the repo root exits 0; every prior test continues to pass: M1-035c HelpCommandHandlerTest / AutoRegisterServiceTest / BundleLoaderTest, M1-036 AddSourceCommandHandler tests, M1-037 SummaryCommandHandler tests, M1-038 InboundRouter*Tests, M1-039 AddSourceBanCheckOrderingTest / AddSourceContactIdRedactionTest, M1-040 SummaryProseInjectionTest / AddSourceAdapterScopeIT / SummaryAdapterScopeIT, M1-043 (when it lands), M1-044a RateCapBucketTest / InviteCodeConsumerTest / BanCheckTest / AutoRegisterServiceTest"
+test_plan:
+  adds:
+    - infochat-provider/src/main/java/app/zcat/infochat/provider/command/BanCommandHandler.java
+    - infochat-provider/src/main/java/app/zcat/infochat/provider/command/UnbanCommandHandler.java
+    - infochat-provider/src/main/java/app/zcat/infochat/provider/command/InviteCommandHandler.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/command/BanCommandHandlerTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/command/UnbanCommandHandlerTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/command/InviteCommandHandlerTest.java
+  modifies:
+    - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
+    - infochat-provider/src/main/resources/bundles/en.properties
+  preserves:
+    - all tests currently green on main
+    - M1-044a's per-service tests
+spec_refs:
+  - docs/spec/security.md §User ban
+  - docs/spec/security.md §Invite-code registration
+  - docs/spec/security.md §Authorization model
+  - docs/spec/commands.md §Admin (bot admin)
+  - docs/spec/schema.md §Identity and access
+decision_refs:
+  - D9
+  - D11
+  - D44
+  - D46
+---
+
+# M1-044c: Admin command handlers — /ban, /unban, /invite create/list/revoke
+
+## Context
+
+T2-A.1 subticket 3 of 3 (parallel to M1-044b after M1-044a's
+services land). Ships the five admin command handlers that
+mutate the state the M1-044b intake-step splice reads:
+
+- `/ban <contact> [--reason "..."]` — mints a `preban` row for
+  unknown contacts (the spec's pre-ban carve-out); flips
+  `is_banned = TRUE` for known contacts; revokes any pending
+  invites for the same `(adapter, contact_id)` in the same
+  transaction; audit-before-effect.
+- `/unban <contact>` — deletes the row via the V5
+  `delete_preban_user` stored procedure for preban rows;
+  flips `is_banned = FALSE` for non-preban rows; enumerates
+  restored group-admin rows in the reply AND in the audit
+  row's `details_json`.
+- `/invite create --adapter <name> {--contact <id> | --open}`
+  — mints a single-use PENDING `invite_code` row; enforces
+  the per-adapter open cap and global contact cap; rejects
+  banned targets; audit-before-effect; cross-adapter creation
+  is permitted (the one admin command that takes `--adapter`).
+- `/invite list [--page N]` — paginated read of PENDING +
+  not-expired codes; distinguishes OPEN_ADAPTER rows with a
+  prominent marker.
+- `/invite revoke <code>` — confirm-required transition
+  PENDING → REVOKED; audit-before-effect.
+
+The handlers consume:
+
+- The M1-040 `@Inject InboundContext` bean for the
+  inbound-adapter scope (every handler except `/invite create`
+  which takes an explicit `--adapter` flag).
+- The V5 `delete_preban_user` stored procedure for the unban
+  preban path (the procedure writes its own
+  `UNBAN_PREBAN_DELETE` audit row internally — the handler
+  does not duplicate).
+- The V5 `trg_last_admin_protection_update` and
+  `trg_last_admin_protection_delete` triggers as the
+  last-line defense for the last-admin invariant; the
+  handlers surface trigger exceptions as friendly errors so
+  the user sees a UX-friendly reply rather than a stack
+  trace.
+- The V5 `invite_code` table for create / list / revoke; the
+  M1-044a `idx_invite_code_pending` index supports the cap
+  count queries.
+- The M1-038 `ContactIds.redact` helper for exception
+  message interpolation.
+
+`complexity: high` and `risk: high` because the handlers
+implement multiple security-critical invariants in one
+ticket: pre-ban + invite-revoke-on-ban + last-admin
+protection + per-cap enforcement + audit-before-effect across
+five command surfaces. The `round_cap: 3` accommodates
+likely-to-fail-first acceptance items.
+
+`security_relevant: true`.
+
+`migration_touch: false` — V5 + V12 are the only migrations
+T2-A.1 touches; M1-044a's V12 covers it. This ticket consumes
+the schema as-is.
+
+## Definition of Done
+
+- Three handler classes (`BanCommandHandler`,
+  `UnbanCommandHandler`, `InviteCommandHandler`) each
+  implement `CommandHandler` with the appropriate `name()`.
+  `InviteCommandHandler` dispatches on the first subcommand
+  token to `create` / `list` / `revoke`.
+- Every spec rule from §User ban and §Invite-code
+  registration that maps to a command surface lands here:
+  preban + invite-revoke-on-ban, last-admin protection, unban
+  side-effect disclosure, cross-adapter invite creation,
+  per-adapter open cap, global contact cap, brute-force
+  rejection of banned targets, single-use atomicity, TTL +
+  inclusive-expiry boundary handling.
+- Each handler writes its audit row(s) audit-before-effect
+  per Invariant 7 — the audit INSERT runs in the same
+  transaction as the state mutation, so a transaction
+  roll-back leaves no audit-vs-state divergence.
+- New bundle keys + entries land in `BundleKeys.java` +
+  `bundles/en.properties`; the M1-035c reflective
+  bundle-completeness assertion in `BundleLoaderTest` covers
+  the new keys automatically.
+- Per-handler tests against a Testcontainers Postgres exercise
+  every acceptance scenario.
+- `mvn -B clean verify` exits 0.
+
+## Implementation notes
+
+- **Common scaffolding.** Each handler `@Inject`s
+  `DataSource`, `BundleLoader`, `InboundContext`. Each
+  handler resolves the caller via the M1-040 adapter-scoped
+  SELECT `SELECT id, is_admin, is_banned, registration_state
+  FROM users WHERE adapter = ? AND contact_id = ?` against
+  the (adapter, contact_id) UNIQUE constraint. The
+  `contact_id` for the caller comes from
+  `((ScopeRef.Dm) scope).contactId()` for DM scope; for group
+  scope the caller's contact id is not in the SPI today (M1-039
+  flagged this as T2-F territory) — group-scope admin commands
+  return `error.group_admin_not_in_v1` until T2-F lands.
+  These handlers are intentionally DM-only in v1.
+- **`BanCommandHandler` SQL shape.** Wrap the ban + invite
+  revoke + audit writes in one application-side transaction
+  (open one Connection, set autoCommit=false, COMMIT at the
+  end). The trigger `trg_last_admin_protection_update`
+  raises `SQLException` with the literal `last_admin_protection`
+  in its message — match on that to surface the friendly
+  reply rather than a stack trace.
+- **Pre-ban INSERT shape.** Mirror the AutoRegisterService
+  M1-044a INSERT but with `is_banned=TRUE` and
+  `registration_state='preban'` and the additional
+  `banned_at`/`banned_by`/`ban_reason` columns.
+- **Invite revoke during ban.** The SQL pinned in acceptance
+  item 1's pattern (`UPDATE invite_code SET status =
+  'REVOKED' WHERE adapter = ? AND status = 'PENDING' AND
+  (expected_contact_id = ? OR (invite_type = 'OPEN_ADAPTER'
+  AND expected_contact_id IS NULL))`) is technically broader
+  than "invites bound to this contact" — the OPEN_ADAPTER
+  branch matches every pending OPEN invite on the adapter,
+  not just those that would consume against this contact.
+  Re-read the spec carefully:
+  > §Invite-code registration — "If `/ban <contact>` runs
+  > while one or more `PENDING` invites exist for the same
+  > `(adapter, contact_id)` (either pre-bound via `--contact`
+  > or open-but-bound-on-consume targeting that contact),
+  > every such invite is transitioned to `REVOKED` in the
+  > same transaction as the ban."
+  The "open-but-bound-on-consume targeting that contact"
+  phrase is the trip wire: an `--open` invite is NOT bound at
+  creation time, so it cannot be "open-but-bound targeting
+  that contact" until it's consumed (at which point it's no
+  longer PENDING). The spec's intent is therefore:
+  - `--contact` invites where `expected_contact_id = <target>`
+    are REVOKED on the ban.
+  - `--open` invites are NOT revoked on the ban (the open
+    invite remains available to any other unknown contact).
+  The implementation MUST filter the revoke to
+  `expected_contact_id = ?` AND `invite_type = 'CONTACT_BOUND'`.
+  Pin this in acceptance: the implementation SQL is `UPDATE
+  invite_code SET status = 'REVOKED' WHERE adapter = ? AND
+  invite_type = 'CONTACT_BOUND' AND expected_contact_id = ?
+  AND status = 'PENDING'`. (The acceptance grep above is a
+  starting-point regex; refine in implementation to match the
+  exact spec-correct shape.)
+- **`UnbanCommandHandler` preban path.** The V5 stored
+  procedure `delete_preban_user(p_user_id UUID, p_actor_id
+  UUID)` runs with SECURITY DEFINER and writes the audit row
+  before deleting. The handler must CALL this procedure via
+  JDBC `CallableStatement` rather than running its own DELETE
+  (the Provider role has NO direct DELETE on `users` — the
+  V5 GRANT block confirms this). The handler validates that
+  `p_actor_id` is a real `is_admin=true` user before issuing
+  the CALL (the procedure has no caller-side validation per
+  the M1-008a red-team finding; the application layer is the
+  trust boundary here). Pre-check: `actor.is_admin = true`
+  already enforces this for the `/unban` command path.
+- **`UnbanCommandHandler` group-admin restoration disclosure.**
+  When the row is non-preban, after the UPDATE, SELECT the
+  user's `is_group_admin=true` rows; if any, the reply uses
+  the `reply.unban.group_admins_restored` template. The
+  audit row's `details_json` carries the same list under the
+  `restored_group_admin` key per spec.
+- **`InviteCommandHandler` confirm flow for `--open`.** The
+  spec requires confirm for `--open` (broader blast radius)
+  and NO confirm for `--contact`. The M1-036 / M1-037 path
+  did not implement confirm. This ticket implements the
+  confirm flow as the canonical pattern for T2-* admin
+  commands going forward:
+  - First invocation: parse + validate + cap-check; on
+    success, return `reply.invite.confirm_open` with the
+    canonical confirmation prompt (the exact text from
+    `docs/design/03-commands.md` §Confirmation for
+    destructive commands if present; otherwise a stable
+    `Confirm with /invite create --adapter <name> --open --confirm` prompt).
+  - Second invocation with `--confirm` flag: perform the
+    INSERT + audit-write.
+  - The confirmation state is stateless (no in-memory pending
+    confirm queue) — the user re-types the full command with
+    `--confirm`. This is the simplest correct shape and
+    matches the design's "the canonical confirmation prompt"
+    pattern.
+- **Cap query.** The PENDING cap query uses the V5
+  `idx_invite_code_pending` partial index automatically since
+  the WHERE clause filters `status = 'PENDING'`. The
+  `expires_at` filter adds a row-level evaluation per index
+  hit; Postgres handles this cleanly for the small cap sizes.
+- **`/invite list` pagination.** Page size 20 from
+  `docs/design/03-commands.md` §3.10. The 1-indexed `--page
+  N` flag. Out-of-range page returns the empty list (no
+  error).
+- **Self-ban guard placement.** The check runs INSIDE the
+  handler (`actor.id == target.id`), NOT at the trigger
+  layer — the trigger has no signal of which connection
+  issued the UPDATE per the M1-008a red-team finding. The
+  in-handler check is the only line of defense; pin it
+  carefully.
+- **Pre-banned contact rejection on `/invite create
+  --contact`.** Check `is_banned=true` on the
+  `(adapter, expected_contact_id)` row at parse time;
+  reject with the friendly `error.invite.banned_target` reply
+  AND no INSERT.
+- **Cross-adapter `/invite create` — the one exception.**
+  Unlike `/ban`, `/unban`, `/vouch`, etc., `/invite create`
+  reads the adapter from the `--adapter <name>` flag, NOT
+  from `InboundContext.adapterName()`. The
+  `InboundContext.adapterName()` is the **inbound** adapter
+  (where the bot admin ran the command); the target adapter
+  is the flag. Both may differ. The pre-banned-contact check
+  and the cap check use the FLAG adapter. The audit row's
+  `actor_adapter` field carries the **inbound** adapter; the
+  audit row's `details_json` carries the target adapter.
+  This is the spec's intentional "high-assurance admin onboards
+  a contact on the lower-assurance adapter" pattern.
+- **Audit-row shape.** Every BAN / UNBAN / INVITE_CREATE /
+  INVITE_REVOKE row carries: `actor_user_id=actor.id`,
+  `actor_contact_id=actor.contactId`,
+  `actor_adapter=inboundContext.adapterName()`,
+  `action=<verb>`, `target_kind` per the row's natural target
+  (`'user'` for BAN/UNBAN/INVITE_REVOKE-against-contact-bound,
+  `'invite'` for INVITE_CREATE/INVITE_REVOKE), `target_id`
+  per the natural key, `target_contact_id` per the
+  redaction-time denormalization, `scope_id=NULL` (DM scope),
+  `request_id=UUID.randomUUID().toString()`, `details_json`
+  per-verb shape.
+
+## Big-picture notes
+
+- **Confirmation flow lands here as the canonical pattern.**
+  T2-* admin commands that require confirm (`/ban`, `/invite
+  revoke`, `/unfollow-tag --all`, etc.) will inherit the
+  stateless-confirm `--confirm` flag pattern from this
+  ticket. Documenting it here means M1-046 (/grant-admin /
+  /revoke-admin) can adopt it for /revoke-admin without
+  re-deriving the protocol.
+- **`/ban` requires confirm per spec.** This ticket implements
+  the confirm flow for /ban via the same `--confirm` pattern.
+- **`/invite revoke` requires confirm per spec.** Same
+  pattern.
+- **Group-scope admin commands are DM-only in v1.** Per
+  M1-039's findings, ScopeRef.Group does not carry the
+  sender's contact id; the handler cannot identify the actor
+  in group scope without the T2-F SPI widening. These admin
+  handlers refuse to run in group scope with a friendly
+  `error.group_admin_not_in_v1` reply (an in-handler
+  short-circuit similar to M1-036's group-scope check —
+  M1-036 returns `error.add_source.group_admin_only` for the
+  same reason).
+- **The audit-write helper consolidation is deferred to
+  M1-041.** Handlers write directly to `audit_log` here; a
+  future ticket replaces the per-handler INSERT with a shared
+  AuditLogWriter facade. The verbs used here
+  (`BAN`, `UNBAN`, `INVITE_CREATE`, `INVITE_REVOKE`) are all
+  in the V5 closed catalogue at lines 281-287.
+
+## Out-of-scope expansion
+
+- **M1-044a services.** Consumed unchanged.
+- **InboundRouter intake splice.** M1-044b.
+- **The umbrella's roundtrip IT.** M1-044.
+- **/vouch handler.** M1-045 (also lifts the DM gate from
+  `group_only`).
+- **/grant-admin, /revoke-admin.** M1-046.
+- **/promote, /demote.** T2-F (group context only).
+- **/quarantine commands.** T2-G.
+- **AuditLogWriter consolidation.** M1-041.
+- **Group-scope dispatch.** The handlers refuse with a
+  friendly reply; T2-F lands group-scope support.
+- **TranslationProvider exercise.** T2-C; new entries are
+  English only.
+
+## Authorized test changes
+
+- (none — this ticket adds three new test files and modifies
+  no pre-existing test.)
+
+## Alternatives considered
+
+- **Split into three separate handler tickets (one per
+  command surface).** Rejected — the three commands share
+  spec section, share the M1-040 InboundContext consumption
+  pattern, and share bundle-key authoring. The cost of a
+  unified ticket (12-ish acceptance items, ~10 files) is
+  lower than three tickets of 4-5 items each because the
+  shared scaffolding amortizes. The reviewer's must-shrink
+  on REWORK still applies; round_cap: 3 buys headroom for
+  the per-handler acceptance refinements.
+- **Implement /invite create / list / revoke as three
+  separate `CommandHandler` classes with `name()` returning
+  `"invite-create"` / `"invite-list"` / `"invite-revoke"`.**
+  Rejected — the spec/design (`docs/spec/commands.md` §Admin)
+  uses the subcommand shape `/invite <subcommand>`, so the
+  dispatcher routes on the first token after `/invite`. A
+  single handler with subcommand dispatch is the spec-correct
+  shape. If the M1-035b handleSlash dispatcher cannot do
+  subcommand matching, the InviteCommandHandler does the
+  inner dispatch.
+- **Defer the invite-revoke-on-ban behavior to a follow-up
+  ticket.** Rejected — the spec ties them together: pre-ban
+  revokes pending invites for the same contact, and the
+  audit trail's correlation by `request_id` is part of the
+  spec contract. Splitting them would defer a security
+  invariant.
+- **Skip the confirm flow for `--open` / `/ban` / `/invite
+  revoke` and implement it in M1-045 alongside CommandPermissions.**
+  Rejected — the spec marks these `requires confirm` explicitly;
+  shipping without confirm would be a spec violation. The
+  stateless `--confirm` flag pattern is the smallest viable
+  shape.
