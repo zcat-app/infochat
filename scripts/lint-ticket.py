@@ -38,6 +38,18 @@ The six checks (severity, rationale):
     compiled with Python's `re` module. Catches malformed regex
     (unbalanced brackets, bad backreference, etc.).
 
+  GREP-CROSS-LINE-NEWLINE    BLOCKER
+    Detects `\\n` (or `\\s*\\n`) inside a `grep -E` pattern run
+    without `-z` (NUL separator) or `-P` + multiline. GNU grep
+    processes input line-by-line; each record passed to the regex
+    engine does NOT include the terminating newline, so `\\n` in
+    `-E` patterns never matches a real line boundary — the grep
+    always returns 0 matches regardless of file content. Catches
+    M1-044a round-2 refine items 3-6, 13-19, 21-23, 25-26.
+    Recommended idiomatic single-line replacement for "the file
+    contains a @Test method named X":
+      grep -iE 'void\\s+\\w*X\\w*\\s*\\(' TestFile.java returns >=1 match
+
   FILES-SCOPE-COVERAGE       WARN
     Cross-checks files_scope membership. (a) test_plan.adds /
     test_plan.modifies entries not in files_scope warn: the
@@ -317,6 +329,53 @@ def check_regex_compilable(grep_commands):
     return findings
 
 
+# Any `grep ... -E 'pattern'` or `grep ... -E "pattern"`, with or without
+# surrounding backticks. Used by checks that only need the pattern (not the
+# full shell-parseable command line).
+GREP_ANY_RE = re.compile(
+    r"\bgrep\s+(?:-[a-zA-Z]+\s+)*"
+    r"-[a-zA-Z]*E\s+"
+    r"(?:'((?:[^'\\]|\\.)*)'"
+    r"|\"((?:[^\"\\]|\\.)*)\")"
+)
+
+
+def extract_grep_patterns(acceptance):
+    """Yield (item_idx, pattern_str) for every -E pattern in any grep
+    command, backticked or in prose."""
+    out = []
+    if not isinstance(acceptance, list):
+        return out
+    for idx, item in enumerate(acceptance, start=1):
+        if not isinstance(item, str):
+            continue
+        for m in GREP_ANY_RE.finditer(item):
+            pattern = m.group(1) if m.group(1) is not None else m.group(2)
+            # Skip if the surrounding grep invocation opted into -z or -P.
+            window = item[max(0, m.start() - 40):m.start()]
+            if re.search(r"-[a-zA-Z]*[zP]\b", window):
+                continue
+            out.append((idx, pattern))
+    return out
+
+
+def check_grep_cross_line_newline(acceptance):
+    """Detect `\\n` inside grep -E patterns without -z/-P. GNU grep is
+    line-oriented; \\n in -E never matches a real line boundary, so any
+    such pattern returns 0 matches regardless of file content."""
+    findings = []
+    for idx, pattern in extract_grep_patterns(acceptance):
+        if "\\n" in pattern:
+            findings.append(_finding(
+                "GREP-CROSS-LINE-NEWLINE", "BLOCKER", idx, pattern[:100],
+                "regex contains `\\n`; GNU grep is line-oriented, so the "
+                "newline never matches a real line boundary in -E mode. "
+                "Use a single-line pattern (e.g. `void\\s+\\w*<name>\\w*\\s*\\(`) "
+                "or pass -z/-P with multiline flags.",
+            ))
+    return findings
+
+
 # ---------- check 3: files_scope coverage ----------
 
 # Code-file path: a path with at least one slash and a known source extension.
@@ -565,6 +624,7 @@ def lint_one(path, quiet):
     findings.extend(check_grep_shell_parseable(greps))
     findings.extend(check_grep_embedded_quote(greps))
     findings.extend(check_regex_compilable(greps))
+    findings.extend(check_grep_cross_line_newline(acceptance))
     findings.extend(check_files_scope_coverage(fm, body))
     findings.extend(check_heterogeneous_aggregate(acceptance))
     findings.extend(check_prose_verb(acceptance))
