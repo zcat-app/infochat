@@ -64,7 +64,35 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
+redteam_audits:
+  - date: 2026-05-20
+    verdict: CLEAN
+    base: d77d8ca^
+    head: d77d8ca
+    verdict_file: docs/plan/m1/redteam/M1-043-2026-05-20.md
+    out_of_model_count: 0
+    note: |
+      Post-/m1-tick-commit, pre-/m1-tick-merge audit on the branch
+      tip d77d8ca. CLEAN — zero findings, zero out-of-model. The
+      threat-actor's reasoning trace enumerated the detection-rule
+      edge cases (`[]`, `[REFUSAL:]`, refusal-marker with admin
+      command in reason, refusal-marker with appended LLM
+      continuation) and confirmed the layered defense holds: the
+      bracket-anchored detection catches the canonical shape; the
+      `LlmOutputSanitizer` defense-in-depth catches admin commands
+      in non-canonical responses. topicId in the WARN log is an
+      internal post UID, not attacker-controlled — no log-injection
+      vector. The spec's audit-log obligation is on the
+      LlmOutputSanitizer admin-command-match path, not on refusal
+      markers — no audit gap. Sensitive-surface placeholders all
+      resolved to `(none touched)` (no auth/authz/input/ban/audit
+      surfaces in this diff).
+
+      Format-compliance note: the threat-actor returned its full
+      reasoning trace before the canonical verdict line, contrary
+      to the "return ONLY the structured verdict" rule. Substance
+      was unambiguous (CLEAN); accepted on substance over format
+      with the user explicitly opting in to the persist path.
 clarity_check:
   date: 2026-05-20
   verdict: PASS
