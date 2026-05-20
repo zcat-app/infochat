@@ -15,11 +15,15 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.Timestamp;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -40,9 +44,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   <li>First-DM auto-register + /help reply: a fresh contact id
  *       sending {@code /help} causes exactly one users row insert
  *       with the spec-required defaults ({@code is_admin=FALSE},
- *       {@code registration_state='invited'}, {@code probation_until
- *       IS NULL}) and produces exactly one outbound message whose
- *       body equals the bundle-composed /help reply.</li>
+ *       {@code registration_state='group_only'},
+ *       {@code probation_until ≈ NOW() + 24h}) and produces exactly
+ *       one outbound message whose body equals the bundle-composed
+ *       /help reply. (Pre-M1-044a, the upsert wrote
+ *       {@code 'invited'} with a NULL probation column; M1-044a
+ *       narrows {@code AutoRegisterService} to the group-only path
+ *       per spec D44 §Invite-code registration — the DM-unknown
+ *       contact route is M1-044b's invite gate.)</li>
  *   <li>Auto-register idempotency: a second {@code /help} from the
  *       same contact id does NOT insert a second users row but DOES
  *       produce a second outbound /help reply.</li>
@@ -90,9 +99,11 @@ class AdapterRouterIT {
 
     @Test
     void firstDmAutoRegistersUserAndRepliesWithHelp() throws Exception {
+        Instant before = Instant.now();
         adapter.deliverDm("mvp-user-1", "/help");
+        Instant after = Instant.now();
 
-        assertUsersRowMatchesMvpDefaults("mvp-user-1");
+        assertUsersRowMatchesMvpDefaults("mvp-user-1", before, after);
 
         List<OutboundMessage> sent = adapter.sentMessages();
         assertEquals(1, sent.size(),
@@ -132,7 +143,8 @@ class AdapterRouterIT {
                 + "\n" + bundleLoader.get(BundleKeys.HELP_CMD_SUMMARY_SHORT);
     }
 
-    private void assertUsersRowMatchesMvpDefaults(String contactId) throws Exception {
+    private void assertUsersRowMatchesMvpDefaults(String contactId, Instant before, Instant after)
+            throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "SELECT is_admin, registration_state, probation_until "
@@ -143,11 +155,19 @@ class AdapterRouterIT {
                         "users row must exist for adapter='inmemory' contact_id='" + contactId + "'");
                 assertFalse(rs.getBoolean("is_admin"),
                         "is_admin must be FALSE for auto-registered users");
-                assertEquals("invited", rs.getString("registration_state"),
-                        "registration_state must be 'invited' per the four-value V5 CHECK");
-                rs.getTimestamp("probation_until");
-                assertTrue(rs.wasNull(),
-                        "probation_until must be NULL (slow-start tier is deferred to T2-A)");
+                assertEquals("group_only", rs.getString("registration_state"),
+                        "registration_state must be 'group_only' per spec D44 §Authorization model step 3 "
+                                + "(M1-044a narrowed AutoRegisterService to the group-only path)");
+                Timestamp probation = rs.getTimestamp("probation_until");
+                assertNotNull(probation,
+                        "probation_until must be populated to NOW() + slow_start_window "
+                                + "(default infochat.probation.duration=24h)");
+                Instant actual = probation.toInstant();
+                Instant expectedMin = before.plus(Duration.ofHours(24)).minusSeconds(30);
+                Instant expectedMax = after.plus(Duration.ofHours(24)).plusSeconds(30);
+                assertTrue(!actual.isBefore(expectedMin) && !actual.isAfter(expectedMax),
+                        "probation_until=" + actual + " must lie in ["
+                                + expectedMin + ", " + expectedMax + "]");
                 assertFalse(rs.next(),
                         "exactly one users row must match (adapter='inmemory', contact_id='"
                                 + contactId + "')");

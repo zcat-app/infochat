@@ -10,6 +10,8 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -26,22 +28,26 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Integration tests for {@link AutoRegisterService} against the
- * DevServices Postgres container (Flyway-applied schema, V5 users
- * table). Four invariants are pinned, each in its own {@code @Test}:
+ * DevServices Postgres container (Flyway-applied V5 users table).
+ * Four invariants are pinned, each in its own {@code @Test}:
  *
  * <ol>
- *   <li>First-DM inserts a row with the spec-required defaults
- *       ({@code is_admin=FALSE}, {@code registration_state='invited'},
- *       slow-start probation column left at the NULL default).</li>
- *   <li>A second call with the same identity is idempotent — returns
- *       the existing row's id, no second insert.</li>
- *   <li>Concurrent first-DMs from the same {@code contact_id} produce
- *       exactly one row via the {@code ON CONFLICT (adapter,
- *       contact_id) DO NOTHING} race protection.</li>
+ *   <li>{@code groupFreshInsert} — a fresh
+ *       {@code (adapter, contact_id)} insert writes
+ *       {@code registration_state='group_only'} AND
+ *       {@code probation_until ≈ NOW() + 24h} (the default value of
+ *       the {@code infochat.probation.duration} property).</li>
+ *   <li>{@code groupIdempotent} — a second call with the same
+ *       identity returns the existing row's id, writes no second
+ *       row, and does NOT modify the existing row's
+ *       {@code registration_state} or {@code probation_until}.</li>
+ *   <li>Concurrent first-{@code @mentions} from the same
+ *       {@code contact_id} produce exactly one row via the
+ *       {@code ON CONFLICT (adapter, contact_id) DO NOTHING} race
+ *       protection.</li>
  *   <li>The same {@code contact_id} across two different adapters
- *       produces two distinct rows — the cross-adapter isolation
- *       invariant per {@code docs/spec/messaging.md} §Per-adapter
- *       trust level.</li>
+ *       produces two distinct rows — cross-adapter isolation per
+ *       D46 + the V5 UNIQUE (adapter, contact_id) constraint.</li>
  * </ol>
  */
 @QuarkusTest
@@ -55,9 +61,6 @@ class AutoRegisterServiceTest {
 
     @BeforeEach
     void cleanTestContacts() throws Exception {
-        // Each @Test uses contact_ids in the "test-" / "race-" / "dup-"
-        // namespaces; clean only those so the test does not race the
-        // bootstrap-admin row (deferred) or other tests' fixtures.
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "DELETE FROM users WHERE contact_id LIKE 'test-%' "
@@ -68,10 +71,12 @@ class AutoRegisterServiceTest {
     }
 
     @Test
-    void firstDmInsertsRowWithSpecRequiredDefaults() throws Exception {
-        UUID id = autoRegisterService.resolveOrRegister(
+    void groupFreshInsert() throws Exception {
+        Instant before = Instant.now();
+        UUID id = autoRegisterService.resolveOrRegisterGroup(
                 identity("test-1", "Test One"), "inmemory");
-        assertNotNull(id, "resolveOrRegister must return a non-null UUID");
+        Instant after = Instant.now();
+        assertNotNull(id, "resolveOrRegisterGroup must return a non-null UUID");
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
@@ -81,58 +86,75 @@ class AutoRegisterServiceTest {
             ps.setString(1, "inmemory");
             ps.setString(2, "test-1");
             try (ResultSet rs = ps.executeQuery()) {
-                assertTrue(rs.next(), "row must exist after resolveOrRegister");
+                assertTrue(rs.next(), "row must exist after resolveOrRegisterGroup");
                 assertEquals(id, rs.getObject("id", UUID.class));
                 assertEquals("inmemory", rs.getString("adapter"));
                 assertEquals("test-1", rs.getString("contact_id"));
                 assertEquals("Test One", rs.getString("display_name"));
                 assertFalse(rs.getBoolean("is_admin"),
                         "is_admin must be FALSE — hardcoded in AutoRegisterService.UPSERT_SQL");
-                assertEquals("invited", rs.getString("registration_state"),
-                        "registration_state must be 'invited' per the four-value V5 CHECK");
-                // The slow-start column is left out of the INSERT so the V5 column
-                // default (NULL) applies — T2-A's slow-start tier is not wired here.
-                rs.getTimestamp("probation_until");
-                assertTrue(rs.wasNull(),
-                        "probation_until must be NULL (column omitted from INSERT)");
+                assertEquals("group_only", rs.getString("registration_state"),
+                        "registration_state must be 'group_only' per spec §Authorization model step 3");
+
+                Timestamp probation = rs.getTimestamp("probation_until");
+                assertNotNull(probation,
+                        "probation_until must be populated to NOW() + slow_start_window");
+                // The default infochat.probation.duration is 24h. Allow a
+                // generous +/- 30s tolerance to absorb test-VM scheduling
+                // slack between the JVM clock and Postgres NOW().
+                Instant expectedMin = before.plus(Duration.ofHours(24)).minusSeconds(30);
+                Instant expectedMax = after.plus(Duration.ofHours(24)).plusSeconds(30);
+                Instant actual = probation.toInstant();
+                assertTrue(!actual.isBefore(expectedMin) && !actual.isAfter(expectedMax),
+                        "probation_until=" + actual + " must lie in ["
+                                + expectedMin + ", " + expectedMax + "]");
+
                 assertFalse(rs.next(), "exactly one row must match (adapter, contact_id)");
             }
         }
     }
 
     @Test
-    void secondCallWithSameIdentityIsIdempotentReturningExistingRow() throws Exception {
-        UUID first = autoRegisterService.resolveOrRegister(
+    void groupIdempotent() throws Exception {
+        UUID first = autoRegisterService.resolveOrRegisterGroup(
                 identity("test-1", "Test One"), "inmemory");
         assertEquals(1L, countRows("inmemory", "test-1"));
 
-        UUID second = autoRegisterService.resolveOrRegister(
+        // Capture the existing row's probation_until + registration_state
+        // so the idempotent assertion can pin "no modification".
+        Snapshot beforeSecond = snapshot("inmemory", "test-1");
+
+        UUID second = autoRegisterService.resolveOrRegisterGroup(
                 identity("test-1", "Test One"), "inmemory");
         assertEquals(first, second,
                 "idempotent call must return the same UUID as the first call");
         assertEquals(1L, countRows("inmemory", "test-1"),
-                "second resolveOrRegister must NOT insert a second row");
+                "second resolveOrRegisterGroup must NOT insert a second row");
+
+        Snapshot afterSecond = snapshot("inmemory", "test-1");
+        assertEquals(beforeSecond.registrationState, afterSecond.registrationState,
+                "registration_state must NOT change on the idempotent call");
+        assertEquals(beforeSecond.probationUntil, afterSecond.probationUntil,
+                "probation_until must NOT change on the idempotent call");
     }
 
     @Test
-    void concurrentFirstDmsFromSameContactIdProduceExactlyOneRowViaOnConflictRaceProtection()
+    void concurrentFirstMentionsFromSameContactIdProduceExactlyOneRowViaOnConflictRaceProtection()
             throws Exception {
         CountDownLatch latch = new CountDownLatch(1);
         ExecutorService pool = Executors.newFixedThreadPool(2);
         try {
             Future<UUID> a = pool.submit(() -> {
                 latch.await();
-                return autoRegisterService.resolveOrRegister(
+                return autoRegisterService.resolveOrRegisterGroup(
                         identity("race-1", "Racer A"), "inmemory");
             });
             Future<UUID> b = pool.submit(() -> {
                 latch.await();
-                return autoRegisterService.resolveOrRegister(
+                return autoRegisterService.resolveOrRegisterGroup(
                         identity("race-1", "Racer B"), "inmemory");
             });
 
-            // Release both threads simultaneously so the two upserts race
-            // the UNIQUE (adapter, contact_id) constraint.
             latch.countDown();
 
             UUID idA;
@@ -142,7 +164,7 @@ class AutoRegisterServiceTest {
                 idB = b.get(15, TimeUnit.SECONDS);
             } catch (ExecutionException e) {
                 throw new AssertionError(
-                        "concurrent resolveOrRegister raised — ON CONFLICT DO NOTHING "
+                        "concurrent resolveOrRegisterGroup raised — ON CONFLICT DO NOTHING "
                                 + "must absorb the race", e);
             }
 
@@ -158,9 +180,9 @@ class AutoRegisterServiceTest {
 
     @Test
     void crossAdapterContactIdsProduceTwoDistinctRows() throws Exception {
-        UUID inmemoryId = autoRegisterService.resolveOrRegister(
+        UUID inmemoryId = autoRegisterService.resolveOrRegisterGroup(
                 identity("dup-1", "Inmemory User"), "inmemory");
-        UUID inmemory2Id = autoRegisterService.resolveOrRegister(
+        UUID inmemory2Id = autoRegisterService.resolveOrRegisterGroup(
                 identity("dup-1", "Inmemory2 User"), "inmemory2");
 
         assertNotNull(inmemoryId);
@@ -197,4 +219,21 @@ class AutoRegisterServiceTest {
             }
         }
     }
+
+    private Snapshot snapshot(String adapter, String contactId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT registration_state, probation_until FROM users "
+                             + "WHERE adapter = ? AND contact_id = ?")) {
+            ps.setString(1, adapter);
+            ps.setString(2, contactId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next());
+                return new Snapshot(rs.getString("registration_state"),
+                        rs.getTimestamp("probation_until"));
+            }
+        }
+    }
+
+    private record Snapshot(String registrationState, Timestamp probationUntil) {}
 }

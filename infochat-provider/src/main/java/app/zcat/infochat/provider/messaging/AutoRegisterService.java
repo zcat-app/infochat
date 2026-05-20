@@ -3,103 +3,86 @@ package app.zcat.infochat.provider.messaging;
 import app.zcat.infochat.messaging.Identity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Duration;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 /**
- * MVP-legacy auto-register-on-first-DM service per
- * {@code docs/design/00-mvp.md} §4. The {@link InboundRouter} calls
- * {@link #resolveOrRegister} immediately after Unicode normalization
- * and before slash-prefix dispatch so every reachable
- * {@link CommandHandler} sees a stable {@code users.id} for the
- * sender.
+ * Authorization step 3 group-registration service per
+ * docs/spec/security.md §Authorization model. The intake-step
+ * splice (M1-044b) calls {@link #resolveOrRegisterGroup} on the
+ * first non-banned {@code @mention} of the bot in a new group;
+ * a row is inserted under {@code registration_state = 'group_only'}
+ * with a slow-start probation expiry. The DM-unknown contact path
+ * — formerly handled here in the MVP-legacy shape — now routes
+ * through {@link InviteCodeConsumer} at step 2.
  *
- * <p><b>SQL shape.</b> A single
- * {@code INSERT INTO users (...) VALUES (...) ON CONFLICT
- * (adapter, contact_id) DO NOTHING} statement, followed by a
- * {@code SELECT id FROM users WHERE adapter=? AND contact_id=?} to
- * read back the row identifier. The {@code ON CONFLICT DO NOTHING}
- * clause is the race-protection load-bearer: two concurrent first-DMs
- * from the same {@code contact_id} would otherwise race the V5
- * {@code UNIQUE (adapter, contact_id)} constraint and one transaction
- * would raise PostgreSQL 23505 (unique violation). The {@code DO
- * NOTHING} clause turns the second concurrent INSERT into a no-op;
- * the SELECT then reads the row the first transaction inserted.</p>
+ * <p><b>UPSERT shape.</b> {@code INSERT ... ON CONFLICT (adapter,
+ * contact_id) DO NOTHING}; the {@code SELECT id} reads back the
+ * row whether it was just inserted or already existed. Idempotent
+ * across concurrent first-{@code @mentions} from the same contact
+ * — the UNIQUE (adapter, contact_id) constraint is the
+ * serialization point.</p>
  *
- * <p><b>Hardcoded defaults.</b> {@code is_admin} is the literal
- * {@code FALSE} — no template, no per-deployment override path. A
- * future attacker who controls part of the {@link Identity} record
- * (e.g., a spoofed {@code contactId} under a LOW-trust adapter) must
- * not be able to elevate to admin via this path. The bootstrap-admin
- * {@code @Startup} bean (deferred) is the only path that sets
- * {@code is_admin=true}; it runs against a configured contact id, not
- * an arbitrary inbound user. {@code registration_state} is the
- * literal {@code 'invited'} — the closest match in the four-value V5
- * CHECK ({@code preban}, {@code group_only}, {@code invited},
- * {@code vouched}) for the MVP-legacy "DM-pathway-registered without
- * an explicit invite" semantics. T2-A's invite-gating ticket
- * naturally writes {@code 'invited'} when an actual invite consume
- * happens, so the value carries forward.</p>
+ * <p><b>Probation window.</b> {@code probation_until = NOW() +
+ * @ConfigProperty(infochat.probation.duration, defaultValue="24h")}
+ * — every newly-registered contact begins in the slow-start tier
+ * per D45 / docs/design/03-commands.md §3.3.</p>
  *
- * <p><b>Column omission.</b> The INSERT column list omits the
- * slow-start probation column so the V5 default (NULL) applies — "no
- * probation in effect," which is what MVP requires (slow-start tier
- * is deferred to T2-A). T2-A may retro-fit existing rows when the
- * probation tier is wired; that retro-fit is T2-A's call.</p>
- *
- * <p><b>No audit row.</b> Per {@code docs/design/00-mvp.md} §5, the
- * V5 closed action set does not include an {@code AUTO_REGISTER}
- * verb. MVP auto-register skips the audit insert entirely; T2-A
- * writes the {@code INVITE_CONSUME} row (which exists in the closed
- * set) at the moment invite-gated registration happens, replacing
- * this MVP-legacy "register-and-skip-audit" path. Adding
- * {@code AUTO_REGISTER} would be a spec amendment + a separate
- * {@code spec:} commit, not an in-flight edit here.</p>
- *
- * <p>T2-A's invite-gating ticket will replace the method body but
- * leave the call site (the {@link InboundRouter}'s intake point) and
- * the method signature unchanged — the seam is intentional.</p>
+ * <p><b>InboundRouter compatibility seam.</b> The deprecated
+ * {@link #resolveOrRegister} method exists solely so M1-035d's
+ * call site at {@code InboundRouter.onMessage} continues to
+ * compile under M1-044a's narrowed contract. M1-044b removes the
+ * call site as part of the intake-step splice and a follow-up
+ * removes the deprecated method here.</p>
  */
 @ApplicationScoped
 public class AutoRegisterService {
 
+    /**
+     * The {@code registration_state} value written for newly-
+     * registered users per spec §Authorization model step 3
+     * (the four-value V5 CHECK enumerates
+     * {@code 'preban','group_only','invited','vouched'}).
+     */
+    static final String REGISTRATION_STATE_GROUP_ONLY = "group_only";
+
     private static final String UPSERT_SQL =
-            "INSERT INTO users (adapter, contact_id, display_name, is_admin, registration_state) "
-                    + "VALUES (?, ?, ?, FALSE, 'invited') "
+            "INSERT INTO users (adapter, contact_id, display_name, "
+                    + "is_admin, registration_state, probation_until) "
+                    + "VALUES (?, ?, ?, FALSE, '" + REGISTRATION_STATE_GROUP_ONLY + "', ?) "
                     + "ON CONFLICT (adapter, contact_id) DO NOTHING";
 
     private static final String SELECT_ID_SQL =
             "SELECT id FROM users WHERE adapter = ? AND contact_id = ?";
 
+    @ConfigProperty(name = "infochat.probation.duration", defaultValue = "24h")
+    Duration probationDuration;
+
     @Inject
     DataSource dataSource;
 
     /**
-     * Resolve the {@code users.id} for the sender, inserting a row
-     * iff one does not already exist for {@code (adapterName,
-     * sender.contactId())}. Idempotent across concurrent first-DMs
-     * from the same contact (the ON CONFLICT clause serializes them
-     * against the UNIQUE constraint).
-     *
-     * @param sender      the inbound message's {@link Identity}; only
-     *                    {@code contactId()} and {@code displayName()}
-     *                    are consulted.
-     * @param adapterName the adapter the inbound came from (e.g.,
-     *                    {@code "inmemory"}, {@code "simplex"}).
-     * @return the {@code users.id} UUID of the resolved or newly-
-     *         inserted row.
+     * Group-registration path: insert a row under
+     * {@code registration_state = 'group_only'} with
+     * {@code probation_until = NOW() + slow_start_window}, or read
+     * back the existing row if one already matches
+     * {@code (adapterName, sender.contactId())}. Idempotent.
      */
-    public UUID resolveOrRegister(Identity sender, String adapterName) {
+    public UUID resolveOrRegisterGroup(Identity sender, String adapterName) {
         try (Connection conn = dataSource.getConnection()) {
             try (PreparedStatement insert = conn.prepareStatement(UPSERT_SQL)) {
                 insert.setString(1, adapterName);
                 insert.setString(2, sender.contactId());
                 insert.setString(3, sender.displayName());
+                insert.setObject(4, OffsetDateTime.now().plus(probationDuration));
                 insert.executeUpdate();
             }
             try (PreparedStatement select = conn.prepareStatement(SELECT_ID_SQL)) {
@@ -107,22 +90,34 @@ public class AutoRegisterService {
                 select.setString(2, sender.contactId());
                 try (ResultSet rs = select.executeQuery()) {
                     if (!rs.next()) {
-                        // Unreachable under ON CONFLICT DO NOTHING semantics: a row
-                        // for (adapterName, contactId) must exist after the upsert.
-                        // Surface as IllegalStateException so the test layer notices
-                        // immediately if some future schema change breaks the
-                        // invariant.
+                        // Unreachable under ON CONFLICT DO NOTHING: the row exists
+                        // after the upsert. Surface as IllegalStateException so a
+                        // future schema change breaking the invariant fails loud.
                         throw new IllegalStateException(
                                 "users row missing after upsert: adapter=" + adapterName
                                         + " contact_id=" + sender.contactId());
                     }
-                    return (UUID) rs.getObject(1);
+                    return rs.getObject(1, UUID.class);
                 }
             }
         } catch (SQLException e) {
             throw new IllegalStateException(
-                    "AutoRegisterService.resolveOrRegister failed for adapter="
+                    "AutoRegisterService.resolveOrRegisterGroup failed for adapter="
                             + adapterName + " contact_id=" + sender.contactId(), e);
         }
+    }
+
+    /**
+     * Compatibility pass-through for M1-035d's InboundRouter call
+     * site. M1-044b removes the call site as part of the intake
+     * splice; a follow-up removes this method.
+     *
+     * @deprecated use {@link #resolveOrRegisterGroup} from the
+     *     group {@code @mention} path; the DM-unknown contact path
+     *     routes through {@link InviteCodeConsumer} at step 2.
+     */
+    @Deprecated
+    public UUID resolveOrRegister(Identity sender, String adapterName) {
+        return resolveOrRegisterGroup(sender, adapterName);
     }
 }

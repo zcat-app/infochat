@@ -1,9 +1,9 @@
 ---
 id: M1-044a
 title: Intake-step services — rate cap, invite consumer, ban check, brute-force migration
-status: pending
+status: done
 created: 2026-05-20
-last_updated: 2026-05-20
+last_updated: 2026-05-21
 blocked_by: []
 files_budget: 12
 files_scope:
@@ -16,6 +16,7 @@ files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InviteCodeConsumerTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/BanCheckTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/AutoRegisterServiceTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/AdapterRouterIT.java
 complexity: high
 risk: high
 round_cap: 3
@@ -34,7 +35,7 @@ out_of_scope:
   - any change to ContactIds.redact — the M1-038 helper is consumed unchanged
   - any modification to the V5 invite_code table, delete_preban_user procedure, or last-admin protection trigger — those are V5's commit and are consumed as-is
   - any change to AutoRegisterService PUBLIC method signature beyond what the rename-and-narrow strictly requires — callers (currently only InboundRouter.onMessage line 235 today) must continue to compile until M1-044b updates the call site
-  - any test outside the four files in files_scope — M1-035c's HelpCommandHandlerTest, BundleLoaderTest, M1-035b's InboundRouterTest / NormalizeTest, M1-036/M1-037 handler tests, M1-038/M1-039/M1-040 hardening tests all stay green unchanged
+  - any test outside the five test files in files_scope — M1-035c's HelpCommandHandlerTest, BundleLoaderTest, M1-035b's InboundRouterTest / NormalizeTest, M1-036/M1-037 handler tests, M1-038/M1-039/M1-040 hardening tests all stay green unchanged
 acceptance:
   - "infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/RateCapBucket.java exists, is `@ApplicationScoped`, and exposes a public method `boolean tryAcquire(String adapter, String contactId)` that returns true on under-cap and false on over-cap. Verify: `grep -E '@ApplicationScoped' RateCapBucket.java` returns ≥1 match AND `grep -E 'public\\s+boolean\\s+tryAcquire' RateCapBucket.java` returns ≥1 match. The bucket holds in-memory state keyed by `(adapter, contactId)`; no JDBC, no `DataSource` injection — confirmed by `grep -E 'DataSource|java\\.sql' RateCapBucket.java` returning ZERO matches"
   - "RateCapBucket reads its cap value via `@ConfigProperty(name = \"infochat.rate-cap.inbound-per-minute\", defaultValue = \"60\")` so M1-044b's per-profile property edits land cleanly. Verify: `grep -E 'infochat\\.rate-cap\\.inbound-per-minute' RateCapBucket.java` returns ≥1 match"
@@ -76,6 +77,7 @@ test_plan:
   modifies:
     - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/AutoRegisterService.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/AutoRegisterServiceTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/AdapterRouterIT.java
   preserves:
     - all other tests currently green on main
 spec_refs:
@@ -89,7 +91,26 @@ decision_refs:
   - D44
   - D45
   - D46
-clarity_check: {}
+clarity_check:
+  date: 2026-05-20
+  verdict: PASS
+  warnings: []
+  blockers: []
+outline_file: target/m1-tick-outline-M1-044a.md
+reviews:
+  - round: 1
+    date: 2026-05-21
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 11
+      added: 1268
+      removed: 125
 escalations:
   - date: 2026-05-20
     reason: clarity-fail
@@ -143,6 +164,165 @@ revisions:
       gained a new GREP-CROSS-LINE-NEWLINE check to catch this class going
       forward (separate process: commit). Linted clean before re-running
       /m1-tick start round 2.
+  - date: 2026-05-21
+    reason: mid-implementation authorization for AdapterRouterIT modification
+    summary: |
+      During implementation, `mvn verify` surfaced a regression in
+      `AdapterRouterIT.firstDmAutoRegistersUserAndRepliesWithHelp` at line
+      146: the IT pins `registration_state='invited'` and `probation_until
+      IS NULL` (the MVP-legacy DM auto-register state), and the narrowed
+      AutoRegisterService now writes `'group_only'` + `probation_until =
+      NOW() + 24h` per acceptance item 24. Same provably-wrong-against-spec
+      category as the §Authorized test changes carve-out already granted
+      for AutoRegisterServiceTest; the author missed cascading the
+      authorization to the IT layer. User authorized the inline amendment;
+      AdapterRouterIT.java added to files_scope (10 of 12), test_plan
+      modifies, and §Authorized test changes with full provably-wrong
+      rationale. No new acceptance items needed — the IT's assertions just
+      track the spec-correct behavior the M1-044a narrow already pins via
+      acceptance items 24-26.
+redteam_findings:
+  - date: 2026-05-21
+    category: INFO-LEAK
+    severity: medium
+    promise: |
+      Contact IDs are logged in redacted form (prefix + ellipsis +
+      suffix) outside the audit log. (docs/spec/security.md §Secrets
+      handling)
+    gap: |
+      Raw contactId is concatenated into IllegalStateException messages
+      in InviteCodeConsumer.java:171-173, :176-178, :231-233;
+      BanCheck.java:57-59; AutoRegisterService.java:79-82, :88-90. None
+      of these call the existing ContactIds.redact helper (M1-038
+      precedent, applied by M1-039 to handler exception messages); raw
+      contact ids land in Quarkus default exception logs, defeating the
+      audit-log redaction commitment.
+    repro: |
+      Trigger any SQLException reachable from these paths (transient DB
+      connection blip, schema mismatch). Quarkus default error handler
+      logs the full exception chain. An operator with read access to
+      application logs (broader than audit-log access) sees plaintext
+      contact_id — the same data V5 §2.1.9 redact_contact_id was
+      designed to keep out of routine log surfaces.
+    suggested_fix_class: input-sanitization
+  - date: 2026-05-21
+    category: AUDIT-EVASION
+    severity: medium
+    promise: |
+      Failed attempts increment a counter; when the counter exceeds a
+      profile-driven threshold within a profile-driven window, further
+      attempts from that (adapter, contact_id) are rejected without
+      checking the code, and an audit row records the threshold breach.
+      (docs/spec/security.md §Invite-code registration)
+    gap: |
+      InviteCodeConsumer.java:141-145. The in-memory
+      breachAudited.add(key) is called BEFORE insertAudit(...) runs. If
+      insertAudit throws (any SQL/DB error), the catch at line 169 rolls
+      back the DB transaction — but the in-memory Set mutation is NOT
+      rolled back. Subsequent calls see breachAudited.add(key) return
+      false and skip the audit insert entirely. The threshold breach is
+      silently never audited until the breach event "ends"
+      (counter drops below threshold), at which point
+      breachAudited.remove(key) clears the sentinel — but the original
+      breach has gone unaudited and the evidence trail is lost.
+    repro: |
+      Adversary patient-brute-forces invite codes from a stable (adapter,
+      contact_id). Reaches threshold. Audit insert encounters any
+      transient or persistent SQL fault. IllegalStateException
+      propagates; operator may or may not notice. The next breach
+      attempt finds breachAudited already contains the key, so no audit
+      row is ever written for this breach event. Brute-force evidence
+      missing from audit_log, defeating the spec's "an audit row
+      records the threshold breach" commitment.
+    suggested_fix_class: audit-log-coverage
+  - date: 2026-05-21
+    category: DOS
+    severity: low
+    promise: |
+      Per-user token buckets bound, grouped explicitly so commands that
+      share a cost profile share a bucket... Chat-mode message rate
+      (transport-level) — bounds inbound message volume regardless of
+      cost. (docs/spec/security.md §Rate limiting) — the bucket is
+      positioned as a defense, but its memory footprint must itself be
+      bounded.
+    gap: |
+      RateCapBucket.java:72-82. The evictIdleBuckets predicate requires
+      bucket.tokens == inboundPerMinute (i.e., the bucket must be FULL)
+      AND lastRefillEpochMillis < thresholdEpochMillis. But refill is
+      lazy — lastRefillEpochMillis only advances inside tryAcquire. A
+      bucket that has been drained (tokens < cap) and then abandoned
+      (no further tryAcquire calls) will never refill back to cap on
+      its own, so the eviction predicate never fires. The bucket is
+      pinned in the ConcurrentHashMap indefinitely.
+    repro: |
+      Any contact that drains its bucket and stops sending leaves a
+      permanent entry. For an adversary on an adapter where cheap fresh
+      contact IDs are obtainable (Sybil resistance is acknowledged
+      out-of-v1), this turns the bucket into an attacker-controlled
+      memory-growth vector: send 1 message from each of N synthetic IDs
+      to seed N permanent entries. Map grows without bound; provider
+      OOMs eventually. Even without an adversary, every legitimate user
+      who hits the cap and goes silent leaves a residual bucket.
+    suggested_fix_class: rate-limit
+  - date: 2026-05-21
+    category: AUTH-BYPASS
+    severity: low
+    promise: |
+      Pre-banned contact + invite. /invite create --contact <id> against
+      a contact whose users row already has is_banned=true returns a
+      friendly error... The intake-side ban check (authorization step 4)
+      is the second line of defense — even if a stale invite exists,
+      the ban check fires first. AND: DM — unknown contact. If no user
+      row exists for this (contact_id, adapter): check whether the full
+      normalized message body is a valid PENDING invite code...
+      (docs/spec/security.md §Invite-code registration, §Authorization
+      model)
+    gap: |
+      InviteCodeConsumer.java:130-180 — the consume method does not
+      itself verify that no users row exists for (adapter, contactId).
+      If the splice (M1-044b) ever routes a contact-with-existing-row
+      (pre-banned, group_only, or vouched) to consume, INSERT_USER_SQL
+      runs with ON CONFLICT DO NOTHING and the subsequent
+      SELECT_USER_ID_SQL returns the EXISTING row's id (including
+      registration_state='preban' or is_banned=true). The function
+      returns Accepted(existingUserId) and writes an INVITE_CONSUME
+      audit row even though the contact is banned or already
+      registered. The building block defaults open; it relies entirely
+      on the caller's gating.
+    repro: |
+      A stale PENDING invite exists for (adapter, contactId) from before
+      a /ban (race window between ban and pre-ban revoke). The contact
+      has a users row with is_banned=true. If M1-044b's intake path
+      calls InviteCodeConsumer.consume before the ban check (or in the
+      wrong order), the consume succeeds, the invite transitions to
+      USED, and the caller receives Accepted(userId) pointing at the
+      banned row. The defense-in-depth this building block could
+      provide is absent — the contract is enforced only at the call
+      site, with no internal sanity check.
+    suggested_fix_class: trust-boundary-tightening
+redteam_audits:
+  - date: 2026-05-21
+    verdict: FINDINGS
+    base: main
+    head: 15cbcdd
+    verdict_file: docs/plan/m1/redteam/M1-044a-2026-05-21.md
+    findings_count: 4
+    out_of_model_count: 2
+    note: |
+      Post-/m1-tick-commit, pre-/m1-tick-merge audit on the M1-044a
+      implementation commit (15cbcdd). FINDINGS: 0 critical, 0 high,
+      2 medium, 2 low. Two mediums (INFO-LEAK regression vs the
+      M1-038/M1-039 ContactIds.redact precedent; AUDIT-EVASION on
+      in-memory breachAudited mutating before audit-INSERT can fail)
+      should land as a new remediation ticket — M1-044a's commit is
+      done and immutable. Two lows (DOS on the eviction predicate;
+      AUTH-BYPASS defense-in-depth on consume() not self-verifying
+      the no-existing-users-row precondition) are deferred follow-ups
+      whose mitigation lives in M1-044b's gating order rather than
+      M1-044a's surface. The threat-actor produced reasoning preamble
+      before the structured verdict (protocol violation against
+      "Return ONLY the structured verdict"); the structured portion
+      parses cleanly and is recorded verbatim in the verdict_file.
 ---
 
 # M1-044a: Intake-step services — rate cap, invite consumer, ban check, brute-force migration
@@ -409,6 +589,7 @@ globally.
 ## Authorized test changes
 
 - `infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/AutoRegisterServiceTest.java` — M1-035c's existing test asserts the MVP-legacy DM auto-register behavior (writing `'invited'` to a fresh `(adapter, contact_id)`). This ticket narrows the service to group-only and writes `'group_only'`; the test's existing assertions are updated to reflect the new contract. The reason this is an authorized modification rather than a test-integrity violation: M1-035c's test asserted the MVP-legacy DM behavior that the spec D44 §Invite-code registration explicitly forbids. The previous assertion is provably-wrong-against-spec, not a regression target. The test is rewritten to assert the spec-correct group-only path.
+- `infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/AdapterRouterIT.java` — M1-035's umbrella IT pinned the MVP-legacy DM auto-register state at the integration layer (`assertUsersRowMatchesMvpDefaults` line 146 asserts `registration_state='invited'` AND `probation_until IS NULL`). Same provably-wrong-against-spec category as AutoRegisterServiceTest: the assertion pins the MVP-legacy DM behavior that D44 explicitly forbids. The IT's `firstDmAutoRegistersUserAndRepliesWithHelp` test path is unchanged (the deprecated `resolveOrRegister` pass-through still fires from `InboundRouter.onMessage` line 235 until M1-044b removes the call site); only the post-call assertions are updated to expect `registration_state='group_only'` AND `probation_until ≈ NOW() + 24h` per the narrowed contract. This authorization was missed in the original ticket draft and added in revision round 3 mid-implementation per `[[feedback_acceptance_transcribe_spec_promises]]` (any spec-derived behavior change ripples to every IT that pins the prior behavior).
 
 ## Alternatives considered
 
