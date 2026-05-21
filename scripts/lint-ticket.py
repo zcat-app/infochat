@@ -59,10 +59,25 @@ The six checks (severity, rationale):
     too, unless the section contains an explicit "inner class of X"
     disclaimer. Catches M1-026/30/32/33/35a/44a.
 
-  HETEROGENEOUS-AGGREGATE-TEST-COUNT   WARN
+  HETEROGENEOUS-AGGREGATE-TEST-COUNT   BLOCKER
     Acceptance items asserting `grep -E '@Test' <file> returns ≥N`
     with N >= 3 collapse structurally-different test methods into
-    one count. Recommend per-method greps. Catches M1-026/27/28/33.
+    one count. Recommend per-method greps. Catches M1-026/27/28/33/
+    44b. Promoted from WARN to BLOCKER after M1-044b clarity-warn
+    almost slipped past — the recurring-pattern memory already
+    classifies this as a hard-no.
+
+  UNDEFINED-SYMBOL-COUNT     BLOCKER
+    Acceptance grep predicates whose count expression contains a
+    non-numeric symbol (`≥N`, `≥(N+1)`, `=M+K`, `at least N matches
+    where N is …`) are not independently verifiable from the
+    ticket. The developer must compute N to author the
+    implementation; the reviewer must re-derive N to verify it; and
+    the assertion silently rots when unrelated tickets change the
+    state N counts. Refuse with a citation pointing at the
+    Implementation notes for a specific named identifier the
+    acceptance item should grep for instead. Catches M1-044b item
+    13 (`≥(N+1)`).
 
   PROSE-VERB-IN-VERIFY       WARN
     Verify clauses containing "by reading", "by inspection",
@@ -493,11 +508,50 @@ def check_heterogeneous_aggregate(acceptance):
             n = int(m.group(1))
             if n >= 3:
                 findings.append(_finding(
-                    "HETEROGENEOUS-AGGREGATE-TEST-COUNT", "WARN", idx,
+                    "HETEROGENEOUS-AGGREGATE-TEST-COUNT", "BLOCKER", idx,
                     m.group(0),
                     f"aggregate @Test count ≥{n} collapses structurally-different "
                     f"tests; split into per-method greps naming each test by name",
                 ))
+    return findings
+
+
+# ---------- check 7: undefined-symbol count ----------
+
+# A grep predicate's count expression that contains a non-numeric symbol.
+# Matches phrasings like `≥(N+1) matches`, `>=N matches`, `at least N+1
+# matches`, `exactly N matches`. The symbol part must be a single uppercase
+# letter so we don't accidentally match `at least 6 matches` (numeric N is
+# fine, lowercase identifiers are not part of the recurring smell).
+UNDEFINED_SYMBOL_COUNT_RE = re.compile(
+    r"(?:≥|>=|[Aa]t\s+[Ll]east|[Ee]xactly|returns)\s*"
+    r"\(?\s*"
+    r"([A-Z](?:\s*[+\-*]\s*[A-Z0-9]+)*)"
+    r"\s*\)?\s*[Mm]atch(?:es)?",
+)
+
+
+def check_undefined_symbol_count(acceptance):
+    findings = []
+    if not isinstance(acceptance, list):
+        return findings
+    for idx, item in enumerate(acceptance, start=1):
+        if not isinstance(item, str):
+            continue
+        # Only flag within an acceptance item that mentions `grep` — the
+        # rule scopes to grep-count predicates, not prose counts.
+        if "grep" not in item.lower():
+            continue
+        for m in UNDEFINED_SYMBOL_COUNT_RE.finditer(item):
+            symbol = m.group(1).strip()
+            findings.append(_finding(
+                "UNDEFINED-SYMBOL-COUNT", "BLOCKER", idx, m.group(0),
+                f"count expression `{symbol}` is not a specific integer; "
+                f"the assertion is not independently verifiable. Replace "
+                f"with a specific number, or pin a named identifier "
+                f"directly (e.g. `grep -E 'void <new-method-name>' … "
+                f"returns ≥1`).",
+            ))
     return findings
 
 
@@ -627,6 +681,7 @@ def lint_one(path, quiet):
     findings.extend(check_grep_cross_line_newline(acceptance))
     findings.extend(check_files_scope_coverage(fm, body))
     findings.extend(check_heterogeneous_aggregate(acceptance))
+    findings.extend(check_undefined_symbol_count(acceptance))
     findings.extend(check_prose_verb(acceptance))
     findings.extend(check_impl_notes_cross_ref(fm, body))
     return report_file(path, findings, None, quiet)

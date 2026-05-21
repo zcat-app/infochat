@@ -299,49 +299,91 @@ Lean to `FAIL` when the assertion is mechanically impossible to
 satisfy given the DoD's enumeration (Shape-2). `WARN` only when the
 DoD does not commit to the relevant fragment fully enough to count.
 
-**Aggregate-count smell — WARN even when satisfiable.** If an
-acceptance item asserts a count across **heterogeneous elements**
-(phrasings like `across the three join tables`, `at least N matches
-across the catalogue tables`, `grep -c … over the per-scope schema`),
-record `WARN` on this check even when the count is mechanically
-satisfiable against the DoD. The aggregate-count pattern is the
-authoring-time smell that produced M1-008c: it hides structural
-shape differences between the elements and silently accepts a
-regression in any one element so long as the total count remains
-met. The author intended a uniform structural commitment; what they
-wrote is a fragile count that happens to add up.
+**Aggregate-count over NAMED heterogeneous elements — FAIL.** If
+an acceptance item asserts a count across heterogeneous elements
+that the same ticket's DoD or Implementation notes *enumerate by
+name* (≥3 distinct scenarios labeled `(a)`–`(c)`/etc., named test
+methods, named tables with different PK/FK/CHECK shapes, named
+bundle keys with different value commitments), record `FAIL` on
+this check. The canonical example is the M1-044b shape: DoD
+enumerates 8 distinct test scenarios `(a)`–`(h)` with visibly
+different collaborator sequences, and acceptance asserts
+`grep -E '@Test' … returns ≥6 matches`. The aggregate count masks
+per-scenario regressions — deleting scenario `(g)` (the DM-gate
+carve-out test, which is itself a load-bearing security assertion)
+and adding two duplicate copies of scenario `(a)` would still
+satisfy `@Test ≥6` while silently dropping the DM-gate coverage.
+The recommended replacement is **one acceptance item per named
+scenario / method / element** asserting the specific identifier
+grep (e.g., `grep -E 'void dmGroupOnlyWithSlashHelpReplacesReply
+WithInviteRequired' … returns ≥1 match` per scenario), so a
+regression in any one element fails its own check rather than
+being absorbed by the aggregate. The threshold for FAIL is N≥3
+named elements; ≤2 named elements is allowed to remain aggregate
+because there is no structural-difference masking to worry about.
 
-The recommended alternative — **one acceptance item per named
-element**, each pinning that element's exact shape (e.g., one item
-per table, each asserting the table's specific PK / GRANT / index
-declaration) — is documented in
-[`docs/process/ticket-template.md`](../../docs/process/ticket-template.md)
-under the `acceptance:` field comments. The clarity reviewer flags
-the smell so the ticket-author can split the aggregate item into
-per-element items before `/m1-tick start` proceeds; the per-element
-form is then mechanically checkable against the DoD without count
-arithmetic at all.
+This rule is a hard-no, not a judgment call. It encodes a recurring
+authoring-failure pattern that produced repeated rework on five
+M1 tickets (M1-026/027/028/033/044b); the corrective discipline is
+"name each method individually" applied at the clarity gate before
+implementation starts.
+
+**Aggregate-count smell over un-enumerated elements — WARN.** When
+the heterogeneous aggregate is asserted without the DoD or
+Implementation notes themselves enumerating the named elements
+(e.g. `across the per-scope schema`, `over the catalogue tables`
+without naming which tables or their shapes), the elements are
+inferred rather than committed — record `WARN` so the author can
+either enumerate the elements in the DoD and split the acceptance
+item, or relax the regex to match the genuine shared shape. The
+M1-008c precedent fits here: the DoD enumerated three join tables
+but the third had a 2-column PK while the others had 3-column, and
+the regex required a trailing comma. The structural break was in
+the DoD but the acceptance item collapsed it. The shift from WARN
+to FAIL in the previous paragraph fires when the enumeration is
+explicit (named elements visible in the DoD); WARN remains for
+the inferred-elements case where the enumeration has to be
+reconstructed.
+
+**Undefined-symbol count — FAIL.** Acceptance items that express
+their count as a non-numeric expression — `≥N`, `≥(N+1)`, `=N`,
+`returns N matches where N is the count before this ticket`,
+`returns at least M+K matches`, `>=(N+1)` — are not independently
+verifiable from the ticket. The developer must run the grep before
+implementation to compute N, the reviewer cannot tell whether the
+final state satisfies the assertion without re-running the same
+arithmetic, and the acceptance item rots if the underlying state
+changes (a test added in an unrelated ticket bumps N silently).
+Refuse with a citation that names the symbol and points at the
+DoD section that should commit to the specific integer or to the
+specific named identifier. The canonical correction shape: an
+acceptance item with `≥(N+1)` where N is the pre-existing @Test
+count in a file should be replaced by `grep -E 'void
+<new-method-name>' … returns ≥1` — pinning the new method by name
+without depending on N.
 
 Aggregate counts have ONE legitimate use: enforcing "exactly N and
 no more" when **all N elements are structurally identical** — e.g.,
 M1-008c's correct acceptance item `grep -cE '(stage1_done|stage2_done|
 tagger_done|embedding_done|stage1_flagged|stage2_failed|tagger_fallback)
 \s+BOOLEAN NOT NULL' V7 returns 7` (seven per-stage flags of the
-same shape; the count is the load-bearing assertion). Do NOT WARN
-on the structurally-identical case; the WARN fires for heterogeneous
-aggregates only. Distinguishing test: if you can name each element
-and the elements have visibly different shapes in the DoD (e.g.,
-different PK lengths, different FK targets, different CHECK
-expressions), the aggregate is heterogeneous. If the DoD enumerates
-N elements that share the same shape and only differ in name, the
-aggregate is identical-count.
+same shape; the count is the load-bearing assertion). Do NOT flag
+the structurally-identical case; the FAIL fires for heterogeneous
+aggregates over named elements only, and the WARN fires for the
+un-enumerated case only. Distinguishing test: if you can name each
+element and the elements have visibly different shapes in the DoD
+(different PK lengths, different FK targets, different CHECK
+expressions, different test collaborator sequences), the aggregate
+is heterogeneous. If the DoD enumerates N elements that share the
+same shape and only differ in name, the aggregate is identical-count.
 
 This check does NOT verify regex *correctness* on individual inputs
 (that's the spec-vs-prose half — clarity catches it via test-vector
 review on the spec side; the developer's own grep against the DoD
 catches it here). It verifies regex *cardinality* — that the
-count claim is satisfiable — AND surfaces the aggregate-count
-authoring smell so the per-element pattern can replace it.
+count claim is satisfiable AND committed to a specific value —
+and surfaces the aggregate-count authoring smell so the per-element
+pattern can replace it.
 
 ---
 
@@ -380,19 +422,36 @@ ACCEPTANCE-VS-DOD-CONSISTENT: <PASS | WARN | FAIL>
   <one bullet per acceptance item that asserts a grep-match count;
    each bullet records the asserted count, the expected count derived
    from the DoD's inlined fragments, an aggregate-vs-identical
-   classification of the elements counted (HETEROGENEOUS-AGGREGATE |
-   IDENTICAL-AGGREGATE | SINGLE-ELEMENT | N/A), and a PASS/WARN/FAIL
-   classification. Items that do not assert a count (mvn invocations,
-   prose behavioral assertions, integration-test outcomes) are
-   reported as "N/A — no count assertion" and do not contribute to
-   the verdict. FAIL when at least one item's expected count cannot
-   satisfy the asserted bound (Shape-2 unsatisfiability); WARN when
-   at least one item is HETEROGENEOUS-AGGREGATE (authoring smell —
-   recommend split into per-element items) OR the DoD is ambiguous
-   on the count, and no item is FAIL; PASS otherwise. The
-   HETEROGENEOUS-AGGREGATE WARN cites the recommended per-element
-   replacement set so the author can refine without re-deriving
-   the structural break.>
+   classification of the elements counted (HETEROGENEOUS-AGGREGATE-
+   NAMED | HETEROGENEOUS-AGGREGATE-UN-ENUMERATED | IDENTICAL-AGGREGATE
+   | UNDEFINED-SYMBOL-COUNT | SINGLE-ELEMENT | N/A), and a
+   PASS/WARN/FAIL classification. Items that do not assert a count
+   (mvn invocations, prose behavioral assertions, integration-test
+   outcomes) are reported as "N/A — no count assertion" and do not
+   contribute to the verdict.
+
+   Severity rules (the section verdict is the maximum of the per-item
+   verdicts):
+     - FAIL when at least one item:
+         (a) is Shape-2 unsatisfiable (expected count cannot satisfy
+             the asserted bound given the DoD's enumeration), OR
+         (b) is HETEROGENEOUS-AGGREGATE-NAMED with ≥3 named elements
+             enumerated in the DoD / Implementation notes (the
+             M1-044b shape: 8 named scenarios (a)–(h) collapsed to
+             one @Test count), OR
+         (c) is UNDEFINED-SYMBOL-COUNT (the count expression contains
+             a non-numeric symbol like `N`, `(N+1)`, `M+K` that the
+             ticket does not commit to a specific integer for).
+     - WARN when no item is FAIL and at least one item is
+       HETEROGENEOUS-AGGREGATE-UN-ENUMERATED (DoD does not enumerate
+       the elements; the heterogeneity is inferred) OR the DoD is
+       ambiguous about the count.
+     - PASS otherwise.
+
+   Each FAIL bullet cites the specific recommended replacement
+   (per-element grep set with named identifiers, or specific integer
+   to replace the symbol expression) so the author can refine without
+   re-deriving the structural break.>
 
 OUT-OF-SCOPE-SPECIFIC: <PASS | WARN | FAIL>
   <one paragraph: is out_of_scope non-empty and specific, or PASS>
