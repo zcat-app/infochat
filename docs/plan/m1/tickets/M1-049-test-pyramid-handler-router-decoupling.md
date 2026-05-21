@@ -28,10 +28,10 @@ out_of_scope:
   - the `verified_stays_green:` lint check (M1-048 territory) — though D's refactor reduces the heuristic's surface area, A still ships independently
 acceptance:
   - "New doc `docs/process/test-pyramid.md` exists with three sections defining the three layers (handler unit tests / router unit tests / integration tests), each section naming the layer's responsibility, what it MAY use, and what it MUST NOT use. Verify: `test -f docs/process/test-pyramid.md && grep -cE '^## (Handler|Router|Integration)' docs/process/test-pyramid.md` returns 3. The doc also names canonical example classes per layer (e.g. HelpCommandHandlerTest as handler-tier; InboundRouterTest as router-tier; AddSourceIT as integration-tier) so future tests have a copy-from template"
-  - "AddSourceCommandHandlerTest.java is plain JUnit (no `@QuarkusTest`), constructs the handler under test directly, and exercises it via `handler.handle(scope, body)` with mocked collaborators (UrlProbe, DataSource, BundleLoader, LlmClient). No call to `adapter.deliverDm(...)`. Verify: `grep -cE '@QuarkusTest' AddSourceCommandHandlerTest.java` returns 0 AND `grep -cE 'adapter\\.deliverDm' AddSourceCommandHandlerTest.java` returns 0 AND `grep -cE '\\.handle\\(' AddSourceCommandHandlerTest.java` returns ≥9"
-  - "AddSourceCommandHandlerTest.java preserves all 9 pre-refactor @Test scenarios. Per-scenario verification by name-substring grep (case-insensitive single-method greps, NOT an aggregate count — see [[no-heterogeneous-aggregate-test-counts]]): `grep -iE 'void\\s+\\w*DispatchesAddSourceToHandlerExactlyOnce\\w*\\s*\\(' AddSourceCommandHandlerTest.java` ≥1; `grep -iE 'void\\s+\\w*FreshInsertReply\\w*\\s*\\(' AddSourceCommandHandlerTest.java` ≥1; `grep -iE 'void\\s+\\w*AmbiguousUrlWithHtmlContentType\\w*\\s*\\(' AddSourceCommandHandlerTest.java` ≥1; `grep -iE 'void\\s+\\w*SubscribedExistingReply\\w*\\s*\\(' AddSourceCommandHandlerTest.java` ≥1; `grep -iE 'void\\s+\\w*RssPathUrlContradicted\\w*\\s*\\(' AddSourceCommandHandlerTest.java` ≥1; `grep -iE 'void\\s+\\w*BannedUserRejectsBeforeProbe\\w*\\s*\\(' AddSourceCommandHandlerTest.java` ≥1. (Remaining 3 @Test method-name greps are author-discretion based on the pre-refactor scenarios; the Authorized test changes section enumerates the full rename map.)"
-  - "AddSourceBanCheckOrderingTest.java is plain JUnit, calls `handler.handle()` direct with mocked collaborators, preserves all 3 pre-refactor @Test scenarios. Note: this class STAYS a handler-tier test because the ban check currently lives in the handler on main (NOT in the router — that move is M1-044b's splice, which this ticket precedes). After M1-044b lands, M1-044b's refine will delete this class because the ban check will move to InboundRouter and the ordering moves to InboundRouterIntakeOrderingTest scenario (f). Verify: `grep -cE '@QuarkusTest' AddSourceBanCheckOrderingTest.java` returns 0 AND `grep -cE '\\.handle\\(' AddSourceBanCheckOrderingTest.java` returns ≥3 AND `grep -iE 'void\\s+\\w*bannedDmUserReceivesFixedBanReply\\w*\\s*\\(' AddSourceBanCheckOrderingTest.java` ≥1"
-  - "SummaryCommandHandlerTest.java is plain JUnit, calls `handler.handle()` direct with mocked collaborators (SummaryService, JoinService, BundleLoader, etc.), preserves all 10 pre-refactor @Test scenarios. Verify: `grep -cE '@QuarkusTest' SummaryCommandHandlerTest.java` returns 0 AND `grep -cE 'adapter\\.deliverDm' SummaryCommandHandlerTest.java` returns 0 AND `grep -cE '\\.handle\\(' SummaryCommandHandlerTest.java` returns ≥10"
+  - "AddSourceCommandHandlerTest.java is plain JUnit (no `@QuarkusTest`), constructs the handler under test directly, and exercises it via `handler.handle(scope, body)` with mocked collaborators (BundleLoader, KindResolver, UrlProbe, SourceUpsertService, DataSource, InboundContext — the six @Inject fields of AddSourceCommandHandler, verified by reading AddSourceCommandHandler.java:83-99). No call to `adapter.deliverDm(...)`. Verify: `grep -cE '@QuarkusTest' AddSourceCommandHandlerTest.java` returns 0 AND `grep -cE 'adapter\\.deliverDm' AddSourceCommandHandlerTest.java` returns 0 AND `grep -cE '\\.handle\\(' AddSourceCommandHandlerTest.java` returns ≥8"
+  - "AddSourceCommandHandlerTest.java preserves all 8 pre-refactor @Test scenarios (count verified by `grep -cE '^\\s*@Test\\b' AddSourceCommandHandlerTest.java` on main = 8). Per-scenario verification by name-substring grep (case-insensitive single-method greps, NOT an aggregate count — see [[no-heterogeneous-aggregate-test-counts]]): `grep -iE 'void\\s+\\w*DispatchesAddSourceToHandlerExactlyOnce\\w*\\s*\\(' AddSourceCommandHandlerTest.java` ≥1; `grep -iE 'void\\s+\\w*FreshInsertReply\\w*\\s*\\(' AddSourceCommandHandlerTest.java` ≥1; `grep -iE 'void\\s+\\w*BannedUserRejectsBeforeProbe\\w*\\s*\\(' AddSourceCommandHandlerTest.java` ≥1; `grep -iE 'void\\s+\\w*GroupScopeNonAdminCallerIsRejected\\w*\\s*\\(' AddSourceCommandHandlerTest.java` ≥1; `grep -iE 'void\\s+\\w*AmbiguousUrlWithHtmlContentType\\w*\\s*\\(' AddSourceCommandHandlerTest.java` ≥1; `grep -iE 'void\\s+\\w*RssPathUrlContradicted\\w*\\s*\\(' AddSourceCommandHandlerTest.java` ≥1; `grep -iE 'void\\s+\\w*SubscribedExistingReply\\w*\\s*\\(' AddSourceCommandHandlerTest.java` ≥1; `grep -iE 'void\\s+\\w*TagReplacementReply\\w*\\s*\\(' AddSourceCommandHandlerTest.java` ≥1. (Each substring is a unique fragment of one of the 8 pre-refactor method names; the §Authorized test changes section pins the pre→post rename map per method.)"
+  - "AddSourceBanCheckOrderingTest.java is plain JUnit, calls `handler.handle()` direct with mocked collaborators, preserves all 2 pre-refactor @Test scenarios (count verified by `grep -cE '^\\s*@Test\\b' AddSourceBanCheckOrderingTest.java` on main = 2). Note: this class STAYS a handler-tier test because the ban check currently lives in the handler on main (NOT in the router — that move is M1-044b's splice, which this ticket precedes). After M1-044b lands, M1-044b's refine will delete this class because the ban check will move to InboundRouter and the ordering moves to InboundRouterIntakeOrderingTest scenario (f). Verify: `grep -cE '@QuarkusTest' AddSourceBanCheckOrderingTest.java` returns 0 AND `grep -cE '\\.handle\\(' AddSourceBanCheckOrderingTest.java` returns ≥2 AND `grep -iE 'void\\s+\\w*bannedDmUserReceivesFixedBanReply\\w*\\s*\\(' AddSourceBanCheckOrderingTest.java` ≥1 AND `grep -iE 'void\\s+\\w*groupScopeNonAdminReceivesGroupAdminOnly\\w*\\s*\\(' AddSourceBanCheckOrderingTest.java` ≥1"
+  - "SummaryCommandHandlerTest.java is plain JUnit, calls `handler.handle()` direct with mocked collaborators (BundleLoader, DataSource, EligiblePostQuery, ClusterTraversal, SummaryProseGenerator, LlmOutputSanitizer, InboundContext — the seven @Inject fields of SummaryCommandHandler, verified by reading SummaryCommandHandler.java:84-103), preserves all 9 pre-refactor @Test scenarios (count verified by `grep -cE '^\\s*@Test\\b' SummaryCommandHandlerTest.java` on main = 9). Verify: `grep -cE '@QuarkusTest' SummaryCommandHandlerTest.java` returns 0 AND `grep -cE 'adapter\\.deliverDm' SummaryCommandHandlerTest.java` returns 0 AND `grep -cE '\\.handle\\(' SummaryCommandHandlerTest.java` returns ≥9. Per-scenario verification by name-substring grep (case-insensitive, NOT an aggregate count — see [[no-heterogeneous-aggregate-test-counts]]): `grep -iE 'void\\s+\\w*handlerNameIsLiteralSummary\\w*\\s*\\(' SummaryCommandHandlerTest.java` ≥1; `grep -iE 'void\\s+\\w*DispatchesSummaryToHandlerExactlyOnce\\w*\\s*\\(' SummaryCommandHandlerTest.java` ≥1; `grep -iE 'void\\s+\\w*ZeroSubscriptionsProducesNoPostsYetReply\\w*\\s*\\(' SummaryCommandHandlerTest.java` ≥1; `grep -iE 'void\\s+\\w*EmptyWindowProducesNoPostsYetReply\\w*\\s*\\(' SummaryCommandHandlerTest.java` ≥1; `grep -iE 'void\\s+\\w*HappyPathThreeEligiblePostsYieldsThreeClusterBlocks\\w*\\s*\\(' SummaryCommandHandlerTest.java` ≥1; `grep -iE 'void\\s+\\w*LlmUnreachableYieldsDegradedFallbackReply\\w*\\s*\\(' SummaryCommandHandlerTest.java` ≥1; `grep -iE 'void\\s+\\w*CapExcessYieldsCapExcessNoticePrefix\\w*\\s*\\(' SummaryCommandHandlerTest.java` ≥1; `grep -iE 'void\\s+\\w*GroupScopeReturnsNoPostsYet\\w*\\s*\\(' SummaryCommandHandlerTest.java` ≥1; `grep -iE 'void\\s+\\w*SanitizerStripsPrivilegedCommandFromLlmAuthoredProse\\w*\\s*\\(' SummaryCommandHandlerTest.java` ≥1"
   - "HelpCommandHandlerTest.java drops `@QuarkusTest` and constructs the handler directly. The class already calls `handler.handle()` direct (pre-refactor pattern matches the new convention); the only changes are removing `@QuarkusTest` and `@Inject` and constructing the handler+bundleLoader by hand. All 4 pre-refactor @Test scenarios preserved (per-method name-substring grep, NOT an aggregate count — see [[no-heterogeneous-aggregate-test-counts]]). Verify: `grep -cE '@QuarkusTest' HelpCommandHandlerTest.java` returns 0 AND `grep -cE '@Inject' HelpCommandHandlerTest.java` returns 0 AND `grep -iE 'void\\s+\\w*replyContainsHeaderAndThreeMvpCommandShortHelpLines\\w*\\s*\\(' HelpCommandHandlerTest.java` ≥1 AND `grep -iE 'void\\s+\\w*handlerConsumesExactlyTheFourMvpBundleKeys\\w*\\s*\\(' HelpCommandHandlerTest.java` ≥1 AND `grep -iE 'void\\s+\\w*missingBundleKeyCausesHandlerToFailInsteadOfShippingIncompleteReply\\w*\\s*\\(' HelpCommandHandlerTest.java` ≥1 AND `grep -iE 'void\\s+\\w*replyContainsNoMarkdownLinkSyntaxOrHtmlAnchors\\w*\\s*\\(' HelpCommandHandlerTest.java` ≥1"
   - "AdapterRegistryTest.java stays at the wiring layer but tightens its assertion: the canonical test (`singleAdapterHappyPathActivatesInMemoryAndRegistersRouter`) asserts WIRING (router was invoked with the delivered body) instead of REPLY CONTENT (UNKNOWN_COMMAND_REPLY literal). The reply-content check belongs in InboundRouterTest's `unknownCommandProducesFriendlyUnknownCommandReply` (already there on main). Both pre-refactor @Test scenarios preserved (per-method name-substring grep, NOT an aggregate count — see [[no-heterogeneous-aggregate-test-counts]]). Verify: `grep -cE 'UNKNOWN_COMMAND_REPLY' AdapterRegistryTest.java` returns 0 AND `grep -iE 'void\\s+\\w*singleAdapterHappyPathActivatesInMemoryAndRegistersRouter\\w*\\s*\\(' AdapterRegistryTest.java` ≥1 AND `grep -iE 'void\\s+\\w*multiAdapterHappyPathActivatesBothFakeAdapters\\w*\\s*\\(' AdapterRegistryTest.java` ≥1. (This tightens the wiring test's scope so M1-044b's splice does not collateral-damage it via the unknown-DM contact path — the same defect the handoff describes.)"
   - "mvn -B clean verify exits 0 — every refactored test passes against the existing production code (no production handler is modified). The `*IT.java` integration tests (AddSourceIT, SummaryIT, AddSourceAdapterScopeIT, SummaryAdapterScopeIT, AdapterRouterIT) also stay green — they continue to provide full-chain coverage at the IT layer per the new pyramid convention"
@@ -63,6 +63,77 @@ escalations:
       per-class regressions. Fix recommended in clarity verdict: add per-class
       @Test count assertions to items 6 (HelpCommandHandlerTest ≥4) and 7
       (AdapterRegistryTest ≥3), drop item 8.
+  - date: 2026-05-21
+    reason: outline-fail
+    reviewer_verdict_excerpt: |
+      ## OUTLINE FAILED — escalation recommended
+
+      REASON: The ticket's Definition of Done and acceptance items pin
+      pre-refactor @Test counts that do not match the files on main as of
+      2026-05-21. The DoD asserts `AddSourceCommandHandlerTest (9 @Test),
+      AddSourceBanCheckOrderingTest (3 @Test), SummaryCommandHandlerTest
+      (10 @Test), HelpCommandHandlerTest (4 @Test), AdapterRegistryTest
+      (3 @Test)` for a total of 29; the `revisions:` block likewise frames
+      the per-class counts as `9, 3, 10, 4, 3 → total 29`. Actual
+      `grep -cE '^\s*@Test\s*$'` counts on main: `AddSourceCommandHandlerTest=8,
+      AddSourceBanCheckOrderingTest=2, SummaryCommandHandlerTest=9,
+      HelpCommandHandlerTest=4, AdapterRegistryTest=2` → total 25. Four of
+      the five classes have one fewer @Test method than the ticket promises
+      to "preserve". Acceptance item 3 ("preserves all 9 pre-refactor @Test
+      scenarios") is unsatisfiable by a pure refactor; the same for items
+      4, 5, and the DoD line on AdapterRegistryTest.
+
+      Secondary risk: acceptance items 2 and 5 list illustrative collaborator
+      class names that do not match production code. Item 2 cites `LlmClient`
+      — AddSourceCommandHandler does not depend on it. Item 5 cites
+      `SummaryService` and `JoinService` — neither class exists in the
+      repository. Actual deps (verified by Read against production handlers):
+        - AddSourceCommandHandler: BundleLoader, KindResolver, UrlProbe,
+          SourceUpsertService, DataSource, InboundContext
+        - SummaryCommandHandler: BundleLoader, DataSource, EligiblePostQuery,
+          ClusterTraversal, SummaryProseGenerator, LlmOutputSanitizer,
+          InboundContext
+      The verifier greps in items 2 and 5 pin `.handle(` counts rather than
+      specific mock class names, so this is documentation/clarity drift
+      rather than an unrunnable verifier — but a developer following the
+      acceptance prose would head for non-existent classes.
+
+      SUGGESTED ESCALATION: refine — fix the @Test counts in DoD and
+      acceptance items 3, 4, 5, 7 to match reality (8, 2, 9, 4, 2), and
+      replace the wrong collaborator-class names in items 2 and 5 with the
+      real field-injected deps listed above. Also a natural place to pin
+      the rename map for AddSourceCommandHandlerTest that the prior
+      clarity_check WARN flagged as inconsistent ("TBD by implementer" vs
+      acceptance item 3 saying the section enumerates it).
+
+      EVIDENCE (verbatim from Plan subagent):
+
+      `grep -cE '^\s*@Test\s*$'` on main:
+        HelpCommandHandlerTest.java                       4
+        AddSourceBanCheckOrderingTest.java                2
+        AdapterRegistryTest.java                          2
+        SummaryCommandHandlerTest.java                    9
+        AddSourceCommandHandlerTest.java                  8
+                                                  total: 25
+
+      ### Audit coverage
+      - file accounting — audited (pass): 6 files (1 doc + 5 test modifies)
+        ≤ files_budget 8.
+      - API-surface — audited (fail): handle(ScopeRef, String) signatures
+        align with acceptance, but @Test-count claims do not match reality
+        and collaborator names in items 2/5 cite non-existent classes.
+      - test-scaffolding — audited (pass): all 5 test files in files_scope
+        appear in §Authorized test changes.
+      - cross-cutting concerns — audited (pass): refactor changes test
+        shape, not production behavior.
+      - implementation order — audited (pass): doc → HelpCommandHandlerTest
+        → AdapterRegistryTest → AddSourceBanCheckOrderingTest →
+        SummaryCommandHandlerTest → AddSourceCommandHandlerTest is the
+        suggested order.
+      - risks — audited: @Test-count mismatches and illustrative-collaborator-
+        naming gap (escalated above). Also rename-map TBD vs acceptance-item-3
+        claim inconsistency (already flagged in clarity_check WARN; natural
+        to fold into the same refine).
 revisions:
   - date: 2026-05-21
     reason: clarity-fail refine snapshot (acceptance item 8 heterogeneous-aggregate)
@@ -97,6 +168,64 @@ revisions:
 
       Prior frontmatter values: status=escalated (was pending pre-start);
       clarity_check.verdict=FAIL with 1 blocker, 1 warning.
+  - date: 2026-05-21
+    reason: outline-fail refine snapshot (fabricated test-method counts + collaborators)
+    summary: |
+      Pre-refine snapshot. The clarity-fail rework above (commit 1a91794)
+      pinned per-class @Test counts as 9, 3, 10, 4, 3 → total 29 — written
+      from memory without grepping the actual files. Reality on main
+      verified by `grep -cE '^\s*@Test\b'`: AddSourceCommandHandlerTest=8,
+      AddSourceBanCheckOrderingTest=2, SummaryCommandHandlerTest=9,
+      HelpCommandHandlerTest=4, AdapterRegistryTest=2 → total 25. Four of
+      five classes had one fewer @Test than promised.
+
+      Secondary fabrications: acceptance item 2 named `LlmClient` as an
+      AddSourceCommandHandler collaborator (no such class exists; real
+      deps verified by reading AddSourceCommandHandler.java:83-99 are
+      BundleLoader, KindResolver, UrlProbe, SourceUpsertService, DataSource,
+      InboundContext). Item 5 named `SummaryService` and `JoinService` as
+      SummaryCommandHandler collaborators (neither class exists; real
+      deps verified by reading SummaryCommandHandler.java:84-103 are
+      BundleLoader, DataSource, EligiblePostQuery, ClusterTraversal,
+      SummaryProseGenerator, LlmOutputSanitizer, InboundContext).
+
+      The Plan subagent at /m1-tick start caught the count drift on
+      round 1 as OUTLINE FAILED. Clarity round 2 (on the refined ticket
+      that introduced the fabrication) passed it as WARN — clarity reads
+      only the ticket text and cited spec files, has no filesystem
+      grounding, so it could not detect ticket↔reality drift.
+
+      Resolution path chosen (2026-05-21 design discussion): NOT to add
+      a `DOD-COUNTS-GROUND-TRUTHED` lint check (whack-a-mole concern over
+      adding one mechanical check per LLM-author hallucination leaf).
+      Instead encode the trunk discipline in author-memory note
+      `feedback_ground_truth_before_claims.md`: every claim about an
+      external artifact (count, name, signature, regex match, file path)
+      must be preceded by the grounding command, with the output visible
+      in the same turn. This refine applies that discipline retroactively
+      — every count and class name below was preceded by an explicit
+      `grep` against main in the chat that produced this commit.
+
+      Changes applied:
+        - DoD per-class counts: 9/3/10/4/3 → 8/2/9/4/2; total 29 → 25.
+        - Acceptance item 2: collaborator list replaced with the 6 real
+          @Inject fields; `≥9` → `≥8`.
+        - Acceptance item 3: "all 9" → "all 8"; enumerated all 8
+          per-method substring greps (resolves prior clarity WARN that
+          flagged 6-of-9 enumeration + "TBD by implementer" inconsistency).
+        - Acceptance item 4: "all 3" → "all 2"; `≥3` → `≥2`; added
+          second per-method name grep for the second @Test method.
+        - Acceptance item 5: collaborator list replaced with the 7 real
+          @Inject fields; "all 10" → "all 9"; `≥10` → `≥9`; added per-
+          method substring greps for all 9 methods (resolves prior clarity
+          WARN that flagged HETEROGENEOUS-AGGREGATE-UN-ENUMERATED).
+        - §Authorized test changes: counts updated to match reality;
+          AddSourceCommandHandlerTest rename map enumerated (resolves
+          prior clarity WARN that flagged "TBD by implementer" vs the
+          acceptance-item-3 claim that the section enumerates it).
+
+      Prior frontmatter values: status=escalated;
+      clarity_check.verdict=WARN with 0 blockers, 2 warnings.
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -119,11 +248,11 @@ After D lands, M1-044b's "M1-035c/M1-036/M1-037/M1-039/M1-040 tests stay green u
 ## Definition of Done
 
 - New `docs/process/test-pyramid.md` convention doc with three layer sections.
-- 5 handler-tier test classes refactored:
-  - **Full refactor**: AddSourceCommandHandlerTest (9 @Test), AddSourceBanCheckOrderingTest (3 @Test), SummaryCommandHandlerTest (10 @Test) — drop `@QuarkusTest`, drop `adapter.deliverDm`, call `handler.handle()` direct with mocks.
+- 5 handler-tier test classes refactored (per-class @Test counts verified by `grep -cE '^\s*@Test\b'` against main as of 2026-05-21):
+  - **Full refactor**: AddSourceCommandHandlerTest (8 @Test), AddSourceBanCheckOrderingTest (2 @Test), SummaryCommandHandlerTest (9 @Test) — drop `@QuarkusTest`, drop `adapter.deliverDm`, call `handler.handle()` direct with mocks.
   - **Light touch**: HelpCommandHandlerTest (4 @Test) — already calls `handler.handle()` direct; only drop `@QuarkusTest` + `@Inject`.
-  - **Tighten assertions**: AdapterRegistryTest (3 @Test) — stays a wiring test; assertion narrows from "router dispatches AND emits UNKNOWN_COMMAND_REPLY" to "router was invoked with the body." The reply-content check is already in InboundRouterTest.
-- Total @Test count ≥ 29 (no scenario silently dropped).
+  - **Tighten assertions**: AdapterRegistryTest (2 @Test) — stays a wiring test; assertion narrows from "router dispatches AND emits UNKNOWN_COMMAND_REPLY" to "router was invoked with the body." The reply-content check is already in InboundRouterTest.
+- Total @Test count ≥ 25 (no scenario silently dropped).
 - `mvn -B clean verify` exits 0.
 
 ## Implementation notes
@@ -155,11 +284,19 @@ After D lands, M1-044b's "M1-035c/M1-036/M1-037/M1-039/M1-040 tests stay green u
 
 ## Authorized test changes
 
-- `AddSourceCommandHandlerTest.java` (M1-036): full refactor per §Implementation notes. All 9 @Test methods preserved with name-substring continuity (see acceptance item 3). Authorized rename map (pre → post): TBD by implementer; the post-rename name must contain the substring cited in the per-method grep so the acceptance check passes.
-- `AddSourceBanCheckOrderingTest.java` (M1-039): full refactor per §Implementation notes. All 3 @Test methods preserved; `bannedDmUserReceivesFixedBanReply` substring preserved per acceptance item 4.
-- `SummaryCommandHandlerTest.java` (M1-037): full refactor per §Implementation notes. All 10 @Test methods preserved.
-- `HelpCommandHandlerTest.java` (M1-035c): light touch — drop `@QuarkusTest` + `@Inject`. All 4 @Test methods preserved with original names per acceptance item 6 (specifically `replyContainsHeaderAndThreeMvpCommandShortHelpLines` cited).
-- `AdapterRegistryTest.java` (M1-008b): tighten assertion in `singleAdapterHappyPathActivatesInMemoryAndRegistersRouter` from reply-content check to wiring check (router was invoked). The method name is preserved per acceptance item 7.
+- `AddSourceCommandHandlerTest.java` (M1-036): full refactor per §Implementation notes. All 8 @Test methods preserved. Authorized rename map (pre → post) — each post-rename name must retain the substring cited in the per-method grep in acceptance item 3:
+  - `inboundRouterDispatchesAddSourceToHandlerExactlyOnce` → keep verbatim OR rename containing `DispatchesAddSourceToHandlerExactlyOnce`
+  - `dmNonBannedNonAdminProceedsAndProducesFreshInsertReply` → keep verbatim OR rename containing `FreshInsertReply`
+  - `dmBannedUserRejectsBeforeProbe` → keep verbatim OR rename containing `BannedUserRejectsBeforeProbe`
+  - `groupScopeNonAdminCallerIsRejected` → keep verbatim OR rename containing `GroupScopeNonAdminCallerIsRejected`
+  - `ambiguousUrlWithHtmlContentTypeSurfacesAmbiguousFriendlyError` → keep verbatim OR rename containing `AmbiguousUrlWithHtmlContentType`
+  - `rssPathUrlContradictedByHtmlContentTypeSurfacesAmbiguous` → keep verbatim OR rename containing `RssPathUrlContradicted`
+  - `branchBSubscribedExistingReplyOmitsUrlVisibilityDisclosure` → keep verbatim OR rename containing `SubscribedExistingReply`
+  - `branchCBotAdminTagReplacementReplyOmitsUrlVisibilityDisclosure` → keep verbatim OR rename containing `TagReplacementReply`
+- `AddSourceBanCheckOrderingTest.java` (M1-039): full refactor per §Implementation notes. All 2 @Test methods preserved; `bannedDmUserReceivesFixedBanReply` and `groupScopeNonAdminReceivesGroupAdminOnly` substrings preserved per acceptance item 4.
+- `SummaryCommandHandlerTest.java` (M1-037): full refactor per §Implementation notes. All 9 @Test methods preserved with name-substring continuity (see acceptance item 5).
+- `HelpCommandHandlerTest.java` (M1-035c): light touch — drop `@QuarkusTest` + `@Inject`. All 4 @Test methods preserved with original names per acceptance item 6.
+- `AdapterRegistryTest.java` (M1-008b): tighten assertion in `singleAdapterHappyPathActivatesInMemoryAndRegistersRouter` from reply-content check to wiring check (router was invoked). Both @Test method names (`singleAdapterHappyPathActivatesInMemoryAndRegistersRouter`, `multiAdapterHappyPathActivatesBothFakeAdapters`) are preserved per acceptance item 7.
 
 ## Alternatives considered
 
