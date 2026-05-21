@@ -29,6 +29,35 @@ escalations:
       feedback_no_heterogeneous_aggregate_test_counts), the warn #3
       pattern is a hard-no even at WARN level. User elected to refine
       items 12 and 13 before starting.
+  - date: 2026-05-21
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      CLARITY VERDICT: FAIL (1 blocker, 1 warning).
+
+      Blocker:
+        1. Acceptance item 8 states the wrong step ordering in its
+           verification line: "setAdapterName → size-cap → normalize →
+           rate cap." This places normalize BEFORE rate cap, contradicting
+           (a) the spec (security.md §Authorization model: step 1.5 rate
+           cap → step 1.7 normalize), (b) the DoD's Implementation notes
+           code sketch (rate-cap before normalize), and (c) acceptance
+           item 1 ("step 1.5 rate cap → 1.7 normalize"). A developer
+           implementing the spec-correct order cannot satisfy item 8;
+           a developer satisfying item 8's stated order contradicts the
+           spec and item 1.
+
+           Fix: change the verification line in item 8 to read
+           "setAdapterName → size-cap → rate cap → normalize" (matching
+           the spec's step 1.5 → 1.7 ordering).
+
+      Warning:
+        1. ACCEPTANCE-RUNNABLE items 1, 3, 4, 6: Source-order reading
+           checks or behavioral prose assertions without runnable
+           commands. Behavioral coverage is provided by
+           InboundRouterIntakeOrderingTest (item 12) which covers all
+           8 scenarios with mock-verified collaborator sequences. Not a
+           blocker because the ordering test provides the runnable
+           equivalent.
 blocked_by:
   - M1-044a
 files_budget: 10
@@ -70,7 +99,7 @@ acceptance:
   - "Step 4 — ban check: AFTER step 2/3 resolved the user, InboundRouter invokes `banCheck.isBanned(adapter, contactId)`; when true, the fixed `error.ban.fixed` reply (the `Your access has been revoked.` literal) is sent and dispatch STOPS per spec §User ban (`Banned user receives one fixed reply per inbound message, regardless of input`). grep -E 'banCheck\\.isBanned' InboundRouter.java returns ≥1 match. The reply body equals the `error.ban.fixed` bundle value (NOT a different literal)"
   - "Step 7 — DM-gate carve-out for `group_only` users: after a slash-command dispatch produces an outbound, BUT BEFORE returning, when the inbound is a DM scope AND `users.registration_state = 'group_only'` for the resolved row, the dispatch result is REPLACED with the fixed `error.invite.required` reply (the same fixed reply step 2's invalid path uses, per spec §Invite-code registration `Group-registered users do not get free DM access ... rejected with the same fixed reply as step 2's invalid path`). The DM-gate check fires AFTER the ban check (step 4) AND AFTER the dispatch to the command handler — the spec sequences DM-gate at step 7, NOT step 4. Verify InboundRouter.java: the DM-gate check is sequenced after handleSlash returns AND only fires when the scope is ScopeRef.Dm. Note: this differs from the spec's prose ordering — the spec describes step 7 as part of permission evaluation; here the carve-out is implemented as a post-dispatch result override so the dispatch can still resolve the handler (the permission check runs INSIDE the handler today per M1-035c/M1-036/M1-037; full step-7 permission matrix lands in M1-045). The /stop carve-out from spec §Slow-start tier (`/stop is not blocked`) and analogous carve-outs are NOT in this ticket's scope — the DM-gate fires for EVERY slash command issued by a `group_only` user; M1-045's CommandPermissions can later widen the DM-gate to allow specific commands if the spec changes (the current spec gives no per-command carve-out for the DM-gate)"
   - "InboundRouter.onMessage continues to invoke `inboundContext.setAdapterName(adapterName)` BEFORE any service call, so M1-040's adapter-scoped `users` lookups in downstream handlers continue to see the correct adapter. Verify: `grep -E 'inboundContext\\.setAdapterName' InboundRouter.java` returns ≥1 match AND the call appears before `rateCapBucket.tryAcquire` in source order"
-  - "InboundRouter.onMessage continues to apply the body-size cap (M1-038) BEFORE normalization AND continues to run `normalize()` BEFORE any body-content check. Verify the order is preserved: setAdapterName → size-cap → normalize → rate cap. (The size cap fires before rate-cap so adversarial Hangul-jamo bodies cannot drive NFKC amplification cost AND to bound the inbound payload before it hits the bucket arithmetic — M1-038's body-size-cap test continues to pass.)"
+  - "InboundRouter.onMessage continues to apply the body-size cap (M1-038) BEFORE the rate-cap check AND continues to run `normalize()` AFTER the rate-cap check but BEFORE any body-content check. Verify the order is preserved: setAdapterName → size-cap → rate cap → normalize. (The size cap fires before rate-cap so adversarial bodies cannot drive bucket-arithmetic cost on un-bounded payloads; rate-cap fires before normalize so the bucket-arithmetic short-circuits BEFORE the NFKC amplification cost — matching spec §Authorization model step 1.5 (rate cap) preceding step 1.7 (normalize). M1-038's body-size-cap test continues to pass.)"
   - "BundleKeys.java adds four new public constants: `ERROR_INVITE_REQUIRED = \"error.invite.required\"`, `ERROR_BAN_FIXED = \"error.ban.fixed\"`, `REPLY_WELCOME_DM_FRESH = \"reply.welcome.dm_fresh\"`, `REPLY_WELCOME_GROUP_FIRST_MENTION = \"reply.welcome.group_first_mention\"`. Verify: `grep -E 'ERROR_INVITE_REQUIRED\\s*=\\s*\"error\\.invite\\.required\"' BundleKeys.java` returns 1 match AND `grep -E 'ERROR_BAN_FIXED\\s*=\\s*\"error\\.ban\\.fixed\"' BundleKeys.java` returns 1 match AND `grep -E 'REPLY_WELCOME_DM_FRESH\\s*=\\s*\"reply\\.welcome\\.dm_fresh\"' BundleKeys.java` returns 1 match AND `grep -E 'REPLY_WELCOME_GROUP_FIRST_MENTION\\s*=\\s*\"reply\\.welcome\\.group_first_mention\"' BundleKeys.java` returns 1 match. The BundleLoaderTest's existing reflective bundle-completeness assertion (per M1-035c) automatically extends to the new keys — no test edit required for completeness coverage"
   - "bundles/en.properties adds the four bundle entries with text drawn from docs/design/03-commands.md §3.11 Welcome messages (for the two welcome keys) AND from docs/spec/security.md §Invite-code registration / §User ban (for the two fixed-error keys — the spec's quoted literal `Access requires an invitation.` and `Your access has been revoked.` resp.). Verify: `grep -E '^error\\.invite\\.required\\s*=' en.properties` returns 1 match AND the value contains the literal substring `Access requires an invitation` (the trailing period optional) AND `grep -E '^error\\.ban\\.fixed\\s*=' en.properties` returns 1 match AND the value equals or starts with `Your access has been revoked` AND `grep -E '^reply\\.welcome\\.dm_fresh\\s*=' en.properties` returns 1 match AND `grep -E '^reply\\.welcome\\.group_first_mention\\s*=' en.properties` returns 1 match"
   - "application.properties adds the per-profile rate-cap + invite TTL config keys. The base values mirror the spec's profile table (docs/spec/security.md §Rate limiting — `Per-user chat-mode messages (transport rate) 60/min token bucket`; docs/design/04-security.md §4.9 Per-user chat-mode messages and §4.5 brute-force threshold/window; docs/design/03-commands.md §3.10 TTL table). At minimum the file declares: `infochat.rate-cap.inbound-per-minute=60`, `infochat.invite.brute-force-threshold=10`, `infochat.invite.brute-force-window=1h`, `infochat.invite.ttl=7d`, `infochat.invite.open-cap-per-adapter=3`, `infochat.invite.contact-cap-global=50`, `infochat.probation.duration=24h`. Per-profile overrides (under `%vps`, `%pi`, `%remote-llm`) MAY be added but the laptop defaults above are mandatory. Verify: `grep -E '^infochat\\.rate-cap\\.inbound-per-minute=' application.properties` returns ≥1 match AND `grep -E '^infochat\\.invite\\.brute-force-threshold=' application.properties` returns ≥1 match AND `grep -E '^infochat\\.invite\\.ttl=' application.properties` returns ≥1 match AND `grep -E '^infochat\\.probation\\.duration=' application.properties` returns ≥1 match"
@@ -108,6 +137,44 @@ decision_refs:
   - D45
   - D46
 revisions:
+  - date: 2026-05-21
+    reason: clarity-fail refine snapshot (item 8 ordering contradiction with item 1 / DoD / Impl-notes)
+    summary: |
+      Pre-refine snapshot. The second `/m1-tick start M1-044b` clarity
+      preflight (after the clarity-warn refine of items 12 + 13)
+      returned FAIL with 1 blocker: acceptance item 8 stated
+      `setAdapterName → size-cap → normalize → rate cap` while item 1,
+      the DoD bullet, and the Implementation notes code sketch all
+      asserted the opposite order (`rate cap → normalize`, matching the
+      spec's step 1.5 before step 1.7). The bug had been in the ticket
+      since the original draft (commit f7af709) — round-1 clarity
+      flagged item 8 only as a "reading check" (form-level WARN under
+      ACCEPTANCE-RUNNABLE) without reading the content against item 1.
+
+      Pre-refine acceptance item 8 (verbatim):
+        "InboundRouter.onMessage continues to apply the body-size cap
+         (M1-038) BEFORE normalization AND continues to run `normalize()`
+         BEFORE any body-content check. Verify the order is preserved:
+         setAdapterName → size-cap → normalize → rate cap. (The size
+         cap fires before rate-cap so adversarial Hangul-jamo bodies
+         cannot drive NFKC amplification cost AND to bound the inbound
+         payload before it hits the bucket arithmetic — M1-038's
+         body-size-cap test continues to pass.)"
+
+      Refine target: rewrite the verification sentence to match the
+      spec / DoD / Impl-notes order (size-cap → rate cap → normalize)
+      and tighten the parenthetical justification so the rationale
+      matches the new order.
+
+      Structural process changes landed alongside this refine
+      (separate `process:` commit) so the bug class cannot recur:
+        - lint-ticket.py ACCEPTANCE-ORDERING-CONSISTENT (BLOCKER) —
+          mechanical arrow-bigram contradiction check.
+        - clarity-prompt.md check #11 (FAIL) — LLM prose-variant check
+          for orderings expressed without arrows.
+
+      Memory entry [[feedback-acceptance-ordering-consistency]] records
+      the recurring-pattern rule so future tickets pre-empt the trap.
   - date: 2026-05-21
     reason: clarity-warn refine snapshot (items 12 + 13 acceptance phrasing)
     summary: |
