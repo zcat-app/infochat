@@ -118,6 +118,12 @@ The verbatim text of every rule below — plus the full test-integrity rule list
 - Feature flags and backwards-compatibility shims are forbidden — M1 is greenfield, there is no prior version to be compatible with.
 - The reviewer applies this rule narrowly: a defensive check at a system boundary is fine; one between two internal classes is scope drift.
 
+### Method parameter contracts
+- Method parameter contracts MUST be explicit. Every reference-type parameter on a public method declares nullability — either via annotation (`@NonNull`/`@Nullable` from `org.jspecify.annotations`) or via javadoc `@param`. Public/protected methods MUST annotate; internal/package-private methods MAY inherit the default (non-null-assumed). Validation at system boundaries still uses explicit null-checks per the existing No-defensive-code rule.
+- The positive complement to §"No defensive code": that rule prohibits paranoid null-checks; this rule requires the contract that makes paranoia unnecessary. A caller reading the signature can see immediately whether passing null is a legal call or a bug, and the reviewer can check at PR time whether the change adheres.
+- JSpecify (not JetBrains) is the v1 annotation source — the type-use semantics let `List<@Nullable String>` express "list of possibly-null strings," which the JetBrains declaration-only annotations cannot.
+- Author-side enforcement: `scripts/lint-contracts.py` walks `.java` files and reports any public/protected method whose reference-type parameter lacks `@NonNull`/`@Nullable`. The reviewer prompt's `PARAMETER-CONTRACT-CHECK` enforces this on NEW public methods added in each diff.
+
 ## Coding style
 
 These are project-level coding-style preferences. They are NOT reviewer-enforced (the reviewer enforces the §Engineering rules above and the canonical [`engineering-rules-verbatim.md`](docs/process/engineering-rules-verbatim.md)); they are guidelines the developer applies when writing the diff.

@@ -80,4 +80,22 @@
             </dependency>
         </dependencies>
     </dependencyManagement>
+
+    <!--
+         JSpecify nullness annotations (@NonNull, @Nullable) are declared
+         at parent level so every reactor module inherits them automatically
+         without re-declaring per child pom. Compile-time only (provided
+         scope) — not on the runtime classpath, so modules that don't use
+         the annotations pay only a tiny compile-time cost. Keeps the
+         M1-001 BOM-managed-versions invariant: child POMs remain
+         version-less (they don't list JSpecify at all).
+    -->
+    <dependencies>
+        <dependency>
+            <groupId>org.jspecify</groupId>
+            <artifactId>jspecify</artifactId>
+            <version>1.0.0</version>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
 </project>

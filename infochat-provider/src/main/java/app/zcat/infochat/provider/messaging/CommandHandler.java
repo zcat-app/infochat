@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.messaging;
 
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
+import org.jspecify.annotations.NonNull;
 
 /**
  * Provider-side dispatch contract for one slash-prefixed command.
@@ -51,5 +52,5 @@ public interface CommandHandler {
      *                leading slash and any arguments.
      * @return the outbound reply to send via the originating adapter.
      */
-    OutboundMessage handle(ScopeRef scope, String rawText);
+    OutboundMessage handle(@NonNull ScopeRef scope, @NonNull String rawText);
 }

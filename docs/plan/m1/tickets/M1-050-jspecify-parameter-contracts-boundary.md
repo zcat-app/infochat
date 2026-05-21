@@ -1,7 +1,7 @@
 ---
 id: M1-050
 title: "Process fix E: JSpecify parameter contracts (boundary classes + lint)"
-status: pending
+status: done
 created: 2026-05-21
 last_updated: 2026-05-21
 blocked_by: []
@@ -9,6 +9,7 @@ files_budget: 11
 files_scope:
   - pom.xml
   - scripts/lint-contracts.py
+  - scripts/lint-contracts-baseline.txt
   - CLAUDE.md
   - docs/process/engineering-rules-verbatim.md
   - docs/process/reviewer-prompt.md
@@ -35,7 +36,7 @@ acceptance:
   - "Parent pom.xml adds the JSpecify dependency: `org.jspecify:jspecify:1.0.0` with `<scope>provided</scope>` (compile-time only; not in runtime classpath). Verify: `grep -E '<artifactId>jspecify</artifactId>' pom.xml` returns ≥1 match AND `grep -A2 '<artifactId>jspecify</artifactId>' pom.xml | grep -E '<scope>provided</scope>'` returns ≥1 match"
   - "New script `scripts/lint-contracts.py` exists and is executable. Verify: `test -f scripts/lint-contracts.py && python3 scripts/lint-contracts.py --help` exits 0 AND prints a usage line containing the script name"
   - "scripts/lint-contracts.py accepts a list of `.java` file paths as args, parses each for public/protected method declarations, and for every reference-type parameter (any non-primitive parameter type) checks for either an `@NonNull` or `@Nullable` annotation from `org.jspecify.annotations`. Reports FAIL with the file path + method name + parameter name for each missing annotation. Verify: running `python3 scripts/lint-contracts.py infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/InboundRouter.java` after the retroactive pass exits 0 (zero findings on the now-annotated boundary)"
-  - "scripts/lint-contracts.py supports a `--baseline <file>` flag that reads a list of `path:method` entries to grandfather (suppress findings for). The baseline file format is one `path:method` per line, comments after `#`. Verify: `python3 scripts/lint-contracts.py --baseline scripts/lint-contracts-baseline.txt <some-un-annotated-file>` exits 0 when every finding is in the baseline. (The baseline file itself is NOT in files_scope; it is created in this ticket's commit but only contains comments + future-use schema. The baseline can be populated by a follow-up ticket as the retroactive pass widens.)"
+  - "scripts/lint-contracts.py supports a `--baseline <file>` flag that reads a list of `path:method` entries to grandfather (suppress findings for). The baseline file format is one `path:method` per line, comments after `#`. The baseline file `scripts/lint-contracts-baseline.txt` is created in this ticket (in files_scope) with a header comment + format documentation only; entries are populated by follow-up tickets as the retroactive pass widens beyond the 4 boundary classes. Verify: `python3 scripts/lint-contracts.py --help` output contains `--baseline` AND `python3 scripts/lint-contracts.py --baseline scripts/lint-contracts-baseline.txt infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/InboundRouter.java` exits 0 (the --baseline flag parses against the empty baseline; the annotated boundary file produces zero findings, so the no-suppression path also exits 0 — this exercises flag-plumbing without requiring populated baseline entries)"
   - "CLAUDE.md §Engineering rules adds a new subsection (or extension of §'No defensive code') titled 'Method parameter contracts' (or equivalent). The rule text states: 'Method parameter contracts MUST be explicit. Every reference-type parameter on a public method declares nullability — either via annotation (@NonNull/@Nullable from org.jspecify.annotations) or via javadoc @param. Public/protected methods MUST annotate; internal/package-private methods MAY inherit the default (non-null-assumed). Validation at system boundaries still uses explicit null-checks per the existing No-defensive-code rule.' Verify: `grep -cE 'org\\.jspecify\\.annotations|@NonNull.*@Nullable|parameter contracts' CLAUDE.md` returns ≥1 match"
   - "docs/process/engineering-rules-verbatim.md adds the verbatim rule text from CLAUDE.md (so the reviewer's canonical source contains the same statement). Verify: `grep -cE 'org\\.jspecify\\.annotations' docs/process/engineering-rules-verbatim.md` returns ≥1 match"
   - "docs/process/reviewer-prompt.md adds a new check that requires every new public method (i.e. methods added in the diff under review) on a public/protected reference-type parameter to carry @NonNull or @Nullable. Verdict on missing: REWORK with the check name (e.g. `PARAMETER-CONTRACT-CHECK`). Verify: `grep -cE 'PARAMETER-CONTRACT-CHECK|@NonNull.*@Nullable|jspecify' docs/process/reviewer-prompt.md` returns ≥1 match"
@@ -48,6 +49,7 @@ acceptance:
 test_plan:
   adds:
     - scripts/lint-contracts.py
+    - scripts/lint-contracts-baseline.txt
   modifies:
     - pom.xml
     - CLAUDE.md
@@ -62,14 +64,81 @@ test_plan:
     - all production behavior — adding @NonNull / @Nullable does not insert runtime checks
 spec_refs: []
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-05-21
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+      spec_conformance: PASS
+      parameter_contract: PASS
+    diff_stats:
+      files: 12
+      added: 476
+      removed: 22
 escalations: []
-revisions: []
+revisions:
+  - date: 2026-05-21
+    reason: in-place refinement during /m1-tick start to address clarity WARN + lint BLOCKER
+    summary: |
+      Original draft triggered clarity-reviewer WARN (3 warnings) and
+      scripts/lint-ticket.py BLOCKER (1). All four addressed in place
+      on the m1/M1-050 branch before implementation, per user direction
+      to refine in place rather than abort+redo.
+      Changes:
+      (1) Acceptance item 4: replaced `<some-un-annotated-file>`
+          placeholder with concrete path InboundRouter.java; reworded
+          verify to test --baseline flag plumbing without requiring
+          populated baseline entries.
+      (2) files_scope: added scripts/lint-contracts-baseline.txt
+          (10 entries, budget 11 still fits) so the baseline file
+          committed by this ticket does not surface as out-of-scope
+          drift in reviewer's negative-space check.
+      (3) Implementation notes: resolved Maven question — parent
+          pom.xml uses `<dependencies>` (not `<dependencyManagement>`)
+          with `<scope>provided</scope>`; all child modules inherit
+          automatically; no child-POM modifications needed.
+      (4) verified_stays_green: populated with 10 out-of-scope tests
+          that exercise InboundRouter/CommandHandler dispatch surface;
+          uniform rationale (annotation-only change is compile-time
+          and does not alter runtime dispatch).
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-05-21
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE item 4: placeholder `<some-un-annotated-file>` — addressed in revisions entry"
+    - "FILES-BUDGET-PLAUSIBLE: scripts/lint-contracts-baseline.txt excluded from files_scope but created in commit — addressed in revisions entry (file added to files_scope)"
+    - "FILES-BUDGET-PLAUSIBLE: Maven dependencyManagement uncertainty — addressed in revisions entry (parent <dependencies>+provided)"
+  blockers: []
+verified_stays_green:
+  - test_class: app.zcat.infochat.provider.messaging.InboundRouterTest
+    rationale: annotation-only change — @NonNull additions are compile-time; InboundRouter's onMessage dispatch path runtime behavior unchanged
+  - test_class: app.zcat.infochat.provider.messaging.InboundRouterNormalizeTest
+    rationale: tests InboundRouter normalization; no normalization logic changes, only parameter annotations
+  - test_class: app.zcat.infochat.provider.messaging.InboundRouterContactIdRedactionTest
+    rationale: tests InboundRouter contact-id redaction; redaction logic unchanged, annotations are compile-time
+  - test_class: app.zcat.infochat.provider.messaging.AdapterRegistryTest
+    rationale: exercises CommandHandler registration via AdapterRegistry; registration logic unchanged, only SPI signatures annotated
+  - test_class: app.zcat.infochat.provider.messaging.AdapterRouterIT
+    rationale: integration test of the full inbound dispatch path through InboundRouter + handlers; runtime path unchanged, annotations are compile-time
+  - test_class: app.zcat.infochat.provider.messaging.HelpCommandHandlerTest
+    rationale: HelpCommandHandler implements the now-annotated CommandHandler SPI; @Override methods inherit parent annotations without restatement, runtime behavior identical
+  - test_class: app.zcat.infochat.provider.command.AddSourceCommandHandlerTest
+    rationale: AddSourceCommandHandler implements the now-annotated CommandHandler SPI; runtime behavior unchanged
+  - test_class: app.zcat.infochat.provider.command.AddSourceContactIdRedactionTest
+    rationale: tests AddSourceCommandHandler redaction; redaction logic unchanged
+  - test_class: app.zcat.infochat.provider.command.AddSourceBanCheckOrderingTest
+    rationale: tests AddSourceCommandHandler ban-check ordering; ordering logic unchanged, only SPI annotation added
+  - test_class: app.zcat.infochat.provider.command.SummaryCommandHandlerTest
+    rationale: SummaryCommandHandler implements the now-annotated CommandHandler SPI; runtime behavior unchanged
 ---
 
 # M1-050: Process fix E — JSpecify parameter contracts (boundary classes + lint)
@@ -97,7 +166,7 @@ Scope this ticket conservatively: 4 boundary classes for the v1 retroactive pass
 
 ## Implementation notes
 
-- **JSpecify dependency.** Add to parent pom.xml `<dependencyManagement>` so child modules can declare without re-specifying version. Each child module that uses annotations declares `<dependency><groupId>org.jspecify</groupId><artifactId>jspecify</artifactId></dependency>` (scope inherited from parent). For v1, only modules touched by the retroactive pass need the dep: `infochat-provider`, `infochat-messaging-adapter`. Add the dep to those two child POMs. (Wait — this means 2 more files. Reconsider: place the dep at parent only, with `<scope>provided</scope>` — child modules pick up the dep transitively via parent-defined `<dependencies>`. Confirm Maven semantics. If parent-only doesn't work, files_budget bump to 13 to add 2 child POMs.)
+- **JSpecify dependency.** Add to parent pom.xml `<dependencies>` (NOT `<dependencyManagement>`) with `<scope>provided</scope>`. Maven's `<dependencyManagement>` only specifies defaults if a child also declares the dep; placing the dep directly in parent `<dependencies>` makes every child module inherit it automatically, no child-POM modifications needed. The `provided` scope keeps it out of the runtime classpath, so modules that do not use annotations pay only a small compile-time cost. This keeps files_budget bounded to the current files_scope (10 paths, budget 11) and avoids touching `infochat-provider/pom.xml` or `infochat-messaging-adapter/pom.xml`.
 - **lint-contracts.py shape.** Plain Python 3, regex-based parser sufficient for v1 (no need for a full Java AST library). Strategy: scan for `public ` / `protected ` method declarations, extract parameter list, check each non-primitive parameter type for an annotation prefix. The primitive set is the canonical 8 + their boxed forms (Boolean, Integer, etc. count as reference and need annotation). Strings, custom classes, generics — all reference, need annotation. Print findings to stderr; exit 0 on no findings, exit 1 on any.
 - **Baseline file shape.** `scripts/lint-contracts-baseline.txt` is created in this ticket's commit but starts essentially empty (just a header comment explaining the format). Future tickets populate it as the retroactive pass widens — entries get added when grandfathering known-un-annotated public methods. Format: `<path>:<method-signature>` one per line.
 - **The 4 boundary files' annotation pass.** Read each file's public methods, annotate each reference-type parameter. Default policy: @NonNull unless the caller can legitimately pass null (then @Nullable). For the 4 boundary files, every parameter is non-null by contract (none of the SPI methods accept null inputs). All annotations are @NonNull.

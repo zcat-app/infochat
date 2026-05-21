@@ -11,6 +11,7 @@ import jakarta.enterprise.context.control.ActivateRequestContext;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -191,7 +192,7 @@ public class InboundRouter {
      * source adapter even in multi-adapter deployments (T3-A).
      */
     @ActivateRequestContext
-    public void onMessage(InboundMessage msg, String adapterName) {
+    public void onMessage(@NonNull InboundMessage msg, @NonNull String adapterName) {
         // @ActivateRequestContext gives this dispatch its own CDI
         // request-scope context so @RequestScoped collaborators
         // (InboundContext) resolve correctly when invoked from threads

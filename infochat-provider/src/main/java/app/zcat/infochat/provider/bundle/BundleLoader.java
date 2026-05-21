@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.bundle;
 
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
+import org.jspecify.annotations.NonNull;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -62,7 +63,7 @@ public class BundleLoader {
      * relies on (an empty/missing value is treated as a build-time
      * defect, not silently swallowed).
      */
-    public String get(String key) {
+    public String get(@NonNull String key) {
         String value = bundle.getProperty(key);
         if (value == null) {
             throw new IllegalStateException(

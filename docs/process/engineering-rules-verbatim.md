@@ -43,6 +43,13 @@ If a ticket's acceptance criteria cannot be satisfied without violating another 
 - Feature flags and backwards-compatibility shims are forbidden when the change can simply be made. M1 is a greenfield build; there is no prior version to be compatible with.
 - The reviewer applies this rule narrowly: a defensive check at a system boundary is fine; a defensive check between two internal classes is scope drift.
 
+## §7a Method parameter contracts
+
+- Method parameter contracts MUST be explicit. Every reference-type parameter on a public method declares nullability — either via annotation (`@NonNull`/`@Nullable` from `org.jspecify.annotations`) or via javadoc `@param`. Public/protected methods MUST annotate; internal/package-private methods MAY inherit the default (non-null-assumed). Validation at system boundaries still uses explicit null-checks per the existing No-defensive-code rule.
+- The positive complement to §7: that rule prohibits paranoid null-checks; this rule requires the contract that makes paranoia unnecessary. A caller reading the signature can see immediately whether passing null is a legal call or a bug, and the reviewer can check at PR time whether the change adheres.
+- JSpecify (not JetBrains) is the v1 annotation source — the type-use semantics let `List<@Nullable String>` express "list of possibly-null strings," which JetBrains declaration-only annotations cannot.
+- The reviewer's `PARAMETER-CONTRACT-CHECK` enforces this rule on NEW public methods added in each diff. Author-side enforcement is `scripts/lint-contracts.py`, which walks `.java` files and reports any public/protected method whose reference-type parameter lacks `@NonNull`/`@Nullable`.
+
 ## §8 Test-integrity rules
 
 The reviewer's `TEST-INTEGRITY-CHECK` fails if the diff introduces any of the following.
