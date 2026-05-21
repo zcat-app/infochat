@@ -4,6 +4,31 @@ title: InboundRouter intake-step splice (1.5, 2, 4, 7-DM-gate) + bundle keys + r
 status: pending
 created: 2026-05-20
 last_updated: 2026-05-21
+escalations:
+  - date: 2026-05-21
+    reason: clarity-warn
+    reviewer_verdict_excerpt: |
+      CLARITY VERDICT: WARN (0 blockers, 3 warnings).
+
+      Warnings:
+        1. ACCEPTANCE-RUNNABLE: Items 1, 3, 4, 6, 8 contain source-order
+           reading checks that cannot be run as commands. Behavioral
+           coverage is provided by InboundRouterIntakeOrderingTest in
+           item 12.
+        2. ACCEPTANCE-RUNNABLE + ACCEPTANCE-VS-DOD-CONSISTENT: Item 13
+           uses an undefined variable N (`@Test ≥(N+1)`). Implementation
+           notes name the specific new method
+           `rateCapOverflowDropsSilentlyWithoutOutbound` — a precise
+           grep for that method would be tighter than the (N+1) form.
+        3. ACCEPTANCE-VS-DOD-CONSISTENT: Item 12 asserts `@Test ≥6`
+           over 8 behaviorally distinct scenarios (a)–(h) — HETEROGENEOUS-
+           AGGREGATE count. Per-scenario method-name greps would
+           localize regressions instead of masking them.
+
+      Per user-standing feedback rule (memory:
+      feedback_no_heterogeneous_aggregate_test_counts), the warn #3
+      pattern is a hard-no even at WARN level. User elected to refine
+      items 12 and 13 before starting.
 blocked_by:
   - M1-044a
 files_budget: 10
@@ -48,9 +73,9 @@ acceptance:
   - "InboundRouter.onMessage continues to apply the body-size cap (M1-038) BEFORE normalization AND continues to run `normalize()` BEFORE any body-content check. Verify the order is preserved: setAdapterName → size-cap → normalize → rate cap. (The size cap fires before rate-cap so adversarial Hangul-jamo bodies cannot drive NFKC amplification cost AND to bound the inbound payload before it hits the bucket arithmetic — M1-038's body-size-cap test continues to pass.)"
   - "BundleKeys.java adds four new public constants: `ERROR_INVITE_REQUIRED = \"error.invite.required\"`, `ERROR_BAN_FIXED = \"error.ban.fixed\"`, `REPLY_WELCOME_DM_FRESH = \"reply.welcome.dm_fresh\"`, `REPLY_WELCOME_GROUP_FIRST_MENTION = \"reply.welcome.group_first_mention\"`. Verify: `grep -E 'ERROR_INVITE_REQUIRED\\s*=\\s*\"error\\.invite\\.required\"' BundleKeys.java` returns 1 match AND `grep -E 'ERROR_BAN_FIXED\\s*=\\s*\"error\\.ban\\.fixed\"' BundleKeys.java` returns 1 match AND `grep -E 'REPLY_WELCOME_DM_FRESH\\s*=\\s*\"reply\\.welcome\\.dm_fresh\"' BundleKeys.java` returns 1 match AND `grep -E 'REPLY_WELCOME_GROUP_FIRST_MENTION\\s*=\\s*\"reply\\.welcome\\.group_first_mention\"' BundleKeys.java` returns 1 match. The BundleLoaderTest's existing reflective bundle-completeness assertion (per M1-035c) automatically extends to the new keys — no test edit required for completeness coverage"
   - "bundles/en.properties adds the four bundle entries with text drawn from docs/design/03-commands.md §3.11 Welcome messages (for the two welcome keys) AND from docs/spec/security.md §Invite-code registration / §User ban (for the two fixed-error keys — the spec's quoted literal `Access requires an invitation.` and `Your access has been revoked.` resp.). Verify: `grep -E '^error\\.invite\\.required\\s*=' en.properties` returns 1 match AND the value contains the literal substring `Access requires an invitation` (the trailing period optional) AND `grep -E '^error\\.ban\\.fixed\\s*=' en.properties` returns 1 match AND the value equals or starts with `Your access has been revoked` AND `grep -E '^reply\\.welcome\\.dm_fresh\\s*=' en.properties` returns 1 match AND `grep -E '^reply\\.welcome\\.group_first_mention\\s*=' en.properties` returns 1 match"
-  - "application.properties adds the per-profile rate-cap + invite TTL config keys. The base values mirror the spec's profile table (docs/spec/security.md §Rate limiting — `Per-user chat-mode messages (transport rate) 60/min token bucket`; design/04-security.md §4.9 Per-user chat-mode messages and §4.5 brute-force threshold/window; design/03-commands.md §3.10 TTL table). At minimum the file declares: `infochat.rate-cap.inbound-per-minute=60`, `infochat.invite.brute-force-threshold=10`, `infochat.invite.brute-force-window=1h`, `infochat.invite.ttl=7d`, `infochat.invite.open-cap-per-adapter=3`, `infochat.invite.contact-cap-global=50`, `infochat.probation.duration=24h`. Per-profile overrides (under `%vps`, `%pi`, `%remote-llm`) MAY be added but the laptop defaults above are mandatory. Verify: `grep -E '^infochat\\.rate-cap\\.inbound-per-minute=' application.properties` returns ≥1 match AND `grep -E '^infochat\\.invite\\.brute-force-threshold=' application.properties` returns ≥1 match AND `grep -E '^infochat\\.invite\\.ttl=' application.properties` returns ≥1 match AND `grep -E '^infochat\\.probation\\.duration=' application.properties` returns ≥1 match"
-  - "InboundRouterIntakeOrderingTest pins the step ordering via a unit test that constructs InboundRouter with mock collaborators (the four services from M1-044a) and a fake CommandHandler, driving onMessage with synthetic InboundMessages, and asserting (via mock interactions in order): (a) for a DM with a body that exceeds the size cap → only the size-cap branch fires, no other collaborator; (b) for a DM that is over rate cap → rateCapBucket consulted, nothing else, no outbound; (c) for a DM that is under rate cap with an empty body after normalize → no further collaborators; (d) for a DM from an unknown contact_id with a valid invite body → rateCapBucket → normalize → inviteCodeConsumer (returns Accepted) → outbound is the welcome, banCheck NOT consulted, handleSlash NOT called; (e) for a DM from an unknown contact with an invalid body → rateCapBucket → normalize → inviteCodeConsumer (returns Rejected) → outbound is error.invite.required, banCheck NOT consulted; (f) for a DM from a known is_banned=true contact → rateCapBucket → normalize → users lookup → banCheck (returns true) → outbound is error.ban.fixed, no handleSlash; (g) for a DM from a known `group_only` contact with `/help` body → rateCapBucket → normalize → banCheck (returns false) → handleSlash → DM-gate post-check fires → outbound is error.invite.required (NOT the /help reply); (h) for a Group `@mention` from unknown contact → rateCapBucket → normalize → autoRegisterService.resolveOrRegisterGroup → banCheck → handleSlash → outbound is the dispatch reply. `grep -E '@Test' InboundRouterIntakeOrderingTest.java` returns ≥6 matches (matching the 6 distinct DM scenarios above; the group scenario MAY be a separate test or folded into the same class)"
-  - "InboundRouterTest is updated to extend (NOT replace) M1-035b's existing dispatch + chat-mode + unknown-command tests with one new test that asserts the rate-cap branch silently drops with no outbound (the cap-overflow case). M1-035b's existing test methods continue to pass unchanged. `grep -E '@Test' InboundRouterTest.java` returns ≥(N+1) matches where N is the count before this ticket"
+  - "application.properties adds the per-profile rate-cap + invite TTL config keys. The base values mirror the spec's profile table (docs/spec/security.md §Rate limiting — `Per-user chat-mode messages (transport rate) 60/min token bucket`; docs/design/04-security.md §4.9 Per-user chat-mode messages and §4.5 brute-force threshold/window; docs/design/03-commands.md §3.10 TTL table). At minimum the file declares: `infochat.rate-cap.inbound-per-minute=60`, `infochat.invite.brute-force-threshold=10`, `infochat.invite.brute-force-window=1h`, `infochat.invite.ttl=7d`, `infochat.invite.open-cap-per-adapter=3`, `infochat.invite.contact-cap-global=50`, `infochat.probation.duration=24h`. Per-profile overrides (under `%vps`, `%pi`, `%remote-llm`) MAY be added but the laptop defaults above are mandatory. Verify: `grep -E '^infochat\\.rate-cap\\.inbound-per-minute=' application.properties` returns ≥1 match AND `grep -E '^infochat\\.invite\\.brute-force-threshold=' application.properties` returns ≥1 match AND `grep -E '^infochat\\.invite\\.ttl=' application.properties` returns ≥1 match AND `grep -E '^infochat\\.probation\\.duration=' application.properties` returns ≥1 match"
+  - "InboundRouterIntakeOrderingTest pins the step ordering via a unit test that constructs InboundRouter with mock collaborators (the four services from M1-044a) and a fake CommandHandler, driving onMessage with synthetic InboundMessages and asserting (via mock interactions in order) the eight scenarios below. Each scenario is implemented as its own @Test method whose name contains the per-scenario identifying substring listed below (case-insensitive). Every grep MUST return ≥1 match — a regression in any one scenario fails its own check rather than being masked by an aggregate count. (a) DM body exceeds size cap → only the size-cap branch fires, no other collaborator consulted. `grep -iE 'void\\s+\\w*OverSizeCap\\w*\\s*\\(' InboundRouterIntakeOrderingTest.java` ≥1. (b) DM over rate cap → rateCapBucket consulted, nothing else, no outbound. `grep -iE 'void\\s+\\w*OverRateCap\\w*\\s*\\(' InboundRouterIntakeOrderingTest.java` ≥1. (c) DM under cap with body empty after normalize → no further collaborators, no outbound. `grep -iE 'void\\s+\\w*EmptyBodyAfterNormalize\\w*\\s*\\(' InboundRouterIntakeOrderingTest.java` ≥1. (d) DM from unknown contact_id with valid invite body → rateCapBucket → normalize → inviteCodeConsumer (returns Accepted) → outbound is the welcome, banCheck NOT consulted, handleSlash NOT called. `grep -iE 'void\\s+\\w*UnknownContactValidInvite\\w*\\s*\\(' InboundRouterIntakeOrderingTest.java` ≥1. (e) DM from unknown contact with invalid body → rateCapBucket → normalize → inviteCodeConsumer (returns Rejected) → outbound is error.invite.required, banCheck NOT consulted. `grep -iE 'void\\s+\\w*UnknownContactInvalidInvite\\w*\\s*\\(' InboundRouterIntakeOrderingTest.java` ≥1. (f) DM from known is_banned=true contact → rateCapBucket → normalize → users lookup → banCheck (returns true) → outbound is error.ban.fixed, no handleSlash. `grep -iE 'void\\s+\\w*KnownBannedDmStops\\w*\\s*\\(' InboundRouterIntakeOrderingTest.java` ≥1. (g) DM from known group_only contact with /help body → rateCapBucket → normalize → banCheck (returns false) → handleSlash → DM-gate post-check fires → outbound is error.invite.required (NOT the /help reply). `grep -iE 'void\\s+\\w*GroupOnlyDmGate\\w*\\s*\\(' InboundRouterIntakeOrderingTest.java` ≥1. (h) Group @mention from unknown contact → rateCapBucket → normalize → autoRegisterService.resolveOrRegisterGroup → banCheck → handleSlash → outbound is the dispatch reply. `grep -iE 'void\\s+\\w*GroupMentionAutoRegisters\\w*\\s*\\(' InboundRouterIntakeOrderingTest.java` ≥1"
+  - "InboundRouterTest gains exactly ONE new @Test method whose name contains `rateCapOverflowDropsSilentlyWithoutOutbound` (case-insensitive) that asserts when rateCapBucket.tryAcquire returns false, no reply is sent and no downstream service is consulted. M1-035b's eight pre-existing @Test methods continue to pass unchanged — none is deleted; none is renamed in a way that drops the identifying substring listed below. Verify the new method AND each of the eight pre-existing methods by its single-line declaration grep — every one MUST return ≥1 match. New: `grep -iE 'void\\s+\\w*rateCapOverflowDropsSilentlyWithoutOutbound\\w*\\s*\\(' InboundRouterTest.java` ≥1. M1-035b preservation: `grep -iE 'void\\s+\\w*emptyAndWhitespaceAndInvisibleOnlyBodies\\w*\\s*\\(' InboundRouterTest.java` ≥1; `grep -iE 'void\\s+\\w*leadingWhitespaceBeforeSlashCommand\\w*\\s*\\(' InboundRouterTest.java` ≥1; `grep -iE 'void\\s+\\w*chatModeBodyProducesDeterministic\\w*\\s*\\(' InboundRouterTest.java` ≥1; `grep -iE 'void\\s+\\w*unknownCommandProducesFriendly\\w*\\s*\\(' InboundRouterTest.java` ≥1; `grep -iE 'void\\s+\\w*commandHandlerExceptionProducesInternalError\\w*\\s*\\(' InboundRouterTest.java` ≥1; `grep -iE 'void\\s+\\w*firstDmSlashInsertsUsersRow\\w*\\s*\\(' InboundRouterTest.java` ≥1; `grep -iE 'void\\s+\\w*firstDmChatModeInsertsUsersRow\\w*\\s*\\(' InboundRouterTest.java` ≥1; `grep -iE 'void\\s+\\w*repeatedDmsFromSameContactProduceExactlyOne\\w*\\s*\\(' InboundRouterTest.java` ≥1"
   - "InboundRouterNormalizeTest (M1-035b) and InboundRouterContactIdRedactionTest (M1-038) continue to pass without ANY modification — the size cap, normalize pass, and ContactIds.redact log-redaction behavior are preserved unchanged. These two files appear in files_scope only so the reviewer can verify they were NOT inadvertently modified (negative-space check). Verify: `git diff main -- infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterNormalizeTest.java` returns ZERO changes AND the same for InboundRouterContactIdRedactionTest.java"
   - "RateCapBucket.evictIdleBuckets widens the eviction predicate per the /redteam M1-044a DOS finding (verdict file docs/plan/m1/redteam/M1-044a-2026-05-21.md). The M1-044a predicate evicts only buckets where `tokens == inboundPerMinute` AND idle past threshold; a drained-and-abandoned bucket never refills (refill is lazy inside tryAcquire) so it stays pinned forever. The fix removes the tokens-equality requirement: eviction fires whenever the bucket has been idle past the threshold, regardless of token count. A returning contact pays a one-time bucket-cold cost (a new Bucket allocated full). Verify: `grep -nE 'tokens\\s*==\\s*inboundPerMinute' RateCapBucket.java` returns ZERO matches in the evictIdleBuckets method (the structural assertion that the equality gate has been removed)"
   - "RateCapBucketTest has a @Test method whose name contains `evictionDrainedIdle` (case-insensitive) that asserts the widened eviction: seed a bucket via N tryAcquire calls that drain it to ≤0 tokens, advance the test Clock past the eviction threshold without further tryAcquire calls, run the eviction sweep, and assert the bucket entry is removed from the underlying map. Verify: `grep -iE 'void\\s+\\w*evictionDrainedIdle\\w*\\s*\\(' RateCapBucketTest.java` returns ≥1 match"
@@ -83,6 +108,30 @@ decision_refs:
   - D45
   - D46
 revisions:
+  - date: 2026-05-21
+    reason: clarity-warn refine snapshot (items 12 + 13 acceptance phrasing)
+    summary: |
+      Pre-refine snapshot. The `/m1-tick start M1-044b` clarity preflight
+      returned WARN with 3 warnings; warning #3 (heterogeneous-aggregate
+      @Test count on item 12) matches a user-standing feedback rule
+      (no heterogeneous-aggregate @Test counts when DoD enumerates ≥3
+      distinct test methods). User picked refine to tighten items 12 + 13
+      before status flips to in-progress.
+
+      Pre-refine acceptance items (verbatim):
+        - Item 12 ended: "`grep -E '@Test' InboundRouterIntakeOrderingTest.java`
+          returns ≥6 matches (matching the 6 distinct DM scenarios above;
+          the group scenario MAY be a separate test or folded into the
+          same class)"
+        - Item 13 ended: "`grep -E '@Test' InboundRouterTest.java` returns
+          ≥(N+1) matches where N is the count before this ticket"
+
+      Refine target: replace the aggregate-count assertions with
+      per-scenario / per-method-name greps that pin each of the 8
+      ordering-test scenarios (a)–(h) and the one new
+      `rateCapOverflowDropsSilentlyWithoutOutbound` method individually.
+      No other frontmatter or DoD content is changed by this refine; the
+      Implementation notes already commit to the exact method count.
   - date: 2026-05-21
     reason: redteam-finding fold-in (M1-044a DOS-low + AUTH-BYPASS-low)
     summary: |
@@ -303,7 +352,7 @@ unit test in particular).
   base. For the M1-044b commit, base values are mandatory;
   per-profile overrides are encouraged but not required (a
   follow-up ticket can fold the per-profile values from
-  design/04-security.md and design/03-commands.md as needed).
+  docs/design/04-security.md and docs/design/03-commands.md as needed).
 - **InboundRouterIntakeOrderingTest design.** Plain JUnit
   + Mockito or similar (M1-035b's InboundRouterTest pattern).
   Construct InboundRouter via `new InboundRouter()` and
