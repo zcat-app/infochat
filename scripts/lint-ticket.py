@@ -104,9 +104,26 @@ The six checks (severity, rationale):
     cap → 1.7 normalize`). The LLM-side check (clarity-prompt.md
     #11) catches the prose-variant form ("X happens before Y"
     contradicting "Y precedes X").
+
+  OUT-OF-SCOPE-STAYS-GREEN-VERIFIABLE   BLOCKER
+    files_scope includes a file matching one of the
+    SHARED_DISPATCH_SURFACE_FILES heuristics (InboundRouter.java,
+    RateCapBucket.java, InviteCodeConsumer.java, BanCheck.java,
+    AutoRegisterService.java, or *Command*.java under
+    provider/src/main/java/) AND verified_stays_green is empty or
+    absent. The matching files are exercised by tests outside
+    files_scope; pure "stays green unchanged" claims for those
+    tests must be enumerated and rationale-justified in
+    verified_stays_green so the clarity reviewer and Plan can
+    audit each claim. Silent when files_scope matches none of the
+    heuristic files. Catches the M1-044b round-1 shape: 7
+    AddSource* tests broke because the "stays green" claim was
+    asserted, not audited. See feedback_out_of_scope_stays_green_
+    verifiable.md in author-memory.
 """
 
 import argparse
+import fnmatch
 import pathlib
 import re
 import subprocess
@@ -751,6 +768,74 @@ def check_acceptance_ordering_consistent(acceptance, body):
     return findings
 
 
+# ---------- check: out-of-scope-stays-green-verifiable ----------
+
+# Initial heuristic set of dispatch surfaces whose tests usually live outside
+# files_scope. Authoring forcing function: when files_scope touches one of
+# these, the ticket must enumerate the dependent test classes in
+# verified_stays_green so the clarity/Plan audits can verify "stays green"
+# instead of trusting the assertion. Expand the list via subsequent
+# `process:` commits as new dispatch surfaces emerge — see
+# feedback_out_of_scope_stays_green_verifiable.md.
+SHARED_DISPATCH_SURFACE_FILES = [
+    "InboundRouter.java",
+    "RateCapBucket.java",
+    "InviteCodeConsumer.java",
+    "BanCheck.java",
+    "AutoRegisterService.java",
+    "*Command*.java",  # glob; restricted to paths under provider/src/main/java/
+]
+
+
+def _matches_shared_dispatch_surface(scope_path):
+    """True iff scope_path matches a SHARED_DISPATCH_SURFACE_FILES entry.
+
+    Explicit names match by basename; glob patterns match by basename but
+    only when the path lives under `provider/src/main/java/` (so a test
+    file named `FooCommandTest.java` outside the production tree doesn't
+    spuriously trigger the check).
+    """
+    if not isinstance(scope_path, str):
+        return False
+    base = scope_path.rsplit("/", 1)[-1]
+    for pattern in SHARED_DISPATCH_SURFACE_FILES:
+        if "*" in pattern:
+            if "provider/src/main/java/" not in scope_path:
+                continue
+            if fnmatch.fnmatchcase(base, pattern):
+                return True
+        else:
+            if base == pattern:
+                return True
+    return False
+
+
+def check_out_of_scope_stays_green_verifiable(fm):
+    findings = []
+    files_scope = fm.get("files_scope") or []
+    if not isinstance(files_scope, list):
+        return findings
+    matching = [p for p in files_scope if _matches_shared_dispatch_surface(p)]
+    if not matching:
+        return findings  # heuristic doesn't match: silent
+    verified = fm.get("verified_stays_green")
+    if isinstance(verified, list) and len(verified) > 0:
+        return findings  # author has enumerated: silent
+    matching_bases = ", ".join(p.rsplit("/", 1)[-1] for p in matching)
+    findings.append(_finding(
+        "OUT-OF-SCOPE-STAYS-GREEN-VERIFIABLE", "BLOCKER", None,
+        matching_bases,
+        f"files_scope includes shared-dispatch-surface file(s) but "
+        f"`verified_stays_green:` is empty/missing. Tests outside files_scope "
+        f"that exercise the changed dispatch surface must be enumerated by "
+        f"fully-qualified class name with a one-line rationale per entry — "
+        f"see docs/process/ticket-template.md §frontmatter verified_stays_green. "
+        f"The clarity reviewer and Plan use the list to audit each "
+        f"\"stays green\" claim instead of trusting the assertion.",
+    ))
+    return findings
+
+
 # ---------- finding object + reporting ----------
 
 def _finding(check, severity, item_idx, command=None, detail=""):
@@ -806,6 +891,7 @@ def lint_one(path, quiet):
     findings.extend(check_prose_verb(acceptance))
     findings.extend(check_impl_notes_cross_ref(fm, body))
     findings.extend(check_acceptance_ordering_consistent(acceptance, body))
+    findings.extend(check_out_of_scope_stays_green_verifiable(fm))
     return report_file(path, findings, None, quiet)
 
 

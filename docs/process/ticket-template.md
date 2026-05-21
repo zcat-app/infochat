@@ -88,6 +88,32 @@ test_plan:
     # - <module>/src/test/java/.../FooIT.java
   preserves:
     - all tests currently green on main
+verified_stays_green:
+  # - test_class: <fully-qualified test class name>
+  #   rationale: <one-line WHY the test stays green>
+  #
+  # OPTIONAL list. Required (the author-side linter enforces this as a
+  # BLOCKER) when `files_scope` includes a file matching one of the
+  # shared-dispatch-surface heuristics (`InboundRouter.java`,
+  # `RateCapBucket.java`, `InviteCodeConsumer.java`, `BanCheck.java`,
+  # `AutoRegisterService.java`, plus `*Command*.java` under
+  # `provider/src/main/java/`). For each out-of-scope test class whose
+  # "stays green unchanged" claim depends on the changed dispatch
+  # surface, list one entry pinning the test by fully-qualified class
+  # name plus a one-line rationale explaining WHY it stays green (e.g.
+  # "pre-seeds users via @BeforeEach so the auto-register branch is
+  # never exercised").
+  #
+  # Three pipeline layers consume this field. lint-ticket.py's
+  # OUT-OF-SCOPE-STAYS-GREEN-VERIFIABLE check (BLOCKER) fires when the
+  # heuristic matches and the field is empty/missing — pure authoring
+  # forcing function. The clarity reviewer's VERIFIED-STAYS-GREEN-
+  # PLAUSIBLE check (WARN) judges each rationale against the cited
+  # test source. Plan's dependent-test-coverage audit (in
+  # docs/process/plan-prompt.md §Test-scaffolding plan) FAILs the
+  # outline if any test under `provider/src/test/` exercising the
+  # changed surface is missing from this list, or if a listed test
+  # actually needs editing rather than staying green.
 spec_refs:
   # The spec sections this ticket implements. Anchors the "why".
   # - docs/spec/<file>.md §<section>
@@ -210,6 +236,7 @@ WARN later.
 | **HETEROGENEOUS-AGGREGATE-TEST-COUNT** | Aggregate `grep -E '@Test' … ≥N` counts with N ≥ 3, which collapse structurally-different test methods into one count. See [[no-heterogeneous-aggregate-test-counts]] in author-memory; one assertion = one named test method. |
 | **PROSE-VERB-IN-VERIFY** | Verify clauses using "by reading", "by inspection", "should be present", or "loop exits" — not mechanically checkable. Rewrite as `grep` / `mvn test -Dtest=...` / etc. |
 | **IMPLEMENTATION-NOTES-ACCEPTANCE-CROSS-REF** | Body claims "an acceptance grep confirms X" but X has no matching acceptance item. Either add the acceptance item or remove the claim. |
+| **OUT-OF-SCOPE-STAYS-GREEN-VERIFIABLE** | `files_scope` includes a shared-dispatch-surface file (`InboundRouter.java`, `RateCapBucket.java`, `InviteCodeConsumer.java`, `BanCheck.java`, `AutoRegisterService.java`, or `*Command*.java` under `provider/src/main/java/`) but `verified_stays_green:` is empty/missing. The author must enumerate the out-of-scope test classes whose "stays green unchanged" claim depends on the changed dispatch surface, each with a one-line rationale. Catches the M1-044b round-1 shape: 7 AddSource* tests broke because the "stays green" claim was asserted, not audited. |
 
 ### Authoring conventions that prevent the most common findings
 

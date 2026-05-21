@@ -476,6 +476,80 @@ in another) and the cross-section contradictions (acceptance item
 ordering disagreeing with the DoD's prose ordering or with a `// Step
 N` code-sketch comment in §Implementation notes).
 
+### 12. VERIFIED-STAYS-GREEN-PLAUSIBLE — each verified_stays_green rationale is plausibly grounded in the cited test source
+
+Tickets whose `files_scope` touches a shared dispatch surface (the
+heuristic enumerated in `docs/process/ticket-template.md` §frontmatter
+`verified_stays_green:` and enforced by the author-side linter's
+OUT-OF-SCOPE-STAYS-GREEN-VERIFIABLE check) must enumerate each
+out-of-scope test class whose "stays green unchanged" claim depends on
+the changed surface, with a one-line rationale per entry. The linter
+enforces that the field exists and is non-empty; this check
+(LLM-judgment, WARN-level) judges whether each rationale is plausibly
+true given the cited test's source code.
+
+For each entry in `verified_stays_green:`:
+
+1. Use the Read tool to read the test class file. The `test_class:`
+   field is a fully-qualified Java class name; resolve it to the file
+   path under `infochat-provider/src/test/java/` (or
+   `infochat-collector/src/test/java/` etc.) by replacing dots with
+   slashes and appending `.java`. Example:
+   `app.zcat.infochat.provider.intake.RateCapIT` →
+   `infochat-provider/src/test/java/app/zcat/infochat/provider/intake/RateCapIT.java`.
+   If the file does not exist, record `FAIL` for this entry citing
+   the missing path.
+
+2. Judge whether the `rationale:` line is plausibly true given the
+   test source. Examples of plausibility-grounding:
+   - Rationale `"pre-seeds users via @BeforeEach so the auto-register
+     branch is never exercised"` is plausible iff the test class
+     has a `@BeforeEach` (or `@BeforeAll`) method that inserts users
+     into the relevant table — or a Quarkus `@TestProfile` that
+     supplies the same fixture — before each test runs.
+   - Rationale `"asserts only the size-cap rejection path; rate-cap
+     ordering changes are below its observation surface"` is
+     plausible iff the test's assertions inspect only the rejection
+     branch (e.g. `assertThat(adapter.sent).isEmpty()`) and not
+     internal bucket-counter state.
+   - Rationale `"uses a stub adapter that bypasses the changed
+     dispatch path entirely"` is plausible iff the test wires up
+     a stub or fake adapter via CDI alternative / `@QuarkusTest`
+     mock setup rather than the production InboundRouter path.
+
+3. Classify each entry:
+   - **PASS** — the rationale is plausibly true given the test
+     source.
+   - **WARN** — the rationale is ambiguous (the test source
+     neither clearly supports nor refutes it; the developer should
+     re-read the test before trusting the claim during
+     implementation).
+   - **FAIL** — the rationale is clearly contradicted by the test
+     source (the test does exercise the path the rationale claims
+     it doesn't, or the cited fixture is absent).
+
+Severity rule for the section verdict:
+
+- This check caps at WARN even when individual entries are FAIL,
+  because the LLM-judgment dimension has false-positive risk:
+  testing-style differences (Quarkus profile fixtures, alternative
+  CDI beans, Mockito setup) can make a rationale look unsupported
+  when the test is in fact correctly insulated. BLOCKER-level
+  would over-fire. If the reviewer's judgment is wrong, the author
+  refines the rationale or escalates via `/m1-tick escalate
+  <id> refine` with the test-source citation.
+- The section verdict is `WARN` when any entry is WARN or FAIL,
+  and `PASS` when every entry is PASS or when `verified_stays_green:`
+  is empty/absent (the OUT-OF-SCOPE-STAYS-GREEN-VERIFIABLE linter
+  has already vetted whether the field should have been populated;
+  if the linter passed and the field is empty, this check has
+  nothing to judge).
+
+This check fires whenever `verified_stays_green:` is non-empty,
+regardless of whether `files_scope` touches a shared dispatch
+surface — the author has made claims about test behavior and the
+clarity reviewer audits them.
+
 ---
 
 ## Short chat reply (the only thing you return inline)
@@ -564,6 +638,20 @@ ACCEPTANCE-ORDERING-CONSISTENT: <PASS | FAIL>
    ticket is unfinishable as written). PASS when every ordering
    statement agrees with every other, or when zero ordering statements
    are present.>
+
+VERIFIED-STAYS-GREEN-PLAUSIBLE: <PASS | WARN>
+  <one bullet per `verified_stays_green:` entry. Each bullet cites the
+   `test_class:` fully-qualified name, quotes the `rationale:` line
+   verbatim, names the file path resolved from the class name, and
+   records the per-entry classification (PASS / WARN / FAIL) with a
+   one-line judgment of whether the rationale is grounded in the
+   test source (cite the specific code construct that supports or
+   contradicts the claim — `@BeforeEach` fixture name, assertion
+   target, CDI alternative wiring, etc.).
+
+   Section verdict is capped at WARN: when at least one entry is
+   WARN or FAIL the section reports WARN; PASS when every entry is
+   PASS or when `verified_stays_green:` is empty/absent.>
 
 OUT-OF-SCOPE-SPECIFIC: <PASS | WARN | FAIL>
   <one paragraph: is out_of_scope non-empty and specific, or PASS>

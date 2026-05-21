@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 9 |
+| pending | 8 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 49 |
+| done | 50 |
 | deferred | 8 |
 | **total** | **66** |
 
@@ -26,7 +26,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-044c — Admin command handlers — /ban, /unban, /invite create/list/revoke (complexity: high, risk: high)
 - M1-044d — Contact-id redaction + breach-audit ordering (M1-044a fixes) (complexity: low, risk: medium)
-- M1-048 — Process fix A: verified_stays_green frontmatter + lint + clarity + Plan (complexity: low, risk: low)
 - M1-049 — Process fix D: test pyramid — handler/router/IT decoupling (complexity: high, risk: medium)
 - M1-050 — Process fix E: JSpecify parameter contracts (boundary classes + lint) (complexity: medium, risk: medium)
 
@@ -48,7 +47,7 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 - M1-044 — blocked_by: M1-044a (done), M1-044b (deferred), M1-044c (pending)
 - M1-045 — blocked_by: M1-044 (pending)
 - M1-046 — blocked_by: M1-044 (pending)
-- M1-047 — blocked_by: M1-048 (pending), M1-049 (pending), M1-050 (pending)
+- M1-047 — blocked_by: M1-048 (done), M1-049 (pending), M1-050 (pending)
 
 ---
 
@@ -67,6 +66,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-048 | Process fix A: verified_stays_green frontmatter + lint + clarity + Plan | 2026-05-21 | round 1 APPROVE |
 | M1-044a | Intake-step services — rate cap, invite consumer, ban check, brute-force migration | 2026-05-21 | round 1 APPROVE |
 | M1-043 | SummaryProseGenerator refusal-marker interception (degrade on `[REFUSAL: ...]` output) | 2026-05-20 | round 1 APPROVE |
 | M1-040 | /summary prompt-injection wrapper + adapter-scoped users lookup across handlers | 2026-05-20 | round 2 APPROVE |
@@ -76,7 +76,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-036 | /add-source command (handler + kind resolver + URL probe + upsert + audit) | 2026-05-18 | round 2 APPROVE |
 | M1-035 | Adapter + router umbrella — first-DM auto-register + /help IT | 2026-05-18 | round 1 APPROVE |
 | M1-035d | Wire AutoRegisterService into InboundRouter intake | 2026-05-17 | round 1 APPROVE |
-| M1-035c | /help command + auto-register-on-first-DM | 2026-05-17 | round 2 APPROVE |
 
 ---
 
@@ -199,7 +198,7 @@ M1-044a (done)
   └── M1-044c (pending) ← runnable
         └── M1-044 (pending) [see above]
 M1-044d (pending) ← runnable
-M1-048 (pending) ← runnable
+M1-048 (done)
   └── M1-047 (pending)
         └── M1-044b (deferred) [see above]
 M1-049 (pending) ← runnable

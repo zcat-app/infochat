@@ -134,6 +134,46 @@ Write tools accept either form when the agent's CWD is the repo root.
    names them; if not, FAIL the outline with "Test-modification
    authorization missing — escalate via /m1-tick escalate refine".
 
+   **Dependent test coverage (shared dispatch surface gate).** When
+   the ticket's `files_scope` contains a file matching one of the
+   shared dispatch surface heuristics — `InboundRouter.java`,
+   `RateCapBucket.java`, `InviteCodeConsumer.java`, `BanCheck.java`,
+   `AutoRegisterService.java`, or the glob `*Command*.java` under
+   `provider/src/main/java/` — the diff touches code that is
+   exercised by integration tests outside `files_scope`. Pure
+   "stays-green unchanged" claims for those tests must be verified,
+   not asserted. Perform the dependent-test-coverage audit:
+   - (a) Enumerate every test under `provider/src/test/` exercising
+     the changed dispatch surface. Use the Grep tool against the
+     provider test tree with a pattern matching the dispatch entry
+     points the changed files expose, e.g.
+     `grep -rE 'adapter\.deliverDm\(|router\.onMessage\(|<handler>\.handle\(' provider/src/test/`
+     substituting `<handler>` with the relevant handler class name(s).
+   - (b) For each hit, classify it as one of: `stays-green` (the
+     test's assertions are below the changed surface's observation
+     window and remain green unchanged), `needs-edit` (the test must
+     be modified — must appear in the ticket's §"Authorized test
+     changes" body section), or `depends-on-superseded-behavior`
+     (the test asserts a behavior this ticket removes; must also
+     appear in §"Authorized test changes").
+   - (c) Cross-check the `stays-green` set against the ticket's
+     `verified_stays_green:` frontmatter list. If
+     `verified_stays_green` is empty or missing for a shared-
+     dispatch-surface ticket, FAIL the outline with reason
+     "verified_stays_green missing for shared-dispatch-surface
+     ticket — escalate via /m1-tick escalate refine". If a test
+     classified `stays-green` is not listed in
+     `verified_stays_green`, FAIL with reason "stays-green test
+     not enumerated". If a test listed in `verified_stays_green`
+     is actually `needs-edit` or `depends-on-superseded-behavior`,
+     FAIL with reason "stays-green misclassification — listed test
+     must move to §Authorized test changes".
+   - (d) Record the audit in the outline's `### Dependent test
+     coverage` block — one bullet per test with its classification
+     and (for `stays-green`) the matching `verified_stays_green`
+     entry. This block is what the developer reads to know which
+     tests they may NOT edit and which they MUST edit.
+
 4. **Cross-cutting concerns.** From the spec_refs, identify any
    invariants the implementation must preserve that aren't obvious
    from the immediate diff (e.g. per-(user, scope) isolation rules,
@@ -202,6 +242,11 @@ the file is the only artifact the main session will see in detail.
 ### Tests
 - add: `<path>` — covers <acceptance item N>
 - modify: `<path>` — authorized in ticket body §"Authorized test changes" item M
+- ...
+
+### Dependent test coverage (only when files_scope touches a shared dispatch surface; omit otherwise)
+- `<fully-qualified test class>` — stays-green (matches `verified_stays_green` entry "<rationale>")
+- `<fully-qualified test class>` — needs-edit (authorized in §"Authorized test changes" item M)
 - ...
 
 ### Cross-cutting concerns

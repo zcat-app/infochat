@@ -1,7 +1,7 @@
 ---
 id: M1-048
 title: "Process fix A: verified_stays_green frontmatter + lint + clarity + Plan"
-status: pending
+status: done
 created: 2026-05-21
 last_updated: 2026-05-21
 blocked_by: []
@@ -46,14 +46,32 @@ test_plan:
     - lint-ticket.py's existing eight checks (GREP-SHELL-PARSEABLE, GREP-EMBEDDED-QUOTE, REGEX-COMPILABLE, GREP-CROSS-LINE-NEWLINE, FILES-SCOPE-COVERAGE, HETEROGENEOUS-AGGREGATE-TEST-COUNT, PROSE-VERB-IN-VERIFY, IMPLEMENTATION-NOTES-ACCEPTANCE-CROSS-REF, ACCEPTANCE-ORDERING-CONSISTENT) — none of them change behavior; the new check is purely additive
 spec_refs: []
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-05-21
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 258
+      removed: 9
 escalations: []
 revisions: []
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-05-21
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE item 1: the second clause `grep -E 'test_class:' docs/process/ticket-template.md returns ≥1 match in the same vicinity` appends a prose qualifier (\"in the same vicinity\") that is not mechanically verifiable. Recommend splitting into two discrete acceptance items, or replacing with a chained grep (e.g., `grep -A3 '^verified_stays_green:' docs/process/ticket-template.md | grep -cE 'test_class:'`)."
+  blockers: []
 ---
 
 # M1-048: Process fix A — verified_stays_green frontmatter + lint + clarity + Plan
