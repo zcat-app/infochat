@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 6 |
+| pending | 9 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 49 |
-| deferred | 7 |
-| **total** | **62** |
+| deferred | 8 |
+| **total** | **66** |
 
 ---
 
@@ -24,9 +24,11 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-044b — InboundRouter intake-step splice (1.5, 2, 4, 7-DM-gate) + bundle keys + rate-cap config (complexity: high, risk: high)
 - M1-044c — Admin command handlers — /ban, /unban, /invite create/list/revoke (complexity: high, risk: high)
 - M1-044d — Contact-id redaction + breach-audit ordering (M1-044a fixes) (complexity: low, risk: medium)
+- M1-048 — Process fix A: verified_stays_green frontmatter + lint + clarity + Plan (complexity: low, risk: low)
+- M1-049 — Process fix D: test pyramid — handler/router/IT decoupling (complexity: high, risk: medium)
+- M1-050 — Process fix E: JSpecify parameter contracts (boundary classes + lint) (complexity: medium, risk: medium)
 
 ---
 
@@ -43,9 +45,10 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-044 — blocked_by: M1-044a (done), M1-044b (pending), M1-044c (pending)
+- M1-044 — blocked_by: M1-044a (done), M1-044b (deferred), M1-044c (pending)
 - M1-045 — blocked_by: M1-044 (pending)
 - M1-046 — blocked_by: M1-044 (pending)
+- M1-047 — blocked_by: M1-048 (pending), M1-049 (pending), M1-050 (pending)
 
 ---
 
@@ -78,6 +81,9 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 ---
 
 ## Deferred
+
+### blocked-on-new-ticket (1)
+- M1-044b → M1-047
 
 ### decomposed (1)
 - M1-034 → M1-034a
@@ -188,9 +194,16 @@ M1-044a (done)
   ├── M1-044 (pending)
   │     ├── M1-045 (pending)
   │     └── M1-046 (pending)
-  ├── M1-044b (pending) ← runnable
+  ├── M1-044b (deferred)
   │     └── M1-044 (pending) [see above]
   └── M1-044c (pending) ← runnable
         └── M1-044 (pending) [see above]
 M1-044d (pending) ← runnable
+M1-048 (pending) ← runnable
+  └── M1-047 (pending)
+        └── M1-044b (deferred) [see above]
+M1-049 (pending) ← runnable
+  └── M1-047 (pending) [see above]
+M1-050 (pending) ← runnable
+  └── M1-047 (pending) [see above]
 ```

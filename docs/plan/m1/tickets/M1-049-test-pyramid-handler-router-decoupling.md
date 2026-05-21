@@ -1,0 +1,127 @@
+---
+id: M1-049
+title: "Process fix D: test pyramid — handler/router/IT decoupling"
+status: pending
+created: 2026-05-21
+last_updated: 2026-05-21
+blocked_by: []
+files_budget: 8
+files_scope:
+  - docs/process/test-pyramid.md
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/AddSourceCommandHandlerTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/AddSourceBanCheckOrderingTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryCommandHandlerTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/HelpCommandHandlerTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/AdapterRegistryTest.java
+complexity: high
+risk: medium
+round_cap: 3
+security_relevant: false
+migration_touch: false
+decomposed_from: M1-047
+out_of_scope:
+  - any change to a production handler (AddSourceCommandHandler, SummaryCommandHandler, HelpCommandHandler) — the refactor changes how the tests construct + invoke the handlers, not the handlers themselves
+  - any change to InboundRouter or any intake-step service — router-level behavior is M1-044b territory; this ticket only changes how tests are SHAPED
+  - any change to integration-test classes (`*IT.java`, e.g. AddSourceIT, SummaryIT, AddSourceAdapterScopeIT, SummaryAdapterScopeIT, AdapterRouterIT) — ITs already sit at the correct pyramid layer (full chain) per the new convention
+  - any change to test infrastructure shared with ITs (MvpProfile, test-time `application-test.properties`, InMemoryAdapter test wiring) — handler-tier tests stop using these; ITs continue to use them unchanged
+  - parameter contract annotations (M1-050 territory)
+  - the `verified_stays_green:` lint check (M1-048 territory) — though D's refactor reduces the heuristic's surface area, A still ships independently
+acceptance:
+  - "New doc `docs/process/test-pyramid.md` exists with three sections defining the three layers (handler unit tests / router unit tests / integration tests), each section naming the layer's responsibility, what it MAY use, and what it MUST NOT use. Verify: `test -f docs/process/test-pyramid.md && grep -cE '^## (Handler|Router|Integration)' docs/process/test-pyramid.md` returns 3. The doc also names canonical example classes per layer (e.g. HelpCommandHandlerTest as handler-tier; InboundRouterTest as router-tier; AddSourceIT as integration-tier) so future tests have a copy-from template"
+  - "AddSourceCommandHandlerTest.java is plain JUnit (no `@QuarkusTest`), constructs the handler under test directly, and exercises it via `handler.handle(scope, body)` with mocked collaborators (UrlProbe, DataSource, BundleLoader, LlmClient). No call to `adapter.deliverDm(...)`. Verify: `grep -cE '@QuarkusTest' AddSourceCommandHandlerTest.java` returns 0 AND `grep -cE 'adapter\\.deliverDm' AddSourceCommandHandlerTest.java` returns 0 AND `grep -cE '\\.handle\\(' AddSourceCommandHandlerTest.java` returns ≥9"
+  - "AddSourceCommandHandlerTest.java preserves all 9 pre-refactor @Test scenarios. Per-scenario verification by name-substring grep (case-insensitive single-method greps, NOT an aggregate count — see [[no-heterogeneous-aggregate-test-counts]]): `grep -iE 'void\\s+\\w*DispatchesAddSourceToHandlerExactlyOnce\\w*\\s*\\(' AddSourceCommandHandlerTest.java` ≥1; `grep -iE 'void\\s+\\w*FreshInsertReply\\w*\\s*\\(' AddSourceCommandHandlerTest.java` ≥1; `grep -iE 'void\\s+\\w*AmbiguousUrlWithHtmlContentType\\w*\\s*\\(' AddSourceCommandHandlerTest.java` ≥1; `grep -iE 'void\\s+\\w*SubscribedExistingReply\\w*\\s*\\(' AddSourceCommandHandlerTest.java` ≥1; `grep -iE 'void\\s+\\w*RssPathUrlContradicted\\w*\\s*\\(' AddSourceCommandHandlerTest.java` ≥1; `grep -iE 'void\\s+\\w*BannedUserRejectsBeforeProbe\\w*\\s*\\(' AddSourceCommandHandlerTest.java` ≥1. (Remaining 3 @Test method-name greps are author-discretion based on the pre-refactor scenarios; the Authorized test changes section enumerates the full rename map.)"
+  - "AddSourceBanCheckOrderingTest.java is plain JUnit, calls `handler.handle()` direct with mocked collaborators, preserves all 3 pre-refactor @Test scenarios. Note: this class STAYS a handler-tier test because the ban check currently lives in the handler on main (NOT in the router — that move is M1-044b's splice, which this ticket precedes). After M1-044b lands, M1-044b's refine will delete this class because the ban check will move to InboundRouter and the ordering moves to InboundRouterIntakeOrderingTest scenario (f). Verify: `grep -cE '@QuarkusTest' AddSourceBanCheckOrderingTest.java` returns 0 AND `grep -cE '\\.handle\\(' AddSourceBanCheckOrderingTest.java` returns ≥3 AND `grep -iE 'void\\s+\\w*bannedDmUserReceivesFixedBanReply\\w*\\s*\\(' AddSourceBanCheckOrderingTest.java` ≥1"
+  - "SummaryCommandHandlerTest.java is plain JUnit, calls `handler.handle()` direct with mocked collaborators (SummaryService, JoinService, BundleLoader, etc.), preserves all 10 pre-refactor @Test scenarios. Verify: `grep -cE '@QuarkusTest' SummaryCommandHandlerTest.java` returns 0 AND `grep -cE 'adapter\\.deliverDm' SummaryCommandHandlerTest.java` returns 0 AND `grep -cE '\\.handle\\(' SummaryCommandHandlerTest.java` returns ≥10"
+  - "HelpCommandHandlerTest.java drops `@QuarkusTest` and constructs the handler directly. The class already calls `handler.handle()` direct (pre-refactor pattern matches the new convention); the only changes are removing `@QuarkusTest` and `@Inject` and constructing the handler+bundleLoader by hand. All 4 pre-refactor @Test scenarios preserved. Verify: `grep -cE '@QuarkusTest' HelpCommandHandlerTest.java` returns 0 AND `grep -cE '@Inject' HelpCommandHandlerTest.java` returns 0 AND `grep -cE 'void\\s+\\w*replyContainsHeaderAndThreeMvpCommandShortHelpLines\\w*\\s*\\(' HelpCommandHandlerTest.java` ≥1 (one of the 4 preserved scenarios as a check)"
+  - "AdapterRegistryTest.java stays at the wiring layer but tightens its assertion: the canonical test (`singleAdapterHappyPathActivatesInMemoryAndRegistersRouter`) asserts WIRING (router was invoked with the delivered body) instead of REPLY CONTENT (UNKNOWN_COMMAND_REPLY literal). The reply-content check belongs in InboundRouterTest's `unknownCommandProducesFriendlyUnknownCommandReply` (already there on main). Verify: `grep -cE 'UNKNOWN_COMMAND_REPLY' AdapterRegistryTest.java` returns 0 AND `grep -cE 'singleAdapterHappyPathActivatesInMemoryAndRegistersRouter' AdapterRegistryTest.java` ≥1. (This tightens the wiring test's scope so M1-044b's splice does not collateral-damage it via the unknown-DM contact path — the same defect the handoff describes.)"
+  - "Total @Test count across the 5 refactored classes is ≥ pre-refactor count (no test scenario silently dropped). Pre-refactor count: AddSourceCommandHandlerTest=9, AddSourceBanCheckOrderingTest=3, SummaryCommandHandlerTest=10, HelpCommandHandlerTest=4, AdapterRegistryTest=3 → total 29. Verify: `grep -hcE '^\\s*@Test' infochat-provider/src/test/java/app/zcat/infochat/provider/command/AddSourceCommandHandlerTest.java infochat-provider/src/test/java/app/zcat/infochat/provider/command/AddSourceBanCheckOrderingTest.java infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryCommandHandlerTest.java infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/HelpCommandHandlerTest.java infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/AdapterRegistryTest.java | awk '{s+=$1}END{print s}'` returns ≥29"
+  - "mvn -B clean verify exits 0 — every refactored test passes against the existing production code (no production handler is modified). The `*IT.java` integration tests (AddSourceIT, SummaryIT, AddSourceAdapterScopeIT, SummaryAdapterScopeIT, AdapterRouterIT) also stay green — they continue to provide full-chain coverage at the IT layer per the new pyramid convention"
+test_plan:
+  adds:
+    - docs/process/test-pyramid.md
+  modifies:
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/command/AddSourceCommandHandlerTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/command/AddSourceBanCheckOrderingTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryCommandHandlerTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/HelpCommandHandlerTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/AdapterRegistryTest.java
+  preserves:
+    - all tests currently green on main outside files_scope
+    - InboundRouterTest, InboundRouterIntakeOrderingTest (does not exist on main yet — M1-044b creates it), InboundRouterNormalizeTest, InboundRouterContactIdRedactionTest — router-tier tests stay as-is
+    - all `*IT.java` integration tests
+    - all SPI-tier tests (RateCapBucketTest, InviteCodeConsumerTest, BanCheckTest, AutoRegisterServiceTest, etc.) — these test individual services, already at the right layer
+spec_refs: []
+decision_refs: []
+reviews: []
+escalations: []
+revisions: []
+overrides: []
+aborted_attempts: []
+reopens: []
+redteam_findings: []
+clarity_check: {}
+---
+
+# M1-049: Process fix D — test pyramid (handler/router/IT decoupling)
+
+## Context
+
+Subticket of [[M1-047]]. The structural fix for the defect class M1-044b's premise-fail #2 surfaced.
+
+The defect class: handler tests exercise the full `adapter → router → handler` chain via `@QuarkusTest + adapter.deliverDm()`. When the router changes (e.g. M1-044b's splice adds invite gate / ban check before dispatch), handler test outcomes change too — even though the handler under test is unmodified. The fix: handler tests call `handler.handle(scope, body)` directly with mocked collaborators. Router tests exercise `router.onMessage()` with mocked handlers. Integration tests cover the full chain at the IT layer.
+
+After D lands, M1-044b's "M1-035c/M1-036/M1-037/M1-039/M1-040 tests stay green unchanged" claim DISSOLVES — those handler tests no longer exercise the router, so router changes can't break them. The 7 failures M1-044b surfaced (5 unknown-DM + 2 banned-DM) all happened in `AddSourceCommandHandlerTest` + `AddSourceBanCheckOrderingTest`; under D those tests don't reach the router at all.
+
+[[M1-048]] (A) is the procedural backstop; this is the structural fix. [[M1-050]] (E) is the API-contract complement.
+
+## Definition of Done
+
+- New `docs/process/test-pyramid.md` convention doc with three layer sections.
+- 5 handler-tier test classes refactored:
+  - **Full refactor**: AddSourceCommandHandlerTest (9 @Test), AddSourceBanCheckOrderingTest (3 @Test), SummaryCommandHandlerTest (10 @Test) — drop `@QuarkusTest`, drop `adapter.deliverDm`, call `handler.handle()` direct with mocks.
+  - **Light touch**: HelpCommandHandlerTest (4 @Test) — already calls `handler.handle()` direct; only drop `@QuarkusTest` + `@Inject`.
+  - **Tighten assertions**: AdapterRegistryTest (3 @Test) — stays a wiring test; assertion narrows from "router dispatches AND emits UNKNOWN_COMMAND_REPLY" to "router was invoked with the body." The reply-content check is already in InboundRouterTest.
+- Total @Test count ≥ 29 (no scenario silently dropped).
+- `mvn -B clean verify` exits 0.
+
+## Implementation notes
+
+- **Mock library.** Project already uses Mockito for InboundRouterTest. Reuse the same pattern: `Mockito.mock(...)`, `when(...).thenReturn(...)`, `verify(...)`. No new dependency.
+- **Handler construction.** Each handler is a CDI bean today; construct directly via `new AddSourceCommandHandler()` and assign fields (`handler.urlProbe = mockUrlProbe`; etc.). The current package-private field assignment pattern (already used in InboundRouterTest) carries over. If a handler has a constructor that wires fields, use it; if it uses field injection, assign directly.
+- **`bundleLoader` mocking.** The production `BundleLoader` is class, not interface. Use `Mockito.mock(BundleLoader.class)` or extend it with a recording subclass (HelpCommandHandlerTest already has `RecordingBundleLoader` — copy the pattern).
+- **`DataSource` mocking.** Tests that exercise SQL paths today via real Postgres (through `@QuarkusTest`) must mock `DataSource`, `Connection`, `PreparedStatement`, `ResultSet` — verbose but mechanical. Consider extracting a small `H2DataSource` test fixture if the boilerplate is heavy (out of scope here unless boilerplate dominates).
+- **Helper extraction.** If three handler tests need similar collaborator stubs (mock DataSource, mock BundleLoader), a `HandlerTestFixture` helper may be useful (not in this ticket's `files_scope`; extracting it would require a refine to widen files_budget and add the helper path to `files_scope`). If the boilerplate stays bounded per test class, skip the helper entirely.
+- **AdapterRegistryTest's specific change.** The pre-refactor test asserts the round-trip produces UNKNOWN_COMMAND_REPLY. Post-refactor: assert the router's `onMessage` was invoked with the delivered body (via Mockito `verify(router).onMessage(...)`). The reply-content assertion stays in InboundRouterTest's `unknownCommandProducesFriendlyUnknownCommandReply` (already there). This tightening is what makes the test M1-044b-collateral-resistant.
+- **The convention doc shape.** Three top-level sections — `## Handler unit tests`, `## Router unit tests`, `## Integration tests` — each ~10-20 lines naming the layer's collaborators, examples, and forbidden patterns (e.g. handler layer MUST NOT call `adapter.deliverDm` or `router.onMessage`). Add a brief preamble citing the M1-044b premise-fail #2 incident as the motivating example. Length target: ~80-120 lines total.
+- **Rename map for each refactored class.** §Authorized test changes enumerates the pre→post test-method-name map. The acceptance items 3, 5 cite specific name-substrings; the rename map confirms each rename respects the substring preservation. Test-integrity check passes because the renames are authorized + behavioral coverage is preserved.
+
+## Big-picture notes
+
+- **Why the full refactor (not selective).** User chose option (a) — selective would leave the rest of the handler-via-router test pattern in place as a future trap. Once D's pattern is set, future handler tests follow it; the old pattern atrophies.
+- **Why HelpCommandHandlerTest is light touch.** It already follows the pattern (constructs handler, calls `.handle()` direct, mocks bundleLoader). The only un-pyramid thing is `@QuarkusTest`. Dropping that + `@Inject` is mechanical.
+- **Why AddSourceBanCheckOrderingTest stays (for now).** On current main, the ban check lives in `AddSourceCommandHandler` (per M1-039), NOT in InboundRouter. The "ban before probe" ordering is a handler-internal concern. After M1-044b lands the splice, the ban check moves to InboundRouter and this class becomes redundant; M1-044b's eventual refine will delete it (the ordering moves to InboundRouterIntakeOrderingTest scenario (f) — see M1-044b's existing acceptance item 12).
+- **Why AdapterRegistryTest stays at the wiring layer.** Its purpose is to prove the SPI wiring (AdapterRegistry → InMemoryAdapter → InboundRouter round-trip), not to verify command behavior. Tightening the assertion to "router was invoked" preserves the wiring claim without coupling the test to any particular command's reply text.
+- **After D + M1-044b refine: clean state.** The handler tests no longer break when the router changes; future router changes affect only InboundRouterTest + InboundRouterIntakeOrderingTest + the ITs. The "stays green" claim becomes self-evidently true rather than load-bearing.
+
+## Out-of-scope expansion
+
+- **No production handler changes.** AddSourceCommandHandler, SummaryCommandHandler, HelpCommandHandler stay byte-for-byte unchanged.
+- **No router changes.** InboundRouter is not in files_scope. M1-044b's splice still needs to land separately.
+- **No IT changes.** AddSourceIT, SummaryIT, AddSourceAdapterScopeIT, SummaryAdapterScopeIT, AdapterRouterIT continue to do the full-chain assertion at the IT layer. They serve as the spec-conformance backstop the handler-tier tests can no longer provide.
+- **No SPI-tier test changes.** RateCapBucketTest, InviteCodeConsumerTest, BanCheckTest, AutoRegisterServiceTest already exercise individual services in isolation — already at the correct pyramid layer.
+- **No new fixture extraction unless boilerplate demands it.** A `HandlerTestFixture` helper is permissible but adds a file; defer unless the per-class boilerplate is dominating.
+
+## Authorized test changes
+
+- `AddSourceCommandHandlerTest.java` (M1-036): full refactor per §Implementation notes. All 9 @Test methods preserved with name-substring continuity (see acceptance item 3). Authorized rename map (pre → post): TBD by implementer; the post-rename name must contain the substring cited in the per-method grep so the acceptance check passes.
+- `AddSourceBanCheckOrderingTest.java` (M1-039): full refactor per §Implementation notes. All 3 @Test methods preserved; `bannedDmUserReceivesFixedBanReply` substring preserved per acceptance item 4.
+- `SummaryCommandHandlerTest.java` (M1-037): full refactor per §Implementation notes. All 10 @Test methods preserved.
+- `HelpCommandHandlerTest.java` (M1-035c): light touch — drop `@QuarkusTest` + `@Inject`. All 4 @Test methods preserved with original names per acceptance item 6 (specifically `replyContainsHeaderAndThreeMvpCommandShortHelpLines` cited).
+- `AdapterRegistryTest.java` (M1-008b): tighten assertion in `singleAdapterHappyPathActivatesInMemoryAndRegistersRouter` from reply-content check to wiring check (router was invoked). The method name is preserved per acceptance item 7.
+
+## Alternatives considered
+
+- **Additive D (keep old tests, add new direct-handler tests alongside).** Rejected by user 2026-05-21 — the old tests stay a tripwire for future router changes; defect class survives.
+- **Selective D (refactor only the 7 currently-failing tests).** Rejected by user 2026-05-21 — cheapest but leaves rest of pattern in place; future handler tests likely copy the @QuarkusTest pattern from the un-refactored examples.
+- **Extract `HandlerTestFixture` as part of this ticket.** Considered; deferred unless the per-class boilerplate dominates. If extracted, file added via refine (budget bump 8 → 9).
+- **Split into D1 (convention doc + AddSourceCommandHandlerTest as proof) + D2 (apply to remaining 4).** Considered; rejected to land the full pattern atomically. The risk is that D1 lands with a half-converted suite and the second half drifts. files_budget: 8 fits all 6 files (5 tests + 1 doc).

@@ -1,10 +1,80 @@
 ---
 id: M1-044b
 title: InboundRouter intake-step splice (1.5, 2, 4, 7-DM-gate) + bundle keys + rate-cap config
-status: pending
+status: deferred
 created: 2026-05-20
 last_updated: 2026-05-21
+deferred_on: M1-047
+deferred_reason: blocked-on-new-ticket
 escalations:
+  - date: 2026-05-21
+    reason: premise-fail
+    reviewer_verdict_excerpt: |
+      Trigger context (developer one-liner):
+
+      Round-1 mvn verify (target/m1-tick-test-M1-044b-r1.log) on
+      the refined ticket — AFTER applying the three authorized
+      helper edits (AdapterRegistryTest @BeforeEach alice pre-seed
+      + InboundRouterContactIdRedactionTest newRouter() fakes +
+      InboundRouterNormalizeTest at-cap-router fakes) — reports
+      7 failures, ALL outside files_scope:
+
+      (1) AddSourceCommandHandlerTest (6 failures)
+            - inboundRouterDispatchesAddSourceToHandlerExactlyOnce
+              (UrlProbe.probe called 0 times — handler never ran)
+            - dmNonBannedNonAdminProceedsAndProducesFreshInsertReply
+              ("got: Access requires an invitation.")
+            - dmBannedUserRejectsBeforeProbe
+              ("got: Your access has been revoked.")
+            - ambiguousUrlWithHtmlContentTypeSurfacesAmbiguousFriendlyError
+              ("got: Access requires an invitation.")
+            - branchBSubscribedExistingReplyOmitsUrlVisibilityDisclosure
+              ("got: Access requires an invitation.")
+            - rssPathUrlContradictedByHtmlContentTypeSurfacesAmbiguous
+              ("got: Access requires an invitation.")
+      (2) AddSourceBanCheckOrderingTest (1 failure)
+            - bannedDmUserReceivesFixedBanReply
+              ("got: Your access has been revoked.")
+
+      Two failure modes, both flowing from the splice behaving
+      EXACTLY as the spec requires:
+
+      Mode A (5 unknown-DM failures) — tests call
+        adapter.deliverDm("m1-036h-<x>", "/add-source ...")
+      with contact_ids that have NO users row. Pre-M1-044b,
+      AutoRegisterService UPSERTed mid-flight; post-splice, step 2
+      (DM unknown → InviteCodeConsumer → Rejected) fires and the
+      handler never runs. Reply is the M1-044b ERROR_INVITE_REQUIRED
+      literal ("Access requires an invitation.") instead of the
+      handler's URL-disclosure / ambiguous-url / subscribed-existing
+      literal.
+
+      Mode B (2 banned-DM failures) — tests pre-seed an
+      is_banned=true users row and expect each handler's own
+      bundle ("error.add_source.banned" → "You are not permitted
+      to add sources."). Post-splice, step 4 fires first with
+      the fixed M1-044b ERROR_BAN_FIXED literal ("Your access has
+      been revoked.") — exactly what spec §User ban mandates:
+      "Banned user receives one fixed reply per inbound message,
+      regardless of input." The handler-level ban-message is
+      now dead code by spec.
+
+      Why this is premise-fail (not a refine-the-current-tests
+      defect): the ticket's Out-of-scope expansion explicitly
+      asserts "M1-035c/M1-036/M1-037/M1-039/M1-040 tests stay
+      green unchanged — those existing tests seed registered
+      users (or stub the relevant collaborators) so the new
+      gates pass through them." That premise is verifiably FALSE
+      for these 7 tests — the unknown-DM tests do NOT pre-seed
+      users rows, and the banned-DM tests cannot satisfy the
+      handler-level expectation post-splice. Acceptance item 18
+      (mvn -B clean verify exits 0) cannot pass without modifying
+      out-of-scope tests. The prior premise-fail refine (commit
+      ae1c02c) addressed 3 in-scope test classes (Adapter /
+      Normalize / Redaction NPEs) and missed the AddSource*
+      collateral — sibling [[feedback-out-of-scope-stays-green-verifiable]]
+      captures the structural gap.
+
   - date: 2026-05-21
     reason: clarity-warn
     reviewer_verdict_excerpt: |
@@ -116,6 +186,7 @@ escalations:
       add an Out-of-scope expansion carve-out.
 blocked_by:
   - M1-044a
+  - M1-047
 files_budget: 13
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/InboundRouter.java
@@ -368,6 +439,14 @@ revisions:
       single-snapshot reuse pattern (derive both the emptiness predicate
       and the ban predicate from the SAME UserSnapshot lookup to
       eliminate TOCTOU).
+outline_file: target/m1-tick-outline-M1-044b.md
+clarity_check:
+  date: 2026-05-21
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE: Acceptance items 1, 3, 5, 6, 7 contain source-order reading checks or behavioral prose assertions without runnable commands. Behavioral coverage is provided by InboundRouterIntakeOrderingTest (item 12) which covers all 8 scenarios with mock-verified collaborator sequences. Not a blocker; the runnable equivalent is present."
+    - "SELF-CONTAINED-CHECK: §Definition of Done bullet for InboundRouterIntakeOrderingTest reads 'six DM scenarios + the group scenario' (7 total) but acceptance item 12 enumerates scenarios (a)–(g) as DM (7 DM scenarios) + (h) as Group = 8 total. An implementer reading only the DoD prose might implement 6 DM scenarios and miss scenario (g) (the DM-gate group_only carve-out test — a load-bearing security assertion). The acceptance items are authoritative and fully specify all 8 scenarios with named greps, so this is a DoD-prose inaccuracy rather than a structural gap. Recommend updating the DoD bullet to 'seven DM scenarios + the group scenario' to match the acceptance enumeration."
+  blockers: []
 ---
 
 # M1-044b: InboundRouter intake-step splice (1.5, 2, 4, 7-DM-gate) + bundle keys + rate-cap config
