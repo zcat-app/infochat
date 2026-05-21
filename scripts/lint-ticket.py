@@ -59,13 +59,21 @@ The six checks (severity, rationale):
     too, unless the section contains an explicit "inner class of X"
     disclaimer. Catches M1-026/30/32/33/35a/44a.
 
-  HETEROGENEOUS-AGGREGATE-TEST-COUNT   BLOCKER
-    Acceptance items asserting `grep -E '@Test' <file> returns ≥N`
-    with N >= 3 collapse structurally-different test methods into
-    one count. Recommend per-method greps. Catches M1-026/27/28/33/
-    44b. Promoted from WARN to BLOCKER after M1-044b clarity-warn
-    almost slipped past — the recurring-pattern memory already
-    classifies this as a hard-no.
+  HETEROGENEOUS-AGGREGATE-COUNT        BLOCKER
+    Acceptance items asserting an aggregate count ≥N (N >= 3) over
+    a grep-shaped predicate that exhibits any of three "collapse"
+    signals: (a) the grep pattern is `@Test` in any anchor variant
+    (`'@Test'`, `'^\\s*@Test'`, …), (b) the grep targets two or
+    more `.java` paths in one backtick block, or (c) an `awk`-sum
+    pipe (`| awk '{s+=…}'`) follows the grep. Each signal indicates
+    structurally-different elements collapsed into one number; a
+    per-element grep (one per named target, or per-named test
+    method) is the documented fix. Catches M1-026/27/28/33/44b
+    (single-file `@Test` variant) and M1-049 (multi-file + awk-sum
+    variant — the originally-narrow regex missed the latter, which
+    triggered the 2026-05-21 widening). Promoted from WARN to
+    BLOCKER on commit 01b76f6 (2026-05-21); broadened beyond
+    `@Test`-only the same day after M1-049 clarity-fail.
 
   UNDEFINED-SYMBOL-COUNT     BLOCKER
     Acceptance grep predicates whose count expression contains a
@@ -518,15 +526,62 @@ def check_files_scope_coverage(fm, body):
     return findings
 
 
-# ---------- check 4: heterogeneous-aggregate @Test count ----------
+# ---------- check 4: heterogeneous-aggregate count ----------
 
-# Match `grep -E '@Test' <file>.java` followed by some prose and "≥N" / ">=N" / "at least N".
-AGGREGATE_TEST_RE = re.compile(
-    r"`grep\s+-c?E\s+['\"]@Test['\"]\s+\S+\.java`"
-    r"[^.]*?"
-    r"(?:≥|>=|at\s+least)\s*(\d+)\s*match",
+# Backtick-delimited block containing a `grep` command. Anchored on the
+# whole block so an item with multiple greps yields one match per block.
+_GREP_BLOCK_RE = re.compile(r"`([^`]*\bgrep\b[^`]*)`")
+
+# Two or more `.java` paths inside a single backtick block. Indicates a
+# multi-file grep target — the aggregate collapses per-file counts.
+_MULTI_JAVA_RE = re.compile(r"\.java\b.*?\.java\b", re.DOTALL)
+
+# An `awk` pipe summing input values. The accumulator name is conventional
+# (`s+=`, `sum+=`, `total+=`); the recurring shape is the only one we catch.
+# Detection is intentionally narrow — a non-summing awk pipe (e.g. printing
+# matched lines) is not an aggregate-collapse signal.
+_AWK_SUM_PIPE_RE = re.compile(
+    r"\|\s*awk\b[^']*'[^']*\b(?:[a-z_]\w*\s*\+=|sum\s*=|total\s*=)",
     re.IGNORECASE,
 )
+
+# A grep -E pattern argument that literally contains the `@Test` annotation,
+# with or without anchors / whitespace prefix. Matches `'@Test'`,
+# `'^\s*@Test'`, `'@Test\b'`, `"@Test"`. The flag-letter prefix accepts any
+# combination ending in `E` (so `-E`, `-cE`, `-hcE`, `-iE`, … all match).
+_AT_TEST_PATTERN_RE = re.compile(
+    r"-[a-zA-Z]*E\s+['\"][^'\"]*@Test\b[^'\"]*['\"]"
+)
+
+# Count phrasing that may follow a grep block: `≥N`, `>=N`, `at least N`,
+# `returns N`, `returns ≥N`, `summing to N`, `totaling N`. Captures N.
+# Deliberately broader than the legacy regex (which required a trailing
+# `match`/`matches`): today's incident showed authors writing `returns ≥29`
+# with no `match` suffix.
+_COUNT_PHRASE_RE = re.compile(
+    r"(?:"
+    r"returns?\s*(?:≥|>=)?\s*"
+    r"|≥\s*"
+    r"|>=\s*"
+    r"|at\s+least\s+"
+    r"|summing\s+to\s*(?:≥|>=)?\s*"
+    r"|totaling\s*(?:≥|>=)?\s*"
+    r")"
+    r"(\d+)",
+    re.IGNORECASE,
+)
+
+
+def _aggregate_signals(block):
+    """Return the aggregate-shape signal labels present in a grep block."""
+    signals = []
+    if _AT_TEST_PATTERN_RE.search(block):
+        signals.append("@Test pattern")
+    if _MULTI_JAVA_RE.search(block):
+        signals.append("multi-file target")
+    if _AWK_SUM_PIPE_RE.search(block):
+        signals.append("awk-sum pipe")
+    return signals
 
 
 def check_heterogeneous_aggregate(acceptance):
@@ -536,15 +591,49 @@ def check_heterogeneous_aggregate(acceptance):
     for idx, item in enumerate(acceptance, start=1):
         if not isinstance(item, str):
             continue
-        for m in AGGREGATE_TEST_RE.finditer(item):
-            n = int(m.group(1))
-            if n >= 3:
-                findings.append(_finding(
-                    "HETEROGENEOUS-AGGREGATE-TEST-COUNT", "BLOCKER", idx,
-                    m.group(0),
-                    f"aggregate @Test count ≥{n} collapses structurally-different "
-                    f"tests; split into per-method greps naming each test by name",
-                ))
+        for m in _GREP_BLOCK_RE.finditer(item):
+            block = m.group(1)
+            signals = _aggregate_signals(block)
+            if not signals:
+                continue
+            # Look in the text following this block (bounded by the next
+            # period or the next backtick — whichever comes first — and
+            # capped at 300 chars) for the count phrasing that belongs to
+            # this grep. The bound keeps an unrelated `≥N` later in the
+            # same item from being mis-attributed.
+            tail = item[m.end():]
+            for sep in (".", "`"):
+                if sep in tail:
+                    tail = tail.split(sep, 1)[0]
+            cm = _COUNT_PHRASE_RE.search(tail[:300])
+            if not cm:
+                continue
+            n = int(cm.group(1))
+            if n < 3:
+                continue
+            command_snippet = m.group(0)
+            if len(command_snippet) > 160:
+                command_snippet = command_snippet[:160] + "…"
+            if "@Test pattern" in signals:
+                detail = (
+                    f"aggregate `@Test` count ≥{n} collapses "
+                    f"structurally-different test methods into one number; "
+                    f"split into per-method greps naming each test by name. "
+                    f"See feedback_no_heterogeneous_aggregate_test_counts.md."
+                )
+            else:
+                shape = " + ".join(signals)
+                detail = (
+                    f"aggregate count ≥{n} over {shape} collapses "
+                    f"heterogeneous elements into a single sum; replace with "
+                    f"per-element greps (one per named target) so per-target "
+                    f"regressions are individually detectable."
+                )
+            findings.append(_finding(
+                "HETEROGENEOUS-AGGREGATE-COUNT", "BLOCKER", idx,
+                command_snippet,
+                detail,
+            ))
     return findings
 
 
