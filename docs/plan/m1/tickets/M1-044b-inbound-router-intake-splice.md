@@ -3,12 +3,13 @@ id: M1-044b
 title: InboundRouter intake-step splice (1.5, 2, 4, 7-DM-gate) + bundle keys + rate-cap config
 status: pending
 created: 2026-05-20
-last_updated: 2026-05-20
+last_updated: 2026-05-21
 blocked_by:
   - M1-044a
-files_budget: 8
+files_budget: 10
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/InboundRouter.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/RateCapBucket.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
   - infochat-provider/src/main/resources/bundles/en.properties
   - infochat-provider/src/main/resources/application.properties
@@ -16,6 +17,7 @@ files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterNormalizeTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterContactIdRedactionTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/RateCapBucketTest.java
 complexity: high
 risk: high
 round_cap: 3
@@ -23,7 +25,7 @@ security_relevant: true
 migration_touch: false
 out_of_scope:
   - any change to the spec — §Authorization model is the source of truth; this ticket implements step 1.5/2/4/7-DM-gate verbatim
-  - any change to the M1-044a services (RateCapBucket, InviteCodeConsumer, BanCheck, AutoRegisterService, V12 migration) — those are M1-044a's commit and consumed unchanged via @Inject
+  - any change to M1-044a's InviteCodeConsumer, BanCheck, AutoRegisterService, or the V12 migration — those are M1-044a's commit and consumed unchanged via @Inject. RateCapBucket.java is the ONE exception: per the /redteam M1-044a low-severity DOS finding (verdict file docs/plan/m1/redteam/M1-044a-2026-05-21.md), this ticket widens the eviction predicate to evict drained idle buckets — see acceptance item 15 and Implementation notes §"Rate-cap eviction-predicate fix"
   - any new admin command handler — M1-044c territory
   - any /vouch handler — M1-045 territory
   - any /grant-admin / /revoke-admin handler — M1-046 territory
@@ -50,21 +52,25 @@ acceptance:
   - "InboundRouterIntakeOrderingTest pins the step ordering via a unit test that constructs InboundRouter with mock collaborators (the four services from M1-044a) and a fake CommandHandler, driving onMessage with synthetic InboundMessages, and asserting (via mock interactions in order): (a) for a DM with a body that exceeds the size cap → only the size-cap branch fires, no other collaborator; (b) for a DM that is over rate cap → rateCapBucket consulted, nothing else, no outbound; (c) for a DM that is under rate cap with an empty body after normalize → no further collaborators; (d) for a DM from an unknown contact_id with a valid invite body → rateCapBucket → normalize → inviteCodeConsumer (returns Accepted) → outbound is the welcome, banCheck NOT consulted, handleSlash NOT called; (e) for a DM from an unknown contact with an invalid body → rateCapBucket → normalize → inviteCodeConsumer (returns Rejected) → outbound is error.invite.required, banCheck NOT consulted; (f) for a DM from a known is_banned=true contact → rateCapBucket → normalize → users lookup → banCheck (returns true) → outbound is error.ban.fixed, no handleSlash; (g) for a DM from a known `group_only` contact with `/help` body → rateCapBucket → normalize → banCheck (returns false) → handleSlash → DM-gate post-check fires → outbound is error.invite.required (NOT the /help reply); (h) for a Group `@mention` from unknown contact → rateCapBucket → normalize → autoRegisterService.resolveOrRegisterGroup → banCheck → handleSlash → outbound is the dispatch reply. `grep -E '@Test' InboundRouterIntakeOrderingTest.java` returns ≥6 matches (matching the 6 distinct DM scenarios above; the group scenario MAY be a separate test or folded into the same class)"
   - "InboundRouterTest is updated to extend (NOT replace) M1-035b's existing dispatch + chat-mode + unknown-command tests with one new test that asserts the rate-cap branch silently drops with no outbound (the cap-overflow case). M1-035b's existing test methods continue to pass unchanged. `grep -E '@Test' InboundRouterTest.java` returns ≥(N+1) matches where N is the count before this ticket"
   - "InboundRouterNormalizeTest (M1-035b) and InboundRouterContactIdRedactionTest (M1-038) continue to pass without ANY modification — the size cap, normalize pass, and ContactIds.redact log-redaction behavior are preserved unchanged. These two files appear in files_scope only so the reviewer can verify they were NOT inadvertently modified (negative-space check). Verify: `git diff main -- infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterNormalizeTest.java` returns ZERO changes AND the same for InboundRouterContactIdRedactionTest.java"
-  - "mvn -B clean verify from the repo root exits 0; every prior test continues to pass: M1-003 @QuarkusTest stubs, M1-007/007a/b/c, M1-008/008a/b/c, M1-022..M1-026, M1-027/028, M1-032/033/034a/034b, M1-035/035a/b/c/d, M1-036, M1-037, M1-038, M1-039, M1-040, M1-043, plus M1-044a's per-service tests"
+  - "RateCapBucket.evictIdleBuckets widens the eviction predicate per the /redteam M1-044a DOS finding (verdict file docs/plan/m1/redteam/M1-044a-2026-05-21.md). The M1-044a predicate evicts only buckets where `tokens == inboundPerMinute` AND idle past threshold; a drained-and-abandoned bucket never refills (refill is lazy inside tryAcquire) so it stays pinned forever. The fix removes the tokens-equality requirement: eviction fires whenever the bucket has been idle past the threshold, regardless of token count. A returning contact pays a one-time bucket-cold cost (a new Bucket allocated full). Verify: `grep -nE 'tokens\\s*==\\s*inboundPerMinute' RateCapBucket.java` returns ZERO matches in the evictIdleBuckets method (the structural assertion that the equality gate has been removed)"
+  - "RateCapBucketTest has a @Test method whose name contains `evictionDrainedIdle` (case-insensitive) that asserts the widened eviction: seed a bucket via N tryAcquire calls that drain it to ≤0 tokens, advance the test Clock past the eviction threshold without further tryAcquire calls, run the eviction sweep, and assert the bucket entry is removed from the underlying map. Verify: `grep -iE 'void\\s+\\w*evictionDrainedIdle\\w*\\s*\\(' RateCapBucketTest.java` returns ≥1 match"
+  - "mvn -B clean verify from the repo root exits 0; every prior test continues to pass: M1-003 @QuarkusTest stubs, M1-007/007a/b/c, M1-008/008a/b/c, M1-022..M1-026, M1-027/028, M1-032/033/034a/034b, M1-035/035a/b/c/d, M1-036, M1-037, M1-038, M1-039, M1-040, M1-043, plus M1-044a's per-service tests (RateCapBucketTest's four M1-044a methods continue to pass under the widened eviction predicate)"
 test_plan:
   adds:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterIntakeOrderingTest.java
   modifies:
     - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/InboundRouter.java
+    - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/RateCapBucket.java
     - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
     - infochat-provider/src/main/resources/bundles/en.properties
     - infochat-provider/src/main/resources/application.properties
     - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/RateCapBucketTest.java
   preserves:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterNormalizeTest.java (M1-035b — verbatim)
     - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterContactIdRedactionTest.java (M1-038 — verbatim)
     - all tests currently green on main
-    - M1-044a's per-service tests
+    - M1-044a's InviteCodeConsumerTest / BanCheckTest / AutoRegisterServiceTest / AdapterRouterIT (RateCapBucketTest is extended, not preserved)
 spec_refs:
   - docs/spec/security.md §Authorization model
   - docs/spec/security.md §User ban
@@ -76,6 +82,44 @@ decision_refs:
   - D44
   - D45
   - D46
+revisions:
+  - date: 2026-05-21
+    reason: redteam-finding fold-in (M1-044a DOS-low + AUTH-BYPASS-low)
+    summary: |
+      /redteam M1-044a (verdict file docs/plan/m1/redteam/M1-044a-2026-05-21.md)
+      returned 4 findings; the 2 medium findings landed in the new M1-044d
+      remediation ticket. The 2 low findings are folded here per user direction:
+
+      DOS (low) — RateCapBucket.evictIdleBuckets requires `tokens == cap`
+      AND idle past threshold; drained-and-abandoned buckets never refill
+      (refill is lazy inside tryAcquire) so they stay pinned. Fix folded
+      into this ticket: drop the tokens-equality gate; evict on idle alone.
+      Changes:
+        - files_scope: added RateCapBucket.java + RateCapBucketTest.java
+        - files_budget: 8 → 10
+        - acceptance: added 2 items (eviction-predicate widening +
+          evictionDrainedIdle test method)
+        - test_plan.modifies: added RateCapBucket.java + RateCapBucketTest.java
+        - Implementation notes: added §"Rate-cap eviction-predicate fix"
+        - Authorized test changes: added RateCapBucketTest.java entry
+        - out_of_scope: carved out the RateCapBucket.java exception with
+          explicit cross-reference to the verdict file
+      The RateCapBucket modification is a contained surgical edit (single
+      method body) that does NOT cross-cut with the splice work; the
+      reviewer's scope-drift check will see two distinct concern groups
+      (intake-step splice; eviction fix) bound to two distinct acceptance
+      blocks (items 1-13 + 17 splice; items 15-16 eviction). This is the
+      smallest viable shape that avoids creating a third tiny remediation
+      ticket for a one-method change.
+
+      AUTH-BYPASS (low) — InviteCodeConsumer.consume defaults open;
+      M1-044b's existing acceptance items 3 (Step 2 emptiness
+      precondition) and 5 (Step 4 ban check after step 2/3) already
+      enforce the caller-side gating that prevents the scenario. NO new
+      acceptance items needed; a Big-picture note was added pinning the
+      single-snapshot reuse pattern (derive both the emptiness predicate
+      and the ban predicate from the SAME UserSnapshot lookup to
+      eliminate TOCTOU).
 ---
 
 # M1-044b: InboundRouter intake-step splice (1.5, 2, 4, 7-DM-gate) + bundle keys + rate-cap config
@@ -280,6 +324,29 @@ unit test in particular).
   constructs the router with a `RateCapBucket` mock that
   returns `false`, asserts no reply was sent, and asserts no
   downstream service was consulted.
+- **Rate-cap eviction-predicate fix (folded /redteam M1-044a DOS
+  finding).** `RateCapBucket.evictIdleBuckets` (M1-044a) requires
+  `bucket.tokens == inboundPerMinute` AND idle past threshold;
+  refill is lazy (only `tryAcquire` advances
+  `lastRefillEpochMillis`), so a bucket drained-and-abandoned by
+  its contact never refills back to cap and is pinned forever.
+  Fix: drop the tokens-equality gate from the eviction predicate.
+  Evict on idle alone — `lastRefillEpochMillis < NOW() -
+  evictionThreshold`. The eviction-sweep cost stays the same; the
+  memory-bound becomes "buckets per (adapter, contactId) active in
+  the last evictionThreshold window," not "buckets per
+  (adapter, contactId) ever seen." A returning contact whose
+  bucket has been evicted pays a one-time bucket-cold cost
+  (`computeIfAbsent` allocates a fresh bucket at full token count).
+  This is the same behavior a process restart would produce for a
+  long-idle contact, so the bound is conservative.
+  - RateCapBucketTest gains one new method (`evictionDrainedIdle`
+    per acceptance item 16). The M1-044a `RateCapBucketTest`'s four
+    existing tests (underCap, overCap, independent, refill) MUST
+    continue to pass — they each issue a tryAcquire that resets
+    `lastRefillEpochMillis`, so no eviction would have fired
+    under either the M1-044a or M1-044b predicate within their
+    timeframes.
 
 ## Big-picture notes
 
@@ -309,6 +376,24 @@ unit test in particular).
   InboundRouter.onMessage again to insert that one step;
   this ticket's commit leaves a deliberate comment at the
   step 4 / step 6 transition naming the M1-045 seam.
+- **/redteam M1-044a AUTH-BYPASS finding (low) — caller-side
+  gating is the load-bearing defense.** Verdict file
+  docs/plan/m1/redteam/M1-044a-2026-05-21.md flagged that
+  `InviteCodeConsumer.consume` does not itself verify no `users`
+  row exists for `(adapter, contactId)` — it defaults open and
+  relies on the caller to enforce the precondition. This ticket
+  IS that caller, and acceptance items 3 (Step 2 — only when
+  `users.findByContactId(adapter, contactId)` is empty) and 5
+  (Step 4 ban check runs AFTER step 2/3 resolved the user) pin
+  the gating order that prevents the scenario. The implementer
+  MUST treat acceptance item 3's emptiness precondition as
+  non-negotiable: if the users-row lookup returns a row (any
+  registration_state, any is_banned value), `consume` MUST NOT
+  be invoked. The local `UserSnapshot` record (see the users-
+  SELECT-shape note above) is the single source of truth for
+  the lookup — derive both the step-2 emptiness predicate and
+  the step-4 ban predicate from the SAME snapshot to eliminate
+  TOCTOU between the two checks.
 
 ## Out-of-scope expansion
 
@@ -337,6 +422,12 @@ unit test in particular).
 
 - `InboundRouterTest.java` — M1-035b's class is **extended**
   (one new test method) but no prior method is modified.
+- `RateCapBucketTest.java` — M1-044a's class is **extended**
+  (one new `evictionDrainedIdle` test method per acceptance
+  item 16) but no prior method is modified. The four M1-044a
+  methods (underCap, overCap, independent, refill) MUST stay
+  green under the widened eviction predicate; the new method
+  exercises only the previously-untested drained-and-idle case.
 - (no other pre-existing test is modified by this ticket.)
 - The `InboundRouterNormalizeTest.java` (M1-035b) and
   `InboundRouterContactIdRedactionTest.java` (M1-038) appear

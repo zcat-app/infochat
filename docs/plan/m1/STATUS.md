@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 6 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 49 |
 | deferred | 7 |
-| **total** | **61** |
+| **total** | **62** |
 
 ---
 
@@ -26,6 +26,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-044b — InboundRouter intake-step splice (1.5, 2, 4, 7-DM-gate) + bundle keys + rate-cap config (complexity: high, risk: high)
 - M1-044c — Admin command handlers — /ban, /unban, /invite create/list/revoke (complexity: high, risk: high)
+- M1-044d — Contact-id redaction + breach-audit ordering (M1-044a fixes) (complexity: low, risk: medium)
 
 ---
 
@@ -191,4 +192,5 @@ M1-044a (done)
   │     └── M1-044 (pending) [see above]
   └── M1-044c (pending) ← runnable
         └── M1-044 (pending) [see above]
+M1-044d (pending) ← runnable
 ```
