@@ -385,6 +385,97 @@ count claim is satisfiable AND committed to a specific value —
 and surfaces the aggregate-count authoring smell so the per-element
 pattern can replace it.
 
+### 11. ACCEPTANCE-ORDERING-CONSISTENT — ordered sequences across acceptance items, the DoD, and the Implementation notes agree
+
+Checks #1 and #10 audit each acceptance item against external state
+(runnability, DoD-fragment cardinality). This check fires the forcing
+function against a distinct class of bug: a ticket whose acceptance
+items contradict *each other* (or the DoD, or the Implementation notes)
+about the ORDER in which steps execute. The developer cannot satisfy
+both — implementing item A makes item B fail, and vice versa. Round-1
+clarity has historically classified such items as form-level WARN under
+ACCEPTANCE-RUNNABLE ("source-order reading check") without reading the
+content of the claim against any other claim in the same ticket. That
+gap produced the M1-044b round-2 catch: item 8 stated `setAdapterName
+→ size-cap → normalize → rate cap` while item 1, the DoD bullet, and
+the Implementation notes code sketch all asserted the opposite order
+(`rate cap → normalize`, matching the spec's step 1.5 before step 1.7).
+
+For each statement in the ticket that asserts an ordered sequence,
+extract the sequence and cross-check against every other ordering
+statement in the same ticket. Sources to scan:
+
+  - Every entry under `acceptance:`.
+  - Every bullet under §Definition of Done.
+  - Every fenced code sketch and every prose ordering inside
+    §Implementation notes (including `// Step N` comments inside
+    code blocks).
+  - §Big-picture notes (best-effort; orderings there are usually
+    rationale, but they still must agree with the rest of the ticket).
+
+Ordering-statement markers to look for:
+
+  - The arrow character `→` (U+2192) connecting two or more elements:
+    `A → B → C`.
+  - Prose connectives: `before`, `after`, `then`, `precedes`, `follows`,
+    `prior to`, `subsequent to`, `must run before / after`, `executes
+    before / after`.
+  - Step references: `step 1`, `step 1.5`, `step 2`, etc. — these tie
+    each element to a specific position in a numerically ordered
+    pipeline (the spec's step ordering).
+
+Element normalization (so two statements name "the same" element
+even when one writes `1.5 rate cap` and another writes `rate cap`):
+
+  - Strip leading step-number prefixes (`step 1.5`, `1.5`, `step 2`).
+  - Strip trailing parenthetical clarifications (`normalize (already
+    on disk)` → `normalize`).
+  - Lowercase and collapse whitespace.
+  - Treat hyphen, space, and underscore as equivalent (`size-cap` ==
+    `size cap`).
+
+After normalization, for each pair of statements that name the same
+elements, compare the orderings:
+
+  - PASS for the pair when the relative order of every shared element
+    pair agrees.
+  - FAIL for the pair when at least one shared element pair appears in
+    one order in one statement and the opposite order in another. Cite
+    both statements verbatim (source location: `acceptance item N` /
+    `§Definition of Done bullet "<first 60 chars>"` / `§Implementation
+    notes code sketch line "<first 60 chars>"`) and name the
+    contradicting element pair (`X` precedes `Y` in source A; `Y`
+    precedes `X` in source B).
+
+  Equivalent edges expressed differently still count as the same edge:
+  `A → B` in one statement and `B follows A` in another agree; both
+  produce the directed edge (A, B). Contradiction means the same
+  element pair is asserted as both (A, B) and (B, A) by different
+  statements.
+
+Severity:
+  - FAIL on any contradicting pair. This is a hard-no, not a judgment
+    call — the ticket is unfinishable as written and the developer
+    must not be allowed to pick which item to satisfy.
+  - PASS otherwise (including the trivial case where the ticket
+    contains zero ordering statements, or where all orderings agree).
+
+Recommended remediation cited in the FAIL bullet: name which
+statement is correct (typically the one that matches the spec_refs)
+and instruct the author to rewrite the contradicting statements to
+match. Where two statements disagree but the spec resolves the
+ambiguity, cite the spec line and recommend the spec-matching
+direction.
+
+The author-side static linter (`scripts/lint-ticket.py`) catches the
+literal arrow-bigram form of this contradiction mechanically — every
+ticket should pass the linter before reaching the clarity reviewer.
+The reviewer's job here is to catch the prose variants the linter
+misses (`X happens before Y` in one item contradicting `Y precedes X`
+in another) and the cross-section contradictions (acceptance item
+ordering disagreeing with the DoD's prose ordering or with a `// Step
+N` code-sketch comment in §Implementation notes).
+
 ---
 
 ## Short chat reply (the only thing you return inline)
@@ -452,6 +543,27 @@ ACCEPTANCE-VS-DOD-CONSISTENT: <PASS | WARN | FAIL>
    (per-element grep set with named identifiers, or specific integer
    to replace the symbol expression) so the author can refine without
    re-deriving the structural break.>
+
+ACCEPTANCE-ORDERING-CONSISTENT: <PASS | FAIL>
+  <one bullet per ordering statement found, naming the source
+   (`acceptance item N` | `§Definition of Done bullet "<first 60 chars>"`
+   | `§Implementation notes code sketch / prose "<first 60 chars>"` |
+   `§Big-picture notes "<first 60 chars>"`) and the extracted sequence
+   in normalized form (`A → B → C`).
+
+   For each pair of statements that share at least one element pair
+   in opposite order, an additional bullet records the contradiction
+   verbatim:
+     - source A: <verbatim quote>
+     - source B: <verbatim quote>
+     - conflict: `X` precedes `Y` in A; `Y` precedes `X` in B
+     - recommendation: <which direction to keep + spec citation if the
+       spec resolves the ambiguity>
+
+   Severity rule: FAIL on any contradicting pair (no WARN tier — the
+   ticket is unfinishable as written). PASS when every ordering
+   statement agrees with every other, or when zero ordering statements
+   are present.>
 
 OUT-OF-SCOPE-SPECIFIC: <PASS | WARN | FAIL>
   <one paragraph: is out_of_scope non-empty and specific, or PASS>

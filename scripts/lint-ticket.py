@@ -89,6 +89,21 @@ The six checks (severity, rationale):
     confirms ..." (or asserts/verifies), the nearest backticked
     identifier must appear in at least one acceptance item.
     Catches M1-044a's `invite_drop_total` self-contradiction.
+
+  ACCEPTANCE-ORDERING-CONSISTENT   BLOCKER
+    Extracts every `A → B → C` arrow sequence from acceptance items
+    and §Definition of Done bullets, normalizes the elements (strip
+    leading "step N" / "1.5" prefixes, strip trailing
+    parentheticals, lowercase, collapse whitespace, treat hyphen/
+    space/underscore as equivalent), and walks the resulting
+    directed edges. When the same element pair (A, B) appears in
+    one source and (B, A) appears in another, both sources are
+    asserting contradictory orderings — the ticket is unfinishable
+    as written. Catches M1-044b item 8 (`setAdapterName → size-cap
+    → normalize → rate cap` contradicting item 1's `step 1.5 rate
+    cap → 1.7 normalize`). The LLM-side check (clarity-prompt.md
+    #11) catches the prose-variant form ("X happens before Y"
+    contradicting "Y precedes X").
 """
 
 import argparse
@@ -630,6 +645,112 @@ def check_impl_notes_cross_ref(fm, body):
     return findings
 
 
+# ---------- check: acceptance-ordering-consistent ----------
+
+# Strip a leading "step N" / "step 1.5" / "1.5" / "1." prefix off an element
+# name. Conservative: only strips when the prefix is followed by whitespace,
+# so a bare "step1" identifier (no space) is preserved verbatim.
+STEP_PREFIX_RE = re.compile(r"^(?:step\s+)?[\d]+(?:\.[\d]+)?\s+", re.IGNORECASE)
+
+
+def _normalize_ordering_element(s):
+    """Normalize an element name extracted from an arrow sequence.
+
+    Strips leading "step N" prefixes, trailing parenthetical clarifications,
+    surrounding backticks, surrounding punctuation, lowercases, collapses
+    whitespace, and treats hyphen/space/underscore as equivalent. If the
+    element is entirely parenthesized (e.g. "(rate cap)"), keep the inner
+    content.
+    """
+    s = s.strip()
+    # If a colon prefix is present (e.g. "Verify the order is preserved: X"),
+    # take everything after the last colon.
+    if ":" in s:
+        s = s.split(":")[-1].strip()
+    # Strip backticks around the whole element.
+    s = s.strip("`").strip()
+    # Strip "step N" / "1.5" leading prefix.
+    s = STEP_PREFIX_RE.sub("", s).strip()
+    # If the whole element is parenthesized, lift the inner content.
+    paren_whole = re.match(r"^\(([^)]*)\)$", s)
+    if paren_whole:
+        s = paren_whole.group(1).strip()
+    else:
+        # Otherwise strip a trailing parenthetical clarification.
+        s = re.sub(r"\s*\([^)]*\)\s*$", "", s).strip()
+    # Strip surrounding punctuation and whitespace.
+    s = re.sub(r"^[,;:.\-\s]+|[,;:.\s]+$", "", s)
+    # Lowercase; collapse runs of whitespace/hyphen/underscore into single space.
+    s = re.sub(r"[\s\-_]+", " ", s).strip().lower()
+    return s
+
+
+# An arrow sequence: two or more elements separated by `→`. We extract one
+# *line* at a time to keep elements bounded; cross-line sequences would be
+# noise rather than signal.
+def _extract_arrow_edges(text, source_label):
+    """Yield (a, b, source_label, snippet) for every adjacent (A → B) pair in
+    every line of `text` containing one or more `→` characters."""
+    edges = []
+    for line in text.split("\n"):
+        if "→" not in line:
+            continue
+        parts = [p for p in line.split("→")]
+        if len(parts) < 2:
+            continue
+        normalized = [_normalize_ordering_element(p) for p in parts]
+        # Use the raw line (trimmed) as the snippet for citation purposes.
+        snippet = line.strip()
+        if len(snippet) > 100:
+            snippet = snippet[:100] + "…"
+        for i in range(len(normalized) - 1):
+            a, b = normalized[i], normalized[i + 1]
+            if not a or not b or a == b:
+                continue
+            edges.append((a, b, source_label, snippet))
+    return edges
+
+
+def check_acceptance_ordering_consistent(acceptance, body):
+    """Detect contradictions between arrow sequences in acceptance items,
+    §Definition of Done bullets, and §Implementation notes prose."""
+    findings = []
+    edges = []
+    if isinstance(acceptance, list):
+        for idx, item in enumerate(acceptance, start=1):
+            if isinstance(item, str) and "→" in item:
+                edges.extend(_extract_arrow_edges(item, f"acceptance item {idx}"))
+    for sec_name in ("Definition of Done", "Implementation notes",
+                     "Big-picture notes"):
+        sec_text = extract_section(body, sec_name)
+        if sec_text and "→" in sec_text:
+            edges.extend(_extract_arrow_edges(sec_text, f"§{sec_name}"))
+
+    # Walk edges; record first-seen for each ordered pair; flag the
+    # contradiction when (b, a) was seen earlier from a different source.
+    first_seen = {}  # (a, b) -> (source_label, snippet)
+    reported = set()  # avoid duplicate findings for the same conflicting pair
+    for (a, b, source, snippet) in edges:
+        if (b, a) in first_seen:
+            prior_source, prior_snippet = first_seen[(b, a)]
+            if prior_source == source:
+                continue  # same source: not cross-statement contradiction
+            key = tuple(sorted((a, b))) + (prior_source, source)
+            if key in reported:
+                continue
+            reported.add(key)
+            findings.append(_finding(
+                "ACCEPTANCE-ORDERING-CONSISTENT", "BLOCKER", None,
+                f"'{a}' → '{b}' ({source})  vs  '{b}' → '{a}' ({prior_source})",
+                f"contradictory orderings: {source} asserts '{a}' precedes "
+                f"'{b}', but {prior_source} asserts '{b}' precedes '{a}'. "
+                f"Reconcile against the spec_refs cited in the ticket and "
+                f"rewrite the losing statement.",
+            ))
+        first_seen.setdefault((a, b), (source, snippet))
+    return findings
+
+
 # ---------- finding object + reporting ----------
 
 def _finding(check, severity, item_idx, command=None, detail=""):
@@ -684,6 +805,7 @@ def lint_one(path, quiet):
     findings.extend(check_undefined_symbol_count(acceptance))
     findings.extend(check_prose_verb(acceptance))
     findings.extend(check_impl_notes_cross_ref(fm, body))
+    findings.extend(check_acceptance_ordering_consistent(acceptance, body))
     return report_file(path, findings, None, quiet)
 
 
