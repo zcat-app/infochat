@@ -8,6 +8,41 @@ escalations:
     reviewer_verdict_excerpt: |
       CLARITY VERDICT: FAIL — 1 blocker, 0 warnings.
       Blockers:
+        1. ACCEPTANCE-VS-DOD-CONSISTENT (acceptance item 16): the
+           InviteCommandHandler dispatch acceptance item asserts
+           `grep -E 'create|list|revoke' InviteCommandHandler.java
+           returns >=3 matches across the three subcommand
+           dispatch branches`. The DoD explicitly enumerates three
+           named subcommand branches (create, list, revoke) each
+           with a visibly different behavioral shape (INSERT + cap
+           enforcement; paginated SELECT; PENDING→REVOKED
+           transition). This is HETEROGENEOUS-AGGREGATE-NAMED with
+           N=3 named elements — the N>=3 FAIL threshold. The
+           alternation regex `create|list|revoke` is maskable:
+           three occurrences of "create" (in variable names,
+           String literals, comments, or import paths) would
+           satisfy >=3 while leaving the `list` and `revoke`
+           branches entirely absent. An implementer can ship
+           InviteCommandHandler with only the create subcommand
+           and pass this grep.
+           Fix: Replace the aggregate with three separate
+           acceptance greps:
+             (a) `grep -E '"create"' InviteCommandHandler.java
+                 returns >=1 match`
+             (b) `grep -E '"list"' InviteCommandHandler.java
+                 returns >=1 match`
+             (c) `grep -E '"revoke"' InviteCommandHandler.java
+                 returns >=1 match`
+           Or adapt the regex to match only the dispatch case
+           literal (e.g. in a switch or if-else chain) so each
+           grep pins its own named branch independently. Item 16
+           can remain one acceptance item with three verify lines,
+           or can be split into 16a/b/c.
+  - date: 2026-05-22
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      CLARITY VERDICT: FAIL — 1 blocker, 0 warnings.
+      Blockers:
         1. BODY-CLAIM-COVERAGE: §Implementation notes §UnbanCommandHandler
            preban-path request_id propagation commits via MUST that the
            handler issues `SET LOCAL infochat.request_id = ?` before
@@ -144,6 +179,135 @@ escalations:
           (infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/
           AutoRegisterServiceTest.java).
 revisions:
+  - date: 2026-05-22
+    reason: clarity-fail refine round 4 (1 blocker ACCEPTANCE-VS-DOD-CONSISTENT — item 16 InviteCommandHandler dispatch aggregate grep `create|list|revoke` returns ≥3 is HETEROGENEOUS-AGGREGATE-NAMED with N=3 named elements, maskable) — split the aggregate into three per-subcommand SINGLE-ELEMENT greps
+    summary: |
+      Pre-refine snapshot. The round-4 clarity FAIL surfaced one
+      ACCEPTANCE-VS-DOD-CONSISTENT blocker against acceptance item
+      16 (InviteCommandHandler dispatch). The item's second verify
+      line `grep -E 'create|list|revoke' InviteCommandHandler.java
+      returns ≥3 matches across the three subcommand dispatch
+      branches` is HETEROGENEOUS-AGGREGATE-NAMED with N=3 named
+      elements (create / list / revoke); each branch has a visibly
+      different behavioral shape (INSERT + cap enforcement;
+      paginated SELECT; PENDING→REVOKED transition). The
+      alternation regex is maskable: three occurrences of `create`
+      alone (variable names, String literals, comments) satisfy
+      ≥3 while leaving the `list` and `revoke` branches entirely
+      absent. An implementer can ship InviteCommandHandler with
+      only the create subcommand and pass this grep.
+
+      Provenance. The aggregate grep predates the round-1
+      clarity-fail refine. That round-1 refine replaced three
+      OTHER aggregate greps in items 2, 4, 9 with per-scenario
+      named greps but missed item 16's three-branch aggregate.
+      Each subsequent clarity round caught one isolated blocker
+      (BODY-CLAIM-COVERAGE on `error.group_admin_not_in_v1`;
+      OUTLINE-FAILED on verified_stays_green completeness;
+      BODY-CLAIM-COVERAGE on SET LOCAL request_id propagation)
+      and item 16's aggregate slipped through three pre-flights
+      because earlier rounds had higher-impact blockers that
+      consumed reviewer attention. This refine is the catch-up
+      on the latent item-16 issue.
+
+      Refine action (no body / DoD / files_scope / files_budget
+      change):
+
+        1. Replace item 16's second verify line:
+             `grep -E 'create|list|revoke' InviteCommandHandler.java
+              returns ≥3 matches across the three subcommand
+              dispatch branches`
+           with three SINGLE-ELEMENT greps, one per named
+           subcommand:
+             (a) `grep -E '"create"' InviteCommandHandler.java`
+                 returns ≥1 match
+             (b) `grep -E '"list"' InviteCommandHandler.java`
+                 returns ≥1 match
+             (c) `grep -E '"revoke"' InviteCommandHandler.java`
+                 returns ≥1 match
+           Each regex matches the literal 8/6/8-char Java string-
+           literal occurrence (`"create"` / `"list"` / `"revoke"`)
+           — the only realistic places a quoted lowercase
+           subcommand string appears in this handler are the
+           dispatch case labels (switch expression per
+           `CLAUDE.md` §Coding style "Prefer switch expressions"
+           or string-equality branches like
+           `"create".equals(token)`). Comment masking is not a
+           concern: `"create"` requires literal double-quote
+           chars around the word, which only appear in source
+           string literals, not in line comments.
+           Defense in depth: items 17–20 already pin each branch
+           to its branch-specific SQL/keywords (CONTACT_BOUND /
+           OPEN_ADAPTER / INSERT INTO invite_code /
+           gen_random_uuid for create; `created_at DESC` and
+           OPEN marker for list; UPDATE invite_code SET status =
+           'REVOKED' for revoke), so even a deliberately
+           subverted dispatch grep can't hide a missing branch.
+
+        2. The first verify line (`grep -E 'public\s+String\s+name'
+           InviteCommandHandler.java returns ≥1 match returning
+           "invite"`) is unchanged.
+
+        3. Item 16's prose is reworded from "dispatches on the
+           first subcommand token (`create`, `list`, `revoke`);
+           any other subcommand returns
+           `error.invite.unknown_subcommand`" to "dispatches on
+           the first subcommand token to a `create` / `list` /
+           `revoke` branch; any other subcommand returns
+           `error.invite.unknown_subcommand`" — semantically
+           identical, just the / / / form to match the new
+           verify lines visually.
+
+        4. `clarity_check:` cleared so the next /m1-tick start
+           runs a fresh clarity pass against the refined item 16.
+
+      Acceptance count: 37 → 37 (item 16 stays one item with a
+      four-grep verify line). files_budget held at 11;
+      files_scope unchanged; complexity / risk / round_cap
+      unchanged (high / high / 3). No body changes. No DoD
+      changes.
+
+      Full-ticket safety audit (paranoid pass to prevent another
+      one-at-a-time clarity round):
+        - Aggregate-count predicates: only item 16's
+          `'create|list|revoke' ≥3` is HETEROGENEOUS-AGGREGATE-
+          NAMED. All other count-bearing predicates are ≥1 (per
+          grep) or `returns 1 match` (anchored bundle key
+          greps). Confirmed by grep for `≥` / `>=` / `returns
+          [0-9]` across the file.
+        - HETEROGENEOUS-AGGREGATE-NAMED elsewhere: items with
+          multiple greps linked by AND (items 1, 17, 18, 19, 34,
+          35, 36) each pin distinct named elements with one
+          grep per element — SINGLE-ELEMENT per grep, the safe
+          pattern.
+        - BODY-CLAIM-COVERAGE: §Big-picture notes claims (ship
+          without confirm; handlers write directly to audit_log)
+          covered by items 26/31/2-8 and item 35. §Implementation
+          notes claims (audit-FIRST inside transaction;
+          CallableStatement CALL; SET LOCAL request_id;
+          group-admin restoration list in details_json) covered
+          by items 1/8, 9/13, 10, 15. The "out-of-range page
+          returns empty list" pagination note is design
+          convention without a commitment verb — passes per
+          calibration.
+        - ACCEPTANCE-ORDERING-CONSISTENT: item 1 step 1.5
+          (audit pre-write inside transaction before steps
+          4-7 mutations) agrees with DoD ("audit INSERT runs
+          FIRST inside the same transaction") and §Implementation
+          notes §BanCommandHandler transaction shape. Item 9
+          step 5 ordering (open transaction → pre-write audit →
+          UPDATE → COMMIT) agrees with DoD audit-before-effect.
+        - VERIFIED-STAYS-GREEN-PLAUSIBLE: all 15 entries
+          previously verified by the clarity reviewer; no new
+          entries added in this refine.
+        - SPEC-REFS-VALID: 5/5 resolved previously; no changes.
+        - FORWARD-REFERENCE-CHECK: all M1-* ticket references
+          resolve previously; no changes.
+        - GREP-EMBEDDED-QUOTE: new item-16 greps use single-
+          quoted bash outer (`'"create"'`) and contain no
+          literal apostrophe, so single-quote outer is correct.
+        - lint-ticket.py: must pass post-refine (re-run before
+          commit).
   - date: 2026-05-22
     reason: clarity-fail refine round 3 (1 blocker BODY-CLAIM-COVERAGE — SET LOCAL infochat.request_id propagation in UnbanCommandHandler had no acceptance hook) — option B (add single acceptance item with the SET LOCAL grep)
     summary: |
@@ -482,7 +646,7 @@ acceptance:
   - "UnbanCommandHandlerTest scenario: an admin's /unban against a `registration_state='preban'` row CALLs the V5 `delete_preban_user(target.id, actor.id)` procedure; the test asserts (a) the users row is gone post-call, (b) one `UNBAN_PREBAN_DELETE` row exists in `audit_log` referencing the deleted user, (c) the reply matches `reply.unban.preban_deleted` AND contains the literals `pre-ban-only` AND `fresh invite`. Verify: `grep -iE 'void\\s+\\w*unbanOfPrebanRowCallsDeletePrebanUserProcedure\\w*\\s*\\(' UnbanCommandHandlerTest.java` returns ≥1 match"
   - "UnbanCommandHandlerTest scenario: an admin's /unban against a non-preban row when the target has ZERO `is_group_admin=true` rows flips `is_banned=false` via UPDATE, writes the `UNBAN` audit row, and replies with `reply.unban.plain`. Verify: `grep -iE 'void\\s+\\w*unbanOfNonPrebanWithoutGroupAdminsReturnsPlainReply\\w*\\s*\\(' UnbanCommandHandlerTest.java` returns ≥1 match"
   - "UnbanCommandHandlerTest scenario: an admin's /unban against a non-preban row when the target has ONE `is_group_admin=true` row flips `is_banned=false` via UPDATE, writes the `UNBAN` audit row whose `details_json.restored_group_admin` list contains the same group, AND replies with `reply.unban.group_admins_restored` (containing the group's display name AND the literal `/demote`). Verify: `grep -iE 'void\\s+\\w*unbanOfNonPrebanWithGroupAdminsReturnsRestoredReply\\w*\\s*\\(' UnbanCommandHandlerTest.java` returns ≥1 match"
-  - "infochat-provider/src/main/java/app/zcat/infochat/provider/command/InviteCommandHandler.java implements `CommandHandler` with `name() == \"invite\"`. The handler dispatches on the first subcommand token (`create`, `list`, `revoke`); any other subcommand returns `error.invite.unknown_subcommand`. Verify: `grep -E 'public\\s+String\\s+name' InviteCommandHandler.java` returns ≥1 match returning `\"invite\"`; `grep -E 'create|list|revoke' InviteCommandHandler.java` returns ≥3 matches across the three subcommand dispatch branches"
+  - "infochat-provider/src/main/java/app/zcat/infochat/provider/command/InviteCommandHandler.java implements `CommandHandler` with `name() == \"invite\"`. The handler dispatches on the first subcommand token to a `create` / `list` / `revoke` branch; any other subcommand returns `error.invite.unknown_subcommand`. Verify: `grep -E 'public\\s+String\\s+name' InviteCommandHandler.java` returns ≥1 match returning `\"invite\"`; `grep -E '\"create\"' InviteCommandHandler.java` returns ≥1 match; `grep -E '\"list\"' InviteCommandHandler.java` returns ≥1 match; `grep -E '\"revoke\"' InviteCommandHandler.java` returns ≥1 match"
   - "`/invite create` flag parsing: requires `--adapter <name>`; requires EXACTLY ONE of `--contact <id>` or `--open`; neither → `error.invite.missing_flag` (lists both options per spec); both → `error.invite.mutually_exclusive`. The `--adapter <name>` value is validated against the set of currently-enabled adapters at parse time — naming an unknown adapter returns `error.invite.unknown_adapter` per spec §Admin `/invite create`. Pre-banned-contact rejection: `/invite create --contact <id>` where the (adapter, contact_id) row exists with `is_banned=true` returns `error.invite.banned_target` pointing the admin at `/unban`; NO invite is created. Pre-flight cap check: `/invite create --open` enforces the per-adapter open cap from `infochat.invite.open-cap-per-adapter` — the count query filters `invite_type = 'OPEN_ADAPTER' AND status = 'PENDING' AND (expires_at IS NULL OR expires_at > NOW())` per spec §Invite-code registration (`Codes that are USED, REVOKED, or whose expires_at has passed do not count toward either cap`); over-cap returns `error.invite.open_cap_met` with the current open-code list and a `/invite revoke` hint. `/invite create --contact <id>` enforces the global contact cap from `infochat.invite.contact-cap-global` via the same shape (filter on `invite_type='CONTACT_BOUND'`, no adapter scope); over-cap returns `error.invite.contact_cap_met`. Verify: `grep -E \"invite_type\\s*=\\s*'OPEN_ADAPTER'\" InviteCommandHandler.java` returns ≥1 match AND `grep -E \"invite_type\\s*=\\s*'CONTACT_BOUND'\" InviteCommandHandler.java` returns ≥1 match AND `grep -E 'is_banned' InviteCommandHandler.java` returns ≥1 match"
   - "`/invite create` happy-path (both --contact and --open): writes the row via `INSERT INTO invite_code (code, invite_type, adapter, expected_contact_id, status, created_by, created_at, expires_at) VALUES (gen_random_uuid(), ?, ?, ?, 'PENDING', ?, NOW(), NOW() + <ttl>)` — the V5 schema's iff-CHECK enforces that `expected_contact_id` is non-null iff `invite_type = 'CONTACT_BOUND'`. The reply (`reply.invite.created`) carries the new code's UUID literal once. The `INVITE_CREATE` audit row is pre-written audit-before-effect with `target_kind='invite'`, `target_id=<code-uuid::text>`, `target_contact_id=<expected_contact_id or NULL>`, `details_json={\"invite_type\": \"...\", \"adapter\": \"...\"}`. Both `--contact` and `--open` paths execute on first invocation in this ticket — confirm flow is deferred per the Big-picture notes / out_of_scope entry; the follow-up ticket will retrofit the spec's in-memory pending-confirm gate as a pre-dispatch service call. Verify: `grep -E 'INSERT\\s+INTO\\s+invite_code' InviteCommandHandler.java` returns ≥1 match; `grep -E 'gen_random_uuid' InviteCommandHandler.java` returns ≥1 match"
   - "`/invite list` lists `PENDING` rows from `invite_code` where `(expires_at IS NULL OR expires_at > NOW())` — implements the spec's active-pending filter. Sort by `created_at DESC`. Paginated; page size 20 (`docs/design/03-commands.md` §3.10). Output format from `reply.invite.list_entry` template: `<code prefix> · adapter=<adapter> · target=<contact_id or 'OPEN'> · expires=<ISO timestamp>` (exact field shape implementer's choice as long as the bundle template matches). Open-vs-contact-bound distinguishability is mandatory: every `invite_type='OPEN_ADAPTER'` row carries the literal `OPEN` marker per spec §Invite-code registration (`The list output must visually distinguish --open codes from --contact codes`). Verify: `grep -E 'OPEN' bundles/en.properties` returns ≥1 match in the `reply.invite.list_entry` template or its OPEN-variant key; `grep -E 'created_at\\s+DESC' InviteCommandHandler.java` returns ≥1 match"
