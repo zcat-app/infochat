@@ -3,21 +3,35 @@ id: M1-047
 title: "Process-fix umbrella: stays-green + pyramid + contracts"
 status: pending
 created: 2026-05-21
-last_updated: 2026-05-21
+last_updated: 2026-05-22
 blocked_by:
   - M1-048
   - M1-049
   - M1-050
-files_budget: 8
+files_budget: 3
+files_scope:
+  - docs/plan/m1/process-fix-handoff.md
+  - docs/plan/m1/tickets/M1-044b-inbound-router-intake-splice.md
 complexity: low
 risk: low
 round_cap: 2
 security_relevant: false
 migration_touch: false
-out_of_scope: []
-acceptance: []
+out_of_scope:
+  - the actual M1-044b implementation — that ticket reopens on this umbrella's merge and re-enters its own lifecycle (/m1-tick start M1-044b after refine), with its own branch, its own reviewer pass, and its own commit on main
+  - any production-code change — the umbrella's only repo-tree change is the transient handoff doc deletion + the M1-044b reopen edit; everything else (handler/router/IT decoupling, JSpecify contracts, verified_stays_green lint+prompts) landed under M1-049 / M1-050 / M1-048 respectively and is not re-touched here
+  - changes to docs/process/test-pyramid.md, docs/process/engineering-rules-verbatim.md, CLAUDE.md, scripts/lint-ticket.py, docs/process/clarity-prompt.md, docs/process/plan-prompt.md, docs/process/ticket-template.md — those are M1-048/049/050 territory; the umbrella does not amend the landed work
+  - any further M1-044b refinement decisions — those happen on M1-044b's own branch after reopen, not on the umbrella's branch
+  - changes to other memory notes — only feedback_out_of_scope_stays_green_verifiable.md's "Future codification target" section is touched (out-of-band; the memory file is not in the repo and so does not appear in the git diff)
+acceptance:
+  - "The transient handoff doc docs/plan/m1/process-fix-handoff.md is deleted. Verify: `test ! -f docs/plan/m1/process-fix-handoff.md` exits 0 AND `git log --diff-filter=D --name-only --pretty=format: -1 -- docs/plan/m1/process-fix-handoff.md | grep -cF docs/plan/m1/process-fix-handoff.md` returns 1 (the umbrella commit is the one that deleted it)"
+  - "M1-044b is reopened: its frontmatter has `status: pending`, `deferred_on:` is unset/empty, `deferred_reason:` is unset/empty, and the `reopens:` list has exactly one new entry dated 2026-05-22 with reason `umbrella-done`. Verify: `grep -cE '^status: pending$' docs/plan/m1/tickets/M1-044b-inbound-router-intake-splice.md` returns 1 AND `grep -cE '^deferred_on:\\s*$' docs/plan/m1/tickets/M1-044b-inbound-router-intake-splice.md` returns 1 AND `grep -cE '^deferred_reason:\\s*$' docs/plan/m1/tickets/M1-044b-inbound-router-intake-splice.md` returns 1 AND `grep -cE 'reason: umbrella-done' docs/plan/m1/tickets/M1-044b-inbound-router-intake-splice.md` returns 1"
+  - "The memory note ~/.claude/projects/-home-ubuntu5-Projects-quarkus-projects-infochat/memory/feedback_out_of_scope_stays_green_verifiable.md no longer carries an aspirational `**Future codification target**:` section that promises unimplemented work. The section is replaced with a paragraph that names the three landed paths: `scripts/lint-ticket.py` (the OUT-OF-SCOPE-STAYS-GREEN-VERIFIABLE lint check + `verified_stays_green:` frontmatter validator), `docs/process/clarity-prompt.md` (clarity subagent's out-of-scope-stays-green check), and `docs/process/plan-prompt.md` (Plan subagent's pre-implementation dependent-tests audit). Verify (paths via env-expansion): MEM=~/.claude/projects/-home-ubuntu5-Projects-quarkus-projects-infochat/memory/feedback_out_of_scope_stays_green_verifiable.md; `grep -cE '\\*\\*Future codification target\\*\\*' \"$MEM\"` returns 0 AND `grep -cF 'scripts/lint-ticket.py' \"$MEM\"` returns ≥1 AND `grep -cF 'docs/process/clarity-prompt.md' \"$MEM\"` returns ≥1 AND `grep -cF 'docs/process/plan-prompt.md' \"$MEM\"` returns ≥1. (The memory file is outside the repo; this acceptance item is verified by reading the file at commit time, not by git diff.)"
+  - "All three blockers are committed-done on main (gate for umbrella merge). Verify: `git log main --format=%s | grep -cE '^M1-048: '` returns ≥1 AND `git log main --format=%s | grep -cE '^M1-049: '` returns ≥1 AND `git log main --format=%s | grep -cE '^M1-050: '` returns ≥1. Ground-truthed against current main on 2026-05-22: M1-048's canonical subject is `M1-048: Process fix A — verified_stays_green frontmatter + lint + clarity + Plan` (em-dash after the leader, not a colon); M1-049's is `M1-049: Process fix D: test pyramid — handler/router/IT decoupling`; M1-050's is `M1-050: Process fix E: JSpecify parameter contracts (boundary classes + lint)`. (This gate is also enforced upstream by `blocked_by: [M1-048, M1-049, M1-050]`, but enumerated here so the umbrella's done state is fully self-verifying.)"
+  - "mvn -B clean verify exits 0. The umbrella's only repo-tree changes are documentation + a ticket-file reopen; no production code or tests are touched, so the suite trivially stays green. The check is still required by the M1 workflow rules and catches the case where the handoff-doc deletion or M1-044b reopen edit accidentally breaks a Maven enforcer rule or doc-linter check"
 test_plan:
   adds: []
+  modifies: []
   preserves:
     - all tests currently green on main
 spec_refs: []
@@ -25,8 +39,43 @@ decision_refs: []
 deferred_on:
 deferred_reason:
 reviews: []
-escalations: []
-revisions: []
+escalations:
+  - date: 2026-05-22
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      User-initiated escalation (no automated trigger fired). The
+      ticket's frontmatter is incomplete and would FAIL clarity
+      pre-flight at /m1-tick start:
+        - acceptance: [] (no testable criteria — DoD lives only in
+          the body and is not mirrored into runnable acceptance
+          items)
+        - out_of_scope: [] (clarity requires non-empty out_of_scope)
+        - no files_scope declared (only a numeric files_budget)
+        - clarity_check: {} (never run)
+      User invoked /m1-tick escalate M1-047 refine to formally enter
+      the refine flow so the missing fields can be authored before
+      the next /m1-tick start.
+revisions:
+  - date: 2026-05-22
+    reason: clarity-fail refine snapshot (acceptance/out_of_scope/files_scope authoring)
+    summary: |
+      Pre-refine snapshot. The umbrella ticket was created 2026-05-21
+      as a coordinator with the DoD captured only in body prose; the
+      runnable frontmatter fields acceptance, out_of_scope, and
+      files_scope were left empty as placeholders. Now that all three
+      subtickets (M1-048 A, M1-049 D, M1-050 E) are done, the umbrella
+      is unblocked but cannot pass clarity until those fields are
+      authored. User invoked /m1-tick escalate M1-047 refine on
+      2026-05-22 to formally fill them in before the next /m1-tick
+      start.
+
+      Prior frontmatter values:
+        - status: pending (now: escalated, will return to pending on refine commit)
+        - acceptance: []
+        - out_of_scope: []
+        - files_scope: (absent)
+        - test_plan.preserves: [all tests currently green on main]
+        - clarity_check: {}
 overrides: []
 aborted_attempts: []
 reopens: []
