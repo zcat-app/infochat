@@ -2,6 +2,8 @@
 
 This is the user prompt the m1-tick skill substitutes and passes to `Agent(subagent_type: "clarity-reviewer", ...)` for `/m1-tick start <id>`. The agent's identity, tool allowlist (Read/Grep/Glob/Write), and model pinning (sonnet) are declared in [`.claude/agents/clarity-reviewer.md`](../../.claude/agents/clarity-reviewer.md) — those are harness-level enforcement. This template carries only the *task metadata* and the *prompt-supplied paths* the agent reads; the ticket body and the cited spec files are loaded by the agent via Read in its fresh context, and the full structured verdict is written to disk before the short chat reply.
 
+**Ticket-split convention.** The skill no longer passes a single `TICKET_FILE_PATH`; instead `scripts/m1-split-ticket.py` partitions the ticket into two files: `{{CURRENT_TICKET_PATH}}` (body + frontmatter with `escalations:` and `revisions:` keys stripped) and `{{HISTORY_PATH}}` (just those two YAML blocks, or a `# No history` sentinel when neither is present). Every per-check scan operates on `{{CURRENT_TICKET_PATH}}`; only `REFINE-REGRESSION-CHECK` (§14) reads `{{HISTORY_PATH}}`. The split removes the LLM-judgment surface "is this quoted phrase current or historical" — it's mechanically pre-segmented.
+
 ---
 
 ## Template
@@ -20,18 +22,35 @@ are looking for things the ticket cannot be implemented from in its
 current form.
 
 The ticket is: {{TICKET_ID}}
-Ticket file (Read this with the Read tool): {{TICKET_FILE_PATH}}
+Current-state ticket file (Read this with the Read tool — this is the
+ticket as it stands NOW, with historical `escalations:`/`revisions:`
+frontmatter blocks removed): {{CURRENT_TICKET_PATH}}
+History file (Read this with the Read tool — informational only;
+contains the `escalations:` and `revisions:` blocks that the split
+peeled off, or a `# No history` sentinel when neither key is present):
+{{HISTORY_PATH}}
 Verdict file (Write the full structured verdict here using the Write
 tool BEFORE returning your short chat reply): {{VERDICT_FILE_PATH}}
 
 Paths above are repo-relative unless prefixed with `/`. The Read and
 Write tools accept either form when the agent's CWD is the repo root.
 
+**Scope rule (load-bearing).** Every per-check scan operates on
+`{{CURRENT_TICKET_PATH}}`. The ONLY check that reads
+`{{HISTORY_PATH}}` is `REFINE-REGRESSION-CHECK` (§14 below), which
+uses the history to detect a refine that claimed to strip a phrase
+but missed an occurrence in the current ticket. Do NOT treat quoted
+phrases inside `{{HISTORY_PATH}}` as current behavioral commitments;
+those phrases are recorded there precisely because earlier refines
+removed them. The split is mechanical, so this boundary is not a
+matter of judgment — the script has already separated them.
+
 ---
 
 ## Inputs to load
 
-1. Use the Read tool to read the ticket file at {{TICKET_FILE_PATH}}.
+1. Use the Read tool to read the current-state ticket file at
+   {{CURRENT_TICKET_PATH}}.
 2. Before evaluating anything else, verify the ticket file you Read
    has `id: {{TICKET_ID}}` in its YAML frontmatter. If the frontmatter
    id does not match, abort the per-check evaluation, Write CLARITY
@@ -175,9 +194,12 @@ rounds later when Provider's tests had no schema source). This
 check fires the forcing function: forward references resolve, or
 the ticket cannot start.
 
-Scan the ticket file (frontmatter + body, the same file you Read
-in step 1) for substrings matching the regex
-`M[0-9]+-[0-9]+[a-z]*`. For each match, classify:
+Scan the current-state ticket file ({{CURRENT_TICKET_PATH}},
+frontmatter + body, the same file you Read in step 1) for substrings
+matching the regex `M[0-9]+-[0-9]+[a-z]*`. Do NOT scan
+{{HISTORY_PATH}} — ticket IDs mentioned inside refine narratives are
+informational context, not current commitments. For each match,
+classify:
 
 - **Self-reference** — the matched ID equals the ticket's own
   frontmatter `id:`. Exempt; no flag. (A ticket of id `M1-018`
@@ -697,6 +719,96 @@ classes of break:
     item at all — the body promised something the acceptance list
     silently dropped.
 
+### 14. REFINE-REGRESSION-CHECK — phrases prior refines claimed to strip are absent from the current ticket
+
+When a ticket is refined after a previous clarity FAIL, the refine
+summary (recorded under `revisions:` in frontmatter) typically quotes
+the phrase the refine removed: `"§Big-picture notes paragraph 2 ('X')
+stripped entirely"`, `"corrected from `Y` to `Z`"`, `"fabricated
+bundle key K removed from prose"`. The refine is only correct if the
+quoted phrase is in fact absent from the current ticket. Without this
+check, an incomplete refine ships with the regressed phrase still
+present, and the next clarity pass either re-FAILs on the same
+blocker or — worse — false-positives the historical quote inside
+`revisions:` as a current commitment. This check closes that loop.
+
+The check operates on `{{HISTORY_PATH}}` (the only check that reads
+it). The history file is the YAML body of the `escalations:` and
+`revisions:` blocks that the splitter peeled off; if neither block is
+present, the file contains a `# No history` sentinel and this check
+is N/A.
+
+Steps:
+
+1. Read `{{HISTORY_PATH}}`. If the file begins with
+   `# No history`, mark this check N/A and skip the rest. Record
+   the section verdict as PASS with one line: "no refines on this
+   ticket".
+
+2. Otherwise scan the history file for refine-summary sentences that
+   frame content as removed. Markers (case-insensitive, substring
+   match anywhere on a line):
+     - `stripped` (e.g., "stripped entirely", "paragraph N stripped")
+     - `removed` (e.g., "fabricated key K removed", "removed from prose")
+     - `deleted`
+     - `rewritten to drop`
+     - `corrected from` (the value after `from` is the removed side;
+       the value after the subsequent `to` is the replacement and
+       MUST NOT be flagged)
+     - `dropped`
+
+3. For each line that contains a marker, extract the quoted phrase
+   the summary frames as removed. The phrase is delimited by one of:
+     - backticks: `` `phrase` ``
+     - double quotes: `"phrase"`
+     - single quotes: `'phrase'`
+   A summary line may contain multiple quoted phrases; in that case
+   extract all of them, then filter to keep ONLY phrases on the
+   removed side. For `corrected from X to Y`, keep `X` and discard
+   `Y`. For `stripped paragraph 2 ('X')`, keep `X`.
+
+4. For each extracted phrase, use the Read tool on
+   `{{CURRENT_TICKET_PATH}}` and search for the phrase as a
+   case-sensitive substring. If found, FAIL this check with a citation
+   that includes:
+     - the refine-summary line that claimed the strip (verbatim,
+       first 100 chars);
+     - the line number in `{{CURRENT_TICKET_PATH}}` where the phrase
+       still appears;
+     - recommended remediation: "complete the refine — remove the
+       phrase from {{CURRENT_TICKET_PATH}} before re-running clarity".
+
+5. If every extracted phrase is absent from the current ticket, PASS.
+
+False-positive guidance:
+  - Generic single words inside narrative prose (e.g., "scope",
+    "audit", "ticket") are not candidates. The marker rule REQUIRES
+    the phrase to be delimited by backticks or quotes in the refine
+    summary; bare words are skipped.
+  - Phrases that the summary frames as ADDED rather than removed are
+    not candidates. For `corrected from X to Y`, only `X` is checked.
+    For `added acceptance item N`, no phrase is checked (the marker
+    "added" is not in the removed-set above).
+  - When a phrase is short and structurally common (e.g., a single
+    word that appears in unrelated prose), use judgment: if the
+    current-ticket occurrence is clearly unrelated to the refined
+    claim (different section, different surrounding context), do
+    NOT flag. The reviewer's notes should explain when the judgment
+    was applied.
+
+Severity rule:
+  - FAIL on any extracted phrase still present in the current ticket
+    where the occurrence is plausibly the regressed phrase (i.e.,
+    the same section/context the refine claimed to strip from).
+  - PASS otherwise (every extracted phrase absent, or the history
+    file is the sentinel).
+  - No WARN tier — either the strip is complete or it isn't.
+
+This check is the structural counterpart to the
+"feedback_replan_after_outline_fail_refine" rule: refines that pass
+human review can still miss occurrences, and the mechanical scan
+catches what visual review missed.
+
 ---
 
 ## Short chat reply (the only thing you return inline)
@@ -820,6 +932,21 @@ BODY-CLAIM-COVERAGE: <PASS | FAIL>
    claim has acceptance coverage, OR when the in-scope sections
    contain zero behavioral claims.>
 
+REFINE-REGRESSION-CHECK: <PASS | FAIL | NOT-APPLICABLE>
+  <one paragraph: if the history file is the `# No history` sentinel,
+   record `NOT-APPLICABLE — no refines on this ticket` and stop. If
+   refines exist, one bullet per extracted stripped-phrase: cite the
+   refine-summary line (first 100 chars), the extracted phrase, the
+   marker that identified it (`stripped` / `removed` / `corrected from`
+   / etc.), and the classification (PASS = phrase absent from current
+   ticket; FAIL = phrase still present, with the current-ticket line
+   number).
+
+   Severity rule: FAIL on any extracted phrase still present where the
+   occurrence is plausibly the regressed phrase. PASS when every
+   extracted phrase is absent. NOT-APPLICABLE when the history file is
+   the sentinel.>
+
 OUT-OF-SCOPE-SPECIFIC: <PASS | WARN | FAIL>
   <one paragraph: is out_of_scope non-empty and specific, or PASS>
 
@@ -884,12 +1011,13 @@ both literally.
 
 ## Skill responsibilities (what `/m1-tick start` does around the prompt)
 
-1. Pre-allocates the verdict file path under `target/m1-tick-clarity-{{ID}}.txt` so the subagent has a known location for its Write. The directory `target/` already exists by Maven convention and is excluded from version control.
-2. Substitutes `{{TICKET_ID}}`, `{{TICKET_FILE_PATH}}` (repo-relative path to the ticket file the skill resolved from the ID), and `{{VERDICT_FILE_PATH}}` (the path pre-allocated in step 1). No content placeholders — the subagent loads the ticket and each cited spec file via Read in its own fresh context.
-3. Spawns `Agent(subagent_type: "clarity-reviewer", prompt: <substituted>, description: "Clarity pre-flight M<N>-NNN")`. Foreground.
-4. Parses the four-line short chat reply for the verdict line and integer blocker/warning counts.
-5. Reads `{{VERDICT_FILE_PATH}}` from disk to extract the BLOCKERS / WARNINGS strings for the ticket frontmatter `clarity_check:` entry.
-6. Records under `clarity_check:` in ticket frontmatter:
+1. Pre-allocates three paths under `target/`: the verdict file at `target/m1-tick-clarity-{{ID}}.txt`, the current-state ticket file at `target/m1-tick-current-{{ID}}.md`, and the history file at `target/m1-tick-history-{{ID}}.md`. The directory `target/` already exists by Maven convention and is excluded from version control.
+2. Runs `python3 scripts/m1-split-ticket.py <ticket-path> <current-out> <history-out>` to partition the ticket into the two files. The split is mechanical (top-level YAML key parse — `escalations:` and `revisions:` blocks go to history, everything else to current); the script writes the `# No history` sentinel into the history file when neither key is present.
+3. Substitutes `{{TICKET_ID}}`, `{{CURRENT_TICKET_PATH}}` (the current-state file written by the splitter), `{{HISTORY_PATH}}` (the history file written by the splitter), and `{{VERDICT_FILE_PATH}}` (the path pre-allocated in step 1). No content placeholders — the subagent loads the current ticket, the history file, and each cited spec file via Read in its own fresh context.
+4. Spawns `Agent(subagent_type: "clarity-reviewer", prompt: <substituted>, description: "Clarity pre-flight M<N>-NNN")`. Foreground.
+5. Parses the four-line short chat reply for the verdict line and integer blocker/warning counts.
+6. Reads `{{VERDICT_FILE_PATH}}` from disk to extract the BLOCKERS / WARNINGS strings for the ticket frontmatter `clarity_check:` entry.
+7. Records under `clarity_check:` in ticket frontmatter:
    ```yaml
    clarity_check:
      date: <YYYY-MM-DD>
@@ -897,7 +1025,7 @@ both literally.
      warnings: [<list of warning-strings>]
      blockers: [<list of blocker-strings if FAIL>]
    ```
-7. Branches on verdict:
+8. Branches on verdict:
    - `PASS` → proceed with the rest of `start`.
    - `WARN` → print warnings to chat, proceed.
    - `FAIL` → print blockers, refuse to start, ask user to refine the ticket. Status stays `pending`.

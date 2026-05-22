@@ -4,6 +4,8 @@ Used when `/m1-tick start <id>` encounters a ticket with `complexity: high`. The
 
 The Plan subagent is a Claude Code built-in (one of `claude-code-guide`, `Explore`, `general-purpose`, `Plan`, `statusline-setup`); we do not define a custom agent for it. The prompt below is what the skill substitutes and passes as the `prompt` argument. The path-based slimming pattern mirrors [`clarity-prompt.md`](clarity-prompt.md): only path placeholders are substituted, and the subagent loads the ticket and each cited spec file via its own Read tool in fresh context.
 
+**Ticket-split convention.** The skill passes the ticket as two files: `{{CURRENT_TICKET_PATH}}` (body + frontmatter with `escalations:` and `revisions:` keys stripped) and `{{HISTORY_PATH}}` (just those two YAML blocks, or a `# No history` sentinel when neither is present). The split is performed by `scripts/m1-split-ticket.py` before the Plan subagent is spawned. The Plan audit operates on `{{CURRENT_TICKET_PATH}}`; the history file is informational context that can help understand what changed in prior refines but is NOT a source of current commitments.
+
 ---
 
 ## Template
@@ -17,7 +19,13 @@ markdown outline that the developer (a separate agent in the main
 conversation) will follow.
 
 The ticket is: {{TICKET_ID}}
-Ticket file (Read this with the Read tool): {{TICKET_FILE_PATH}}
+Current-state ticket file (Read this with the Read tool — this is the
+ticket as it stands NOW, with historical `escalations:`/`revisions:`
+frontmatter blocks removed): {{CURRENT_TICKET_PATH}}
+History file (Read this with the Read tool — informational only;
+contains the `escalations:` and `revisions:` blocks that the split
+peeled off, or a `# No history` sentinel when neither key is present):
+{{HISTORY_PATH}}
 Outline file (Write the full implementation outline here using the
 Write tool BEFORE returning your short chat reply — but ONLY in the
 success case; on OUTLINE FAILED, return the failure block inline as
@@ -27,11 +35,19 @@ your chat reply and do NOT Write the outline file):
 Paths above are repo-relative unless prefixed with `/`. The Read and
 Write tools accept either form when the agent's CWD is the repo root.
 
+**Scope rule.** The audit operates on `{{CURRENT_TICKET_PATH}}`. The
+history file is informational context (it can help understand what
+prior refines changed, especially for an OUTLINE FAILED that follows
+a clarity-fail refine); do NOT treat quoted phrases inside the
+history file as current commitments. The split is mechanical, so the
+boundary is not a matter of judgment.
+
 ---
 
 ## Inputs to load
 
-1. Use the Read tool to read the ticket file at {{TICKET_FILE_PATH}}.
+1. Use the Read tool to read the current-state ticket file at
+   {{CURRENT_TICKET_PATH}}.
 2. Before evaluating anything else, verify the ticket file you Read
    has `id: {{TICKET_ID}}` in its YAML frontmatter. If the frontmatter
    id does not match, abort the audit, return an OUTLINE FAILED block
@@ -337,9 +353,10 @@ exhaustive when it's actually one observation pass.
 
 1. After the clarity pre-flight passes, check the ticket's `complexity` field. If `complexity: high`, continue; otherwise skip the Plan step.
 2. Pre-allocate the outline sidecar path at `target/m1-tick-outline-{{ID}}.md` (the directory `target/` already exists by Maven convention and is excluded from version control).
-3. Read this file to load the template. Substitute three placeholders only: `{{TICKET_ID}}`, `{{TICKET_FILE_PATH}}` (repo-relative path to the ticket file the skill resolved from the ID), and `{{OUTLINE_FILE_PATH}}` (the path pre-allocated in step 2). No content placeholders — the subagent loads the ticket and each cited spec file via Read in its own fresh context, and runs the spec_refs anchor resolution algorithm itself.
-4. Spawn `Agent(subagent_type: "Plan", prompt: <substituted>, description: "Implementation outline M<N>-NNN")`. Foreground.
-5. Branch on the chat reply:
+3. Run `scripts/m1-split-ticket.py` against the ticket to pre-allocate the current-state file at `target/m1-tick-current-{{ID}}.md` and the history file at `target/m1-tick-history-{{ID}}.md`. (The clarity step already ran this earlier in the same `start` invocation; running again is idempotent and ensures the files are fresh against the post-clarity ticket state.)
+4. Substitute four placeholders only: `{{TICKET_ID}}`, `{{CURRENT_TICKET_PATH}}` (the current-state file written by the splitter), `{{HISTORY_PATH}}` (the history file written by the splitter), and `{{OUTLINE_FILE_PATH}}` (the path pre-allocated in step 2). No content placeholders — the subagent loads the current ticket, the history file, and each cited spec file via Read in its own fresh context, and runs the spec_refs anchor resolution algorithm itself.
+5. Spawn `Agent(subagent_type: "Plan", prompt: <substituted>, description: "Implementation outline M<N>-NNN")`. Foreground.
+6. Branch on the chat reply:
    - If the reply begins with `## OUTLINE FAILED`, treat as a `clarity-fail`-equivalent escalation: append the OUTLINE FAILED block to the ticket's `escalations:` frontmatter entry (existing escalation flow) and fire `escalate` with `reason: outline-fail`. Do NOT add an `outline_file:` pointer; the sidecar was not written.
    - Otherwise the reply begins with `OUTLINE: PASS`; parse the three-line reply for the outline file path and risk count. Set the ticket frontmatter `outline_file: target/m1-tick-outline-M<N>-NNN.md` as a one-line pointer. Do NOT append the outline body to the ticket — the sidecar IS the outline.
 

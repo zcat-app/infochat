@@ -14,18 +14,28 @@ Preconditions (refuse and explain if any fail):
 
 Steps:
 
-1. **Ticket-clarity pre-flight.** Pre-allocate the verdict file path at `target/m1-tick-clarity-{{ID}}.txt` and the substituted-prompt path at `target/m1-tick-prompt-clarity-{{ID}}.txt` (the directory `target/` already exists by Maven convention and is excluded from version control). Render the prompt via Bash — do NOT Read `docs/process/clarity-prompt.md` into main-session context; the script extracts the fenced template body and substitutes placeholders, then the subagent Reads the rendered file in its own fresh context:
+1. **Ticket-clarity pre-flight.** Pre-allocate four paths under `target/` (the directory already exists by Maven convention and is excluded from version control): the verdict file at `target/m1-tick-clarity-{{ID}}.txt`, the substituted-prompt path at `target/m1-tick-prompt-clarity-{{ID}}.txt`, the current-state ticket file at `target/m1-tick-current-{{ID}}.md`, and the history file at `target/m1-tick-history-{{ID}}.md`. First split the ticket via Bash:
+
+   ```
+   python3 scripts/m1-split-ticket.py \
+     <repo-relative path to the ticket file> \
+     target/m1-tick-current-{{ID}}.md \
+     target/m1-tick-history-{{ID}}.md
+   ```
+
+   The split is mechanical (top-level YAML key parse — `escalations:` and `revisions:` blocks go to history, everything else to current). The history file gets a `# No history` sentinel when neither key is present. Then render the prompt via Bash — do NOT Read `docs/process/clarity-prompt.md` into main-session context; the script extracts the fenced template body and substitutes placeholders, then the subagent Reads the rendered file in its own fresh context:
 
    ```
    python3 scripts/m1-render-prompt.py \
      docs/process/clarity-prompt.md \
      target/m1-tick-prompt-clarity-{{ID}}.txt \
      TICKET_ID={{ID}} \
-     TICKET_FILE_PATH=<repo-relative path to the ticket file> \
+     CURRENT_TICKET_PATH=target/m1-tick-current-{{ID}}.md \
+     HISTORY_PATH=target/m1-tick-history-{{ID}}.md \
      VERDICT_FILE_PATH=target/m1-tick-clarity-{{ID}}.txt
    ```
 
-   The script substitutes three placeholders only: `{{TICKET_ID}}`, `{{TICKET_FILE_PATH}}`, `{{VERDICT_FILE_PATH}}`. No content placeholders are substituted — the clarity subagent loads the ticket and each cited spec file via its own Read tool in fresh context, and runs the spec_refs anchor resolution algorithm itself (the algorithm body is inlined into clarity-prompt.md and plan-prompt.md; the main session never runs it directly). Spawn the subagent with a short stub that points at the rendered file:
+   The script substitutes four placeholders only: `{{TICKET_ID}}`, `{{CURRENT_TICKET_PATH}}`, `{{HISTORY_PATH}}`, `{{VERDICT_FILE_PATH}}`. No content placeholders are substituted — the clarity subagent loads the current ticket, the history file, and each cited spec file via its own Read tool in fresh context, and runs the spec_refs anchor resolution algorithm itself (the algorithm body is inlined into clarity-prompt.md and plan-prompt.md; the main session never runs it directly). Spawn the subagent with a short stub that points at the rendered file:
 
    ```
    Agent(
@@ -53,18 +63,28 @@ Steps:
 6. Branch:
    - **Sequential:** `git checkout -b m1/M1-NNN-<slug>` from `main`.
    - **Parallel:** create a worktree via `Agent(isolation: "worktree")` and run the rest of the flow inside it.
-7. If `complexity: high`: pre-allocate the outline sidecar path at `target/m1-tick-outline-{{ID}}.md` and the substituted-prompt path at `target/m1-tick-prompt-plan-{{ID}}.txt`. Render the prompt via Bash (same pattern as step 1 — the main session never Reads `docs/process/plan-prompt.md`):
+7. If `complexity: high`: pre-allocate the outline sidecar path at `target/m1-tick-outline-{{ID}}.md` and the substituted-prompt path at `target/m1-tick-prompt-plan-{{ID}}.txt`. The current-state and history files were already written by the splitter call in step 1 against the post-clarity ticket state; re-run the splitter here (idempotent) only if the ticket file has been modified since (e.g., the clarity step recorded `clarity_check:` into frontmatter — see step 2 below; that frontmatter change means the splitter MUST re-run before Plan so the current-state file reflects it):
+
+   ```
+   python3 scripts/m1-split-ticket.py \
+     <repo-relative path to the ticket file> \
+     target/m1-tick-current-{{ID}}.md \
+     target/m1-tick-history-{{ID}}.md
+   ```
+
+   Then render the prompt via Bash (same pattern as step 1 — the main session never Reads `docs/process/plan-prompt.md`):
 
    ```
    python3 scripts/m1-render-prompt.py \
      docs/process/plan-prompt.md \
      target/m1-tick-prompt-plan-{{ID}}.txt \
      TICKET_ID={{ID}} \
-     TICKET_FILE_PATH=<repo-relative path to the ticket file> \
+     CURRENT_TICKET_PATH=target/m1-tick-current-{{ID}}.md \
+     HISTORY_PATH=target/m1-tick-history-{{ID}}.md \
      OUTLINE_FILE_PATH=target/m1-tick-outline-{{ID}}.md
    ```
 
-   The script substitutes three placeholders only: `{{TICKET_ID}}`, `{{TICKET_FILE_PATH}}`, `{{OUTLINE_FILE_PATH}}`. No content placeholders are substituted — the Plan subagent loads the ticket and each cited spec file via its own Read tool in fresh context, and runs the spec_refs anchor resolution algorithm itself (the algorithm body is inlined in plan-prompt.md). Spawn the subagent with the stub:
+   The script substitutes four placeholders only: `{{TICKET_ID}}`, `{{CURRENT_TICKET_PATH}}`, `{{HISTORY_PATH}}`, `{{OUTLINE_FILE_PATH}}`. No content placeholders are substituted — the Plan subagent loads the current ticket, the history file, and each cited spec file via its own Read tool in fresh context, and runs the spec_refs anchor resolution algorithm itself (the algorithm body is inlined in plan-prompt.md). Spawn the subagent with the stub:
 
    ```
    Agent(
