@@ -9,6 +9,7 @@ import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
+import app.zcat.infochat.provider.bundle.BundleLoader;
 import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.util.TypeLiteral;
 import org.jboss.logmanager.LogContext;
@@ -20,6 +21,7 @@ import java.lang.annotation.Annotation;
 import java.time.Instant;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.logging.Handler;
@@ -140,7 +142,23 @@ class InboundRouterContactIdRedactionTest {
     // ----- helpers ------------------------------------------------------
 
     private InboundRouter newRouter() {
-        InboundRouter router = new InboundRouter();
+        // M1-044b splice introduces 4 new mandatory CDI-injected
+        // collaborators on InboundRouter plus a DataSource used by the
+        // new lookupUser method. The redaction tests construct the
+        // router by hand (no Quarkus boot), so the helper wires no-op
+        // fakes for the 4 collaborators and overrides lookupUser to
+        // return a fixed "vouched" snapshot. The vouched state makes
+        // step 2 (DM unknown) skip and step 7 DM-gate (group_only-only)
+        // not fire — the redaction log sites at dispatch-exception /
+        // no-replyTarget / reply-send-failed still fire because the
+        // dispatch reaches handleSlash. The DataSource field stays
+        // null — lookupUser override bypasses it.
+        InboundRouter router = new InboundRouter() {
+            @Override
+            Optional<UserSnapshot> lookupUser(String adapter, String contactId) {
+                return Optional.of(new UserSnapshot(UUID.randomUUID(), false, "vouched"));
+            }
+        };
         router.commandHandlers = new SingletonInstance<>();
         router.autoRegisterService = new NoopAutoRegisterService();
         // M1-040 wired a @RequestScoped InboundContext into onMessage.
@@ -148,7 +166,53 @@ class InboundRouterContactIdRedactionTest {
         // @RequestScoped marker only matters when ARC proxies it.
         router.inboundContext = new InboundContext();
         router.maxInboundBodyBytes = 65536;
+        router.rateCapBucket = new NoopRateCapBucket();
+        router.inviteCodeConsumer = new NoopInviteCodeConsumer();
+        router.banCheck = new NoopBanCheck();
+        router.bundleLoader = new NoopBundleLoader();
         return router;
+    }
+
+    /** Always admits — the redaction tests do not exercise the rate-cap branch. */
+    private static final class NoopRateCapBucket extends RateCapBucket {
+        @Override
+        public boolean tryAcquire(String adapter, String contactId) {
+            return true;
+        }
+    }
+
+    /** Never invoked — the vouched-user lookup override means step 2 does not fire. */
+    private static final class NoopInviteCodeConsumer extends InviteCodeConsumer {
+        @Override
+        public Outcome consume(String adapter, String contactId, UUID candidateCode) {
+            throw new UnsupportedOperationException(
+                    "inviteCodeConsumer should not be invoked when the user is known (vouched)");
+        }
+    }
+
+    /** Always reports {@code is_banned=false} — the redaction tests do not exercise the ban branch. */
+    private static final class NoopBanCheck extends BanCheck {
+        @Override
+        public boolean isBanned(String adapter, String contactId) {
+            return false;
+        }
+    }
+
+    /**
+     * Returns a stub value if asked. The redaction tests do not assert
+     * on outbound bodies — they assert on log contents — but the
+     * router calls {@code bundleLoader.get(ERROR_BAN_FIXED)} only when
+     * the ban gate fires (it does not, thanks to NoopBanCheck), and
+     * {@code ERROR_INVITE_REQUIRED} only when step 7 DM-gate fires (it
+     * does not, thanks to the vouched-user lookup override). So this
+     * fake exists purely to avoid a null-field NPE if a future refactor
+     * starts consulting BundleLoader unconditionally.
+     */
+    private static final class NoopBundleLoader extends BundleLoader {
+        @Override
+        public String get(String key) {
+            return "noop:" + key;
+        }
     }
 
     private static InboundMessage inboundDm(String contactId, String text) {

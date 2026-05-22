@@ -1,7 +1,7 @@
 ---
 id: M1-044b
 title: InboundRouter intake-step splice (1.5, 2, 4, 7-DM-gate) + bundle keys + rate-cap config
-status: pending
+status: done
 created: 2026-05-20
 last_updated: 2026-05-22
 deferred_on:
@@ -573,8 +573,144 @@ revisions:
       single-snapshot reuse pattern (derive both the emptiness predicate
       and the ban predicate from the SAME UserSnapshot lookup to
       eliminate TOCTOU).
-outline_file:
-clarity_check: {}
+outline_file: target/m1-tick-outline-M1-044b.md
+clarity_check:
+  date: 2026-05-22
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE: Items 1, 3, 4, 6 contain prose behavioral assertions or source-order reading checks without standalone runnable commands. Behavioral coverage for all four is provided by InboundRouterIntakeOrderingTest (item 12) scenarios (d)/(e)/(g)/(h) — treat item 12 as the runnable anchor for those behavioral claims."
+    - "SELF-CONTAINED: §Out-of-scope expansion body section contains stale prose from the pre-M1-049 architecture: (a) AdapterRegistryTest described as receiving a @BeforeEach alice pre-seed (body lines ~898–900), contradicting frontmatter out_of_scope (\"any change to AdapterRegistryTest... is obsolete and removed\") and Authorized test changes (\"AdapterRegistryTest is NOT modified by this ticket\"); (b) M1-035c/M1-036/M1-037/M1-039/M1-040 described as staying green because they \"seed registered users or stub collaborators\" — the correct rationale (handler.handle() bypass per M1-049) lives in verified_stays_green; (c) §Out-of-scope expansion line ~904–905 lists 5 @Inject fields (incl. dataSource) while acceptance item 15 + DoD commit to 4. Developer should follow the acceptance items and Authorized test changes for implementation scope, not §Out-of-scope expansion prose."
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-05-22
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 14
+      added: 1302
+      removed: 194
+redteam_findings:
+  - date: 2026-05-22
+    category: AUTH-BYPASS
+    severity: high
+    promise: |
+      spec/security.md §Invite-code registration: "Group-registered users
+      do not get free DM access ... rejected with the same fixed reply
+      as step 2's invalid path." Combined with §Authorization model step
+      7 ("Permission check ... blocked commands return a friendly reply
+      and never reach execution") and step 9 ("Execute"), the spec orders
+      Permission BEFORE Execute.
+    gap: |
+      InboundRouter.java lines 319-345. The DM-gate carve-out fires AFTER
+      handleSlash (line 322); the handler's side effects already occurred
+      before the body override at line 342. AddSourceCommandHandler.handle
+      performs a URL probe + sourceUpsertService.upsert (DB write);
+      SummaryCommandHandler.handle performs an LLM call. The body is
+      replaced with "Access requires an invitation." but the source row /
+      LLM call / probe already landed.
+    repro: |
+      1) Alice auto-registers in Group G via @mention → users row gets
+      registration_state='group_only'. 2) Alice DMs /add-source <url>
+      --tags news. 3) Step 1.5/normalize/lookupUser pass; steps 2,3,4
+      no-op (snapshot non-empty, not Group, not banned). 4) handleSlash
+      dispatches AddSource handler; URL probe runs, sourceUpsertService
+      writes the source row. 5) Step 7 overrides body to invite-required.
+      Alice sees rejection literal but the source exists in the DB.
+    suggested_fix_class: missing-auth-check
+  - date: 2026-05-22
+    category: DOS
+    severity: medium
+    promise: |
+      spec/security.md §Authorization model step 1.5: "Over-cap inbound
+      is dropped silently ... no reply (including no fixed ban reply,
+      no fixed invite-required reply, no friendly error). The cap runs
+      after step 1 ... and before every application-level check below,
+      so a hostile flood cannot drive outbound cost via the per-inbound
+      fixed-reply paths."
+    gap: |
+      InboundRouter.java lines 243-255. Body-size cap fires BEFORE the
+      rate cap. Oversize-inbound flow never consumes a token from
+      RateCapBucket but emits MESSAGE_TOO_LARGE_REPLY. An adversary
+      sustaining oversize inbound bypasses the bucket and drives
+      unbounded outbound. The class-Javadoc rationale at lines 88-95
+      acknowledges the ordering but conflicts with the spec's explicit
+      "step 1.5 before every application-level check" promise.
+    repro: |
+      1) Send oversize inbound (>infochat.router.max-inbound-body-bytes)
+      at 10/s. 2) Each triggers sendReply(MESSAGE_TOO_LARGE_REPLY); the
+      bucket never decrements. 3) Sustained 10× outbound amplification
+      relative to the under-cap inbound rate (60/min). The rate-cap
+      health signal stays "green" while outbound is saturated.
+    suggested_fix_class: rate-limit
+  - date: 2026-05-22
+    category: INFO-LEAK
+    severity: low
+    promise: |
+      spec/security.md §Secrets handling: "Contact IDs are logged in
+      redacted form (prefix + ellipsis + suffix) outside the audit log."
+    gap: |
+      InboundRouter.java lines 379-383. lookupUser's IllegalStateException
+      wrapper concatenates raw contactId into its message. onMessage does
+      not catch the exception; it bubbles to the adapter dispatch surface
+      where any uncaught-handler log emits the unredacted id — bypassing
+      the M1-038 redaction at the three log sites in the same method.
+    repro: |
+      1) Transient DB outage triggers SQLException inside lookupUser.
+      2) IllegalStateException bubbles to the adapter dispatch surface.
+      3) Default Quarkus uncaught-exception logger writes the message
+      including raw contactId. 4) Operator log readers see the unredacted
+      id.
+    suggested_fix_class: input-sanitization
+  - date: 2026-05-22
+    category: AUDIT-EVASION
+    severity: low
+    promise: |
+      spec/security.md §Invite-code registration: "Brute-force rate
+      limit. A per-(adapter, contact_id) rate limit applies to
+      invite-code attempts. Failed attempts increment a counter;
+      when the counter exceeds a profile-driven threshold within a
+      profile-driven window, further attempts from that (adapter,
+      contact_id) are rejected without checking the code, and an
+      audit row records the threshold breach."
+    gap: |
+      InboundRouter.java lines 277-293. parseInviteCode short-circuits
+      when the normalized body is not a UUID — ERROR_INVITE_REQUIRED
+      is sent without invoking InviteCodeConsumer.consume. The
+      brute-force counter does not increment for non-UUID probes, so
+      an adversary can issue arbitrarily many non-UUID probes between
+      a small number of below-threshold UUID guesses; the threshold-
+      breach audit row never fires.
+    repro: |
+      1) Issue 9 UUID-shaped guesses (under threshold-of-10). 2) Issue
+      1000 non-UUID-shaped probes — none increment the counter. 3) Wait
+      for the window to roll, repeat. 4) Threshold breach never logged;
+      >1000 invite-related probes per window invisible to the operator.
+    suggested_fix_class: rate-limit
+redteam_audits:
+  - date: 2026-05-22
+    verdict: FINDINGS
+    base: main (f598c03)
+    head: m1/M1-044b-inbound-router-intake-splice (0523710)
+    verdict_file: docs/plan/m1/redteam/M1-044b-2026-05-22.md
+    findings_count: 4
+    out_of_model_count: 2
+    note: |
+      Audit run post-`/m1-tick commit M1-044b`, pre-`/m1-tick merge`.
+      Four findings (1 high AUTH-BYPASS, 1 medium DOS, 2 low INFO-LEAK
+      + AUDIT-EVASION) all sit in InboundRouter.java on the splice
+      surface; recommended disposition is ONE remediation ticket (e.g.
+      M1-044e) with `remediates: M1-044b`, bundling all four since they
+      share a single file + intake-step surface. The done-commit
+      (0523710) is immutable per workflow. When `/m1-tick merge M1-044b`
+      runs, the squash-merge must `-C 0523710` (the implementation
+      commit SHA) so the canonical message survives the audit's
+      second-commit-on-branch landing.
 ---
 
 # M1-044b: InboundRouter intake-step splice (1.5, 2, 4, 7-DM-gate) + bundle keys + rate-cap config

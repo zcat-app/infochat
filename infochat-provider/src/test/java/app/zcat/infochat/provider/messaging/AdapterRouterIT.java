@@ -18,6 +18,7 @@ import java.sql.ResultSet;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -95,6 +96,29 @@ class AdapterRouterIT {
                      "DELETE FROM users WHERE contact_id LIKE 'mvp-%'")) {
             ps.executeUpdate();
         }
+        // M1-044b: pre-seed INSERT INTO users for mvp-user-1 + mvp-user-2
+        // with registration_state='invited' — the post-step-2 successful-
+        // invite state, mirroring what InviteCodeConsumer.Accepted would
+        // have written — so step 2 (DM unknown) skips and dispatch reaches
+        // the handler. The 'invited' state also makes step 7 DM-gate
+        // (group_only-only) not fire. probation_until is set to NOW()+24h
+        // to satisfy assertUsersRowMatchesMvpDefaults's ±30s window check.
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO users (adapter, contact_id, is_admin, "
+                             + "registration_state, probation_until) "
+                             + "VALUES (?, ?, FALSE, 'invited', ?) "
+                             + "ON CONFLICT (adapter, contact_id) DO NOTHING")) {
+            OffsetDateTime probationOneDayOut = OffsetDateTime.now().plusHours(24);
+            ps.setString(1, "inmemory");
+            ps.setString(2, "mvp-user-1");
+            ps.setObject(3, probationOneDayOut);
+            ps.executeUpdate();
+            ps.setString(1, "inmemory");
+            ps.setString(2, "mvp-user-2");
+            ps.setObject(3, probationOneDayOut);
+            ps.executeUpdate();
+        }
     }
 
     @Test
@@ -154,10 +178,13 @@ class AdapterRouterIT {
                 assertTrue(rs.next(),
                         "users row must exist for adapter='inmemory' contact_id='" + contactId + "'");
                 assertFalse(rs.getBoolean("is_admin"),
-                        "is_admin must be FALSE for auto-registered users");
-                assertEquals("group_only", rs.getString("registration_state"),
-                        "registration_state must be 'group_only' per spec D44 §Authorization model step 3 "
-                                + "(M1-044a narrowed AutoRegisterService to the group-only path)");
+                        "is_admin must be FALSE for invite-registered users");
+                assertEquals("invited", rs.getString("registration_state"),
+                        "registration_state must be 'invited' — post-M1-044b the @BeforeEach "
+                                + "pre-seeds the row in the post-step-2 successful-invite state, "
+                                + "mirroring what InviteCodeConsumer.Accepted would have written; "
+                                + "the auto-register path (which writes 'group_only') no longer "
+                                + "fires from a DM inbound");
                 Timestamp probation = rs.getTimestamp("probation_until");
                 assertNotNull(probation,
                         "probation_until must be populated to NOW() + slow_start_window "

@@ -138,6 +138,48 @@ public final class BundleKeys {
     public static final String REPLY_SUMMARY_TOP_3_OF_N_PREFIX =
             "reply.summary.top_3_of_n_prefix";
 
+    // ----- Intake-step splice fixed replies (M1-044b) ---------------------
+    // Per docs/spec/security.md §Authorization model + §User ban +
+    // §Invite-code registration, and docs/design/03-commands.md §3.11
+    // Welcome messages. These keys are looked up by InboundRouter at the
+    // step 2 / step 4 / step 7-DM-gate branches of the intake splice.
+
+    /**
+     * Fixed reply for a DM that fails the step 2 invite-code consume
+     * (Rejected or BruteForceThresholdBreached outcome), and for the
+     * step 7 DM-gate override that rewrites a {@code group_only} user's
+     * slash-command reply to the same literal. Per spec
+     * §Invite-code registration: "rejected with the same fixed reply
+     * as step 2's invalid path."
+     */
+    public static final String ERROR_INVITE_REQUIRED = "error.invite.required";
+
+    /**
+     * Fixed reply for the step 4 ban check. Per spec §User ban: "Banned
+     * user receives one fixed reply per inbound message, regardless of
+     * input." The exact English literal lives in
+     * {@code docs/design/04-security.md} §Banning.
+     */
+    public static final String ERROR_BAN_FIXED = "error.ban.fixed";
+
+    /**
+     * Welcome reply sent after a successful step 2 invite-code consume
+     * (DM, fresh user). Text from {@code docs/design/03-commands.md}
+     * §3.11 Welcome messages, Mode 1.
+     */
+    public static final String REPLY_WELCOME_DM_FRESH = "reply.welcome.dm_fresh";
+
+    /**
+     * Welcome reply sent on a group's first non-banned {@code @mention}
+     * after step 3 group auto-register. Text from
+     * {@code docs/design/03-commands.md} §3.11 Welcome messages, Mode 3.
+     * The intake-step splice (M1-044b) reserves this key for use by the
+     * group auto-promote / first-mention reply path (M1-044c / T2-A).
+     * M1-044b lands the key + bundle entry so the bundle stays in sync
+     * with {@link BundleKeys} reflection.
+     */
+    public static final String REPLY_WELCOME_GROUP_FIRST_MENTION = "reply.welcome.group_first_mention";
+
     private BundleKeys() {
         throw new AssertionError("BundleKeys is a constant holder and must not be instantiated");
     }

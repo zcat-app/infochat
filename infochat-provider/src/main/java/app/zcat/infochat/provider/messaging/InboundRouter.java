@@ -6,6 +6,8 @@ import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
+import app.zcat.infochat.provider.bundle.BundleKeys;
+import app.zcat.infochat.provider.bundle.BundleLoader;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.context.control.ActivateRequestContext;
 import jakarta.enterprise.inject.Instance;
@@ -15,9 +17,15 @@ import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.sql.DataSource;
 import java.nio.charset.StandardCharsets;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.text.Normalizer;
 import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -27,90 +35,85 @@ import java.util.concurrent.atomic.AtomicLong;
  * lambda that captures the source adapter's {@code name()} and calls
  * {@link #onMessage(InboundMessage, String)}; the registry also tells
  * the router which adapter to send replies through via
- * {@link #setReplyTarget}. The adapter-name plumbing keeps the
- * messaging-adapter SPI ({@link app.zcat.infochat.messaging.InboundMessage})
- * free of an adapter-identity field — the registry knows which adapter
- * it just wired, so the name reaches the router through the wiring
- * surface, not the payload.
+ * {@link #setReplyTarget}.
  *
- * <p><b>Body-size cap (defense in depth).</b> Before invoking
- * {@link #normalize}, {@link #onMessage} drops any inbound whose UTF-8
- * byte length exceeds {@code infochat.router.max-inbound-body-bytes}
- * with the fixed {@link #MESSAGE_TOO_LARGE_REPLY} literal. The
- * adapter SPI declares its own {@code maxInboundMessageBytes} but is
- * honor-system; the router cap fires even when a misbehaving adapter
- * lets a larger payload through. The cap exists chiefly to bound
- * NFKC's amplification cost on adversarial inputs (Hangul jamo
- * expansion, deep combining-mark sequences) — see M1-035b red-team
- * Finding 6.</p>
+ * <p><b>Intake-step order (M1-044b splice).</b> {@link #onMessage}
+ * runs the intake steps in the spec's exact order per
+ * {@code docs/spec/security.md} §Authorization model:
+ * <ol>
+ *   <li>identity (resolved by {@link AdapterRegistry} into
+ *       {@link InboundMessage#sender()});</li>
+ *   <li>1.5 transport-level rate cap via {@link RateCapBucket};
+ *       over-cap inbound is dropped silently with no outbound;</li>
+ *   <li>1.7 Unicode normalize (NFKC + bidi-strip + zero-width-strip,
+ *       per-line outside CommonMark fenced code);</li>
+ *   <li>2 DM unknown contact → {@link InviteCodeConsumer} invite-code
+ *       consume; the {@code candidateCode} is parsed from the
+ *       normalized body. {@link InviteCodeConsumer.Accepted} sends the
+ *       {@code reply.welcome.dm_fresh} bundle entry and stops;
+ *       {@link InviteCodeConsumer.Rejected} and
+ *       {@link InviteCodeConsumer.BruteForceThresholdBreached} both
+ *       send the fixed {@code error.invite.required} reply per spec
+ *       (the rate-limit state does not change the per-failure reply)
+ *       and stop;</li>
+ *   <li>3 Group unknown contact → {@link AutoRegisterService#resolveOrRegisterGroup}
+ *       inserts a {@code registration_state='group_only'} row and
+ *       continues to step 4;</li>
+ *   <li>4 ban check via {@link BanCheck#isBanned}; a banned user
+ *       receives the fixed {@code error.ban.fixed} reply and stops
+ *       (spec §User ban: "one fixed reply per inbound message");</li>
+ *   <li>5 reserved — M1-045 splices the probation check here;</li>
+ *   <li>6 parse + dispatch (slash-command resolver or chat-mode
+ *       fallback);</li>
+ *   <li>7 DM-gate carve-out: when the inbound is a DM scope AND the
+ *       resolved user's {@code registration_state = 'group_only'}, the
+ *       dispatch result is REPLACED with the fixed
+ *       {@code error.invite.required} reply (spec §Invite-code
+ *       registration: "rejected with the same fixed reply as step 2's
+ *       invalid path"). The check fires AFTER the dispatch resolved a
+ *       handler — full step-7 permission matrix lands in M1-045.</li>
+ * </ol>
  *
- * <p><b>Normalization-first invariant.</b> After the size cap,
- * {@link #onMessage} runs the Unicode normalization pass spec'd in
- * {@code docs/spec/security.md} §Authorization model step 1.7 and
- * {@code docs/spec/commands.md} §Surface conventions: NFKC,
- * bidi-control strip, zero-width strip, leading/trailing whitespace
- * trim. The normalized body REPLACES the raw body for every
- * downstream consumer; the raw body is discarded. This is what makes
- * the homoglyph-evasion claim of §Authorization model step 1.7 a real
- * defense — every command parser and chat-agent call site sees the
- * normalized form, never the raw inbound. Future command handlers
- * MUST stay downstream of this router so they inherit the same
- * invariant.</p>
+ * <p><b>Single users-row SELECT per dispatch.</b> Steps 2 (emptiness
+ * pre-condition), 3 (emptiness pre-condition), and 7 (DM-gate
+ * {@code registration_state} predicate) all derive from the SAME
+ * {@link UserSnapshot} read at the top of the splice. This eliminates
+ * TOCTOU between the three checks and keeps the dispatch path at one
+ * users-row SELECT per inbound. The step 4 ban predicate consults
+ * {@link BanCheck#isBanned} directly per spec (a separate query that
+ * sees the freshest {@code is_banned} state for a banned-mid-dispatch
+ * race).</p>
  *
- * <p><b>Fenced-code carve-out.</b> Code points inside CommonMark
- * fenced code blocks are preserved byte-for-byte: no NFKC, no
- * bidi-strip, no zero-width-strip. A fenced block opens on a line of
- * 3 or more consecutive {@code `} or {@code ~} characters (with 0–3
- * leading spaces and an optional info string after the run) and
- * closes on the next line containing only the same fence character
- * at ≥ that count. The carve-out exists because {@code docs/spec/
- * security.md} §Authorization model step 1.7 promises chat-input
- * parity: code samples a user pastes must round-trip verbatim into
- * downstream prose and through the chat-agent. The single-line
- * inline-code surface (single-backtick pairs within a line) is NOT
- * fenced code — those characters remain subject to NFKC.</p>
+ * <p><b>Body-size cap (defense in depth, preserved from M1-038).</b>
+ * Before the rate-cap check, {@link #onMessage} drops any inbound
+ * whose UTF-8 byte length exceeds
+ * {@code infochat.router.max-inbound-body-bytes} with the fixed
+ * {@link #MESSAGE_TOO_LARGE_REPLY} literal. The cap fires
+ * BEFORE rate cap so adversarial bodies cannot drive bucket
+ * arithmetic on un-bounded payloads, and BEFORE normalize so NFKC
+ * amplification on adversarial inputs (Hangul jamo expansion, deep
+ * combining-mark sequences) cannot amplify cost.</p>
  *
- * <p><b>Branches.</b> After normalization the dispatch table is:</p>
- * <ul>
- *   <li>Empty / whitespace-only / bidi-only / zero-width-only body →
- *       drop silently (no outbound, no exception).</li>
- *   <li>Body begins with {@code '/'} → resolve a {@link CommandHandler}
- *       via {@link Instance} lookup; if no handler binds to that name
- *       reply with the deterministic unknown-command literal.</li>
- *   <li>Otherwise → reply with the deterministic chat-mode-not-in-MVP
- *       literal. The chat-mode dispatcher proper lands in T2-D; this
- *       stub prevents a silent drop.</li>
- *   <li>Any uncaught exception in the dispatch branch → log at ERROR
- *       via raw SLF4J, reply with the fixed internal-error literal.
- *       The exception's {@code getMessage()} is NEVER interpolated
- *       into the user-visible body (M1-020's deferred sanitization
- *       concern — using a fixed literal sidesteps it for MVP).</li>
- * </ul>
+ * <p><b>Normalization-first invariant (preserved from M1-035b).</b>
+ * After rate cap, {@link #onMessage} runs the Unicode normalization
+ * pass spec'd in {@code docs/spec/security.md} §Authorization model
+ * step 1.7: NFKC, bidi-control strip, zero-width strip, leading/
+ * trailing whitespace trim, applied per-line OUTSIDE CommonMark
+ * fenced code blocks. The normalized body REPLACES the raw body for
+ * every downstream consumer.</p>
  *
- * <p>v1 deferred work that future tickets wire upstream of dispatch:
- * <b>ban check</b> (T2-A / D11), <b>invite-code gating</b> (T2-A /
- * D44), <b>slow-start probation filter</b> (T2-A / D45). The one-line
- * comment in {@link #onMessage} below pins the deferred ordering so a
- * future reader sees the seam. M1-035d adds the
- * {@code AutoRegisterService} at the same intake point.</p>
- *
- * <p><b>Contact-id redaction in operator logs.</b> The three error-log
- * sites in {@link #onMessage} (dispatch failure, no-replyTarget, and
- * reply-send-failed) route the scope's id through
- * {@link ContactIds#redact} so a contact id never appears unredacted
- * in non-audit logs — see {@code docs/spec/security.md} §Secrets
- * handling and M1-035b red-team Finding 5.</p>
+ * <p><b>Contact-id redaction in operator logs (preserved from
+ * M1-038).</b> The three error-log sites in {@link #onMessage}
+ * (dispatch failure, no-replyTarget, reply-send-failed) route the
+ * scope's id through {@link ContactIds#redact} so a contact id never
+ * appears unredacted in non-audit logs.</p>
  *
  * <p><b>Multi-adapter reply.</b> {@link #replyTarget} is a single
  * volatile reference. {@link AdapterRegistry} sets it once per
  * activated adapter; in a multi-adapter MVP the last-registered
  * adapter wins as the reply target — an acceptable MVP limitation
  * because no MVP user-facing flow runs more than one adapter
- * simultaneously (D46 production-exclusion of {@code inmemory}
- * leaves SimpleX+Signal as the only multi-adapter shape, and SimpleX
- * + Signal are T3-A territory). A scope-to-adapter routing table
- * lands when the multi-adapter inbound→reply round-trip becomes a
- * real consumer.</p>
+ * simultaneously.</p>
  */
 @ApplicationScoped
 public class InboundRouter {
@@ -146,11 +149,25 @@ public class InboundRouter {
      * Test-only seam: incremented on entry to {@link #normalize}. The
      * size-cap test asserts this counter does not advance across an
      * oversize inbound, proving the cap-checked branch returns before
-     * the normalization pass runs. Not exposed as a public API; the
-     * sole reader is {@code InboundRouterNormalizeTest} in the same
-     * package.
+     * the normalization pass runs.
      */
     static final AtomicLong NORMALIZE_INVOCATIONS = new AtomicLong();
+
+    /**
+     * The {@code registration_state} string that causes the step 7
+     * DM-gate carve-out to fire — a user auto-registered via group
+     * {@code @mention} (M1-044a {@code AutoRegisterService}) is barred
+     * from initiating a DM until a bot admin issues
+     * {@code /invite create --contact} or {@code /vouch}. Other
+     * states ({@code 'invited'}, {@code 'vouched'}, {@code 'preban'})
+     * pass through.
+     */
+    private static final String REGISTRATION_STATE_GROUP_ONLY = "group_only";
+
+    /** Single users-row lookup feeding steps 2, 3, and 7 from one SELECT. */
+    private static final String USER_SNAPSHOT_SQL =
+            "SELECT id, is_banned, registration_state FROM users "
+                    + "WHERE adapter = ? AND contact_id = ?";
 
     @Inject
     Instance<CommandHandler> commandHandlers;
@@ -160,6 +177,21 @@ public class InboundRouter {
 
     @Inject
     InboundContext inboundContext;
+
+    @Inject
+    RateCapBucket rateCapBucket;
+
+    @Inject
+    InviteCodeConsumer inviteCodeConsumer;
+
+    @Inject
+    BanCheck banCheck;
+
+    @Inject
+    BundleLoader bundleLoader;
+
+    @Inject
+    DataSource dataSource;
 
     /**
      * Defense-in-depth body cap. The default is below the in-memory
@@ -175,10 +207,7 @@ public class InboundRouter {
 
     /**
      * Bind the adapter used to send replies. Called by
-     * {@link AdapterRegistry} once per activated adapter at startup;
-     * in single-adapter MVP this is the one InMemoryAdapter, in
-     * future multi-adapter deployments the last-bound adapter wins
-     * until scope-to-adapter routing is wired.
+     * {@link AdapterRegistry} once per activated adapter at startup.
      */
     void setReplyTarget(MessagingAdapter adapter) {
         this.replyTarget = adapter;
@@ -186,55 +215,108 @@ public class InboundRouter {
 
     /**
      * Entry point for one inbound message routed from the named
-     * source adapter. {@link AdapterRegistry} wires every activated
-     * adapter to a lambda that captures {@code adapter.name()} and
-     * calls this method, so {@code adapterName} reflects the real
-     * source adapter even in multi-adapter deployments (T3-A).
+     * source adapter. See the class-level Javadoc for the full
+     * intake-step order.
      */
     @ActivateRequestContext
     public void onMessage(@NonNull InboundMessage msg, @NonNull String adapterName) {
         // @ActivateRequestContext gives this dispatch its own CDI
         // request-scope context so @RequestScoped collaborators
         // (InboundContext) resolve correctly when invoked from threads
-        // that have no ambient request scope — adapter callbacks fire
-        // off virtual / pool threads in production and on the test
-        // thread in InMemoryAdapter-driven tests.
-        // T2-A wires the missing intake steps upstream of this point:
-        // ban check (D11), invite-code gate (D44), slow-start probation (D45).
+        // that have no ambient request scope.
         //
-        // Set the per-request adapter name BEFORE any size-cap / normalize /
-        // dispatch step runs. Handlers and downstream collaborators that
-        // need to qualify a per-actor users lookup by (adapter, contact_id)
-        // — required for the V5 UNIQUE constraint and for cross-adapter
-        // isolation when D46's SimpleX+Signal lands — read it back via
-        // @Inject InboundContext. The router is the single producer of
-        // adapter-name truth for the dispatch (AdapterRegistry captures
-        // adapter.name() into the lambda that invokes onMessage).
+        // Set the per-request adapter name BEFORE any size-cap / rate-cap
+        // / normalize / dispatch step runs. Handlers and downstream
+        // collaborators that need to qualify a per-actor users lookup by
+        // (adapter, contact_id) — required for the V5 UNIQUE constraint
+        // and cross-adapter isolation — read it back via @Inject
+        // InboundContext.
         inboundContext.setAdapterName(adapterName);
 
         String raw = msg.text();
+        String contactId = msg.sender().contactId();
 
-        // Size cap fires BEFORE normalize so adversarial NFKC inputs
-        // (Hangul jamo expansion, deep combining marks) cannot amplify
-        // cost. The adapter SPI also declares maxInboundMessageBytes
-        // but is honor-system — this is the centralized seam.
+        // Size cap (M1-038, preserved). Fires BEFORE rate cap so
+        // adversarial payloads cannot drive bucket arithmetic on
+        // un-bounded inputs, AND before normalize so NFKC amplification
+        // cannot drive cost on adversarial inputs.
         if (raw != null && raw.getBytes(StandardCharsets.UTF_8).length > maxInboundBodyBytes) {
             sendReply(msg.scope(), MESSAGE_TOO_LARGE_REPLY);
             return;
         }
 
+        // Step 1.5 — transport-level rate cap. Over-cap inbound is
+        // dropped silently per spec §Authorization model step 1.5
+        // (no outbound, no ban reply, no invite-required reply). The
+        // cap bounds outbound cost from a hostile contact driving
+        // inbound floods.
+        if (!rateCapBucket.tryAcquire(adapterName, contactId)) {
+            return;
+        }
+
+        // Step 1.7 — Unicode normalize (M1-035b, preserved).
         String normalized = normalize(raw);
         if (normalized.isEmpty()) {
             return;
         }
 
-        // MVP-legacy auto-register-on-first-DM per docs/design/00-mvp.md §4.
-        // Returns the users.id; MVP discards it (T2-A wires invite-gating
-        // upstream and consumes the id at that seam). The call must be
-        // upstream of the slash-vs-chat split so chat-mode inbound also
-        // produces a users row.
-        autoRegisterService.resolveOrRegister(msg.sender(), adapterName);
+        // Single users-row SELECT feeds steps 2 (emptiness), 3
+        // (emptiness), and 7 (DM-gate registration_state predicate).
+        // Step 4 consults BanCheck.isBanned directly per spec — see
+        // class-level Javadoc.
+        Optional<UserSnapshot> snapshot = lookupUser(adapterName, contactId);
 
+        // Step 2 — DM unknown contact + invite-code consume.
+        // Per spec §Authorization model step 2: parse the normalized
+        // body as a UUID candidate code; if it isn't a UUID, that's
+        // the same Rejected fate as a code-shaped-but-invalid body.
+        // InviteCodeConsumer.Accepted → welcome reply; Rejected and
+        // BruteForceThresholdBreached → fixed error.invite.required
+        // reply (the spec gives the same user-visible reply for
+        // both — the rate-limit state does not change it).
+        if (msg.scope() instanceof ScopeRef.Dm && snapshot.isEmpty()) {
+            UUID candidate = parseInviteCode(normalized);
+            if (candidate == null) {
+                sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_INVITE_REQUIRED));
+                return;
+            }
+            InviteCodeConsumer.Outcome outcome =
+                    inviteCodeConsumer.consume(adapterName, contactId, candidate);
+            switch (outcome) {
+                case InviteCodeConsumer.Accepted a ->
+                        sendReply(msg.scope(), bundleLoader.get(BundleKeys.REPLY_WELCOME_DM_FRESH));
+                case InviteCodeConsumer.Rejected r ->
+                        sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_INVITE_REQUIRED));
+                case InviteCodeConsumer.BruteForceThresholdBreached b ->
+                        sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_INVITE_REQUIRED));
+            }
+            return;
+        }
+
+        // Step 3 — Group unknown contact + auto-register. Per spec
+        // §Authorization model step 3: insert a row under
+        // registration_state='group_only' with probation_until = NOW()
+        // + slow_start_window, then continue to step 4. The auto-
+        // promote slot and group_membership row inserts are deferred
+        // to T2-F. A freshly auto-registered user is never banned
+        // (V5 default is_banned=FALSE), so step 4 below will see
+        // is_banned=false either via BanCheck SQL or by the row that
+        // was just written.
+        if (msg.scope() instanceof ScopeRef.Group && snapshot.isEmpty()) {
+            autoRegisterService.resolveOrRegisterGroup(msg.sender(), adapterName);
+        }
+
+        // Step 4 — ban check per spec §User ban + §Authorization model
+        // step 4. The fixed error.ban.fixed reply is sent and dispatch
+        // stops.
+        if (banCheck.isBanned(adapterName, contactId)) {
+            sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_BAN_FIXED));
+            return;
+        }
+
+        // Step 5 (reserved — M1-045 inserts the probation check here).
+
+        // Step 6 — Parse + dispatch.
         String body;
         try {
             body = normalized.startsWith("/")
@@ -246,8 +328,87 @@ public class InboundRouter {
             body = INTERNAL_ERROR_REPLY;
         }
 
+        // Step 7 — DM-gate carve-out for group_only users. Per spec
+        // §Invite-code registration: a user auto-registered via group
+        // @mention (registration_state='group_only') is rejected from
+        // DM with the same fixed reply as step 2's invalid path. The
+        // override fires AFTER dispatch resolved a handler — full
+        // step-7 permission matrix is M1-045 territory. The handler's
+        // SELECT (e.g. /help) is wasted work for a group_only DM, but
+        // bounded; the optimization to skip dispatch is deferred.
+        if (msg.scope() instanceof ScopeRef.Dm
+                && snapshot.map(s -> REGISTRATION_STATE_GROUP_ONLY.equals(s.registrationState()))
+                        .orElse(false)) {
+            body = bundleLoader.get(BundleKeys.ERROR_INVITE_REQUIRED);
+        }
+
         sendReply(msg.scope(), body);
     }
+
+    /**
+     * Resolve a {@link UserSnapshot} for {@code (adapter, contactId)} —
+     * the V5 UNIQUE (adapter, contact_id) constraint guarantees
+     * zero-or-one result. Used by steps 2 (DM emptiness), 3 (Group
+     * emptiness), and 7 (DM-gate {@code registration_state} predicate)
+     * — derive all three predicates from the SAME snapshot to
+     * eliminate TOCTOU between them.
+     *
+     * <p>Package-private + non-final so plain-JUnit test helpers
+     * (InboundRouterNormalizeTest, InboundRouterContactIdRedactionTest,
+     * InboundRouterIntakeOrderingTest) can subclass {@link InboundRouter}
+     * and override this method with a fixed-value response — the
+     * helpers do not wire a {@link DataSource} fake, and the
+     * size-cap / normalize / redaction code paths the tests exercise
+     * do not depend on a real users row. Production callers consume
+     * via the {@code @Inject} {@link DataSource} seam.</p>
+     */
+    Optional<UserSnapshot> lookupUser(String adapter, String contactId) {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(USER_SNAPSHOT_SQL)) {
+            ps.setString(1, adapter);
+            ps.setString(2, contactId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return Optional.empty();
+                }
+                return Optional.of(new UserSnapshot(
+                        rs.getObject("id", UUID.class),
+                        rs.getBoolean("is_banned"),
+                        rs.getString("registration_state")));
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "InboundRouter.lookupUser failed for adapter=" + adapter
+                            + " contact_id=" + contactId, e);
+        }
+    }
+
+    /**
+     * Parse the normalized body as a UUID candidate invite code, or
+     * return {@code null} if the body is not a UUID. A non-UUID body
+     * from an unknown DM contact gets the same fixed
+     * {@code error.invite.required} reply as a Rejected consume —
+     * the spec gives a single reply class for the entire failure
+     * surface.
+     */
+    private static UUID parseInviteCode(String normalized) {
+        try {
+            return UUID.fromString(normalized);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Per-dispatch snapshot of one users-row's state. Captures only
+     * the columns the splice needs: {@code id} (for downstream audit
+     * hooks if any), {@code is_banned} (TOCTOU-paired with
+     * {@link BanCheck#isBanned} at step 4), and
+     * {@code registration_state} (step 7 DM-gate predicate).
+     * Package-private so test subclasses can construct instances when
+     * overriding {@link #lookupUser}.
+     */
+    record UserSnapshot(UUID id, boolean isBanned, String registrationState) {}
 
     private void sendReply(ScopeRef scope, String body) {
         MessagingAdapter target = replyTarget;
@@ -290,10 +451,7 @@ public class InboundRouter {
      * Extract the id component of a {@link ScopeRef} for redacted
      * logging. DM scope carries the cryptographic {@code contactId};
      * group scope carries the adapter-defined stable group id. Both
-     * are treated as contact-id-shaped for redaction purposes — the
-     * spec's "Contact IDs are logged in redacted form" rule
-     * generalises to "stable adapter-side identifiers" in
-     * non-audit logs.
+     * are treated as contact-id-shaped for redaction purposes.
      */
     private static String scopeIdOf(ScopeRef scope) {
         return switch (scope) {
@@ -306,10 +464,7 @@ public class InboundRouter {
      * Unicode normalization pass per
      * {@code docs/spec/security.md} §Authorization model step 1.7:
      * NFKC + bidi-control strip + zero-width strip + whole-body trim,
-     * applied per-line OUTSIDE CommonMark fenced code blocks. Lines
-     * inside a fence (including the fence-delimiter lines themselves)
-     * are preserved byte-for-byte so the spec's chat-input parity
-     * promise holds for pasted code samples.
+     * applied per-line OUTSIDE CommonMark fenced code blocks.
      *
      * <p>Package-private + static so {@code InboundRouterNormalizeTest}
      * can exercise the function directly without booting Quarkus.</p>
@@ -356,10 +511,7 @@ public class InboundRouter {
      * Match a CommonMark fenced code-block opener per §4.5: 0–3
      * leading spaces, then a run of 3 or more {@code `} or {@code ~}
      * characters (all the same), optionally followed by an info
-     * string. The info string contents are not validated — strict
-     * CommonMark forbids backticks in a backtick-fence info string,
-     * but this carve-out is about preserving content rather than
-     * full-fidelity Markdown parsing.
+     * string.
      *
      * @return the opener descriptor on a match, {@code null} otherwise.
      */
@@ -390,8 +542,7 @@ public class InboundRouter {
      * Match a CommonMark fenced code-block closer per §4.5: 0–3
      * leading spaces, then a run of the same {@code fenceChar} at
      * count ≥ {@code fenceCount}, then only whitespace until end of
-     * line. The CommonMark rule forbids any non-whitespace content
-     * after the closing fence run.
+     * line.
      */
     private static boolean matchFenceCloser(String line, char fenceChar, int fenceCount) {
         int i = 0;
@@ -419,9 +570,7 @@ public class InboundRouter {
 
     /**
      * Apply NFKC + bidi-control strip + zero-width strip to one line
-     * (no trim — whole-body trim runs at the end of {@link #normalize}
-     * so leading/trailing whitespace on intermediate lines and
-     * fenced-block trailing whitespace are not disturbed).
+     * (no trim — whole-body trim runs at the end of {@link #normalize}).
      */
     private static void appendNormalized(StringBuilder out, String line) {
         String nfkc = Normalizer.normalize(line, Normalizer.Form.NFKC);

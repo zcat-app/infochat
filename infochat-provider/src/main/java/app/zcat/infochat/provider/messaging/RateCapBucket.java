@@ -112,9 +112,23 @@ public class RateCapBucket {
     }
 
     /**
-     * Periodically evict full + idle buckets to bound memory. Quarkus
-     * runtime invokes this method on the scheduler thread; plain-JUnit
-     * tests never see it fire (no scheduler runtime).
+     * Periodically evict idle buckets to bound memory. Quarkus runtime
+     * invokes this method on the scheduler thread; plain-JUnit tests
+     * never see it fire (no scheduler runtime).
+     *
+     * <p>The predicate is idle-alone: any bucket whose
+     * {@code lastRefillEpochMillis} is older than the eviction
+     * threshold is evicted, regardless of current token count. The
+     * earlier predicate also required the token count to be at cap,
+     * which pinned drained-and-abandoned buckets forever — refill is
+     * lazy inside {@link #tryAcquire}, so a contact that drained their
+     * bucket and never returned never refilled back to cap and never
+     * matched the eviction gate. A returning contact whose bucket was
+     * evicted pays a one-time bucket-cold cost (a fresh full bucket
+     * via {@code computeIfAbsent}), which is the same shape a process
+     * restart would produce. See the /redteam M1-044a DOS finding
+     * (docs/plan/m1/redteam/M1-044a-2026-05-21.md) and M1-044b's
+     * Implementation notes §"Rate-cap eviction-predicate fix".</p>
      */
     @Scheduled(every = "{infochat.rate-cap.sweep-interval:5m}")
     void evictIdleBuckets() {
@@ -122,10 +136,19 @@ public class RateCapBucket {
         buckets.entrySet().removeIf(entry -> {
             Bucket bucket = entry.getValue();
             synchronized (bucket) {
-                return bucket.tokens == inboundPerMinute
-                        && bucket.lastRefillEpochMillis < thresholdEpochMillis;
+                return bucket.lastRefillEpochMillis < thresholdEpochMillis;
             }
         });
+    }
+
+    /**
+     * Test-only seam: report the current bucket-map size so
+     * {@code RateCapBucketTest.evictionDrainedIdle} can assert eviction
+     * actually removed the entry from the map. Package-private —
+     * production callers consume {@link #tryAcquire}, never the size.
+     */
+    int bucketCount() {
+        return buckets.size();
     }
 
     private record Key(String adapter, String contactId) {

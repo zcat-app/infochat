@@ -8,6 +8,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -98,6 +99,48 @@ class RateCapBucketTest {
         }
         assertFalse(bucket.tryAcquire("inmemory", "rate-1"),
                 "the post-refill bucket is also bounded at CAP");
+    }
+
+    /**
+     * Widened-eviction predicate (M1-044b folded /redteam M1-044a DOS
+     * finding). Pre-M1-044b, evictIdleBuckets required {@code tokens ==
+     * cap} AND idle past threshold; a drained-and-abandoned bucket
+     * never refilled (refill is lazy inside tryAcquire) and so stayed
+     * pinned forever. The fix drops the tokens-at-cap gate so any
+     * idle bucket evicts regardless of token count.
+     *
+     * <p>This test seeds a bucket by draining it (so {@code tokens ==
+     * 0}), then advances the clock past the eviction threshold WITHOUT
+     * any further {@code tryAcquire} call (so {@code lastRefillEpochMillis}
+     * stays stale), runs {@link RateCapBucket#evictIdleBuckets} directly,
+     * and asserts the bucket entry has been removed from the underlying
+     * map via {@link RateCapBucket#bucketCount()}.</p>
+     */
+    @Test
+    void evictionDrainedIdle() {
+        TestClock clock = new TestClock(Instant.parse("2026-05-20T00:00:00Z"));
+        RateCapBucket bucket = new RateCapBucket(clock, CAP, REFILL_WINDOW, EVICTION_THRESHOLD);
+
+        // Drain the bucket to 0 tokens via CAP tryAcquire calls. The
+        // last call leaves lastRefillEpochMillis at the current clock
+        // (no refill happened — elapsed=0 in the same tick).
+        for (int i = 0; i < CAP; i++) {
+            assertTrue(bucket.tryAcquire("inmemory", "rate-drained"));
+        }
+        assertEquals(1, bucket.bucketCount(),
+                "bucket map should hold one entry after the drain");
+
+        // Advance the clock past evictionThreshold WITHOUT calling
+        // tryAcquire — lastRefillEpochMillis stays at the drain time,
+        // so the entry is now "drained and idle past threshold." Under
+        // the pre-M1-044b predicate this entry would not be evicted
+        // (tokens != cap); under the widened predicate it is.
+        clock.advance(EVICTION_THRESHOLD.plus(Duration.ofMinutes(1)));
+
+        bucket.evictIdleBuckets();
+
+        assertEquals(0, bucket.bucketCount(),
+                "drained-and-idle bucket must be evicted under the widened predicate");
     }
 
     /**

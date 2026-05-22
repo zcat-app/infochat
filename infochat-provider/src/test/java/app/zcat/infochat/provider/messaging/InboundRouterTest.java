@@ -14,7 +14,7 @@ import org.junit.jupiter.api.Test;
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
-import java.sql.ResultSet;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -27,7 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Drives inbound messages through the real production wiring
  * (Quarkus boots the registry via {@link MessagingStartup}; the
  * single InMemoryAdapter is bound to the router) and asserts the
- * five branches from acceptance items 8–12:
+ * five M1-035b branches plus the M1-044b silent-rate-cap-drop:
  *
  * <ol>
  *   <li>Empty / whitespace / bidi-only / zero-width-only bodies →
@@ -40,11 +40,27 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   <li>Unknown slash command → unknown-command reply.</li>
  *   <li>Command-handler exception → internal-error reply that does
  *       NOT interpolate the exception's text.</li>
+ *   <li>(M1-044b) Rate-cap silent drop — when
+ *       {@link RateCapBucket#tryAcquire} returns false (bucket
+ *       drained), no reply is sent and no downstream service runs.</li>
  * </ol>
  *
- * <p>The exception path test installs a test-only
- * {@link CommandHandler} bean ({@link BoomHandler}) that throws on
- * invocation; the inbound body {@code "/boom"} routes to it.</p>
+ * <p>The M1-035b methods are kept green by an @BeforeEach pre-seed
+ * of an {@code alice} users row with
+ * {@code registration_state='vouched'} — the post-M1-044b splice
+ * routes unknown DM contacts through the invite gate (step 2), so
+ * the deterministic UNKNOWN / CHAT_MODE / INTERNAL_ERROR replies the
+ * five M1-035b methods assert only fire when the dispatch reaches
+ * {@code handleSlash}. Pre-seeding the contact as a known
+ * {@code 'vouched'} user makes step 2 skip and step 7 not gate.</p>
+ *
+ * <p>M1-035d's three first-DM auto-register tests were REMOVED by
+ * M1-044b: their premise (a DM from an unknown contact auto-creates
+ * a users row via {@code AutoRegisterService.resolveOrRegister}) is
+ * spec-invalidated by the splice. Replacement coverage lives in
+ * {@link InboundRouterIntakeOrderingTest} scenarios (d) DM unknown +
+ * valid invite → welcome and (e) DM unknown + invalid invite →
+ * invite-required.</p>
  */
 @QuarkusTest
 @TestProfile(InboundRouterTest.Profile.class)
@@ -56,20 +72,34 @@ class InboundRouterTest {
     @Inject
     DataSource dataSource;
 
+    @Inject
+    RateCapBucket rateCapBucket;
+
     @BeforeEach
     void resetAdapterState() throws Exception {
         inMemoryAdapter.reset();
-        // M1-035d wired AutoRegisterService into the router, so every
-        // inbound now inserts a users row. Clean up the contact_ids
-        // this class uses so accumulated rows do not race the M1-007a
-        // bootstrap-admin row (deferred) or other test classes' fixtures.
+        // Clean up any users rows this class touches before each test,
+        // then pre-seed the alice contact as a vouched user so the
+        // M1-044b splice's step 2 (DM unknown → invite gate) does not
+        // short-circuit the deterministic UNKNOWN / CHAT_MODE /
+        // INTERNAL_ERROR reply assertions in the M1-035b methods.
+        // registration_state='vouched' also keeps step 7 DM-gate
+        // (group_only-only) from firing.
         try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(
+             PreparedStatement clean = conn.prepareStatement(
                      "DELETE FROM users WHERE adapter = 'inmemory' AND ("
                              + "contact_id = 'alice' "
-                             + "OR contact_id LIKE 'fresh-%' "
-                             + "OR contact_id LIKE 'same-contact-%')")) {
-            ps.executeUpdate();
+                             + "OR contact_id LIKE 'rate-overflow-%')")) {
+            clean.executeUpdate();
+        }
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement seed = conn.prepareStatement(
+                     "INSERT INTO users (adapter, contact_id, is_admin, "
+                             + "registration_state, probation_until) "
+                             + "VALUES ('inmemory', 'alice', FALSE, 'vouched', ?) "
+                             + "ON CONFLICT (adapter, contact_id) DO NOTHING")) {
+            seed.setObject(1, OffsetDateTime.now().minusHours(24));
+            seed.executeUpdate();
         }
     }
 
@@ -134,53 +164,53 @@ class InboundRouterTest {
     }
 
     @Test
-    void firstDmSlashInsertsUsersRowBeforeDispatchUnderInmemoryAdapterName() throws Exception {
-        inMemoryAdapter.deliverDm("fresh-contact-1", "/xyz");
+    void rateCapOverflowDropsSilentlyWithoutOutbound() {
+        // Drain the bucket for a unique contact id by calling tryAcquire
+        // directly until it returns false (≤ infochat.rate-cap.inbound-per-minute
+        // iterations). The router-driven deliverDm below then finds the
+        // bucket empty and exercises the spec §Authorization model
+        // step 1.5 "drop silently" branch — no outbound, no downstream
+        // service consulted.
+        String overflowContact = "rate-overflow-1";
+        int safetyCap = 1000; // > any reasonable infochat.rate-cap.inbound-per-minute
+        int i = 0;
+        while (rateCapBucket.tryAcquire("inmemory", overflowContact) && i < safetyCap) {
+            i++;
+        }
+        assertTrue(i < safetyCap,
+                "tryAcquire should have returned false within " + safetyCap + " iterations");
 
-        assertEquals(1, inMemoryAdapter.sentMessages().size(),
-                "router must still reply on the dispatch path");
-        assertEquals(1L, countUsersRows("inmemory", "fresh-contact-1"),
-                "auto-register must insert a row keyed on (adapter='inmemory', "
-                        + "contact_id='fresh-contact-1') — the lambda in AdapterRegistry "
-                        + "passes the real adapter.name(), not a hardcoded literal");
+        // Reset the adapter so any spurious previous outbound does not
+        // mask a regression in the drop-silently branch.
+        inMemoryAdapter.reset();
+
+        inMemoryAdapter.deliverDm(overflowContact, "/help");
+
+        assertTrue(inMemoryAdapter.sentMessages().isEmpty(),
+                "over-rate-cap inbound must produce zero outbound; got: "
+                        + inMemoryAdapter.sentMessages());
+        // "No downstream service consulted" — observable proxy: no users
+        // row was inserted (InviteCodeConsumer's invite_consume path
+        // would have INSERTed even on a Rejected outcome via the
+        // invite_code_attempt table; step 4 banCheck reads users; both
+        // are silent if rate cap drops before them).
+        assertEquals(0L, countUsersRows("inmemory", overflowContact),
+                "rate-cap silent drop must not write any users row "
+                        + "(no invite consume, no ban-check write side effect)");
     }
 
-    @Test
-    void firstDmChatModeInsertsUsersRowBeforeChatModeReply() throws Exception {
-        inMemoryAdapter.deliverDm("fresh-contact-2", "hello there");
-
-        List<OutboundMessage> sent = inMemoryAdapter.sentMessages();
-        assertEquals(1, sent.size(), "chat-mode reply must still fire");
-        assertEquals(InboundRouter.CHAT_MODE_REPLY, sent.get(0).text(),
-                "the existing chat-mode-not-in-MVP reply contract is unchanged");
-        assertEquals(1L, countUsersRows("inmemory", "fresh-contact-2"),
-                "auto-register must run on chat-mode inbound too — the wiring "
-                        + "sits upstream of the slash-vs-chat split");
-    }
-
-    @Test
-    void repeatedDmsFromSameContactProduceExactlyOneUsersRow() throws Exception {
-        inMemoryAdapter.deliverDm("same-contact-1", "/xyz");
-        inMemoryAdapter.deliverDm("same-contact-1", "hello there");
-
-        assertEquals(2, inMemoryAdapter.sentMessages().size(),
-                "both inbounds must still produce their replies (no short-circuit)");
-        assertEquals(1L, countUsersRows("inmemory", "same-contact-1"),
-                "two consecutive DMs from the same contact must produce exactly "
-                        + "one users row — AutoRegisterService's ON CONFLICT DO NOTHING "
-                        + "absorbs the second insert");
-    }
-
-    private long countUsersRows(String adapter, String contactId) throws Exception {
+    private long countUsersRows(String adapter, String contactId) throws RuntimeException {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "SELECT COUNT(*) FROM users WHERE adapter = ? AND contact_id = ?")) {
             ps.setString(1, adapter);
             ps.setString(2, contactId);
-            try (ResultSet rs = ps.executeQuery()) {
+            try (var rs = ps.executeQuery()) {
                 assertTrue(rs.next());
                 return rs.getLong(1);
             }
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
     }
 

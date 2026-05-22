@@ -14,9 +14,9 @@
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 53 |
+| done | 54 |
 | deferred | 7 |
-| **total** | **66** |
+| **total** | **67** |
 
 ---
 
@@ -24,9 +24,9 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-044b — InboundRouter intake-step splice (1.5, 2, 4, 7-DM-gate) + bundle keys + rate-cap config (complexity: high, risk: high)
 - M1-044c — Admin command handlers — /ban, /unban, /invite create/list/revoke (complexity: high, risk: high)
 - M1-044d — Contact-id redaction + breach-audit ordering (M1-044a fixes) (complexity: low, risk: medium)
+- M1-044e — InboundRouter splice red-team fixes (DM-gate pre-dispatch, rate-cap precedence, lookupUser redaction, non-UUID counter) (complexity: high, risk: high)
 
 ---
 
@@ -43,7 +43,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-044 — blocked_by: M1-044a (done), M1-044b (pending), M1-044c (pending)
+- M1-044 — blocked_by: M1-044a (done), M1-044b (done), M1-044c (pending)
 - M1-045 — blocked_by: M1-044 (pending)
 - M1-046 — blocked_by: M1-044 (pending)
 
@@ -66,6 +66,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 |---|---|---|---|
 | M1-049 | Process fix D: test pyramid — handler/router/IT decoupling | 2026-05-22 | round 1 APPROVE |
 | M1-047 | Process-fix umbrella: stays-green + pyramid + contracts | 2026-05-22 | round 1 APPROVE |
+| M1-044b | InboundRouter intake-step splice (1.5, 2, 4, 7-DM-gate) + bundle keys + rate-cap config | 2026-05-22 | round 1 APPROVE |
 | M1-050 | Process fix E: JSpecify parameter contracts (boundary classes + lint) | 2026-05-21 | round 1 APPROVE |
 | M1-048 | Process fix A: verified_stays_green frontmatter + lint + clarity + Plan | 2026-05-21 | round 1 APPROVE |
 | M1-044a | Intake-step services — rate cap, invite consumer, ban check, brute-force migration | 2026-05-21 | round 1 APPROVE |
@@ -73,7 +74,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-040 | /summary prompt-injection wrapper + adapter-scoped users lookup across handlers | 2026-05-20 | round 2 APPROVE |
 | M1-039 | /add-source handler hardening — ban-check ordering + contact-ID redaction in exceptions | 2026-05-19 | round 1 APPROVE |
 | M1-038 | InboundRouter hardening — fenced-code carve-out + body-size cap + contact-ID redaction in logs | 2026-05-19 | round 1 APPROVE |
-| M1-037 | /summary command (eligible-post SQL + cluster traversal + LLM prose + sanitizer + degraded fallback) | 2026-05-19 | round 1 APPROVE |
 
 ---
 
@@ -188,14 +188,15 @@ M1-044a (done)
   ├── M1-044 (pending)
   │     ├── M1-045 (pending)
   │     └── M1-046 (pending)
-  ├── M1-044b (pending) ← runnable
-  │     └── M1-044 (pending) [see above]
+  ├── M1-044b (done)
+  │     ├── M1-044 (pending) [see above]
+  │     └── M1-044e (pending) ← runnable
   └── M1-044c (pending) ← runnable
         └── M1-044 (pending) [see above]
 M1-044d (pending) ← runnable
 M1-048 (done)
   └── M1-047 (done)
-        └── M1-044b (pending) [see above]
+        └── M1-044b (done) [see above]
 M1-049 (done)
   └── M1-047 (done) [see above]
 M1-050 (done)

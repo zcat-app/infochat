@@ -29,6 +29,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.time.Duration;
+import java.time.OffsetDateTime;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -124,6 +125,21 @@ class AddSourceIT {
                     "DELETE FROM tag WHERE name IN ('m1-036-mvp-news', 'm1-036-mvp-tech')");
             exec(conn,
                     "DELETE FROM users WHERE contact_id = 'm1-036-mvp-user-1'");
+            // M1-044b: pre-seed INSERT INTO users for m1-036-mvp-user-1 with
+            // registration_state='invited' — the post-step-2 successful-
+            // invite state, mirroring what InviteCodeConsumer.Accepted
+            // would have written — so step 2 (DM unknown) skips and the
+            // dispatch reaches the AddSourceCommandHandler. Step 7 DM-gate
+            // (group_only-only) also skips for 'invited' users.
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO users (adapter, contact_id, is_admin, "
+                            + "registration_state, probation_until) "
+                            + "VALUES ('inmemory', 'm1-036-mvp-user-1', FALSE, "
+                            + "'invited', ?) "
+                            + "ON CONFLICT (adapter, contact_id) DO NOTHING")) {
+                ps.setObject(1, OffsetDateTime.now().plusHours(24));
+                ps.executeUpdate();
+            }
         }
     }
 

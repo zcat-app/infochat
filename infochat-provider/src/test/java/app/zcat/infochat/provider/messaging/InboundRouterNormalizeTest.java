@@ -7,6 +7,7 @@ import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
+import app.zcat.infochat.provider.bundle.BundleLoader;
 import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.util.TypeLiteral;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,6 +18,8 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -193,7 +196,7 @@ class InboundRouterNormalizeTest {
      */
     @Test
     void bodyAtExactlyTheCapIsAcceptedAndNormalizeRuns() {
-        InboundRouter router = new InboundRouter();
+        InboundRouter router = newRouterWithKnownVouchedUser();
         router.maxInboundBodyBytes = 16;
         router.commandHandlers = new EmptyHandlerInstance();
         router.autoRegisterService = new ThrowingAutoRegisterService();
@@ -350,6 +353,71 @@ class InboundRouterNormalizeTest {
         @Override
         public void setInboundHandler(InboundHandler handler) {
             throw new UnsupportedOperationException();
+        }
+    }
+
+    /**
+     * Helper for {@link #bodyAtExactlyTheCapIsAcceptedAndNormalizeRuns}
+     * (the one M1-035b @Test method that calls {@code onMessage} on
+     * an at-cap body). The M1-044b splice introduces four new
+     * mandatory CDI-injected collaborators on {@link InboundRouter}
+     * (rateCapBucket, inviteCodeConsumer, banCheck, bundleLoader)
+     * plus a {@link javax.sql.DataSource} used by the new
+     * {@code lookupUser} method. The helper returns a router whose
+     * {@code lookupUser} is overridden to return a fixed "vouched"
+     * snapshot — that skips step 2 (DM unknown), keeps step 7 DM-gate
+     * from firing, and lets the at-cap chat-mode body flow into the
+     * chat-mode-not-in-MVP reply path. The four new collaborator
+     * fields receive no-op fakes (the per-method assertion is purely
+     * about the normalize-invocation counter, not about which fakes
+     * were consulted, so the fakes just need to not NPE).
+     */
+    private InboundRouter newRouterWithKnownVouchedUser() {
+        InboundRouter router = new InboundRouter() {
+            @Override
+            Optional<UserSnapshot> lookupUser(String adapter, String contactId) {
+                return Optional.of(new UserSnapshot(UUID.randomUUID(), false, "vouched"));
+            }
+        };
+        router.rateCapBucket = new NoopRateCapBucket();
+        router.inviteCodeConsumer = new NoopInviteCodeConsumer();
+        router.banCheck = new NoopBanCheck();
+        router.bundleLoader = new NoopBundleLoader();
+        // dataSource intentionally left null — lookupUser is overridden
+        // above so the DataSource field is never accessed.
+        return router;
+    }
+
+    /** No-op {@link RateCapBucket} — always admits ({@code tryAcquire} = true). */
+    private static final class NoopRateCapBucket extends RateCapBucket {
+        @Override
+        public boolean tryAcquire(String adapter, String contactId) {
+            return true;
+        }
+    }
+
+    /** No-op {@link InviteCodeConsumer} — never invoked because the test router's lookupUser returns non-empty. */
+    private static final class NoopInviteCodeConsumer extends InviteCodeConsumer {
+        @Override
+        public Outcome consume(String adapter, String contactId, UUID candidateCode) {
+            throw new UnsupportedOperationException(
+                    "inviteCodeConsumer should not run when the user is known (vouched)");
+        }
+    }
+
+    /** No-op {@link BanCheck} — always reports {@code is_banned=false}. */
+    private static final class NoopBanCheck extends BanCheck {
+        @Override
+        public boolean isBanned(String adapter, String contactId) {
+            return false;
+        }
+    }
+
+    /** No-op {@link BundleLoader} — returns a stub value if asked (the at-cap test does not consume any bundle key). */
+    private static final class NoopBundleLoader extends BundleLoader {
+        @Override
+        public String get(String key) {
+            return "noop:" + key;
         }
     }
 }
