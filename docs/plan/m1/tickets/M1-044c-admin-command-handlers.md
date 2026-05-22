@@ -25,7 +25,103 @@ escalations:
         - SELF-CONTAINED-CHECK: confirm-flow protocol (stateless --confirm)
           conflicts with commands.md §Surface conventions timeout model.
         - ACCEPTANCE-RUNNABLE item 7: same confirm-flow conflict.
+  - date: 2026-05-22
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      CLARITY VERDICT: FAIL — 1 blocker, 1 warning.
+      Blockers:
+        1. BODY-CLAIM-COVERAGE: §Big-picture notes paragraph 2 + §Implementation
+           notes §Common scaffolding both assert that the three admin handlers
+           refuse to run in group scope and return `error.group_admin_not_in_v1`
+           — a specific runtime behavior committed in present-tense indicative
+           mood with a named reply string. None of the 36 acceptance items
+           verifies this behavior (no grep for `group_admin_not_in_v1` in any
+           handler file, no named test scenario for group-scope invocation, no
+           behavioral assertion of the group-scope rejection reply). An
+           implementer can omit the group-scope check from all three handlers
+           and pass every acceptance grep.
+      Warnings:
+        - VERIFIED-STAYS-GREEN-PLAUSIBLE: AutoRegisterServiceTest FQN is wrong —
+          actual package is `messaging`, not `intake`
+          (infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/
+          AutoRegisterServiceTest.java).
 revisions:
+  - date: 2026-05-22
+    reason: clarity-fail refine round 2 (1 blocker BODY-CLAIM-COVERAGE + 1 warning VERIFIED-STAYS-GREEN-PLAUSIBLE) — option A (strip fabricated claim)
+    summary: |
+      Pre-refine snapshot. The round-2 clarity FAIL surfaced one
+      blocker (BODY-CLAIM-COVERAGE: §Big-picture notes paragraph 2
+      and §Implementation notes §Common scaffolding both committed
+      handlers to "refuse to run in group scope" with a fabricated
+      `error.group_admin_not_in_v1` reply, but no acceptance item
+      verified it) and one warning
+      (VERIFIED-STAYS-GREEN-PLAUSIBLE: AutoRegisterServiceTest FQN
+      named the `intake` package; actual is `messaging`).
+
+      Root-cause review with the user surfaced that the failing
+      behavioral claim was itself fabricated context. The
+      constraint "Group-scope admin commands are DM-only in v1"
+      was never discussed and has no spec basis:
+
+        - docs/spec/commands.md §Admin lines 810-963 list /ban,
+          /unban, /invite create/list/revoke as bot-admin-only
+          with NO mention of DM-only or scope restriction.
+        - docs/spec/commands.md §Permission model lines 965-1011
+          commits to "Bot-wide destructive operations require
+          bot admin" — scope is not mentioned.
+        - The bundle key `error.group_admin_not_in_v1` exists
+          nowhere in spec, design, or the codebase. The only
+          existing `*group_admin*` key is
+          `error.add_source.group_admin_only` (M1-036) with a
+          DIFFERENT semantic ("only group admins can do this,"
+          not "this doesn't work in groups").
+        - M1-039 defers actor-seam SPI widening to T2-F but does
+          NOT introduce any "bot-admin DM-only" rule.
+
+      Refine actions (option A — strip the fabricated claim):
+
+        1. §Big-picture notes paragraph 2 ("Group-scope admin
+           commands are DM-only in v1...") stripped entirely.
+           The SPI-shape constraint and the T2-F deferral remain
+           noted in §Common scaffolding and §Out-of-scope
+           expansion; no behavioral commitment about group-scope
+           rejection is made.
+        2. §Implementation notes §Common scaffolding rewritten
+           to describe ONLY how the DM-scope caller is identified
+           (via `((ScopeRef.Dm) scope).contactId()`) and to note
+           the SPI does not yet thread `Identity sender` in
+           group scope (M1-039 / T2-F) — without committing to
+           any group-scope user-visible behavior.
+        3. §Out-of-scope expansion "Group-scope dispatch" bullet
+           rewritten to drop the "handlers refuse with a
+           friendly reply" claim; only the T2-F SPI-widening
+           deferral remains.
+        4. Fabricated bundle key `error.group_admin_not_in_v1`
+           removed from prose. No acceptance item or
+           BundleKeys constant enumeration referenced it (the
+           round-1 refine had not added it; only the body
+           prose contained it).
+        5. `verified_stays_green:` AutoRegisterServiceTest FQN
+           corrected:
+           `app.zcat.infochat.provider.intake.AutoRegisterServiceTest`
+           → `app.zcat.infochat.provider.messaging.AutoRegisterServiceTest`.
+        6. `clarity_check:` block cleared so the next
+           `/m1-tick start` runs a fresh clarity pass against
+           the rewritten ticket.
+
+      Group-scope behavior in v1 (verified, NOT skipped): /ban,
+      /unban, /invite are bot-admin-only commands. Group-admin
+      tier (a separate concept) is alive in v1 via the V5
+      `group_membership` schema with `is_group_admin`, the
+      `one_admin_per_group` partial unique index, the
+      clear-admin trigger, and the M1-036 /add-source group
+      gate; /promote and /demote land in T2-F. This refine
+      does not skip any group-admin tier work — M1-044c
+      never owned that tier in the first place.
+
+      files_budget held at 11; files_scope unchanged;
+      complexity / risk / round_cap unchanged (high / high / 3);
+      acceptance item count unchanged at 36.
   - date: 2026-05-22
     reason: clarity-fail refine (3 blockers + 3 warnings + 4 lint-detected GREP-EMBEDDED-QUOTE + 1 OUT-OF-SCOPE-STAYS-GREEN-VERIFIABLE)
     summary: |
@@ -133,7 +229,7 @@ verified_stays_green:
     rationale: "M1-049 refactored to call handler.handle() directly with mocked collaborators; routes a different command name (\"summary\") so the three new handler beans cannot intercept"
   - test_class: app.zcat.infochat.provider.messaging.AdapterRegistryTest
     rationale: "uses a RecordingInboundRouter @Alternative that intercepts onMessage(); the real CommandHandler dispatch is never exercised, so adding new CommandHandler beans is unobservable from this test"
-  - test_class: app.zcat.infochat.provider.intake.AutoRegisterServiceTest
+  - test_class: app.zcat.infochat.provider.messaging.AutoRegisterServiceTest
     rationale: "exercises AutoRegisterService directly without consulting the CommandHandler registry; the new handler beans are registered as separate CDI beans and do not interact with this service"
   - test_class: app.zcat.infochat.provider.command.SummaryIT
     rationale: "drives the full InboundRouter dispatch path but sends /summary inbounds only; first-token dispatch routes to SummaryCommandHandler.name()==\"summary\", which the three new handlers' name()s (\"ban\", \"unban\", \"invite\") cannot intercept"
@@ -333,11 +429,11 @@ the schema as-is.
   FROM users WHERE adapter = ? AND contact_id = ?` against
   the (adapter, contact_id) UNIQUE constraint. The
   `contact_id` for the caller comes from
-  `((ScopeRef.Dm) scope).contactId()` for DM scope; for group
-  scope the caller's contact id is not in the SPI today (M1-039
-  flagged this as T2-F territory) — group-scope admin commands
-  return `error.group_admin_not_in_v1` until T2-F lands.
-  These handlers are intentionally DM-only in v1.
+  `((ScopeRef.Dm) scope).contactId()` in DM scope. The
+  CommandHandler SPI does not yet thread the sender's
+  `Identity` through to the handler in group scope (M1-039 /
+  T2-F); this ticket does not widen the SPI and adds no
+  special group-scope branch.
 - **`BanCommandHandler` transaction shape.** Wrap the audit
   pre-write + ban + invite revoke writes in one
   application-side transaction (open one Connection, set
@@ -461,15 +557,6 @@ the schema as-is.
   pre-dispatch check across all destructive admin commands.
   This is a deliberate temporary spec deviation; the
   follow-up ticket closes it.
-- **Group-scope admin commands are DM-only in v1.** Per
-  M1-039's findings, ScopeRef.Group does not carry the
-  sender's contact id; the handler cannot identify the actor
-  in group scope without the T2-F SPI widening. These admin
-  handlers refuse to run in group scope with a friendly
-  `error.group_admin_not_in_v1` reply (an in-handler
-  short-circuit similar to M1-036's group-scope check —
-  M1-036 returns `error.add_source.group_admin_only` for the
-  same reason).
 - **The audit-write helper consolidation is deferred to
   M1-041.** Handlers write directly to `audit_log` here; a
   future ticket replaces the per-handler INSERT with a shared
@@ -495,8 +582,9 @@ the schema as-is.
   and retrofits the gate as a pre-dispatch check across
   /ban, /invite revoke, /grant-admin, /revoke-admin, and
   /quarantine commands.
-- **Group-scope dispatch.** The handlers refuse with a
-  friendly reply; T2-F lands group-scope support.
+- **Group-scope dispatch.** T2-F lands the CommandHandler
+  SPI widening that threads `Identity sender` through to
+  handlers; this ticket does not widen the SPI.
 - **TranslationProvider exercise.** T2-C; new entries are
   English only.
 
