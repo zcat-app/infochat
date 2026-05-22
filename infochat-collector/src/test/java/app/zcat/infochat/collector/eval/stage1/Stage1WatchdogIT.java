@@ -168,19 +168,24 @@ class Stage1WatchdogIT {
             }
         }
 
-        // Wall-clock sanity-band per M1-029 precedent (cap × 5
-        // upper). Side-effect assertions above are the load-bearing
-        // checks; this band catches gross drift (e.g. watchdog
-        // never fired, or the process took 100× the cap because
-        // something other than the matcher was the bottleneck).
+        // Wall-clock sanity-band per M1-029 precedent. Side-effect
+        // assertions above are the load-bearing checks; this band
+        // catches gross drift (e.g. watchdog never fired, or the
+        // process took 100× the cap because something other than the
+        // matcher was the bottleneck). The upper bound is 10× cap:
+        // the 5× band flaked twice on main (51ms during M1-040 round-2
+        // on 2026-05-19; 78ms then 52ms during M1-049 round-1 on
+        // 2026-05-22) under normal CI noise, so the band widens to
+        // 10× to keep the load-bearing assertions usable without
+        // suppressing the test.
         assertTrue(durationMs >= TEST_CAP_MS,
             "Stage1Pipeline.process duration was " + durationMs + "ms — "
                 + "expected at least " + TEST_CAP_MS + "ms (the watchdog "
                 + "cannot have fired against the matcher in less than its cap).");
-        assertTrue(durationMs <= TEST_CAP_MS * 5,
+        assertTrue(durationMs <= TEST_CAP_MS * 10,
             "Stage1Pipeline.process duration was " + durationMs + "ms — "
-                + "expected at most " + (TEST_CAP_MS * 5) + "ms "
-                + "(5× cap, the M1-029 CI-tolerance precedent).");
+                + "expected at most " + (TEST_CAP_MS * 10) + "ms "
+                + "(10× cap, CI-tolerance band per M1-049 refine).");
     }
 
     private UUID seedRssSource(String identifier, String displayName) throws Exception {

@@ -1,9 +1,9 @@
 ---
 id: M1-049
 title: "Process fix D: test pyramid — handler/router/IT decoupling"
-status: pending
+status: done
 created: 2026-05-21
-last_updated: 2026-05-21
+last_updated: 2026-05-22
 blocked_by: []
 files_budget: 8
 files_scope:
@@ -13,6 +13,7 @@ files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryCommandHandlerTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/HelpCommandHandlerTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/AdapterRegistryTest.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/stage1/Stage1WatchdogIT.java
 complexity: high
 risk: medium
 round_cap: 3
@@ -34,6 +35,7 @@ acceptance:
   - "SummaryCommandHandlerTest.java is plain JUnit, calls `handler.handle()` direct with mocked collaborators (BundleLoader, DataSource, EligiblePostQuery, ClusterTraversal, SummaryProseGenerator, LlmOutputSanitizer, InboundContext — the seven @Inject fields of SummaryCommandHandler, verified by reading SummaryCommandHandler.java:84-103), preserves all 9 pre-refactor @Test scenarios (count verified by `grep -cE '^\\s*@Test\\b' SummaryCommandHandlerTest.java` on main = 9). Verify: `grep -cE '@QuarkusTest' SummaryCommandHandlerTest.java` returns 0 AND `grep -cE 'adapter\\.deliverDm' SummaryCommandHandlerTest.java` returns 0 AND `grep -cE '\\.handle\\(' SummaryCommandHandlerTest.java` returns ≥9. Per-scenario verification by name-substring grep (case-insensitive, NOT an aggregate count — see [[no-heterogeneous-aggregate-test-counts]]): `grep -iE 'void\\s+\\w*handlerNameIsLiteralSummary\\w*\\s*\\(' SummaryCommandHandlerTest.java` ≥1; `grep -iE 'void\\s+\\w*DispatchesSummaryToHandlerExactlyOnce\\w*\\s*\\(' SummaryCommandHandlerTest.java` ≥1; `grep -iE 'void\\s+\\w*ZeroSubscriptionsProducesNoPostsYetReply\\w*\\s*\\(' SummaryCommandHandlerTest.java` ≥1; `grep -iE 'void\\s+\\w*EmptyWindowProducesNoPostsYetReply\\w*\\s*\\(' SummaryCommandHandlerTest.java` ≥1; `grep -iE 'void\\s+\\w*HappyPathThreeEligiblePostsYieldsThreeClusterBlocks\\w*\\s*\\(' SummaryCommandHandlerTest.java` ≥1; `grep -iE 'void\\s+\\w*LlmUnreachableYieldsDegradedFallbackReply\\w*\\s*\\(' SummaryCommandHandlerTest.java` ≥1; `grep -iE 'void\\s+\\w*CapExcessYieldsCapExcessNoticePrefix\\w*\\s*\\(' SummaryCommandHandlerTest.java` ≥1; `grep -iE 'void\\s+\\w*GroupScopeReturnsNoPostsYet\\w*\\s*\\(' SummaryCommandHandlerTest.java` ≥1; `grep -iE 'void\\s+\\w*SanitizerStripsPrivilegedCommandFromLlmAuthoredProse\\w*\\s*\\(' SummaryCommandHandlerTest.java` ≥1"
   - "HelpCommandHandlerTest.java drops `@QuarkusTest` and constructs the handler directly. The class already calls `handler.handle()` direct (pre-refactor pattern matches the new convention); the only changes are removing `@QuarkusTest` and `@Inject` and constructing the handler+bundleLoader by hand. All 4 pre-refactor @Test scenarios preserved (per-method name-substring grep, NOT an aggregate count — see [[no-heterogeneous-aggregate-test-counts]]). Verify: `grep -cE '@QuarkusTest' HelpCommandHandlerTest.java` returns 0 AND `grep -cE '@Inject' HelpCommandHandlerTest.java` returns 0 AND `grep -iE 'void\\s+\\w*replyContainsHeaderAndThreeMvpCommandShortHelpLines\\w*\\s*\\(' HelpCommandHandlerTest.java` ≥1 AND `grep -iE 'void\\s+\\w*handlerConsumesExactlyTheFourMvpBundleKeys\\w*\\s*\\(' HelpCommandHandlerTest.java` ≥1 AND `grep -iE 'void\\s+\\w*missingBundleKeyCausesHandlerToFailInsteadOfShippingIncompleteReply\\w*\\s*\\(' HelpCommandHandlerTest.java` ≥1 AND `grep -iE 'void\\s+\\w*replyContainsNoMarkdownLinkSyntaxOrHtmlAnchors\\w*\\s*\\(' HelpCommandHandlerTest.java` ≥1"
   - "AdapterRegistryTest.java stays at the wiring layer but tightens its assertion: the canonical test (`singleAdapterHappyPathActivatesInMemoryAndRegistersRouter`) asserts WIRING (router was invoked with the delivered body) instead of REPLY CONTENT (UNKNOWN_COMMAND_REPLY literal). The reply-content check belongs in InboundRouterTest's `unknownCommandProducesFriendlyUnknownCommandReply` (already there on main). Both pre-refactor @Test scenarios preserved (per-method name-substring grep, NOT an aggregate count — see [[no-heterogeneous-aggregate-test-counts]]). Verify: `grep -cE 'UNKNOWN_COMMAND_REPLY' AdapterRegistryTest.java` returns 0 AND `grep -iE 'void\\s+\\w*singleAdapterHappyPathActivatesInMemoryAndRegistersRouter\\w*\\s*\\(' AdapterRegistryTest.java` ≥1 AND `grep -iE 'void\\s+\\w*multiAdapterHappyPathActivatesBothFakeAdapters\\w*\\s*\\(' AdapterRegistryTest.java` ≥1. (This tightens the wiring test's scope so M1-044b's splice does not collateral-damage it via the unknown-DM contact path — the same defect the handoff describes.)"
+  - "Stage1WatchdogIT.java's wall-clock sanity-band upper assertion widens from 5× to 10× the per-host wall to absorb CI-tolerance noise. Reason: this cap has flaked twice on main with the 5× setting (51ms during M1-040 round-2 on 2026-05-19 per memory note `project_stage1watchdogit_flake.md`; 78ms then 52ms during M1-049 round-1 on 2026-05-22). The side-effect assertions (watchdog row INSERTED, post status QUARANTINED, span_start/end set correctly) remain the load-bearing correctness checks; the wall-clock band catches gross drift only. No production code (Stage1Pipeline, Stage1Watchdog) is modified. Verify: `grep -cE 'TEST_CAP_MS \\* 10' Stage1WatchdogIT.java` returns 2 (the assertion expression + the message-string echo of the cap value; matches the original 5×-form's grep shape) AND `grep -cE 'TEST_CAP_MS \\* 5' Stage1WatchdogIT.java` returns 0"
   - "mvn -B clean verify exits 0 — every refactored test passes against the existing production code (no production handler is modified). The `*IT.java` integration tests (AddSourceIT, SummaryIT, AddSourceAdapterScopeIT, SummaryAdapterScopeIT, AdapterRouterIT) also stay green — they continue to provide full-chain coverage at the IT layer per the new pyramid convention"
 test_plan:
   adds:
@@ -44,6 +46,7 @@ test_plan:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryCommandHandlerTest.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/HelpCommandHandlerTest.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/AdapterRegistryTest.java
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/stage1/Stage1WatchdogIT.java
   preserves:
     - all tests currently green on main outside files_scope
     - InboundRouterTest, InboundRouterIntakeOrderingTest (does not exist on main yet — M1-044b creates it), InboundRouterNormalizeTest, InboundRouterContactIdRedactionTest — router-tier tests stay as-is
@@ -51,7 +54,20 @@ test_plan:
     - all SPI-tier tests (RateCapBucketTest, InviteCodeConsumerTest, BanCheckTest, AutoRegisterServiceTest, etc.) — these test individual services, already at the right layer
 spec_refs: []
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-05-22
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 9
+      added: 1155
+      removed: 579
 escalations:
   - date: 2026-05-21
     reason: clarity-fail
@@ -134,6 +150,28 @@ escalations:
         naming gap (escalated above). Also rename-map TBD vs acceptance-item-3
         claim inconsistency (already flagged in clarity_check WARN; natural
         to fold into the same refine).
+  - date: 2026-05-22
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      Implementation surfaced a Stage1WatchdogIT timing flake on main:
+      round-1 `mvn -B verify` failed with `Stage1Pipeline.process
+      duration was 78ms — expected at most 50ms (5× cap, the M1-029
+      CI-tolerance precedent)`; the retry hit 52ms. This is the second
+      occurrence on the same code (first was 51ms during M1-040 round-2
+      on 2026-05-19 per memory note project_stage1watchdogit_flake.md).
+      Per the memory rule "widen to 10× only after a second hit on the
+      same code", widen Stage1WatchdogIT.java's wall-clock cap from 5×
+      to 10×. Stage1WatchdogIT.java is in infochat-collector, outside
+      M1-049's current files_scope (5 paths in infochat-provider + 1
+      process doc), so files_scope must be widened via refine before
+      the edit lands.
+
+      Provider-module validation: the 5 refactored test files all pass
+      against the provider-only `mvn -pl infochat-provider -am verify`
+      (Help 4/4, AdapterRegistry 2/2, AddSourceBanCheckOrdering 2/2,
+      Summary 9/9, AddSource 8/8; total provider 176 unit + 46 IT, all
+      green). The blocking failure is entirely orthogonal to M1-049's
+      handler-tier surface.
 revisions:
   - date: 2026-05-21
     reason: clarity-fail refine snapshot (acceptance item 8 heterogeneous-aggregate)
@@ -226,11 +264,46 @@ revisions:
 
       Prior frontmatter values: status=escalated;
       clarity_check.verdict=WARN with 0 blockers, 2 warnings.
+  - date: 2026-05-22
+    reason: budget-breach refine snapshot (Stage1WatchdogIT cap widening)
+    summary: |
+      Pre-refine snapshot. The 5-test-file provider-tier refactor
+      (HelpCommandHandlerTest, AdapterRegistryTest,
+      AddSourceBanCheckOrderingTest, SummaryCommandHandlerTest,
+      AddSourceCommandHandlerTest) plus the new process doc landed on
+      the branch in `/m1-tick start` round-1 implementation; all 5
+      tests pass in provider-only `mvn -pl infochat-provider -am
+      verify`. Full reactor `mvn -B verify` failed twice consecutively
+      in infochat-collector at
+      Stage1WatchdogIT.watchdogFiresAndPostIsSealedAtQuarantined: 78ms
+      then 52ms vs the existing 50ms cap (TEST_CAP_MS × 5). Per memory
+      note `project_stage1watchdogit_flake.md`, this is the second hit
+      on the same code (first was 51ms during M1-040 round-2 on
+      2026-05-19); the codified rule triggers widening to 10× wall.
+
+      This refine adds Stage1WatchdogIT.java to files_scope (1→7 of 8
+      budget; doc + 5 provider tests + 1 collector test) and one new
+      acceptance item (#9) pinning the 5×→10× widening. The widening
+      is test-scope only: no production code (Stage1Pipeline,
+      Stage1Watchdog) is touched; the side-effect assertions (watchdog
+      row INSERTED, post QUARANTINED, span_start/end set correctly)
+      remain the load-bearing correctness checks; the wall-clock band
+      catches gross drift only (e.g. watchdog never fired, process
+      took 100× the cap because something other than the matcher was
+      the bottleneck).
+
+      Prior frontmatter values: status=in-progress; files_scope had 6
+      entries (1 doc + 5 provider tests); acceptance had 8 items.
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-05-21
+  verdict: PASS
+  warnings: []
+  blockers: []
+outline_file: target/m1-tick-outline-M1-049.md
 ---
 
 # M1-049: Process fix D — test pyramid (handler/router/IT decoupling)

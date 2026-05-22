@@ -4,10 +4,10 @@ import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
-import io.quarkus.test.junit.QuarkusTest;
-import jakarta.inject.Inject;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -18,11 +18,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Behavioral tests for {@link HelpCommandHandler}'s bundle-driven
- * reply composition per {@code docs/design/03-commands.md} §3.4 and
- * decision D30 (plain text, no markdown).
+ * Handler-tier (plain JUnit, no Quarkus boot) test for
+ * {@link HelpCommandHandler} per the test-pyramid convention at
+ * {@code docs/process/test-pyramid.md} §Handler unit tests.
  *
- * <p>Four invariants are covered, each in its own {@code @Test}:</p>
+ * <p>Behavioral tests for the bundle-driven reply composition per
+ * {@code docs/design/03-commands.md} §3.4 and decision D30 (plain
+ * text, no markdown). Four invariants, each in its own
+ * {@code @Test}:</p>
  * <ol>
  *   <li>The composed reply contains the header text plus the three
  *       MVP command short-help lines (acceptance item 11).</li>
@@ -37,11 +40,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *       anchor tags (acceptance item 13).</li>
  * </ol>
  */
-@QuarkusTest
 class HelpCommandHandlerTest {
 
-    @Inject
-    BundleLoader productionBundleLoader;
+    private BundleLoader productionBundleLoader;
+
+    @BeforeEach
+    void buildProductionBundleLoader() throws Exception {
+        // Without CDI driving the @PostConstruct lifecycle, the test
+        // constructs BundleLoader by hand and invokes the
+        // package-private load() via reflection so the production
+        // properties land in the instance.
+        productionBundleLoader = new BundleLoader();
+        Method load = BundleLoader.class.getDeclaredMethod("load");
+        load.setAccessible(true);
+        load.invoke(productionBundleLoader);
+    }
 
     @Test
     void replyContainsHeaderAndThreeMvpCommandShortHelpLines() {
@@ -132,7 +145,7 @@ class HelpCommandHandlerTest {
      * in {@code allowedKeys}, throws {@link IllegalStateException} for
      * everything else (same shape the real {@link BundleLoader} raises
      * for an unknown key), and records every lookup attempt for
-     * assertion. Avoids pulling in Mockito for one test.
+     * assertion.
      */
     private static final class RecordingBundleLoader extends BundleLoader {
         private final Set<String> allowedKeys;

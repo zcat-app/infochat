@@ -2,135 +2,122 @@ package app.zcat.infochat.provider.command;
 
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
-import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
-import app.zcat.infochat.provider.messaging.InboundRouter;
+import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.source.KindResolver;
+import app.zcat.infochat.provider.source.SourceUpsertService;
+import app.zcat.infochat.provider.source.SourceUpsertService.Outcome;
+import app.zcat.infochat.provider.source.SourceUpsertService.UpsertResult;
 import app.zcat.infochat.provider.source.UrlProbe;
 import app.zcat.infochat.provider.source.UrlProbe.ProbeResult;
-import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
-import io.quarkus.test.junit.TestProfile;
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.enterprise.inject.Alternative;
-import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
+import java.io.PrintWriter;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
 import java.net.URI;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.SQLFeatureNotSupportedException;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Handler-tier tests for {@link AddSourceCommandHandler}. Boots
- * {@link io.quarkus.test.junit.QuarkusTest @QuarkusTest} with the
- * {@link MvpProfile} so the {@code inmemory} adapter activates and
- * the router → handler chain is wired against the production CDI
- * graph. The {@link MockUrlProbe} {@link Alternative} replaces
- * {@link UrlProbe} so handler-tier tests can pin the probe outcome
- * per URL without a real HttpServer fixture (the URL-probe path is
- * covered by {@code UrlProbeTest}).
+ * Handler-tier (plain JUnit, no Quarkus boot) tests for
+ * {@link AddSourceCommandHandler} per the test-pyramid convention at
+ * {@code docs/process/test-pyramid.md} §Handler unit tests.
  *
- * <p>Asserted invariants (one {@code @Test} per acceptance bullet):
+ * <p>The handler's six {@code @Inject} collaborators are stubbed in
+ * {@link #buildHandlerWithStubs()}: real {@link BundleLoader} (loaded
+ * by hand), real {@link KindResolver} (pure function), programmable
+ * {@link RecordingUrlProbe} per-URL probe outcomes, programmable
+ * {@link StubSourceUpsertService} per-scenario outcomes, programmable
+ * {@link StubUserDataSource} per-contact-id user rows, and a hand-
+ * constructed {@link InboundContext} with {@code adapterName="inmemory"}.
+ *
+ * <p>Asserted invariants (one {@code @Test} per behavioral branch):
  * <ul>
- *   <li>CDI discovery: the handler is reachable through the
- *       {@code InboundRouter.onMessage(/add-source ...)} path exactly
- *       once — confirms the router's
- *       {@code Instance<CommandHandler>} lookup binds the handler by
- *       its {@code "add-source"} name.</li>
+ *   <li>Dispatch: one /add-source call exercises UrlProbe exactly
+ *       once on the dispatch path.</li>
  *   <li>Permission gate: DM non-banned proceeds, DM banned rejects,
- *       group non-admin rejects, group admin proceeds.</li>
- *   <li>Ambiguous probe outcome: {@code /about} URL with
- *       {@code text/html} probe response surfaces the AMBIGUOUS
- *       friendly error.</li>
+ *       group non-admin rejects.</li>
+ *   <li>Ambiguous probe: {@code /about} URL → AMBIGUOUS reply
+ *       without invoking the probe; an RSS-hinted URL contradicted
+ *       by {@code text/html} → AMBIGUOUS reply.</li>
  *   <li>URL-visibility disclosure: present on Branch A reply,
  *       absent on Branch B / Branch C replies.</li>
  * </ul>
  */
-@QuarkusTest
-@TestProfile(AddSourceCommandHandlerTest.MvpProfile.class)
 class AddSourceCommandHandlerTest {
 
-    @Inject InMemoryAdapter adapter;
-
-    @Inject InboundRouter inboundRouter;
-
-    @Inject AddSourceCommandHandler handler;
-
-    @Inject MockUrlProbe mockProbe;
-
-    @Inject DataSource dataSource;
+    private AddSourceCommandHandler handler;
+    private RecordingUrlProbe urlProbe;
+    private StubSourceUpsertService sourceUpsertService;
+    private StubUserDataSource dataSource;
+    private BundleLoader bundleLoader;
 
     @BeforeEach
-    void cleanup() throws Exception {
-        adapter.reset();
-        mockProbe.reset();
-        try (Connection conn = dataSource.getConnection()) {
-            // Insert (or re-affirm) a permanent guardian admin BEFORE
-            // deleting test users; the last-admin-protection trigger
-            // (V5 trg_last_admin_protection_delete) would otherwise
-            // refuse to delete the final is_admin=TRUE row if our
-            // test set is the only admin population in this DB.
-            exec(conn,
-                    "INSERT INTO users (adapter, contact_id, is_admin, registration_state) "
-                            + "VALUES ('inmemory', 'm1-036h-guardian-permanent', TRUE, 'vouched') "
-                            + "ON CONFLICT (adapter, contact_id) DO UPDATE "
-                            + "  SET is_admin = TRUE, is_banned = FALSE");
-            exec(conn,
-                    "DELETE FROM audit_log "
-                            + "WHERE target_kind = 'source' AND target_id IN ("
-                            + "  SELECT id::TEXT FROM source "
-                            + "   WHERE identifier LIKE 'https://example.com/m1-036h-%')");
-            exec(conn,
-                    "DELETE FROM source_subscription "
-                            + "WHERE source_id IN ("
-                            + "  SELECT id FROM source "
-                            + "   WHERE identifier LIKE 'https://example.com/m1-036h-%')");
-            exec(conn,
-                    "DELETE FROM source WHERE identifier LIKE 'https://example.com/m1-036h-%'");
-            exec(conn,
-                    "DELETE FROM tag WHERE name LIKE 'm1-036h-%'");
-            exec(conn,
-                    "DELETE FROM users "
-                            + "WHERE contact_id LIKE 'm1-036h-%' "
-                            + "  AND contact_id <> 'm1-036h-guardian-permanent'");
-        }
+    void buildHandlerWithStubs() throws Exception {
+        bundleLoader = newRealBundleLoader();
+        urlProbe = new RecordingUrlProbe();
+        sourceUpsertService = new StubSourceUpsertService();
+        dataSource = new StubUserDataSource();
+        handler = new AddSourceCommandHandler();
+        handler.bundleLoader = bundleLoader;
+        handler.kindResolver = new KindResolver();
+        handler.urlProbe = urlProbe;
+        handler.sourceUpsertService = sourceUpsertService;
+        handler.dataSource = dataSource;
+        InboundContext context = new InboundContext();
+        context.setAdapterName("inmemory");
+        handler.inboundContext = context;
     }
 
     @Test
     void inboundRouterDispatchesAddSourceToHandlerExactlyOnce() {
-        mockProbe.setOk("https://example.com/m1-036h-disp.xml",
+        dataSource.seedUser("m1-036h-disp", /* isAdmin */ false, /* isBanned */ false);
+        urlProbe.setProbe("https://example.com/m1-036h-disp.xml",
                 ProbeResult.success(200, Optional.of("application/rss+xml")));
+        sourceUpsertService.setOutcome(Outcome.FRESH_INSERT);
 
-        adapter.deliverDm("m1-036h-disp",
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm("m1-036h-disp"),
                 "/add-source https://example.com/m1-036h-disp.xml --tags m1-036h-news");
 
-        assertEquals(1, adapter.sentMessages().size(),
-                "exactly one outbound reply must be produced via the router → handler chain");
-        assertEquals(1, mockProbe.callCount(),
+        assertEquals(1, urlProbe.callCount(),
                 "the handler must call UrlProbe.probe exactly once on the dispatch path");
+        // One OutboundMessage returned by signature; assert the text is non-empty
+        // so this scenario fails loud if the handler short-circuits to nothing.
+        assertFalse(reply.text().isEmpty(),
+                "dispatch must produce a non-empty reply");
     }
 
     @Test
     void dmNonBannedNonAdminProceedsAndProducesFreshInsertReply() {
-        mockProbe.setOk("https://example.com/m1-036h-fresh.xml",
+        dataSource.seedUser("m1-036h-fresh-user", /* isAdmin */ false, /* isBanned */ false);
+        urlProbe.setProbe("https://example.com/m1-036h-fresh.xml",
                 ProbeResult.success(200, Optional.of("application/rss+xml")));
+        sourceUpsertService.setOutcome(Outcome.FRESH_INSERT);
 
-        adapter.deliverDm("m1-036h-fresh-user",
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm("m1-036h-fresh-user"),
                 "/add-source https://example.com/m1-036h-fresh.xml --tags m1-036h-news");
 
-        List<OutboundMessage> sent = adapter.sentMessages();
-        assertEquals(1, sent.size());
-        String body = sent.get(0).text();
+        String body = reply.text();
         // Branch A reply MUST contain the URL-visibility disclosure literal.
         assertTrue(body.contains("visible to bot admins"),
                 "Branch A reply MUST include the URL-visibility disclosure literal "
@@ -138,21 +125,19 @@ class AddSourceCommandHandlerTest {
     }
 
     @Test
-    void dmBannedUserRejectsBeforeProbe() throws Exception {
-        // Pre-create the user as banned so AutoRegisterService's
-        // upstream UPSERT finds an existing row.
-        insertBannedUser("m1-036h-banned");
+    void dmBannedUserRejectsBeforeProbe() {
         // No mock probe setup needed — the ban check fires BEFORE probe.
+        dataSource.seedUser("m1-036h-banned", /* isAdmin */ false, /* isBanned */ true);
 
-        adapter.deliverDm("m1-036h-banned",
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm("m1-036h-banned"),
                 "/add-source https://example.com/m1-036h-banned.xml --tags m1-036h-news");
 
-        assertEquals(1, adapter.sentMessages().size());
-        String body = adapter.sentMessages().get(0).text();
+        String body = reply.text();
         // The bundle value for error.add_source.banned should be present.
         assertTrue(body.contains("not permitted"),
                 "banned user must see the banned-friendly-error literal — got: " + body);
-        assertEquals(0, mockProbe.callCount(),
+        assertEquals(0, urlProbe.callCount(),
                 "ban check must short-circuit BEFORE UrlProbe is invoked");
     }
 
@@ -166,20 +151,17 @@ class AddSourceCommandHandlerTest {
         assertTrue(reply.text().contains("Only group admins"),
                 "non-admin in group scope must see the group-admin-only friendly error — got: "
                         + reply.text());
+        assertEquals(0, urlProbe.callCount(),
+                "group-scope rejection must short-circuit BEFORE UrlProbe is invoked");
     }
 
-    // The "GROUP scope, group admin → handler proceeds" branch from
-    // the acceptance's item 10 is NOT covered here: the frozen
-    // CommandHandler SPI does not carry the inbound actor's identity
-    // in group scope (ScopeRef.Group holds only the adapter-side
-    // group id; the actor's contact id is not on the SPI), so the
-    // handler cannot consult group_membership for the caller. The
-    // ticket's out_of_scope explicitly accepts this gap: "the
-    // rejection branch falls through the auth check WITHOUT
-    // requiring group-membership infrastructure; no group-membership
-    // lookup is needed in MVP." T2-F wires the actor seam + the
-    // group-admin proceed path; the corresponding acceptance test
-    // lands then.
+    // The "GROUP scope, group admin → handler proceeds" branch is NOT
+    // covered here: the frozen CommandHandler SPI does not carry the
+    // inbound actor's identity in group scope (ScopeRef.Group holds
+    // only the adapter-side group id; the actor's contact id is not on
+    // the SPI), so the handler cannot consult group_membership for the
+    // caller. T2-F wires the actor seam + the group-admin proceed
+    // path; the corresponding acceptance test lands then.
 
     @Test
     void ambiguousUrlWithHtmlContentTypeSurfacesAmbiguousFriendlyError() {
@@ -187,49 +169,52 @@ class AddSourceCommandHandlerTest {
         // AMBIGUOUS directly. The handler short-circuits to the
         // ambiguous_url bundle key BEFORE the probe is invoked (the
         // probe runs after kind resolution).
-        adapter.deliverDm("m1-036h-amb",
+        dataSource.seedUser("m1-036h-amb", /* isAdmin */ false, /* isBanned */ false);
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm("m1-036h-amb"),
                 "/add-source https://example.com/m1-036h-about --tags m1-036h-news");
 
-        assertEquals(1, adapter.sentMessages().size());
-        String body = adapter.sentMessages().get(0).text();
+        String body = reply.text();
         assertTrue(body.contains("Couldn't infer the source type"),
                 "ambiguous-URL reply must surface the ambiguous_url friendly error literal — got: "
                         + body);
+        assertEquals(0, urlProbe.callCount(),
+                "ambiguous-URL short-circuit must run BEFORE UrlProbe is invoked");
     }
 
     @Test
     void rssPathUrlContradictedByHtmlContentTypeSurfacesAmbiguous() {
         // Path ends in /feed → resolver chooses RSS via the path
-        // hint. The probe returns text/html — the
-        // confirm-or-contradict check fires and the handler returns
-        // the ambiguous_url friendly error.
-        mockProbe.setOk("https://example.com/m1-036h-news/feed",
+        // hint. The probe returns text/html — the confirm-or-contradict
+        // check fires and the handler returns the ambiguous_url friendly
+        // error.
+        dataSource.seedUser("m1-036h-contradict-user", /* isAdmin */ false, /* isBanned */ false);
+        urlProbe.setProbe("https://example.com/m1-036h-news/feed",
                 ProbeResult.success(200, Optional.of("text/html")));
 
-        adapter.deliverDm("m1-036h-contradict-user",
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm("m1-036h-contradict-user"),
                 "/add-source https://example.com/m1-036h-news/feed --tags m1-036h-news");
 
-        String body = adapter.sentMessages().get(0).text();
+        String body = reply.text();
         assertTrue(body.contains("Couldn't infer the source type"),
                 "RSS-hinted URL contradicted by text/html Content-Type must surface "
                         + "the ambiguous_url friendly error — got: " + body);
     }
 
     @Test
-    void branchBSubscribedExistingReplyOmitsUrlVisibilityDisclosure() throws Exception {
-        // Seed an existing source via another contact, then call as a
-        // non-admin from a different contact id.
-        UUID seedUser = insertUser("m1-036h-seed-b", true);
-        insertSourceRow(seedUser, "https://example.com/m1-036h-shared.xml",
-                "Shared", "news", List.of("m1-036h-tag"));
-
-        mockProbe.setOk("https://example.com/m1-036h-shared.xml",
+    void branchBSubscribedExistingReplyOmitsUrlVisibilityDisclosure() {
+        dataSource.seedUser("m1-036h-non-admin-b", /* isAdmin */ false, /* isBanned */ false);
+        urlProbe.setProbe("https://example.com/m1-036h-shared.xml",
                 ProbeResult.success(200, Optional.of("application/rss+xml")));
+        sourceUpsertService.setOutcome(Outcome.SUBSCRIBED_EXISTING);
 
-        adapter.deliverDm("m1-036h-non-admin-b",
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm("m1-036h-non-admin-b"),
                 "/add-source https://example.com/m1-036h-shared.xml --tags m1-036h-other");
 
-        String body = adapter.sentMessages().get(0).text();
+        String body = reply.text();
         assertFalse(body.contains("visible to bot admins"),
                 "Branch B (subscribed-existing) reply MUST NOT include the URL-visibility "
                         + "disclosure — got: " + body);
@@ -239,24 +224,21 @@ class AddSourceCommandHandlerTest {
     }
 
     @Test
-    void branchCBotAdminTagReplacementReplyOmitsUrlVisibilityDisclosure() throws Exception {
-        // Seed an existing source via a different contact, then call as
-        // a bot-admin caller with new --tags. The handler routes to the
-        // ADMIN_TAGS_REPLACED arm of buildReply, which emits the
+    void branchCBotAdminTagReplacementReplyOmitsUrlVisibilityDisclosure() {
+        // Bot-admin caller against a pre-existing source row routes to
+        // the ADMIN_TAGS_REPLACED arm of buildReply, which emits the
         // admin_tags_replaced bundle value WITHOUT the URL-visibility
         // disclosure (gated to FRESH_INSERT only).
-        UUID seedUser = insertUser("m1-036h-seed-c", true);
-        insertSourceRow(seedUser, "https://example.com/m1-036h-admin.xml",
-                "AdminShared", "news", List.of("m1-036h-old"));
-        insertUser("m1-036h-bot-admin-c", true);
-
-        mockProbe.setOk("https://example.com/m1-036h-admin.xml",
+        dataSource.seedUser("m1-036h-bot-admin-c", /* isAdmin */ true, /* isBanned */ false);
+        urlProbe.setProbe("https://example.com/m1-036h-admin.xml",
                 ProbeResult.success(200, Optional.of("application/rss+xml")));
+        sourceUpsertService.setOutcome(Outcome.ADMIN_TAGS_REPLACED);
 
-        adapter.deliverDm("m1-036h-bot-admin-c",
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm("m1-036h-bot-admin-c"),
                 "/add-source https://example.com/m1-036h-admin.xml --tags m1-036h-new");
 
-        String body = adapter.sentMessages().get(0).text();
+        String body = reply.text();
         assertFalse(body.contains("visible to bot admins"),
                 "Branch C (admin-tag-replacement) reply MUST NOT include the "
                         + "URL-visibility disclosure — got: " + body);
@@ -265,120 +247,212 @@ class AddSourceCommandHandlerTest {
                         + "— got: " + body);
     }
 
-    // --- helpers ---------------------------------------------------------
+    // ----- fixtures + collaborator stubs --------------------------------
 
-    private UUID insertUser(String contactId, boolean isAdmin) throws Exception {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(
-                     "INSERT INTO users (adapter, contact_id, is_admin, registration_state) "
-                             + "VALUES ('inmemory', ?, ?, 'invited') RETURNING id")) {
-            ps.setString(1, contactId);
-            ps.setBoolean(2, isAdmin);
-            try (ResultSet rs = ps.executeQuery()) {
-                rs.next();
-                return (UUID) rs.getObject(1);
-            }
-        }
-    }
-
-    private void insertBannedUser(String contactId) throws Exception {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(
-                     "INSERT INTO users (adapter, contact_id, is_admin, is_banned, "
-                             + "registration_state) "
-                             + "VALUES ('inmemory', ?, FALSE, TRUE, 'invited')")) {
-            ps.setString(1, contactId);
-            ps.executeUpdate();
-        }
-    }
-
-    private void insertSourceRow(UUID inserter, String url, String name,
-                                  String category, List<String> tags) throws Exception {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(
-                     "INSERT INTO source (kind, identifier, display_name, category, "
-                             + "bootstrap_tags, status, added_by) "
-                             + "VALUES ('rss', ?, ?, ?, ?, 'active', ?)")) {
-            ps.setString(1, url);
-            ps.setString(2, name);
-            ps.setString(3, category);
-            ps.setArray(4, conn.createArrayOf("TEXT", tags.toArray(new String[0])));
-            ps.setObject(5, inserter);
-            ps.executeUpdate();
-        }
-    }
-
-    private static void exec(Connection conn, String sql) throws Exception {
-        try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.executeUpdate();
-        }
+    private static BundleLoader newRealBundleLoader() throws Exception {
+        BundleLoader loader = new BundleLoader();
+        Method load = BundleLoader.class.getDeclaredMethod("load");
+        load.setAccessible(true);
+        load.invoke(loader);
+        return loader;
     }
 
     /**
-     * CDI {@link Alternative} that replaces the real {@link UrlProbe}
-     * for handler-tier tests. The test populates per-URL canned
-     * results via {@link #setOk(String, ProbeResult)}; an unmapped
-     * URL falls through to a SUCCESS with no content-type so tests
-     * that exercise unrelated paths don't have to repeat the
-     * boilerplate.
-     *
-     * <p>No {@link Priority} annotation — activation is scoped via
-     * {@link MvpProfile#getEnabledAlternatives()} so this mock is
-     * active only inside this test's profile. A global
-     * {@code @Priority(1)} would conflict with
-     * {@code AddSourceIT.LoopbackProbe}'s alternative.</p>
+     * Recording {@link UrlProbe} subclass with per-URL canned probe
+     * outcomes. An unmapped URL falls through to a SUCCESS with no
+     * content-type so the dispatch test's probe doesn't need to be
+     * seeded with the dispatch URL twice.
      */
-    @Alternative
-    @ApplicationScoped
-    public static class MockUrlProbe extends UrlProbe {
+    private static final class RecordingUrlProbe extends UrlProbe {
 
         private final Map<String, ProbeResult> canned = new ConcurrentHashMap<>();
-
-        private int callCount;
+        private final AtomicInteger callCount = new AtomicInteger();
 
         @Override
         public ProbeResult probe(URI url) {
-            callCount++;
+            callCount.incrementAndGet();
             return canned.getOrDefault(
                     url.toString(),
                     ProbeResult.success(200, Optional.empty()));
         }
 
-        void setOk(String url, ProbeResult result) {
+        void setProbe(String url, ProbeResult result) {
             canned.put(url, result);
         }
 
         int callCount() {
-            return callCount;
-        }
-
-        void reset() {
-            canned.clear();
-            callCount = 0;
+            return callCount.get();
         }
     }
 
     /**
-     * Same shape as {@code AdapterRouterIT.MvpProfile}: inmemory +
-     * low-trust opt-in. Plus
-     * {@link QuarkusTestProfile#getEnabledAlternatives()} so the
-     * {@link MockUrlProbe} above is the only active alternative for
-     * this profile — Quarkus boot-time CDI would otherwise see BOTH
-     * this mock and {@code AddSourceIT.LoopbackProbe} as competing
-     * {@code @Priority(1)} alternatives and refuse to start with an
-     * AmbiguousResolutionException.
+     * Programmable {@link SourceUpsertService} stub: returns a canned
+     * {@link UpsertResult} on every {@link #upsert} call. Tests
+     * configure the outcome per scenario via {@link #setOutcome}.
+     * The display name is echoed back verbatim so Branch A's
+     * fresh-insert reply gets a usable interpolation argument.
      */
-    public static final class MvpProfile implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of(
-                    "infochat.adapters", "inmemory",
-                    "infochat.adapters.inmemory.allow-low-trust", "true");
+    private static final class StubSourceUpsertService extends SourceUpsertService {
+        private Outcome outcome = Outcome.FRESH_INSERT;
+
+        void setOutcome(Outcome outcome) {
+            this.outcome = outcome;
         }
 
         @Override
-        public java.util.Set<Class<?>> getEnabledAlternatives() {
-            return java.util.Set.of(MockUrlProbe.class);
+        public UpsertResult upsert(UUID actorUserId,
+                                   boolean actorIsBotAdmin,
+                                   String scopeKind,
+                                   UUID scopeId,
+                                   KindResolver.SourceKind kind,
+                                   String identifier,
+                                   String displayName,
+                                   String category,
+                                   List<String> tags) {
+            return new UpsertResult(outcome, UUID.randomUUID(), displayName);
+        }
+    }
+
+    /**
+     * Hand-rolled JDBC stub: returns the seeded {@code users} row for
+     * the contact_id passed as the second parameter to
+     * {@code AddSourceCommandHandler.lookupActor}'s SELECT (the first
+     * parameter is the adapter name, which is asserted in
+     * {@code InboundContext} setup and not used as a lookup key here).
+     * Mockito is intentionally absent from the Provider classpath.
+     */
+    private static final class StubUserDataSource extends UnsupportedDataSource {
+
+        private record UserRow(UUID id, boolean isAdmin, boolean isBanned) {}
+
+        private final Map<String, UserRow> rowsByContactId = new ConcurrentHashMap<>();
+
+        void seedUser(String contactId, boolean isAdmin, boolean isBanned) {
+            rowsByContactId.put(contactId, new UserRow(UUID.randomUUID(), isAdmin, isBanned));
+        }
+
+        @Override
+        public Connection getConnection() {
+            return (Connection) Proxy.newProxyInstance(
+                    Connection.class.getClassLoader(),
+                    new Class<?>[] { Connection.class },
+                    (proxy, method, methodArgs) -> switch (method.getName()) {
+                        case "prepareStatement" -> newPreparedStatement();
+                        case "close" -> null;
+                        case "toString" -> "StubConnection";
+                        case "hashCode" -> System.identityHashCode(proxy);
+                        case "equals" -> proxy == methodArgs[0];
+                        default -> throw new UnsupportedOperationException(
+                                "Connection." + method.getName() + " not stubbed");
+                    });
+        }
+
+        private PreparedStatement newPreparedStatement() {
+            // Capture per-statement setString parameters so executeQuery
+            // can resolve the row by contact_id (parameter index 2).
+            Map<Integer, String> params = new HashMap<>();
+            return (PreparedStatement) Proxy.newProxyInstance(
+                    PreparedStatement.class.getClassLoader(),
+                    new Class<?>[] { PreparedStatement.class },
+                    (proxy, method, methodArgs) -> switch (method.getName()) {
+                        case "setString" -> {
+                            params.put((Integer) methodArgs[0], (String) methodArgs[1]);
+                            yield null;
+                        }
+                        case "executeQuery" -> {
+                            String contactId = params.get(2);
+                            UserRow row = rowsByContactId.get(contactId);
+                            yield newResultSet(row);
+                        }
+                        case "close" -> null;
+                        case "toString" -> "StubPreparedStatement";
+                        case "hashCode" -> System.identityHashCode(proxy);
+                        case "equals" -> proxy == methodArgs[0];
+                        default -> throw new UnsupportedOperationException(
+                                "PreparedStatement." + method.getName() + " not stubbed");
+                    });
+        }
+
+        private ResultSet newResultSet(UserRow row) {
+            boolean[] consumed = { row == null };
+            return (ResultSet) Proxy.newProxyInstance(
+                    ResultSet.class.getClassLoader(),
+                    new Class<?>[] { ResultSet.class },
+                    (proxy, method, methodArgs) -> switch (method.getName()) {
+                        case "next" -> {
+                            if (consumed[0]) yield false;
+                            consumed[0] = true;
+                            yield true;
+                        }
+                        case "getObject" -> row.id();
+                        case "getBoolean" -> {
+                            String col = (String) methodArgs[0];
+                            yield switch (col) {
+                                case "is_admin" -> row.isAdmin();
+                                case "is_banned" -> row.isBanned();
+                                default -> throw new UnsupportedOperationException(
+                                        "ResultSet.getBoolean unknown column: " + col);
+                            };
+                        }
+                        case "close" -> null;
+                        case "toString" -> "StubResultSet";
+                        case "hashCode" -> System.identityHashCode(proxy);
+                        case "equals" -> proxy == methodArgs[0];
+                        default -> throw new UnsupportedOperationException(
+                                "ResultSet." + method.getName() + " not stubbed");
+                    });
+        }
+    }
+
+    /**
+     * Base implementation of {@link DataSource} that throws
+     * {@link UnsupportedOperationException} for everything except
+     * {@link #getConnection()}.
+     */
+    private static class UnsupportedDataSource implements DataSource {
+        @Override
+        public Connection getConnection() throws SQLException {
+            throw new UnsupportedOperationException("getConnection() not stubbed");
+        }
+
+        @Override
+        public Connection getConnection(String username, String password) {
+            throw new UnsupportedOperationException("getConnection(String,String) not stubbed");
+        }
+
+        @Override
+        public PrintWriter getLogWriter() {
+            throw new UnsupportedOperationException("getLogWriter not stubbed");
+        }
+
+        @Override
+        public void setLogWriter(PrintWriter out) {
+            throw new UnsupportedOperationException("setLogWriter not stubbed");
+        }
+
+        @Override
+        public void setLoginTimeout(int seconds) {
+            throw new UnsupportedOperationException("setLoginTimeout not stubbed");
+        }
+
+        @Override
+        public int getLoginTimeout() {
+            throw new UnsupportedOperationException("getLoginTimeout not stubbed");
+        }
+
+        @Override
+        public Logger getParentLogger() throws SQLFeatureNotSupportedException {
+            throw new SQLFeatureNotSupportedException();
+        }
+
+        @Override
+        public <T> T unwrap(Class<T> iface) {
+            throw new UnsupportedOperationException("unwrap not stubbed");
+        }
+
+        @Override
+        public boolean isWrapperFor(Class<?> iface) {
+            return false;
         }
     }
 }

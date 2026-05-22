@@ -13,22 +13,21 @@ import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Alternative;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import javax.sql.DataSource;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Happy-path activation tests for {@link AdapterRegistry}. The
+ * Wiring-tier happy-path tests for {@link AdapterRegistry}. The
  * gate sad paths live in {@link StartupGatesTest}; this class
  * asserts the two happy shapes from acceptance item 24:
  *
@@ -36,10 +35,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   <li><b>Single-adapter:</b> {@code infochat.adapters=inmemory}
  *       activates exactly one adapter and registers the
  *       {@link InboundRouter} as its inbound handler — verified
- *       functionally by delivering an inbound message through
- *       {@link InMemoryAdapter#deliverDm(String, String)} and
- *       asserting the unknown-command reply lands in
- *       {@link InMemoryAdapter#sentMessages()}.</li>
+ *       via the {@link RecordingInboundRouter} {@link Alternative}
+ *       that captures the {@code (InboundMessage, adapterName)} pair
+ *       handed to {@code onMessage}. Asserting wiring (router was
+ *       invoked with the delivered body) rather than reply content
+ *       narrows this test's scope to the SPI handshake; the
+ *       unknown-command literal is asserted by
+ *       {@code InboundRouterTest.unknownCommandProducesFriendlyUnknownCommandReply}.</li>
  *   <li><b>Multi-adapter:</b> {@code infochat.adapters=fake-x,fake-y}
  *       activates both test-only adapter beans. (The acceptance
  *       text's "e.g. inmemory and inmemory2" is illustrative — the
@@ -69,20 +71,10 @@ class AdapterRegistryTest {
     @Inject
     InboundRouter inboundRouter;
 
-    @Inject
-    DataSource dataSource;
-
     @BeforeEach
-    void resetAdapterState() throws Exception {
+    void resetAdapterAndRouterState() {
         inMemoryAdapter.reset();
-        // M1-035d wired AutoRegisterService into the router, so the
-        // singleAdapter happy-path's deliverDm("alice", ...) now inserts
-        // a users row. Clean it up so re-runs do not accumulate.
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(
-                     "DELETE FROM users WHERE adapter = 'inmemory' AND contact_id = 'alice'")) {
-            ps.executeUpdate();
-        }
+        ((RecordingInboundRouter) inboundRouter).reset();
     }
 
     @Test
@@ -93,18 +85,20 @@ class AdapterRegistryTest {
         assertEquals(1, activated.size(), "exactly one adapter should activate");
         assertEquals("inmemory", activated.get(0).name());
 
-        // Verify the handler that InMemoryAdapter received is the
-        // Provider's InboundRouter bean: a deliverDm round-trip
-        // should route through the router and produce the
-        // unknown-command reply. The probe uses /xyz — a name that
-        // will never be implemented — so the assertion stays valid
-        // as the milestone fills in real CommandHandlers.
+        // Wiring assertion: the handler InMemoryAdapter received must
+        // route through the InboundRouter bean. A deliverDm probe with
+        // an arbitrary body lands in RecordingInboundRouter.onMessage,
+        // which records the (body, adapterName) pair. Asserting on the
+        // capture confirms the SPI wiring without coupling this test
+        // to any specific command's reply text.
         inMemoryAdapter.deliverDm("alice", "/xyz");
-        List<OutboundMessage> sent = inMemoryAdapter.sentMessages();
-        assertEquals(1, sent.size(),
-                "router should have produced exactly one outbound reply");
-        assertEquals(InboundRouter.UNKNOWN_COMMAND_REPLY, sent.get(0).text(),
-                "reply must come from the InboundRouter's slash-prefix branch");
+        RecordingInboundRouter recording = (RecordingInboundRouter) inboundRouter;
+        assertEquals(1, recording.capturedBodyCount(),
+                "router should have been invoked exactly once");
+        assertEquals("/xyz", recording.lastCapturedBody(),
+                "router must receive the body delivered through the adapter");
+        assertEquals("inmemory", recording.lastCapturedAdapterName(),
+                "router must receive the source adapter's name through the wiring lambda");
     }
 
     @Test
@@ -127,6 +121,57 @@ class AdapterRegistryTest {
                     "app.zcat.infochat.provider.messaging.MessagingStartup",
                     "infochat.adapters.inmemory.allow-low-trust", "true"
             );
+        }
+
+        @Override
+        public Set<Class<?>> getEnabledAlternatives() {
+            return Set.of(RecordingInboundRouter.class);
+        }
+    }
+
+    /**
+     * CDI {@link Alternative} that records every {@code onMessage}
+     * dispatch the {@link AdapterRegistry} wiring routes through. The
+     * production {@link InboundRouter}'s side effects (normalize,
+     * dispatch, auto-register, DB writes) are intentionally suppressed
+     * — this test asserts the wiring handshake, not the router's own
+     * behavior (covered by {@link InboundRouterTest}).
+     *
+     * <p>Activation is scoped via
+     * {@link QuarkusTestProfile#getEnabledAlternatives()}; no
+     * {@code @Priority} so this alternative does not leak into other
+     * test classes' CDI graphs.
+     */
+    @Alternative
+    @ApplicationScoped
+    public static class RecordingInboundRouter extends InboundRouter {
+
+        private final java.util.List<String> capturedBodies =
+                new java.util.concurrent.CopyOnWriteArrayList<>();
+        private final java.util.List<String> capturedAdapterNames =
+                new java.util.concurrent.CopyOnWriteArrayList<>();
+
+        @Override
+        public void onMessage(InboundMessage msg, String adapterName) {
+            capturedBodies.add(msg.text());
+            capturedAdapterNames.add(adapterName);
+        }
+
+        int capturedBodyCount() {
+            return capturedBodies.size();
+        }
+
+        String lastCapturedBody() {
+            return capturedBodies.get(capturedBodies.size() - 1);
+        }
+
+        String lastCapturedAdapterName() {
+            return capturedAdapterNames.get(capturedAdapterNames.size() - 1);
+        }
+
+        void reset() {
+            capturedBodies.clear();
+            capturedAdapterNames.clear();
         }
     }
 
