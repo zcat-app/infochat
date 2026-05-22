@@ -550,6 +550,153 @@ regardless of whether `files_scope` touches a shared dispatch
 surface — the author has made claims about test behavior and the
 clarity reviewer audits them.
 
+### 13. BODY-CLAIM-COVERAGE — every behavioral claim in §Big-picture notes / §Implementation notes is exercised by at least one acceptance item
+
+Checks #1 and #10 audit acceptance items in isolation: is each item
+runnable, does each grep-count assertion match what the DoD commits to?
+Both checks start from the acceptance list and look outward. This check
+fires the inverse direction: it starts from the ticket *body* and looks
+for behavioral commitments that the acceptance list silently drops.
+The class of bug it catches is the "promise without a hook" — the body
+asserts the ticket implements behavior X, but no acceptance item
+verifies X, so an implementer can ship a diff that satisfies every
+acceptance item while omitting X entirely, and the reviewer's
+APPROVE/REWORK gate has no signal to catch the omission.
+
+This check fires the forcing function against the class of bug that
+produced the M1-044c round-1 catch: §Big-picture notes declared
+`"/ban requires confirm per spec. This ticket implements the confirm
+flow for /ban via the same --confirm pattern."`, but acceptance item
+1's logic sequence (steps 1-8) contains no confirm step and item 2's
+seven test scenarios (a)-(g) contain no confirm-prompt scenario. The
+confirm behavior was claimed but unverifiable; without this check the
+implementer could have shipped a `/ban` handler with no confirm flow
+and the diff would have satisfied every acceptance grep.
+
+For each prose section in scope, enumerate sentences that match a
+behavioral-claim pattern, then for each claim search the `acceptance:`
+block for a verification that exercises it. Sections to scan:
+
+  - **§Big-picture notes** — typically where "this ticket implements X"
+    rationale slips in. IN SCOPE.
+  - **§Implementation notes** — sometimes contains "the handler MUST do
+    X" prose that the author meant as acceptance commitment. IN SCOPE.
+  - **§Context** — typically scope-setting and ticket framing, not
+    behavioral commitment. EXCLUDED unless the framing names a
+    specific runtime behavior the ticket "ships" (look for the
+    commitment verbs below).
+  - **§Definition of Done** — already covered by
+    ACCEPTANCE-VS-DOD-CONSISTENT (check #10). EXCLUDED here to avoid
+    double-counting; check #10 catches its class of failure.
+  - **§Alternatives considered** — design rationale (accepted/rejected
+    alternatives); explicit non-commitments. EXCLUDED.
+  - **§Out-of-scope expansion** — explicit non-commitments by
+    construction. EXCLUDED.
+  - **§Authorized test changes** — modifications to other tickets'
+    tests, not new behavior. EXCLUDED.
+
+Behavioral-claim markers to look for inside the IN-SCOPE sections:
+
+  - Commitment verbs in present-tense indicative mood, where the
+    grammatical subject is the current ticket OR a code surface the
+    ticket adds: `implements`, `adds`, `introduces`, `enforces`,
+    `writes`, `wires`, `lands`, `ships`, `mints`, `flips`, `rejects`,
+    `surfaces`, `dispatches`, `revokes`. Examples:
+    - `"This ticket implements the confirm flow for /ban"` (matches)
+    - `"The handler enforces the per-adapter open cap"` (matches)
+    - `"/invite revoke requires confirm"` (matches via the modal form)
+  - Modal commitments naming a specific code surface: `must`,
+    `requires`, `always`, where the surface is a handler/service/path
+    the ticket adds:
+    - `"/ban requires confirm per spec"` (matches — `/ban` is the
+      added handler).
+    - `"the handler must catch the trigger's exception"` (matches —
+      "the handler" refers to the added BanCommandHandler).
+  - Exclusion: spec quotations and forward-references. A sentence like
+    `"per §User ban, audit rows are written before mutation"` quotes
+    the spec; it commits the ticket to that behavior only if the
+    sentence's grammatical subject is the current ticket or its added
+    code surface. A sentence like `"a future ticket replaces this
+    with a shared AuditLogWriter"` is a forward-deferral, not a
+    current commitment.
+  - Exclusion: claims about *out-of-scope* tickets. Sentences like
+    `"M1-045 lands the /vouch handler"` or `"the audit-write helper
+    consolidation is deferred to M1-041"` name other tickets'
+    commitments, not the current ticket's. EXCLUDED.
+
+For each in-scope claim, identify the **claim subject** (the specific
+runtime behavior the claim commits to) — typically one of:
+
+  - A command surface (`/ban`, `/invite revoke`, `/unban`).
+  - A code path inside a command surface (`the /ban confirm flow`,
+    `the /invite revoke confirm gate`, `the unban group-admin
+    restoration disclosure`).
+  - A side-effect (`the BAN audit row writes audit-before-effect`,
+    `the same-transaction invite revoke on /ban`).
+
+Then search the `acceptance:` block for a verification of that subject.
+Verification shapes (any one of these suffices for PASS on the claim):
+
+  - **Per-method grep on the implementation file**: an acceptance item
+    whose grep regex matches the asserted behavior (e.g.
+    `grep -E 'banConfirmFlow|--confirm' BanCommandHandler.java
+    returns ≥1 match` for a `/ban` confirm claim).
+  - **Named test scenario**: an acceptance item naming a test scenario
+    that exercises the asserted behavior (e.g.
+    `"(h) first invocation of /ban <contact> → confirm prompt
+    returned, no DB write"`).
+  - **Behavioral assertion**: an acceptance item that asserts the
+    runtime behavior directly (e.g. `"BanCommandHandler returns
+    reply.ban.confirm_prompt on first invocation without --confirm"`).
+  - **Negative coverage** is permitted: a claim of the form "X is NOT
+    confirm-gated in v1" passes if at least one acceptance item
+    asserts the absence (e.g. a scenario verifying the ban executes
+    on first invocation).
+
+Classify each claim:
+  - **PASS** — at least one acceptance item verifies the subject.
+  - **FAIL** — no acceptance item verifies the subject. Cite the claim
+    verbatim (section name + first 60 chars), the extracted subject,
+    and the absence of coverage. Recommend either (a) adding an
+    acceptance item that verifies the subject, or (b) removing the
+    claim from the body if the author meant it as rationale rather
+    than commitment.
+
+Severity rule for the section verdict:
+  - **FAIL** on any uncovered claim. This is a hard-no, not a judgment
+    call — every committed behavior must have an acceptance hook, or
+    the reviewer cannot prove the implementer kept the promise.
+  - **PASS** when every claim has acceptance coverage, OR when the
+    in-scope sections contain zero behavioral claims (a short ticket
+    with body sections that are pure rationale / non-commitment).
+  - There is no WARN tier on this check — the claim is either covered
+    by acceptance or it isn't, and the consequence of a missed claim
+    is a silently-dropped behavior at implementation time.
+
+Exclusion calibration: this check has false-positive risk when the
+author's prose phrasing matches a commitment marker but the sentence's
+intent is rationale rather than commitment. Lean toward PASS when the
+sentence is clearly rationale or framing (`"This ticket implements
+five command surfaces"` — a structural statement that the individual
+surfaces' acceptance items cover, not an additional behavior
+commitment). Lean toward FAIL when the sentence names a specific
+runtime behavior or a confirm/cap/reject/audit invariant that no
+acceptance item names. The M1-044c shape — `"This ticket implements
+the confirm flow for /ban via the same --confirm pattern"` naming a
+specific control-flow path with no acceptance hook — is the canonical
+FAIL exemplar.
+
+This check complements check #10 (ACCEPTANCE-VS-DOD-CONSISTENT) and
+check #1 (ACCEPTANCE-RUNNABLE). The three checks fire on different
+classes of break:
+  - #1 catches acceptance items that name an unrunnable or non-testable
+    predicate.
+  - #10 catches acceptance items whose grep-count is unsatisfiable
+    against what the DoD enumerated.
+  - #13 catches behavioral claims in the body that have no acceptance
+    item at all — the body promised something the acceptance list
+    silently dropped.
+
 ---
 
 ## Short chat reply (the only thing you return inline)
@@ -652,6 +799,26 @@ VERIFIED-STAYS-GREEN-PLAUSIBLE: <PASS | WARN>
    Section verdict is capped at WARN: when at least one entry is
    WARN or FAIL the section reports WARN; PASS when every entry is
    PASS or when `verified_stays_green:` is empty/absent.>
+
+BODY-CLAIM-COVERAGE: <PASS | FAIL>
+  <one bullet per behavioral claim found in §Big-picture notes and
+   §Implementation notes. Each bullet quotes the claim verbatim
+   (section name + first 60 chars), names the extracted claim subject
+   (the specific runtime behavior committed), and records the
+   classification (PASS / FAIL) with a one-line citation of either:
+     (PASS) the acceptance item index that verifies the subject and
+            the verification shape (per-method grep / named test
+            scenario / behavioral assertion / negative coverage), OR
+     (FAIL) the absence of any acceptance verification, plus the
+            recommended remediation (add an acceptance item that
+            verifies the subject, OR remove the claim from the body
+            if intended as rationale rather than commitment).
+
+   Severity rule: FAIL on any uncovered claim (no WARN tier — the
+   claim is either covered or it isn't, and the consequence of a
+   missed claim is a silently-dropped behavior). PASS when every
+   claim has acceptance coverage, OR when the in-scope sections
+   contain zero behavioral claims.>
 
 OUT-OF-SCOPE-SPECIFIC: <PASS | WARN | FAIL>
   <one paragraph: is out_of_scope non-empty and specific, or PASS>
