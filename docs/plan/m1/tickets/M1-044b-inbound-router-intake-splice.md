@@ -1,11 +1,16 @@
 ---
 id: M1-044b
 title: InboundRouter intake-step splice (1.5, 2, 4, 7-DM-gate) + bundle keys + rate-cap config
-status: deferred
+status: pending
 created: 2026-05-20
-last_updated: 2026-05-21
-deferred_on: M1-047
-deferred_reason: blocked-on-new-ticket
+last_updated: 2026-05-22
+deferred_on:
+deferred_reason:
+reopens:
+  - date: 2026-05-22
+    prior_deferred_reason: blocked-on-new-ticket
+    prior_deferred_on: M1-047
+    reason: umbrella-done
 escalations:
   - date: 2026-05-21
     reason: premise-fail

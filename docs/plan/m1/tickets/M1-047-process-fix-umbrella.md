@@ -1,7 +1,7 @@
 ---
 id: M1-047
 title: "Process-fix umbrella: stays-green + pyramid + contracts"
-status: pending
+status: done
 created: 2026-05-21
 last_updated: 2026-05-22
 blocked_by:
@@ -38,7 +38,20 @@ spec_refs: []
 decision_refs: []
 deferred_on:
 deferred_reason:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-05-22
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 26
+      removed: 274
 escalations:
   - date: 2026-05-22
     reason: clarity-fail
@@ -80,7 +93,12 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-05-22
+  verdict: WARN
+  warnings:
+    - "FORWARD-REFERENCE-CHECK: M1-047A, M1-047D, and M1-047E appear in §Definition of Done body prose but do not correspond to any file under docs/plan/m1/tickets/. These were working labels used before the subtickets were allocated as M1-048/049/050 respectively. The Implementation notes §Subticket allocation section already clarifies the mapping. Low risk — informational labels in prose, not load-bearing references."
+  blockers: []
 ---
 
 # M1-047: Process-fix umbrella: stays-green + pyramid + contracts
