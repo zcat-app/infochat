@@ -1,7 +1,7 @@
 ---
 id: M1-044c
 title: Admin command handlers — /ban, /unban, /invite create/list/revoke
-status: pending
+status: done
 escalations:
   - date: 2026-05-22
     reason: clarity-fail
@@ -693,6 +693,197 @@ decision_refs:
   - D11
   - D44
   - D46
+clarity_check:
+  date: 2026-05-22
+  verdict: PASS
+  warnings: []
+  blockers: []
+outline_file: target/m1-tick-outline-M1-044c.md
+redteam_findings:
+  - date: 2026-05-22
+    category: AUDIT-EVASION
+    severity: high
+    promise: |
+      docs/spec/security.md §Secrets handling: audit-log writes pass through
+      a redaction hook that masks values matching a closed catalogue of
+      API-key shapes (OpenAI sk-, generic 32+-char hex/base64 adjacent to
+      api_key/secret/token/password/bearer).
+    gap: |
+      BanCommandHandler.insertAudit, InviteCommandHandler.insertAudit,
+      UnbanCommandHandler.insertUnbanAudit write details_json via raw
+      ps.setString(...) with no redaction hook. ban_reason is JSON-escaped
+      but never passed through the API-key catalogue. The implementation
+      explicitly defers M1-041 AuditLogWriter consolidation.
+    repro: |
+      Bot admin issues `/ban victim --reason "key=sk-ant-api03-<...>"`;
+      handler writes the API-key-shaped reason verbatim into
+      audit_log.details_json; any operator with audit-log SELECT rights
+      sees the key.
+    suggested_fix_class: audit-log-coverage
+  - date: 2026-05-22
+    category: AUTH-BYPASS
+    severity: high
+    promise: |
+      docs/spec/security.md §What's intentionally NOT in v1:
+      "Two-factor confirmation for ban — single-step confirm-within-window
+      is enough for v1." (single-step confirm-within-window IS in v1.)
+      docs/spec/security.md §Invite-code registration: "`--open` ...
+      Requires confirm" and "`/invite revoke` requires confirm."
+    gap: |
+      BanCommandHandler.handle executes the BAN + INVITE_REVOKE transaction
+      on the first inbound /ban with no confirm gate. InviteCommandHandler
+      explicitly states the confirm gate is deferred; handleCreate and
+      handleRevoke execute mutations directly. The ticket body acknowledges
+      this as a deliberate temporary spec deviation deferred to a follow-up
+      ticket.
+    repro: |
+      Attacker briefly gains admin's chat session (shoulder-surf, unlocked
+      phone, open SimpleX client); types `/ban <legit-user>`,
+      `/invite create --adapter signal --open`, or
+      `/invite revoke <stale-code>`; mutation commits immediately. Spec
+      requires confirm-within-window step to bound exposure.
+    suggested_fix_class: trust-boundary-tightening
+  - date: 2026-05-22
+    category: AUDIT-EVASION
+    severity: medium
+    promise: |
+      docs/spec/security.md §Authorization model step 8: "Audit-log the
+      intent." (The intent, not just the executed mutation.) Per-adapter
+      admin threat profile: admin actions on single-adapter compromise
+      must be auditable.
+    gap: |
+      InviteCommandHandler.handleRevoke writes the INVITE_REVOKE audit row
+      only after lockPendingInviteId succeeds. When the code is absent or
+      already-REVOKED, the function rolls back and replies
+      error.invite.revoke_not_pending with NO audit row.
+    repro: |
+      Admin (or session-hijacker) issues `/invite revoke <random-uuid>`
+      repeatedly to brute-force-probe for valid PENDING codes. Success
+      path writes one row; every failed attempt writes none. Offline audit
+      review cannot reconstruct the probe.
+    suggested_fix_class: audit-log-coverage
+  - date: 2026-05-22
+    category: PERM-ESCAL
+    severity: medium
+    promise: |
+      docs/spec/security.md §Per-adapter admin threat profile:
+      "Cross-adapter elevation is impossible by design (`/grant-admin`
+      is inbound-adapter-scoped). A compromised Signal admin cannot grant
+      admin on SimpleX without also compromising a SimpleX admin's chat
+      session."
+    gap: |
+      InviteCommandHandler.handleCreate verifies the actor is admin on the
+      inbound adapter, then mints an invite for ANY target adapter named
+      in --adapter. No requirement that the actor also holds admin on the
+      target adapter. A compromised Signal admin can mint a SimpleX invite
+      the SimpleX adapter will honor on first DM.
+    repro: |
+      Attacker compromises Signal admin session (SIM-swap per spec
+      §Per-adapter admin threat profile); from Signal chat issues
+      `/invite create --adapter simplex --open` (or --contact
+      <attacker-simplex-id>); handler validates actor is is_admin=TRUE
+      (Signal admin row) and simplex is enabled, then mints the invite.
+      Attacker uses the code on SimpleX to register a fresh identity on
+      the high-trust adapter — a foothold the spec said cross-adapter
+      elevation should not enable.
+    suggested_fix_class: missing-auth-check
+  - date: 2026-05-22
+    category: INFO-LEAK
+    severity: low
+    promise: |
+      docs/spec/security.md §Secrets handling: "Contact IDs are logged in
+      redacted form (prefix + ellipsis + suffix) outside the audit log."
+    gap: |
+      BanCommandHandler.lookupUser, InviteCommandHandler.lookupUser,
+      UnbanCommandHandler.lookupUser, and several other catch-blocks wrap
+      SQLException into IllegalStateException whose message uses
+      ContactIds.redact(...), but the cause (original SQLException) is
+      preserved with `, e` and PG driver messages embed raw bound
+      parameters in constraint-violation Detail lines. Default log
+      handlers print Caused-by chains verbatim with the un-redacted id.
+    repro: |
+      A /ban <contact> triggers a SQLException whose PG message embeds
+      the raw contact_id (e.g. "Key (adapter, contact_id)=(signal,
+      +15551234567)"). Wrapping IllegalStateException carries the cause;
+      default JUL/Quarkus log handlers print the chain.
+    suggested_fix_class: input-sanitization
+  - date: 2026-05-22
+    category: DOS
+    severity: low
+    promise: |
+      docs/spec/security.md §Prompt-injection defenses commits "all
+      free-form string and list inputs across every tool below are
+      length-bounded by a profile-driven cap" as the dispatcher-level
+      discipline; generalizes to deterministic admin command paths.
+    gap: |
+      BanCommandHandler.BanArgs.parse accepts --reason of arbitrary
+      length and writes it raw into users.ban_reason (TEXT) and
+      audit_log.details_json (JSONB). No length cap.
+    repro: |
+      Attacker (with admin session) issues `/ban target --reason
+      "<10MB of text>"`. Handler accepts and persists. Repeated calls
+      bloat audit_log + users without bound.
+    suggested_fix_class: input-sanitization
+  - date: 2026-05-22
+    category: AUDIT-EVASION
+    severity: low
+    promise: |
+      docs/spec/security.md §Authorization model step 8: "Audit-log
+      the intent." (The intent is the parsed command, not only the
+      executed mutation.)
+    gap: |
+      BanCommandHandler.handle short-circuits on the non-admin,
+      no-args, and self-ban paths with NO audit row. Same gap in
+      UnbanCommandHandler.handle (admin gate + parse failure +
+      unknown-contact) and InviteCommandHandler.handle (all
+      admin-gate and validation rejections). Handler-level pattern
+      is audit-before-effect on the success path only, not
+      audit-the-intent.
+    repro: |
+      Non-admin attacker enumerates admin commands (/ban x, /unban x,
+      /invite create --adapter signal --open, /invite revoke
+      any-uuid); each returns error.admin_only and leaves zero audit
+      rows. Operator has no signal of admin-surface probing.
+    suggested_fix_class: audit-log-coverage
+redteam_audits:
+  - date: 2026-05-22
+    verdict: FINDINGS
+    base: main
+    head: m1/M1-044c-admin-command-handlers
+    verdict_file: docs/plan/m1/redteam/M1-044c-2026-05-22.md
+    findings_count: 7
+    out_of_model_count: 2
+    note: |
+      Audit ran post-/m1-tick-commit, pre-/m1-tick-merge on the per-ticket
+      branch tip (BASE=main, HEAD=m1/M1-044c-admin-command-handlers).
+      7 findings: 2 high (audit-log redaction hook bypass; confirm-window
+      gate missing), 2 medium (revoke-probe audit gap; cross-adapter
+      invite-create perm-escalation), 3 low (SQLException-cause leak,
+      unbounded --reason, handler-level rejections unaudited). 2
+      out-of-model items already addressed by spec posture.
+
+      M1-044c is `status: done`; per workflow rules the committed
+      implementation is immutable. Disposition: file remediation tickets
+      with `remediates: M1-044c`. The high-severity confirm-window gap
+      already has an acknowledged follow-up slot in the ticket body —
+      filing that follow-up ticket should be the next remediation step.
+      The high-severity audit-log redaction gap closes naturally when
+      M1-041 (AuditLogWriter consolidation) lands; consider bringing
+      M1-041 forward.
+reviews:
+  - round: 1
+    date: 2026-05-22
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 3150
+      removed: 8
 ---
 
 # M1-044c: Admin command handlers — /ban, /unban, /invite create/list/revoke

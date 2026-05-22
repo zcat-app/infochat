@@ -180,6 +180,87 @@ public final class BundleKeys {
      */
     public static final String REPLY_WELCOME_GROUP_FIRST_MENTION = "reply.welcome.group_first_mention";
 
+    // ----- Admin command handler errors + replies (M1-044c) ---------------
+    // Per docs/spec/security.md §User ban + §Invite-code registration +
+    // §Authorization model, and docs/spec/commands.md §Admin (bot admin).
+    // The three handlers (/ban, /unban, /invite create/list/revoke) look
+    // these up; every user-visible reply path the spec assigns to those
+    // commands is keyed here. Plain text only — single backticks for
+    // inline literals, bare URLs, no markdown link syntax.
+
+    /** Non-admin invoked an admin-tier command. */
+    public static final String ERROR_ADMIN_ONLY = "error.admin_only";
+
+    /** {@code /unban <contact>} against a contact with no {@code users} row at all (unknown-contact rule per {@code commands.md} §Admin). */
+    public static final String ERROR_CONTACT_NOT_REGISTERED = "error.contact_not_registered";
+
+    /** {@code /ban <self>}: actor and target are the same {@code users.id}. */
+    public static final String ERROR_BAN_CANNOT_BAN_SELF = "error.ban.cannot_ban_self";
+
+    /** {@code /ban} of the only remaining {@code is_admin=TRUE AND is_banned=FALSE} row — caught from the V5 {@code trg_last_admin_protection_update} trigger. */
+    public static final String ERROR_BAN_LAST_ADMIN = "error.ban.last_admin";
+
+    /** {@code /unban} success on the preban-deletion path; value MUST contain the literals {@code pre-ban-only row removed} and {@code fresh invite required} per spec §User ban. */
+    public static final String REPLY_UNBAN_PREBAN_DELETED = "reply.unban.preban_deleted";
+
+    /** {@code /unban} success on the non-preban path with {@code is_group_admin=TRUE} rows restored; value MUST contain {@code {0}} for the comma-joined group list and the literal {@code /demote} hint. */
+    public static final String REPLY_UNBAN_GROUP_ADMINS_RESTORED = "reply.unban.group_admins_restored";
+
+    /** {@code /unban} success on the non-preban path with zero group-admin rows. */
+    public static final String REPLY_UNBAN_PLAIN = "reply.unban.plain";
+
+    /** {@code /ban} success reply. {@code {0}} = the redacted target contact id (per {@code ContactIds.redact}). */
+    public static final String REPLY_BAN_SUCCESS = "reply.ban.success";
+
+    /** {@code /invite} with no subcommand or an unrecognized one. */
+    public static final String ERROR_INVITE_UNKNOWN_SUBCOMMAND = "error.invite.unknown_subcommand";
+
+    /** {@code /invite create} with neither {@code --contact} nor {@code --open}; value lists both options per spec §Invite-code registration. */
+    public static final String ERROR_INVITE_MISSING_FLAG = "error.invite.missing_flag";
+
+    /** {@code /invite create} with both {@code --contact} and {@code --open}. */
+    public static final String ERROR_INVITE_MUTUALLY_EXCLUSIVE = "error.invite.mutually_exclusive";
+
+    /** {@code /invite create --adapter <name>} where {@code <name>} is not a currently-enabled adapter. {@code {0}} = the rejected name. */
+    public static final String ERROR_INVITE_UNKNOWN_ADAPTER = "error.invite.unknown_adapter";
+
+    /** {@code /invite create --contact <id>} against a {@code is_banned=TRUE} row; points the admin at {@code /unban}. */
+    public static final String ERROR_INVITE_BANNED_TARGET = "error.invite.banned_target";
+
+    /** {@code /invite create --open} when the per-adapter open cap is met; lists current open codes and a {@code /invite revoke} hint. */
+    public static final String ERROR_INVITE_OPEN_CAP_MET = "error.invite.open_cap_met";
+
+    /** {@code /invite create --contact} when the global contact-bound cap is met. */
+    public static final String ERROR_INVITE_CONTACT_CAP_MET = "error.invite.contact_cap_met";
+
+    /** {@code /invite revoke <code>} where {@code <code>} is absent, already {@code USED}, or already {@code REVOKED}. */
+    public static final String ERROR_INVITE_REVOKE_NOT_PENDING = "error.invite.revoke_not_pending";
+
+    /** {@code /invite create} success — the new code's UUID is interpolated as {@code {0}}. */
+    public static final String REPLY_INVITE_CREATED = "reply.invite.created";
+
+    /** {@code /invite list} header line printed before the rows. */
+    public static final String REPLY_INVITE_LIST_HEADER = "reply.invite.list_header";
+
+    /**
+     * Per-row template for {@code /invite list} on CONTACT_BOUND rows. Tokens:
+     * {@code {0}} = code prefix, {@code {1}} = adapter name, {@code {2}} = target
+     * contact id, {@code {3}} = ISO expiry timestamp.
+     */
+    public static final String REPLY_INVITE_LIST_ENTRY = "reply.invite.list_entry";
+
+    /**
+     * Per-row template for {@code /invite list} on OPEN_ADAPTER rows; carries the
+     * literal {@code OPEN} marker per spec §Invite-code registration ("the list
+     * output must visually distinguish --open codes from --contact codes").
+     * Tokens: {@code {0}} = code prefix, {@code {1}} = adapter name, {@code {2}}
+     * = ISO expiry timestamp.
+     */
+    public static final String REPLY_INVITE_LIST_ENTRY_OPEN = "reply.invite.list_entry_open";
+
+    /** {@code /invite revoke} success. */
+    public static final String REPLY_INVITE_REVOKED = "reply.invite.revoked";
+
     private BundleKeys() {
         throw new AssertionError("BundleKeys is a constant holder and must not be instantiated");
     }

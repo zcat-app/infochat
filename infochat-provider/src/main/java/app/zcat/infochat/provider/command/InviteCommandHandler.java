@@ -1,0 +1,682 @@
+package app.zcat.infochat.provider.command;
+
+import app.zcat.infochat.core.log.ContactIds;
+import app.zcat.infochat.messaging.MessagingAdapter;
+import app.zcat.infochat.messaging.OutboundMessage;
+import app.zcat.infochat.messaging.ScopeRef;
+import app.zcat.infochat.provider.bundle.BundleKeys;
+import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.messaging.AdapterRegistry;
+import app.zcat.infochat.provider.messaging.CommandHandler;
+import app.zcat.infochat.provider.messaging.InboundContext;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.jspecify.annotations.NonNull;
+
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.sql.Types;
+import java.text.MessageFormat;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
+
+/**
+ * Implements {@code /invite create / list / revoke} per
+ * {@code docs/spec/security.md} §Invite-code registration and
+ * {@code docs/spec/commands.md} §Admin (bot admin).
+ *
+ * <p>The handler dispatches on the first whitespace-delimited
+ * subcommand token to a {@code "create"} / {@code "list"} /
+ * {@code "revoke"} branch; any other token → {@code error.invite
+ * .unknown_subcommand} (acceptance item 16). Each branch executes
+ * the audit-before-effect transaction shape that
+ * {@link BanCommandHandler} pins for {@code /ban}: the audit row
+ * INSERT runs FIRST inside the same transaction as the state
+ * mutation; a roll-back leaves no audit-vs-state divergence
+ * (Invariant 7).</p>
+ *
+ * <p><b>Cross-adapter create.</b> {@code /invite create} reads the
+ * target adapter from the {@code --adapter <name>} flag, NOT from
+ * {@link InboundContext#adapterName()}. The inbound adapter (where
+ * the bot admin ran the command) is the {@code actor_adapter} on the
+ * audit row; the target adapter (the flag value) is the
+ * {@code invite_code.adapter} column and the cap-query scope. Per spec
+ * §Invite-code registration this is "the one admin command that may
+ * name any adapter the deployment supports."</p>
+ *
+ * <p><b>Confirm-gate deferred.</b> Both {@code /invite create --open}
+ * and {@code /invite revoke} require confirm per spec §Surface
+ * conventions; M1-044c ships without the confirm gate and the
+ * spec-compliant in-memory pending-confirm service lands in a
+ * follow-up ticket that retrofits the gate across all destructive
+ * admin commands. v1 is a deliberate temporary spec deviation.</p>
+ */
+@ApplicationScoped
+public class InviteCommandHandler implements CommandHandler {
+
+    private static final String SELECT_USER_SQL =
+            "SELECT id, is_admin, is_banned, registration_state "
+                    + "FROM users WHERE adapter = ? AND contact_id = ?";
+
+    // The open-cap query is scoped to one adapter per spec §Invite-code
+    // registration ("per-adapter open cap"). The expires_at filter
+    // matches the spec's active-PENDING definition — codes whose TTL
+    // has passed do NOT count toward the cap.
+    private static final String COUNT_OPEN_PENDING_PER_ADAPTER_SQL =
+            "SELECT count(*) FROM invite_code "
+                    + "WHERE invite_type = 'OPEN_ADAPTER' "
+                    + "  AND status = 'PENDING' "
+                    + "  AND adapter = ? "
+                    + "  AND (expires_at IS NULL OR expires_at > NOW())";
+
+    // The contact-cap query is global across adapters per spec
+    // §Invite-code registration ("global --contact cap").
+    private static final String COUNT_CONTACT_PENDING_GLOBAL_SQL =
+            "SELECT count(*) FROM invite_code "
+                    + "WHERE invite_type = 'CONTACT_BOUND' "
+                    + "  AND status = 'PENDING' "
+                    + "  AND (expires_at IS NULL OR expires_at > NOW())";
+
+    // Pre-mint the code via a separate SELECT gen_random_uuid() so the
+    // audit row can be written FIRST (audit-before-effect, Invariant 7)
+    // with the code as its target_id, and the INSERT INTO invite_code
+    // can then run with the same code passed as a JDBC bind parameter.
+    // pgcrypto's gen_random_uuid() (cryptographically secure RNG)
+    // remains the code source — the spec asks for it explicitly.
+    private static final String SELECT_NEW_CODE_SQL =
+            "SELECT gen_random_uuid() AS code";
+
+    private static final String INSERT_INVITE_SQL =
+            "INSERT INTO invite_code "
+                    + "(code, invite_type, adapter, expected_contact_id, "
+                    + " status, created_by, created_at, expires_at) "
+                    + "VALUES (?, ?, ?, ?, 'PENDING', ?, NOW(), ?)";
+
+    private static final String INSERT_AUDIT_SQL =
+            "INSERT INTO audit_log ("
+                    + "actor_user_id, actor_contact_id, actor_adapter, "
+                    + "action, target_kind, target_id, target_contact_id, "
+                    + "scope_id, request_id, details_json) "
+                    + "VALUES (?, ?, ?, ?, 'invite', ?, ?, NULL, ?, ?::jsonb)";
+
+    // Active-PENDING filter (status='PENDING' AND not expired). Sorts
+    // by created_at DESC; limit + offset support `--page N` paging.
+    private static final String SELECT_PENDING_LIST_SQL =
+            "SELECT code, invite_type, adapter, expected_contact_id, expires_at "
+                    + "FROM invite_code "
+                    + "WHERE status = 'PENDING' "
+                    + "  AND (expires_at IS NULL OR expires_at > NOW()) "
+                    + "ORDER BY created_at DESC "
+                    + "LIMIT ? OFFSET ?";
+
+    // FOR UPDATE locks the row so the audit INSERT below cannot
+    // reference an invite another transaction flips before the UPDATE.
+    private static final String SELECT_INVITE_FOR_REVOKE_SQL =
+            "SELECT id FROM invite_code WHERE code = ? AND status = 'PENDING' FOR UPDATE";
+
+    private static final String UPDATE_INVITE_REVOKED_SQL =
+            "UPDATE invite_code SET status = 'REVOKED' "
+                    + "WHERE code = ? AND status = 'PENDING'";
+
+    private static final int PAGE_SIZE = 20;
+
+    @ConfigProperty(name = "infochat.invite.ttl", defaultValue = "7d")
+    Duration inviteTtl;
+
+    @ConfigProperty(name = "infochat.invite.open-cap-per-adapter", defaultValue = "3")
+    int openCap;
+
+    @ConfigProperty(name = "infochat.invite.contact-cap-global", defaultValue = "50")
+    int contactCap;
+
+    @Inject
+    BundleLoader bundleLoader;
+
+    @Inject
+    DataSource dataSource;
+
+    @Inject
+    InboundContext inboundContext;
+
+    @Inject
+    AdapterRegistry adapterRegistry;
+
+    @Override
+    public String name() {
+        return "invite";
+    }
+
+    @Override
+    public OutboundMessage handle(@NonNull ScopeRef scope, @NonNull String rawText) {
+        String inboundAdapter = inboundContext.adapterName();
+        String callerContactId = contactIdOf(scope);
+
+        // Step 1 — admin gate. Resolved by the inbound adapter regardless
+        // of which --adapter the command targets (the actor identity is
+        // per-inbound; the target adapter is a flag).
+        Optional<UserRow> actorOpt = lookupUser(inboundAdapter, callerContactId);
+        if (actorOpt.isEmpty() || !actorOpt.get().isAdmin) {
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+        }
+        UserRow actor = actorOpt.get();
+
+        // Step 2 — dispatch on the first subcommand token.
+        String[] split = rawText.trim().split("\\s+", 3);
+        String subcommand = split.length > 1 ? split[1].toLowerCase(java.util.Locale.ROOT) : "";
+        String remainder = split.length > 2 ? split[2] : "";
+
+        return switch (subcommand) {
+            case "create" -> handleCreate(scope, actor, inboundAdapter, remainder);
+            case "list" -> handleList(scope, remainder);
+            case "revoke" -> handleRevoke(scope, actor, inboundAdapter, remainder);
+            default -> reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_UNKNOWN_SUBCOMMAND));
+        };
+    }
+
+    // ------------------------------------------------------------------
+    // /invite create --adapter <name> {--contact <id> | --open}
+    // ------------------------------------------------------------------
+
+    private OutboundMessage handleCreate(ScopeRef scope,
+                                         UserRow actor,
+                                         String inboundAdapter,
+                                         String remainder) {
+        CreateArgs args = CreateArgs.parse(remainder);
+
+        // Flag combination checks before adapter-name validation: the
+        // spec's friendly errors fire in this priority order (mutually
+        // exclusive before missing, both before unknown adapter / cap).
+        if (args.contact != null && args.open) {
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_MUTUALLY_EXCLUSIVE));
+        }
+        if (args.contact == null && !args.open) {
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_MISSING_FLAG));
+        }
+
+        // Adapter validation against the currently-enabled set.
+        Set<String> enabled = enabledAdapterNames();
+        String targetAdapter = args.adapter;
+        if (targetAdapter == null || !enabled.contains(targetAdapter)) {
+            String body = MessageFormat.format(
+                    bundleLoader.get(BundleKeys.ERROR_INVITE_UNKNOWN_ADAPTER),
+                    targetAdapter == null ? "" : targetAdapter);
+            return reply(scope, body);
+        }
+
+        if (args.contact != null) {
+            return createContactBound(scope, actor, inboundAdapter, targetAdapter, args.contact);
+        }
+        return createOpen(scope, actor, inboundAdapter, targetAdapter);
+    }
+
+    private OutboundMessage createContactBound(ScopeRef scope,
+                                               UserRow actor,
+                                               String inboundAdapter,
+                                               String targetAdapter,
+                                               String targetContactId) {
+        // Pre-banned-contact rejection: the (targetAdapter, targetContactId)
+        // row must not be is_banned=TRUE per spec. The unknown-contact
+        // case (no row at all) is permitted because /invite create
+        // explicitly carves out a pre-bound invite for an unregistered
+        // contact (spec §Admin Unknown-contact rule exception).
+        Optional<UserRow> targetOpt = lookupUser(targetAdapter, targetContactId);
+        if (targetOpt.isPresent() && targetOpt.get().isBanned) {
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_BANNED_TARGET));
+        }
+
+        String requestId = UUID.randomUUID().toString();
+        OffsetDateTime expiresAt = OffsetDateTime.now().plus(inviteTtl);
+        UUID code;
+        try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                long current = countContactBoundPending(conn);
+                if (current >= contactCap) {
+                    conn.rollback();
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_CONTACT_CAP_MET));
+                }
+
+                // Audit-before-effect: mint the code (pure read), write
+                // the INVITE_CREATE audit row FIRST referencing that
+                // code, then INSERT the invite_code row. A roll-back
+                // anywhere below the audit INSERT discards both.
+                code = generateInviteCode(conn);
+
+                insertAudit(conn, "INVITE_CREATE", code.toString(), targetContactId,
+                        actor, inboundAdapter, requestId,
+                        inviteCreateDetailsJson("CONTACT_BOUND", targetAdapter));
+
+                insertInvite(conn, code, "CONTACT_BOUND", targetAdapter, targetContactId,
+                        actor.id, expiresAt);
+
+                conn.commit();
+            } catch (SQLException e) {
+                conn.rollback();
+                throw new IllegalStateException(
+                        "InviteCommandHandler.createContactBound failed for adapter="
+                                + targetAdapter + " contact_id="
+                                + ContactIds.redact(targetContactId), e);
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "InviteCommandHandler.createContactBound connection failed for adapter="
+                            + targetAdapter + " contact_id="
+                            + ContactIds.redact(targetContactId), e);
+        }
+
+        String body = MessageFormat.format(
+                bundleLoader.get(BundleKeys.REPLY_INVITE_CREATED), code.toString());
+        return reply(scope, body);
+    }
+
+    private OutboundMessage createOpen(ScopeRef scope,
+                                       UserRow actor,
+                                       String inboundAdapter,
+                                       String targetAdapter) {
+        String requestId = UUID.randomUUID().toString();
+        OffsetDateTime expiresAt = OffsetDateTime.now().plus(inviteTtl);
+        UUID code;
+        try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                long current = countOpenPendingForAdapter(conn, targetAdapter);
+                if (current >= openCap) {
+                    conn.rollback();
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_OPEN_CAP_MET));
+                }
+
+                // Audit-before-effect: see {@link #createContactBound}
+                // for the rationale on the mint-audit-insert order.
+                code = generateInviteCode(conn);
+
+                insertAudit(conn, "INVITE_CREATE", code.toString(), null,
+                        actor, inboundAdapter, requestId,
+                        inviteCreateDetailsJson("OPEN_ADAPTER", targetAdapter));
+
+                insertInvite(conn, code, "OPEN_ADAPTER", targetAdapter, null,
+                        actor.id, expiresAt);
+
+                conn.commit();
+            } catch (SQLException e) {
+                conn.rollback();
+                throw new IllegalStateException(
+                        "InviteCommandHandler.createOpen failed for adapter="
+                                + targetAdapter, e);
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "InviteCommandHandler.createOpen connection failed for adapter="
+                            + targetAdapter, e);
+        }
+
+        String body = MessageFormat.format(
+                bundleLoader.get(BundleKeys.REPLY_INVITE_CREATED), code.toString());
+        return reply(scope, body);
+    }
+
+    private long countOpenPendingForAdapter(Connection conn, String adapter) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(COUNT_OPEN_PENDING_PER_ADAPTER_SQL)) {
+            ps.setString(1, adapter);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getLong(1);
+            }
+        }
+    }
+
+    private long countContactBoundPending(Connection conn) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(COUNT_CONTACT_PENDING_GLOBAL_SQL);
+             ResultSet rs = ps.executeQuery()) {
+            rs.next();
+            return rs.getLong(1);
+        }
+    }
+
+    private UUID generateInviteCode(Connection conn) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(SELECT_NEW_CODE_SQL);
+             ResultSet rs = ps.executeQuery()) {
+            rs.next();
+            return (UUID) rs.getObject("code");
+        }
+    }
+
+    private void insertInvite(Connection conn,
+                              UUID code,
+                              String inviteType,
+                              String adapter,
+                              String expectedContactId,
+                              UUID createdBy,
+                              OffsetDateTime expiresAt) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(INSERT_INVITE_SQL)) {
+            ps.setObject(1, code);
+            ps.setString(2, inviteType);
+            ps.setString(3, adapter);
+            if (expectedContactId == null) {
+                ps.setNull(4, Types.VARCHAR);
+            } else {
+                ps.setString(4, expectedContactId);
+            }
+            ps.setObject(5, createdBy);
+            ps.setObject(6, expiresAt);
+            ps.executeUpdate();
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // /invite list [--page N]
+    // ------------------------------------------------------------------
+
+    private OutboundMessage handleList(ScopeRef scope, String remainder) {
+        int page = ListArgs.parse(remainder).page;
+        int offset = Math.max(0, (page - 1) * PAGE_SIZE);
+
+        List<PendingInviteRow> rows = new ArrayList<>();
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(SELECT_PENDING_LIST_SQL)) {
+            ps.setInt(1, PAGE_SIZE);
+            ps.setInt(2, offset);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    UUID code = (UUID) rs.getObject("code");
+                    String inviteType = rs.getString("invite_type");
+                    String adapter = rs.getString("adapter");
+                    String contactId = rs.getString("expected_contact_id");
+                    Timestamp ts = rs.getTimestamp("expires_at");
+                    Instant expiresAt = ts == null ? null : ts.toInstant();
+                    rows.add(new PendingInviteRow(code, inviteType, adapter, contactId, expiresAt));
+                }
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "InviteCommandHandler.handleList failed", e);
+        }
+
+        StringBuilder body = new StringBuilder(bundleLoader.get(BundleKeys.REPLY_INVITE_LIST_HEADER));
+        for (PendingInviteRow row : rows) {
+            body.append('\n');
+            body.append(renderListEntry(row));
+        }
+        return reply(scope, body.toString());
+    }
+
+    private String renderListEntry(PendingInviteRow row) {
+        String codePrefix = row.code.toString().substring(0, 8);
+        String expiresAtIso = row.expiresAt == null ? "(no expiry)" : row.expiresAt.toString();
+        if ("OPEN_ADAPTER".equals(row.inviteType)) {
+            return MessageFormat.format(
+                    bundleLoader.get(BundleKeys.REPLY_INVITE_LIST_ENTRY_OPEN),
+                    codePrefix, row.adapter, expiresAtIso);
+        }
+        String target = row.expectedContactId == null
+                ? ""
+                : ContactIds.redact(row.expectedContactId);
+        return MessageFormat.format(
+                bundleLoader.get(BundleKeys.REPLY_INVITE_LIST_ENTRY),
+                codePrefix, row.adapter, target, expiresAtIso);
+    }
+
+    // ------------------------------------------------------------------
+    // /invite revoke <code>
+    // ------------------------------------------------------------------
+
+    private OutboundMessage handleRevoke(ScopeRef scope,
+                                         UserRow actor,
+                                         String inboundAdapter,
+                                         String remainder) {
+        String codeText = remainder.trim().split("\\s+", 2)[0];
+        UUID code;
+        try {
+            code = UUID.fromString(codeText);
+        } catch (IllegalArgumentException e) {
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_REVOKE_NOT_PENDING));
+        }
+
+        String requestId = UUID.randomUUID().toString();
+        try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                UUID inviteId = lockPendingInviteId(conn, code);
+                if (inviteId == null) {
+                    // Zero rows pending under this code (already USED /
+                    // REVOKED / absent). Roll back so no audit row
+                    // survives — audit-before-effect with no effect = no
+                    // audit row.
+                    conn.rollback();
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_REVOKE_NOT_PENDING));
+                }
+
+                insertAudit(conn, "INVITE_REVOKE", inviteId.toString(), null,
+                        actor, inboundAdapter, requestId, "{}");
+
+                int updated = updateInviteRevoked(conn, code);
+                if (updated == 0) {
+                    // Race-condition guard: the FOR UPDATE above held the
+                    // row, so this should be unreachable. Roll back to
+                    // keep the invariant audit-row-iff-mutation.
+                    conn.rollback();
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_REVOKE_NOT_PENDING));
+                }
+
+                conn.commit();
+            } catch (SQLException e) {
+                conn.rollback();
+                throw new IllegalStateException(
+                        "InviteCommandHandler.handleRevoke failed for code=" + codeText, e);
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "InviteCommandHandler.handleRevoke connection failed", e);
+        }
+
+        return reply(scope, bundleLoader.get(BundleKeys.REPLY_INVITE_REVOKED));
+    }
+
+    private UUID lockPendingInviteId(Connection conn, UUID code) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(SELECT_INVITE_FOR_REVOKE_SQL)) {
+            ps.setObject(1, code);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return null;
+                }
+                return (UUID) rs.getObject("id");
+            }
+        }
+    }
+
+    private int updateInviteRevoked(Connection conn, UUID code) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(UPDATE_INVITE_REVOKED_SQL)) {
+            ps.setObject(1, code);
+            return ps.executeUpdate();
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Shared helpers
+    // ------------------------------------------------------------------
+
+    private void insertAudit(Connection conn,
+                             String action,
+                             String targetId,
+                             String targetContactId,
+                             UserRow actor,
+                             String inboundAdapter,
+                             String requestId,
+                             String detailsJson) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(INSERT_AUDIT_SQL)) {
+            ps.setObject(1, actor.id);
+            ps.setString(2, actor.contactId);
+            ps.setString(3, inboundAdapter);
+            ps.setString(4, action);
+            ps.setString(5, targetId);
+            if (targetContactId == null) {
+                ps.setNull(6, Types.VARCHAR);
+            } else {
+                ps.setString(6, targetContactId);
+            }
+            ps.setString(7, requestId);
+            ps.setString(8, detailsJson);
+            ps.executeUpdate();
+        }
+    }
+
+    private Optional<UserRow> lookupUser(String adapter, String contactId) {
+        if (adapter == null || contactId == null) {
+            return Optional.empty();
+        }
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(SELECT_USER_SQL)) {
+            ps.setString(1, adapter);
+            ps.setString(2, contactId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return Optional.empty();
+                }
+                UUID id = (UUID) rs.getObject("id");
+                boolean isAdmin = rs.getBoolean("is_admin");
+                boolean isBanned = rs.getBoolean("is_banned");
+                String registrationState = rs.getString("registration_state");
+                return Optional.of(new UserRow(id, contactId, isAdmin, isBanned, registrationState));
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "InviteCommandHandler.lookupUser failed for adapter="
+                            + adapter + " contact_id="
+                            + ContactIds.redact(contactId), e);
+        }
+    }
+
+    private Set<String> enabledAdapterNames() {
+        Set<String> out = new LinkedHashSet<>();
+        for (MessagingAdapter adapter : adapterRegistry.activatedAdapters()) {
+            out.add(adapter.name());
+        }
+        return out;
+    }
+
+    private OutboundMessage reply(ScopeRef scope, String text) {
+        return new OutboundMessage(scope, text, Instant.now(), UUID.randomUUID().toString());
+    }
+
+    private static String contactIdOf(ScopeRef scope) {
+        return scope instanceof ScopeRef.Dm dm ? dm.contactId() : null;
+    }
+
+    private static String inviteCreateDetailsJson(String inviteType, String adapter) {
+        // Both fields are closed-set / well-formed identifiers, so direct
+        // concatenation into the JSON template is safe (no untrusted
+        // user-supplied content). The invite_type set is the V5 CHECK
+        // constraint values; the adapter is validated against
+        // AdapterRegistry.activatedAdapters() upstream.
+        return "{\"invite_type\":\"" + inviteType + "\",\"adapter\":\"" + adapter + "\"}";
+    }
+
+    /** Minimal in-memory representation of a users row this handler needs. */
+    private record UserRow(UUID id, String contactId, boolean isAdmin, boolean isBanned,
+                           String registrationState) {}
+
+    /** One row of a {@code /invite list} result page. */
+    private record PendingInviteRow(UUID code, String inviteType, String adapter,
+                                    String expectedContactId, Instant expiresAt) {}
+
+    /**
+     * Parsed form of {@code /invite create --adapter <name>
+     * {--contact <id> | --open}}. The required-vs-optional shape and
+     * mutually-exclusive validation live in {@link #handleCreate}; the
+     * parser only extracts the supplied flag values.
+     */
+    record CreateArgs(String adapter, String contact, boolean open) {
+
+        static CreateArgs parse(String remainder) {
+            List<String> tokens = tokenize(remainder);
+            String adapter = null;
+            String contact = null;
+            boolean open = false;
+            int i = 0;
+            while (i < tokens.size()) {
+                String tok = tokens.get(i);
+                if (tok.equals("--adapter") && i + 1 < tokens.size()) {
+                    adapter = tokens.get(i + 1);
+                    i += 2;
+                } else if (tok.startsWith("--adapter=")) {
+                    adapter = tok.substring("--adapter=".length());
+                    i++;
+                } else if (tok.equals("--contact") && i + 1 < tokens.size()) {
+                    contact = tokens.get(i + 1);
+                    i += 2;
+                } else if (tok.startsWith("--contact=")) {
+                    contact = tok.substring("--contact=".length());
+                    i++;
+                } else if (tok.equals("--open")) {
+                    open = true;
+                    i++;
+                } else {
+                    i++;
+                }
+            }
+            return new CreateArgs(adapter, contact, open);
+        }
+    }
+
+    /** Parsed form of {@code /invite list [--page N]}. */
+    record ListArgs(int page) {
+
+        static ListArgs parse(String remainder) {
+            List<String> tokens = tokenize(remainder);
+            int page = 1;
+            for (int i = 0; i < tokens.size(); i++) {
+                String tok = tokens.get(i);
+                if (tok.equals("--page") && i + 1 < tokens.size()) {
+                    try {
+                        page = Math.max(1, Integer.parseInt(tokens.get(i + 1)));
+                    } catch (NumberFormatException ignored) {
+                        // Malformed --page N falls back to page 1.
+                    }
+                } else if (tok.startsWith("--page=")) {
+                    try {
+                        page = Math.max(1, Integer.parseInt(tok.substring("--page=".length())));
+                    } catch (NumberFormatException ignored) {
+                        // Malformed --page=N falls back to page 1.
+                    }
+                }
+            }
+            return new ListArgs(page);
+        }
+    }
+
+    private static List<String> tokenize(String s) {
+        List<String> out = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        boolean inQuotes = false;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '"') {
+                inQuotes = !inQuotes;
+                continue;
+            }
+            if (!inQuotes && Character.isWhitespace(c)) {
+                if (current.length() > 0) {
+                    out.add(current.toString());
+                    current.setLength(0);
+                }
+                continue;
+            }
+            current.append(c);
+        }
+        if (current.length() > 0) {
+            out.add(current.toString());
+        }
+        return out;
+    }
+}
