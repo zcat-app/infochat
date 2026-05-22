@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.messaging;
 
+import app.zcat.infochat.core.log.ContactIds;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -135,14 +136,30 @@ public class InviteCodeConsumer {
                 Key key = new Key(adapter, contactId);
 
                 if (attempts >= bruteForceThreshold) {
-                    // Threshold breached. Write the audit row exactly once
-                    // per breach event — the in-memory set guards the
-                    // single-audit promise within a JVM lifetime.
-                    if (breachAudited.add(key)) {
-                        insertAudit(conn, contactId, adapter,
-                                INVITE_BRUTE_FORCE_BREACH, contactId, contactId);
+                    // Rollback-safe breach-audit ordering: contains-check
+                    // before insertAudit so a SQL fault on the audit INSERT
+                    // does NOT permanently mark the key in the in-memory
+                    // set. The add(key) call moves to AFTER conn.commit()
+                    // so the in-memory mark only fires once the DB row is
+                    // durable. If insertAudit OR commit throws, the outer
+                    // catch rolls back the DB AND leaves breachAudited
+                    // untouched — the next call retries the audit.
+                    //
+                    // Trade-off: if insertAudit succeeds but commit throws
+                    // (rare), no DB row survives AND the next call retries
+                    // the audit insert; the spec language "an audit row
+                    // records the threshold breach" tolerates the over-
+                    // once retry artifact in that narrow commit-failure
+                    // window. Audit-insert failure (the common mode) is
+                    // correctly retried by this ordering.
+                    if (!breachAudited.contains(key)) {
+                        insertAudit(conn, contactId, adapter, INVITE_BRUTE_FORCE_BREACH,
+                                contactId, contactId);
+                        conn.commit();
+                        breachAudited.add(key);
+                    } else {
+                        conn.commit();
                     }
-                    conn.commit();
                     return new BruteForceThresholdBreached();
                 }
                 // Counter under threshold — clear any stale sentinel for
@@ -170,12 +187,14 @@ public class InviteCodeConsumer {
                 conn.rollback();
                 throw new IllegalStateException(
                         "InviteCodeConsumer.consume failed for adapter="
-                                + adapter + " contact_id=" + contactId, e);
+                                + adapter + " contact_id="
+                                + ContactIds.redact(contactId), e);
             }
         } catch (SQLException e) {
             throw new IllegalStateException(
                     "InviteCodeConsumer.consume connection failed for adapter="
-                            + adapter + " contact_id=" + contactId, e);
+                            + adapter + " contact_id="
+                            + ContactIds.redact(contactId), e);
         }
     }
 
@@ -230,7 +249,8 @@ public class InviteCodeConsumer {
                 if (!rs.next()) {
                     throw new IllegalStateException(
                             "users row missing after invite-consume INSERT for adapter="
-                                    + adapter + " contact_id=" + contactId);
+                                    + adapter + " contact_id="
+                                    + ContactIds.redact(contactId));
                 }
                 return rs.getObject(1, UUID.class);
             }

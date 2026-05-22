@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.messaging;
 
+import app.zcat.infochat.core.log.ContactIds;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -55,7 +56,7 @@ public class BanCheck {
         } catch (SQLException e) {
             throw new IllegalStateException(
                     "BanCheck.isBanned failed for adapter=" + adapter
-                            + " contact_id=" + contactId, e);
+                            + " contact_id=" + ContactIds.redact(contactId), e);
         }
     }
 }

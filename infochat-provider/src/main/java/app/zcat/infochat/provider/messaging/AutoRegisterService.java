@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.messaging;
 
+import app.zcat.infochat.core.log.ContactIds;
 import app.zcat.infochat.messaging.Identity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -77,17 +78,18 @@ public class AutoRegisterService {
      * {@code (adapterName, sender.contactId())}. Idempotent.
      */
     public UUID resolveOrRegisterGroup(Identity sender, String adapterName) {
+        String contactId = sender.contactId();
         try (Connection conn = dataSource.getConnection()) {
             try (PreparedStatement insert = conn.prepareStatement(UPSERT_SQL)) {
                 insert.setString(1, adapterName);
-                insert.setString(2, sender.contactId());
+                insert.setString(2, contactId);
                 insert.setString(3, sender.displayName());
                 insert.setObject(4, OffsetDateTime.now().plus(probationDuration));
                 insert.executeUpdate();
             }
             try (PreparedStatement select = conn.prepareStatement(SELECT_ID_SQL)) {
                 select.setString(1, adapterName);
-                select.setString(2, sender.contactId());
+                select.setString(2, contactId);
                 try (ResultSet rs = select.executeQuery()) {
                     if (!rs.next()) {
                         // Unreachable under ON CONFLICT DO NOTHING: the row exists
@@ -95,7 +97,7 @@ public class AutoRegisterService {
                         // future schema change breaking the invariant fails loud.
                         throw new IllegalStateException(
                                 "users row missing after upsert: adapter=" + adapterName
-                                        + " contact_id=" + sender.contactId());
+                                        + " contact_id=" + ContactIds.redact(contactId));
                     }
                     return rs.getObject(1, UUID.class);
                 }
@@ -103,7 +105,8 @@ public class AutoRegisterService {
         } catch (SQLException e) {
             throw new IllegalStateException(
                     "AutoRegisterService.resolveOrRegisterGroup failed for adapter="
-                            + adapterName + " contact_id=" + sender.contactId(), e);
+                            + adapterName + " contact_id="
+                            + ContactIds.redact(contactId), e);
         }
     }
 

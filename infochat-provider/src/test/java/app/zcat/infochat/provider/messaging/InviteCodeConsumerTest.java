@@ -15,6 +15,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -227,6 +228,52 @@ class InviteCodeConsumerTest {
         // contact, so any UPDATE would have to invent one.
         assertEquals(0, countAudit(InviteCodeConsumer.INVITE_CONSUME, contactId),
                 "no INVITE_CONSUME audit row written during a breach");
+    }
+
+    @Test
+    void bruteForceBreachAuditFailureRetries() throws Exception {
+        // Rollback-safety property for M1-044d AUDIT-EVASION fix: if the
+        // audit_log INSERT for INVITE_BRUTE_FORCE_BREACH fails, the in-
+        // memory `breachAudited` Set is NOT permanently marked. The next
+        // call with the same (adapter, contact_id) MUST attempt the audit
+        // insert again rather than silently skipping it (which would
+        // defeat the §Invite-code registration spec commitment "an audit
+        // row records the threshold breach").
+        String adapter = "inmemory";
+        String contactId = NAMESPACE + "brute-retry";
+
+        // Drive the counter to threshold via 10 Rejected consumes (none
+        // of these write to audit_log — the under-threshold Rejected
+        // path only INSERTs invite_code_attempt + commits).
+        for (int i = 0; i < BRUTE_FORCE_THRESHOLD; i++) {
+            InviteCodeConsumer.Outcome r = consumer.consume(adapter, contactId, UUID.randomUUID());
+            assertInstanceOf(InviteCodeConsumer.Rejected.class, r);
+        }
+
+        // Rename audit_log so the upcoming breach-branch INSERT fails
+        // with a SQLException (Postgres invalidates cached plans on
+        // RENAME). The consumer's outer catch wraps it as
+        // IllegalStateException and rolls back the connection.
+        executeUpdate("ALTER TABLE audit_log RENAME TO audit_log_disabled");
+        try {
+            assertThrows(IllegalStateException.class,
+                    () -> consumer.consume(adapter, contactId, UUID.randomUUID()),
+                    "audit_log INSERT failure during breach must propagate");
+        } finally {
+            executeUpdate("ALTER TABLE audit_log_disabled RENAME TO audit_log");
+        }
+
+        // With audit_log restored, the next call from the same key must
+        // attempt the audit insert again — proving the in-memory Set
+        // was NOT permanently marked by the failed call. If the old
+        // ordering survived, this call would skip insertAudit and the
+        // audit-row count below would be 0.
+        InviteCodeConsumer.Outcome retry = consumer.consume(adapter, contactId, UUID.randomUUID());
+        assertInstanceOf(InviteCodeConsumer.BruteForceThresholdBreached.class, retry);
+
+        assertEquals(1, countAudit(InviteCodeConsumer.INVITE_BRUTE_FORCE_BREACH, contactId),
+                "one INVITE_BRUTE_FORCE_BREACH audit row written on retry "
+                        + "(in-memory set was not permanently marked by the failed insert)");
     }
 
     private void seedInvite(UUID code, String inviteType, String adapter,

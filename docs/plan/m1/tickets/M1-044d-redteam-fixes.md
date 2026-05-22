@@ -1,10 +1,50 @@
 ---
 id: M1-044d
 title: Contact-id redaction + breach-audit ordering (M1-044a fixes)
-status: pending
+status: done
 created: 2026-05-21
-last_updated: 2026-05-21
+last_updated: 2026-05-22
 blocked_by: []
+clarity_check:
+  date: 2026-05-22
+  verdict: PASS
+  warnings: []
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-05-22
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 97
+      removed: 23
+redteam_findings: []
+redteam_audits:
+  - date: 2026-05-22
+    verdict: CLEAN
+    base: main
+    head: 12cbd1f
+    verdict_file: docs/plan/m1/redteam/M1-044d-2026-05-22.md
+    out_of_model_count: 3
+    note: |
+      Post-commit pre-merge audit (running between /m1-tick commit
+      and /m1-tick merge per the security_relevant: true convention).
+      CLEAN — both M1-044a remediations land cleanly: INFO-LEAK fix
+      restores §Secrets handling redaction at all six call sites;
+      AUDIT-EVASION fix restructures the breach branch so the in-
+      memory mark only fires after the DB commit succeeds, restoring
+      §Invite-code registration's "an audit row records the threshold
+      breach" promise. Three OUT-OF-MODEL advisory observations
+      (concurrent over-audit race; crash-between-commit-and-add widens
+      duplicate-audit window; trade-off comment relies on JDBC commit/
+      rollback semantics) are not threat-model failures and are
+      candidates for future hardening if scope permits.
 files_budget: 6
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/InviteCodeConsumer.java
