@@ -4,6 +4,74 @@ title: Admin command handlers — /ban, /unban, /invite create/list/revoke
 status: pending
 escalations:
   - date: 2026-05-22
+    reason: outline-fail
+    reviewer_verdict_excerpt: |
+      ## OUTLINE FAILED — escalation recommended
+
+      REASON: The ticket triggers the shared-dispatch-surface gate
+      (files_scope contains three `*Command*.java` files under
+      `provider/src/main/java/`). Per the gate, every test exercising
+      the changed dispatch surface (CDI `Instance<CommandHandler>`
+      selection in `InboundRouter`) must either be enumerated in
+      `verified_stays_green:` or appear in §"Authorized test changes".
+      Grepping `provider/src/test/` for tests that drive `InboundRouter`
+      dispatch yields 15 tests. Only 10 appear in `verified_stays_green:`.
+      The 5 stays-green tests not enumerated are:
+
+        - app.zcat.infochat.provider.messaging.AdapterRouterIT — sends
+          /help and /unknown-command via adapter.deliverDm(...); routes
+          through the real InboundRouter dispatch path.
+        - app.zcat.infochat.provider.messaging.InboundRouterTest —
+          drives the router via @Inject InMemoryAdapter + deliverDm(...)
+          for /help, /xyz, /boom, plus the rate-cap-overflow path.
+        - app.zcat.infochat.provider.messaging.InboundRouterIntakeOrderingTest
+          — drives router.onMessage(dmInbound(..., "/help"), ADAPTER)
+          for the M1-044b intake-step splice ordering.
+        - app.zcat.infochat.provider.messaging.InboundRouterNormalizeTest
+          — drives the router through the normalization pipeline.
+        - app.zcat.infochat.provider.messaging.InboundRouterContactIdRedactionTest
+          — @Injects InboundRouter and exercises the dispatch path
+          for contact-id redaction in logs.
+
+      Each is stays-green by the same rationale already used for the
+      four IT entries: the new handler beans bind to
+      name() == "ban" | "unban" | "invite"; first-token dispatch in
+      InboundRouter routes by name; the unenumerated tests send /help,
+      /add-source, /summary, /xyz, /boom, or /unknown-command, none of
+      which collide. The omission is enumeration completeness, not
+      classification correctness. (AddSourceContactIdRedactionTest
+      calls handler.handle() directly and never reaches the registry,
+      so it is NOT exercising the changed dispatch surface and need
+      not be enumerated; the other five do reach the registry.)
+
+      The ticket's §Out-of-scope expansion bullet "M1-044b InboundRouter
+      test surface (FROZEN at its review round per out_of_scope)" is
+      the intended blanket-freeze, but the gate's text is explicit:
+      "If a test classified stays-green is not listed in
+      verified_stays_green, FAIL with reason 'stays-green test not
+      enumerated'." The blanket freeze is not a structural substitute
+      for per-test enumeration.
+
+      SUGGESTED ESCALATION: refine
+      The refine is small: add the five missing test classes to
+      verified_stays_green: with rationale matching the existing
+      four-IT pattern ("drives the full InboundRouter dispatch path
+      but sends /help/xyz/boom/unknown-command only; first-token
+      dispatch routes to a handler name that the three new handlers
+      cannot intercept"). No body changes; no acceptance changes;
+      no files_scope changes; no files_budget change. The
+      clarity_check block should be re-cleared so the next
+      /m1-tick start runs a fresh clarity pass.
+
+      Additional flagged risk (not OUTLINE-failing, but worth a
+      Implementation-notes bullet during refine): the V5
+      delete_preban_user procedure reads request_id from
+      current_setting('infochat.request_id', TRUE). The
+      UnbanCommandHandler must SET LOCAL infochat.request_id = ?
+      BEFORE the CALL so the procedure-written
+      UNBAN_PREBAN_DELETE audit row carries the same request_id
+      as the dispatch.
+  - date: 2026-05-22
     reason: clarity-fail
     reviewer_verdict_excerpt: |
       CLARITY VERDICT: FAIL — 3 blockers, 3 warnings.
@@ -46,6 +114,54 @@ escalations:
           (infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/
           AutoRegisterServiceTest.java).
 revisions:
+  - date: 2026-05-22
+    reason: outline-fail refine (1 blocker test-scaffolding completeness — 5 InboundRouter dispatch-surface tests missing from verified_stays_green:)
+    summary: |
+      Pre-refine snapshot. The Plan subagent returned OUTLINE
+      FAILED on the test-scaffolding completeness audit: the
+      shared-dispatch-surface gate triggered (files_scope adds
+      three *CommandHandler.java files), and grepping
+      provider/src/test/ for tests that drive InboundRouter
+      dispatch yielded 15 tests against the 10 currently
+      enumerated under verified_stays_green:. The 5 missing
+      classes are all in
+      app.zcat.infochat.provider.messaging:
+      AdapterRouterIT, InboundRouterTest,
+      InboundRouterIntakeOrderingTest,
+      InboundRouterNormalizeTest,
+      InboundRouterContactIdRedactionTest. Each is stays-green
+      by the same first-token-dispatch rationale already used
+      for the four IT entries (SummaryIT / SummaryAdapterScopeIT
+      / AddSourceIT / AddSourceAdapterScopeIT): the new
+      handlers' name() values are "ban" / "unban" / "invite";
+      the unenumerated tests dispatch /help, /add-source,
+      /summary, /xyz, /boom, /unknown-command — none collide.
+      The omission is enumeration completeness, not classifier
+      error. The §Out-of-scope-expansion bullet
+      "M1-044b InboundRouter test surface (FROZEN at its review
+      round per out_of_scope)" is the intended blanket-freeze
+      but is not a structural substitute for per-test
+      enumeration per the gate text.
+
+      Refine actions (small, no acceptance/body/files_scope
+      change):
+        1. Add five entries under verified_stays_green: with
+           rationale matching the existing four-IT pattern.
+        2. Fold the V5 delete_preban_user request_id
+           propagation risk into §Implementation notes as a
+           bullet on the UnbanCommandHandler preban path
+           (handler must SET LOCAL infochat.request_id = ?
+           BEFORE the CALL so the procedure-written
+           UNBAN_PREBAN_DELETE audit row carries the same
+           request_id as the dispatch).
+        3. Clear clarity_check: so the next /m1-tick start
+           runs a fresh clarity pass against the refined
+           verified_stays_green: list.
+
+      files_budget held at 11; files_scope unchanged;
+      complexity / risk / round_cap unchanged (high / high / 3);
+      acceptance item count unchanged at 30. No body claim
+      changes.
   - date: 2026-05-22
     reason: clarity-fail refine round 2 (1 blocker BODY-CLAIM-COVERAGE + 1 warning VERIFIED-STAYS-GREEN-PLAUSIBLE) — option A (strip fabricated claim)
     summary: |
@@ -239,6 +355,16 @@ verified_stays_green:
     rationale: "drives the full InboundRouter dispatch path but sends /summary inbounds only; same first-token routing argument as SummaryIT"
   - test_class: app.zcat.infochat.provider.command.AddSourceAdapterScopeIT
     rationale: "drives the full InboundRouter dispatch path but sends /add-source inbounds only; same first-token routing argument as AddSourceIT"
+  - test_class: app.zcat.infochat.provider.messaging.AdapterRouterIT
+    rationale: "drives the full InboundRouter dispatch path but sends /help and /unknown-command inbounds only; first-token dispatch routes to HelpCommandHandler.name()==\"help\" or returns the unknown-command reply, neither of which the three new handlers' name()s (\"ban\", \"unban\", \"invite\") can intercept"
+  - test_class: app.zcat.infochat.provider.messaging.InboundRouterTest
+    rationale: "drives the full InboundRouter dispatch path but sends /help, /xyz, /boom only; first-token dispatch routes to HelpCommandHandler or the unknown-command reply, neither of which the three new handlers can intercept"
+  - test_class: app.zcat.infochat.provider.messaging.InboundRouterIntakeOrderingTest
+    rationale: "drives router.onMessage(dmInbound(..., \"/help\"), ADAPTER) only; first-token dispatch routes to HelpCommandHandler.name()==\"help\" which the three new handlers cannot intercept"
+  - test_class: app.zcat.infochat.provider.messaging.InboundRouterNormalizeTest
+    rationale: "drives the router through the normalization pipeline with non-ban/non-unban/non-invite inbounds; first-token dispatch never reaches the three new handlers"
+  - test_class: app.zcat.infochat.provider.messaging.InboundRouterContactIdRedactionTest
+    rationale: "@Injects InboundRouter and exercises the dispatch path for contact-id redaction in logs without sending /ban, /unban, or /invite; first-token dispatch routes elsewhere"
 complexity: high
 risk: high
 round_cap: 3
@@ -485,6 +611,16 @@ the schema as-is.
   the M1-008a red-team finding; the application layer is the
   trust boundary here). Pre-check: `actor.is_admin = true`
   already enforces this for the `/unban` command path.
+- **`UnbanCommandHandler` preban-path `request_id`
+  propagation.** The V5 `delete_preban_user` procedure reads
+  `request_id` from
+  `current_setting('infochat.request_id', TRUE)` and writes
+  it into the `UNBAN_PREBAN_DELETE` audit row. The handler
+  MUST `SET LOCAL infochat.request_id = ?` on the same
+  Connection BEFORE the `CALL delete_preban_user(...)` so the
+  procedure-written audit row carries the same `request_id`
+  as the dispatch. Without this, the audit row's `request_id`
+  is NULL and the dispatch's audit trail loses correlation.
 - **`UnbanCommandHandler` group-admin restoration disclosure.**
   When the row is non-preban, after the UPDATE, SELECT the
   user's `is_group_admin=true` rows; if any, the reply uses
