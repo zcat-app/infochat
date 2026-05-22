@@ -4,6 +4,36 @@ title: Admin command handlers — /ban, /unban, /invite create/list/revoke
 status: pending
 escalations:
   - date: 2026-05-22
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      CLARITY VERDICT: FAIL — 1 blocker, 0 warnings.
+      Blockers:
+        1. BODY-CLAIM-COVERAGE: §Implementation notes §UnbanCommandHandler
+           preban-path request_id propagation commits via MUST that the
+           handler issues `SET LOCAL infochat.request_id = ?` before
+           `CALL delete_preban_user(...)` so the procedure-written
+           UNBAN_PREBAN_DELETE audit row carries the same `request_id`
+           as the dispatch. No acceptance item verifies this specific
+           behavior: item 12 checks only that the audit row EXISTS
+           (not its request_id value), and item 34's
+           `grep -E 'request_id' UnbanCommandHandler.java` is satisfied
+           by any occurrence of the string (including the UUID
+           generation line) without requiring `SET LOCAL`. An
+           implementer can omit SET LOCAL entirely and pass all 36
+           acceptance items, leaving the UNBAN_PREBAN_DELETE audit row
+           with a NULL request_id.
+           Fix options:
+             (a) extend item 12 to also assert the audit row's
+                 request_id is non-null and matches the dispatch
+                 (SELECT request_id FROM audit_log WHERE
+                 action='UNBAN_PREBAN_DELETE' returns a non-null
+                 value equal to the dispatch UUID), OR
+             (b) add a separate acceptance item with
+                 `grep -E 'SET LOCAL.*infochat[._]request_id'
+                 UnbanCommandHandler.java` returns >=1 match, OR
+             (c) strengthen item 34 for UnbanCommandHandler
+                 specifically to pin SET LOCAL invocation.
+  - date: 2026-05-22
     reason: outline-fail
     reviewer_verdict_excerpt: |
       ## OUTLINE FAILED — escalation recommended
@@ -114,6 +144,55 @@ escalations:
           (infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/
           AutoRegisterServiceTest.java).
 revisions:
+  - date: 2026-05-22
+    reason: clarity-fail refine round 3 (1 blocker BODY-CLAIM-COVERAGE — SET LOCAL infochat.request_id propagation in UnbanCommandHandler had no acceptance hook) — option B (add single acceptance item with the SET LOCAL grep)
+    summary: |
+      Pre-refine snapshot. The round-3 clarity FAIL surfaced one
+      BODY-CLAIM-COVERAGE blocker against §Implementation notes
+      §UnbanCommandHandler preban-path request_id propagation, which
+      commits via MUST that the handler issues
+      `SET LOCAL infochat.request_id = ?` on the same Connection
+      BEFORE the CALL delete_preban_user(...) so the procedure-
+      written UNBAN_PREBAN_DELETE audit row carries the same
+      request_id as the dispatch. The body claim was uncovered by
+      acceptance — item 12 verified only that the audit row exists
+      (not its request_id value), and item 34's
+      `grep -E 'request_id' UnbanCommandHandler.java` was satisfied
+      by any string occurrence (including the UUID generation line)
+      without requiring SET LOCAL. An implementer could omit SET
+      LOCAL entirely and pass all 36 acceptance items, leaving the
+      procedure-written audit row's request_id NULL.
+
+      Provenance. The offending §Implementation notes bullet was
+      added by the round-1 outline-fail refine (revision entry
+      directly below, action #2 — "Fold the V5 delete_preban_user
+      request_id propagation risk into §Implementation notes as a
+      bullet on the UnbanCommandHandler preban path"). That refine
+      paired a body claim with no acceptance hook; BODY-CLAIM-
+      COVERAGE (clarity-prompt §13, added 2026-05-22) catches the
+      pattern but only on the NEXT /m1-tick start. The cost was one
+      extra refine cycle that a refine-time coverage check could
+      have avoided — a meta-pattern worth a memory entry.
+
+      Refine action (option B — single new acceptance item):
+
+        1. New acceptance item added immediately after item 9
+           (UnbanCommandHandler dispatch sequence): "UnbanCommandHandler
+           propagates `request_id` to the V5 `delete_preban_user`
+           stored procedure via `SET LOCAL infochat.request_id = ?`
+           on the same JDBC Connection BEFORE the `CALL
+           delete_preban_user(...)`. The V5 procedure reads
+           `request_id` from `current_setting('infochat.request_id',
+           TRUE)` and writes it into the `UNBAN_PREBAN_DELETE` audit
+           row ... Verify: `grep -E 'SET LOCAL.*infochat[._]request_id'
+           UnbanCommandHandler.java` returns >=1 match."
+        2. `clarity_check:` cleared so the next /m1-tick start runs
+           a fresh clarity pass against the augmented acceptance.
+
+      Acceptance count: 36 → 37. files_budget held at 11;
+      files_scope unchanged (the new item is a source-grep against
+      an in-scope file); complexity / risk / round_cap unchanged
+      (high / high / 3). No body changes. DoD unchanged.
   - date: 2026-05-22
     reason: outline-fail refine (1 blocker test-scaffolding completeness — 5 InboundRouter dispatch-surface tests missing from verified_stays_green:)
     summary: |
@@ -397,6 +476,7 @@ acceptance:
   - "BanCommandHandlerTest scenario: an admin's /ban writes `BAN` + `INVITE_REVOKE` audit rows that share the same `request_id`. The test seeds a pending CONTACT_BOUND invite, runs /ban, then SELECTs both rows from `audit_log` and asserts their `request_id` values are equal. Verify: `grep -iE 'void\\s+\\w*banAndInviteRevokeAuditRowsShareRequestId\\w*\\s*\\(' BanCommandHandlerTest.java` returns ≥1 match"
   - "BanCommandHandlerTest scenario: an admin's /ban against the only `is_admin=TRUE AND is_banned=FALSE` row (a deployment with one admin) raises the V5 `trg_last_admin_protection_update` trigger; the handler catches the exception, rolls back the transaction, and replies with `error.ban.last_admin`. The test asserts no row was modified (the audit row pre-written at step 1.5 also rolls back with the transaction). Verify: `grep -iE 'void\\s+\\w*banOfOnlyAdminSurfacesLastAdminError\\w*\\s*\\(' BanCommandHandlerTest.java` returns ≥1 match"
   - "infochat-provider/src/main/java/app/zcat/infochat/provider/command/UnbanCommandHandler.java implements `CommandHandler` with `name() == \"unban\"`. The handler dispatch sequence is: (1) admin gate — non-admin returns `error.admin_only`; (2) parse one positional `<contact>` argument; (3) resolve the target `users` row by `(inbound_adapter, target_contact_id)`; no row → `error.contact_not_registered` (the spec's Unknown-contact rule) and no DB write; (4) when the target row's `registration_state = 'preban'`, CALL the V5 `delete_preban_user(target.id, actor.id)` stored procedure — the procedure writes the `UNBAN_PREBAN_DELETE` audit row AND deletes the row in the same transaction; the handler's reply is `reply.unban.preban_deleted` (the bundle value contains the literals `pre-ban-only row removed` AND `fresh invite required`); (5) when the target row is non-preban, open an application-side transaction, pre-write the `UNBAN` audit row audit-before-effect, then `UPDATE users SET is_banned = FALSE, banned_at = NULL, banned_by = NULL, ban_reason = NULL WHERE id = ?`, then COMMIT; (6) the reply on the non-preban path enumerates restored group-admin rows when any exist via `SELECT g.id, g.display_name FROM group_membership gm JOIN groups g ON g.id = gm.group_id WHERE gm.user_id = ? AND gm.is_group_admin = TRUE` — the reply uses the `reply.unban.group_admins_restored` template that interpolates the list AND includes a `/demote <contact>` hint per spec §User ban; (7) when no group-admin rows exist on the non-preban path, the reply is the plain `reply.unban.plain` value. Verify: `grep -E 'CALL\\s+delete_preban_user' UnbanCommandHandler.java` returns ≥1 match; `grep -E 'pre-ban-only row removed|preban_deleted' UnbanCommandHandler.java` returns ≥1 match (the bundle key referenced for the preban-delete reply); `grep -E 'is_group_admin' UnbanCommandHandler.java` returns ≥1 match"
+  - "UnbanCommandHandler propagates `request_id` to the V5 `delete_preban_user` stored procedure via `SET LOCAL infochat.request_id = ?` on the same JDBC Connection BEFORE the `CALL delete_preban_user(...)`. The V5 procedure reads `request_id` from `current_setting('infochat.request_id', TRUE)` and writes it into the `UNBAN_PREBAN_DELETE` audit row; without SET LOCAL the procedure-written audit row's `request_id` is NULL and the dispatch's audit trail loses correlation with the handler's other rows. The SET LOCAL value MUST equal the same `UUID.randomUUID().toString()` request_id the handler uses for the dispatch (so the procedure-written `UNBAN_PREBAN_DELETE` row and any handler-written rows for the same dispatch share one request_id). Verify: `grep -E 'SET LOCAL.*infochat[._]request_id' UnbanCommandHandler.java` returns ≥1 match"
   - "UnbanCommandHandlerTest scenario: a non-admin caller's /unban invocation returns `error.admin_only` and writes no row. Verify: `grep -iE 'void\\s+\\w*unbanByNonAdminReturnsAdminOnly\\w*\\s*\\(' UnbanCommandHandlerTest.java` returns ≥1 match"
   - "UnbanCommandHandlerTest scenario: an admin's /unban against an unknown contact (no `users` row at all) returns `error.contact_not_registered` and writes no row. Verify: `grep -iE 'void\\s+\\w*unbanUnknownContactReturnsContactNotRegistered\\w*\\s*\\(' UnbanCommandHandlerTest.java` returns ≥1 match"
   - "UnbanCommandHandlerTest scenario: an admin's /unban against a `registration_state='preban'` row CALLs the V5 `delete_preban_user(target.id, actor.id)` procedure; the test asserts (a) the users row is gone post-call, (b) one `UNBAN_PREBAN_DELETE` row exists in `audit_log` referencing the deleted user, (c) the reply matches `reply.unban.preban_deleted` AND contains the literals `pre-ban-only` AND `fresh invite`. Verify: `grep -iE 'void\\s+\\w*unbanOfPrebanRowCallsDeletePrebanUserProcedure\\w*\\s*\\(' UnbanCommandHandlerTest.java` returns ≥1 match"
