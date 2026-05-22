@@ -12,6 +12,60 @@ reopens:
     prior_deferred_on: M1-047
     reason: umbrella-done
 escalations:
+  - date: 2026-05-22
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      User-initiated escalation (no automated trigger fired — the
+      ticket was just reopened from `status: deferred` by the M1-047
+      umbrella merge and would FAIL on the next /m1-tick start).
+      The ticket as currently written misdescribes the post-A+D+E
+      architecture in ways that block both the M1-048 lint and the
+      anticipated clarity pre-flight:
+
+        1. M1-048 OUT-OF-SCOPE-STAYS-GREEN-VERIFIABLE BLOCKER:
+           files_scope contains shared-dispatch-surface files
+           (InboundRouter.java, RateCapBucket.java) but
+           verified_stays_green: is empty/missing. scripts/lint-ticket.py
+           refuses to PASS until every unmodified test that drives the
+           changed router path is catalogued either in files_scope with
+           an acceptance item OR named in verified_stays_green: with a
+           one-line audit note per entry.
+
+        2. The out_of_scope claim "M1-035c/M1-036/M1-037/M1-039/M1-040
+           tests stay green unchanged" has DISSOLVED under M1-049's
+           handler/router/IT decoupling. Per `git log main --grep "^M1-049: "`,
+           M1-049 refactored AddSourceCommandHandlerTest (the 6-failure
+           class from the 2026-05-21 premise-fail) and
+           AddSourceBanCheckOrderingTest (the 1-failure class) to call
+           handler.handle() directly with mocked collaborators — those
+           tests no longer exercise InboundRouter at all. The premise-
+           fail's Mode A (5 unknown-DM failures) and Mode B (2 banned-DM
+           failures) both dissolve: the AddSource tests no longer flow
+           through step 2 (invite-required) or step 4 (ban-fixed) of
+           the splice. The Out-of-scope expansion section needs to be
+           rewritten against the new architecture (router-only tests
+           drive the router; handler tests drive the handler).
+
+        3. AdapterRegistryTest was also refactored by M1-049. Acceptance
+           item 15's plan to extend its @BeforeEach to pre-seed an alice
+           users row may already be unnecessary (M1-049 may have changed
+           the wiring round-trip path) or may need to target a different
+           seed location. Either way the acceptance text reads against
+           the pre-M1-049 source and must be re-audited.
+
+        4. test_plan.modifies and files_scope reference test files whose
+           current shape post-M1-049 may differ from the references
+           encoded here. The four-mandatory-@Inject-field claim in
+           acceptance item 14 (rateCapBucket, inviteCodeConsumer,
+           banCheck, bundleLoader, dataSource) needs to be verified
+           against M1-050's JSpecify boundary annotations — the
+           collaborator surface may now carry @NonNull constraints
+           the helper fakes must respect.
+
+      User invoked /m1-tick escalate M1-044b refine to formally enter
+      the refine flow so these post-A+D+E updates can land before the
+      next /m1-tick start re-runs clarity + Plan against the rewritten
+      acceptance.
   - date: 2026-05-21
     reason: premise-fail
     reviewer_verdict_excerpt: |
@@ -199,12 +253,30 @@ files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
   - infochat-provider/src/main/resources/bundles/en.properties
   - infochat-provider/src/main/resources/application.properties
-  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/AdapterRegistryTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterIntakeOrderingTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterNormalizeTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterContactIdRedactionTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/AdapterRouterIT.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/RateCapBucketTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/AddSourceIT.java
+verified_stays_green:
+  - test_class: app.zcat.infochat.provider.messaging.AdapterRegistryTest
+    rationale: "M1-049 refactored to use a RecordingInboundRouter @Alternative that intercepts onMessage(); the test never invokes the real InboundRouter dispatch, so the splice is unobservable from this test's perspective"
+  - test_class: app.zcat.infochat.provider.messaging.HelpCommandHandlerTest
+    rationale: "M1-049 refactored to call handler.handle() directly with mocked collaborators; no router code path is exercised"
+  - test_class: app.zcat.infochat.provider.command.AddSourceCommandHandlerTest
+    rationale: "M1-049 refactored to call handler.handle() directly with mocked collaborators; no router code path is exercised (resolves the round-1 premise-fail Mode A 6 failures)"
+  - test_class: app.zcat.infochat.provider.command.AddSourceBanCheckOrderingTest
+    rationale: "M1-049 refactored to call handler.handle() directly with mocked collaborators; no router code path is exercised (resolves the round-1 premise-fail Mode B 1 failure)"
+  - test_class: app.zcat.infochat.provider.command.SummaryCommandHandlerTest
+    rationale: "M1-049 refactored to call handler.handle() directly with mocked collaborators; no router code path is exercised"
+  - test_class: app.zcat.infochat.provider.command.SummaryIT
+    rationale: "pre-seeds users row with registration_state='vouched' BEFORE deliverDm; post-splice step 2 (DM unknown) never fires, step 4 ban check finds is_banned=false, step 7 DM-gate does not gate vouched users"
+  - test_class: app.zcat.infochat.provider.command.SummaryAdapterScopeIT
+    rationale: "pre-seeds users rows via insertUser() with registration_state='vouched' for both adapters BEFORE deliverDm; same step-2/4/7 traversal as SummaryIT"
+  - test_class: app.zcat.infochat.provider.command.AddSourceAdapterScopeIT
+    rationale: "pre-seeds users rows via insertUser() with registration_state='invited' for the shared contact-id on both adapters BEFORE deliverDm; step 2 (DM unknown) never fires AND step 7 DM-gate fires only for registration_state='group_only' so 'invited' passes through, dispatch reaches the handler"
 complexity: high
 risk: high
 round_cap: 3
@@ -212,7 +284,7 @@ security_relevant: true
 migration_touch: false
 out_of_scope:
   - any change to the spec — §Authorization model is the source of truth; this ticket implements step 1.5/2/4/7-DM-gate verbatim
-  - any change to M1-044a's InviteCodeConsumer, BanCheck, AutoRegisterService, or the V12 migration — those are M1-044a's commit and consumed unchanged via @Inject. RateCapBucket.java is the ONE exception: per the /redteam M1-044a low-severity DOS finding (verdict file docs/plan/m1/redteam/M1-044a-2026-05-21.md), this ticket widens the eviction predicate to evict drained idle buckets — see acceptance item 16 and Implementation notes §"Rate-cap eviction-predicate fix"
+  - any change to M1-044a's InviteCodeConsumer, BanCheck, AutoRegisterService, or the V12 migration — those are M1-044a's commit and consumed unchanged via @Inject. RateCapBucket.java is the ONE exception: per the /redteam M1-044a low-severity DOS finding (verdict file docs/plan/m1/redteam/M1-044a-2026-05-21.md), this ticket widens the eviction predicate to evict drained idle buckets — see acceptance item 18 and Implementation notes §"Rate-cap eviction-predicate fix"
   - any new admin command handler — M1-044c territory
   - any /vouch handler — M1-045 territory
   - any /grant-admin / /revoke-admin handler — M1-046 territory
@@ -223,7 +295,9 @@ out_of_scope:
   - any change to ScopeRef, InboundMessage, OutboundMessage, MessagingAdapter, AdapterRegistry — messaging-adapter SPI surfaces stay
   - any change to existing CommandHandler implementations (HelpCommandHandler from M1-035c, AddSourceCommandHandler from M1-036, SummaryCommandHandler from M1-037) — those are M1-044c's territory only insofar as the step 7 DM-gate carve-out interposes a check; the handlers themselves are NOT modified
   - any new probation-check service or CommandPermissions class — M1-045 territory (step 5 + step 7 probation check)
-  - any test outside the eleven files in files_scope — every M1-035c/M1-036/M1-037/M1-039/M1-040 test stays green unchanged; M1-035b's InboundRouterNormalizeTest, M1-038's InboundRouterContactIdRedactionTest, and M1-008b's AdapterRegistryTest are extended with helper-only modifications (see acceptance items 14 and 15) rather than left untouched
+  - any change to test classes outside files_scope that drive the router dispatch surface — those are enumerated in `verified_stays_green:` above with a per-entry audit note. After M1-049's handler/router/IT decoupling the formerly-listed M1-035c/M1-036/M1-037/M1-039/M1-040 handler tests no longer drive the router at all (they call `handler.handle()` directly with mocks), and AdapterRegistryTest uses a `RecordingInboundRouter` @Alternative that intercepts the SPI handshake before dispatch — these stay green for distinct reasons captured per-entry rather than as a single hand-wave carve-out
+  - any change to AdapterRegistryTest — post-M1-049 it does not drive the real router (RecordingInboundRouter @Alternative); the round-1 plan to extend its @BeforeEach with an `alice` pre-seed is obsolete and removed
+  - any change to the IT-tier tests that already pre-seed users rows before the dispatch (SummaryIT, SummaryAdapterScopeIT, AddSourceAdapterScopeIT) — these are in `verified_stays_green:` because their existing @BeforeEach already seeds `registration_state='vouched'` or `'invited'`, both of which pass through step 2 (DM known) and step 7 DM-gate (only `'group_only'` is gated)
 acceptance:
   - "InboundRouter.onMessage executes the intake steps in the spec's exact numerical order: identity (step 1, already resolved by AdapterRegistry into msg.sender()) → 1.5 rate cap → 1.7 normalize (already on disk) → 2 invite gate (DM unknown only) → 3 group auto-register (group `@mention` only) → 4 ban check → 6 parse + dispatch → 7 permission DM-gate carve-out (DM from `registration_state='group_only'` rejected with the invite-required reply). Verify by reading InboundRouter.java: the calls appear in source order rateCapBucket.tryAcquire → normalize → inviteCodeConsumer.consume → autoRegisterService.resolveOrRegisterGroup → banCheck.isBanned → handleSlash"
   - "Step 1.5 — rate-cap silent drop: when `rateCapBucket.tryAcquire(adapter, contactId)` returns false, InboundRouter.onMessage returns IMMEDIATELY with no outbound reply (no fixed ban reply, no fixed invite-required reply, no friendly error) per spec §Authorization model step 1.5 (`Over-cap inbound is dropped silently`). Verify InboundRouter.java: the rate-cap branch contains no `sendReply` call and returns directly. grep -E 'rateCapBucket\\.tryAcquire' InboundRouter.java returns ≥1 match"
@@ -237,9 +311,11 @@ acceptance:
   - "bundles/en.properties adds the four bundle entries with text drawn from docs/design/03-commands.md §3.11 Welcome messages (for the two welcome keys) AND from docs/spec/security.md §Invite-code registration / §User ban (for the two fixed-error keys — the spec's quoted literal `Access requires an invitation.` and `Your access has been revoked.` resp.). Verify: `grep -E '^error\\.invite\\.required\\s*=' en.properties` returns 1 match AND the value contains the literal substring `Access requires an invitation` (the trailing period optional) AND `grep -E '^error\\.ban\\.fixed\\s*=' en.properties` returns 1 match AND the value equals or starts with `Your access has been revoked` AND `grep -E '^reply\\.welcome\\.dm_fresh\\s*=' en.properties` returns 1 match AND `grep -E '^reply\\.welcome\\.group_first_mention\\s*=' en.properties` returns 1 match"
   - "application.properties adds the per-profile rate-cap + invite TTL config keys. The base values mirror the spec's profile table (docs/spec/security.md §Rate limiting — `Per-user chat-mode messages (transport rate) 60/min token bucket`; docs/design/04-security.md §4.9 Per-user chat-mode messages and §4.5 brute-force threshold/window; docs/design/03-commands.md §3.10 TTL table). At minimum the file declares: `infochat.rate-cap.inbound-per-minute=60`, `infochat.invite.brute-force-threshold=10`, `infochat.invite.brute-force-window=1h`, `infochat.invite.ttl=7d`, `infochat.invite.open-cap-per-adapter=3`, `infochat.invite.contact-cap-global=50`, `infochat.probation.duration=24h`. Per-profile overrides (under `%vps`, `%pi`, `%remote-llm`) MAY be added but the laptop defaults above are mandatory. Verify: `grep -E '^infochat\\.rate-cap\\.inbound-per-minute=' application.properties` returns ≥1 match AND `grep -E '^infochat\\.invite\\.brute-force-threshold=' application.properties` returns ≥1 match AND `grep -E '^infochat\\.invite\\.ttl=' application.properties` returns ≥1 match AND `grep -E '^infochat\\.probation\\.duration=' application.properties` returns ≥1 match"
   - "InboundRouterIntakeOrderingTest pins the step ordering via a unit test that constructs InboundRouter with mock collaborators (the four services from M1-044a) and a fake CommandHandler, driving onMessage with synthetic InboundMessages and asserting (via mock interactions in order) the eight scenarios below. Each scenario is implemented as its own @Test method whose name contains the per-scenario identifying substring listed below (case-insensitive). Every grep MUST return ≥1 match — a regression in any one scenario fails its own check rather than being masked by an aggregate count. (a) DM body exceeds size cap → only the size-cap branch fires, no other collaborator consulted. `grep -iE 'void\\s+\\w*OverSizeCap\\w*\\s*\\(' InboundRouterIntakeOrderingTest.java` ≥1. (b) DM over rate cap → rateCapBucket consulted, nothing else, no outbound. `grep -iE 'void\\s+\\w*OverRateCap\\w*\\s*\\(' InboundRouterIntakeOrderingTest.java` ≥1. (c) DM under cap with body empty after normalize → no further collaborators, no outbound. `grep -iE 'void\\s+\\w*EmptyBodyAfterNormalize\\w*\\s*\\(' InboundRouterIntakeOrderingTest.java` ≥1. (d) DM from unknown contact_id with valid invite body → rateCapBucket → normalize → inviteCodeConsumer (returns Accepted) → outbound is the welcome, banCheck NOT consulted, handleSlash NOT called. `grep -iE 'void\\s+\\w*UnknownContactValidInvite\\w*\\s*\\(' InboundRouterIntakeOrderingTest.java` ≥1. (e) DM from unknown contact with invalid body → rateCapBucket → normalize → inviteCodeConsumer (returns Rejected) → outbound is error.invite.required, banCheck NOT consulted. `grep -iE 'void\\s+\\w*UnknownContactInvalidInvite\\w*\\s*\\(' InboundRouterIntakeOrderingTest.java` ≥1. (f) DM from known is_banned=true contact → rateCapBucket → normalize → users lookup → banCheck (returns true) → outbound is error.ban.fixed, no handleSlash. `grep -iE 'void\\s+\\w*KnownBannedDmStops\\w*\\s*\\(' InboundRouterIntakeOrderingTest.java` ≥1. (g) DM from known group_only contact with /help body → rateCapBucket → normalize → banCheck (returns false) → handleSlash → DM-gate post-check fires → outbound is error.invite.required (NOT the /help reply). `grep -iE 'void\\s+\\w*GroupOnlyDmGate\\w*\\s*\\(' InboundRouterIntakeOrderingTest.java` ≥1. (h) Group @mention from unknown contact → rateCapBucket → normalize → autoRegisterService.resolveOrRegisterGroup → banCheck → handleSlash → outbound is the dispatch reply. `grep -iE 'void\\s+\\w*GroupMentionAutoRegisters\\w*\\s*\\(' InboundRouterIntakeOrderingTest.java` ≥1"
-  - "InboundRouterTest gains exactly ONE new @Test method whose name contains `rateCapOverflowDropsSilentlyWithoutOutbound` (case-insensitive) that asserts when rateCapBucket.tryAcquire returns false, no reply is sent and no downstream service is consulted. M1-035b's eight pre-existing @Test methods continue to pass unchanged — none is deleted; none is renamed in a way that drops the identifying substring listed below. Verify the new method AND each of the eight pre-existing methods by its single-line declaration grep — every one MUST return ≥1 match. New: `grep -iE 'void\\s+\\w*rateCapOverflowDropsSilentlyWithoutOutbound\\w*\\s*\\(' InboundRouterTest.java` ≥1. M1-035b preservation: `grep -iE 'void\\s+\\w*emptyAndWhitespaceAndInvisibleOnlyBodies\\w*\\s*\\(' InboundRouterTest.java` ≥1; `grep -iE 'void\\s+\\w*leadingWhitespaceBeforeSlashCommand\\w*\\s*\\(' InboundRouterTest.java` ≥1; `grep -iE 'void\\s+\\w*chatModeBodyProducesDeterministic\\w*\\s*\\(' InboundRouterTest.java` ≥1; `grep -iE 'void\\s+\\w*unknownCommandProducesFriendly\\w*\\s*\\(' InboundRouterTest.java` ≥1; `grep -iE 'void\\s+\\w*commandHandlerExceptionProducesInternalError\\w*\\s*\\(' InboundRouterTest.java` ≥1; `grep -iE 'void\\s+\\w*firstDmSlashInsertsUsersRow\\w*\\s*\\(' InboundRouterTest.java` ≥1; `grep -iE 'void\\s+\\w*firstDmChatModeInsertsUsersRow\\w*\\s*\\(' InboundRouterTest.java` ≥1; `grep -iE 'void\\s+\\w*repeatedDmsFromSameContactProduceExactlyOne\\w*\\s*\\(' InboundRouterTest.java` ≥1"
-  - "InboundRouterNormalizeTest (M1-035b) and InboundRouterContactIdRedactionTest (M1-038) continue to assert the same behaviors they did before this ticket — the body-size cap, the normalize pass, and the ContactIds.redact log-redaction logic are preserved unchanged. The M1-044b splice introduces 4 new mandatory @Inject fields on InboundRouter (rateCapBucket, inviteCodeConsumer, banCheck, bundleLoader, dataSource) that the M1-035b / M1-038 test helpers do not wire; a minimal helper modification is required to inject no-op fakes so the size-cap / normalize / redaction code paths the tests actually exercise can run. The constraint: NO @Test method body is modified — the helper-method changes are ONLY to wire the new collaborator stubs. The two specific helpers authorized to change are (a) `InboundRouterContactIdRedactionTest.newRouter()` (a private factory method already in the file) and (b) the inline `new InboundRouter()` block in `InboundRouterNormalizeTest.bodyAtExactlyTheCapIsAcceptedAndNormalizeRuns` (the one M1-035b @Test method that calls `router.onMessage(...)`; the other 6 normalize-related tests in that class invoke `InboundRouter.normalize(...)` as a static method and need no router instance — they are NOT modified). Verify per file: `git diff main -- infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterNormalizeTest.java | grep -cE '^[+-]\\s*@Test\\b'` returns 0 AND `git diff main -- infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterContactIdRedactionTest.java | grep -cE '^[+-]\\s*@Test\\b'` returns 0 (the @Test annotation set is unchanged: no test method added, removed, or renamed in either file)"
-  - "AdapterRegistryTest.singleAdapterHappyPathActivatesInMemoryAndRegistersRouter (M1-008b's wiring round-trip test — verifying AdapterRegistry → InMemoryAdapter → InboundRouter flow) continues to assert that delivering `/xyz` from contact `alice` produces UNKNOWN_COMMAND_REPLY (the M1-035b friendly-unknown-command reply, NOT the new ERROR_INVITE_REQUIRED reply step 2 would emit for an unseeded contact). The M1-044b splice would otherwise route the unknown DM contact through step 2 → Rejected → ERROR_INVITE_REQUIRED; to preserve the wiring-test's purpose, the test's `@BeforeEach` is extended to pre-seed an `alice` users row with `registration_state='invited'` (the same pattern used in InboundRouterTest's @BeforeEach widening per item 13 of this ticket). The canonical unknown-command behavior coverage stays in InboundRouterTest.unknownCommandProducesFriendlyUnknownCommandReply (preserved per item 13); AdapterRegistryTest's job is the round-trip wiring, not the unknown-command branch logic. NO @Test method body in AdapterRegistryTest is modified — only @BeforeEach is extended. Verify: `grep -E 'INSERT INTO users.*alice' infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/AdapterRegistryTest.java` returns ≥1 match AND `git diff main -- infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/AdapterRegistryTest.java | grep -cE '^[+-]\\s*@Test\\b'` returns 0 (no @Test annotation set change)"
+  - "InboundRouterTest gains exactly ONE new @Test method whose name contains `rateCapOverflowDropsSilentlyWithoutOutbound` (case-insensitive) that asserts when rateCapBucket.tryAcquire returns false, no reply is sent and no downstream service is consulted. Five M1-035b pre-existing @Test methods continue to pass unchanged — none is deleted; none is renamed in a way that drops the identifying substring listed below. Verify the new method AND each of the five preserved pre-existing methods by its single-line declaration grep — every one MUST return ≥1 match. New: `grep -iE 'void\\s+\\w*rateCapOverflowDropsSilentlyWithoutOutbound\\w*\\s*\\(' InboundRouterTest.java` ≥1. M1-035b preservation: `grep -iE 'void\\s+\\w*emptyAndWhitespaceAndInvisibleOnlyBodies\\w*\\s*\\(' InboundRouterTest.java` ≥1; `grep -iE 'void\\s+\\w*leadingWhitespaceBeforeSlashCommand\\w*\\s*\\(' InboundRouterTest.java` ≥1; `grep -iE 'void\\s+\\w*chatModeBodyProducesDeterministic\\w*\\s*\\(' InboundRouterTest.java` ≥1; `grep -iE 'void\\s+\\w*unknownCommandProducesFriendly\\w*\\s*\\(' InboundRouterTest.java` ≥1; `grep -iE 'void\\s+\\w*commandHandlerExceptionProducesInternalError\\w*\\s*\\(' InboundRouterTest.java` ≥1"
+  - "Three M1-035d @Test methods in InboundRouterTest are REMOVED because their premise (DM from unknown contact auto-creates a users row via AutoRegisterService) is spec-invalidated by the M1-044b splice — post-splice, DMs from unknown contacts hit step 2 (invite-code consume) before AutoRegisterService is ever reached, and the only path that creates a users row from a DM is InviteCodeConsumer's Accepted outcome. The removed methods are `firstDmSlashInsertsUsersRowBeforeDispatchUnderInmemoryAdapterName`, `firstDmChatModeInsertsUsersRowBeforeChatModeReply`, and `repeatedDmsFromSameContactProduceExactlyOneUsersRow`. Their replacement coverage is in InboundRouterIntakeOrderingTest scenarios (d) DM unknown + valid invite → welcome and (e) DM unknown + invalid invite → invite-required (acceptance item 12 above) — those scenarios exercise the new DM-unknown dispatch path comprehensively at the unit-test tier. Verify the removal: `grep -iE 'void\\s+\\w*firstDmSlashInsertsUsersRow\\w*\\s*\\(' InboundRouterTest.java` returns 0 matches AND `grep -iE 'void\\s+\\w*firstDmChatModeInsertsUsersRow\\w*\\s*\\(' InboundRouterTest.java` returns 0 matches AND `grep -iE 'void\\s+\\w*repeatedDmsFromSameContactProduceExactlyOne\\w*\\s*\\(' InboundRouterTest.java` returns 0 matches"
+  - "InboundRouterNormalizeTest (M1-035b) and InboundRouterContactIdRedactionTest (M1-038) continue to assert the same behaviors they did before this ticket — the body-size cap, the normalize pass, and the ContactIds.redact log-redaction logic are preserved unchanged. The M1-044b splice introduces 4 new mandatory @Inject fields on InboundRouter (`rateCapBucket`, `inviteCodeConsumer`, `banCheck`, `bundleLoader`) that the M1-035b / M1-038 test helpers do not wire; a minimal helper modification is required to inject no-op fakes so the size-cap / normalize / redaction code paths the tests actually exercise can run. The constraint: NO @Test method body is modified — the helper-method changes are ONLY to wire the new collaborator stubs. The two specific helpers authorized to change are (a) `InboundRouterContactIdRedactionTest.newRouter()` (a private factory method already in the file) and (b) the inline `new InboundRouter()` block in `InboundRouterNormalizeTest.bodyAtExactlyTheCapIsAcceptedAndNormalizeRuns` (the one M1-035b @Test method that calls `router.onMessage(...)`; the other 6 normalize-related tests in that class invoke `InboundRouter.normalize(...)` as a static method and need no router instance — they are NOT modified). The 4 new @Inject fields are all plain reference types; M1-050's JSpecify annotations apply only to public/protected method parameters (not to package-private @Inject fields), so the helper fakes do not need annotations. Verify per file: `git diff main -- infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterNormalizeTest.java | grep -cE '^[+-]\\s*@Test\\b'` returns 0 AND `git diff main -- infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterContactIdRedactionTest.java | grep -cE '^[+-]\\s*@Test\\b'` returns 0 (the @Test annotation set is unchanged: no test method added, removed, or renamed in either file)"
+  - "AdapterRouterIT (M1-008c IT-tier wiring test) — its 4 @Test methods deliver inbound bodies for contact_ids `mvp-user-1` and `mvp-user-2` that have NO users row; pre-splice AutoRegisterService UPSERTed mid-flight, post-splice step 2 (DM unknown) fires and the dispatch returns the fixed invite-required reply instead. The fix is helper-only: extend the `@BeforeEach resetAdapterAndCleanMvpContacts()` method (already present) to pre-seed `mvp-user-1` and `mvp-user-2` users rows with `registration_state='invited'` (the post-step-2 successful-invite state, mirroring what InviteCodeConsumer.Accepted would have written) AFTER the existing `DELETE FROM users WHERE contact_id LIKE 'mvp-%'` cleanup but BEFORE the @Test body runs. NO @Test method body is modified. Verify: `grep -E 'INSERT INTO users.*mvp-user' infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/AdapterRouterIT.java` returns ≥1 match AND `git diff main -- infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/AdapterRouterIT.java | grep -cE '^[+-]\\s*@Test\\b'` returns 0 (the @Test annotation set is unchanged: 4 tests preserved, none added/removed/renamed)"
+  - "AddSourceIT (M1-036 MVP exit-criterion IT) — its 1 @Test method delivers `/add-source <url>` for contact_id `m1-036-mvp-user-1` that has NO users row; pre-splice AutoRegisterService UPSERTed mid-flight, post-splice step 2 (DM unknown) fires and the dispatch returns the fixed invite-required reply instead of the handler's fresh-insert reply. The fix is helper-only: extend the `@BeforeEach cleanup()` method (already present) to pre-seed an `m1-036-mvp-user-1` users row with `registration_state='invited'` AFTER the existing cleanup statements but BEFORE the @Test body runs. NO @Test method body is modified. Verify: `grep -E 'INSERT INTO users.*m1-036-mvp-user' infochat-provider/src/test/java/app/zcat/infochat/provider/command/AddSourceIT.java` returns ≥1 match AND `git diff main -- infochat-provider/src/test/java/app/zcat/infochat/provider/command/AddSourceIT.java | grep -cE '^[+-]\\s*@Test\\b'` returns 0 (the @Test annotation set is unchanged: 1 test preserved, none added/removed/renamed)"
   - "RateCapBucket.evictIdleBuckets widens the eviction predicate per the /redteam M1-044a DOS finding (verdict file docs/plan/m1/redteam/M1-044a-2026-05-21.md). The M1-044a predicate evicts only buckets where `tokens == inboundPerMinute` AND idle past threshold; a drained-and-abandoned bucket never refills (refill is lazy inside tryAcquire) so it stays pinned forever. The fix removes the tokens-equality requirement: eviction fires whenever the bucket has been idle past the threshold, regardless of token count. A returning contact pays a one-time bucket-cold cost (a new Bucket allocated full). Verify: `grep -nE 'tokens\\s*==\\s*inboundPerMinute' RateCapBucket.java` returns ZERO matches in the evictIdleBuckets method (the structural assertion that the equality gate has been removed)"
   - "RateCapBucketTest has a @Test method whose name contains `evictionDrainedIdle` (case-insensitive) that asserts the widened eviction: seed a bucket via N tryAcquire calls that drain it to ≤0 tokens, advance the test Clock past the eviction threshold without further tryAcquire calls, run the eviction sweep, and assert the bucket entry is removed from the underlying map. Verify: `grep -iE 'void\\s+\\w*evictionDrainedIdle\\w*\\s*\\(' RateCapBucketTest.java` returns ≥1 match"
   - "mvn -B clean verify from the repo root exits 0; every prior test continues to pass: M1-003 @QuarkusTest stubs, M1-007/007a/b/c, M1-008/008a/b/c, M1-022..M1-026, M1-027/028, M1-032/033/034a/034b, M1-035/035a/b/c/d, M1-036, M1-037, M1-038, M1-039, M1-040, M1-043, plus M1-044a's per-service tests (RateCapBucketTest's four M1-044a methods continue to pass under the widened eviction predicate)"
@@ -252,14 +328,15 @@ test_plan:
     - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
     - infochat-provider/src/main/resources/bundles/en.properties
     - infochat-provider/src/main/resources/application.properties
-    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterTest.java (M1-035b/M1-035d — body changes: add 1 new @Test for rate-cap silent drop, remove 3 spec-invalidated M1-035d first-DM-auto-register @Tests; acceptance items 13 and 14)
     - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/RateCapBucketTest.java
-    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/AdapterRegistryTest.java (M1-008b — @BeforeEach pre-seed of alice users row; no @Test method body change; acceptance item 15)
-    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterNormalizeTest.java (M1-035b — inline new InboundRouter() block in bodyAtExactlyTheCapIsAcceptedAndNormalizeRuns wired with no-op fakes for the 4 new mandatory @Inject fields; no @Test method body change; acceptance item 14)
-    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterContactIdRedactionTest.java (M1-038 — private newRouter() factory method wired with no-op fakes for the 4 new mandatory @Inject fields; no @Test method body change; acceptance item 14)
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterNormalizeTest.java (M1-035b — inline new InboundRouter() block in bodyAtExactlyTheCapIsAcceptedAndNormalizeRuns wired with no-op fakes for the 4 new mandatory @Inject fields; no @Test method body change; acceptance item 15)
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterContactIdRedactionTest.java (M1-038 — private newRouter() factory method wired with no-op fakes for the 4 new mandatory @Inject fields; no @Test method body change; acceptance item 15)
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/AdapterRouterIT.java (M1-008c IT — @BeforeEach pre-seed of mvp-user-1 / mvp-user-2 users rows with registration_state='invited'; no @Test method body change; acceptance item 16)
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/command/AddSourceIT.java (M1-036 IT — @BeforeEach pre-seed of m1-036-mvp-user-1 users row with registration_state='invited'; no @Test method body change; acceptance item 17)
   preserves:
-    - all tests currently green on main outside files_scope
-    - M1-044a's InviteCodeConsumerTest / BanCheckTest / AutoRegisterServiceTest / AdapterRouterIT (RateCapBucketTest is extended, not preserved)
+    - all tests currently green on main outside files_scope (per verified_stays_green entries above for the eight router/IT-driving classes that stay green for distinct reasons)
+    - M1-044a's InviteCodeConsumerTest / BanCheckTest / AutoRegisterServiceTest (RateCapBucketTest is extended, not preserved)
 spec_refs:
   - docs/spec/security.md §Authorization model
   - docs/spec/security.md §User ban
@@ -272,6 +349,58 @@ decision_refs:
   - D45
   - D46
 revisions:
+  - date: 2026-05-22
+    reason: clarity-fail refine snapshot (post-A+D+E architecture — stays-green premise dissolves; lint requires verified_stays_green)
+    summary: |
+      Pre-refine snapshot. The umbrella M1-047 (process-fix A+D+E)
+      merged on 2026-05-22 and reopened this ticket. The new
+      architecture invalidates several load-bearing claims in the
+      ticket as written:
+
+        - The 2026-05-21 premise-fail traced to 7 failures in
+          AddSourceCommandHandlerTest + AddSourceBanCheckOrderingTest.
+          M1-049 (test pyramid handler/router/IT decoupling) refactored
+          both classes to call handler.handle() directly with mocks —
+          they no longer drive InboundRouter at all. The premise-fail's
+          Mode A (5 unknown-DM failures) + Mode B (2 banned-DM failures)
+          dissolve under the new test pyramid; the "stays green
+          unchanged" claim about M1-035c/M1-036/M1-037/M1-039/M1-040 in
+          the prior Out-of-scope expansion is also moot because those
+          tests no longer exercise the router.
+
+        - M1-049 also refactored AdapterRegistryTest — acceptance item
+          15's @BeforeEach alice pre-seed plan needs to be re-audited
+          against the refactored wiring round-trip.
+
+        - M1-048 added the OUT-OF-SCOPE-STAYS-GREEN-VERIFIABLE lint
+          BLOCKER: files_scope contains InboundRouter.java +
+          RateCapBucket.java (shared dispatch surfaces) but
+          verified_stays_green: is empty. The refined ticket must
+          either populate verified_stays_green: with one-line audit
+          notes per router-driving test OR move those tests into
+          files_scope.
+
+        - M1-050 added JSpecify @NonNull / @Nullable boundary
+          annotations on boundary classes (InboundRouter, AdapterRegistry,
+          MessagingAdapter, etc.). Acceptance item 14's "4 new mandatory
+          @Inject fields" claim needs to be verified against the post-
+          M1-050 collaborator surface — the helper fakes in
+          InboundRouterNormalizeTest and InboundRouterContactIdRedactionTest
+          must respect any @NonNull constraints on the new fields.
+
+      Prior frontmatter values (pre-refine):
+        - status: pending (reopened by M1-047 umbrella; will return to pending on refine commit)
+        - acceptance: 18 items (1.5 rate-cap silent drop, step 2/3/4/7-DM-gate, BundleKeys/bundles/application.properties, InboundRouterIntakeOrderingTest 8 scenarios, InboundRouterTest new rate-cap test + 8 preserved, InboundRouterNormalizeTest helper-only, InboundRouterContactIdRedactionTest helper-only, AdapterRegistryTest @BeforeEach pre-seed, RateCapBucket eviction-predicate widening, RateCapBucketTest evictionDrainedIdle, mvn verify exit 0)
+        - files_budget: 13
+        - files_scope: 11 paths (1 router, 1 RateCapBucket, 1 BundleKeys, 1 bundles/en, 1 application.properties, 6 test files)
+        - out_of_scope: 14 items including the now-stale "M1-035c/M1-036/M1-037/M1-039/M1-040 tests stay green unchanged" carve-out and the "every test outside the eleven files in files_scope" assertion
+        - test_plan.adds: [InboundRouterIntakeOrderingTest]
+        - test_plan.modifies: 9 entries (3 helper-only edits flagged via verified_stays_green-style audit notes)
+        - test_plan.preserves: M1-044a service tests + everything else outside files_scope
+        - spec_refs: 5 entries unchanged (security.md §Authorization model / §User ban / §Invite-code registration / §Rate limiting; commands.md §Onboarding)
+        - decision_refs: D11, D44, D45, D46 unchanged
+        - verified_stays_green: (absent — required by M1-048 lint)
+        - clarity_check: (last run was PASS pre-premise-fail on 2026-05-21; not yet re-run post-M1-047 umbrella)
   - date: 2026-05-21
     reason: premise-fail refine snapshot (item 14 structurally unsatisfiable; AdapterRegistryTest collateral)
     summary: |
@@ -444,14 +573,8 @@ revisions:
       single-snapshot reuse pattern (derive both the emptiness predicate
       and the ban predicate from the SAME UserSnapshot lookup to
       eliminate TOCTOU).
-outline_file: target/m1-tick-outline-M1-044b.md
-clarity_check:
-  date: 2026-05-21
-  verdict: WARN
-  warnings:
-    - "ACCEPTANCE-RUNNABLE: Acceptance items 1, 3, 5, 6, 7 contain source-order reading checks or behavioral prose assertions without runnable commands. Behavioral coverage is provided by InboundRouterIntakeOrderingTest (item 12) which covers all 8 scenarios with mock-verified collaborator sequences. Not a blocker; the runnable equivalent is present."
-    - "SELF-CONTAINED-CHECK: §Definition of Done bullet for InboundRouterIntakeOrderingTest reads 'six DM scenarios + the group scenario' (7 total) but acceptance item 12 enumerates scenarios (a)–(g) as DM (7 DM scenarios) + (h) as Group = 8 total. An implementer reading only the DoD prose might implement 6 DM scenarios and miss scenario (g) (the DM-gate group_only carve-out test — a load-bearing security assertion). The acceptance items are authoritative and fully specify all 8 scenarios with named greps, so this is a DoD-prose inaccuracy rather than a structural gap. Recommend updating the DoD bullet to 'seven DM scenarios + the group scenario' to match the acceptance enumeration."
-  blockers: []
+outline_file:
+clarity_check: {}
 ---
 
 # M1-044b: InboundRouter intake-step splice (1.5, 2, 4, 7-DM-gate) + bundle keys + rate-cap config
@@ -506,10 +629,13 @@ unit test in particular).
   invite TTL + brute-force threshold/window + probation
   duration + PENDING cap config keys.
 - `InboundRouterIntakeOrderingTest` (new) pins the step
-  ordering across the six DM scenarios + the group scenario.
-- `InboundRouterTest` (M1-035b's, modified) adds one new test
-  for the rate-cap silent-drop case; all prior assertions
-  remain.
+  ordering across seven DM scenarios (a)–(g) + the group
+  scenario (h) — eight @Tests total per acceptance item 12.
+- `InboundRouterTest` (M1-035b/M1-035d, modified) adds one new
+  test for the rate-cap silent-drop case AND removes the three
+  M1-035d first-DM-auto-register tests whose premise is
+  spec-invalidated by the splice; the five M1-035b pre-existing
+  tests remain unchanged (acceptance items 13 and 14).
 - `InboundRouterNormalizeTest` (M1-035b's) and
   `InboundRouterContactIdRedactionTest` (M1-038's) are
   helper-only modified — the `newRouter()` factory / inline
@@ -517,15 +643,20 @@ unit test in particular).
   is wired with no-op fakes for the 4 new mandatory @Inject
   fields on InboundRouter; NO `@Test` method body is changed
   in either file. The body-size cap, normalize pass, and
-  ContactIds.redact log-redaction assertions remain verbatim.
-- `AdapterRegistryTest` (M1-008b's) is helper-only modified —
-  its `@BeforeEach` pre-seeds an `alice` users row with
+  ContactIds.redact log-redaction assertions remain verbatim
+  (acceptance item 15).
+- `AdapterRouterIT` (M1-008c IT) is helper-only modified —
+  its `@BeforeEach resetAdapterAndCleanMvpContacts()` pre-seeds
+  `mvp-user-1` and `mvp-user-2` users rows with
   `registration_state='invited'` so the splice's step 2
-  invite-gate does not short-circuit the wiring round-trip.
-  No `@Test` method body is changed; the
-  `singleAdapterHappyPathActivatesInMemoryAndRegistersRouter`
-  assertion on UNKNOWN_COMMAND_REPLY remains the test's exit
-  condition.
+  invite-gate does not short-circuit the 4 wiring round-trip
+  @Tests. No `@Test` method body is changed (acceptance item 16).
+- `AddSourceIT` (M1-036 IT) is helper-only modified — its
+  `@BeforeEach cleanup()` pre-seeds an `m1-036-mvp-user-1`
+  users row with `registration_state='invited'` so the splice's
+  step 2 invite-gate does not short-circuit the MVP exit-
+  criterion §4 flow. No `@Test` method body is changed
+  (acceptance item 17).
 - `mvn -B clean verify` exits 0.
 
 ## Implementation notes
@@ -685,7 +816,7 @@ unit test in particular).
   This is the same behavior a process restart would produce for a
   long-idle contact, so the bound is conservative.
   - RateCapBucketTest gains one new method (`evictionDrainedIdle`
-    per acceptance item 17). The M1-044a `RateCapBucketTest`'s four
+    per acceptance item 19). The M1-044a `RateCapBucketTest`'s four
     existing tests (underCap, overCap, independent, refill) MUST
     continue to pass — they each issue a tryAcquire that resets
     `lastRefillEpochMillis`, so no eviction would have fired
@@ -781,40 +912,62 @@ unit test in particular).
 
 ## Authorized test changes
 
-- `InboundRouterTest.java` — M1-035b's class is **extended**
-  (one new test method) but no prior method is modified.
-- `AdapterRegistryTest.java` — M1-008b's class is **extended**
-  (the `@BeforeEach` resetAdapterState is widened to pre-seed an
-  `alice` users row with `registration_state='invited'` so the
-  M1-044b splice's step 2 invite-gate does not short-circuit the
-  wiring round-trip's `/xyz` delivery). No `@Test` method body is
-  modified; the existing single happy-path assertion on
-  `UNKNOWN_COMMAND_REPLY` remains the test's exit condition. See
-  acceptance item 15.
+- `InboundRouterTest.java` — M1-035b's class is **extended** (one
+  new `rateCapOverflowDropsSilentlyWithoutOutbound` @Test method
+  per acceptance item 13) AND **contracted** (3 M1-035d first-DM
+  @Tests REMOVED per acceptance item 14 — their premise is
+  spec-invalidated by the splice; replacement coverage lives in
+  InboundRouterIntakeOrderingTest scenarios (d), (e) per
+  acceptance item 12). The 5 M1-035b pre-existing methods
+  (emptyAndWhitespace, leadingWhitespace, chatMode,
+  unknownCommand, commandHandlerException) stay green unchanged.
 - `InboundRouterNormalizeTest.java` (M1-035b) — extended with a
-  helper-only modification per acceptance item 14: the inline
+  helper-only modification per acceptance item 15: the inline
   `new InboundRouter()` block in
   `bodyAtExactlyTheCapIsAcceptedAndNormalizeRuns` (the one @Test
   method that calls `router.onMessage(...)`) is wired with no-op
   fakes for the 4 new mandatory @Inject fields (`rateCapBucket`,
-  `inviteCodeConsumer`, `banCheck`, `bundleLoader`, `dataSource`).
-  The other 6 normalize-related @Test methods invoke
-  `InboundRouter.normalize(...)` as a static method and need no
-  router instance — they are NOT modified.
+  `inviteCodeConsumer`, `banCheck`, `bundleLoader`). The other 6
+  normalize-related @Test methods invoke `InboundRouter.normalize(...)`
+  as a static method and need no router instance — they are NOT
+  modified.
 - `InboundRouterContactIdRedactionTest.java` (M1-038) — extended
-  with a helper-only modification per acceptance item 14: the
+  with a helper-only modification per acceptance item 15: the
   private `newRouter()` factory method is updated to assign no-op
   fakes for the 4 new mandatory @Inject fields. No `@Test` method
   body is modified — every redaction assertion (the contact-id
   redaction in log lines on size-cap reject, on normalize-empty
   return, on dispatch happy-path, etc.) stays as M1-038 wrote it.
+- `AdapterRouterIT.java` (M1-008c IT) — extended with a
+  helper-only modification per acceptance item 16: the
+  `@BeforeEach resetAdapterAndCleanMvpContacts()` method is
+  widened to pre-seed `mvp-user-1` and `mvp-user-2` users rows
+  with `registration_state='invited'` AFTER the existing
+  `DELETE FROM users WHERE contact_id LIKE 'mvp-%'` cleanup but
+  BEFORE the @Test bodies run, so the splice's step 2 invite-gate
+  does not short-circuit the 4 wiring round-trip @Tests. No
+  `@Test` method body is modified.
+- `AddSourceIT.java` (M1-036 IT) — extended with a helper-only
+  modification per acceptance item 17: the `@BeforeEach
+  cleanup()` method is widened to pre-seed an
+  `m1-036-mvp-user-1` users row with `registration_state='invited'`
+  AFTER the existing cleanup statements but BEFORE the
+  `mvpExitCriterionFourEndToEndAddSourceProducesRowsTagsSubscriptionAndReply`
+  @Test body runs, so the splice's step 2 invite-gate does not
+  short-circuit the MVP exit-criterion §4 flow. No `@Test` method
+  body is modified.
 - `RateCapBucketTest.java` — M1-044a's class is **extended**
   (one new `evictionDrainedIdle` test method per acceptance
-  item 17) but no prior method is modified. The four M1-044a
+  item 19) but no prior method is modified. The four M1-044a
   methods (underCap, overCap, independent, refill) MUST stay
   green under the widened eviction predicate; the new method
   exercises only the previously-untested drained-and-idle case.
-- (no other pre-existing test is modified by this ticket.)
+- (no other pre-existing test is modified by this ticket. The
+  formerly-listed `AdapterRegistryTest.java` is NOT modified by
+  this ticket — post-M1-049 it uses a `RecordingInboundRouter`
+  @Alternative that intercepts onMessage() before dispatch, so
+  the splice is unobservable; see the `verified_stays_green:`
+  entry above.)
 
 ## Alternatives considered
 
