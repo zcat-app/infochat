@@ -3,23 +3,21 @@ id: M1-044e
 title: InboundRouter splice red-team fixes (DM-gate pre-dispatch, rate-cap precedence, lookupUser redaction, non-UUID counter)
 status: pending
 created: 2026-05-22
-last_updated: 2026-05-22
+last_updated: 2026-05-23
 blocked_by:
   - M1-044b
-files_budget: 5
+files_budget: 7
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/InboundRouter.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/InviteCodeConsumer.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterIntakeOrderingTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterNormalizeTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterContactIdRedactionTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InviteCodeConsumerTest.java
 verified_stays_green:
   - test_class: app.zcat.infochat.provider.messaging.InboundRouterTest
     rationale: "the size-cap-precedence and DM-gate-pre-dispatch swaps move ordering boundaries inside @Test methods that this ticket modifies in-place; the 6 pre-existing M1-035b/M1-044b @Test methods (emptyAndWhitespace, leadingWhitespace, chatMode, unknownCommand, commandHandlerException, rateCapOverflowDropsSilentlyWithoutOutbound) keep their behavioral assertions"
-  - test_class: app.zcat.infochat.provider.messaging.InboundRouterNormalizeTest
-    rationale: "M1-035b normalize tests use a NoopRateCapBucket / NoopInviteCodeConsumer / NoopBanCheck setup; the new rate-cap-precedence ordering moves the size-cap branch AFTER the no-op rate-cap, but the no-op always returns true so the size-cap branch still fires for the one onMessage @Test method (bodyAtExactlyTheCapIsAcceptedAndNormalizeRuns) and produces the same MESSAGE_TOO_LARGE_REPLY"
-  - test_class: app.zcat.infochat.provider.messaging.InboundRouterContactIdRedactionTest
-    rationale: "M1-038 redaction tests construct the router with NoopRateCapBucket / NoopInviteCodeConsumer / NoopBanCheck; the lookupUser-redaction fix only affects the SQLException catch path (not exercised by these tests, which run against happy-path SELECTs); ordering swaps do not change which log sites the redaction runs against"
   - test_class: app.zcat.infochat.provider.messaging.AdapterRouterIT
     rationale: "M1-008c/M1-044b wiring round-trip pre-seeds users rows with registration_state='invited' — the DM-gate-pre-dispatch fix only short-circuits for 'group_only'; 'invited' users pass through dispatch unchanged"
   - test_class: app.zcat.infochat.provider.command.AddSourceIT
@@ -62,7 +60,7 @@ out_of_scope:
   - any new admin command handler — M1-044c territory
   - any change to the V12 migration or any V<N> migration — this ticket modifies code only
   - any change to AddSourceCommandHandler / SummaryCommandHandler / HelpCommandHandler bodies — M1-044c/M1-045 own those handlers; the AUTH-BYPASS fix lives at the router caller side, not by hardening each handler
-  - any test outside the five files in files_scope — every test enumerated in `verified_stays_green:` stays green under the surgical fixes (see per-entry rationale)
+  - any test outside the seven files in files_scope — every test enumerated in `verified_stays_green:` stays green under the surgical fixes (see per-entry rationale)
 acceptance:
   - "InboundRouter.onMessage swaps the size-cap branch and the rate-cap branch so the rate-cap check runs FIRST (step 1.5) and the size-cap branch runs AFTER. Verify by reading InboundRouter.java: the call to rateCapBucket.tryAcquire appears in source order BEFORE the `raw.getBytes(UTF_8).length > maxInboundBodyBytes` check AND BEFORE the MESSAGE_TOO_LARGE_REPLY sendReply. grep -nE 'rateCapBucket\\.tryAcquire' InboundRouter.java AND grep -nE 'maxInboundBodyBytes' InboundRouter.java both return ≥1 match; the line number of the FIRST tryAcquire match is LESS than the line number of the FIRST maxInboundBodyBytes match"
   - "InboundRouter.onMessage moves the step-7 DM-gate carve-out so it fires BEFORE the parse-and-dispatch block (step 6), not after. Verify by reading InboundRouter.java: the `registrationState == 'group_only'` predicate AND its `sendReply(ERROR_INVITE_REQUIRED) + return` branch appear in source order BEFORE the handleSlash call. grep -nE 'REGISTRATION_STATE_GROUP_ONLY' InboundRouter.java returns ≥1 match; the line number of the FIRST REGISTRATION_STATE_GROUP_ONLY match is LESS than the line number of the FIRST `handleSlash\\(` match in onMessage"
@@ -72,19 +70,26 @@ acceptance:
   - "InboundRouter.onMessage no longer parses the UUID-shape of the body before invoking InviteCodeConsumer.consume; the parseInviteCode helper is removed (or the call-site is removed). InboundRouter always calls inviteCodeConsumer.consume(adapter, contactId, normalizedBody) in step 2's DM-unknown branch, passing the normalized string body. Verify: grep -nE 'parseInviteCode' InboundRouter.java returns ZERO matches AND grep -nE 'inviteCodeConsumer\\.consume\\(' InboundRouter.java returns ≥1 match. The argument to consume is the normalized String body, not a UUID — grep -nE 'inviteCodeConsumer\\.consume\\([^)]*UUID' InboundRouter.java returns ZERO matches"
   - "InviteCodeConsumer.consume's signature changes from (String adapter, String contactId, UUID candidateCode) to (String adapter, String contactId, String normalizedBody). The method internally attempts to parse the body as a UUID; on parse failure it returns Rejected AND increments the brute-force counter (via the same insertAudit + counter row that an invalid-but-UUID-shaped code increments). Verify: grep -nE 'public\\s+Outcome\\s+consume\\(\\s*@?NonNull?\\s*String\\s+adapter,\\s*@?NonNull?\\s*String\\s+contactId,\\s*@?NonNull?\\s*String\\s+\\w+\\s*\\)' InviteCodeConsumer.java returns ≥1 match. The old UUID-typed signature returns ZERO matches: grep -nE 'public\\s+Outcome\\s+consume\\(\\s*[^)]*UUID' InviteCodeConsumer.java returns ZERO matches"
   - "InviteCodeConsumerTest gains a new @Test method whose name contains `nonUuidBodyIncrementsBruteForceCounter` (case-insensitive) that asserts: calling consume() with a non-UUID String body returns Rejected AND inserts a brute-force-counter row (same shape as the existing invalid-UUID test seeds), so N+1 non-UUID attempts past threshold trip BruteForceThresholdBreached. Verify: grep -iE 'void\\s+\\w*nonUuidBodyIncrementsBruteForceCounter\\w*\\s*\\(' InviteCodeConsumerTest.java returns ≥1 match"
-  - "InviteCodeConsumerTest's 7 M1-044a pre-existing @Test methods continue to pass with the signature change applied (each callsite updated from `consume(adapter, contactId, uuid)` to `consume(adapter, contactId, uuid.toString())`). No assertion semantics change; the only edit is the call-site shape. Verify: grep -cE '^\\s*@Test\\b' InviteCodeConsumerTest.java returns 8 (7 pre-existing + 1 new nonUuidBody test)"
+  - "InviteCodeConsumerTest's 8 M1-044a pre-existing @Test methods continue to pass with the signature change applied (each callsite updated from `consume(adapter, contactId, uuid)` to `consume(adapter, contactId, uuid.toString())`). No assertion semantics change; the only edit is the call-site shape. Verify: grep -cE '^\\s*@Test\\b' InviteCodeConsumerTest.java returns 9 (8 pre-existing + 1 new nonUuidBody test)"
   - "InboundRouterIntakeOrderingTest's scenario (g) `groupOnlyDmGateReplacesHandlerReplyWithInviteRequired` is renamed and rewritten to assert the NEW ordering: when the inbound is a DM AND snapshot.registrationState='group_only', InboundRouter sends ERROR_INVITE_REQUIRED and does NOT call handleSlash. The new method name contains `groupOnlyDmGateShortCircuitsBeforeDispatch` (case-insensitive). The expected collaborator-order log changes: handleSlash is REMOVED from the expected sequence; bundleLoader.get(error.invite.required) appears AFTER banCheck.isBanned, not after a handler invocation. Verify: grep -iE 'void\\s+\\w*groupOnlyDmGateShortCircuitsBeforeDispatch\\w*\\s*\\(' InboundRouterIntakeOrderingTest.java returns ≥1 match AND grep -iE 'void\\s+\\w*groupOnlyDmGateReplacesHandlerReply\\w*\\s*\\(' InboundRouterIntakeOrderingTest.java returns ZERO matches"
   - "InboundRouterIntakeOrderingTest gains a new @Test method whose name contains `oversizedBodyDropsAfterOverRateCap` (case-insensitive) that asserts the rate-cap-precedence fix: when rateCapBucket.tryAcquire returns false AND the inbound body is OVERSIZE, the over-cap silent-drop fires FIRST and no MESSAGE_TOO_LARGE_REPLY is emitted (the bucket's silent-drop dominates the size-cap reply). Verify: grep -iE 'void\\s+\\w*oversizedBodyDropsAfterOverRateCap\\w*\\s*\\(' InboundRouterIntakeOrderingTest.java returns ≥1 match"
   - "InboundRouterIntakeOrderingTest's scenario (a) `overSizeCapDropsBeforeAnyCollaboratorIsConsulted` is renamed and rewritten: under the new ordering, an oversize body that PASSES the rate cap still drops with MESSAGE_TOO_LARGE_REPLY, but the rateCapBucket.tryAcquire call MUST appear FIRST in the collaborator sequence. The new method name contains `overSizeCapDropsAfterRateCapPassesNoOtherCollaborator` (case-insensitive). The expected collaborator-order log starts with rateCapBucket.tryAcquire, then the size-cap MESSAGE_TOO_LARGE_REPLY sendReply; users lookup, inviteCodeConsumer, banCheck must NOT be consulted. Verify: grep -iE 'void\\s+\\w*overSizeCapDropsAfterRateCapPassesNoOtherCollaborator\\w*\\s*\\(' InboundRouterIntakeOrderingTest.java returns ≥1 match AND grep -iE 'void\\s+\\w*overSizeCapDropsBeforeAnyCollaboratorIsConsulted\\w*\\s*\\(' InboundRouterIntakeOrderingTest.java returns ZERO matches"
-  - "InboundRouterIntakeOrderingTest's scenario (e) `unknownContactInvalidInviteRejectsWithFixedReplyAndStopsBeforeBanCheck` is updated for the new InviteCodeConsumer.consume signature: the test now passes a non-UUID String body (not a UUID.toString()), and the FakeInviteCodeConsumer in the test file is updated to accept a String parameter (not a UUID) — its consume() returns the canned outcome regardless of body shape. The renamed test method continues to assert that Rejected outcome → ERROR_INVITE_REQUIRED reply → no banCheck call. Verify: the test file's FakeInviteCodeConsumer.consume method signature contains `String\\s+\\w+` for the third parameter (not `UUID`). grep -nE 'consume\\(String\\s+\\w+,\\s*String\\s+\\w+,\\s*String\\s+\\w+\\)' InboundRouterIntakeOrderingTest.java returns ≥1 match"
+  - "InboundRouterIntakeOrderingTest's scenario (e) `unknownContactInvalidInviteRejectsWithFixedReplyAndStopsBeforeBanCheck` is updated for the new InviteCodeConsumer.consume signature: the test now passes a non-UUID String body (not a UUID.toString()), and the FakeInviteCodeConsumer in the test file is updated to accept a String parameter (not a UUID) — its consume() returns the canned outcome regardless of body shape. The method name does NOT change; this is a body-only update. The renamed-scenario-(a) and renamed-scenario-(g) test methods plus this body-updated scenario-(e) together cover the three @Test methods whose internals change; the other 5 IntakeOrderingTest @Test methods (overRateCapDropsSilentlyWithNoOtherCollaboratorConsulted, emptyBodyAfterNormalizeDropsBeforeUsersLookupOrInviteConsume, unknownContactValidInviteAcceptedSendsWelcomeAndStopsBeforeBanCheck, knownBannedDmStopsWithFixedReplyAndNoHandleSlash, groupMentionAutoRegistersAndDispatchesNormally) stay green unchanged. Verify: the test file's FakeInviteCodeConsumer.consume method signature contains `String\\s+\\w+` for the third parameter (not `UUID`). grep -nE 'consume\\(String\\s+\\w+,\\s*String\\s+\\w+,\\s*String\\s+\\w+\\)' InboundRouterIntakeOrderingTest.java returns ≥1 match"
+  - "InboundRouterIntakeOrderingTest's final @Test count after the 2 renames (scenarios a, g) plus the 1 body-only update (scenario e) plus the 1 new addition (oversizedBodyDropsAfterOverRateCap) is 9 (8 pre-existing + 1 net addition; renames and body updates do not change the count). Verify: grep -cE '^\\s*@Test\\b' InboundRouterIntakeOrderingTest.java returns 9"
+  - "InboundRouterNormalizeTest's inner-class NoopInviteCodeConsumer.consume signature updates from (String adapter, String contactId, UUID candidateCode) to (String adapter, String contactId, String body) to remain compilable after the InviteCodeConsumer.consume signature change. The method body returns the canned outcome unchanged; no behavioral change. Verify: grep -nE 'consume\\(\\s*String\\s+\\w+,\\s*String\\s+\\w+,\\s*UUID\\s+\\w+\\s*\\)' InboundRouterNormalizeTest.java returns ZERO matches AND grep -nE 'consume\\(\\s*String\\s+\\w+,\\s*String\\s+\\w+,\\s*String\\s+\\w+\\s*\\)' InboundRouterNormalizeTest.java returns ≥1 match"
+  - "InboundRouterNormalizeTest's `oversizeBodyIsDroppedAndNormalizeIsNeverInvoked` @Test method wires rateCapBucket via `router.rateCapBucket = new NoopRateCapBucket();` before invoking onMessage so the new rate-cap-first ordering does not NPE on the bare `new InboundRouter()` construction. The @Test method name does NOT change. Assertion semantics do NOT change (the test still asserts MESSAGE_TOO_LARGE_REPLY is emitted and NORMALIZE_INVOCATIONS does not increment). Verify: grep -cE 'router\\.rateCapBucket\\s*=\\s*new NoopRateCapBucket\\(\\)' InboundRouterNormalizeTest.java returns 2 (one pre-existing in newRouterWithKnownVouchedUser helper + one new in oversizeBodyIsDroppedAndNormalizeIsNeverInvoked)"
+  - "InboundRouterNormalizeTest's other 7 @Test methods stay green unchanged. Six of them (plainTextOutsideFencesIsNfkcNormalisedBidiStrippedAndTrimmed, ligatureFiInsideBacktickFenceRoundTripsUnchanged, fullwidthDigitInsideFenceRoundTripsUnchanged, trailingWhitespaceInsideFenceIsPreserved, textBeforeAndAfterFenceIsNormalizedFenceIsPreserved, tildeDelimitedFenceCarvesOutTheSameWay) call the static method `InboundRouter.normalize(body)` directly without constructing a router, so the new ordering does not affect them. The seventh (bodyAtExactlyTheCapIsAcceptedAndNormalizeRuns) uses the `newRouterWithKnownVouchedUser()` helper that already wires NoopRateCapBucket — under the new ordering the no-op bucket returns true, the size cap passes (the body is exactly at the cap, not over), and normalize runs as before. The file's final @Test count is unchanged: grep -cE '^\\s*@Test\\b' InboundRouterNormalizeTest.java returns 8 (the 8 pre-existing methods, no additions, no removals)"
+  - "InboundRouterContactIdRedactionTest's inner-class NoopInviteCodeConsumer.consume signature updates from (String adapter, String contactId, UUID candidateCode) to (String adapter, String contactId, String body) to remain compilable after the InviteCodeConsumer.consume signature change. The method body returns the canned outcome unchanged; no behavioral change. The 3 ContactIdRedactionTest @Test methods stay green unchanged; the file's final @Test count is unchanged. Verify: grep -nE 'consume\\(\\s*String\\s+\\w+,\\s*String\\s+\\w+,\\s*UUID\\s+\\w+\\s*\\)' InboundRouterContactIdRedactionTest.java returns ZERO matches AND grep -nE 'consume\\(\\s*String\\s+\\w+,\\s*String\\s+\\w+,\\s*String\\s+\\w+\\s*\\)' InboundRouterContactIdRedactionTest.java returns ≥1 match AND grep -cE '^\\s*@Test\\b' InboundRouterContactIdRedactionTest.java returns 3"
   - "InboundRouterTest's `rateCapOverflowDropsSilentlyWithoutOutbound` @Test method continues to pass under the new ordering. The 5 M1-035b/M1-044b pre-existing @Test methods (emptyAndWhitespaceAndInvisibleOnlyBodies, leadingWhitespaceBeforeSlashCommand, chatModeBodyProducesDeterministic, unknownCommandProducesFriendlyUnknownCommandReply, commandHandlerExceptionProducesInternalErrorReplyWithoutLeakingMessage) stay green unchanged; no @Test annotation count change. Verify: grep -cE '^\\s*@Test\\b' InboundRouterTest.java returns 6 (5 pre-existing + 1 M1-044b rate-cap test); git diff main -- InboundRouterTest.java shows ZERO removed @Test annotation lines"
-  - "mvn -B clean verify from the repo root exits 0; every prior test continues to pass: all M1-035c/M1-036/M1-037/M1-038/M1-039/M1-040/M1-043 tests, M1-044a's per-service tests (RateCapBucketTest's 5 methods, BanCheckTest, AutoRegisterServiceTest, InviteCodeConsumerTest's 8 methods after the +1 non-UUID test), M1-044b's per-file tests (InboundRouterTest's 6 methods, InboundRouterIntakeOrderingTest's 8 methods after the 3 renames), M1-049's handler-tier tests, M1-050's JSpecify lint"
+  - "mvn -B clean verify from the repo root exits 0; every prior test continues to pass: all M1-035c/M1-036/M1-037/M1-038/M1-039/M1-040/M1-043 tests, M1-044a's per-service tests (RateCapBucketTest's 5 methods, BanCheckTest's 3 methods, AutoRegisterServiceTest's 4 methods, InviteCodeConsumerTest's 9 methods after the +1 non-UUID test), M1-044b's per-file tests (InboundRouterTest's 6 methods, InboundRouterIntakeOrderingTest's 9 methods after the 2 renames + 1 body update + 1 new), InboundRouterNormalizeTest's 8 methods (1 body update for rateCapBucket wiring), InboundRouterContactIdRedactionTest's 3 methods (no body changes — only inner-class signature), M1-049's handler-tier tests, M1-050's JSpecify lint"
 test_plan:
   modifies:
     - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/InboundRouter.java
     - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/InviteCodeConsumer.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterTest.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterIntakeOrderingTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterNormalizeTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterContactIdRedactionTest.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InviteCodeConsumerTest.java
   preserves:
     - all tests currently green on main (enumerated in verified_stays_green)
@@ -96,6 +101,79 @@ spec_refs:
 decision_refs:
   - D44
   - D45
+escalations:
+  - date: 2026-05-23
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      FILES-BUDGET-PLAUSIBLE FAIL: files_scope (5 files) and test_plan.modifies
+      exclude two test files that MUST be modified to keep mvn verify passing
+      after InviteCodeConsumer.consume signature change from (String, String, UUID)
+      to (String, String, String):
+        (a) infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterNormalizeTest.java
+            — inner class NoopInviteCodeConsumer.consume uses old UUID parameter
+            type (compilation break) AND oversizeBodyIsDroppedAndNormalizeIsNeverInvoked
+            constructs InboundRouter without rateCapBucket (NPE under new
+            rate-cap-first ordering).
+        (b) infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterContactIdRedactionTest.java
+            — inner class NoopInviteCodeConsumer.consume uses old UUID parameter
+            type (compilation break).
+      Fix: add both paths to files_scope and test_plan.modifies; update
+      files_budget from 5 to 7; extend Authorized test changes / Implementation
+      notes §Test-side updates describing the signature fix and the rateCapBucket
+      wiring fix.
+revisions:
+  - date: 2026-05-23
+    reason: clarity-fail refine (1 blocker FILES-BUDGET-PLAUSIBLE — files_scope excluded two test files containing inline NoopInviteCodeConsumer subclasses with old UUID signature; oversize NormalizeTest also uses bare `new InboundRouter()` which would NPE under the new rate-cap-first ordering)
+    summary: |
+      Pre-refine snapshot. The 2026-05-23 clarity FAIL surfaced one
+      FILES-BUDGET-PLAUSIBLE blocker plus two confirming
+      VERIFIED-STAYS-GREEN-PLAUSIBLE warnings, all rooted in the same
+      ground-truth miss: the original ticket asserted that
+      InboundRouterNormalizeTest and InboundRouterContactIdRedactionTest
+      stay green untouched, without actually running
+      `grep -rn "extends InviteCodeConsumer\|consume(.*UUID"` across
+      the test tree. The survey would have surfaced the two inline
+      NoopInviteCodeConsumer inner classes (NormalizeTest:402,
+      ContactIdRedactionTest:187) with the old (String, String, UUID)
+      signature — both compile-break after the
+      InviteCodeConsumer.consume signature change. NormalizeTest's
+      `oversizeBodyIsDroppedAndNormalizeIsNeverInvoked` also
+      constructs InboundRouter directly without wiring rateCapBucket;
+      under the new rate-cap-first ordering the bucket call comes
+      first and NPEs on the null field.
+
+      Changes applied in this refine:
+        - files_budget: 5 → 7
+        - files_scope: +2 paths (InboundRouterNormalizeTest,
+          InboundRouterContactIdRedactionTest)
+        - test_plan.modifies: +2 paths (same)
+        - verified_stays_green: removed the 2 entries that moved into
+          files_scope (NormalizeTest, ContactIdRedactionTest)
+        - out_of_scope: "five files" → "seven files"
+        - acceptance items: added 4 new items (NormalizeTest signature
+          fix, NormalizeTest rateCapBucket wiring fix, NormalizeTest
+          other-7-stay-green count assertion, ContactIdRedactionTest
+          signature fix; also a new IntakeOrderingTest @Test count
+          assertion of 9)
+        - Implementation notes §Test-side updates: added 2 new bullets
+          describing the NormalizeTest and ContactIdRedactionTest edits
+          (signature fix + rateCapBucket wiring)
+
+      Two count bugs surfaced during the grep-grounded survey that
+      the clarity reviewer did not flag (it audited the named blocker,
+      not arithmetic) but that would have caused a follow-up clarity
+      WARN/FAIL or a round-1 reviewer REWORK if left in:
+        - acceptance item 9: InviteCodeConsumerTest pre-existing
+          count was claimed as 7 but ground-truth shows 8 @Test
+          methods (acceptedContactBound, acceptedOpenAdapter,
+          rejectedAlreadyUsed, rejectedExpired, rejectedCrossContact,
+          rejectedCrossAdapter, bruteForceBreach,
+          bruteForceBreachAuditFailureRetries). Final count after the
+          +1 nonUuidBody addition is 9, not 8. Fixed.
+        - acceptance item 15 (mvn verify): IntakeOrderingTest "8
+          methods after the 3 renames" was wrong on both counts —
+          only 2 actual renames (a, g), plus 1 body-only update (e),
+          plus 1 new addition. Final count is 9, not 8. Fixed.
 ---
 
 # M1-044e: InboundRouter splice red-team fixes (DM-gate pre-dispatch, rate-cap precedence, lookupUser redaction, non-UUID counter)
@@ -350,11 +428,45 @@ the brute-force budget under a new input shape.
     flood-defense property). The test sets the RateCapBucket fake to
     return false AND passes an oversize body; asserts no outbound
     reply was sent AND no other collaborator was consulted.
-  - `InviteCodeConsumerTest`'s 7 M1-044a pre-existing methods get
+  - `InviteCodeConsumerTest`'s 8 M1-044a pre-existing methods get
     their call sites updated from `consume(adapter, contactId, uuid)`
     to `consume(adapter, contactId, uuid.toString())`. NEW @Test
     method `nonUuidBodyIncrementsBruteForceCounter` exercises the
-    non-UUID counter increment + threshold trip.
+    non-UUID counter increment + threshold trip. Final @Test count
+    is 9 (8 pre-existing + 1 new).
+  - `InboundRouterNormalizeTest`'s inner-class `NoopInviteCodeConsumer.consume`
+    signature changes from `(String, String, UUID)` to `(String, String, String)`
+    to remain compilable after the production `InviteCodeConsumer.consume`
+    signature change. The method body returns the canned outcome unchanged;
+    no behavioral change. Additionally, `oversizeBodyIsDroppedAndNormalizeIsNeverInvoked`
+    (the one @Test method that constructs `new InboundRouter()` directly
+    rather than via `newRouterWithKnownVouchedUser()`) wires
+    `router.rateCapBucket = new NoopRateCapBucket();` before the
+    `router.onMessage(...)` call so the new rate-cap-first ordering does
+    not NPE on the null bucket field. Method name and assertion
+    semantics are unchanged. The other 7 @Test methods stay green
+    untouched (six call `InboundRouter.normalize(body)` statically and
+    never construct a router; the seventh uses the
+    `newRouterWithKnownVouchedUser()` helper which already wires
+    `NoopRateCapBucket`).
+  - `InboundRouterContactIdRedactionTest`'s inner-class
+    `NoopInviteCodeConsumer.consume` signature changes from
+    `(String, String, UUID)` to `(String, String, String)` for the
+    same compile-break reason. The method body returns the canned
+    outcome unchanged. The 3 @Test methods
+    (`dispatchExceptionPathDoesNotLeakFullContactId`,
+    `noReplyTargetPathDoesNotLeakFullContactId`,
+    `replySendFailedPathDoesNotLeakFullContactId`) stay green
+    untouched — they construct the router with `NoopRateCapBucket`
+    already wired (line 169) and cover the three M1-038 redaction
+    sites in `onMessage`'s exception/reply-failure paths, which this
+    ticket does NOT modify. The new redaction site added by this
+    ticket (`lookupUser`'s `SQLException` catch wrapper) is verified
+    by grep against `InboundRouter.java` source per acceptance item 4,
+    following the M1-044d precedent (six similar catch-path redaction
+    sites across `InviteCodeConsumer`, `BanCheck`, and
+    `AutoRegisterService` were all grep-verified rather than driven
+    by a runtime SQLException-injection test).
 
 ## Big-picture notes
 
