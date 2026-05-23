@@ -3,7 +3,7 @@ id: M1-045
 title: Slow-start probation tier + restricted command set (step 5) + /vouch
 status: pending
 created: 2026-05-20
-last_updated: 2026-05-20
+last_updated: 2026-05-23
 blocked_by:
   - M1-044
 files_budget: 12
@@ -20,7 +20,7 @@ files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/VouchCommandHandlerTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterProbationOrderingTest.java
 complexity: high
-risk: medium
+risk: high
 round_cap: 3
 security_relevant: true
 migration_touch: false
@@ -39,7 +39,7 @@ out_of_scope:
   - any test outside the eleven files in files_scope — every M1-035c/M1-036/M1-037/M1-038/M1-039/M1-040/M1-044*/M1-046 test stays green unchanged
 acceptance:
   - "infochat-provider/src/main/java/app/zcat/infochat/provider/command/CommandPermissions.java exposes a public method `boolean allowedDuringProbation(String slashCommand)` that returns the closed allowed-set per spec §Slow-start tier verbatim. The implementation lists, as a `Set<String>` constant or a switch expression: `help`, `status`, `get-tags`, `get-sources`, `list-sources`, `summary`, `saved`, `export`, `forget`, `lang`, `stop` (the /stop carve-out). Plus delegation to `AssetCommandFamilyOracle.isAssetCommand(slashCommand)` for the asset-command family. Verify: `grep -E '\"help\"|\"status\"|\"get-tags\"|\"get-sources\"|\"list-sources\"|\"summary\"|\"saved\"|\"export\"|\"forget\"|\"lang\"|\"stop\"' CommandPermissions.java` returns ≥11 distinct matches AND `grep -E 'AssetCommandFamilyOracle' CommandPermissions.java` returns ≥1 match"
-  - "CommandPermissions.allowedDuringProbation does NOT permit any of the spec-blocked commands: `add-source`, `save`, `unsave`, `follow-tag`, `unfollow-tag`, `clear`, `compress`, `group-timezone`, `retry`, `ban`, `unban`, `invite`, `vouch`, `grant-admin`, `revoke-admin`, `promote`, `demote`, `quarantine`, `audit`. Verify by reading the method: each of these returns false (NOT in the allowed set, NOT in the asset family). The unknown-command case (a non-existent slash) returns false (fail-closed)"
+  - "CommandPermissions.allowedDuringProbation does NOT permit any of the spec-blocked commands: `add-source`, `save`, `unsave`, `follow-tag`, `unfollow-tag`, `clear`, `compress`, `group-timezone`, `retry`, `ban`, `unban`, `invite`, `vouch`, `grant-admin`, `revoke-admin`, `promote`, `demote`, `quarantine`, `audit`. Each of these returns false (NOT in the allowed set, NOT in the asset family). The unknown-command case (a non-existent slash) returns false (fail-closed). Verified runnably by the parameterized test in acceptance item [3]."
   - "CommandPermissionsTest pins the spec matrix command-by-command: a `@ParameterizedTest` with one row per command in the spec's closed list, asserting `allowedDuringProbation(<name>) == <expected>` for every command. The test file MUST include separate assertions for each of the 11 explicitly-allowed commands AND each of the 19 explicitly-blocked commands listed in spec §Slow-start tier. Verify: `grep -E '\"stop\"' CommandPermissionsTest.java` returns ≥1 match (the /stop carve-out pin) AND `grep -E '\"add-source\"' CommandPermissionsTest.java` returns ≥1 match (the blocked-during-probation pin) AND `grep -E '\"forget\"' CommandPermissionsTest.java` returns ≥1 match (the privacy-lever pin) AND `grep -E '\"lang\"' CommandPermissionsTest.java` returns ≥1 match (the locale-lever pin). `grep -E '@Test|@ParameterizedTest' CommandPermissionsTest.java` returns ≥3 matches"
   - "infochat-provider/src/main/java/app/zcat/infochat/provider/command/AssetCommandFamilyOracle.java exists, is `@ApplicationScoped`, and exposes `boolean isAssetCommand(String slashCommand)` returning `false` for ALL inputs in this ticket's commit (the asset registry lands in T2-H per docs/spec/commands.md §Asset commands + docs/design/10-asset-commands.md). The class docstring documents this seam explicitly: T2-H will displace the impl by injecting the bootstrap-fed registry via CDI without changing the interface. Verify: `grep -E '@ApplicationScoped' AssetCommandFamilyOracle.java` returns ≥1 match AND `grep -E 'return\\s+false' AssetCommandFamilyOracle.java` returns ≥1 match AND `grep -E 'T2-H' AssetCommandFamilyOracle.java` returns ≥1 match (the seam documentation)"
   - "infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/ProbationCheck.java exists, is `@ApplicationScoped`, and exposes `boolean inProbation(UUID userId)` AND `void clearIfPromoted(UUID userId)`. The `inProbation` method reads `SELECT probation_until FROM users WHERE id = ?` and returns `probation_until IS NOT NULL AND probation_until > NOW()` per spec §Slow-start tier (`The mechanism is lazy: the permission check is probation_until IS NULL OR probation_until < NOW()`). The `clearIfPromoted` method runs `UPDATE users SET probation_until = NULL WHERE id = ? AND probation_until IS NOT NULL AND probation_until <= NOW()` — the opportunistic clear that nulls the column on the next request from a promoted user. Verify: `grep -E '@ApplicationScoped' ProbationCheck.java` returns ≥1 match AND `grep -E 'probation_until\\s+IS\\s+NOT\\s+NULL\\s+AND\\s+probation_until\\s*>\\s*NOW' ProbationCheck.java` returns ≥1 match AND `grep -E 'UPDATE\\s+users\\s+SET\\s+probation_until\\s*=\\s*NULL' ProbationCheck.java` returns ≥1 match"
@@ -121,7 +121,7 @@ identity → 1.5 rate-cap → 1.7 normalize → 2 invite consume →
 3 group auto-register → 4 ban check → 5 probation check
 (new) → 6 parse → 7 dispatch + DM-gate carve-out.
 
-`complexity: high` and `risk: medium` because the step-5
+`complexity: high` and `risk: high` because the step-5
 splice is a new authorization gate that must agree with the
 spec's closed allowed/blocked enumeration verbatim; getting
 the matrix wrong is a privilege defect.
@@ -319,9 +319,8 @@ new T2-A migration; this ticket consumes the schema as-is.
 
 ## Authorized test changes
 
-- (none — this ticket adds four new test files and one new
-  test method to a pre-existing test class, modifying no
-  prior test method.)
+- (none — this ticket adds four new test files, modifying
+  no prior test method.)
 
 ## Alternatives considered
 
