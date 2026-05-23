@@ -56,13 +56,17 @@ amendment.
 
 ## Verify before recommending
 
-Every recommendation or suggestion you make to the user is a claim — verify it before stating it.
+Every claim, recommendation, or suggestion is a hypothesis. Before stating it:
 
-For recommendations to modify an existing artifact (file, prompt, doc, config, script): Read the target section first. If the existing content already covers what you'd add, drop the proposal and say so. If it partially covers it, narrow the proposal to the actual gap.
+1. **Falsify it.** Ask "what would make this false?" — list those things specifically — and check them. Do NOT check the supporting evidence you already gathered; that's confirmation, not verification. Verification means actively trying to break the claim.
+2. **Search for a better option.** Ask "is there an alternative I haven't considered that meets the same goal better?" and look. The proposed approach being workable doesn't make it the right one.
+3. **If either step fails, revise or drop the claim before publishing.**
+
+When the recommendation involves an artifact (modifying an existing one OR creating a new one): Read what's already there — the target file for modifications, the surrounding package/directory for creations — to falsify "the gap exists" before stating it. If the existing content already covers what you'd add, drop the proposal and say so. If it partially covers it, narrow the proposal to the actual gap.
 
 Hedge words ("worth considering", "optional", "~5 lines", "minor addition", "one strengthening") and small line counts do not exempt the rule. A 5-line addition is a 100% claim, just compressed.
 
-The shape, not the phrasing, is the trigger: any sentence in which you propose that an existing artifact be modified — added to, removed from, rewritten, tightened, clarified, strengthened, slimmed. Catch yourself before writing it, not after.
+The shape, not the phrasing, is the trigger: any sentence in which you propose a fact, course of action, or change. Catch yourself before writing it, not after.
 
 ## Bootstrap admin & sources
 
