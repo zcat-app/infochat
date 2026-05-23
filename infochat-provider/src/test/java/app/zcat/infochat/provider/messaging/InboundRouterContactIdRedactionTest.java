@@ -184,7 +184,7 @@ class InboundRouterContactIdRedactionTest {
     /** Never invoked — the vouched-user lookup override means step 2 does not fire. */
     private static final class NoopInviteCodeConsumer extends InviteCodeConsumer {
         @Override
-        public Outcome consume(String adapter, String contactId, UUID candidateCode) {
+        public Outcome consume(String adapter, String contactId, String body) {
             throw new UnsupportedOperationException(
                     "inviteCodeConsumer should not be invoked when the user is known (vouched)");
         }

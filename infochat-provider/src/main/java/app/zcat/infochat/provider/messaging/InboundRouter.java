@@ -47,10 +47,12 @@ import java.util.concurrent.atomic.AtomicLong;
  *       over-cap inbound is dropped silently with no outbound;</li>
  *   <li>1.7 Unicode normalize (NFKC + bidi-strip + zero-width-strip,
  *       per-line outside CommonMark fenced code);</li>
- *   <li>2 DM unknown contact → {@link InviteCodeConsumer} invite-code
- *       consume; the {@code candidateCode} is parsed from the
- *       normalized body. {@link InviteCodeConsumer.Accepted} sends the
- *       {@code reply.welcome.dm_fresh} bundle entry and stops;
+ *   <li>2 DM unknown contact → {@link InviteCodeConsumer#consume} with
+ *       the normalized body. The consumer owns the UUID-parse: a
+ *       non-UUID body and an invalid UUID share the same Rejected
+ *       branch (both increment the brute-force counter — M1-044e
+ *       AUDIT-EVASION fix). {@link InviteCodeConsumer.Accepted} sends
+ *       the {@code reply.welcome.dm_fresh} bundle entry and stops;
  *       {@link InviteCodeConsumer.Rejected} and
  *       {@link InviteCodeConsumer.BruteForceThresholdBreached} both
  *       send the fixed {@code error.invite.required} reply per spec
@@ -63,15 +65,19 @@ import java.util.concurrent.atomic.AtomicLong;
  *       receives the fixed {@code error.ban.fixed} reply and stops
  *       (spec §User ban: "one fixed reply per inbound message");</li>
  *   <li>5 reserved — M1-045 splices the probation check here;</li>
+ *   <li>7 DM-gate carve-out (pre-dispatch): when the inbound is a DM
+ *       scope AND the resolved user's {@code registration_state =
+ *       'group_only'}, the router emits the fixed
+ *       {@code error.invite.required} reply and stops BEFORE dispatch
+ *       (spec §Invite-code registration: "rejected with the same fixed
+ *       reply as step 2's invalid path"; §Authorization model:
+ *       "blocked commands never reach execution"). M1-044e fix:
+ *       moved from post-dispatch override to pre-dispatch short-
+ *       circuit so handler side effects never land for a blocked DM
+ *       (closes AUTH-BYPASS). Full step-7 permission matrix lands in
+ *       M1-045;</li>
  *   <li>6 parse + dispatch (slash-command resolver or chat-mode
- *       fallback);</li>
- *   <li>7 DM-gate carve-out: when the inbound is a DM scope AND the
- *       resolved user's {@code registration_state = 'group_only'}, the
- *       dispatch result is REPLACED with the fixed
- *       {@code error.invite.required} reply (spec §Invite-code
- *       registration: "rejected with the same fixed reply as step 2's
- *       invalid path"). The check fires AFTER the dispatch resolved a
- *       handler — full step-7 permission matrix lands in M1-045.</li>
+ *       fallback).</li>
  * </ol>
  *
  * <p><b>Single users-row SELECT per dispatch.</b> Steps 2 (emptiness
@@ -85,14 +91,19 @@ import java.util.concurrent.atomic.AtomicLong;
  * race).</p>
  *
  * <p><b>Body-size cap (defense in depth, preserved from M1-038).</b>
- * Before the rate-cap check, {@link #onMessage} drops any inbound
+ * After the rate-cap check, {@link #onMessage} drops any inbound
  * whose UTF-8 byte length exceeds
  * {@code infochat.router.max-inbound-body-bytes} with the fixed
- * {@link #MESSAGE_TOO_LARGE_REPLY} literal. The cap fires
- * BEFORE rate cap so adversarial bodies cannot drive bucket
- * arithmetic on un-bounded payloads, and BEFORE normalize so NFKC
- * amplification on adversarial inputs (Hangul jamo expansion, deep
- * combining-mark sequences) cannot amplify cost.</p>
+ * {@link #MESSAGE_TOO_LARGE_REPLY} literal. Ordering rationale
+ * (M1-044e): rate-cap fires FIRST so a hostile flood cannot drive
+ * outbound cost via the size-cap reply path (closes the DOS
+ * amplification surface — over-cap inbound never produces a friendly
+ * error reply per spec §Authorization model step 1.5). The size-cap
+ * still fires BEFORE normalize so NFKC amplification on adversarial
+ * inputs (Hangul jamo expansion, deep combining-mark sequences)
+ * cannot amplify cost. Bucket arithmetic is O(1) and cares nothing
+ * about payload size, so reversing the order does not expose any
+ * unbounded-input attack on the bucket.</p>
  *
  * <p><b>Normalization-first invariant (preserved from M1-035b).</b>
  * After rate cap, {@link #onMessage} runs the Unicode normalization
@@ -236,21 +247,25 @@ public class InboundRouter {
         String raw = msg.text();
         String contactId = msg.sender().contactId();
 
-        // Size cap (M1-038, preserved). Fires BEFORE rate cap so
-        // adversarial payloads cannot drive bucket arithmetic on
-        // un-bounded inputs, AND before normalize so NFKC amplification
-        // cannot drive cost on adversarial inputs.
-        if (raw != null && raw.getBytes(StandardCharsets.UTF_8).length > maxInboundBodyBytes) {
-            sendReply(msg.scope(), MESSAGE_TOO_LARGE_REPLY);
+        // Step 1.5 — transport-level rate cap. Fires FIRST per spec
+        // §Authorization model step 1.5: over-cap inbound is dropped
+        // silently with NO outbound (no ban reply, no invite-required
+        // reply, no friendly error — including no MESSAGE_TOO_LARGE_REPLY).
+        // A hostile flood that would otherwise drive the size-cap reply
+        // path is short-circuited here, closing the DOS amplification
+        // surface (M1-044e fix). Bucket arithmetic is O(1) and cares
+        // nothing about payload size; the size-cap below still bounds
+        // NFKC cost on the (rate-cap-passing) bodies that reach it.
+        if (!rateCapBucket.tryAcquire(adapterName, contactId)) {
             return;
         }
 
-        // Step 1.5 — transport-level rate cap. Over-cap inbound is
-        // dropped silently per spec §Authorization model step 1.5
-        // (no outbound, no ban reply, no invite-required reply). The
-        // cap bounds outbound cost from a hostile contact driving
-        // inbound floods.
-        if (!rateCapBucket.tryAcquire(adapterName, contactId)) {
+        // Body-size cap (M1-038, preserved). Fires AFTER rate cap so a
+        // flood cannot leak MESSAGE_TOO_LARGE_REPLY outbound, and BEFORE
+        // normalize so NFKC amplification cannot drive cost on
+        // adversarial inputs.
+        if (raw != null && raw.getBytes(StandardCharsets.UTF_8).length > maxInboundBodyBytes) {
+            sendReply(msg.scope(), MESSAGE_TOO_LARGE_REPLY);
             return;
         }
 
@@ -267,21 +282,17 @@ public class InboundRouter {
         Optional<UserSnapshot> snapshot = lookupUser(adapterName, contactId);
 
         // Step 2 — DM unknown contact + invite-code consume.
-        // Per spec §Authorization model step 2: parse the normalized
-        // body as a UUID candidate code; if it isn't a UUID, that's
-        // the same Rejected fate as a code-shaped-but-invalid body.
-        // InviteCodeConsumer.Accepted → welcome reply; Rejected and
+        // Per spec §Authorization model step 2: pass the normalized
+        // body to InviteCodeConsumer.consume; the consumer owns the
+        // UUID-parse + brute-force counter (M1-044e fix — closes
+        // AUDIT-EVASION by ensuring non-UUID probes also increment
+        // the counter). Accepted → welcome reply; Rejected and
         // BruteForceThresholdBreached → fixed error.invite.required
         // reply (the spec gives the same user-visible reply for
         // both — the rate-limit state does not change it).
         if (msg.scope() instanceof ScopeRef.Dm && snapshot.isEmpty()) {
-            UUID candidate = parseInviteCode(normalized);
-            if (candidate == null) {
-                sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_INVITE_REQUIRED));
-                return;
-            }
             InviteCodeConsumer.Outcome outcome =
-                    inviteCodeConsumer.consume(adapterName, contactId, candidate);
+                    inviteCodeConsumer.consume(adapterName, contactId, normalized);
             switch (outcome) {
                 case InviteCodeConsumer.Accepted a ->
                         sendReply(msg.scope(), bundleLoader.get(BundleKeys.REPLY_WELCOME_DM_FRESH));
@@ -316,6 +327,23 @@ public class InboundRouter {
 
         // Step 5 (reserved — M1-045 inserts the probation check here).
 
+        // Step 7 — DM-gate carve-out (pre-dispatch). Per spec
+        // §Invite-code registration + §Authorization model: a user
+        // auto-registered via group @mention (registration_state=
+        // 'group_only') is rejected from DM with the same fixed reply
+        // as step 2's invalid path. The check fires BEFORE dispatch so
+        // the handler's side effects (URL probe, LLM call, DB writes)
+        // never land for a blocked DM — honors the spec's "blocked
+        // commands never reach execution" promise (M1-044e fix closes
+        // the AUTH-BYPASS redteam finding). Full step-7 permission
+        // matrix is M1-045 territory.
+        if (msg.scope() instanceof ScopeRef.Dm
+                && snapshot.map(s -> REGISTRATION_STATE_GROUP_ONLY.equals(s.registrationState()))
+                        .orElse(false)) {
+            sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_INVITE_REQUIRED));
+            return;
+        }
+
         // Step 6 — Parse + dispatch.
         String body;
         try {
@@ -326,20 +354,6 @@ public class InboundRouter {
             log.error("InboundRouter dispatch failed for scope={}",
                     ContactIds.redact(scopeIdOf(msg.scope())), e);
             body = INTERNAL_ERROR_REPLY;
-        }
-
-        // Step 7 — DM-gate carve-out for group_only users. Per spec
-        // §Invite-code registration: a user auto-registered via group
-        // @mention (registration_state='group_only') is rejected from
-        // DM with the same fixed reply as step 2's invalid path. The
-        // override fires AFTER dispatch resolved a handler — full
-        // step-7 permission matrix is M1-045 territory. The handler's
-        // SELECT (e.g. /help) is wasted work for a group_only DM, but
-        // bounded; the optimization to skip dispatch is deferred.
-        if (msg.scope() instanceof ScopeRef.Dm
-                && snapshot.map(s -> REGISTRATION_STATE_GROUP_ONLY.equals(s.registrationState()))
-                        .orElse(false)) {
-            body = bundleLoader.get(BundleKeys.ERROR_INVITE_REQUIRED);
         }
 
         sendReply(msg.scope(), body);
@@ -379,23 +393,7 @@ public class InboundRouter {
         } catch (SQLException e) {
             throw new IllegalStateException(
                     "InboundRouter.lookupUser failed for adapter=" + adapter
-                            + " contact_id=" + contactId, e);
-        }
-    }
-
-    /**
-     * Parse the normalized body as a UUID candidate invite code, or
-     * return {@code null} if the body is not a UUID. A non-UUID body
-     * from an unknown DM contact gets the same fixed
-     * {@code error.invite.required} reply as a Rejected consume —
-     * the spec gives a single reply class for the entire failure
-     * surface.
-     */
-    private static UUID parseInviteCode(String normalized) {
-        try {
-            return UUID.fromString(normalized);
-        } catch (IllegalArgumentException e) {
-            return null;
+                            + " contact_id=" + ContactIds.redact(contactId), e);
         }
     }
 

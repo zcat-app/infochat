@@ -94,7 +94,7 @@ class InviteCodeConsumerTest {
         UUID code = UUID.randomUUID();
         seedInvite(code, "CONTACT_BOUND", adapter, contactId, "PENDING", null);
 
-        InviteCodeConsumer.Outcome outcome = consumer.consume(adapter, contactId, code);
+        InviteCodeConsumer.Outcome outcome = consumer.consume(adapter, contactId, code.toString());
 
         assertInstanceOf(InviteCodeConsumer.Accepted.class, outcome);
         UUID userId = ((InviteCodeConsumer.Accepted) outcome).userId();
@@ -112,7 +112,7 @@ class InviteCodeConsumerTest {
         UUID code = UUID.randomUUID();
         seedInvite(code, "OPEN_ADAPTER", adapter, null, "PENDING", null);
 
-        InviteCodeConsumer.Outcome outcome = consumer.consume(adapter, contactId, code);
+        InviteCodeConsumer.Outcome outcome = consumer.consume(adapter, contactId, code.toString());
 
         assertInstanceOf(InviteCodeConsumer.Accepted.class, outcome);
         assertInviteUsedBy(code, contactId);
@@ -131,10 +131,10 @@ class InviteCodeConsumerTest {
         // contact id — must Rejected because status is now USED.
         seedInvite(code, "CONTACT_BOUND", adapter, firstContact, "PENDING", null);
 
-        InviteCodeConsumer.Outcome first = consumer.consume(adapter, firstContact, code);
+        InviteCodeConsumer.Outcome first = consumer.consume(adapter, firstContact, code.toString());
         assertInstanceOf(InviteCodeConsumer.Accepted.class, first);
 
-        InviteCodeConsumer.Outcome second = consumer.consume(adapter, secondContact, code);
+        InviteCodeConsumer.Outcome second = consumer.consume(adapter, secondContact, code.toString());
         assertInstanceOf(InviteCodeConsumer.Rejected.class, second,
                 "consume against an already-USED code must be Rejected");
 
@@ -155,7 +155,7 @@ class InviteCodeConsumerTest {
         OffsetDateTime past = OffsetDateTime.now().minusSeconds(1);
         seedInvite(code, "CONTACT_BOUND", adapter, contactId, "PENDING", past);
 
-        InviteCodeConsumer.Outcome outcome = consumer.consume(adapter, contactId, code);
+        InviteCodeConsumer.Outcome outcome = consumer.consume(adapter, contactId, code.toString());
         assertInstanceOf(InviteCodeConsumer.Rejected.class, outcome);
     }
 
@@ -169,7 +169,7 @@ class InviteCodeConsumerTest {
 
         // Consume from the WRONG contact id under the same adapter — the
         // CONTACT_BOUND code's expected_contact_id check fails.
-        InviteCodeConsumer.Outcome outcome = consumer.consume(adapter, otherContact, code);
+        InviteCodeConsumer.Outcome outcome = consumer.consume(adapter, otherContact, code.toString());
         assertInstanceOf(InviteCodeConsumer.Rejected.class, outcome);
 
         // The invite stays PENDING (no row UPDATEd).
@@ -186,7 +186,7 @@ class InviteCodeConsumerTest {
 
         // The conditional UPDATE's `WHERE adapter = ?` is the load-bearer
         // for cross-adapter isolation per §Invite-code registration.
-        InviteCodeConsumer.Outcome outcome = consumer.consume(otherAdapter, contactId, code);
+        InviteCodeConsumer.Outcome outcome = consumer.consume(otherAdapter, contactId, code.toString());
         assertInstanceOf(InviteCodeConsumer.Rejected.class, outcome);
 
         assertInviteStatus(code, "PENDING");
@@ -201,14 +201,14 @@ class InviteCodeConsumerTest {
         // match a real invite. Each Rejected appends one row to
         // invite_code_attempt; the counter grows to the threshold.
         for (int i = 0; i < BRUTE_FORCE_THRESHOLD; i++) {
-            InviteCodeConsumer.Outcome r = consumer.consume(adapter, contactId, UUID.randomUUID());
+            InviteCodeConsumer.Outcome r = consumer.consume(adapter, contactId, UUID.randomUUID().toString());
             assertInstanceOf(InviteCodeConsumer.Rejected.class, r,
                     "pre-breach consume #" + i + " must be Rejected");
         }
 
         // The (threshold+1)-th call sees count >= threshold and
         // short-circuits with BruteForceThresholdBreached.
-        InviteCodeConsumer.Outcome breach = consumer.consume(adapter, contactId, UUID.randomUUID());
+        InviteCodeConsumer.Outcome breach = consumer.consume(adapter, contactId, UUID.randomUUID().toString());
         assertInstanceOf(InviteCodeConsumer.BruteForceThresholdBreached.class, breach);
 
         assertEquals(1, countAudit(InviteCodeConsumer.INVITE_BRUTE_FORCE_BREACH, contactId),
@@ -216,7 +216,7 @@ class InviteCodeConsumerTest {
 
         // A second over-threshold call must NOT write a second breach
         // audit row — EXACTLY ONCE per breach event.
-        InviteCodeConsumer.Outcome breachAgain = consumer.consume(adapter, contactId, UUID.randomUUID());
+        InviteCodeConsumer.Outcome breachAgain = consumer.consume(adapter, contactId, UUID.randomUUID().toString());
         assertInstanceOf(InviteCodeConsumer.BruteForceThresholdBreached.class, breachAgain);
 
         assertEquals(1, countAudit(InviteCodeConsumer.INVITE_BRUTE_FORCE_BREACH, contactId),
@@ -246,7 +246,7 @@ class InviteCodeConsumerTest {
         // of these write to audit_log — the under-threshold Rejected
         // path only INSERTs invite_code_attempt + commits).
         for (int i = 0; i < BRUTE_FORCE_THRESHOLD; i++) {
-            InviteCodeConsumer.Outcome r = consumer.consume(adapter, contactId, UUID.randomUUID());
+            InviteCodeConsumer.Outcome r = consumer.consume(adapter, contactId, UUID.randomUUID().toString());
             assertInstanceOf(InviteCodeConsumer.Rejected.class, r);
         }
 
@@ -257,7 +257,7 @@ class InviteCodeConsumerTest {
         executeUpdate("ALTER TABLE audit_log RENAME TO audit_log_disabled");
         try {
             assertThrows(IllegalStateException.class,
-                    () -> consumer.consume(adapter, contactId, UUID.randomUUID()),
+                    () -> consumer.consume(adapter, contactId, UUID.randomUUID().toString()),
                     "audit_log INSERT failure during breach must propagate");
         } finally {
             executeUpdate("ALTER TABLE audit_log_disabled RENAME TO audit_log");
@@ -268,12 +268,52 @@ class InviteCodeConsumerTest {
         // was NOT permanently marked by the failed call. If the old
         // ordering survived, this call would skip insertAudit and the
         // audit-row count below would be 0.
-        InviteCodeConsumer.Outcome retry = consumer.consume(adapter, contactId, UUID.randomUUID());
+        InviteCodeConsumer.Outcome retry = consumer.consume(adapter, contactId, UUID.randomUUID().toString());
         assertInstanceOf(InviteCodeConsumer.BruteForceThresholdBreached.class, retry);
 
         assertEquals(1, countAudit(InviteCodeConsumer.INVITE_BRUTE_FORCE_BREACH, contactId),
                 "one INVITE_BRUTE_FORCE_BREACH audit row written on retry "
                         + "(in-memory set was not permanently marked by the failed insert)");
+    }
+
+    @Test
+    void nonUuidBodyIncrementsBruteForceCounter() throws Exception {
+        // M1-044e AUDIT-EVASION fix: a non-UUID body now travels the
+        // SAME Rejected path as an invalid UUID — both insert one
+        // invite_code_attempt row. N+1 non-UUID attempts past the
+        // threshold trip BruteForceThresholdBreached just like N+1
+        // UUID-shaped invalid attempts.
+        String adapter = "inmemory";
+        String contactId = NAMESPACE + "non-uuid-brute";
+
+        for (int i = 0; i < BRUTE_FORCE_THRESHOLD; i++) {
+            InviteCodeConsumer.Outcome r = consumer.consume(adapter, contactId, "garbage-" + i);
+            assertInstanceOf(InviteCodeConsumer.Rejected.class, r,
+                    "non-UUID consume #" + i + " must be Rejected");
+        }
+
+        // Each Rejected non-UUID consume must have inserted one
+        // invite_code_attempt row — the counter is the serialization
+        // point for the brute-force budget.
+        assertEquals(BRUTE_FORCE_THRESHOLD, countAttempts(contactId),
+                "each non-UUID consume must insert one invite_code_attempt row");
+
+        InviteCodeConsumer.Outcome breach =
+                consumer.consume(adapter, contactId, "garbage-overflow");
+        assertInstanceOf(InviteCodeConsumer.BruteForceThresholdBreached.class, breach,
+                "the (threshold+1)-th non-UUID consume must trip BruteForceThresholdBreached");
+    }
+
+    private long countAttempts(String contactId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT COUNT(*) FROM invite_code_attempt WHERE contact_id = ?")) {
+            ps.setString(1, contactId);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getLong(1);
+            }
+        }
     }
 
     private void seedInvite(UUID code, String inviteType, String adapter,

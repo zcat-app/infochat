@@ -4,6 +4,7 @@ import app.zcat.infochat.core.log.ContactIds;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.jspecify.annotations.NonNull;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -23,13 +24,14 @@ import java.util.concurrent.ConcurrentHashMap;
  * race-safe conditional UPDATE pinned at docs/spec/schema.md
  * §Identity and access — Invite code. The intake-step splice
  * (M1-044b) calls {@link #consume} when the inbound contact has
- * no {@code users} row, passing the {@code candidateCode} parsed
- * from the inbound message body. The Outcome drives the
- * splice's branch: {@link Accepted} registers the contact and
- * proceeds; {@link Rejected} drops the inbound with the
- * "invalid or already-used code" fixed reply; {@link
- * BruteForceThresholdBreached} drops the inbound with the
- * "too many attempts" fixed reply.
+ * no {@code users} row, passing the normalized inbound message
+ * body. The consumer owns the body-to-UUID parse so a non-UUID
+ * probe also increments the brute-force counter (M1-044e
+ * AUDIT-EVASION fix). The Outcome drives the splice's branch:
+ * {@link Accepted} registers the contact and proceeds; {@link
+ * Rejected} drops the inbound with the "invalid or already-used
+ * code" fixed reply; {@link BruteForceThresholdBreached} drops
+ * the inbound with the "too many attempts" fixed reply.
  *
  * <p><b>Race-safe consume.</b> The conditional
  * {@code UPDATE invite_code SET status='USED' ... RETURNING id}
@@ -128,7 +130,13 @@ public class InviteCodeConsumer {
 
     public record BruteForceThresholdBreached() implements Outcome {}
 
-    public Outcome consume(String adapter, String contactId, UUID candidateCode) {
+    public Outcome consume(@NonNull String adapter, @NonNull String contactId, @NonNull String body) {
+        // Parse the normalized body into a UUID candidate. The router
+        // (M1-044e fix) no longer pre-parses the body; the consumer owns
+        // both "is this a UUID?" and "does this UUID match a PENDING
+        // invite?" so a non-UUID probe also increments the brute-force
+        // counter (closes the AUDIT-EVASION redteam finding).
+        UUID candidateCode = parseUuid(body);
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
@@ -166,13 +174,18 @@ public class InviteCodeConsumer {
                 // this key (window expired, breach event ended).
                 breachAudited.remove(key);
 
-                UUID inviteId = tryConsume(conn, contactId, candidateCode, adapter);
+                // Two failure modes share the same Rejected branch: a
+                // non-UUID body (parseUuid returned null) and a UUID that
+                // does not match any PENDING invite (tryConsume returned
+                // null). Both increment the brute-force counter so a
+                // sustained attack of either shape accumulates toward the
+                // threshold within the window.
+                // TODO followup: register `invite_drop_total` Micrometer
+                // counter (deferred from M1-044a).
+                UUID inviteId = candidateCode == null
+                        ? null
+                        : tryConsume(conn, contactId, candidateCode, adapter);
                 if (inviteId == null) {
-                    // Rejected: persist one row to the brute-force counter
-                    // table so a sustained attack accumulates toward
-                    // threshold within the window.
-                    // TODO followup: register `invite_drop_total` Micrometer
-                    // counter (deferred from M1-044a).
                     insertAttempt(conn, adapter, contactId);
                     conn.commit();
                     return new Rejected();
@@ -195,6 +208,14 @@ public class InviteCodeConsumer {
                     "InviteCodeConsumer.consume connection failed for adapter="
                             + adapter + " contact_id="
                             + ContactIds.redact(contactId), e);
+        }
+    }
+
+    private static UUID parseUuid(String body) {
+        try {
+            return UUID.fromString(body);
+        } catch (IllegalArgumentException e) {
+            return null;
         }
     }
 

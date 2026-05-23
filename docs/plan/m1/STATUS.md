@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 6 |
+| pending | 5 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 56 |
+| done | 57 |
 | deferred | 6 |
 | **total** | **68** |
 
@@ -26,7 +26,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-041 — Audit-log writer + RedactionHook + LlmOutputSanitizer audit row (complexity: high, risk: high)
 - M1-044 — Invite-code intake umbrella — invite/ban/unban DM-gate roundtrip IT (complexity: low, risk: medium)
-- M1-044e — InboundRouter splice red-team fixes (DM-gate pre-dispatch, rate-cap precedence, lookupUser redaction, non-UUID counter) (complexity: high, risk: high)
 - M1-051 — ConfirmStateService — pre-dispatch confirm gate for /ban + /invite create --open + /invite revoke (complexity: high, risk: high)
 
 ---
@@ -64,6 +63,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-044e | InboundRouter splice red-team fixes (DM-gate pre-dispatch, rate-cap precedence, lookupUser redaction, non-UUID counter) | 2026-05-23 | round 1 APPROVE |
 | M1-049 | Process fix D: test pyramid — handler/router/IT decoupling | 2026-05-22 | round 1 APPROVE |
 | M1-047 | Process-fix umbrella: stays-green + pyramid + contracts | 2026-05-22 | round 1 APPROVE |
 | M1-044d | Contact-id redaction + breach-audit ordering (M1-044a fixes) | 2026-05-22 | round 1 APPROVE |
@@ -73,7 +73,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-048 | Process fix A: verified_stays_green frontmatter + lint + clarity + Plan | 2026-05-21 | round 1 APPROVE |
 | M1-044a | Intake-step services — rate cap, invite consumer, ban check, brute-force migration | 2026-05-21 | round 1 APPROVE |
 | M1-043 | SummaryProseGenerator refusal-marker interception (degrade on `[REFUSAL: ...]` output) | 2026-05-20 | round 1 APPROVE |
-| M1-040 | /summary prompt-injection wrapper + adapter-scoped users lookup across handlers | 2026-05-20 | round 2 APPROVE |
 
 ---
 
@@ -187,7 +186,7 @@ M1-044a (done)
   │     └── M1-046 (pending)
   ├── M1-044b (done)
   │     ├── M1-044 (pending) [see above]
-  │     └── M1-044e (pending) ← runnable
+  │     └── M1-044e (done)
   └── M1-044c (done)
         └── M1-044 (pending) [see above]
 M1-044d (done)

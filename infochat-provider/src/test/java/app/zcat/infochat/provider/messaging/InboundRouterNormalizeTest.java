@@ -163,6 +163,10 @@ class InboundRouterNormalizeTest {
         // M1-040: InboundContext is set at the top of onMessage and
         // must be non-null even when the size-cap path returns early.
         router.inboundContext = new InboundContext();
+        // M1-044e: rate-cap fires BEFORE size-cap under the new
+        // ordering; wire a no-op bucket so the size-cap reaches its
+        // check without NPE'ing on the null field.
+        router.rateCapBucket = new NoopRateCapBucket();
         CapturingAdapter target = new CapturingAdapter();
         router.setReplyTarget(target);
 
@@ -399,7 +403,7 @@ class InboundRouterNormalizeTest {
     /** No-op {@link InviteCodeConsumer} — never invoked because the test router's lookupUser returns non-empty. */
     private static final class NoopInviteCodeConsumer extends InviteCodeConsumer {
         @Override
-        public Outcome consume(String adapter, String contactId, UUID candidateCode) {
+        public Outcome consume(String adapter, String contactId, String body) {
             throw new UnsupportedOperationException(
                     "inviteCodeConsumer should not run when the user is known (vouched)");
         }

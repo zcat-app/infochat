@@ -27,12 +27,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Pin the intake-step order of {@link InboundRouter#onMessage}
  * against the spec at {@code docs/spec/security.md} §Authorization
- * model. Eight scenarios cover the runnable shape of the splice
- * (acceptance item 12 in {@code M1-044b}):
+ * model. Nine scenarios cover the runnable shape of the splice
+ * (originally M1-044b acceptance item 12; updated by M1-044e for the
+ * rate-cap-first and DM-gate-pre-dispatch reorderings):
  *
  * <ol>
- *   <li>(a) {@code overSizeCap} — body exceeds the size cap; only the
- *       size-cap branch fires, no other collaborator is consulted.</li>
+ *   <li>(a) {@code overSizeCapDropsAfterRateCapPasses} — body exceeds
+ *       the size cap and rate-cap passes; rateCapBucket fires FIRST,
+ *       then the size-cap branch emits MESSAGE_TOO_LARGE_REPLY. No
+ *       other collaborator consulted.</li>
+ *   <li>(a2) {@code oversizedBodyDropsAfterOverRateCap} — body exceeds
+ *       the size cap AND rate-cap rejects; the silent drop dominates,
+ *       no outbound is emitted (closes DOS amplification surface).</li>
  *   <li>(b) {@code overRateCap} — bucket returns {@code false};
  *       dispatch returns silently with no outbound and no further
  *       collaborator consulted.</li>
@@ -44,17 +50,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *       (Accepted) → welcome reply. Step 4 ban check NOT consulted;
  *       {@code handleSlash} NOT called.</li>
  *   <li>(e) {@code unknownContactInvalidInvite} — DM, unknown contact,
- *       non-UUID body; flow runs rateCap → normalize → invite-required
- *       reply (parse failure short-circuit). Step 4 ban check NOT
- *       consulted.</li>
+ *       non-UUID body; flow runs rateCap → normalize → inviteCodeConsumer
+ *       (Rejected) → invite-required reply. The consumer (not the
+ *       router) owns the UUID-parse. Step 4 ban check NOT consulted.</li>
  *   <li>(f) {@code knownBannedDmStops} — DM, known is_banned=true
  *       contact; flow runs rateCap → normalize → users lookup
  *       → banCheck (true) → ban-fixed reply. No {@code handleSlash}.</li>
- *   <li>(g) {@code groupOnlyDmGate} — DM, known
- *       registration_state='group_only' contact, body {@code /help};
- *       flow runs rateCap → normalize → banCheck (false) →
- *       handleSlash → DM-gate post-check → reply REPLACED with the
- *       invite-required literal.</li>
+ *   <li>(g) {@code groupOnlyDmGateShortCircuitsBeforeDispatch} — DM,
+ *       known registration_state='group_only' contact, body
+ *       {@code /help}; flow runs rateCap → normalize → banCheck
+ *       (false) → DM-gate short-circuit → invite-required reply.
+ *       {@code handleSlash} MUST NOT run (closes AUTH-BYPASS surface).</li>
  *   <li>(h) {@code groupMentionAutoRegisters} — Group, unknown
  *       contact; flow runs rateCap → normalize → autoRegisterService
  *       → banCheck → handleSlash → dispatch reply.</li>
@@ -76,10 +82,10 @@ class InboundRouterIntakeOrderingTest {
     private static final String GROUP_CONTACT = "bob-contact-1234567890abcdef";
     private static final String GROUP_ID = "group-xyz-12345";
 
-    // ----- (a) DM body exceeds size cap → only size-cap fires --------------
+    // ----- (a) DM body exceeds size cap → rate-cap first, then size-cap ----
 
     @Test
-    void overSizeCapDropsBeforeAnyCollaboratorIsConsulted() {
+    void overSizeCapDropsAfterRateCapPassesNoOtherCollaborator() {
         CallLog log = new CallLog();
         InboundRouter router = newRouterWithLog(log, Optional.empty());
         router.maxInboundBodyBytes = 16;
@@ -89,13 +95,44 @@ class InboundRouterIntakeOrderingTest {
         String oversize = "0123456789ABCDEF01234567"; // 24 ASCII bytes, cap=16
         router.onMessage(dmInbound(DM_CONTACT, oversize), ADAPTER);
 
-        // Size cap drops with the fixed too-large literal; no other
-        // collaborator consulted.
+        // M1-044e: rate-cap runs first; when it passes, the size-cap
+        // still fires and emits MESSAGE_TOO_LARGE_REPLY. Users-lookup,
+        // inviteCodeConsumer, and banCheck must NOT be consulted.
         assertEquals(1, target.captured.size(),
                 "size-cap path must send exactly one too-large reply");
         assertEquals(InboundRouter.MESSAGE_TOO_LARGE_REPLY, target.captured.get(0).text());
-        assertEquals(List.of("setAdapterName"), log.calls,
-                "no collaborator beyond setAdapterName is consulted on the size-cap path; got: "
+        assertEquals(
+                List.of("setAdapterName", "rateCapBucket.tryAcquire"),
+                log.calls,
+                "rate-cap first; no other collaborator consulted on the rate-cap-passes/size-cap-drops path; got: "
+                        + log.calls);
+    }
+
+    // ----- (a2) rate-cap rejects AND body oversize → silent drop wins ------
+
+    @Test
+    void oversizedBodyDropsAfterOverRateCap() {
+        CallLog log = new CallLog();
+        InboundRouter router = newRouterWithLog(log, Optional.empty());
+        router.maxInboundBodyBytes = 16;
+        ((CountingRateCapBucket) router.rateCapBucket).next = false;
+        CapturingAdapter target = new CapturingAdapter();
+        router.setReplyTarget(target);
+
+        // Oversize body AND rate-cap rejecting: per spec §Authorization
+        // model step 1.5, the silent drop dominates — no
+        // MESSAGE_TOO_LARGE_REPLY is emitted (closes the DOS amplification
+        // surface flagged by /redteam M1-044b).
+        String oversize = "0123456789ABCDEF01234567"; // 24 ASCII bytes, cap=16
+        router.onMessage(dmInbound(DM_CONTACT, oversize), ADAPTER);
+
+        assertTrue(target.captured.isEmpty(),
+                "over-rate-cap path must produce zero outbound even when the body is oversize; got: "
+                        + target.captured);
+        assertEquals(
+                List.of("setAdapterName", "rateCapBucket.tryAcquire"),
+                log.calls,
+                "only setAdapterName + rateCapBucket consulted; size-cap reply must NOT fire; got: "
                         + log.calls);
     }
 
@@ -183,8 +220,11 @@ class InboundRouterIntakeOrderingTest {
         CapturingAdapter target = new CapturingAdapter();
         router.setReplyTarget(target);
 
-        UUID candidate = UUID.randomUUID();
-        router.onMessage(dmInbound(DM_CONTACT, candidate.toString()), ADAPTER);
+        // M1-044e: the router no longer pre-parses the body as a UUID.
+        // A non-UUID String reaches inviteCodeConsumer.consume just like
+        // a UUID-shaped one; the FakeInviteCodeConsumer returns the
+        // canned Rejected outcome regardless of body shape.
+        router.onMessage(dmInbound(DM_CONTACT, "not-a-uuid-body"), ADAPTER);
 
         assertEquals(1, target.captured.size(),
                 "Rejected invite must produce exactly one invite-required reply; got: " + target.captured);
@@ -238,10 +278,12 @@ class InboundRouterIntakeOrderingTest {
     // ----- (g) DM from known group_only contact + /help → DM-gate fires -----
 
     @Test
-    void groupOnlyDmGateReplacesHandlerReplyWithInviteRequired() {
+    void groupOnlyDmGateShortCircuitsBeforeDispatch() {
         CallLog log = new CallLog();
         InboundRouter router = newRouterWithLog(log,
                 Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), false, "group_only")));
+        // RecordingCommandHandler is wired but MUST NOT be invoked — the
+        // M1-044e DM-gate fires BEFORE dispatch.
         router.commandHandlers = new SingletonInstance<>(new RecordingCommandHandler(log, "help"));
         CapturingAdapter target = new CapturingAdapter();
         router.setReplyTarget(target);
@@ -252,19 +294,17 @@ class InboundRouterIntakeOrderingTest {
                 "group_only DM path must produce exactly one reply; got: " + target.captured);
         assertEquals(FakeBundleLoader.stubFor(BundleKeys.ERROR_INVITE_REQUIRED),
                 target.captured.get(0).text(),
-                "the post-dispatch DM-gate override must REPLACE the handler reply with the "
-                        + "error.invite.required bundle entry");
+                "the pre-dispatch DM-gate emits the error.invite.required bundle entry");
         assertEquals(
                 List.of(
                         "setAdapterName",
                         "rateCapBucket.tryAcquire",
                         "lookupUser",
                         "banCheck.isBanned",
-                        "handler.handle(help)",
                         "bundleLoader.get(error.invite.required)"),
                 log.calls,
-                "DM-gate path must call exactly these collaborators in order — handler.handle DOES "
-                        + "run (the override happens AFTER dispatch); got: " + log.calls);
+                "DM-gate path must short-circuit BEFORE dispatch — handler.handle MUST NOT appear; got: "
+                        + log.calls);
     }
 
     // ----- (h) Group @mention from unknown contact → auto-register + dispatch
@@ -396,7 +436,7 @@ class InboundRouterIntakeOrderingTest {
         }
 
         @Override
-        public Outcome consume(String adapter, String contactId, UUID candidateCode) {
+        public Outcome consume(String adapter, String contactId, String body) {
             log.calls.add("inviteCodeConsumer.consume");
             return outcome;
         }

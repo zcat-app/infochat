@@ -1,11 +1,32 @@
 ---
 id: M1-044e
 title: InboundRouter splice red-team fixes (DM-gate pre-dispatch, rate-cap precedence, lookupUser redaction, non-UUID counter)
-status: pending
+status: done
 created: 2026-05-22
 last_updated: 2026-05-23
 blocked_by:
   - M1-044b
+reviews:
+  - round: 1
+    date: 2026-05-23
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 242
+      removed: 134
+clarity_check:
+  date: 2026-05-23
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-VS-DOD-CONSISTENT item 14 (IntakeOrderingTest @Test count = 9) HETEROGENEOUS-AGGREGATE-UN-ENUMERATED: the 5 unchanged scenarios are named in acceptance item 13's prose (overRateCapDropsSilentlyWithNoOtherCollaboratorConsulted, emptyBodyAfterNormalizeDropsBeforeUsersLookupOrInviteConsume, unknownContactValidInviteAcceptedSendsWelcomeAndStopsBeforeBanCheck, knownBannedDmStopsWithFixedReplyAndNoHandleSlash, groupMentionAutoRegistersAndDispatchesNormally) but lack per-method grep pins. Exact count=9 prevents pure deletion but not replacement regressions. mvn verify (item 20) catches behavioral regressions; does not block implementation."
+  blockers: []
+outline_file: target/m1-tick-outline-M1-044e.md
 files_budget: 7
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/InboundRouter.java
@@ -50,6 +71,24 @@ round_cap: 3
 security_relevant: true
 migration_touch: false
 remediates: M1-044b
+redteam_findings: []
+redteam_audits:
+  - date: 2026-05-23
+    verdict: CLEAN
+    base: main
+    head: m1/M1-044e-inbound-router-redteam-fixes
+    verdict_file: docs/plan/m1/redteam/M1-044e-2026-05-23.md
+    out_of_model_count: 0
+    note: |
+      Audit run between /m1-tick commit and /m1-tick merge on the
+      per-ticket branch tip (commit de6b93f). Threat-actor confirmed
+      that all four M1-044b red-team findings (AUTH-BYPASS, DOS,
+      INFO-LEAK, AUDIT-EVASION) close cleanly without introducing
+      new gaps against docs/spec/security.md §Authorization model,
+      §User ban, §Invite-code registration, or §Secrets handling.
+      Verbose preamble from the subagent recorded in the verdict
+      file under "Threat-actor session notes". No remediation
+      tickets required.
 out_of_scope:
   - any change to the spec — §Authorization model + §Invite-code registration + §Secrets handling are the source of truth; this ticket lands code already required by those sections
   - any change to BanCheck / AutoRegisterService / RateCapBucket — out of scope; the four findings sit inside InboundRouter and InviteCodeConsumer only
