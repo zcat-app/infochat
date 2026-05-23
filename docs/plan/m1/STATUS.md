@@ -10,12 +10,12 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 6 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 56 |
-| deferred | 7 |
+| deferred | 6 |
 | **total** | **68** |
 
 ---
@@ -24,6 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
+- M1-041 — Audit-log writer + RedactionHook + LlmOutputSanitizer audit row (complexity: high, risk: high)
 - M1-044 — Invite-code intake umbrella — invite/ban/unban DM-gate roundtrip IT (complexity: low, risk: medium)
 - M1-044e — InboundRouter splice red-team fixes (DM-gate pre-dispatch, rate-cap precedence, lookupUser redaction, non-UUID counter) (complexity: high, risk: high)
 - M1-051 — ConfirmStateService — pre-dispatch confirm gate for /ban + /invite create --open + /invite revoke (complexity: high, risk: high)
@@ -83,9 +84,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 ### end-of-tier-1-redteam (1)
 - M1-021 → unspecified
-
-### post-mvp-audit-writer-consolidation (1)
-- M1-041 → unspecified
 
 ### post-mvp-hardening (4)
 - M1-019 → M1-033
@@ -181,7 +179,7 @@ M1-038 (done)
   └── M1-039 (done)
         └── M1-040 (done)
               └── M1-043 (done)
-M1-041 (deferred)
+M1-041 (pending) ← runnable
 M1-042 (deferred)
 M1-044a (done)
   ├── M1-044 (pending) ← runnable
