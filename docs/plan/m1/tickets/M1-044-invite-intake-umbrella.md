@@ -3,12 +3,12 @@ id: M1-044
 title: Invite-code intake umbrella — invite/ban/unban DM-gate roundtrip IT
 status: pending
 created: 2026-05-20
-last_updated: 2026-05-20
+last_updated: 2026-05-23
 blocked_by:
   - M1-044a
   - M1-044b
   - M1-044c
-files_budget: 2
+files_budget: 1
 files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InviteIntakeRoundtripIT.java
 complexity: low
@@ -33,7 +33,7 @@ out_of_scope:
 acceptance:
   - "infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InviteIntakeRoundtripIT.java exists, is named with the `*IT` suffix so maven-failsafe-plugin runs it under mvn verify (the M1-008a-authored failsafe wiring already includes the provider module pattern), and contains at least one `@Test` annotation. Verify: `grep -E '@Test' InviteIntakeRoundtripIT.java` returns ≥1 match"
   - "The IT is a `@QuarkusTest` (NOT plain JUnit — it needs the full CDI graph: AdapterRegistry + InboundRouter + RateCapBucket + InviteCodeConsumer + BanCheck + AutoRegisterService + Ban/Unban/InviteCommandHandler + BundleLoader + the InMemoryAdapter bean). Verify: `grep -E '@QuarkusTest' InviteIntakeRoundtripIT.java` returns ≥1 match"
-  - "The IT activates a test profile setting `infochat.adapters=inmemory` AND `infochat.adapters.inmemory.allow-low-trust=true` so the registry's gate 5 (LOW-trust opt-in) passes — the same property shape M1-035's AdapterRouterIT uses. Verify: `grep -E 'allow-low-trust|infochat\\.adapters' InviteIntakeRoundtripIT.java` returns ≥1 match (in the @TestProfile overrides or a test-resources property file)"
+  - "The IT activates a test profile via an inline `@TestProfile(...)` whose `getConfigOverrides()` returns `Map.of(\"infochat.adapters\", \"inmemory\", \"infochat.adapters.inmemory.allow-low-trust\", \"true\")` so the registry's gate 5 (LOW-trust opt-in) passes — the same inline-profile shape M1-035's AdapterRouterIT.MvpProfile uses (infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/AdapterRouterIT.java:227–233). No separate test-resources properties file. Verify: `grep -E 'allow-low-trust|infochat\\.adapters' InviteIntakeRoundtripIT.java` returns ≥1 match"
   - "Step (a) — unknown-DM-without-invite gate: `adapter.deliverDm(\"u-1\", \"random text not a uuid\")` produces exactly ONE outbound message whose body matches the `error.invite.required` bundle value (the fixed `Access requires an invitation.` reply); `SELECT COUNT(*) FROM users WHERE adapter='inmemory' AND contact_id='u-1'` returns 0 (no row written); `SELECT COUNT(*) FROM audit_log WHERE action='INVITE_CONSUME'` is unchanged. The IT asserts all three."
   - "Step (b) — bot admin /invite create --contact: seeded bot-admin (`is_admin=true`, `registration_state='vouched'`) issues `/invite create --adapter inmemory --contact u-1`; the reply contains the new code's UUID literal; `SELECT COUNT(*) FROM invite_code WHERE adapter='inmemory' AND expected_contact_id='u-1' AND status='PENDING'` returns 1; `SELECT COUNT(*) FROM audit_log WHERE action='INVITE_CREATE'` increments by 1. The IT asserts all three."
   - "Step (c) — invite-consume roundtrip: `adapter.deliverDm(\"u-1\", \"<the-code-from-step-b>\")` produces a welcome reply (body equals the `reply.welcome.dm_fresh` bundle value or matches the spec's DM-fresh welcome wording); `SELECT registration_state, probation_until FROM users WHERE adapter='inmemory' AND contact_id='u-1'` returns ONE row with `registration_state='invited'` AND `probation_until IS NOT NULL` (probation begins per D45); `SELECT status FROM invite_code WHERE code='<the-code>'` returns `'USED'`; `SELECT COUNT(*) FROM audit_log WHERE action='INVITE_CONSUME'` increments by 1. The IT asserts all four."
