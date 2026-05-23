@@ -244,7 +244,19 @@ class ConfirmFlowIT {
             ps.setBoolean(4, isBanned);
             ps.setString(5, registrationState);
             ps.setBoolean(6, isBanned);
-            ps.setObject(7, OffsetDateTime.now().plusHours(24));
+            // M1-045: bootstrap admins are past-probation by construction
+            // (they skip the AutoRegisterService path that seeds
+            // probation_until). A seeded admin with a 24h probation window
+            // would now be blocked at step 5 for /ban + /invite create
+            // --open, masking the dispatch-path assertions this file
+            // exists to prove. Non-admin targets keep the pre-M1-045
+            // 24h seed since they are recipients of /ban + /invite, never
+            // actors.
+            if (isAdmin) {
+                ps.setNull(7, java.sql.Types.TIMESTAMP_WITH_TIMEZONE);
+            } else {
+                ps.setObject(7, OffsetDateTime.now().plusHours(24));
+            }
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return (UUID) rs.getObject("id");

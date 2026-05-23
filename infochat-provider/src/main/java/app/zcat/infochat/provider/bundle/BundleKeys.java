@@ -307,6 +307,53 @@ public final class BundleKeys {
     public static final String REPLY_CONFIRM_PROMPT_INVITE_REVOKE =
             "reply.confirm.prompt.invite_revoke";
 
+    // ----- Slow-start probation + /vouch (M1-045) -------------------------
+    // Per docs/spec/security.md §Slow-start tier ("Blocked operations
+    // return a friendly reply stating when full access unlocks") +
+    // docs/design/03-commands.md §3.3 (probation-aware reply shape).
+    // The probation gate (InboundRouter step 5) emits
+    // ERROR_PROBATION_BLOCKED when a probation user invokes a
+    // non-allowed command; /vouch emits the success / no-op replies.
+
+    /**
+     * Probation gate rejection reply. Token {@code {0}} = the
+     * approximate time until full access unlocks (formatted from
+     * {@code probation_until - NOW()} by the caller). Per spec
+     * §Slow-start tier, the reply never reaches the LLM or any
+     * write path.
+     */
+    public static final String ERROR_PROBATION_BLOCKED = "error.probation.blocked";
+
+    /**
+     * {@code /vouch} success reply. Sent on the happy path where
+     * the handler performed the two transitions
+     * ({@code probation_until = NULL} and, when prior state was
+     * {@code group_only}, {@code registration_state = 'vouched'})
+     * in one transaction with one VOUCH audit row.
+     */
+    public static final String REPLY_VOUCH_SUCCESS = "reply.vouch.success";
+
+    /**
+     * {@code /vouch} no-op reply. Sent when the target row is
+     * already past probation AND not {@code group_only} — the
+     * UPDATE would change nothing. The handler short-circuits
+     * BEFORE running the SQL and writes no audit row, matching
+     * the M1-036 / {@code /unban} pattern for in-effect no-ops.
+     */
+    public static final String REPLY_VOUCH_NOOP = "reply.vouch.noop";
+
+    /**
+     * {@code /vouch} banned-target reply (M1-045 redteam-fix). Sent
+     * when the target row has {@code is_banned = true}: an admin
+     * cannot vouch a banned user past probation when intake step 4
+     * still blocks them. The handler short-circuits BEFORE opening
+     * the transaction so no audit row and no UPDATE land — the
+     * banned row's {@code registration_state} and
+     * {@code probation_until} columns are preserved verbatim, which
+     * is the state {@code /unban} restores into.
+     */
+    public static final String ERROR_VOUCH_BANNED_TARGET = "error.vouch.banned_target";
+
     private BundleKeys() {
         throw new AssertionError("BundleKeys is a constant holder and must not be instantiated");
     }

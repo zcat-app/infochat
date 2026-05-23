@@ -145,6 +145,19 @@ class AddSourceIT {
 
     @Test
     void mvpExitCriterionFourEndToEndAddSourceProducesRowsTagsSubscriptionAndReply() throws Exception {
+        // M1-045: the @BeforeEach pre-seeds m1-036-mvp-user-1 with
+        // probation_until = NOW() + 24h (pre-M1-045 default mirroring
+        // AutoRegisterService output). After step 5 lands, /add-source
+        // is NOT in the allowed-during-probation set, so the dispatch
+        // would be blocked with error.probation.blocked. Promote the
+        // actor past probation so this MVP-exit-criterion test
+        // continues to exercise the AddSourceCommandHandler path.
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "UPDATE users SET probation_until = NULL WHERE contact_id = ?")) {
+            ps.setString(1, "m1-036-mvp-user-1");
+            ps.executeUpdate();
+        }
         String url = "http://127.0.0.1:" + port + "/m1-036-mvp-feed.xml";
         adapter.deliverDm("m1-036-mvp-user-1",
                 "/add-source " + url + " --tags m1-036-mvp-news,m1-036-mvp-tech");

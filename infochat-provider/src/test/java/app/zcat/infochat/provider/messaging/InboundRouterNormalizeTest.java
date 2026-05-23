@@ -168,6 +168,16 @@ class InboundRouterNormalizeTest {
         // ordering; wire a no-op bucket so the size-cap reaches its
         // check without NPE'ing on the null field.
         router.rateCapBucket = new NoopRateCapBucket();
+        // M1-045: oversize body short-circuits at step 1.6 (size cap)
+        // BEFORE step 5 (probation), so the two new @Inject fields
+        // are not strictly needed here. Wire them anyway for hygiene
+        // so a future test addition in this file (or a future
+        // re-ordering of the intake steps) does not silently
+        // re-introduce a step-5 NPE. See NoopProbationCheck +
+        // NoopCommandPermissions class-level javadoc for the
+        // log-silent rationale.
+        router.commandPermissions = new NoopCommandPermissions();
+        router.probationCheck = new NoopProbationCheck();
         CapturingAdapter target = new CapturingAdapter();
         router.setReplyTarget(target);
 
@@ -394,6 +404,15 @@ class InboundRouterNormalizeTest {
         // outbound (no extra cancellation reply leaks into the test's
         // captured outbound queue).
         router.confirmStateService = new NoopConfirmStateService();
+        // M1-045: step 5 probation gate would NPE on null @Inject
+        // fields. The bodyAtExactlyTheCapIsAcceptedAndNormalizeRuns
+        // scenario routes a vouched user through step 5, which
+        // dereferences both fields. The Noop stand-ins live as
+        // top-level classes in this package — see NoopProbationCheck
+        // + NoopCommandPermissions class-level javadoc for the
+        // log-silent rationale.
+        router.commandPermissions = new NoopCommandPermissions();
+        router.probationCheck = new NoopProbationCheck();
         // dataSource intentionally left null — lookupUser is overridden
         // above so the DataSource field is never accessed.
         return router;

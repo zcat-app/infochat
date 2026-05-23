@@ -149,7 +149,24 @@ class AdapterRouterIT {
     }
 
     @Test
-    void unknownCommandProducesBundleKeyedFriendlyReply() {
+    void unknownCommandProducesBundleKeyedFriendlyReply() throws Exception {
+        // M1-045: the @BeforeEach pre-seeds mvp-user-2 with
+        // probation_until = NOW() + 24h (kept to satisfy the
+        // firstDmAutoRegistersUserAndRepliesWithHelp assertion that
+        // pins the auto-register defaults). Unknown commands fail
+        // closed at step 5 — the probation gate returns its blocked
+        // reply BEFORE step 6 (parse → unknown-command), so the
+        // bundle-keyed error.unknown_command reply this test asserts
+        // would never fire. Promote mvp-user-2 past probation for
+        // this scenario so the unknown-command parse path still
+        // exercises end-to-end. The other tests in this file send
+        // /help (allowed during probation) and remain untouched.
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "UPDATE users SET probation_until = NULL WHERE contact_id = ?")) {
+            ps.setString(1, "mvp-user-2");
+            ps.executeUpdate();
+        }
         adapter.deliverDm("mvp-user-2", "/unknown-command");
 
         List<OutboundMessage> sent = adapter.sentMessages();

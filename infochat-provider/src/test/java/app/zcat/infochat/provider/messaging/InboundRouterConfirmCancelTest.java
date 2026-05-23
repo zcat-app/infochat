@@ -159,6 +159,15 @@ class InboundRouterConfirmCancelTest {
         router.banCheck = new NoopBanCheck();
         router.bundleLoader = new FakeBundleLoader();
         router.confirmStateService = confirmState;
+        // M1-045: step 5 probation gate would NPE on null @Inject
+        // fields for the vouched-user scenarios this test exercises
+        // (every test in this file routes through lookupUser →
+        // banCheck → probationCheck). The Noop stand-ins live as
+        // top-level classes in this package — see NoopProbationCheck
+        // + NoopCommandPermissions class-level javadoc for the
+        // log-silent rationale.
+        router.commandPermissions = new NoopCommandPermissions();
+        router.probationCheck = new NoopProbationCheck();
         router.maxInboundBodyBytes = 65536;
         router.setReplyTarget(target);
         return router;

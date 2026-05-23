@@ -330,10 +330,13 @@ class InboundRouterIntakeOrderingTest {
                         "rateCapBucket.tryAcquire",
                         "lookupUser",
                         "autoRegisterService.resolveOrRegisterGroup",
+                        "lookupUser",
                         "banCheck.isBanned",
                         "handler.handle(help)"),
                 log.calls,
-                "group-mention path must call exactly these collaborators in order; got: " + log.calls);
+                "group-mention path must call exactly these collaborators in order — the second "
+                        + "lookupUser is the M1-045 redteam-fix re-fetch after auto-register inserts; got: "
+                        + log.calls);
     }
 
     // ----- helpers + fakes ------------------------------------------------
@@ -341,16 +344,37 @@ class InboundRouterIntakeOrderingTest {
     /**
      * Build a router with all M1-044b collaborators replaced by
      * recording fakes. {@code snapshot} controls the
-     * {@link InboundRouter#lookupUser} override — empty means
-     * "DM unknown contact" / "group unknown contact", non-empty means
-     * "user known with this {@link InboundRouter.UserSnapshot} state."
+     * {@link InboundRouter#lookupUser} override's INITIAL return —
+     * empty means "DM unknown contact" / "group unknown contact",
+     * non-empty means "user known with this
+     * {@link InboundRouter.UserSnapshot} state."
+     *
+     * <p><b>M1-045 redteam-fix re-fetch.</b> Fix 1 added a re-fetch
+     * of {@code lookupUser} after step 3's
+     * {@code autoRegisterService.resolveOrRegisterGroup} insert.
+     * The override is therefore stateful: the FIRST call returns
+     * the {@code snapshot} the test seeded; subsequent calls
+     * synthesize a present snapshot from V5 auto-register defaults
+     * ({@code is_banned=false}, {@code registration_state='group_only'})
+     * so the now-guard-less {@code snapshot.get().id()} at step 5 does
+     * not NPE. Scenario (h)
+     * {@code groupMentionAutoRegistersAndDispatchesNormally} relies
+     * on the synthesized re-fetch result; every other scenario in
+     * this file uses the initial snapshot only (auto-register does
+     * not fire on DM scope or when the initial snapshot is present).
      */
     private InboundRouter newRouterWithLog(CallLog log, Optional<InboundRouter.UserSnapshot> snapshot) {
+        java.util.concurrent.atomic.AtomicInteger lookupCallCount =
+                new java.util.concurrent.atomic.AtomicInteger();
         InboundRouter router = new InboundRouter() {
             @Override
             Optional<UserSnapshot> lookupUser(String adapter, String contactId) {
                 log.calls.add("lookupUser");
-                return snapshot;
+                if (lookupCallCount.incrementAndGet() == 1) {
+                    return snapshot;
+                }
+                return Optional.of(new UserSnapshot(
+                        UUID.randomUUID(), false, "group_only"));
             }
         };
         router.commandHandlers = new SingletonInstance<>();
@@ -370,6 +394,14 @@ class InboundRouterIntakeOrderingTest {
         // log entry would break those assertions, so this Noop is
         // deliberately log-silent.
         router.confirmStateService = new NoopConfirmStateService();
+        // M1-045: step 5 probation gate would NPE on null @Inject
+        // fields. The two Noop stand-ins live as top-level classes
+        // in this same package — NoopProbationCheck + NoopCommand
+        // Permissions — and are deliberately log-silent. See their
+        // class-level javadoc for the rationale (same as
+        // NoopConfirmStateService above).
+        router.commandPermissions = new NoopCommandPermissions();
+        router.probationCheck = new NoopProbationCheck();
         router.maxInboundBodyBytes = 65536;
         return router;
     }

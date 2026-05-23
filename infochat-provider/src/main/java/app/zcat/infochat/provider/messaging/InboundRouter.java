@@ -8,6 +8,7 @@ import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.command.CommandPermissions;
 import app.zcat.infochat.provider.command.ConfirmStateService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.context.control.ActivateRequestContext;
@@ -15,6 +16,7 @@ import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -26,6 +28,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.text.MessageFormat;
 import java.text.Normalizer;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
@@ -61,12 +64,32 @@ import java.util.concurrent.atomic.AtomicLong;
  *       (the rate-limit state does not change the per-failure reply)
  *       and stop;</li>
  *   <li>3 Group unknown contact → {@link AutoRegisterService#resolveOrRegisterGroup}
- *       inserts a {@code registration_state='group_only'} row and
- *       continues to step 4;</li>
+ *       inserts a {@code registration_state='group_only'} row, then
+ *       {@link #lookupUser} is RE-FETCHED so {@code snapshot} carries
+ *       the just-inserted row's {@code (id, registration_state,
+ *       probation_until)} for the downstream steps (M1-045 redteam-fix:
+ *       closes AUTH-BYPASS on the first-message probation gate);</li>
  *   <li>4 ban check via {@link BanCheck#isBanned}; a banned user
  *       receives the fixed {@code error.ban.fixed} reply and stops
  *       (spec §User ban: "one fixed reply per inbound message");</li>
- *   <li>5 reserved — M1-045 splices the probation check here;</li>
+ *   <li>4.7 DM-gate carve-out: when the inbound is a DM scope AND
+ *       the resolved user's {@code registration_state = 'group_only'},
+ *       the router emits the fixed {@code error.invite.required}
+ *       reply and stops BEFORE the probation gate (spec §Invite-code
+ *       registration: "rejected with the same fixed reply as step
+ *       2's invalid path"; §Authorization model: "blocked commands
+ *       never reach execution"). M1-045 redteam-fix INFO-LEAK:
+ *       moved from post-step-5 to pre-step-5 so a {@code group_only}
+ *       user DMing during probation receives the spec-mandated fixed
+ *       reply instead of {@code error.probation.blocked}'s allowed-set
+ *       enumeration (the reply-text divergence was a probe surface);</li>
+ *   <li>5 slow-start probation gate (M1-045): if {@link ProbationCheck}
+ *       reports {@code inProbation == true} AND the command is NOT in
+ *       {@link CommandPermissions}'s allowed-during-probation set, the
+ *       router emits {@code error.probation.blocked} with the time-
+ *       until-unlock interpolated; otherwise
+ *       {@link ProbationCheck#clearIfPromoted} runs as the lazy
+ *       graduation clear;</li>
  *   <li>4.5 confirm-cancel sweep (M1-051): if the resolved snapshot
  *       has pending confirm state for this {@code (actor.id, scope)},
  *       AND the inbound body is NOT the confirm-shape for the pending
@@ -74,31 +97,21 @@ import java.util.concurrent.atomic.AtomicLong;
  *       {@link ConfirmStateService#takeAny} and send a cancellation
  *       acknowledgement BEFORE proceeding to dispatch. The
  *       confirm-shape body is forwarded unchanged so the handler's
- *       takeMatching pops the pending args. Empty pending → no-op;
- *       this preserves the per-step call-order assertions of every
- *       pre-existing router test (the new sweep is invisible when no
- *       pending exists);</li>
- *   <li>7 DM-gate carve-out (pre-dispatch): when the inbound is a DM
- *       scope AND the resolved user's {@code registration_state =
- *       'group_only'}, the router emits the fixed
- *       {@code error.invite.required} reply and stops BEFORE dispatch
- *       (spec §Invite-code registration: "rejected with the same fixed
- *       reply as step 2's invalid path"; §Authorization model:
- *       "blocked commands never reach execution"). M1-044e fix:
- *       moved from post-dispatch override to pre-dispatch short-
- *       circuit so handler side effects never land for a blocked DM
- *       (closes AUTH-BYPASS). Full step-7 permission matrix lands in
- *       M1-045;</li>
+ *       takeMatching pops the pending args. Empty pending → no-op;</li>
  *   <li>6 parse + dispatch (slash-command resolver or chat-mode
  *       fallback).</li>
  * </ol>
  *
- * <p><b>Single users-row SELECT per dispatch.</b> Steps 2 (emptiness
- * pre-condition), 3 (emptiness pre-condition), and 7 (DM-gate
- * {@code registration_state} predicate) all derive from the SAME
- * {@link UserSnapshot} read at the top of the splice. This eliminates
- * TOCTOU between the three checks and keeps the dispatch path at one
- * users-row SELECT per inbound. The step 4 ban predicate consults
+ * <p><b>Users-row SELECT count per dispatch.</b> The dispatch path
+ * is one users-row SELECT per inbound on every code path EXCEPT the
+ * group-auto-register first-message path: there, step 3 inserts the
+ * row and a second SELECT re-fetches the just-written snapshot so
+ * steps 4.7 (DM-gate) and 5 (probation gate) see the actor's actual
+ * {@code registration_state} and {@code probation_until}. Steps 2
+ * (DM-emptiness), 3 (group-emptiness), 4.7 (DM-gate), and 5
+ * (probation gate) all consume the SAME {@link UserSnapshot} (the
+ * post-step-3 snapshot on the auto-register path; the initial step-1
+ * snapshot otherwise). The step 4 ban predicate consults
  * {@link BanCheck#isBanned} directly per spec (a separate query that
  * sees the freshest {@code is_banned} state for a banned-mid-dispatch
  * race).</p>
@@ -220,6 +233,12 @@ public class InboundRouter {
     @Inject
     ConfirmStateService confirmStateService;
 
+    @Inject
+    CommandPermissions commandPermissions;
+
+    @Inject
+    ProbationCheck probationCheck;
+
     /**
      * Defense-in-depth body cap. The default is below the in-memory
      * adapter's declared {@code maxInboundMessageBytes} so a
@@ -329,8 +348,17 @@ public class InboundRouter {
         // (V5 default is_banned=FALSE), so step 4 below will see
         // is_banned=false either via BanCheck SQL or by the row that
         // was just written.
+        //
+        // M1-045 redteam-fix (AUTH-BYPASS): re-fetch snapshot after
+        // the insert so step 5's probation gate sees the just-written
+        // row's probation_until. Without the re-fetch, the snapshot
+        // captured at the top of dispatch would remain empty and the
+        // step-5 gate would skip enforcement on the user's very first
+        // message — silently widening to any future group-scope
+        // handler that adds side effects.
         if (msg.scope() instanceof ScopeRef.Group && snapshot.isEmpty()) {
             autoRegisterService.resolveOrRegisterGroup(msg.sender(), adapterName);
+            snapshot = lookupUser(adapterName, contactId);
         }
 
         // Step 4 — ban check per spec §User ban + §Authorization model
@@ -341,56 +369,85 @@ public class InboundRouter {
             return;
         }
 
-        // Step 5 (reserved — M1-045 inserts the probation check here).
+        // Step 4.7 — DM-gate carve-out (M1-045 redteam-fix INFO-LEAK).
+        // Per spec §Invite-code registration: "rejected with the same
+        // fixed reply as step 2's invalid path." Moved BEFORE step 5
+        // so a group_only user DMing in probation receives the spec-
+        // mandated fixed `error.invite.required` reply rather than
+        // the longer `error.probation.blocked` text (which would
+        // enumerate the allowed-set and create a reply-content
+        // distinction between unknown vs registered-but-DM-blocked
+        // contacts — a probe surface). Group scope and non-group_only
+        // DM scope pass through. Snapshot is always present by this
+        // point (DM-empty short-circuited at step 2; Group-empty was
+        // auto-registered and re-fetched at step 3).
+        if (msg.scope() instanceof ScopeRef.Dm
+                && REGISTRATION_STATE_GROUP_ONLY.equals(snapshot.get().registrationState())) {
+            sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_INVITE_REQUIRED));
+            return;
+        }
+
+        // Step 5 — slow-start probation gate (M1-045) per spec
+        // §Slow-start tier + §Authorization model step 5. A probation
+        // user invoking a non-allowed command receives the
+        // error.probation.blocked reply (with the {0} time-until-
+        // unlock interpolated from probation_until); a probation
+        // user invoking an allowed command falls through to the
+        // rest of the pipeline; a non-probation user gets the
+        // opportunistic clearIfPromoted (the lazy clear) on the way.
+        //
+        // Invariant: snapshot is always present by step 4 — DM-empty
+        // short-circuited at step 2's invite-consume; Group-empty
+        // was auto-registered and re-fetched at step 3. The defensive
+        // isPresent guard removed by M1-045 redteam-fix.
+        UUID probationActorId = snapshot.get().id();
+        String commandName = commandNameOf(normalized);
+        if (probationCheck.inProbation(probationActorId)) {
+            if (!commandPermissions.allowedDuringProbation(commandName)) {
+                Instant expiry = probationCheck.probationExpiry(probationActorId);
+                String body = MessageFormat.format(
+                        bundleLoader.get(BundleKeys.ERROR_PROBATION_BLOCKED),
+                        formatTimeUntilUnlock(expiry));
+                sendReply(msg.scope(), body);
+                return;
+            }
+        } else {
+            // Lazy clear: nulls probation_until on the next
+            // request after graduation. Idempotent after first
+            // success (WHERE clause matches zero rows).
+            probationCheck.clearIfPromoted(probationActorId);
+        }
 
         // Step 4.5 — confirm-cancel sweep (M1-051). Per spec
         // §Surface conventions ("any other input cancels"): a pending
         // confirm under (actor.id, scope) that does NOT match the
         // current inbound's confirm-shape is drained AND the user
         // receives a cancellation acknowledgement BEFORE the
-        // intended-next-command dispatches. The sweep skips when
-        // snapshot is empty (an unregistered DM contact would have
-        // short-circuited at step 2; a freshly auto-registered group
-        // contact cannot have pending state because every remember-path
-        // runs only inside an admin-gated handler).
-        if (snapshot.isPresent()) {
-            UUID actorId = snapshot.get().id();
-            Optional<ConfirmStateService.PendingConfirm> pending =
-                    confirmStateService.peek(actorId, msg.scope());
-            if (pending.isPresent() && !isConfirmShape(normalized, pending.get())) {
-                // Drain pending and send cancellation BEFORE dispatch.
-                // The takeAny call removes the entry; the subsequent
-                // dispatch proceeds with no pending state, so the
-                // user's intended-next-command is processed normally.
-                ConfirmStateService.PendingConfirm cancelled = pending.get();
-                confirmStateService.takeAny(actorId, msg.scope());
-                String cancellation = MessageFormat.format(
-                        bundleLoader.get(BundleKeys.REPLY_CONFIRM_CANCELLED),
-                        cancelled.commandName());
-                sendReply(msg.scope(), cancellation);
-            }
-            // Matching confirm-shape: leave pending in place; the
-            // handler's takeMatching pops it on the dispatch path.
+        // intended-next-command dispatches. Snapshot is guaranteed
+        // present here by the step-4 invariant (M1-045 redteam-fix).
+        UUID confirmActorId = snapshot.get().id();
+        Optional<ConfirmStateService.PendingConfirm> pending =
+                confirmStateService.peek(confirmActorId, msg.scope());
+        if (pending.isPresent() && !isConfirmShape(normalized, pending.get())) {
+            // Drain pending and send cancellation BEFORE dispatch.
+            // The takeAny call removes the entry; the subsequent
+            // dispatch proceeds with no pending state, so the
+            // user's intended-next-command is processed normally.
+            ConfirmStateService.PendingConfirm cancelled = pending.get();
+            confirmStateService.takeAny(confirmActorId, msg.scope());
+            String cancellation = MessageFormat.format(
+                    bundleLoader.get(BundleKeys.REPLY_CONFIRM_CANCELLED),
+                    cancelled.commandName());
+            sendReply(msg.scope(), cancellation);
         }
+        // Matching confirm-shape: leave pending in place; the
+        // handler's takeMatching pops it on the dispatch path.
 
-        // Step 7 — DM-gate carve-out (pre-dispatch). Per spec
-        // §Invite-code registration + §Authorization model: a user
-        // auto-registered via group @mention (registration_state=
-        // 'group_only') is rejected from DM with the same fixed reply
-        // as step 2's invalid path. The check fires BEFORE dispatch so
-        // the handler's side effects (URL probe, LLM call, DB writes)
-        // never land for a blocked DM — honors the spec's "blocked
-        // commands never reach execution" promise (M1-044e fix closes
-        // the AUTH-BYPASS redteam finding). Full step-7 permission
-        // matrix is M1-045 territory.
-        if (msg.scope() instanceof ScopeRef.Dm
-                && snapshot.map(s -> REGISTRATION_STATE_GROUP_ONLY.equals(s.registrationState()))
-                        .orElse(false)) {
-            sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_INVITE_REQUIRED));
-            return;
-        }
-
-        // Step 6 — Parse + dispatch.
+        // Step 6 — Parse + dispatch. The DM-gate (group_only + DM →
+        // error.invite.required) moved to step 4.7 above so blocked
+        // DMs short-circuit BEFORE the probation gate would otherwise
+        // emit the probation-blocked reply for a group_only user.
+        // See the step 4.7 comment block for the spec rationale.
         String body;
         try {
             body = normalized.startsWith("/")
@@ -409,9 +466,9 @@ public class InboundRouter {
      * Resolve a {@link UserSnapshot} for {@code (adapter, contactId)} —
      * the V5 UNIQUE (adapter, contact_id) constraint guarantees
      * zero-or-one result. Used by steps 2 (DM emptiness), 3 (Group
-     * emptiness), and 7 (DM-gate {@code registration_state} predicate)
-     * — derive all three predicates from the SAME snapshot to
-     * eliminate TOCTOU between them.
+     * emptiness + post-insert re-fetch), 4.7 (DM-gate
+     * {@code registration_state} predicate), and 5 (probation gate's
+     * actor.id read).
      *
      * <p>Package-private + non-final so plain-JUnit test helpers
      * (InboundRouterNormalizeTest, InboundRouterContactIdRedactionTest,
@@ -508,6 +565,52 @@ public class InboundRouter {
             }
         }
         return UNKNOWN_COMMAND_REPLY;
+    }
+
+    /**
+     * Extract the command name for the step 5 probation gate. For a
+     * slash body, returns the first whitespace-delimited token with
+     * the leading {@code /} stripped (e.g. {@code "help"} from
+     * {@code "/help foo"}). For a non-slash body (chat mode),
+     * returns the fixed sentinel {@code "chat-mode"} so the gate's
+     * allowed-set check fails closed — spec §Slow-start tier lists
+     * chat mode in the Blocked column. The sentinel name is NOT in
+     * {@link CommandPermissions}'s allowed set and NOT in the asset
+     * family, so a probation user typing prose receives the
+     * probation reply.
+     */
+    private static String commandNameOf(String normalized) {
+        if (!normalized.startsWith("/")) {
+            return "chat-mode";
+        }
+        String firstToken = normalized.split("\\s+", 2)[0];
+        return firstToken.substring(1);
+    }
+
+    /**
+     * Format the time-until-unlock for the
+     * {@code error.probation.blocked} {@code {0}} token. The output
+     * is approximate ({@code "~Nh"} or {@code "~Nm"}) because the
+     * probation window is hours-scale and users do not need
+     * second-precision. A null or past expiry renders as
+     * {@code "<1m"} — defends the user-visible reply against the
+     * tight race where {@link ProbationCheck#inProbation} returned
+     * true but a concurrent {@code clearIfPromoted} on the same
+     * row nulled the column between the two reads.
+     */
+    static String formatTimeUntilUnlock(@Nullable Instant expiry) {
+        if (expiry == null) {
+            return "<1m";
+        }
+        Duration remaining = Duration.between(Instant.now(), expiry);
+        if (remaining.isNegative() || remaining.toMinutes() < 1) {
+            return "<1m";
+        }
+        long hours = remaining.toHours();
+        if (hours >= 1) {
+            return "~" + hours + "h";
+        }
+        return "~" + remaining.toMinutes() + "m";
     }
 
     /**

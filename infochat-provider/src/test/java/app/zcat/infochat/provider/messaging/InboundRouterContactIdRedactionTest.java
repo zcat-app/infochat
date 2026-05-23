@@ -176,6 +176,16 @@ class InboundRouterContactIdRedactionTest {
         // the sweep is a no-op and the dispatch-redaction sites
         // downstream still fire as before.
         router.confirmStateService = new NoopConfirmStateService();
+        // M1-045: step 5 probation gate would NPE on null @Inject
+        // fields for the vouched-user scenarios this test exercises
+        // (every test in this file routes a vouched user through
+        // step 5 on the way to handleSlash, where the redaction
+        // sites fire). The Noop stand-ins live as top-level classes
+        // in this package — see NoopProbationCheck +
+        // NoopCommandPermissions class-level javadoc for the
+        // log-silent rationale.
+        router.commandPermissions = new NoopCommandPermissions();
+        router.probationCheck = new NoopProbationCheck();
         return router;
     }
 
