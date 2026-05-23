@@ -121,6 +121,28 @@ escalations:
       files_budget from 5 to 7; extend Authorized test changes / Implementation
       notes §Test-side updates describing the signature fix and the rateCapBucket
       wiring fix.
+  - date: 2026-05-23
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      ACCEPTANCE-VS-DOD-CONSISTENT FAIL: Definition of Done body bullet reads
+      "InviteCodeConsumerTest's **7** M1-044a pre-existing methods stay green
+      with the call-site update" (DoD enumerates 7 pre-existing + 1 new = 8
+      total @Test methods). Acceptance item 9 asserts
+      `grep -cE '^\s*@Test\b' InviteCodeConsumerTest.java returns 9
+      (8 pre-existing + 1 new nonUuidBody test)`. The 2026-05-23 refine
+      corrected acceptance item 9 from 7-pre-existing to 8-pre-existing
+      (per history file lines 63-69 — ground-truth grep across
+      InviteCodeConsumerTest.java surfaced 8 named methods:
+      acceptedContactBound, acceptedOpenAdapter, rejectedAlreadyUsed,
+      rejectedExpired, rejectedCrossContact, rejectedCrossAdapter,
+      bruteForceBreach, bruteForceBreachAuditFailureRetries) but did not
+      apply the parallel correction to the DoD bullet. A developer
+      implementing against the DoD would produce 8 total @Test methods;
+      the acceptance grep would return 8, not 9, and item 9 would fail.
+      Fix: change the DoD bullet "InviteCodeConsumerTest's **7** M1-044a
+      pre-existing methods stay green" to "InviteCodeConsumerTest's
+      **8** M1-044a pre-existing methods stay green". One-word change;
+      all other acceptance items are internally consistent with 8+1=9.
 revisions:
   - date: 2026-05-23
     reason: clarity-fail refine (1 blocker FILES-BUDGET-PLAUSIBLE — files_scope excluded two test files containing inline NoopInviteCodeConsumer subclasses with old UUID signature; oversize NormalizeTest also uses bare `new InboundRouter()` which would NPE under the new rate-cap-first ordering)
@@ -174,6 +196,40 @@ revisions:
           methods after the 3 renames" was wrong on both counts —
           only 2 actual renames (a, g), plus 1 body-only update (e),
           plus 1 new addition. Final count is 9, not 8. Fixed.
+  - date: 2026-05-23
+    reason: clarity-fail refine (1 blocker ACCEPTANCE-VS-DOD-CONSISTENT — DoD bullet still said `7 M1-044a pre-existing methods` while acceptance item 9 / Implementation notes §Test-side updates had been corrected to 8 in the prior refine)
+    summary: |
+      Pre-refine snapshot. The 2026-05-23 clarity FAIL (second round)
+      surfaced a single ACCEPTANCE-VS-DOD-CONSISTENT blocker rooted in
+      the same count bug the prior refine's own summary identified: the
+      previous refine moved acceptance item 9 from "7 pre-existing + 1
+      new = 8" to "8 pre-existing + 1 new = 9" and updated
+      Implementation notes §Test-side updates line 459 accordingly, but
+      missed the parallel correction to the DoD bullet at line 297
+      (which still read "InviteCodeConsumerTest's 7 M1-044a pre-existing
+      methods stay green"). Ground-truth grep at refine time confirms
+      InviteCodeConsumerTest.java has 8 @Test methods:
+      acceptedContactBound, acceptedOpenAdapter, rejectedAlreadyUsed,
+      rejectedExpired, rejectedCrossContact, rejectedCrossAdapter,
+      bruteForceBreach, bruteForceBreachAuditFailureRetries.
+
+      Changes applied in this refine:
+        - Definition of Done line 297: "InviteCodeConsumerTest's 7
+          M1-044a pre-existing methods stay green" → "InviteCodeConsumerTest's
+          8 M1-044a pre-existing methods stay green". One-word numeric
+          correction; no new claim added, no new acceptance hook
+          required (acceptance item 9 already asserts the 8+1=9 final
+          count).
+        - status: escalated → pending (rewrite ready for fresh clarity)
+        - clarity_check: cleared (the FAIL block described the OLD
+          ticket; the rewritten ticket requires a fresh clarity run on
+          /m1-tick start).
+
+      No other body or acceptance text changed. The Implementation
+      notes §Test-side updates bullet at line 459 ("8 M1-044a pre-existing
+      methods get their call sites updated") and acceptance items 8, 9
+      (the +1 new and the final-count-9 grep) are now consistent across
+      DoD ↔ acceptance ↔ Implementation notes.
 ---
 
 # M1-044e: InboundRouter splice red-team fixes (DM-gate pre-dispatch, rate-cap precedence, lookupUser redaction, non-UUID counter)
@@ -266,7 +322,7 @@ the brute-force budget under a new input shape.
 - `InviteCodeConsumerTest` gains one new `@Test` method that exercises
   the non-UUID counter-increment path: N+1 non-UUID probes past
   threshold trip `BruteForceThresholdBreached`.
-- `InviteCodeConsumerTest`'s 7 M1-044a pre-existing methods stay green
+- `InviteCodeConsumerTest`'s 8 M1-044a pre-existing methods stay green
   with the call-site update from `consume(adapter, contactId, uuid)`
   to `consume(adapter, contactId, uuid.toString())`.
 - `InboundRouterIntakeOrderingTest`'s scenarios (a) and (g) are renamed
