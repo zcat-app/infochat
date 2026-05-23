@@ -455,7 +455,20 @@ should pick admin placement deliberately:
 - Cross-adapter elevation is impossible by design (`/grant-admin`
   is inbound-adapter-scoped). A compromised Signal admin cannot
   grant admin on SimpleX without also compromising a SimpleX
-  admin's chat session.
+  admin's chat session. **Cross-adapter `/invite create` is a
+  separate surface and is intentionally permitted** — `/invite
+  create --adapter <name>` may name any enabled adapter regardless
+  of which adapter the command arrived on (per `commands.md`
+  §Admin `/invite create`). The trade-off is acceptable because an
+  invite code grants only **registration on the named adapter**,
+  not elevation: the first contact to present the code is
+  recorded under the inbound-adapter as a fresh user with no
+  admin bit and the standard probation gate. A compromised
+  Signal admin can therefore mint a SimpleX invite, but cannot
+  use that invite path to mint a SimpleX admin. Per-adapter
+  PENDING caps and the audit trail bound the cross-adapter
+  invite-issuance rate. This carve-out is what the "elevation
+  vs registration" distinction above turns on.
 
 ## User ban
 
