@@ -1,13 +1,50 @@
 ---
 id: M1-044
 title: Invite-code intake umbrella — invite/ban/unban DM-gate roundtrip IT
-status: pending
+status: done
 created: 2026-05-20
 last_updated: 2026-05-23
 blocked_by:
   - M1-044a
   - M1-044b
   - M1-044c
+clarity_check:
+  date: 2026-05-23
+  verdict: PASS
+  warnings: []
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-05-23
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 3
+      added: 490
+      removed: 11
+redteam_findings: []
+redteam_audits:
+  - date: 2026-05-23
+    verdict: CLEAN
+    base: main
+    head: m1/M1-044-invite-intake-umbrella (working tree — pre-commit)
+    verdict_file: docs/plan/m1/redteam/M1-044-2026-05-23.md
+    findings_count: 0
+    out_of_model_count: 2
+    note: |
+      Pre-commit audit against the branch's working tree. CLEAN.
+      The diff is purely a test-only addition (one new IT class);
+      no production-source touches. Two OUT-OF-MODEL advisories
+      noted in the verdict file: (1) trigger-disable in test
+      fixture cleanup requires elevated DB privileges the
+      production Provider role does not hold; (2) audit_log DELETE
+      LIKE prefix is unique to this IT, no cross-test collision.
+      Both are advisory; no remediation ticket required.
 files_budget: 1
 files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InviteIntakeRoundtripIT.java
