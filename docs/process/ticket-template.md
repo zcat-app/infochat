@@ -21,7 +21,7 @@ files_scope:                   # OPTIONAL path/glob list. When present, the revi
                                # this ticket's own file here.
   # - infochat-collector/src/main/java/.../rss/**
   # - infochat-collector/src/test/java/.../rss/**
-complexity: low                # low | medium | high; high triggers the Plan subagent at start
+complexity: low                # low | medium | high; high triggers the plan-writer subagent at start
 risk: low                      # low | medium | high; high triggers commit-time mvn verify re-run
 round_cap: 2                   # default 2; opt-in to 3 only for complexity:high or risk:high
 security_relevant: false       # true → triggers threat-actor review (see /redteam skill)

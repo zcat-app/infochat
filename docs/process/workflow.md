@@ -64,8 +64,8 @@ Apply the doctrine on every proposed process change: is this addition addressing
 
 Edges:
 
-- `pending → in-progress` — normal `start` path (clarity PASS or WARN; for `complexity: high` tickets, also requires the Plan subagent to return an outline rather than `OUTLINE FAILED`).
-- `pending → escalated` — `start`-blocked-by-clarity-FAIL OR `outline-fail` for `complexity: high` tickets (Plan subagent returned `OUTLINE FAILED` after the branch was created). The status never passes through `in-progress` for the clarity-fail arm; for the outline-fail arm the branch exists but is rolled back if the user resolves with refine-to-pending or abort.
+- `pending → in-progress` — normal `start` path (clarity PASS or WARN; for `complexity: high` tickets, also requires the plan-writer subagent to return an outline rather than `OUTLINE FAILED`).
+- `pending → escalated` — `start`-blocked-by-clarity-FAIL OR `outline-fail` for `complexity: high` tickets (plan-writer subagent returned `OUTLINE FAILED` after the branch was created). The status never passes through `in-progress` for the clarity-fail arm; for the outline-fail arm the branch exists but is rolled back if the user resolves with refine-to-pending or abort.
 - `in-progress → in-review` — `review` step.
 - `in-review → in-progress` — REWORK (rounds 1..N).
 - `in-review → escalated` — round-cap or `MANUAL` verdict.
@@ -106,7 +106,7 @@ If this section disagrees with `ticket-template.md`, the template wins; sync thi
 | `files_scope` | Optional path/glob list. Enables negative-space check + parallelism eligibility. | reviewer NEGATIVE-SPACE-CHECK, `start --parallel` |
 | `out_of_scope` | Path/feature exclusions the diff MUST NOT touch. | reviewer OUT-OF-SCOPE-CHECK |
 | `acceptance` | Runnable / testable criteria, ideally one assertion per item. | reviewer ACCEPTANCE-CHECK, clarity pre-flight |
-| `complexity` | `low` / `medium` / `high`; `high` triggers the Plan subagent at `start`. | `start` |
+| `complexity` | `low` / `medium` / `high`; `high` triggers the plan-writer subagent at `start`. | `start` |
 | `risk` | `low` / `medium` / `high`; `high` triggers the commit-time `mvn verify` re-run. | `commit` |
 | `round_cap` | Default 2; may be 3 for `complexity: high` OR `risk: high` tickets. | reviewer round bookkeeping |
 | `security_relevant` | When `true`, `/redteam` is recommended after APPROVE. | `commit` reminder |

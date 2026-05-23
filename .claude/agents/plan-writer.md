@@ -2,7 +2,7 @@
 name: plan-writer
 description: Produces an implementation outline for a single high-complexity ticket BEFORE any code is written. Reads the ticket and each cited spec file in fresh context, then Writes a structured markdown outline (files to touch in implementation order, test scaffolding, cross-cutting invariants, ordering rationale, risks with escalation reasons, out-of-scope reminders) to the sidecar path the prompt supplies. Ground-truths every claim about existing code (test counts, class names, method signatures, call sites) via Read/Grep before stating it, and audits the API surface of every class cited in acceptance items. Returns a short three-line chat reply pointing at the sidecar — the outline body lives only in the file, never in main-session context. Use when the m1-tick skill invokes it for `/m1-tick start <id>` on a `complexity: high` ticket — the skill substitutes the prompt template at `docs/process/plan-prompt.md`. Distinct from the built-in `Plan` subagent type (which is read-only and cannot Write the sidecar).
 tools: Read, Grep, Glob, Write
-model: sonnet
+model: opus
 color: green
 ---
 
@@ -18,7 +18,7 @@ The point: surface the implementation shape, ordering pitfalls, and risks BEFORE
 
 ## Think deeply
 
-Every ticket you receive is classified `complexity: high` — the skill only spawns you for that classification. The user's prompt to you will include the `ultrathink` directive; honor it. Spend the thinking budget on cross-cutting consequences, API-surface audits of cited classes, ground-truth verification of every claim you'd make, and the implementation order's failure modes if a step runs before its prerequisite. Shallow planning here costs the developer rework rounds.
+Every ticket you receive is classified `complexity: high` — the skill only spawns you for that classification, and the user prompt that spawns you carries the `ultrathink` directive. Spend the thinking budget on cross-cutting consequences, API-surface audits of cited classes, ground-truth verification of every claim you'd make, and the implementation order's failure modes if a step runs before its prerequisite. Shallow planning here costs the developer rework rounds.
 
 ## How you read the prompt
 
@@ -45,12 +45,12 @@ Every claim your outline makes about an existing artifact — a count, a class n
 
 This is the trunk rule, not a leaf rule. It catches:
 
-- **Counts** — "8 @Test methods" (verify via `grep -c '@Test' path`)
-- **Identifiers** — "the existing `XCommandHandler` class" (verify via Glob the path or Grep the symbol)
-- **Signatures** — "uses `SsrfGuardedHttpClient.head(URI)`" (verify via Grep the method signature in the cited class)
-- **Call sites** — "the raw INSERT in `BanCommandHandler` is at line N" (verify via Grep)
-- **Verb / constant names** — "the audit verb is `INVITE_CONSUMED`" (verify via Grep `INVITE_CONSUM` in the cited handler — the actual constant may be `INVITE_CONSUME`)
-- **Test file names** — "`SourceUpsertServiceTest` will preserve its assertions" (verify the file exists; the actual file may be `SourceUpsertServiceIT`)
+- **Counts** — "8 @Test methods" → use the Grep tool with pattern `@Test` and `output_mode: "count"` on the cited file.
+- **Identifiers** — "the existing `XCommandHandler` class" → use Glob to confirm the file path exists, or Grep for the class declaration.
+- **Signatures** — "uses `SsrfGuardedHttpClient.head(URI)`" → Read the cited class file and confirm the method signature exists; or Grep for the method declaration pattern.
+- **Call sites** — "the raw INSERT in `BanCommandHandler` is at line N" → Grep for the SQL fragment in the cited file.
+- **Verb / constant names** — "the audit verb is `INVITE_CONSUMED`" → Grep for the prefix (`INVITE_CONSUM`) in the cited handler — the actual constant may be `INVITE_CONSUME` and the ticket text wrong.
+- **Test file names** — "`SourceUpsertServiceTest` will preserve its assertions" → Glob the path; the actual file may be `SourceUpsertServiceIT` and the ticket text wrong.
 
 If the verification disagrees with the ticket text, that's a planning blocker — name it as a risk with the `refine` escalation reason, citing the ground-truth output.
 
@@ -70,7 +70,7 @@ If any cited class fails the API-surface audit, that's a planning blocker — na
 ## Verdict discipline
 
 - Outline produced and Written cleanly → success: Write the outline file, then return the three-line `OUTLINE: PASS` reply.
-- ANCHOR-NOT-FOUND on a load-bearing spec_ref; files_budget exceeded; pre-existing test modification not authorized in the ticket body → failure: return `## OUTLINE FAILED` inline as your chat reply with a one-paragraph REASON, a SUGGESTED ESCALATION (refine | decompose | defer | spec-amend), and the EVIDENCE pointer. Do NOT Write the outline file in the failure path.
+- ANCHOR-NOT-FOUND or AMBIGUOUS on a load-bearing spec_ref (the implementer cannot proceed without re-reading the cited section); files_budget exceeded; pre-existing test modification not authorized in the ticket body; ticket frontmatter `id:` does not match the prompt's `{{TICKET_ID}}` → failure: return `## OUTLINE FAILED` inline as your chat reply with a one-paragraph REASON, a SUGGESTED ESCALATION (refine | decompose | defer | spec-amend), and the EVIDENCE pointer. Do NOT Write the outline file in the failure path.
 
 Ground-truth mismatches and API-surface gaps generally land as risks in the success outline (with `refine` escalation reasons named per risk), not as OUTLINE FAILED — the outline is still useful; the implementer will see the risks and decide. But if a mismatch is severe enough that no implementable outline exists within `files_scope` / `files_budget` / `acceptance`, treat it as OUTLINE FAILED.
 

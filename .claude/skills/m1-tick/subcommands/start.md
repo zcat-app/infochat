@@ -70,7 +70,7 @@ Steps:
    Agent(
      subagent_type: "plan-writer",
      description: "Implementation outline M1-NNN",
-     prompt: "Read target/m1-tick-prompt-plan-{{ID}}.txt and execute the instructions in that file. Everything you need (ticket path, outline sidecar path, the full procedure) is in that file."
+     prompt: "Ultrathink. Read target/m1-tick-prompt-plan-{{ID}}.txt and execute the instructions in that file. Everything you need (ticket path, outline sidecar path, the full procedure) is in that file. This is a complexity:high ticket — spend the thinking budget on cross-cutting consequences, API-surface audits of every class cited in acceptance items, and ground-truth verification of every claim the outline would make about existing code."
    )
    ```
 
