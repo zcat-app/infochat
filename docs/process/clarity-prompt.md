@@ -1,8 +1,6 @@
 # Ticket-clarity pre-flight subagent prompt template
 
-This is the user prompt the m1-tick skill substitutes and passes to `Agent(subagent_type: "clarity-reviewer", ...)` for `/m1-tick start <id>`. The agent's identity, tool allowlist (Read/Grep/Glob/Write), and model pinning (sonnet) are declared in [`.claude/agents/clarity-reviewer.md`](../../.claude/agents/clarity-reviewer.md) — those are harness-level enforcement. This template carries only the *task metadata* and the *prompt-supplied paths* the agent reads; the ticket body and the cited spec files are loaded by the agent via Read in its fresh context, and the full structured verdict is written to disk before the short chat reply.
-
-**Ticket-split convention.** The skill no longer passes a single `TICKET_FILE_PATH`; instead `scripts/m1-split-ticket.py` partitions the ticket into two files: `{{CURRENT_TICKET_PATH}}` (body + frontmatter with `escalations:` and `revisions:` keys stripped) and `{{HISTORY_PATH}}` (just those two YAML blocks, or a `# No history` sentinel when neither is present). Every per-check scan operates on `{{CURRENT_TICKET_PATH}}`; only `REFINE-REGRESSION-CHECK` (§14) reads `{{HISTORY_PATH}}`. The split removes the LLM-judgment surface "is this quoted phrase current or historical" — it's mechanically pre-segmented.
+This is the user prompt the m1-tick skill substitutes and passes to `Agent(subagent_type: "clarity-reviewer", ...)` for `/m1-tick start <id>`. The agent's identity, tool allowlist (Read/Grep/Glob/Write), and model pinning (sonnet) are declared in [`.claude/agents/clarity-reviewer.md`](../../.claude/agents/clarity-reviewer.md). This template carries only the *task metadata* and the *prompt-supplied paths* the agent reads; the ticket body and the cited spec files are loaded by the agent via Read in its fresh context, and the full structured verdict is written to disk before the short chat reply.
 
 ---
 
@@ -22,35 +20,18 @@ are looking for things the ticket cannot be implemented from in its
 current form.
 
 The ticket is: {{TICKET_ID}}
-Current-state ticket file (Read this with the Read tool — this is the
-ticket as it stands NOW, with historical `escalations:`/`revisions:`
-frontmatter blocks removed): {{CURRENT_TICKET_PATH}}
-History file (Read this with the Read tool — informational only;
-contains the `escalations:` and `revisions:` blocks that the split
-peeled off, or a `# No history` sentinel when neither key is present):
-{{HISTORY_PATH}}
+Ticket file (Read this with the Read tool): {{TICKET_FILE_PATH}}
 Verdict file (Write the full structured verdict here using the Write
 tool BEFORE returning your short chat reply): {{VERDICT_FILE_PATH}}
 
 Paths above are repo-relative unless prefixed with `/`. The Read and
 Write tools accept either form when the agent's CWD is the repo root.
 
-**Scope rule (load-bearing).** Every per-check scan operates on
-`{{CURRENT_TICKET_PATH}}`. The ONLY check that reads
-`{{HISTORY_PATH}}` is `REFINE-REGRESSION-CHECK` (§14 below), which
-uses the history to detect a refine that claimed to strip a phrase
-but missed an occurrence in the current ticket. Do NOT treat quoted
-phrases inside `{{HISTORY_PATH}}` as current behavioral commitments;
-those phrases are recorded there precisely because earlier refines
-removed them. The split is mechanical, so this boundary is not a
-matter of judgment — the script has already separated them.
-
 ---
 
 ## Inputs to load
 
-1. Use the Read tool to read the current-state ticket file at
-   {{CURRENT_TICKET_PATH}}.
+1. Use the Read tool to read the ticket file at {{TICKET_FILE_PATH}}.
 2. Before evaluating anything else, verify the ticket file you Read
    has `id: {{TICKET_ID}}` in its YAML frontmatter. If the frontmatter
    id does not match, abort the per-check evaluation, Write CLARITY
@@ -59,10 +40,8 @@ matter of judgment — the script has already separated them.
    {{TICKET_ID}}"), and return the short chat reply with FAIL +
    Blockers: 1. Do NOT proceed with the per-check evaluation.
 3. For each entry in the ticket's `spec_refs:` list (frontmatter),
-   resolve the anchor yourself using the algorithm below. The skill
-   no longer pre-resolves spec_refs in the main session; you resolve
-   each spec_ref in your fresh context. Every spec_ref entry has the
-   form `<file-path> §<section-title>`.
+   resolve the anchor yourself using the algorithm below. Every
+   spec_ref entry has the form `<file-path> §<section-title>`.
 
    **`spec_refs` anchor resolution algorithm.** For each entry:
    1. Use the Read tool to read `<file-path>`.
@@ -71,44 +50,30 @@ matter of judgment — the script has already separated them.
       a. If the line is a CommonMark fenced code-block delimiter —
          0–3 spaces of leading indent, then a run of three or more
          backtick characters (U+0060) or three or more tilde
-         characters (U+007E), optionally followed by an info string
-         such as a language tag — toggle `fence_open` and continue
-         to the next line. Fence delimiter lines are themselves
-         never headings, regardless of what follows the delimiter
-         (a language tag after the opening run does not change
-         the line's role).
+         characters (U+007E), optionally followed by an info string —
+         toggle `fence_open` and continue to the next line. Fence
+         delimiter lines are themselves never headings.
       b. If `fence_open` is true after step (a), skip the line.
-         Anything inside a fenced code block is content, not
-         document structure — a line that reads `## Foo` inside a
-         fence is a literal `## Foo` in the rendered code block, not
-         a section heading. This is the rule whose absence caused
-         the §5.4–§5.11 anchors in
-         docs/design/05-llm-and-embeddings.md to disappear when an
-         unclosed fence in §8.7.3 swallowed everything below it
-         (see commit 7de7e515).
+         Anything inside a fenced code block is content, not document
+         structure.
       c. If the line matches `^[ ]{0,3}#{1,6}[ \t]+\S` (a CommonMark
-         ATX heading: 0–3 leading spaces, then 1–6 `#` markers, then
-         one or more spaces or tabs, then a non-empty title body),
-         record the line as a candidate heading with its line number
-         and the count of `#` markers as its depth. Otherwise skip.
-   3. For each candidate, derive the heading text by stripping, in
-      order: the leading whitespace, the `#`-marker run, the
-      whitespace between the markers and the title, and any trailing
-      whitespace or trailing `#`-run (per CommonMark, a trailing
-      run of `#` characters preceded by whitespace is decorative
-      and not part of the heading text).
+         ATX heading), record the line as a candidate heading with
+         its line number and the count of `#` markers as its depth.
+         Otherwise skip.
+   3. For each candidate, derive the heading text by stripping the
+      leading whitespace, the `#`-marker run, the whitespace between
+      the markers and the title, and any trailing whitespace or
+      trailing `#`-run.
    4. Lowercase both the candidate heading text and the searched
-      section-title; do a substring match (the searched title must
-      appear as a substring of the candidate, or vice-versa for
-      partial titles).
+      section-title; do a substring match.
    5. If exactly one heading matches, the resolution is
       `FOUND (line N: "<heading>")`.
    6. If zero match, the resolution is `ANCHOR-NOT-FOUND`.
-   7. If multiple match, prefer the heading whose depth (count of
-      `#` markers) is closest to the most recently resolved anchor's
-      depth; tie-break by line number ascending. If still tied, the
-      resolution is `AMBIGUOUS (lines: N, M, ...)`. Treat AMBIGUOUS
-      as FAIL on SPEC-REFS-VALID.
+   7. If multiple match, prefer the heading whose depth is closest to
+      the most recently resolved anchor's depth; tie-break by line
+      number ascending. If still tied, the resolution is
+      `AMBIGUOUS (lines: N, M, ...)`. Treat AMBIGUOUS as FAIL on
+      SPEC-REFS-VALID.
 
    Resolve every spec_ref before reporting SPEC-REFS-VALID.
 
@@ -116,34 +81,36 @@ matter of judgment — the script has already separated them.
 
 ## What to check
 
-### 1. Acceptance criteria are runnable or testable
+### 1. ACCEPTANCE-RUNNABLE — acceptance criteria are runnable or testable
 
 Each item under `acceptance:` should be checkable. Strong forms:
   - "mvn -pl <module> test -Dtest=<TestName> returns success"
+  - "<TestName>.<methodName> passes"
   - "Flyway migration V<NNN>__<name>.sql applies cleanly on a fresh DB"
-  - "grep -rn '<forbidden-pattern>' src/ returns zero matches"
+  - prose behavioral assertions the reviewer can check against the diff
+    or the test output (e.g. "`/invite create` rejects banned target
+    contacts with the audit row tagged INVITE_REJECTED_BANNED_TARGET")
 
 Weak forms (FAIL):
   - "system feels responsive" (not measurable)
   - "code is clean" (not testable)
-  - "implements §X of the spec" (delegates to the spec without saying what verifies it)
+  - "implements §X of the spec" (delegates without saying what verifies it)
+  - prose verbs like "by reading", "by inspection", "should be present"
 
-### 2. `out_of_scope` is non-empty AND specific
+### 2. OUT-OF-SCOPE-SPECIFIC — `out_of_scope` is non-empty AND specific
 
 `out_of_scope` is the developer's contract about what they will NOT touch. An empty `out_of_scope` means the ticket has not thought about boundaries; this is a FAIL.
 
 Specific entries (PASS): glob patterns, named files, named features.
-Vague entries (FAIL or WARN): "things unrelated to this ticket" — that's circular.
+Vague entries (FAIL or WARN): "things unrelated to this ticket" — circular.
 
-### 3. `spec_refs` resolve to real anchors
+### 3. SPEC-REFS-VALID — `spec_refs` resolve to real anchors
 
-Every spec_ref must point at a real section. Use the resolutions you
-computed above. Any entry that resolved to ANCHOR-NOT-FOUND or
-AMBIGUOUS → FAIL on this check.
+Every spec_ref must point at a real section. Use the resolutions you computed above. Any entry that resolved to ANCHOR-NOT-FOUND or AMBIGUOUS → FAIL on this check.
 
-### 4. `files_budget` is plausible given the acceptance criteria
+### 4. FILES-BUDGET-PLAUSIBLE — `files_budget` is plausible given the acceptance criteria
 
-Mental math: the acceptance criteria imply some number of files (production code + tests + maybe a migration). If `files_budget` (numeric ceiling) is much smaller than that mental estimate, the ticket is under-budgeted (the developer will breach budget); FAIL or WARN. If much larger, the ticket may be doing too much (decompose); WARN.
+Mental math: the acceptance criteria imply some number of files (production code + tests + maybe a migration). If `files_budget` (numeric ceiling) is much smaller than that mental estimate, the ticket is under-budgeted; FAIL or WARN. If much larger, the ticket may be doing too much (decompose); WARN.
 
 Rough heuristics:
   - One acceptance item that adds an integration test → at minimum 2 files (production class + test).
@@ -151,690 +118,68 @@ Rough heuristics:
   - One acceptance item naming an SPI → at minimum 3 files (interface + implementation + test).
   - You can be wrong; lean to WARN over FAIL on this dimension.
 
-If the ticket also sets `files_scope` (an optional path/glob list enabling the reviewer's negative-space check), additionally check: does `files_scope` cover the files the acceptance criteria imply? If `files_scope` excludes a path the acceptance clearly requires, FAIL — the developer cannot succeed. If `files_scope` is empty or absent, only the numeric `files_budget` is evaluated.
+If the ticket also sets `files_scope`, additionally check: does `files_scope` cover the files the acceptance criteria imply? If `files_scope` excludes a path the acceptance clearly requires, FAIL.
 
-### 5. `complexity` and `risk` are calibrated
+### 5. COMPLEXITY-RISK-CALIBRATED — `complexity` and `risk` are calibrated
 
-`complexity: high` should be claimed for tickets that genuinely require an outline. If the body is one paragraph and there's no big-picture-notes section, `complexity: high` is mis-claimed; WARN.
+`complexity: high` should be claimed for tickets that genuinely require an outline. If the body is one paragraph and there's no big-picture concern, `complexity: high` is mis-claimed; WARN.
 
 `risk: high` should be claimed for tickets touching auth, admin, ban handling, persistence migrations, or anything affecting data integrity. If the ticket touches those and `risk: low` is claimed, WARN.
 
-### 6. Authorized test changes section
+### 6. TEST-CHANGES-AUTHORIZED — pre-existing test modifications are explicitly authorized
 
-If the ticket modifies pre-existing tests (look at `test_plan` and the body's "Authorized test changes" section), the modifications must be explicitly listed with the new expected behavior. If pre-existing tests are mentioned but not authorized, FAIL.
+If the ticket modifies pre-existing tests (look at `test_plan.modifies` and the body's §Out-of-scope or §Notes section), the modifications must be explicitly listed with the new expected behavior. If pre-existing tests are mentioned but not authorized, FAIL.
 
-### 7. `security_relevant: true` consistency
+### 7. SECURITY-FLAG-CONSISTENT — `security_relevant: true` consistency
 
-If the ticket touches any of: invite-code logic, admin-tier gates, ban handling, message intake validation, LLM tool-call wiring, audit log writes — and `security_relevant` is false, WARN. The developer can still proceed; the WARN flags it for the user.
+If the ticket touches any of: invite-code logic, admin-tier gates, ban handling, message intake validation, LLM tool-call wiring, audit log writes — and `security_relevant` is false, WARN.
 
-### 8. SELF-CONTAINED — ticket inlines what an implementer needs
+### 8. SELF-CONTAINED-CHECK — ticket inlines what an implementer needs
 
-After `/m1-tick start` finishes, the developer (the main session) implements the ticket. If the ticket body delegates its behavioral contract to `spec_refs` — e.g. acceptance items of the form `implements §X of docs/spec/Y.md` without inlining what §X requires — the implementer has no choice but to Read the cited spec files in main-session context, which defeats the purpose of routing spec content into the clarity/review subagents' fresh contexts.
+The implementer (the main session) needs to be able to implement the ticket without re-reading every cited spec section. If the ticket body delegates its behavioral contract to `spec_refs` — e.g. acceptance items of the form `implements §X of docs/spec/Y.md` without inlining what §X requires — the implementer has no choice but to Read the cited spec files in main-session context, which defeats the purpose of routing spec content into the clarity/review subagents' fresh contexts.
 
 The distinction:
   - **Load-bearing `spec_refs`** (FAIL or WARN) — the cited spec section IS the contract; the implementer cannot succeed without re-reading it. Failure shapes:
     - Acceptance item `implements §X of docs/spec/Y.md` without naming what §X requires → FAIL.
     - Acceptance item `the SPI matches docs/spec/Y.md §Z` without naming the SPI's methods/types in the ticket → FAIL.
-    - Definition of Done bullet naming a spec concept (`per the threat model`, `per the LLM routing rules`) without restating the relevant invariant → WARN.
-  - **Supplementary `spec_refs`** (PASS) — the cited spec section is cross-reference / context, not contract; the ticket body is load-bearing on its own. Shape: Context that cites a spec section to locate the ticket within the broader design (e.g. "this implements one stage of the pipeline described in docs/spec/architecture.md §Ingest pipeline") while the actual implementation contract lives in Definition of Done. Inline the relevant invariant in the ticket body; cite the spec section as cross-reference, not as substitute.
+  - **Supplementary `spec_refs`** (PASS) — the cited spec section is cross-reference / context; the ticket body is load-bearing on its own.
 
-You can be wrong; lean to WARN over FAIL on this dimension (the same calibration as FILES-BUDGET-PLAUSIBLE). FAIL only on clear cases (the load-bearing examples above); WARN on judgment calls.
+Lean to WARN over FAIL on judgment calls.
 
 ### 9. FORWARD-REFERENCE-CHECK — forward references to ticket IDs resolve
 
-The ticket may reference other ticket IDs in its frontmatter
-(e.g. `blocked_by:`, `decomposed_from:`, `deferred_on:`, prose in
-`out_of_scope:`) or in its body (e.g. "see M1-XXX umbrella",
-"deferred to the M1-YYY follow-up"). When the named ticket does
-not exist as a file under `docs/plan/<milestone>/tickets/`, the
-deferral is a prose promise with no tracked work behind it — the
-class of bug that produced M1-009 (a `M1-007a` follow-up that was
-promised in two places and never filed; the consequence surfaced
-rounds later when Provider's tests had no schema source). This
-check fires the forcing function: forward references resolve, or
-the ticket cannot start.
+Scan the ticket file (frontmatter + body) for substrings matching the regex `M[0-9]+-[0-9]+[a-z]*`. For each match, classify:
 
-Scan the current-state ticket file ({{CURRENT_TICKET_PATH}},
-frontmatter + body, the same file you Read in step 1) for substrings
-matching the regex `M[0-9]+-[0-9]+[a-z]*`. Do NOT scan
-{{HISTORY_PATH}} — ticket IDs mentioned inside refine narratives are
-informational context, not current commitments. For each match,
-classify:
+- **Self-reference** — the matched ID equals the ticket's own frontmatter `id:`. Exempt; no flag.
+- **Placeholder** — the matched ID is one of the documented placeholders from `docs/process/workflow.md` §Ticket-ID placeholder convention: `M<N>-NNN`, `M<N>-AAA`, `M<N>-BBB`, `M<N>-CCC`, `M<N>-XXX`, `M<N>-YYY`, `M<N>-ZZZ`. Exempt; no flag.
+- **Resolved** — Use the Glob tool with the pattern `docs/plan/<milestone>/tickets/<ID>-*.md`. If Glob returns at least one path, the reference is resolved. Informational only; no flag.
+- **Unresolved, load-bearing** — Glob returned empty AND the match appears in one of these load-bearing frontmatter fields:
+  - `blocked_by:`, `deferred_on:`, `decomposed_from:`, `replaces:`, `replaced_by:`, `spec_amend_parent:`, `remediates:`
 
-- **Self-reference** — the matched ID equals the ticket's own
-  frontmatter `id:`. Exempt; no flag. (A ticket of id `M1-018`
-  mentioning `M1-018` in its body or frontmatter is fine.)
-- **Placeholder** — the matched ID is one of the documented
-  placeholders from `docs/process/workflow.md` §Ticket-ID
-  placeholder convention: `M<N>-NNN`, `M<N>-AAA`, `M<N>-BBB`,
-  `M<N>-CCC`, `M<N>-XXX`, `M<N>-YYY`, `M<N>-ZZZ`. These are
-  syntactic placeholders, not real references. Exempt; no flag.
-  (The regex above happens not to match `<N>` literal-bracket
-  forms because `<` is not a digit, but the exemption is named
-  explicitly so the rule is robust to future placeholder shapes
-  and to a subagent's regex tolerance.)
-- **Resolved** — Use the Glob tool with the pattern
-  `docs/plan/<milestone>/tickets/<ID>-*.md`, where `<milestone>`
-  is the lowercase prefix of the matched ID (e.g. `M1-007a` →
-  `docs/plan/m1/tickets/M1-007a-*.md`). If Glob returns at least
-  one path, the reference is resolved. Informational only;
-  no flag.
-- **Unresolved, load-bearing** — Glob returned empty AND the
-  match appears in one of these load-bearing frontmatter fields
-  (the fields the runnable-state computation consults):
-  - `blocked_by:`
-  - `deferred_on:`
-  - `decomposed_from:`
-  - `replaces:`
-  - `replaced_by:`
-  - `spec_amend_parent:`
-  - `remediates:`
+  Report `FAIL` for this check.
+- **Unresolved, prose** — Glob returned empty AND the match appears anywhere else (body sections, `out_of_scope:` prose, or any field outside the load-bearing list). Report `WARN`.
 
-  Report `FAIL` for this check. The ticket cannot become runnable
-  because its blocker (or lineage parent) can never reach `done`
-  — the file does not exist.
-- **Unresolved, prose** — Glob returned empty AND the match
-  appears anywhere else: `out_of_scope:` prose, the ticket body
-  sections (Context, Definition of Done, Implementation notes,
-  Big-picture notes, Out-of-scope expansion, Alternatives
-  considered, Authorized test changes), or any field outside the
-  load-bearing list above. Report `WARN`. The ticket can run; the
-  operator sees the missing follow-up flagged.
-
-For each match, record the classification with the ID in the
-verdict file's FORWARD-REFERENCE-CHECK section. Cite each
-UNRESOLVED-LOAD-BEARING and UNRESOLVED-PROSE finding by ID in the
-BLOCKERS / WARNINGS sections respectively.
-
-The overall FORWARD-REFERENCE-CHECK verdict is:
+The overall FORWARD-REFERENCE-CHECK verdict:
 - `PASS` — all matches are RESOLVED, SELF-REF, or PLACEHOLDER.
 - `WARN` — at least one UNRESOLVED-PROSE and no UNRESOLVED-LOAD-BEARING.
 - `FAIL` — at least one UNRESOLVED-LOAD-BEARING.
-
-### 10. ACCEPTANCE-VS-DOD-CONSISTENT — grep-count assertions are satisfiable against the DoD's inlined commitments
-
-Check #1 verifies that each acceptance item is *syntactically runnable*
-(grep is a valid command, the regex parses, etc.). This check verifies
-that each acceptance item is *semantically satisfiable* given what the
-ticket's own Definition of Done commits the implementation to. The two
-are distinct: a grep can be perfectly runnable and still describe a
-predicate that no implementation matching the DoD could satisfy.
-
-This check fires the forcing function against the class of bug that
-produced M1-008c: an acceptance grep asserted "≥3 matches of
-`PRIMARY KEY\s*\(\s*scope_kind\s*,\s*scope_id\s*,`" across three join
-tables, but the same ticket's DoD specified the third table's PK as
-2-column (`(scope_kind, scope_id)`), which doesn't match a regex
-requiring a comma after `scope_id`. The assertion was unsatisfiable
-the moment the DoD was written; the developer hit the trap at
-implementation time and had to escalate.
-
-For each acceptance item that asserts a **count over a regex's
-matches** — phrasings like `returns exactly N matches`, `returns at
-least N matches`, `returns N`, `returns zero matches`, `grep -c ...
-returns N`:
-
-1. Identify the artifact the grep targets (a migration file path, a
-   test-class set, a source tree). The ticket may not commit to all of
-   the artifact's content inline, but the DoD typically commits to the
-   *relevant* fragments (CREATE TABLE columns, CHECK expressions,
-   PRIMARY KEY shapes, GRANT statements, named constants).
-2. Extract those DoD fragments. In M1-008c's DoD they are listed as
-   bullets under "Definition of Done": each `- table_name per …` block
-   inlines the column list, PK declaration, CHECK constraints, etc.
-3. Apply the regex mentally (or with the Read tool's grep-equivalents)
-   to the extracted fragments and count the matches you would expect.
-4. Compare the expected count against the asserted count:
-   - Expected count satisfies the assertion (≥ lower bound, ≤ upper
-     bound, exactly N when N is asserted) → `PASS` on this item.
-   - Expected count cannot satisfy the assertion (lower than a `≥N`
-     bound, higher than an `exactly N` bound, non-zero when `zero` is
-     asserted) → `FAIL` on this item.
-   - The DoD is ambiguous about the count (e.g., DoD says "and
-     additional indexes as needed" without enumerating, or the DoD
-     does not commit to the relevant fragment at all) → `WARN`.
-
-Examples (real and constructed):
-
-- **FAIL (M1-008c shape):** Acceptance: `grep -E 'PRIMARY KEY\s*\(\s*
-  scope_kind\s*,\s*scope_id\s*,' returns at least 3 matches`. DoD:
-  source_subscription PK `(scope_kind, scope_id, source_id)`; scope_tag
-  PK `(scope_kind, scope_id, tag_id)`; **scope_preferences PK
-  `(scope_kind, scope_id)`**. Expected matches: 2. Asserted: ≥3. The
-  third PK doesn't have the trailing comma the regex requires. FAIL
-  with citation: "scope_preferences PK is 2-column per DoD; grep
-  cannot return 3 matches; reduce to ≥2, or relax regex to allow
-  `[,)]` after `scope_id`."
-- **FAIL (constructed):** Acceptance: `grep -cE 'BOOLEAN NOT NULL' V7
-  returns 7`. DoD enumerates 6 BOOLEAN NOT NULL columns. Expected: 6.
-  Asserted: exactly 7. FAIL.
-- **WARN (ambiguous DoD):** Acceptance: `grep -E 'CREATE INDEX ... ON
-  post' returns at least 5 matches`. DoD: "the full index set per
-  docs/design/02-schema.md §2.3.1: idx_post_status_fetched,
-  idx_post_source, idx_post_published, idx_post_ready_at,
-  idx_post_link_cursor, idx_post_tags_gin, idx_post_status_changed" —
-  seven named. Expected: 7. Asserted: ≥5. PASS (assertion satisfied);
-  no warning. But if DoD said only "and additional partial indexes",
-  expected count would be ambiguous → WARN.
-
-Lean to `FAIL` when the assertion is mechanically impossible to
-satisfy given the DoD's enumeration (Shape-2). `WARN` only when the
-DoD does not commit to the relevant fragment fully enough to count.
-
-**Aggregate-count over NAMED heterogeneous elements — FAIL.** If
-an acceptance item asserts a count across heterogeneous elements
-that the same ticket's DoD or Implementation notes *enumerate by
-name* (≥3 distinct scenarios labeled `(a)`–`(c)`/etc., named test
-methods, named tables with different PK/FK/CHECK shapes, named
-bundle keys with different value commitments), record `FAIL` on
-this check. The canonical example is the M1-044b shape: DoD
-enumerates 8 distinct test scenarios `(a)`–`(h)` with visibly
-different collaborator sequences, and acceptance asserts
-`grep -E '@Test' … returns ≥6 matches`. The aggregate count masks
-per-scenario regressions — deleting scenario `(g)` (the DM-gate
-carve-out test, which is itself a load-bearing security assertion)
-and adding two duplicate copies of scenario `(a)` would still
-satisfy `@Test ≥6` while silently dropping the DM-gate coverage.
-The recommended replacement is **one acceptance item per named
-scenario / method / element** asserting the specific identifier
-grep (e.g., `grep -E 'void dmGroupOnlyWithSlashHelpReplacesReply
-WithInviteRequired' … returns ≥1 match` per scenario), so a
-regression in any one element fails its own check rather than
-being absorbed by the aggregate. The threshold for FAIL is N≥3
-named elements; ≤2 named elements is allowed to remain aggregate
-because there is no structural-difference masking to worry about.
-
-This rule is a hard-no, not a judgment call. It encodes a recurring
-authoring-failure pattern that produced repeated rework on five
-M1 tickets (M1-026/027/028/033/044b); the corrective discipline is
-"name each method individually" applied at the clarity gate before
-implementation starts.
-
-**Aggregate-count smell over un-enumerated elements — WARN.** When
-the heterogeneous aggregate is asserted without the DoD or
-Implementation notes themselves enumerating the named elements
-(e.g. `across the per-scope schema`, `over the catalogue tables`
-without naming which tables or their shapes), the elements are
-inferred rather than committed — record `WARN` so the author can
-either enumerate the elements in the DoD and split the acceptance
-item, or relax the regex to match the genuine shared shape. The
-M1-008c precedent fits here: the DoD enumerated three join tables
-but the third had a 2-column PK while the others had 3-column, and
-the regex required a trailing comma. The structural break was in
-the DoD but the acceptance item collapsed it. The shift from WARN
-to FAIL in the previous paragraph fires when the enumeration is
-explicit (named elements visible in the DoD); WARN remains for
-the inferred-elements case where the enumeration has to be
-reconstructed.
-
-**Undefined-symbol count — FAIL.** Acceptance items that express
-their count as a non-numeric expression — `≥N`, `≥(N+1)`, `=N`,
-`returns N matches where N is the count before this ticket`,
-`returns at least M+K matches`, `>=(N+1)` — are not independently
-verifiable from the ticket. The developer must run the grep before
-implementation to compute N, the reviewer cannot tell whether the
-final state satisfies the assertion without re-running the same
-arithmetic, and the acceptance item rots if the underlying state
-changes (a test added in an unrelated ticket bumps N silently).
-Refuse with a citation that names the symbol and points at the
-DoD section that should commit to the specific integer or to the
-specific named identifier. The canonical correction shape: an
-acceptance item with `≥(N+1)` where N is the pre-existing @Test
-count in a file should be replaced by `grep -E 'void
-<new-method-name>' … returns ≥1` — pinning the new method by name
-without depending on N.
-
-Aggregate counts have ONE legitimate use: enforcing "exactly N and
-no more" when **all N elements are structurally identical** — e.g.,
-M1-008c's correct acceptance item `grep -cE '(stage1_done|stage2_done|
-tagger_done|embedding_done|stage1_flagged|stage2_failed|tagger_fallback)
-\s+BOOLEAN NOT NULL' V7 returns 7` (seven per-stage flags of the
-same shape; the count is the load-bearing assertion). Do NOT flag
-the structurally-identical case; the FAIL fires for heterogeneous
-aggregates over named elements only, and the WARN fires for the
-un-enumerated case only. Distinguishing test: if you can name each
-element and the elements have visibly different shapes in the DoD
-(different PK lengths, different FK targets, different CHECK
-expressions, different test collaborator sequences), the aggregate
-is heterogeneous. If the DoD enumerates N elements that share the
-same shape and only differ in name, the aggregate is identical-count.
-
-This check does NOT verify regex *correctness* on individual inputs
-(that's the spec-vs-prose half — clarity catches it via test-vector
-review on the spec side; the developer's own grep against the DoD
-catches it here). It verifies regex *cardinality* — that the
-count claim is satisfiable AND committed to a specific value —
-and surfaces the aggregate-count authoring smell so the per-element
-pattern can replace it.
-
-### 11. ACCEPTANCE-ORDERING-CONSISTENT — ordered sequences across acceptance items, the DoD, and the Implementation notes agree
-
-Checks #1 and #10 audit each acceptance item against external state
-(runnability, DoD-fragment cardinality). This check fires the forcing
-function against a distinct class of bug: a ticket whose acceptance
-items contradict *each other* (or the DoD, or the Implementation notes)
-about the ORDER in which steps execute. The developer cannot satisfy
-both — implementing item A makes item B fail, and vice versa. Round-1
-clarity has historically classified such items as form-level WARN under
-ACCEPTANCE-RUNNABLE ("source-order reading check") without reading the
-content of the claim against any other claim in the same ticket. That
-gap produced the M1-044b round-2 catch: item 8 stated `setAdapterName
-→ size-cap → normalize → rate cap` while item 1, the DoD bullet, and
-the Implementation notes code sketch all asserted the opposite order
-(`rate cap → normalize`, matching the spec's step 1.5 before step 1.7).
-
-For each statement in the ticket that asserts an ordered sequence,
-extract the sequence and cross-check against every other ordering
-statement in the same ticket. Sources to scan:
-
-  - Every entry under `acceptance:`.
-  - Every bullet under §Definition of Done.
-  - Every fenced code sketch and every prose ordering inside
-    §Implementation notes (including `// Step N` comments inside
-    code blocks).
-  - §Big-picture notes (best-effort; orderings there are usually
-    rationale, but they still must agree with the rest of the ticket).
-
-Ordering-statement markers to look for:
-
-  - The arrow character `→` (U+2192) connecting two or more elements:
-    `A → B → C`.
-  - Prose connectives: `before`, `after`, `then`, `precedes`, `follows`,
-    `prior to`, `subsequent to`, `must run before / after`, `executes
-    before / after`.
-  - Step references: `step 1`, `step 1.5`, `step 2`, etc. — these tie
-    each element to a specific position in a numerically ordered
-    pipeline (the spec's step ordering).
-
-Element normalization (so two statements name "the same" element
-even when one writes `1.5 rate cap` and another writes `rate cap`):
-
-  - Strip leading step-number prefixes (`step 1.5`, `1.5`, `step 2`).
-  - Strip trailing parenthetical clarifications (`normalize (already
-    on disk)` → `normalize`).
-  - Lowercase and collapse whitespace.
-  - Treat hyphen, space, and underscore as equivalent (`size-cap` ==
-    `size cap`).
-
-After normalization, for each pair of statements that name the same
-elements, compare the orderings:
-
-  - PASS for the pair when the relative order of every shared element
-    pair agrees.
-  - FAIL for the pair when at least one shared element pair appears in
-    one order in one statement and the opposite order in another. Cite
-    both statements verbatim (source location: `acceptance item N` /
-    `§Definition of Done bullet "<first 60 chars>"` / `§Implementation
-    notes code sketch line "<first 60 chars>"`) and name the
-    contradicting element pair (`X` precedes `Y` in source A; `Y`
-    precedes `X` in source B).
-
-  Equivalent edges expressed differently still count as the same edge:
-  `A → B` in one statement and `B follows A` in another agree; both
-  produce the directed edge (A, B). Contradiction means the same
-  element pair is asserted as both (A, B) and (B, A) by different
-  statements.
-
-Severity:
-  - FAIL on any contradicting pair. This is a hard-no, not a judgment
-    call — the ticket is unfinishable as written and the developer
-    must not be allowed to pick which item to satisfy.
-  - PASS otherwise (including the trivial case where the ticket
-    contains zero ordering statements, or where all orderings agree).
-
-Recommended remediation cited in the FAIL bullet: name which
-statement is correct (typically the one that matches the spec_refs)
-and instruct the author to rewrite the contradicting statements to
-match. Where two statements disagree but the spec resolves the
-ambiguity, cite the spec line and recommend the spec-matching
-direction.
-
-The author-side static linter (`scripts/lint-ticket.py`) catches the
-literal arrow-bigram form of this contradiction mechanically — every
-ticket should pass the linter before reaching the clarity reviewer.
-The reviewer's job here is to catch the prose variants the linter
-misses (`X happens before Y` in one item contradicting `Y precedes X`
-in another) and the cross-section contradictions (acceptance item
-ordering disagreeing with the DoD's prose ordering or with a `// Step
-N` code-sketch comment in §Implementation notes).
-
-### 12. VERIFIED-STAYS-GREEN-PLAUSIBLE — each verified_stays_green rationale is plausibly grounded in the cited test source
-
-Tickets whose `files_scope` touches a shared dispatch surface (the
-heuristic enumerated in `docs/process/ticket-template.md` §frontmatter
-`verified_stays_green:` and enforced by the author-side linter's
-OUT-OF-SCOPE-STAYS-GREEN-VERIFIABLE check) must enumerate each
-out-of-scope test class whose "stays green unchanged" claim depends on
-the changed surface, with a one-line rationale per entry. The linter
-enforces that the field exists and is non-empty; this check
-(LLM-judgment, WARN-level) judges whether each rationale is plausibly
-true given the cited test's source code.
-
-For each entry in `verified_stays_green:`:
-
-1. Use the Read tool to read the test class file. The `test_class:`
-   field is a fully-qualified Java class name; resolve it to the file
-   path under `infochat-provider/src/test/java/` (or
-   `infochat-collector/src/test/java/` etc.) by replacing dots with
-   slashes and appending `.java`. Example:
-   `app.zcat.infochat.provider.intake.RateCapIT` →
-   `infochat-provider/src/test/java/app/zcat/infochat/provider/intake/RateCapIT.java`.
-   If the file does not exist, record `FAIL` for this entry citing
-   the missing path.
-
-2. Judge whether the `rationale:` line is plausibly true given the
-   test source. Examples of plausibility-grounding:
-   - Rationale `"pre-seeds users via @BeforeEach so the auto-register
-     branch is never exercised"` is plausible iff the test class
-     has a `@BeforeEach` (or `@BeforeAll`) method that inserts users
-     into the relevant table — or a Quarkus `@TestProfile` that
-     supplies the same fixture — before each test runs.
-   - Rationale `"asserts only the size-cap rejection path; rate-cap
-     ordering changes are below its observation surface"` is
-     plausible iff the test's assertions inspect only the rejection
-     branch (e.g. `assertThat(adapter.sent).isEmpty()`) and not
-     internal bucket-counter state.
-   - Rationale `"uses a stub adapter that bypasses the changed
-     dispatch path entirely"` is plausible iff the test wires up
-     a stub or fake adapter via CDI alternative / `@QuarkusTest`
-     mock setup rather than the production InboundRouter path.
-
-3. Classify each entry:
-   - **PASS** — the rationale is plausibly true given the test
-     source.
-   - **WARN** — the rationale is ambiguous (the test source
-     neither clearly supports nor refutes it; the developer should
-     re-read the test before trusting the claim during
-     implementation).
-   - **FAIL** — the rationale is clearly contradicted by the test
-     source (the test does exercise the path the rationale claims
-     it doesn't, or the cited fixture is absent).
-
-Severity rule for the section verdict:
-
-- This check caps at WARN even when individual entries are FAIL,
-  because the LLM-judgment dimension has false-positive risk:
-  testing-style differences (Quarkus profile fixtures, alternative
-  CDI beans, Mockito setup) can make a rationale look unsupported
-  when the test is in fact correctly insulated. BLOCKER-level
-  would over-fire. If the reviewer's judgment is wrong, the author
-  refines the rationale or escalates via `/m1-tick escalate
-  <id> refine` with the test-source citation.
-- The section verdict is `WARN` when any entry is WARN or FAIL,
-  and `PASS` when every entry is PASS or when `verified_stays_green:`
-  is empty/absent (the OUT-OF-SCOPE-STAYS-GREEN-VERIFIABLE linter
-  has already vetted whether the field should have been populated;
-  if the linter passed and the field is empty, this check has
-  nothing to judge).
-
-This check fires whenever `verified_stays_green:` is non-empty,
-regardless of whether `files_scope` touches a shared dispatch
-surface — the author has made claims about test behavior and the
-clarity reviewer audits them.
-
-### 13. BODY-CLAIM-COVERAGE — every behavioral claim in §Big-picture notes / §Implementation notes is exercised by at least one acceptance item
-
-Checks #1 and #10 audit acceptance items in isolation: is each item
-runnable, does each grep-count assertion match what the DoD commits to?
-Both checks start from the acceptance list and look outward. This check
-fires the inverse direction: it starts from the ticket *body* and looks
-for behavioral commitments that the acceptance list silently drops.
-The class of bug it catches is the "promise without a hook" — the body
-asserts the ticket implements behavior X, but no acceptance item
-verifies X, so an implementer can ship a diff that satisfies every
-acceptance item while omitting X entirely, and the reviewer's
-APPROVE/REWORK gate has no signal to catch the omission.
-
-This check fires the forcing function against the class of bug that
-produced the M1-044c round-1 catch: §Big-picture notes declared
-`"/ban requires confirm per spec. This ticket implements the confirm
-flow for /ban via the same --confirm pattern."`, but acceptance item
-1's logic sequence (steps 1-8) contains no confirm step and item 2's
-seven test scenarios (a)-(g) contain no confirm-prompt scenario. The
-confirm behavior was claimed but unverifiable; without this check the
-implementer could have shipped a `/ban` handler with no confirm flow
-and the diff would have satisfied every acceptance grep.
-
-For each prose section in scope, enumerate sentences that match a
-behavioral-claim pattern, then for each claim search the `acceptance:`
-block for a verification that exercises it. Sections to scan:
-
-  - **§Big-picture notes** — typically where "this ticket implements X"
-    rationale slips in. IN SCOPE.
-  - **§Implementation notes** — sometimes contains "the handler MUST do
-    X" prose that the author meant as acceptance commitment. IN SCOPE.
-  - **§Context** — typically scope-setting and ticket framing, not
-    behavioral commitment. EXCLUDED unless the framing names a
-    specific runtime behavior the ticket "ships" (look for the
-    commitment verbs below).
-  - **§Definition of Done** — already covered by
-    ACCEPTANCE-VS-DOD-CONSISTENT (check #10). EXCLUDED here to avoid
-    double-counting; check #10 catches its class of failure.
-  - **§Alternatives considered** — design rationale (accepted/rejected
-    alternatives); explicit non-commitments. EXCLUDED.
-  - **§Out-of-scope expansion** — explicit non-commitments by
-    construction. EXCLUDED.
-  - **§Authorized test changes** — modifications to other tickets'
-    tests, not new behavior. EXCLUDED.
-
-Behavioral-claim markers to look for inside the IN-SCOPE sections:
-
-  - Commitment verbs in present-tense indicative mood, where the
-    grammatical subject is the current ticket OR a code surface the
-    ticket adds: `implements`, `adds`, `introduces`, `enforces`,
-    `writes`, `wires`, `lands`, `ships`, `mints`, `flips`, `rejects`,
-    `surfaces`, `dispatches`, `revokes`. Examples:
-    - `"This ticket implements the confirm flow for /ban"` (matches)
-    - `"The handler enforces the per-adapter open cap"` (matches)
-    - `"/invite revoke requires confirm"` (matches via the modal form)
-  - Modal commitments naming a specific code surface: `must`,
-    `requires`, `always`, where the surface is a handler/service/path
-    the ticket adds:
-    - `"/ban requires confirm per spec"` (matches — `/ban` is the
-      added handler).
-    - `"the handler must catch the trigger's exception"` (matches —
-      "the handler" refers to the added BanCommandHandler).
-  - Exclusion: spec quotations and forward-references. A sentence like
-    `"per §User ban, audit rows are written before mutation"` quotes
-    the spec; it commits the ticket to that behavior only if the
-    sentence's grammatical subject is the current ticket or its added
-    code surface. A sentence like `"a future ticket replaces this
-    with a shared AuditLogWriter"` is a forward-deferral, not a
-    current commitment.
-  - Exclusion: claims about *out-of-scope* tickets. Sentences like
-    `"M1-045 lands the /vouch handler"` or `"the audit-write helper
-    consolidation is deferred to M1-041"` name other tickets'
-    commitments, not the current ticket's. EXCLUDED.
-
-For each in-scope claim, identify the **claim subject** (the specific
-runtime behavior the claim commits to) — typically one of:
-
-  - A command surface (`/ban`, `/invite revoke`, `/unban`).
-  - A code path inside a command surface (`the /ban confirm flow`,
-    `the /invite revoke confirm gate`, `the unban group-admin
-    restoration disclosure`).
-  - A side-effect (`the BAN audit row writes audit-before-effect`,
-    `the same-transaction invite revoke on /ban`).
-
-Then search the `acceptance:` block for a verification of that subject.
-Verification shapes (any one of these suffices for PASS on the claim):
-
-  - **Per-method grep on the implementation file**: an acceptance item
-    whose grep regex matches the asserted behavior (e.g.
-    `grep -E 'banConfirmFlow|--confirm' BanCommandHandler.java
-    returns ≥1 match` for a `/ban` confirm claim).
-  - **Named test scenario**: an acceptance item naming a test scenario
-    that exercises the asserted behavior (e.g.
-    `"(h) first invocation of /ban <contact> → confirm prompt
-    returned, no DB write"`).
-  - **Behavioral assertion**: an acceptance item that asserts the
-    runtime behavior directly (e.g. `"BanCommandHandler returns
-    reply.ban.confirm_prompt on first invocation without --confirm"`).
-  - **Negative coverage** is permitted: a claim of the form "X is NOT
-    confirm-gated in v1" passes if at least one acceptance item
-    asserts the absence (e.g. a scenario verifying the ban executes
-    on first invocation).
-
-Classify each claim:
-  - **PASS** — at least one acceptance item verifies the subject.
-  - **FAIL** — no acceptance item verifies the subject. Cite the claim
-    verbatim (section name + first 60 chars), the extracted subject,
-    and the absence of coverage. Recommend either (a) adding an
-    acceptance item that verifies the subject, or (b) removing the
-    claim from the body if the author meant it as rationale rather
-    than commitment.
-
-Severity rule for the section verdict:
-  - **FAIL** on any uncovered claim. This is a hard-no, not a judgment
-    call — every committed behavior must have an acceptance hook, or
-    the reviewer cannot prove the implementer kept the promise.
-  - **PASS** when every claim has acceptance coverage, OR when the
-    in-scope sections contain zero behavioral claims (a short ticket
-    with body sections that are pure rationale / non-commitment).
-  - There is no WARN tier on this check — the claim is either covered
-    by acceptance or it isn't, and the consequence of a missed claim
-    is a silently-dropped behavior at implementation time.
-
-Exclusion calibration: this check has false-positive risk when the
-author's prose phrasing matches a commitment marker but the sentence's
-intent is rationale rather than commitment. Lean toward PASS when the
-sentence is clearly rationale or framing (`"This ticket implements
-five command surfaces"` — a structural statement that the individual
-surfaces' acceptance items cover, not an additional behavior
-commitment). Lean toward FAIL when the sentence names a specific
-runtime behavior or a confirm/cap/reject/audit invariant that no
-acceptance item names. The M1-044c shape — `"This ticket implements
-the confirm flow for /ban via the same --confirm pattern"` naming a
-specific control-flow path with no acceptance hook — is the canonical
-FAIL exemplar.
-
-This check complements check #10 (ACCEPTANCE-VS-DOD-CONSISTENT) and
-check #1 (ACCEPTANCE-RUNNABLE). The three checks fire on different
-classes of break:
-  - #1 catches acceptance items that name an unrunnable or non-testable
-    predicate.
-  - #10 catches acceptance items whose grep-count is unsatisfiable
-    against what the DoD enumerated.
-  - #13 catches behavioral claims in the body that have no acceptance
-    item at all — the body promised something the acceptance list
-    silently dropped.
-
-### 14. REFINE-REGRESSION-CHECK — phrases prior refines claimed to strip are absent from the current ticket
-
-When a ticket is refined after a previous clarity FAIL, the refine
-summary (recorded under `revisions:` in frontmatter) typically quotes
-the phrase the refine removed: `"§Big-picture notes paragraph 2 ('X')
-stripped entirely"`, `"corrected from `Y` to `Z`"`, `"fabricated
-bundle key K removed from prose"`. The refine is only correct if the
-quoted phrase is in fact absent from the current ticket. Without this
-check, an incomplete refine ships with the regressed phrase still
-present, and the next clarity pass either re-FAILs on the same
-blocker or — worse — false-positives the historical quote inside
-`revisions:` as a current commitment. This check closes that loop.
-
-The check operates on `{{HISTORY_PATH}}` (the only check that reads
-it). The history file is the YAML body of the `escalations:` and
-`revisions:` blocks that the splitter peeled off; if neither block is
-present, the file contains a `# No history` sentinel and this check
-is N/A.
-
-Steps:
-
-1. Read `{{HISTORY_PATH}}`. If the file begins with
-   `# No history`, mark this check N/A and skip the rest. Record
-   the section verdict as PASS with one line: "no refines on this
-   ticket".
-
-2. Otherwise scan the history file for refine-summary sentences that
-   frame content as removed. Markers (case-insensitive, substring
-   match anywhere on a line):
-     - `stripped` (e.g., "stripped entirely", "paragraph N stripped")
-     - `removed` (e.g., "fabricated key K removed", "removed from prose")
-     - `deleted`
-     - `rewritten to drop`
-     - `corrected from` (the value after `from` is the removed side;
-       the value after the subsequent `to` is the replacement and
-       MUST NOT be flagged)
-     - `dropped`
-
-3. For each line that contains a marker, extract the quoted phrase
-   the summary frames as removed. The phrase is delimited by one of:
-     - backticks: `` `phrase` ``
-     - double quotes: `"phrase"`
-     - single quotes: `'phrase'`
-   A summary line may contain multiple quoted phrases; in that case
-   extract all of them, then filter to keep ONLY phrases on the
-   removed side. For `corrected from X to Y`, keep `X` and discard
-   `Y`. For `stripped paragraph 2 ('X')`, keep `X`.
-
-4. For each extracted phrase, use the Read tool on
-   `{{CURRENT_TICKET_PATH}}` and search for the phrase as a
-   case-sensitive substring. If found, FAIL this check with a citation
-   that includes:
-     - the refine-summary line that claimed the strip (verbatim,
-       first 100 chars);
-     - the line number in `{{CURRENT_TICKET_PATH}}` where the phrase
-       still appears;
-     - recommended remediation: "complete the refine — remove the
-       phrase from {{CURRENT_TICKET_PATH}} before re-running clarity".
-
-5. If every extracted phrase is absent from the current ticket, PASS.
-
-False-positive guidance:
-  - Generic single words inside narrative prose (e.g., "scope",
-    "audit", "ticket") are not candidates. The marker rule REQUIRES
-    the phrase to be delimited by backticks or quotes in the refine
-    summary; bare words are skipped.
-  - Phrases that the summary frames as ADDED rather than removed are
-    not candidates. For `corrected from X to Y`, only `X` is checked.
-    For `added acceptance item N`, no phrase is checked (the marker
-    "added" is not in the removed-set above).
-  - When a phrase is short and structurally common (e.g., a single
-    word that appears in unrelated prose), use judgment: if the
-    current-ticket occurrence is clearly unrelated to the refined
-    claim (different section, different surrounding context), do
-    NOT flag. The reviewer's notes should explain when the judgment
-    was applied.
-
-Severity rule:
-  - FAIL on any extracted phrase still present in the current ticket
-    where the occurrence is plausibly the regressed phrase (i.e.,
-    the same section/context the refine claimed to strip from).
-  - PASS otherwise (every extracted phrase absent, or the history
-    file is the sentinel).
-  - No WARN tier — either the strip is complete or it isn't.
-
-This check is the structural counterpart to the
-"feedback_replan_after_outline_fail_refine" rule: refines that pass
-human review can still miss occurrences, and the mechanical scan
-catches what visual review missed.
 
 ---
 
 ## Short chat reply (the only thing you return inline)
 
-After Writing the full structured verdict to {{VERDICT_FILE_PATH}},
-return exactly these lines as your chat reply — nothing else, no
-preamble, no postscript:
+After Writing the full structured verdict to {{VERDICT_FILE_PATH}}, return exactly these lines as your chat reply — nothing else, no preamble, no postscript:
 
 CLARITY VERDICT: <PASS | WARN | FAIL>
 Verdict file: {{VERDICT_FILE_PATH}}
 Blockers: <integer count, 0 on PASS/WARN>
 Warnings: <integer count, 0 if none>
 
-That is the entire chat reply. The skill parses these four lines
-literally; the full per-check verdict (with each BLOCKERS / WARNINGS
-string, each per-check PASS/FAIL/WARN reason) lives only in the
-verdict file you wrote, which the skill Reads to populate the ticket
-frontmatter `clarity_check:` entry.
+The skill parses these four lines literally.
 
 ---
 
 ## On-disk verdict format (Write this to {{VERDICT_FILE_PATH}} before the chat reply)
-
-Use the Write tool to write the following structured verdict — the
-canonical full form, which the skill parses for audit and frontmatter
-strings — to {{VERDICT_FILE_PATH}}:
 
 CLARITY VERDICT: <PASS | WARN | FAIL>
 
@@ -842,113 +187,8 @@ ACCEPTANCE-RUNNABLE: <PASS | WARN | FAIL>
   <one bullet per acceptance item with PASS/WARN/FAIL and a one-line
    reason; cite the item by index>
 
-ACCEPTANCE-VS-DOD-CONSISTENT: <PASS | WARN | FAIL>
-  <one bullet per acceptance item that asserts a grep-match count;
-   each bullet records the asserted count, the expected count derived
-   from the DoD's inlined fragments, an aggregate-vs-identical
-   classification of the elements counted (HETEROGENEOUS-AGGREGATE-
-   NAMED | HETEROGENEOUS-AGGREGATE-UN-ENUMERATED | IDENTICAL-AGGREGATE
-   | UNDEFINED-SYMBOL-COUNT | SINGLE-ELEMENT | N/A), and a
-   PASS/WARN/FAIL classification. Items that do not assert a count
-   (mvn invocations, prose behavioral assertions, integration-test
-   outcomes) are reported as "N/A — no count assertion" and do not
-   contribute to the verdict.
-
-   Severity rules (the section verdict is the maximum of the per-item
-   verdicts):
-     - FAIL when at least one item:
-         (a) is Shape-2 unsatisfiable (expected count cannot satisfy
-             the asserted bound given the DoD's enumeration), OR
-         (b) is HETEROGENEOUS-AGGREGATE-NAMED with ≥3 named elements
-             enumerated in the DoD / Implementation notes (the
-             M1-044b shape: 8 named scenarios (a)–(h) collapsed to
-             one @Test count), OR
-         (c) is UNDEFINED-SYMBOL-COUNT (the count expression contains
-             a non-numeric symbol like `N`, `(N+1)`, `M+K` that the
-             ticket does not commit to a specific integer for).
-     - WARN when no item is FAIL and at least one item is
-       HETEROGENEOUS-AGGREGATE-UN-ENUMERATED (DoD does not enumerate
-       the elements; the heterogeneity is inferred) OR the DoD is
-       ambiguous about the count.
-     - PASS otherwise.
-
-   Each FAIL bullet cites the specific recommended replacement
-   (per-element grep set with named identifiers, or specific integer
-   to replace the symbol expression) so the author can refine without
-   re-deriving the structural break.>
-
-ACCEPTANCE-ORDERING-CONSISTENT: <PASS | FAIL>
-  <one bullet per ordering statement found, naming the source
-   (`acceptance item N` | `§Definition of Done bullet "<first 60 chars>"`
-   | `§Implementation notes code sketch / prose "<first 60 chars>"` |
-   `§Big-picture notes "<first 60 chars>"`) and the extracted sequence
-   in normalized form (`A → B → C`).
-
-   For each pair of statements that share at least one element pair
-   in opposite order, an additional bullet records the contradiction
-   verbatim:
-     - source A: <verbatim quote>
-     - source B: <verbatim quote>
-     - conflict: `X` precedes `Y` in A; `Y` precedes `X` in B
-     - recommendation: <which direction to keep + spec citation if the
-       spec resolves the ambiguity>
-
-   Severity rule: FAIL on any contradicting pair (no WARN tier — the
-   ticket is unfinishable as written). PASS when every ordering
-   statement agrees with every other, or when zero ordering statements
-   are present.>
-
-VERIFIED-STAYS-GREEN-PLAUSIBLE: <PASS | WARN>
-  <one bullet per `verified_stays_green:` entry. Each bullet cites the
-   `test_class:` fully-qualified name, quotes the `rationale:` line
-   verbatim, names the file path resolved from the class name, and
-   records the per-entry classification (PASS / WARN / FAIL) with a
-   one-line judgment of whether the rationale is grounded in the
-   test source (cite the specific code construct that supports or
-   contradicts the claim — `@BeforeEach` fixture name, assertion
-   target, CDI alternative wiring, etc.).
-
-   Section verdict is capped at WARN: when at least one entry is
-   WARN or FAIL the section reports WARN; PASS when every entry is
-   PASS or when `verified_stays_green:` is empty/absent.>
-
-BODY-CLAIM-COVERAGE: <PASS | FAIL>
-  <one bullet per behavioral claim found in §Big-picture notes and
-   §Implementation notes. Each bullet quotes the claim verbatim
-   (section name + first 60 chars), names the extracted claim subject
-   (the specific runtime behavior committed), and records the
-   classification (PASS / FAIL) with a one-line citation of either:
-     (PASS) the acceptance item index that verifies the subject and
-            the verification shape (per-method grep / named test
-            scenario / behavioral assertion / negative coverage), OR
-     (FAIL) the absence of any acceptance verification, plus the
-            recommended remediation (add an acceptance item that
-            verifies the subject, OR remove the claim from the body
-            if intended as rationale rather than commitment).
-
-   Severity rule: FAIL on any uncovered claim (no WARN tier — the
-   claim is either covered or it isn't, and the consequence of a
-   missed claim is a silently-dropped behavior). PASS when every
-   claim has acceptance coverage, OR when the in-scope sections
-   contain zero behavioral claims.>
-
-REFINE-REGRESSION-CHECK: <PASS | FAIL | NOT-APPLICABLE>
-  <one paragraph: if the history file is the `# No history` sentinel,
-   record `NOT-APPLICABLE — no refines on this ticket` and stop. If
-   refines exist, one bullet per extracted stripped-phrase: cite the
-   refine-summary line (first 100 chars), the extracted phrase, the
-   marker that identified it (`stripped` / `removed` / `corrected from`
-   / etc.), and the classification (PASS = phrase absent from current
-   ticket; FAIL = phrase still present, with the current-ticket line
-   number).
-
-   Severity rule: FAIL on any extracted phrase still present where the
-   occurrence is plausibly the regressed phrase. PASS when every
-   extracted phrase is absent. NOT-APPLICABLE when the history file is
-   the sentinel.>
-
 OUT-OF-SCOPE-SPECIFIC: <PASS | WARN | FAIL>
-  <one paragraph: is out_of_scope non-empty and specific, or PASS>
+  <one paragraph: is out_of_scope non-empty and specific>
 
 SPEC-REFS-VALID: <PASS | FAIL>
   <one bullet per spec_ref with PASS (line N: "<heading>") or
@@ -972,20 +212,14 @@ SECURITY-FLAG-CONSISTENT: <PASS | WARN>
 SELF-CONTAINED-CHECK: <PASS | WARN | FAIL>
   <one paragraph: are the ticket's spec_refs supplementary
    cross-references (PASS), load-bearing on judgment cases (WARN),
-   or load-bearing on clear cases like acceptance items of the
-   form `implements §X` without inlining the behavioral assertion
-   (FAIL)? Cite the acceptance item or Definition-of-Done bullet
+   or load-bearing on clear cases (FAIL)? Cite the acceptance item
    that delegates to spec without inlining the relevant invariant.>
 
 FORWARD-REFERENCE-CHECK: <PASS | WARN | FAIL>
   <one bullet per matched ticket-ID with the classification:
    RESOLVED (path: <glob result>) | SELF-REF | PLACEHOLDER |
    UNRESOLVED-LOAD-BEARING (field: <field-name>) |
-   UNRESOLVED-PROSE (location: <section or field>).
-   The section verdict is PASS when every match is
-   RESOLVED/SELF-REF/PLACEHOLDER; WARN when there is at least one
-   UNRESOLVED-PROSE and no UNRESOLVED-LOAD-BEARING; FAIL when
-   there is at least one UNRESOLVED-LOAD-BEARING.>
+   UNRESOLVED-PROSE (location: <section or field>).>
 
 BLOCKERS: (omit on PASS; required on FAIL)
   1. <specific, addressable, points at the line in the ticket that needs change>
@@ -1000,24 +234,21 @@ WARNINGS: (optional, omit if empty)
 
 - Any *-CHECK: FAIL forces CLARITY VERDICT to be FAIL. The skill blocks `/m1-tick start` until the user refines the ticket.
 - Any *-CHECK: WARN with no FAILs makes CLARITY VERDICT: WARN. The skill prints the warnings, records them under `clarity_check:` in frontmatter, and proceeds with the start.
-- All PASS → CLARITY VERDICT: PASS. The skill records `clarity_check.verdict: PASS` and proceeds.
+- All PASS → CLARITY VERDICT: PASS.
 
-Write the full verdict to {{VERDICT_FILE_PATH}} first, then return
-ONLY the four-line short chat reply specified above. The skill parses
-both literally.
+Write the full verdict to {{VERDICT_FILE_PATH}} first, then return ONLY the four-line short chat reply specified above.
 ```
 
 ---
 
 ## Skill responsibilities (what `/m1-tick start` does around the prompt)
 
-1. Pre-allocates three paths under `target/`: the verdict file at `target/m1-tick-clarity-{{ID}}.txt`, the current-state ticket file at `target/m1-tick-current-{{ID}}.md`, and the history file at `target/m1-tick-history-{{ID}}.md`. The directory `target/` already exists by Maven convention and is excluded from version control.
-2. Runs `python3 scripts/m1-split-ticket.py <ticket-path> <current-out> <history-out>` to partition the ticket into the two files. The split is mechanical (top-level YAML key parse — `escalations:` and `revisions:` blocks go to history, everything else to current); the script writes the `# No history` sentinel into the history file when neither key is present.
-3. Substitutes `{{TICKET_ID}}`, `{{CURRENT_TICKET_PATH}}` (the current-state file written by the splitter), `{{HISTORY_PATH}}` (the history file written by the splitter), and `{{VERDICT_FILE_PATH}}` (the path pre-allocated in step 1). No content placeholders — the subagent loads the current ticket, the history file, and each cited spec file via Read in its own fresh context.
-4. Spawns `Agent(subagent_type: "clarity-reviewer", prompt: <substituted>, description: "Clarity pre-flight M<N>-NNN")`. Foreground.
-5. Parses the four-line short chat reply for the verdict line and integer blocker/warning counts.
-6. Reads `{{VERDICT_FILE_PATH}}` from disk to extract the BLOCKERS / WARNINGS strings for the ticket frontmatter `clarity_check:` entry.
-7. Records under `clarity_check:` in ticket frontmatter:
+1. Pre-allocates the verdict file path at `target/m1-tick-clarity-{{ID}}.txt`. The directory `target/` already exists by Maven convention and is excluded from version control.
+2. Substitutes `{{TICKET_ID}}`, `{{TICKET_FILE_PATH}}` (the ticket file under `docs/plan/<milestone>/tickets/`), and `{{VERDICT_FILE_PATH}}`. No content placeholders — the subagent loads the ticket and each cited spec file via Read in its own fresh context.
+3. Spawns `Agent(subagent_type: "clarity-reviewer", prompt: <substituted>, description: "Clarity pre-flight M<N>-NNN")`. Foreground.
+4. Parses the four-line short chat reply for the verdict line and integer blocker/warning counts.
+5. Reads `{{VERDICT_FILE_PATH}}` from disk to extract the BLOCKERS / WARNINGS strings for the ticket frontmatter `clarity_check:` entry.
+6. Records under `clarity_check:` in ticket frontmatter (LATEST entry only; git log carries prior rounds):
    ```yaml
    clarity_check:
      date: <YYYY-MM-DD>
@@ -1025,7 +256,7 @@ both literally.
      warnings: [<list of warning-strings>]
      blockers: [<list of blocker-strings if FAIL>]
    ```
-8. Branches on verdict:
+7. Branches on verdict:
    - `PASS` → proceed with the rest of `start`.
    - `WARN` → print warnings to chat, proceed.
    - `FAIL` → print blockers, refuse to start, ask user to refine the ticket. Status stays `pending`.

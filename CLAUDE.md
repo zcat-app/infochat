@@ -54,6 +54,16 @@ amendment.
 - **Asset commands are not posts.** `/zcash`, `/monero` and future per-asset commands store snapshots in a dedicated `price_snapshot` table outside the ingest pipeline — no Stage 1/2, no tagging, no embedding. Every reply names its data source   
   and includes the source URL bare (per-source ToS attribution). Public no-auth endpoints only in v1.
 
+## Verify before recommending
+
+Every recommendation or suggestion you make to the user is a claim — verify it before stating it.
+
+For recommendations to modify an existing artifact (file, prompt, doc, config, script): Read the target section first. If the existing content already covers what you'd add, drop the proposal and say so. If it partially covers it, narrow the proposal to the actual gap.
+
+Hedge words ("worth considering", "optional", "~5 lines", "minor addition", "one strengthening") and small line counts do not exempt the rule. A 5-line addition is a 100% claim, just compressed.
+
+The shape, not the phrasing, is the trigger: any sentence in which you propose that an existing artifact be modified — added to, removed from, rewritten, tightened, clarified, strengthened, slimmed. Catch yourself before writing it, not after.
+
 ## Bootstrap admin & sources
 
 - **Bot admin**: configured **per enabled adapter** in `application.properties` (one bootstrap admin contact id per adapter; the property is keyed by adapter — concrete keys in design notes — and is **optional per adapter** as long as the union across enabled adapters is non-empty). Each value is parsed by its own adapter (SimpleX queue address, Signal ACI, etc.). On startup, an `@Startup` bean ensures, for every adapter that has a configured admin, that the contact exists with `is_admin=true` (creating the user if needed). Audit log records each bootstrap. `/grant-admin` and `/revoke-admin` are scoped to the inbound adapter; last-admin protection counts `is_admin=true` rows globally across adapters (cannot leave the deployment with zero admins; cannot ban self or last admin). See `docs/spec/security.md` §Per-adapter admin threat profile for the SimpleX-vs-Signal threat surface and operator-side mitigations.

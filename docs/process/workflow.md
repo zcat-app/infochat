@@ -22,6 +22,21 @@ Precedence on conflict: the SKILL.md / CLAUDE.md summary content < this document
 
 ---
 
+## Process doctrine — global deletions, not local patches
+
+When a ticket failure surfaces, the default response is to evaluate whether an existing check, field, or rule should be REMOVED — not whether a new one should be added. Process surface grows easily; shrinking requires deliberate doctrine.
+
+1. **When a ticket fails, ask "what *class* of problem is this?" before patching.** A single failure is a data point; two failures of the same shape may be a pattern; only a pattern justifies a process change. One-off failures are noise — fix the ticket, not the process.
+2. **Prefer deletion over addition.** A failure pointing at an existing check being insufficient is more often a sign the check shouldn't exist than that it needs more rules. If the check has produced ≥3 false positives, delete it; do not strengthen it.
+3. **The contract lives in code + tests + spec, not in ticket prose.** Tickets are briefs that point at the spec; the reviewer compares the diff against the spec. Do not re-state spec content inside tickets; do not police ticket-internal consistency of paraphrased spec.
+4. **`mvn verify` is the green gate.** Author claims about test behavior (will-stay-green, won't-conflict, dependency-on-X) are unnecessary — the test suite proves or disproves them at runtime. Do not require authors to predict what the suite will do.
+5. **Git is the audit trail.** Escalation history, refine reasons, prior-round verdicts — git log preserves them. Do not accumulate the same data in YAML frontmatter; redundant copies drift.
+6. **Reviewer additions over clarity additions.** When a new failure mode genuinely requires a process change, prefer a reviewer-side check (reads code + tests, ground truth) over a clarity-side check (reads prose, paraphrase risk). Clarity checks are the last resort, not the default.
+
+Apply the doctrine on every proposed process change: is this addition addressing a class with evidence, or patching a one-off? Could a deletion solve it better?
+
+---
+
 ## Lifecycle
 
 ```
@@ -97,7 +112,7 @@ If this section disagrees with `ticket-template.md`, the template wins; sync thi
 | `security_relevant` | When `true`, `/redteam` is recommended after APPROVE. | `commit` reminder |
 | `migration_touch` | When `true`, serializes parallel start globally. | `start --parallel` preconditions |
 | `spec_refs` / `decision_refs` | Anchors into `docs/spec/` and the decisions log. | clarity pre-flight |
-| `clarity_check`, `reviews`, `escalations`, `revisions`, `overrides`, `redteam_findings`, `aborted_attempts`, `reopens` | Dynamic — populated by the milestone-driver skill. Authors leave empty. | the driver skill |
+| `clarity_check`, `reviews`, `overrides`, `redteam_findings`, `aborted_attempts`, `reopens` | Dynamic — populated by the milestone-driver skill. Authors leave empty. `clarity_check` and `reviews` carry only the LATEST entry (no per-round accumulation); `escalations` and `revisions` are not in the schema — git log is the audit trail for refine/escalation history. | the driver skill |
 | Lineage (`decomposed_from`, `replaces`, `replaced_by`, `deferred_on`, `deferred_reason`, `spec_amend_for`, `spec_amend_parent`, `remediates`) | Populated only when applicable (escalation paths, redteam remediation on done tickets). | the driver skill |
 
 For body section order (Context → Definition of Done → Implementation notes → Big-picture notes → Out-of-scope expansion → Authorized test changes → Alternatives considered) and field defaults / comments / example values, read [`ticket-template.md`](ticket-template.md) directly.
@@ -209,7 +224,7 @@ Choose:
 Reply with: <number> [optional notes]
 ```
 
-- `refine` → user edits the ticket; status returns to `in-progress`. The original frontmatter is preserved in a `revisions:` list with the date and a one-line reason.
+- `refine` → user edits the ticket; status returns to `in-progress`. The commit message records the refine reason (`M<N>-NNN: refine ticket spec (<reason>-rework)`); git log is the audit trail. No YAML accumulation.
 - `override` → reviewer's specific objections are recorded under `overrides:` with a one-line user justification. Status returns to `in-review` and the skill proceeds to commit.
 - `decompose` → driver allocates fresh IDs (`M<N>-AAA`, `M<N>-BBB`, ...) via the ID allocation algorithm; user provides only titles. Operand → `status: deferred` with `deferred_reason: decomposed`. Replacement skeletons created in `docs/plan/<milestone>/tickets/M<N>-AAA-<slug>.md` (etc.) with `decomposed_from: M<N>-NNN` (the operand) populated on each child. The lineage is queryable so a stale child doesn't get lost when its parent is later reopened.
 - `defer` → user names the blocking ticket ID (or asks the skill to draft it). Original → `status: deferred` with `deferred_on:` and `deferred_reason: blocked-on-new-ticket`. Blocker → new pending ticket.
