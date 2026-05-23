@@ -68,14 +68,14 @@ Steps:
 
    ```
    Agent(
-     subagent_type: "Plan",
+     subagent_type: "plan-writer",
      description: "Implementation outline M1-NNN",
      prompt: "Read target/m1-tick-prompt-plan-{{ID}}.txt and execute the instructions in that file. Everything you need (ticket path, outline sidecar path, the full procedure) is in that file."
    )
    ```
 
-   Foreground.
-   - If the chat reply begins with `## OUTLINE FAILED`, fire `escalate` with `reason: outline-fail`. The commit message records the escalation; git log is the audit trail. The Plan subagent did not Write the sidecar in this branch; do NOT set an `outline_file:` pointer on the ticket. The branch created in step 6 is left in place (deleted by `abort` if the user chooses to abandon, or reused after `refine`).
+   Foreground. The `plan-writer` agent is defined at `.claude/agents/plan-writer.md` and has `Read, Grep, Glob, Write` capability — Write is required so the agent can author the outline sidecar directly. The built-in `Plan` subagent type is read-only (Claude Code harness enforces no Write/Edit) and would fail at the sidecar-Write step; do NOT substitute `subagent_type: "Plan"` here.
+   - If the chat reply begins with `## OUTLINE FAILED`, fire `escalate` with `reason: outline-fail`. The commit message records the escalation; git log is the audit trail. The plan-writer subagent did not Write the sidecar in this branch; do NOT set an `outline_file:` pointer on the ticket. The branch created in step 6 is left in place (deleted by `abort` if the user chooses to abandon, or reused after `refine`).
    - Otherwise the chat reply is the three-line success form (`OUTLINE: PASS` / `Outline file: <path>` / `Risks: <integer>`). Parse it to confirm the success verdict and capture the risk count. Set ticket frontmatter `outline_file: target/m1-tick-outline-M1-NNN.md` as a one-line pointer to the sidecar the subagent Wrote. Do NOT append the outline body to the ticket — the sidecar IS the outline. The developer (the main conversation) reads the sidecar before touching code.
 8. Regenerate `STATUS.md` via `scripts/regen-status.py 'docs/plan/m1/tickets/M1-*.md' docs/plan/m1/STATUS.md` (Bash tool). The script writes only the destination path; if it exits non-zero, surface stderr and refuse to proceed.
 9. Print:

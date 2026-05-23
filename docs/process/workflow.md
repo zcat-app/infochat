@@ -133,7 +133,7 @@ The skill reads `docs/plan/<milestone>/tickets/`, finds tickets where `status: p
 - If clarity returns `FAIL`, the start is blocked and the user is prompted to refine the ticket before implementation begins. `WARN` is informational and does not block.
 - Set frontmatter `status: in-progress`. Update `last_updated`.
 - Create branch `m<N>/M<N>-NNN-<slug>` off `main`.
-- If `complexity: high`, spawn `Agent(subagent_type: "Plan")` with the ticket body and require an implementation outline before any code is written.
+- If `complexity: high`, spawn `Agent(subagent_type: "plan-writer")` with the ticket body and require an implementation outline before any code is written. (`plan-writer` is defined at `.claude/agents/plan-writer.md`; the built-in `Plan` subagent type is read-only and cannot Write the outline sidecar, so the procedure uses the custom agent.)
 - The main conversation IS the developer from this point. No developer-subagent.
 - Regenerate `STATUS.md`.
 
