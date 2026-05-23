@@ -1,5 +1,8 @@
 package app.zcat.infochat.provider.source;
 
+import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.AuditLogWriter;
+import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.core.log.ContactIds;
 import app.zcat.infochat.provider.source.KindResolver.SourceKind;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -92,15 +95,11 @@ public class SourceUpsertService {
                     + "VALUES (?, ?, ?, ?) "
                     + "ON CONFLICT (scope_kind, scope_id, source_id) DO NOTHING";
 
-    private static final String INSERT_AUDIT_SQL =
-            "INSERT INTO audit_log "
-                    + "(actor_user_id, actor_contact_id, actor_adapter, "
-                    + " action, target_kind, target_id, target_contact_id, "
-                    + " scope_id, request_id, details_json) "
-                    + "VALUES (?, NULL, NULL, 'ADD_SOURCE', 'source', ?, NULL, ?, NULL, NULL)";
-
     @Inject
     DataSource dataSource;
+
+    @Inject
+    AuditLogWriter auditLogWriter;
 
     /**
      * Run the single transaction. Returns the resolved outcome +
@@ -237,12 +236,14 @@ public class SourceUpsertService {
                                 UUID actorUserId,
                                 UUID sourceId,
                                 UUID scopeId) throws SQLException {
-        try (PreparedStatement ps = conn.prepareStatement(INSERT_AUDIT_SQL)) {
-            ps.setObject(1, actorUserId);
-            ps.setString(2, sourceId.toString());
-            ps.setObject(3, scopeId);
-            ps.executeUpdate();
-        }
+        RedactionHook.AuditRow row = RedactionHook.AuditRow.builder()
+                .actorUserId(actorUserId)
+                .action(AuditAction.ADD_SOURCE)
+                .targetKind("source")
+                .targetId(sourceId.toString())
+                .scopeId(scopeId)
+                .build();
+        auditLogWriter.write(conn, row);
     }
 
     /** Closed set: which of the three spec'd branches the upsert took. */

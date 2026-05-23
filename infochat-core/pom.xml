@@ -37,6 +37,30 @@
     </dependencyManagement>
 
     <dependencies>
+        <!--
+             CDI annotation API on the compile classpath. M1-041 adds
+             @ApplicationScoped on AuditLogWriter + DefaultRedactionHook
+             and @Inject on AuditLogWriter#redactionHook. infochat-core
+             remains a plain library jar at runtime — these deps are
+             provided-scope so the CDI runtime is supplied downstream
+             (infochat-provider + infochat-collector pull in quarkus-arc).
+             Same shape as infochat-llm-adapter/pom.xml.
+        -->
+        <dependency>
+            <groupId>jakarta.enterprise</groupId>
+            <artifactId>jakarta.enterprise.cdi-api</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.inject</groupId>
+            <artifactId>jakarta.inject-api</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.annotation</groupId>
+            <artifactId>jakarta.annotation-api</artifactId>
+            <scope>provided</scope>
+        </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>

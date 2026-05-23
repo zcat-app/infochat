@@ -1,5 +1,8 @@
 package app.zcat.infochat.collector.bootstrap;
 
+import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.AuditLogWriter;
+import app.zcat.infochat.core.audit.RedactionHook;
 import io.quarkus.runtime.Startup;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Priority;
@@ -84,10 +87,13 @@ public class BootstrapLoader {
 
     private static final Logger LOG = Logger.getLogger(BootstrapLoader.class);
 
-    static final String AUDIT_VERB = "BOOTSTRAP_SOURCE_LOAD";
+    static final String AUDIT_VERB = AuditAction.BOOTSTRAP_SOURCE_LOAD.name();
 
     @Inject
     DataSource dataSource;
+
+    @Inject
+    AuditLogWriter auditLogWriter;
 
     @ConfigProperty(name = "infochat.bootstrap.sources-file", defaultValue = "bootstrap-sources.json")
     String sourcesFilePath;
@@ -211,22 +217,17 @@ public class BootstrapLoader {
         // Append-only INSERT; no actor user — the loader runs at startup
         // before any user has acted. target_id is the file content SHA
         // so the audit trail is keyed by file-content version.
-        final String sql =
-            "INSERT INTO audit_log "
-                + "(actor_user_id, actor_contact_id, actor_adapter, "
-                + " action, target_kind, target_id, target_contact_id, "
-                + " scope_id, request_id, details_json) "
-                + "VALUES (NULL, NULL, NULL, ?, 'system', ?, NULL, NULL, NULL, ?::JSONB)";
         String detailsJson =
             "{\"path\":\"" + jsonEscape(resolvedPath)
                 + "\",\"sha256\":\"" + sha256
                 + "\",\"entry_count\":" + entryCount + "}";
-        try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, AUDIT_VERB);
-            ps.setString(2, sha256);
-            ps.setString(3, detailsJson);
-            ps.executeUpdate();
-        }
+        RedactionHook.AuditRow row = RedactionHook.AuditRow.builder()
+                .action(AuditAction.BOOTSTRAP_SOURCE_LOAD)
+                .targetKind("system")
+                .targetId(sha256)
+                .detailsJson(detailsJson)
+                .build();
+        auditLogWriter.write(conn, row);
     }
 
     private void upsertBootstrapMeta(Connection conn, String sha256, int entryCount) throws SQLException {

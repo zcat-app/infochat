@@ -1,5 +1,8 @@
 package app.zcat.infochat.collector.eval.stage2;
 
+import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.AuditLogWriter;
+import app.zcat.infochat.core.audit.RedactionHook;
 import io.quarkus.runtime.Startup;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Priority;
@@ -11,9 +14,7 @@ import org.jboss.logging.Logger;
 import javax.sql.DataSource;
 import java.lang.management.ManagementFactory;
 import java.sql.Connection;
-import java.sql.PreparedStatement;
 import java.sql.SQLException;
-import java.sql.Types;
 
 /**
  * Collector-side @Startup bean that emits the
@@ -64,12 +65,15 @@ public class StartupReleaseOnStage2FailureWarn {
      * spec design commits to. Held as a public constant so the
      * audit-write helper and the IT both reference one literal.
      */
-    public static final String AUDIT_VERB = "STARTUP_RELEASE_ON_STAGE2_FAILURE_TRUE";
+    public static final String AUDIT_VERB = AuditAction.STARTUP_RELEASE_ON_STAGE2_FAILURE_TRUE.name();
 
     private static final Logger LOG = Logger.getLogger(StartupReleaseOnStage2FailureWarn.class);
 
     @Inject
     DataSource dataSource;
+
+    @Inject
+    AuditLogWriter auditLogWriter;
 
     @ConfigProperty(name = "infochat.security.release-on-stage2-failure")
     boolean releaseOnStage2Failure;
@@ -110,22 +114,16 @@ public class StartupReleaseOnStage2FailureWarn {
         String targetId = hostPidTargetId();
         String detailsJson = "{\"profile\":\"" + jsonEscape(profileLabel) + "\"}";
 
-        final String sql =
-            "INSERT INTO audit_log ("
-                + "  actor_user_id, actor_contact_id, actor_adapter,"
-                + "  action, target_kind, target_id, target_contact_id,"
-                + "  scope_id, request_id, details_json"
-                + ") VALUES ("
-                + "  NULL, NULL, NULL,"
-                + "  ?, 'system', ?, NULL,"
-                + "  NULL, NULL, ?::jsonb"
-                + ")";
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, AUDIT_VERB);
-            ps.setString(2, targetId);
-            ps.setObject(3, detailsJson, Types.OTHER);
-            ps.executeUpdate();
+        RedactionHook.AuditRow row = RedactionHook.AuditRow.builder()
+                .action(AuditAction.STARTUP_RELEASE_ON_STAGE2_FAILURE_TRUE)
+                .targetKind("system")
+                .targetId(targetId)
+                .detailsJson(detailsJson)
+                .build();
+        try (Connection conn = dataSource.getConnection()) {
+            // Bean uses no surrounding transaction — the writer commits
+            // on the caller's autoCommit=true connection.
+            auditLogWriter.write(conn, row);
         }
     }
 

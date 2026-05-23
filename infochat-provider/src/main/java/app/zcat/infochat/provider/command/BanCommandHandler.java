@@ -1,5 +1,8 @@
 package app.zcat.infochat.provider.command;
 
+import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.AuditLogWriter;
+import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.core.log.ContactIds;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
@@ -92,13 +95,6 @@ public class BanCommandHandler implements CommandHandler {
                     + "  AND expected_contact_id = ? AND status = 'PENDING' "
                     + "FOR UPDATE";
 
-    private static final String INSERT_AUDIT_SQL =
-            "INSERT INTO audit_log ("
-                    + "actor_user_id, actor_contact_id, actor_adapter, "
-                    + "action, target_kind, target_id, target_contact_id, "
-                    + "scope_id, request_id, details_json) "
-                    + "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?::jsonb)";
-
     // The preban INSERT supplies its own UUID for `id` so the audit row's
     // target_id (pre-written before this INSERT) can reference it.
     private static final String INSERT_PREBAN_USER_SQL =
@@ -123,6 +119,9 @@ public class BanCommandHandler implements CommandHandler {
 
     @Inject
     InboundContext inboundContext;
+
+    @Inject
+    AuditLogWriter auditLogWriter;
 
     @Override
     public String name() {
@@ -184,7 +183,7 @@ public class BanCommandHandler implements CommandHandler {
                         conn, adapter, targetContactId);
 
                 // Step 1.5a — pre-write the BAN audit row.
-                insertAudit(conn, "BAN", "user", targetUserId.toString(),
+                insertAudit(conn, AuditAction.BAN, "user", targetUserId.toString(),
                         targetContactId, actor, adapter, requestId,
                         banDetailsJson(args.reason));
 
@@ -192,7 +191,7 @@ public class BanCommandHandler implements CommandHandler {
                 // pending CONTACT_BOUND invite, sharing the same
                 // request_id (acceptance item 7).
                 for (UUID inviteId : pendingInviteIds) {
-                    insertAudit(conn, "INVITE_REVOKE", "invite",
+                    insertAudit(conn, AuditAction.INVITE_REVOKE, "invite",
                             inviteId.toString(), targetContactId, actor,
                             adapter, requestId, inviteRevokeOnBanDetailsJson());
                 }
@@ -291,7 +290,7 @@ public class BanCommandHandler implements CommandHandler {
     }
 
     private void insertAudit(Connection conn,
-                             String action,
+                             AuditAction action,
                              String targetKind,
                              String targetId,
                              String targetContactId,
@@ -299,18 +298,18 @@ public class BanCommandHandler implements CommandHandler {
                              String adapter,
                              String requestId,
                              String detailsJson) throws SQLException {
-        try (PreparedStatement ps = conn.prepareStatement(INSERT_AUDIT_SQL)) {
-            ps.setObject(1, actor.id);
-            ps.setString(2, actor.contactId);
-            ps.setString(3, adapter);
-            ps.setString(4, action);
-            ps.setString(5, targetKind);
-            ps.setString(6, targetId);
-            ps.setString(7, targetContactId);
-            ps.setString(8, requestId);
-            ps.setString(9, detailsJson);
-            ps.executeUpdate();
-        }
+        RedactionHook.AuditRow row = RedactionHook.AuditRow.builder()
+                .actorUserId(actor.id)
+                .actorContactId(actor.contactId)
+                .actorAdapter(adapter)
+                .action(action)
+                .targetKind(targetKind)
+                .targetId(targetId)
+                .targetContactId(targetContactId)
+                .requestId(requestId)
+                .detailsJson(detailsJson)
+                .build();
+        auditLogWriter.write(conn, row);
     }
 
     private void insertPrebanRow(Connection conn,

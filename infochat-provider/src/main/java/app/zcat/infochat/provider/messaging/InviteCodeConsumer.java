@@ -1,5 +1,8 @@
 package app.zcat.infochat.provider.messaging;
 
+import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.AuditLogWriter;
+import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.core.log.ContactIds;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -92,15 +95,8 @@ public class InviteCodeConsumer {
     private static final String INSERT_ATTEMPT_SQL =
             "INSERT INTO invite_code_attempt (adapter, contact_id) VALUES (?, ?)";
 
-    private static final String INSERT_AUDIT_SQL =
-            "INSERT INTO audit_log ("
-                    + "actor_user_id, actor_contact_id, actor_adapter, "
-                    + "action, target_kind, target_id, target_contact_id, "
-                    + "scope_id, request_id, details_json"
-                    + ") VALUES (NULL, ?, ?, ?, 'user', ?, ?, NULL, NULL, '{}'::jsonb)";
-
-    static final String INVITE_CONSUME = "INVITE_CONSUME";
-    static final String INVITE_BRUTE_FORCE_BREACH = "INVITE_BRUTE_FORCE_BREACH";
+    static final String INVITE_CONSUME = AuditAction.INVITE_CONSUME.name();
+    static final String INVITE_BRUTE_FORCE_BREACH = AuditAction.INVITE_BRUTE_FORCE_BREACH.name();
 
     @ConfigProperty(name = "infochat.invite.brute-force-threshold", defaultValue = "10")
     int bruteForceThreshold;
@@ -113,6 +109,9 @@ public class InviteCodeConsumer {
 
     @Inject
     DataSource dataSource;
+
+    @Inject
+    AuditLogWriter auditLogWriter;
 
     // Sentinel set of (adapter, contact_id) tuples that have ALREADY
     // had an INVITE_BRUTE_FORCE_BREACH audit row written within the
@@ -161,7 +160,7 @@ public class InviteCodeConsumer {
                     // window. Audit-insert failure (the common mode) is
                     // correctly retried by this ordering.
                     if (!breachAudited.contains(key)) {
-                        insertAudit(conn, contactId, adapter, INVITE_BRUTE_FORCE_BREACH,
+                        insertAudit(conn, contactId, adapter, AuditAction.INVITE_BRUTE_FORCE_BREACH,
                                 contactId, contactId);
                         conn.commit();
                         breachAudited.add(key);
@@ -193,7 +192,7 @@ public class InviteCodeConsumer {
 
                 UUID userId = insertOrSelectUser(conn, adapter, contactId);
                 insertAudit(conn, contactId, adapter,
-                        INVITE_CONSUME, userId.toString(), contactId);
+                        AuditAction.INVITE_CONSUME, userId.toString(), contactId);
                 conn.commit();
                 return new Accepted(userId);
             } catch (SQLException e) {
@@ -288,16 +287,18 @@ public class InviteCodeConsumer {
     }
 
     private void insertAudit(Connection conn, String actorContactId, String actorAdapter,
-                             String action, String targetId, String targetContactId)
+                             AuditAction action, String targetId, String targetContactId)
             throws SQLException {
-        try (PreparedStatement ps = conn.prepareStatement(INSERT_AUDIT_SQL)) {
-            ps.setString(1, actorContactId);
-            ps.setString(2, actorAdapter);
-            ps.setString(3, action);
-            ps.setString(4, targetId);
-            ps.setString(5, targetContactId);
-            ps.executeUpdate();
-        }
+        RedactionHook.AuditRow row = RedactionHook.AuditRow.builder()
+                .actorContactId(actorContactId)
+                .actorAdapter(actorAdapter)
+                .action(action)
+                .targetKind("user")
+                .targetId(targetId)
+                .targetContactId(targetContactId)
+                .detailsJson("{}")
+                .build();
+        auditLogWriter.write(conn, row);
     }
 
     private record Key(String adapter, String contactId) {

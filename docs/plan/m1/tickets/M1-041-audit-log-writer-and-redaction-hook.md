@@ -1,9 +1,15 @@
 ---
 id: M1-041
 title: Audit-log writer + RedactionHook + LlmOutputSanitizer audit row
-status: pending
+status: done
 created: 2026-05-19
 last_updated: 2026-05-23
+clarity_check:
+  date: 2026-05-23
+  verdict: PASS
+  warnings: []
+  blockers: []
+outline_file: target/m1-tick-outline-M1-041.md
 escalations:
   - date: 2026-05-23
     reason: clarity-fail
@@ -182,18 +188,193 @@ revisions:
           (a vacuously-true preserve is not a regression risk)
           and is independent of the TEST-CHANGES-AUTHORIZED
           blocker; orthogonal to this refine.
+  - date: 2026-05-23
+    reason: plan-writer (outline PASS) flagged two pre-implementation
+      refines on the otherwise-runnable ticket. Both are pure
+      ticket-text corrections — no behavior change, no
+      acceptance-coverage change. Falsifier checks were run and
+      quoted before edits landed.
+    summary: |
+      Two coupled edits:
+
+        1. files_scope path correction: the
+           StartupReleaseOnStage2FailureWarn.java entry used the
+           wrong package prefix `io/infochat/collector/...`. Verified
+           via `find infochat-collector/src/main/java -name
+           'StartupReleaseOnStage2*'` returning the single actual
+           path under `app/zcat/infochat/collector/eval/stage2/`.
+           No `io/infochat/...` directory exists. Corrected the
+           prefix in `files_scope`.
+
+        2. Acceptance item 3 + body `out_of_scope` wording: the
+           item read "adds LLM_OUTPUT_SANITIZED to the
+           audit_log.action CHECK constraint". V5 explicitly
+           commits NOT to pin verbs with a SQL CHECK on
+           `audit_log.action` (lines 28-29 `-- catalogue honest.
+           The set is NOT pinned with a SQL CHECK on` and lines
+           272-273 `-- below document the v1 set without pinning
+           it via a SQL CHECK — the`). V12 added
+           INVITE_BRUTE_FORCE_BREACH as a pure line-comment
+           addition (lines 12 + 68), no CHECK clause introduced.
+           Verified by `grep -nE "INVITE_BRUTE_FORCE_BREACH|CHECK"
+           infochat-core/src/main/resources/db/migration/V12__invite_code_attempt.sql`
+           returning two matches, both comments. Rewrote the
+           acceptance item to specify the V12 line-comment
+           pattern and added a parenthetical that cites the V5
+           anchor for "not pinned with a SQL CHECK". Rewrote the
+           matching `out_of_scope` parenthetical for consistency.
+           The grep predicate (`grep -E 'LLM_OUTPUT_SANITIZED'`)
+           is unchanged and satisfied by either pattern.
+  - date: 2026-05-23
+    reason: implementation-start refine — infochat-core/pom.xml
+      addition surfaced after the plan-writer pass during the
+      first implementation read. Acceptance item 2 requires
+      RedactionHook to be wireable via CDI @Alternative; that
+      forces @ApplicationScoped on AuditLogWriter and
+      DefaultRedactionHook, which requires jakarta.enterprise
+      .cdi-api on the infochat-core compile classpath.
+      infochat-core today declares zero production dependencies
+      and zero CDI annotations — verified via
+      `grep '<artifactId>' infochat-core/pom.xml | head` (shows
+      only test-scope deps) and
+      `grep -rln 'ApplicationScoped|jakarta.enterprise|jakarta
+      .inject' infochat-core/src/main/java` (returns empty).
+      The sibling library `infochat-llm-adapter/pom.xml` is the
+      established CDI-aware library pattern: adds cdi-api,
+      inject-api, annotation-api all with `<scope>provided</scope>`
+      so the library compiles against the annotations without
+      pulling in a CDI runtime; downstream Quarkus apps (provider,
+      collector) supply the runtime via quarkus-arc.
+    summary: |
+      Two coupled edits:
+
+        1. files_scope: prepend `infochat-core/pom.xml`. The pom
+           addition adds three provided-scope deps mirroring the
+           infochat-llm-adapter pattern: jakarta.enterprise.cdi-api,
+           jakarta.inject-api, jakarta.annotation-api. No production
+           deps and no runtime extensions are added — provided scope
+           only.
+
+        2. files_budget: 18 → 19 (one new path).
+
+      Why not the lower-scope alternatives:
+        - Plain-Java instantiation at call sites (no CDI in
+          infochat-core) — reinterprets acceptance item 2's "via
+          CDI @Alternative" as constructor injection; tests pass
+          alternative RedactionHook into the writer constructor.
+          Functionally equivalent for testability but a literal
+          deviation from the acceptance text.
+        - Producer classes in infochat-provider + infochat-collector
+          — keeps infochat-core untouched but requires two new
+          @Produces classes (one in each module), neither in
+          files_scope. Two new files vs. one pom.xml change; the
+          pom addition is the smaller delta and follows the
+          existing infochat-llm-adapter pattern.
+
+      No body claims added beyond this revisions entry. No
+      acceptance item text changes — the acceptance shape is
+      preserved; only the implementation path now has the deps
+      it needs.
+  - date: 2026-05-23
+    reason: implementation-start refine (round 1 mvn verify
+      gap) — adding @ApplicationScoped to AuditLogWriter +
+      DefaultRedactionHook in infochat-core is necessary to
+      compile (the prior refine 5677ecc) but NOT sufficient
+      to make ArC discover them at runtime in provider /
+      collector. Quarkus ArC does not scan dependency JARs
+      for CDI beans unless the JAR carries a META-INF/beans.xml
+      marker or a Jandex index, or the consumer declares an
+      explicit `quarkus.index-dependency.*` entry. infochat-core
+      has none of those today. Without the directive, every
+      provider/collector consumer of the new SPI (the 7 call
+      sites + LlmOutputSanitizer per-occurrence emitter) fails
+      with UnsatisfiedResolutionException at boot. Falsifier
+      check (verbatim):
+
+          $ grep -n 'index-dependency' \
+              infochat-collector/src/main/resources/application.properties \
+              infochat-provider/src/main/resources/application.properties
+          infochat-collector/src/main/resources/application.properties:38:quarkus.index-dependency.llm-adapter.group-id=app.zcat.infochat
+          infochat-collector/src/main/resources/application.properties:39:quarkus.index-dependency.llm-adapter.artifact-id=infochat-llm-adapter
+          infochat-provider/src/main/resources/application.properties:140:quarkus.index-dependency.llm-adapter.group-id=app.zcat.infochat
+          infochat-provider/src/main/resources/application.properties:141:quarkus.index-dependency.llm-adapter.artifact-id=infochat-llm-adapter
+
+      The infochat-llm-adapter consumer-side precedent (M1-033)
+      is the established pattern for this exact problem: a
+      library JAR with @ApplicationScoped beans + no beans.xml /
+      no Jandex index, surfaced via `quarkus.index-dependency.*`
+      in each consumer's application.properties.
+    summary: |
+      Two coupled edits:
+
+        1. files_scope: prepend the two consumer application
+           .properties paths. Each gets one
+           `quarkus.index-dependency.audit-core.{group-id,
+           artifact-id}` pair mirroring the existing
+           llm-adapter block in the same file.
+
+        2. files_budget: 19 → 21 (two new paths).
+
+      Why not the lower-scope alternatives:
+        - jandex-maven-plugin on infochat-core/pom.xml — would
+          add a new build plugin (one new dependency entry +
+          build phase) to make the JAR carry META-INF/jandex.idx
+          out of the box. Rejected (operator instruction
+          2026-05-23): introduces a new build dependency where
+          an existing repo pattern (consumer-side
+          `quarkus.index-dependency.*`) already solves the same
+          problem with smaller surface area. Consistency across
+          the codebase outweighs the per-decision cleanliness
+          of "fix the library, not the consumer."
+        - empty META-INF/beans.xml in infochat-core — would
+          add a new file outside files_scope and has no
+          existing precedent in this repo.
+
+      No body claims added beyond this revisions entry. No
+      acceptance item text changes — the acceptance shape is
+      preserved.
+reviews:
+  - round: 1
+    date: 2026-05-23
+    verdict: REWORK
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 21
+      added: 1524
+      removed: 151
+  - round: 2
+    date: 2026-05-23
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 21
+      added: 1561
+      removed: 151
 deferred_reason:
 deferred_on: []
 blocked_by: []
-files_budget: 18
+files_budget: 21
 files_scope:
+  - infochat-provider/src/main/resources/application.properties
+  - infochat-collector/src/main/resources/application.properties
+  - infochat-core/pom.xml
   - infochat-core/src/main/java/app/zcat/infochat/core/audit/AuditLogWriter.java
   - infochat-core/src/main/java/app/zcat/infochat/core/audit/RedactionHook.java
   - infochat-core/src/main/java/app/zcat/infochat/core/audit/DefaultRedactionHook.java
   - infochat-core/src/main/java/app/zcat/infochat/core/audit/AuditAction.java
   - infochat-core/src/main/resources/db/migration/V<N>__llm_output_sanitized_action.sql
   - infochat-provider/src/main/java/app/zcat/infochat/provider/llm/LlmOutputSanitizer.java
-  - infochat-collector/src/main/java/io/infochat/collector/eval/stage2/StartupReleaseOnStage2FailureWarn.java
+  - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/stage2/StartupReleaseOnStage2FailureWarn.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/BanCommandHandler.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/UnbanCommandHandler.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/InviteCommandHandler.java
@@ -240,8 +421,90 @@ round_cap: 3
 security_relevant: true
 migration_touch: true
 remediates: M1-037 M1-033 M1-044c
+redteam_findings:
+  - date: 2026-05-23
+    category: AUDIT-EVASION
+    severity: medium
+    promise: |
+      docs/spec/security.md §LLM output sanitizer — "Every match is
+      audit-logged (per-occurrence, not throttled)." Reinforced by
+      §Secrets handling which frames "audit-logged" as a write to
+      the durable audit_log table.
+    gap: |
+      infochat-provider/src/main/java/app/zcat/infochat/provider/llm/
+      LlmOutputSanitizer.java:215-239 — emitAuditRows opens a per-match
+      autoCommit connection, catches SQLException, logs errorf, and
+      continues. The closed-list-rewritten user-visible text is
+      returned at line 136 regardless of whether the audit row reached
+      the database. No retry, no queue, no surrounding transaction.
+    repro: |
+      Adversary triggers any LLM output emitting a closed-list token
+      while the audit_log INSERT path is degraded (pool exhaustion,
+      lock contention, network blip). auditLogWriter.write throws
+      SQLException; the catch logs and returns. The user receives
+      the sanitized reply; no durable audit_log row exists. /audit
+      shows zero LLM_OUTPUT_SANITIZED rows for the incident.
+    suggested_fix_class: audit-log-coverage
+redteam_audits:
+  - date: 2026-05-23
+    run: 1
+    verdict: FINDINGS
+    base: main
+    head: m1/M1-041-audit-log-writer-and-redaction-hook (commit 85c88c9)
+    verdict_file: docs/plan/m1/redteam/M1-041-2026-05-23.md
+    findings_count: 1
+    out_of_model_count: 0
+    note: |
+      Single medium AUDIT-EVASION finding on the LlmOutputSanitizer
+      fail-soft branch. Resolved in-ticket per operator override of
+      the no-amend rule (pre-merge, post-/m1-tick commit; the user
+      rejected the new-remediation-ticket path). emitAuditRows now
+      wraps per-match writes in a single transaction and throws
+      IllegalStateException on SQLException; sanitize() bubbles the
+      exception so the caller's response build aborts when audit
+      cannot be written. New IT auditWriteFailureAbortsSanitizeFailLoud
+      pins the fail-loud behavior. See follow-up redteam_audits entry
+      for the CLEAN confirmation.
+  - date: 2026-05-23
+    run: 2
+    verdict: CLEAN
+    base: main
+    head: m1/M1-041-audit-log-writer-and-redaction-hook (commit e7c0c9b — fail-loud fixup on top of 85c88c9)
+    verdict_file: docs/plan/m1/redteam/M1-041-2026-05-23.md
+    findings_count: 0
+    out_of_model_count: 1
+    note: |
+      CLEAN. The audit-1 medium finding is closed end-to-end:
+      emitAuditRows wraps writes in a tx + throws on failure,
+      sanitize() bubbles the exception, SummaryCommandHandler does
+      not catch, InboundRouter's runtime-exception handler returns
+      INTERNAL_ERROR_REPLY (the sanitized text is NOT sent). One
+      OUT-OF-MODEL observation: DefaultRedactionHook's watchdog
+      placeholder "[REDACTED]" is not valid JSONB, so a watchdog-firing
+      input would cause the surrounding admin action to roll back.
+      Resolved in audit-3 by operator override (see follow-up entry).
+  - date: 2026-05-23
+    run: 3
+    verdict: CLEAN
+    base: main
+    head: m1/M1-041-audit-log-writer-and-redaction-hook (commit 72e9297 — JSONB-fallback fixup on top of e7c0c9b)
+    verdict_file: docs/plan/m1/redteam/M1-041-2026-05-23.md
+    findings_count: 0
+    out_of_model_count: 0
+    note: |
+      CLEAN. The audit-2 OUT-OF-MODEL observation is resolved.
+      New REDACTED_FIELD_JSONB constant = '{"_redacted":true,
+      "reason":"regex_watchdog_timeout"}' replaces the bare
+      "[REDACTED]" string in the DefaultRedactionHook watchdog
+      fail-closed branch; the valid-JSONB shape now passes the
+      ?::jsonb cast in AuditLogWriter so the surrounding dispatch
+      transaction does NOT roll back. The per-match
+      REDACTED_PLACEHOLDER stays as-is (valid inside JSON string
+      quotes). New AuditLogWriterIT.watchdogFallbackIsValidJsonb
+      pins the end-to-end Postgres round-trip. M1-041 is ready
+      for /m1-tick merge.
 out_of_scope:
-  - any change to V5__identity_audit.sql, V6/V8 audit_log GRANTs, or the audit_log column shape itself — this ticket only adds a new audit verb (LLM_OUTPUT_SANITIZED) to the action CHECK constraint and consolidates the application-layer writer
+  - any change to V5__identity_audit.sql, V6/V8 audit_log GRANTs, or the audit_log column shape itself — this ticket only adds a new audit verb (LLM_OUTPUT_SANITIZED) to the V5 §2.1.8 line-comment verb catalogue (matching the V12 line-comment pattern) and consolidates the application-layer writer
   - any change to audit_log triggers (append-only triggers from M1-008a and the actor-integrity trigger from M1-021 if it has landed by start time)
   - any change to bootstrap admin / Stage 2 release-on-failure logic beyond migrating the audit INSERT call site onto the new writer
   - any feature additions to /audit (the admin review command for sanitizer events lives in a separate T2-G follow-up)
@@ -250,7 +513,7 @@ out_of_scope:
 acceptance:
   - "AuditLogWriter.java is the SOLE INSERT path into audit_log for application-layer writers. grep -rn 'INSERT\\s+INTO\\s+audit_log' infochat-collector/src/main infochat-provider/src/main infochat-core/src/main returns matches only inside AuditLogWriter.java and SECURITY DEFINER stored procedures (delete_preban_user, approve_quarantine etc. — those carry the carve-out per V5/V6/V10)"
   - "RedactionHook is an SPI interface in infochat-core/audit with a single `redact(AuditRow): AuditRow` entry. The default implementation applies the closed API-key-shape catalogue from docs/spec/security.md §Secrets handling to the row's `details_json` field. The seven shape families from the spec baseline are OpenAI `sk-…` (incl. `sk-proj-…` / `sk-svcacct-…`), Anthropic `sk-ant-…`, GitHub `ghp_/gho_/ghu_/ghs_/ghr_…`, AWS `AKIA[0-9A-Z]{16}` and `ASIA[0-9A-Z]{16}`, Google `AIza[0-9A-Za-z_-]{35}`, Slack `xox[abprs]-…`, and generic 32+-char hex/base64 strings adjacent to the case-insensitive substrings `api[_-]?key|secret|token|password|bearer`. Each match is replaced with `[REDACTED]`; the regex matcher is fail-closed on timeout (per the spec, a timed-out match treats the whole field as redacted rather than emitting it raw). The hook does NOT redact `target_contact_id` — per spec, contact-id redaction is for non-audit logs only (`ContactIds.redact` prefix+ellipsis+suffix shape), while `audit_log` itself stores the full contact id and the `audit_log_view` exposes the redacted form at read time. An alternative implementation can be wired via CDI `@Alternative` for testing."
-  - "A new Flyway migration at the next free V<N> integer adds LLM_OUTPUT_SANITIZED to the audit_log.action CHECK constraint (and any other new verbs this consolidation requires). grep -E 'LLM_OUTPUT_SANITIZED' V<N>__llm_output_sanitized_action.sql returns at least one match"
+  - "A new Flyway migration at the next free V<N> integer adds LLM_OUTPUT_SANITIZED to the V5 §2.1.8 line-comment audit-verb catalogue, following the V12 line-comment pattern used for INVITE_BRUTE_FORCE_BREACH (V5 explicitly does NOT pin verbs with a SQL CHECK on audit_log.action — see V5 lines 28-29 and 272-273; the verb set is documented via per-verb line comments). grep -E 'LLM_OUTPUT_SANITIZED' V<N>__llm_output_sanitized_action.sql returns at least one match"
   - "LlmOutputSanitizer emits one audit_log row per sanitizer hit (NOT throttled) via AuditLogWriter, per docs/spec/security.md §LLM output sanitizer 'Every match is audit-logged (per-occurrence, not throttled)'. The action is LLM_OUTPUT_SANITIZED; details_json carries the match-count + match-kind enumeration without the user-visible LLM output text"
   - "StartupReleaseOnStage2FailureWarn migrates its raw-JDBC INSERT onto AuditLogWriter — the writer call site replaces the inline INSERT. M1-033's audit-row tests continue to pass with the new writer (semantics preserved)"
   - "BanCommandHandler migrates its raw `INSERT INTO audit_log` onto AuditLogWriter — both the BAN audit-row write AND the INVITE_REVOKE companion row written inside the same transaction flow through the writer with the existing `request_id` correlation preserved. BanCommandHandlerTest's per-scenario audit-row assertions (BAN row exists; BAN + INVITE_REVOKE rows share `request_id`; rollback discards the row on last-admin trigger) continue to pass with the writer (semantics preserved modulo the new redaction-hook application on `details_json`). Verify: `grep -cE 'INSERT\\s+INTO\\s+audit_log' infochat-provider/src/main/java/app/zcat/infochat/provider/command/BanCommandHandler.java` returns 0; `grep -cE 'auditLogWriter' infochat-provider/src/main/java/app/zcat/infochat/provider/command/BanCommandHandler.java` returns ≥1"
@@ -558,3 +821,25 @@ assertion.
   redaction must be visible in code review (a hidden wrapper
   is invisible to reviewers and to the spec's promise that
   redaction is auditable).
+
+## Round 1 rework
+
+PARAMETER-CONTRACT-CHECK: FAIL on three Builder setters. All other
+checks PASS. Address ONLY the named item, re-run
+`mvn -B clean verify > target/m1-tick-test-M1-041-r2.log 2>&1`,
+then `/m1-tick review M1-041`.
+
+1. Add `@NonNull` (from `org.jspecify.annotations`) to the three
+   Builder setter parameters in
+   `infochat-core/src/main/java/app/zcat/infochat/core/audit/RedactionHook.java`:
+   - `public Builder action(AuditAction v)` at line 139
+   - `public Builder targetKind(String v)` at line 144
+   - `public Builder targetId(String v)` at line 149
+
+   These three setters correspond to the three required fields
+   enforced by `Builder.build()`; annotating them as `@NonNull`
+   makes the contract explicit at the signature, matching the
+   sibling setters that already carry `@Nullable` for their
+   nullable fields. Alternative (also acceptable per the
+   §7a javadoc carve-out): add a one-line `@param v ...` javadoc
+   to each setter instead of the annotation.

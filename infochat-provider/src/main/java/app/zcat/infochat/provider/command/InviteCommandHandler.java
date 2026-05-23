@@ -1,5 +1,8 @@
 package app.zcat.infochat.provider.command;
 
+import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.AuditLogWriter;
+import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.core.log.ContactIds;
 import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.OutboundMessage;
@@ -104,13 +107,6 @@ public class InviteCommandHandler implements CommandHandler {
                     + " status, created_by, created_at, expires_at) "
                     + "VALUES (?, ?, ?, ?, 'PENDING', ?, NOW(), ?)";
 
-    private static final String INSERT_AUDIT_SQL =
-            "INSERT INTO audit_log ("
-                    + "actor_user_id, actor_contact_id, actor_adapter, "
-                    + "action, target_kind, target_id, target_contact_id, "
-                    + "scope_id, request_id, details_json) "
-                    + "VALUES (?, ?, ?, ?, 'invite', ?, ?, NULL, ?, ?::jsonb)";
-
     // Active-PENDING filter (status='PENDING' AND not expired). Sorts
     // by created_at DESC; limit + offset support `--page N` paging.
     private static final String SELECT_PENDING_LIST_SQL =
@@ -152,6 +148,9 @@ public class InviteCommandHandler implements CommandHandler {
 
     @Inject
     AdapterRegistry adapterRegistry;
+
+    @Inject
+    AuditLogWriter auditLogWriter;
 
     @Override
     public String name() {
@@ -254,7 +253,7 @@ public class InviteCommandHandler implements CommandHandler {
                 // anywhere below the audit INSERT discards both.
                 code = generateInviteCode(conn);
 
-                insertAudit(conn, "INVITE_CREATE", code.toString(), targetContactId,
+                insertAudit(conn, AuditAction.INVITE_CREATE, code.toString(), targetContactId,
                         actor, inboundAdapter, requestId,
                         inviteCreateDetailsJson("CONTACT_BOUND", targetAdapter));
 
@@ -301,7 +300,7 @@ public class InviteCommandHandler implements CommandHandler {
                 // for the rationale on the mint-audit-insert order.
                 code = generateInviteCode(conn);
 
-                insertAudit(conn, "INVITE_CREATE", code.toString(), null,
+                insertAudit(conn, AuditAction.INVITE_CREATE, code.toString(), null,
                         actor, inboundAdapter, requestId,
                         inviteCreateDetailsJson("OPEN_ADAPTER", targetAdapter));
 
@@ -457,7 +456,7 @@ public class InviteCommandHandler implements CommandHandler {
                     return reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_REVOKE_NOT_PENDING));
                 }
 
-                insertAudit(conn, "INVITE_REVOKE", inviteId.toString(), null,
+                insertAudit(conn, AuditAction.INVITE_REVOKE, inviteId.toString(), null,
                         actor, inboundAdapter, requestId, "{}");
 
                 int updated = updateInviteRevoked(conn, code);
@@ -507,28 +506,25 @@ public class InviteCommandHandler implements CommandHandler {
     // ------------------------------------------------------------------
 
     private void insertAudit(Connection conn,
-                             String action,
+                             AuditAction action,
                              String targetId,
                              String targetContactId,
                              UserRow actor,
                              String inboundAdapter,
                              String requestId,
                              String detailsJson) throws SQLException {
-        try (PreparedStatement ps = conn.prepareStatement(INSERT_AUDIT_SQL)) {
-            ps.setObject(1, actor.id);
-            ps.setString(2, actor.contactId);
-            ps.setString(3, inboundAdapter);
-            ps.setString(4, action);
-            ps.setString(5, targetId);
-            if (targetContactId == null) {
-                ps.setNull(6, Types.VARCHAR);
-            } else {
-                ps.setString(6, targetContactId);
-            }
-            ps.setString(7, requestId);
-            ps.setString(8, detailsJson);
-            ps.executeUpdate();
-        }
+        RedactionHook.AuditRow row = RedactionHook.AuditRow.builder()
+                .actorUserId(actor.id)
+                .actorContactId(actor.contactId)
+                .actorAdapter(inboundAdapter)
+                .action(action)
+                .targetKind("invite")
+                .targetId(targetId)
+                .targetContactId(targetContactId)
+                .requestId(requestId)
+                .detailsJson(detailsJson)
+                .build();
+        auditLogWriter.write(conn, row);
     }
 
     private Optional<UserRow> lookupUser(String adapter, String contactId) {

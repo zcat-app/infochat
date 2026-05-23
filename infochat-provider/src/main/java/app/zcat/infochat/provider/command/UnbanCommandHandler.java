@@ -1,5 +1,8 @@
 package app.zcat.infochat.provider.command;
 
+import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.AuditLogWriter;
+import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.core.log.ContactIds;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
@@ -89,13 +92,6 @@ public class UnbanCommandHandler implements CommandHandler {
                     + "WHERE gm.user_id = ? AND gm.is_group_admin = TRUE "
                     + "ORDER BY g.display_name";
 
-    private static final String INSERT_AUDIT_SQL =
-            "INSERT INTO audit_log ("
-                    + "actor_user_id, actor_contact_id, actor_adapter, "
-                    + "action, target_kind, target_id, target_contact_id, "
-                    + "scope_id, request_id, details_json) "
-                    + "VALUES (?, ?, ?, 'UNBAN', 'user', ?, ?, NULL, ?, ?::jsonb)";
-
     private static final String UPDATE_UNBAN_NON_PREBAN_SQL =
             "UPDATE users SET is_banned = FALSE, banned_at = NULL, "
                     + "banned_by = NULL, ban_reason = NULL WHERE id = ?";
@@ -119,6 +115,9 @@ public class UnbanCommandHandler implements CommandHandler {
 
     @Inject
     InboundContext inboundContext;
+
+    @Inject
+    AuditLogWriter auditLogWriter;
 
     @Override
     public String name() {
@@ -297,16 +296,18 @@ public class UnbanCommandHandler implements CommandHandler {
                                   String targetContactId,
                                   String requestId,
                                   String detailsJson) throws SQLException {
-        try (PreparedStatement ps = conn.prepareStatement(INSERT_AUDIT_SQL)) {
-            ps.setObject(1, actor.id);
-            ps.setString(2, actor.contactId);
-            ps.setString(3, adapter);
-            ps.setString(4, targetId.toString());
-            ps.setString(5, targetContactId);
-            ps.setString(6, requestId);
-            ps.setString(7, detailsJson);
-            ps.executeUpdate();
-        }
+        RedactionHook.AuditRow row = RedactionHook.AuditRow.builder()
+                .actorUserId(actor.id)
+                .actorContactId(actor.contactId)
+                .actorAdapter(adapter)
+                .action(AuditAction.UNBAN)
+                .targetKind("user")
+                .targetId(targetId.toString())
+                .targetContactId(targetContactId)
+                .requestId(requestId)
+                .detailsJson(detailsJson)
+                .build();
+        auditLogWriter.write(conn, row);
     }
 
     private void updateUserUnbanned(Connection conn, UUID targetId) throws SQLException {
