@@ -4,12 +4,22 @@ title: Audit-log writer + RedactionHook + LlmOutputSanitizer audit row
 status: pending
 created: 2026-05-19
 last_updated: 2026-05-23
+escalations:
+  - date: 2026-05-23
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      N/A — clarity-pre-flight FAIL (see clarity_check.blockers)
 reopens:
   - date: 2026-05-23
     prior_deferred_reason: post-mvp-audit-writer-consolidation
     prior_deferred_on: []
     reason: M1-044c red-team finding #1 (audit-redaction-hook bypass) is v1-blocker
 revisions:
+  - date: 2026-05-23
+    reason: clarity-fail rework — drop the `docs/spec/security.md §Audit` spec_refs entry; verified the heading does not exist in security.md (no `## Audit` or `### Audit` at any level; nearest substring matches are §Authorization model, §Per-adapter admin threat profile, §User ban, §DB roles where `audit_log_view` access lives). The two remaining refs (§LLM output sanitizer + §Secrets handling) already cover the substantive spec content every acceptance item depends on; no acceptance item references content unique to the audit_log_view / DB-roles section, so dropping rather than retargeting is the minimum-scope fix. WARN-level clarity items (SELF-CONTAINED-CHECK on acceptance item 2's catalogue delegation; TEST-CHANGES-AUTHORIZED TBD placeholder) are intentionally NOT touched in this refine — both are non-blocking and surfacing the warnings on the next clarity pass keeps the audit trail accurate.
+    summary: |
+      Single-line change: removed `- docs/spec/security.md §Audit`
+      from the spec_refs block. No other frontmatter or body changes.
   - date: 2026-05-23
     reason: pre-reopen scope widening — M1-044c red-team finding #1 (high AUDIT-EVASION) traces the audit-log redaction-hook bypass to three M1-044c handler files that landed AFTER M1-041 was drafted; a parallel grep of `infochat-(collector|provider|core)/src/main` for raw `INSERT INTO audit_log` surfaces three additional sites M1-041's original scope missed (the M1-044a InviteCodeConsumer audit-INSERT for the brute-force-breach + accepted-code rows; the M1-036 SourceUpsertService audit-INSERT for SOURCE_ADDED rows; the BootstrapLoader audit-INSERT for SOURCE_SEEDED rows). Without these six files in `files_scope`, M1-041's existing acceptance item 1 (SOLE-WRITER grep across all three main dirs) cannot be delivered, and the reviewer's negative-space check cannot confirm per-file migration.
     summary: |
@@ -176,7 +186,6 @@ test_plan:
 spec_refs:
   - docs/spec/security.md §LLM output sanitizer
   - docs/spec/security.md §Secrets handling (audit-log redaction hook)
-  - docs/spec/security.md §Audit
 decision_refs: []
 ---
 
