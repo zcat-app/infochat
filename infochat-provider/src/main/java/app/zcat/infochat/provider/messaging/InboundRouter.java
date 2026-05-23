@@ -8,6 +8,7 @@ import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.command.ConfirmStateService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.context.control.ActivateRequestContext;
 import jakarta.enterprise.inject.Instance;
@@ -23,6 +24,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.text.MessageFormat;
 import java.text.Normalizer;
 import java.time.Instant;
 import java.util.Optional;
@@ -65,6 +67,17 @@ import java.util.concurrent.atomic.AtomicLong;
  *       receives the fixed {@code error.ban.fixed} reply and stops
  *       (spec §User ban: "one fixed reply per inbound message");</li>
  *   <li>5 reserved — M1-045 splices the probation check here;</li>
+ *   <li>4.5 confirm-cancel sweep (M1-051): if the resolved snapshot
+ *       has pending confirm state for this {@code (actor.id, scope)},
+ *       AND the inbound body is NOT the confirm-shape for the pending
+ *       command, drain the pending entry via
+ *       {@link ConfirmStateService#takeAny} and send a cancellation
+ *       acknowledgement BEFORE proceeding to dispatch. The
+ *       confirm-shape body is forwarded unchanged so the handler's
+ *       takeMatching pops the pending args. Empty pending → no-op;
+ *       this preserves the per-step call-order assertions of every
+ *       pre-existing router test (the new sweep is invisible when no
+ *       pending exists);</li>
  *   <li>7 DM-gate carve-out (pre-dispatch): when the inbound is a DM
  *       scope AND the resolved user's {@code registration_state =
  *       'group_only'}, the router emits the fixed
@@ -204,6 +217,9 @@ public class InboundRouter {
     @Inject
     DataSource dataSource;
 
+    @Inject
+    ConfirmStateService confirmStateService;
+
     /**
      * Defense-in-depth body cap. The default is below the in-memory
      * adapter's declared {@code maxInboundMessageBytes} so a
@@ -327,6 +343,36 @@ public class InboundRouter {
 
         // Step 5 (reserved — M1-045 inserts the probation check here).
 
+        // Step 4.5 — confirm-cancel sweep (M1-051). Per spec
+        // §Surface conventions ("any other input cancels"): a pending
+        // confirm under (actor.id, scope) that does NOT match the
+        // current inbound's confirm-shape is drained AND the user
+        // receives a cancellation acknowledgement BEFORE the
+        // intended-next-command dispatches. The sweep skips when
+        // snapshot is empty (an unregistered DM contact would have
+        // short-circuited at step 2; a freshly auto-registered group
+        // contact cannot have pending state because every remember-path
+        // runs only inside an admin-gated handler).
+        if (snapshot.isPresent()) {
+            UUID actorId = snapshot.get().id();
+            Optional<ConfirmStateService.PendingConfirm> pending =
+                    confirmStateService.peek(actorId, msg.scope());
+            if (pending.isPresent() && !isConfirmShape(normalized, pending.get())) {
+                // Drain pending and send cancellation BEFORE dispatch.
+                // The takeAny call removes the entry; the subsequent
+                // dispatch proceeds with no pending state, so the
+                // user's intended-next-command is processed normally.
+                ConfirmStateService.PendingConfirm cancelled = pending.get();
+                confirmStateService.takeAny(actorId, msg.scope());
+                String cancellation = MessageFormat.format(
+                        bundleLoader.get(BundleKeys.REPLY_CONFIRM_CANCELLED),
+                        cancelled.commandName());
+                sendReply(msg.scope(), cancellation);
+            }
+            // Matching confirm-shape: leave pending in place; the
+            // handler's takeMatching pops it on the dispatch path.
+        }
+
         // Step 7 — DM-gate carve-out (pre-dispatch). Per spec
         // §Invite-code registration + §Authorization model: a user
         // auto-registered via group @mention (registration_state=
@@ -432,6 +478,25 @@ public class InboundRouter {
             log.error("InboundRouter reply send failed for adapter={} scope={}",
                     target.name(), ContactIds.redact(scopeIdOf(scope)), e);
         }
+    }
+
+    /**
+     * Does {@code normalized} look like the confirm-shape body for
+     * {@code pending}? Per spec §Surface conventions: the canonical
+     * confirm form is {@code "/" + sweepPrefix + " confirm"} and the
+     * "args retyped" relaxation accepts any body that starts with
+     * {@code "/" + sweepPrefix + " "} AND ends with {@code " confirm"}.
+     * Used by step 4.5 to decide cancel-vs-leave-alone — the handler
+     * still performs the authoritative {@code takeMatching} call on
+     * its own commandName key when dispatch reaches it.
+     */
+    private static boolean isConfirmShape(String normalized,
+                                          ConfirmStateService.PendingConfirm pending) {
+        String prefix = "/" + pending.sweepPrefix();
+        if (normalized.equals(prefix + " confirm")) {
+            return true;
+        }
+        return normalized.startsWith(prefix + " ") && normalized.endsWith(" confirm");
     }
 
     private String handleSlash(ScopeRef scope, String normalized) {

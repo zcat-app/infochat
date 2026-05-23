@@ -59,12 +59,17 @@ import java.util.UUID;
  * §Invite-code registration this is "the one admin command that may
  * name any adapter the deployment supports."</p>
  *
- * <p><b>Confirm-gate deferred.</b> Both {@code /invite create --open}
- * and {@code /invite revoke} require confirm per spec §Surface
- * conventions; M1-044c ships without the confirm gate and the
- * spec-compliant in-memory pending-confirm service lands in a
- * follow-up ticket that retrofits the gate across all destructive
- * admin commands. v1 is a deliberate temporary spec deviation.</p>
+ * <p><b>Confirm gate (M1-051).</b> {@code /invite create --open} and
+ * {@code /invite revoke} both pass through the {@link ConfirmStateService}
+ * pre-dispatch confirm gate per spec §Surface conventions. First call:
+ * validate inputs, store pending args under
+ * {@code (actor.id, scope, "invite:create:open"|"invite:revoke")},
+ * return the prompt. Second call (body ends with {@code " confirm"}):
+ * {@code takeMatching} on the same key — non-empty pops the captured
+ * args and runs the M1-044c transaction unchanged; empty returns
+ * {@code error.confirm.no_pending}. {@code /invite create --contact}
+ * is intentionally excluded from the gate (spec §Admin: "risk is
+ * bounded to one specific identity").</p>
  */
 @ApplicationScoped
 public class InviteCommandHandler implements CommandHandler {
@@ -152,6 +157,9 @@ public class InviteCommandHandler implements CommandHandler {
     @Inject
     AuditLogWriter auditLogWriter;
 
+    @Inject
+    ConfirmStateService confirmStateService;
+
     @Override
     public String name() {
         return "invite";
@@ -192,6 +200,29 @@ public class InviteCommandHandler implements CommandHandler {
                                          UserRow actor,
                                          String inboundAdapter,
                                          String remainder) {
+        // Confirm-gate fork for /invite create --open (M1-051). The
+        // --contact branch has NO confirm gate per spec §Admin
+        // ("No confirmation required (risk is bounded to one specific
+        // identity)"); a body ending in ` confirm` against --contact
+        // still reaches the first-call path and falls through to
+        // missing-flag / mutually-exclusive validation since "confirm"
+        // is not a flag.
+        String trimmed = remainder.trim();
+        if (trimmed.equals("confirm") || trimmed.endsWith(" confirm")) {
+            // Confirm-call: identifier "invite:create:open" — namespaced
+            // discriminator so /invite create --open and /invite revoke
+            // can both pend through the same actor+scope key without
+            // ambiguity.
+            Optional<ConfirmStateService.PendingConfirm> taken =
+                    confirmStateService.takeMatching(actor.id, scope, "invite:create:open");
+            if (taken.isEmpty()) {
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONFIRM_NO_PENDING));
+            }
+            ConfirmStateService.PendingConfirm.InviteCreateOpen pending =
+                    (ConfirmStateService.PendingConfirm.InviteCreateOpen) taken.get();
+            return createOpen(scope, actor, inboundAdapter, pending.targetAdapter());
+        }
+
         CreateArgs args = CreateArgs.parse(remainder);
 
         // Flag combination checks before adapter-name validation: the
@@ -215,9 +246,39 @@ public class InviteCommandHandler implements CommandHandler {
         }
 
         if (args.contact != null) {
+            // --contact path executes immediately — spec carves it out
+            // of the confirm requirement (bounded blast radius).
             return createContactBound(scope, actor, inboundAdapter, targetAdapter, args.contact);
         }
-        return createOpen(scope, actor, inboundAdapter, targetAdapter);
+
+        // --open path — first-call: validate adapter (done above), write
+        // the spec §Authorization model step-8 audit-on-intent row,
+        // then remember pending + return prompt. Confirm-call lands in
+        // createOpen via the confirm-fork above with the captured
+        // targetAdapter. The intent row's target_id is a synthetic
+        // placeholder UUID because the invite_code row doesn't exist
+        // yet (it gets INSERTed on confirm in createOpen); details_json
+        // carries the requested targetAdapter so an operator can
+        // correlate intent and completion.
+        String intentRequestId = UUID.randomUUID().toString();
+        try (Connection conn = dataSource.getConnection()) {
+            insertAudit(conn, AuditAction.INVITE_CREATE_INTENT,
+                    UUID.randomUUID().toString(), null, actor, inboundAdapter,
+                    intentRequestId, inviteCreateOpenIntentDetailsJson(targetAdapter));
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to write INVITE_CREATE_INTENT audit row", e);
+        }
+        confirmStateService.remember(actor.id, scope,
+                new ConfirmStateService.PendingConfirm.InviteCreateOpen(targetAdapter));
+        String prompt = MessageFormat.format(
+                bundleLoader.get(BundleKeys.REPLY_CONFIRM_PROMPT_INVITE_CREATE_OPEN),
+                Long.toString(confirmStateService.timeoutSeconds()),
+                targetAdapter);
+        return reply(scope, prompt);
+    }
+
+    private static String inviteCreateOpenIntentDetailsJson(String targetAdapter) {
+        return "{\"target_adapter\":\"" + targetAdapter.replace("\"", "\\\"") + "\"}";
     }
 
     private OutboundMessage createContactBound(ScopeRef scope,
@@ -434,7 +495,23 @@ public class InviteCommandHandler implements CommandHandler {
                                          UserRow actor,
                                          String inboundAdapter,
                                          String remainder) {
-        String codeText = remainder.trim().split("\\s+", 2)[0];
+        // Confirm-gate fork (M1-051). identifier "invite:revoke" is the
+        // colon-namespaced takeMatching key; the router's step 4.5
+        // sweep recognizes the "invite revoke" sweepPrefix on the
+        // pending payload (see ConfirmStateService.PendingConfirm).
+        String trimmed = remainder.trim();
+        if (trimmed.equals("confirm") || trimmed.endsWith(" confirm")) {
+            Optional<ConfirmStateService.PendingConfirm> taken =
+                    confirmStateService.takeMatching(actor.id, scope, "invite:revoke");
+            if (taken.isEmpty()) {
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONFIRM_NO_PENDING));
+            }
+            ConfirmStateService.PendingConfirm.InviteRevoke pending =
+                    (ConfirmStateService.PendingConfirm.InviteRevoke) taken.get();
+            return executeRevoke(scope, actor, inboundAdapter, pending.code());
+        }
+
+        String codeText = trimmed.split("\\s+", 2)[0];
         UUID code;
         try {
             code = UUID.fromString(codeText);
@@ -442,6 +519,44 @@ public class InviteCommandHandler implements CommandHandler {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_REVOKE_NOT_PENDING));
         }
 
+        // First-call path — validation passes only the UUID-parse here.
+        // The PENDING-row existence check lives inside the transaction
+        // (the FOR UPDATE lock in executeRevoke), so a /invite revoke
+        // against a non-PENDING code STILL stores pending and prompts;
+        // the user's confirm will then surface error.invite.revoke_not_pending.
+        // This is acceptable UX — the spec doesn't require pre-flight
+        // existence-checking, and the lock is the canonical race guard.
+        //
+        // Audit-on-intent (spec §Authorization model step 8): write
+        // ONE INVITE_REVOKE_INTENT row referencing the parsed code
+        // BEFORE remember() / prompt. The completion row (action=
+        // INVITE_REVOKE) writes on the confirm leg inside the FOR
+        // UPDATE transaction. Together they record both "the admin
+        // attempted to revoke this code" and "the row actually
+        // transitioned PENDING→REVOKED" — an admin who probes a code
+        // prefix without confirming still leaves the intent row.
+        String intentRequestId = UUID.randomUUID().toString();
+        try (Connection conn = dataSource.getConnection()) {
+            insertAudit(conn, AuditAction.INVITE_REVOKE_INTENT, code.toString(),
+                    null, actor, inboundAdapter, intentRequestId,
+                    inviteRevokeIntentDetailsJson());
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to write INVITE_REVOKE_INTENT audit row", e);
+        }
+        confirmStateService.remember(actor.id, scope,
+                new ConfirmStateService.PendingConfirm.InviteRevoke(code));
+        String prompt = MessageFormat.format(
+                bundleLoader.get(BundleKeys.REPLY_CONFIRM_PROMPT_INVITE_REVOKE),
+                Long.toString(confirmStateService.timeoutSeconds()),
+                code.toString().substring(0, 8));
+        return reply(scope, prompt);
+    }
+
+    private OutboundMessage executeRevoke(ScopeRef scope,
+                                          UserRow actor,
+                                          String inboundAdapter,
+                                          UUID code) {
+        String codeText = code.toString();
         String requestId = UUID.randomUUID().toString();
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
@@ -472,11 +587,11 @@ public class InviteCommandHandler implements CommandHandler {
             } catch (SQLException e) {
                 conn.rollback();
                 throw new IllegalStateException(
-                        "InviteCommandHandler.handleRevoke failed for code=" + codeText, e);
+                        "InviteCommandHandler.executeRevoke failed for code=" + codeText, e);
             }
         } catch (SQLException e) {
             throw new IllegalStateException(
-                    "InviteCommandHandler.handleRevoke connection failed", e);
+                    "InviteCommandHandler.executeRevoke connection failed", e);
         }
 
         return reply(scope, bundleLoader.get(BundleKeys.REPLY_INVITE_REVOKED));
@@ -567,6 +682,10 @@ public class InviteCommandHandler implements CommandHandler {
 
     private static String contactIdOf(ScopeRef scope) {
         return scope instanceof ScopeRef.Dm dm ? dm.contactId() : null;
+    }
+
+    private static String inviteRevokeIntentDetailsJson() {
+        return "{}";
     }
 
     private static String inviteCreateDetailsJson(String inviteType, String adapter) {

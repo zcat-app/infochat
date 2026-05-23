@@ -123,6 +123,9 @@ public class BanCommandHandler implements CommandHandler {
     @Inject
     AuditLogWriter auditLogWriter;
 
+    @Inject
+    ConfirmStateService confirmStateService;
+
     @Override
     public String name() {
         return "ban";
@@ -135,16 +138,34 @@ public class BanCommandHandler implements CommandHandler {
 
         // Step 1 — admin gate. Resolve actor by (adapter, contact_id);
         // non-admin or absent actor short-circuits to error.admin_only
-        // BEFORE any DB write (acceptance item 2 asserts SELECT count is
-        // unchanged on both `users` and `audit_log` for the non-admin
-        // path).
+        // BEFORE any DB write AND before the confirm-gate fork (a
+        // non-admin sending `/ban confirm` must see error.admin_only,
+        // not error.confirm.no_pending — admin gate has precedence).
         Optional<UserRow> actorOpt = lookupUser(adapter, callerContactId);
         if (actorOpt.isEmpty() || !actorOpt.get().isAdmin) {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
         }
         UserRow actor = actorOpt.get();
 
-        // Step 2 — parse `<contact>` + optional `--reason "..."`.
+        // Confirm-gate fork (M1-051). A body that ends with the literal
+        // ` confirm` token is the second leg of the pending-then-confirm
+        // pair; takeMatching pops the previously-stored pending args
+        // and we proceed to the existing M1-044c transaction with them.
+        // Else we run the first-call pre-flight (parse + self-ban),
+        // store pending args, and return the prompt template.
+        if (rawText.trim().endsWith(" confirm")) {
+            Optional<ConfirmStateService.PendingConfirm> taken =
+                    confirmStateService.takeMatching(actor.id, scope, "ban");
+            if (taken.isEmpty()) {
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONFIRM_NO_PENDING));
+            }
+            ConfirmStateService.PendingConfirm.Ban pendingBan =
+                    (ConfirmStateService.PendingConfirm.Ban) taken.get();
+            return executeBan(scope, actor, adapter,
+                    pendingBan.targetContactId(), pendingBan.reason());
+        }
+
+        // First-call path — parse `<contact>` + optional `--reason "..."`.
         BanArgs args = BanArgs.parse(rawText);
         if (args == null) {
             // No positional contact arg. Fall back to error.admin_only;
@@ -155,13 +176,62 @@ public class BanCommandHandler implements CommandHandler {
         }
         String targetContactId = args.contact;
 
-        // Step 3 — self-ban guard. The (adapter, contact_id) identity is
+        // Self-ban guard. The (adapter, contact_id) identity is
         // sufficient: actor and target are scoped to the same inbound
         // adapter, so a contact_id match implies identity.
         if (callerContactId != null && callerContactId.equals(targetContactId)) {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_BAN_CANNOT_BAN_SELF));
         }
 
+        // Pre-flight validation passed — store pending args and prompt
+        // for confirm. Last-admin protection is NOT pre-flighted here;
+        // the V5 trg_last_admin_protection_update trigger remains the
+        // canonical enforcement inside executeBan's transaction. A
+        // confirm that arrives within the window re-runs the trigger
+        // and surfaces error.ban.last_admin if the state changed
+        // between prompt and confirm.
+        //
+        // Audit-on-intent (spec §Authorization model step 8): write
+        // ONE BAN_INTENT row BEFORE remember() / prompt. The row is
+        // an atomic single-statement INSERT with autoCommit=true; it
+        // is intentionally NOT in a multi-statement transaction
+        // because the prompt path mutates no other state. A failure
+        // here surfaces as SQLException and the prompt is never sent
+        // — preferable to a silent intent that lands no audit trail.
+        // The intent row's target_id is a synthetic UUID when the
+        // target user row doesn't exist yet (pre-ban case): we never
+        // SELECT the target on the prompt leg, so the row's
+        // target_user_id is always a fresh UUID; the
+        // target_contact_id field carries the resolved identity.
+        Optional<UserRow> targetOpt = lookupUser(adapter, targetContactId);
+        UUID targetUserIdForIntent = targetOpt.map(u -> u.id).orElse(UUID.randomUUID());
+        String intentRequestId = UUID.randomUUID().toString();
+        try (Connection conn = dataSource.getConnection()) {
+            insertAudit(conn, AuditAction.BAN_INTENT, "user",
+                    targetUserIdForIntent.toString(), targetContactId, actor,
+                    adapter, intentRequestId, banDetailsJson(args.reason));
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to write BAN_INTENT audit row", e);
+        }
+        confirmStateService.remember(actor.id, scope,
+                new ConfirmStateService.PendingConfirm.Ban(targetContactId, args.reason));
+        String prompt = MessageFormat.format(
+                bundleLoader.get(BundleKeys.REPLY_CONFIRM_PROMPT_BAN),
+                Long.toString(confirmStateService.timeoutSeconds()),
+                ContactIds.redact(targetContactId));
+        return reply(scope, prompt);
+    }
+
+    /**
+     * Run the existing M1-044c audit-before-effect ban transaction with
+     * the {@code targetContactId} + {@code reason} captured from the
+     * pending-confirm payload. The transaction body is byte-for-byte
+     * unchanged from the M1-044c shape — only the call shape (called
+     * from the confirm path, not the first-call path) changed for
+     * M1-051.
+     */
+    private OutboundMessage executeBan(ScopeRef scope, UserRow actor, String adapter,
+                                       String targetContactId, String reason) {
         // Step 1.5 + 4..7 — open the transaction and run the
         // audit-first / mutate-after sequence. Reads of the target row
         // and the pending-invite list happen inside the transaction so
@@ -185,7 +255,7 @@ public class BanCommandHandler implements CommandHandler {
                 // Step 1.5a — pre-write the BAN audit row.
                 insertAudit(conn, AuditAction.BAN, "user", targetUserId.toString(),
                         targetContactId, actor, adapter, requestId,
-                        banDetailsJson(args.reason));
+                        banDetailsJson(reason));
 
                 // Step 1.5b — pre-write one INVITE_REVOKE audit row per
                 // pending CONTACT_BOUND invite, sharing the same
@@ -199,9 +269,9 @@ public class BanCommandHandler implements CommandHandler {
                 // Step 5 (unknown) or step 6 (known) — mutate users.
                 if (targetOpt.isEmpty()) {
                     insertPrebanRow(conn, targetUserId, adapter, targetContactId,
-                            actor.id, args.reason);
+                            actor.id, reason);
                 } else {
-                    updateUserToBanned(conn, targetUserId, actor.id, args.reason);
+                    updateUserToBanned(conn, targetUserId, actor.id, reason);
                 }
 
                 // Step 7 — revoke CONTACT_BOUND pending invites. The row
@@ -226,13 +296,13 @@ public class BanCommandHandler implements CommandHandler {
                 // form outside the audit log." The SQLException cause is
                 // preserved as-is.
                 throw new IllegalStateException(
-                        "BanCommandHandler.handle failed for adapter="
+                        "BanCommandHandler.executeBan failed for adapter="
                                 + adapter + " contact_id="
                                 + ContactIds.redact(targetContactId), e);
             }
         } catch (SQLException e) {
             throw new IllegalStateException(
-                    "BanCommandHandler.handle connection failed for adapter="
+                    "BanCommandHandler.executeBan connection failed for adapter="
                             + adapter + " contact_id="
                             + ContactIds.redact(targetContactId), e);
         }

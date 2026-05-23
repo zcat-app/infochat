@@ -261,6 +261,52 @@ public final class BundleKeys {
     /** {@code /invite revoke} success. */
     public static final String REPLY_INVITE_REVOKED = "reply.invite.revoked";
 
+    // ----- Pre-dispatch confirm gate (M1-051) -----------------------------
+    // Per docs/spec/commands.md §Surface conventions ("Confirmation for
+    // destructive commands") + docs/spec/security.md §What's intentionally
+    // NOT in v1 ("single-step confirm-within-window is enough for v1").
+    // The five keys below back the prompt + cancellation + no-pending-error
+    // replies for the three confirmable command surfaces (/ban,
+    // /invite create --open, /invite revoke). Each prompt template
+    // interpolates the timeout-in-seconds derived from
+    // {@code infochat.confirm.timeout} so the user sees the same window
+    // the service enforces.
+
+    /** {@code /<cmd> confirm} arrived with no matching pending entry (no prior /<cmd> or window expired). */
+    public static final String ERROR_CONFIRM_NO_PENDING = "error.confirm.no_pending";
+
+    /**
+     * Cancellation acknowledgement sent by the router's step 4.5 sweep
+     * when any non-confirm-shape input arrives after a pending confirm
+     * was registered. Token {@code {0}} = the display name of the
+     * cancelled command (e.g. {@code "ban"}).
+     */
+    public static final String REPLY_CONFIRM_CANCELLED = "reply.confirm.cancelled";
+
+    /**
+     * First-call prompt template for {@code /ban}. Tokens:
+     * {@code {0}} = timeout in whole seconds, {@code {1}} = redacted
+     * target contact id (per {@code ContactIds.redact}).
+     */
+    public static final String REPLY_CONFIRM_PROMPT_BAN = "reply.confirm.prompt.ban";
+
+    /**
+     * First-call prompt template for {@code /invite create --open}. Tokens:
+     * {@code {0}} = timeout in whole seconds, {@code {1}} = target adapter
+     * name (validated against the currently-enabled set upstream).
+     */
+    public static final String REPLY_CONFIRM_PROMPT_INVITE_CREATE_OPEN =
+            "reply.confirm.prompt.invite_create_open";
+
+    /**
+     * First-call prompt template for {@code /invite revoke <code>}. Tokens:
+     * {@code {0}} = timeout in whole seconds, {@code {1}} = the
+     * 8-char code prefix (full UUID is not echoed in case the prompt
+     * is read by someone other than the issuing admin).
+     */
+    public static final String REPLY_CONFIRM_PROMPT_INVITE_REVOKE =
+            "reply.confirm.prompt.invite_revoke";
+
     private BundleKeys() {
         throw new AssertionError("BundleKeys is a constant holder and must not be instantiated");
     }

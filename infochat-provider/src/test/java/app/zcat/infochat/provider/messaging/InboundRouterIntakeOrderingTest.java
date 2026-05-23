@@ -9,6 +9,7 @@ import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.command.ConfirmStateService;
 import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.util.TypeLiteral;
 import org.junit.jupiter.api.Test;
@@ -359,6 +360,16 @@ class InboundRouterIntakeOrderingTest {
         router.inviteCodeConsumer = new FakeInviteCodeConsumer(log);
         router.banCheck = new FakeBanCheck(log);
         router.bundleLoader = new FakeBundleLoader(log);
+        // M1-051: step 4.5 confirm-cancel sweep peek call would NPE on
+        // a null @Inject field. The Noop returns Optional.empty() AND
+        // — critically — does NOT log into the CallLog. The per-step
+        // call-order assertions of scenarios (g) and (h)
+        // (groupOnlyDmGateShortCircuitsBeforeDispatch + groupMention
+        // AutoRegistersAndDispatchesNormally) pin precise sequences
+        // that must remain unchanged: an extra "confirmStateService.peek"
+        // log entry would break those assertions, so this Noop is
+        // deliberately log-silent.
+        router.confirmStateService = new NoopConfirmStateService();
         router.maxInboundBodyBytes = 65536;
         return router;
     }
@@ -504,6 +515,32 @@ class InboundRouterIntakeOrderingTest {
 
         static String stubFor(String key) {
             return "bundle:" + key;
+        }
+    }
+
+    /**
+     * Log-silent no-op {@link ConfirmStateService} (M1-051). All
+     * accessor methods return {@code Optional.empty()} / no-op
+     * WITHOUT logging into {@link CallLog} — the existing per-step
+     * call-order assertions in scenarios (g) and (h) pin precise
+     * sequences that an extra log entry would break.
+     */
+    private static final class NoopConfirmStateService extends ConfirmStateService {
+        @Override
+        public Optional<ConfirmStateService.PendingConfirm> peek(java.util.UUID actor, ScopeRef scope) {
+            return Optional.empty();
+        }
+        @Override
+        public Optional<ConfirmStateService.PendingConfirm> takeAny(java.util.UUID actor, ScopeRef scope) {
+            return Optional.empty();
+        }
+        @Override
+        public Optional<ConfirmStateService.PendingConfirm> takeMatching(java.util.UUID actor, ScopeRef scope, String commandName) {
+            return Optional.empty();
+        }
+        @Override
+        public void remember(java.util.UUID actor, ScopeRef scope, ConfirmStateService.PendingConfirm pending) {
+            // no-op
         }
     }
 

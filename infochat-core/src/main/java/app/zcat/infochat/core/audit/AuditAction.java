@@ -19,6 +19,16 @@ package app.zcat.infochat.core.audit;
  *       per-(adapter, contact_id) brute-force breach audit row.</li>
  *   <li>V13 (this ticket) adds {@link #LLM_OUTPUT_SANITIZED} for
  *       the per-occurrence sanitizer hit audit row.</li>
+ *   <li>M1-051 adds {@link #BAN_INTENT},
+ *       {@link #INVITE_CREATE_INTENT}, and
+ *       {@link #INVITE_REVOKE_INTENT} for the spec §Authorization
+ *       model step-8 "Audit-log the intent" row written on the
+ *       first-call path of confirm-gated destructive commands.
+ *       The intent row is its own atomic INSERT (separate from the
+ *       BAN / INVITE_CREATE / INVITE_REVOKE completion row written
+ *       by the step-9 execute path), so an admin who probes and
+ *       abandons leaves an audit trail even when no destructive
+ *       mutation lands.</li>
  * </ul>
  *
  * <p>{@link #STARTUP_RELEASE_ON_STAGE2_FAILURE_TRUE} pre-dates this
@@ -41,11 +51,14 @@ public enum AuditAction {
     GRANT_ADMIN,
     REVOKE_ADMIN,
     BAN,
+    BAN_INTENT,
     UNBAN,
     UNBAN_PREBAN_DELETE,
     VOUCH,
     INVITE_CREATE,
+    INVITE_CREATE_INTENT,
     INVITE_REVOKE,
+    INVITE_REVOKE_INTENT,
     INVITE_CONSUME,
     INVITE_BRUTE_FORCE_BREACH,
     PROMOTE_GROUP_ADMIN,

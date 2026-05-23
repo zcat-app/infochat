@@ -10,6 +10,7 @@ import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.command.ConfirmStateService;
 import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.util.TypeLiteral;
 import org.jboss.logmanager.LogContext;
@@ -170,6 +171,11 @@ class InboundRouterContactIdRedactionTest {
         router.inviteCodeConsumer = new NoopInviteCodeConsumer();
         router.banCheck = new NoopBanCheck();
         router.bundleLoader = new NoopBundleLoader();
+        // M1-051: step 4.5 confirm-cancel sweep peek call would NPE on
+        // a null @Inject field. The Noop returns Optional.empty() so
+        // the sweep is a no-op and the dispatch-redaction sites
+        // downstream still fire as before.
+        router.confirmStateService = new NoopConfirmStateService();
         return router;
     }
 
@@ -212,6 +218,32 @@ class InboundRouterContactIdRedactionTest {
         @Override
         public String get(String key) {
             return "noop:" + key;
+        }
+    }
+
+    /**
+     * No-op {@link ConfirmStateService} (M1-051): the redaction tests
+     * exercise the dispatch path (which reaches step 4.5); a Noop
+     * peek returning empty keeps the sweep silent so the dispatch
+     * still proceeds to handleSlash where the log-redaction sites
+     * fire.
+     */
+    private static final class NoopConfirmStateService extends ConfirmStateService {
+        @Override
+        public Optional<ConfirmStateService.PendingConfirm> peek(java.util.UUID actor, ScopeRef scope) {
+            return Optional.empty();
+        }
+        @Override
+        public Optional<ConfirmStateService.PendingConfirm> takeAny(java.util.UUID actor, ScopeRef scope) {
+            return Optional.empty();
+        }
+        @Override
+        public Optional<ConfirmStateService.PendingConfirm> takeMatching(java.util.UUID actor, ScopeRef scope, String commandName) {
+            return Optional.empty();
+        }
+        @Override
+        public void remember(java.util.UUID actor, ScopeRef scope, ConfirmStateService.PendingConfirm pending) {
+            // no-op
         }
     }
 

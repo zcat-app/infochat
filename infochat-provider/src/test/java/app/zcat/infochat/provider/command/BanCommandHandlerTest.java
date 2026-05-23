@@ -8,6 +8,7 @@ import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.messaging.InboundContext;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -16,9 +17,14 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.text.MessageFormat;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -53,6 +59,17 @@ class BanCommandHandlerTest {
     @Inject DataSource dataSource;
     @Inject BundleLoader bundleLoader;
     @Inject InboundContext inboundContext;
+    @Inject ConfirmStateService confirmStateService;
+
+    @AfterEach
+    void restoreClock() {
+        // The timeout scenario swaps the clock via setClock — restore
+        // the production system clock so subsequent tests start with
+        // a non-warped clock. Plain field-set is sufficient (no CDI
+        // round-trip): the bean is @ApplicationScoped and lives
+        // across @Test methods within the same Quarkus boot.
+        confirmStateService.setClock(Clock.systemUTC());
+    }
 
     @BeforeEach
     void cleanup() throws Exception {
@@ -150,19 +167,31 @@ class BanCommandHandlerTest {
     }
 
     // ----- (4) Unknown contact mints a preban row --------------------------
+    // M1-051 augmentation: drives prompt-then-confirm. The M1-044c
+    // end-state assertions on `users` survive verbatim; the new
+    // intermediate-state assertion (no users row after the prompt)
+    // proves the first call wrote no DB state.
 
     @Test
     void banUnknownContactMintsPreban() throws Exception {
         String actor = PREFIX + "preban-actor";
         String unknown = PREFIX + "preban-unknown";
         seedUser(actor, /* isAdmin */ true, false, "vouched");
+        long usersBefore = countUsersUnderPrefix();
 
-        OutboundMessage reply = handler.handle(
+        OutboundMessage promptReply = handler.handle(
                 new ScopeRef.Dm(actor),
                 "/ban " + unknown + " --reason \"spam\"");
+        assertEquals(expectedBanPrompt(unknown), promptReply.text(),
+                "first /ban call must return the confirm prompt");
+        assertEquals(usersBefore, countUsersUnderPrefix(),
+                "first /ban must not write the preban users row (only the confirm executes the transaction)");
 
-        assertEquals(redactedSuccess(unknown), reply.text(),
-                "/ban success reply must interpolate the redacted target contact id");
+        OutboundMessage confirmReply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/ban confirm");
+        assertEquals(redactedSuccess(unknown), confirmReply.text(),
+                "/ban confirm success reply must interpolate the redacted target contact id");
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
@@ -186,6 +215,7 @@ class BanCommandHandlerTest {
     }
 
     // ----- (5) Known user: UPDATE flips is_banned --------------------------
+    // M1-051 augmentation: drives prompt-then-confirm.
 
     @Test
     void banKnownUserSetsIsBannedTrue() throws Exception {
@@ -194,9 +224,17 @@ class BanCommandHandlerTest {
         seedUser(actor, /* isAdmin */ true, false, "vouched");
         seedUser(target, false, /* isBanned */ false, "invited");
 
-        OutboundMessage reply = handler.handle(
+        OutboundMessage promptReply = handler.handle(
                 new ScopeRef.Dm(actor),
                 "/ban " + target + " --reason policy");
+        assertEquals(expectedBanPrompt(target), promptReply.text(),
+                "first /ban call must return the confirm prompt");
+        assertFalse(isBanned(target),
+                "first /ban must not flip is_banned (only confirm executes the UPDATE)");
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/ban confirm");
 
         assertEquals(redactedSuccess(target), reply.text());
 
@@ -225,6 +263,7 @@ class BanCommandHandlerTest {
     }
 
     // ----- (6) Same transaction revokes pending CONTACT_BOUND invites ------
+    // M1-051 augmentation: drives prompt-then-confirm.
 
     @Test
     void banWithPendingContactBoundInviteRevokesItInSameTransaction() throws Exception {
@@ -243,9 +282,17 @@ class BanCommandHandlerTest {
         UUID openCode = UUID.randomUUID();
         seedInvite(openCode, "OPEN_ADAPTER", ADAPTER, null, actorId, "PENDING");
 
-        OutboundMessage reply = handler.handle(
+        OutboundMessage promptReply = handler.handle(
                 new ScopeRef.Dm(actor),
                 "/ban " + target);
+        assertEquals(expectedBanPrompt(target), promptReply.text(),
+                "first /ban call must return the confirm prompt");
+        assertEquals("PENDING", inviteStatus(code),
+                "first /ban must NOT revoke the contact-bound invite (only confirm does)");
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/ban confirm");
         assertEquals(redactedSuccess(target), reply.text());
 
         // users row: is_banned=TRUE.
@@ -259,6 +306,11 @@ class BanCommandHandlerTest {
     }
 
     // ----- (7) BAN + INVITE_REVOKE audit rows share request_id -------------
+    // M1-051 augmentation: drives prompt-then-confirm. The first call
+    // writes ONE BAN_INTENT audit row (spec §Authorization step 8);
+    // the confirm writes the BAN + INVITE_REVOKE pair under one
+    // request_id (the M1-044c invariant — preserved on the confirm
+    // leg even with audit-on-intent added to the first-call leg).
 
     @Test
     void banAndInviteRevokeAuditRowsShareRequestId() throws Exception {
@@ -267,8 +319,15 @@ class BanCommandHandlerTest {
         UUID actorId = seedUser(actor, /* isAdmin */ true, false, "vouched");
         seedUser(target, false, false, "invited");
         seedInvite(UUID.randomUUID(), "CONTACT_BOUND", ADAPTER, target, actorId, "PENDING");
+        long auditBefore = countAuditUnderTargetPrefix(PREFIX + "corrId-");
 
         handler.handle(new ScopeRef.Dm(actor), "/ban " + target);
+        assertEquals(auditBefore + 1, countAuditUnderTargetPrefix(PREFIX + "corrId-"),
+                "first /ban writes exactly ONE audit row (the BAN_INTENT step-8 row)");
+        assertEquals(1, countAuditByActionAndTarget("BAN_INTENT", target),
+                "first /ban writes a BAN_INTENT audit row");
+
+        handler.handle(new ScopeRef.Dm(actor), "/ban confirm");
 
         Set<String> requestIds = new HashSet<>();
         Set<String> actions = new HashSet<>();
@@ -332,24 +391,179 @@ class BanCommandHandlerTest {
             boolean targetBannedBefore = isBanned(target);
             long auditBefore = countAuditUnderTargetPrefix(PREFIX + "lastAdmin-");
 
-            OutboundMessage reply = handler.handle(
+            // First call — prompt. Last-admin protection is not
+            // pre-flighted on the first-call path; the trigger fires
+            // only inside executeBan on the confirm path.
+            OutboundMessage promptReply = handler.handle(
                     new ScopeRef.Dm(actor),
                     "/ban " + target);
+            assertEquals(expectedBanPrompt(target), promptReply.text(),
+                    "first /ban call must return the confirm prompt even when the "
+                            + "subsequent transaction will hit the last-admin trigger");
+
+            // Confirm call — executes the transaction, trigger fires,
+            // rollback. error.ban.last_admin surfaces on this call.
+            OutboundMessage reply = handler.handle(
+                    new ScopeRef.Dm(actor),
+                    "/ban confirm");
 
             assertEquals(bundleLoader.get(BundleKeys.ERROR_BAN_LAST_ADMIN), reply.text(),
-                    "/ban of the only remaining is_admin=TRUE/is_banned=FALSE row must "
-                            + "surface error.ban.last_admin");
-            // The transaction rolled back — target's is_banned is unchanged AND
-            // the pre-written audit row went with the rollback (no new audit
-            // row for this target).
+                    "/ban confirm against the only remaining "
+                            + "is_admin=TRUE/is_banned=FALSE row must surface error.ban.last_admin");
+            // The confirm-leg transaction rolled back — target's is_banned is
+            // unchanged AND the BAN (completion) audit row written inside the
+            // transaction went with the rollback. The BAN_INTENT row from the
+            // first-call path is its OWN auto-committed INSERT (audit-on-
+            // intent, spec §Authorization step 8) and persists; the
+            // post-state therefore has exactly one BAN_INTENT row and zero
+            // BAN rows for the target.
             assertEquals(targetBannedBefore, isBanned(target),
                     "target row must be unchanged after the trigger-driven rollback");
-            assertEquals(auditBefore, countAuditUnderTargetPrefix(PREFIX + "lastAdmin-"),
-                    "pre-written audit row must roll back with the failed mutation "
+            assertEquals(0L, countAuditByActionAndTarget("BAN", target),
+                    "the BAN (completion) audit row pre-written inside the "
+                            + "transaction must roll back with the failed mutation "
                             + "(audit-vs-state divergence is forbidden by Invariant 7)");
+            // BAN_INTENT is an out-of-transaction audit-on-intent row;
+            // it persists regardless of the confirm-leg rollback. This
+            // is the deliberate redteam-finding remediation: a
+            // probe-and-abandon attempt leaves an audit trail even
+            // when no state mutation lands.
+            assertEquals(1L, countAuditByActionAndTarget("BAN_INTENT", target),
+                    "the BAN_INTENT row from the first-call path must persist "
+                            + "after the confirm-leg rollback");
+            assertEquals(auditBefore + 1,
+                    countAuditUnderTargetPrefix(PREFIX + "lastAdmin-"),
+                    "post-state has exactly one new audit row (the BAN_INTENT) "
+                            + "for this target");
         } finally {
             setGuardianAdmin(true);
         }
+    }
+
+    // ----- M1-051 first-call / confirm / no-pending / timeout -----------
+
+    @Test
+    void banFirstCallReturnsPromptAndWritesIntentAuditRowOnly() throws Exception {
+        String actor = PREFIX + "firstCall-actor";
+        String target = PREFIX + "firstCall-target";
+        UUID actorId = seedUser(actor, /* isAdmin */ true, false, "vouched");
+        seedUser(target, false, false, "invited");
+        long usersBefore = countUsersUnderPrefix();
+        long auditBefore = countAuditUnderTargetPrefix(PREFIX + "firstCall-");
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/ban " + target + " --reason foo");
+
+        assertEquals(expectedBanPrompt(target), reply.text(),
+                "first /ban call must return the confirm prompt");
+        assertEquals(usersBefore, countUsersUnderPrefix(),
+                "first /ban must not touch users (no preban INSERT, no UPDATE)");
+
+        // Spec §Authorization model step 8: audit-on-intent. The
+        // first-call path passes the admin gate (step 7) and writes
+        // exactly ONE BAN_INTENT audit row before remember()/prompt.
+        // The completion BAN row writes on the confirm leg (step 9
+        // execute); no BAN row may appear here.
+        assertEquals(auditBefore + 1,
+                countAuditUnderTargetPrefix(PREFIX + "firstCall-"),
+                "first /ban must write exactly ONE audit row (the BAN_INTENT row)");
+        assertEquals(1, countAuditByActionAndTarget("BAN_INTENT", target),
+                "the single audit row must have action=BAN_INTENT");
+        assertEquals(0, countAuditByActionAndTarget("BAN", target),
+                "first /ban must NOT write a BAN (completion) audit row");
+
+        Optional<ConfirmStateService.PendingConfirm> peeked =
+                confirmStateService.peek(actorId, new ScopeRef.Dm(actor));
+        assertTrue(peeked.isPresent(),
+                "ConfirmStateService.peek must show a pending entry under (actor.id, scope, \"ban\")");
+        assertEquals("ban", peeked.get().commandName(),
+                "pending entry's commandName must be \"ban\"");
+    }
+
+    @Test
+    void banConfirmWithinWindowExecutesBanTransaction() throws Exception {
+        // The end-state assertions duplicate banKnownUserSetsIsBannedTrue's
+        // post-confirm checks; this new scenario exists to pin
+        // "prompt-then-confirm" as a directly named acceptance item AND
+        // to assert pending state is cleared after the confirm.
+        String actor = PREFIX + "withinWin-actor";
+        String target = PREFIX + "withinWin-target";
+        UUID actorId = seedUser(actor, /* isAdmin */ true, false, "vouched");
+        seedUser(target, false, false, "invited");
+
+        handler.handle(new ScopeRef.Dm(actor), "/ban " + target);
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/ban confirm");
+        assertEquals(redactedSuccess(target), reply.text(),
+                "/ban confirm within the window must surface the M1-044c ban-success reply");
+        assertTrue(isBanned(target),
+                "/ban confirm within the window must execute the UPDATE (is_banned=TRUE)");
+        Optional<ConfirmStateService.PendingConfirm> peeked =
+                confirmStateService.peek(actorId, new ScopeRef.Dm(actor));
+        assertFalse(peeked.isPresent(),
+                "ConfirmStateService.peek must be empty after the confirm executes (entry cleared)");
+    }
+
+    @Test
+    void banConfirmWithoutPendingReturnsNoPending() throws Exception {
+        String actor = PREFIX + "noPending-actor";
+        seedUser(actor, /* isAdmin */ true, false, "vouched");
+        long usersBefore = countUsersUnderPrefix();
+        long auditBefore = countAuditUnderTargetPrefix(PREFIX + "noPending-");
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/ban confirm");
+
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_CONFIRM_NO_PENDING), reply.text(),
+                "/ban confirm with no prior /ban must surface error.confirm.no_pending");
+        assertEquals(usersBefore, countUsersUnderPrefix(),
+                "/ban confirm without pending must not touch users");
+        assertEquals(auditBefore, countAuditUnderTargetPrefix(PREFIX + "noPending-"),
+                "/ban confirm without pending must not write any audit row");
+    }
+
+    @Test
+    void banConfirmAfterTimeoutReturnsNoPending() throws Exception {
+        String actor = PREFIX + "timeout-actor";
+        String target = PREFIX + "timeout-target";
+        seedUser(actor, /* isAdmin */ true, false, "vouched");
+        seedUser(target, false, false, "invited");
+
+        // Pin "now" at a controllable instant so the post-prompt
+        // advance is deterministic. The remember stores deadline =
+        // T0 + 60s; the confirm advances clock to T0 + 61s.
+        Instant t0 = Instant.parse("2026-05-23T12:00:00Z");
+        confirmStateService.setClock(Clock.fixed(t0, ZoneOffset.UTC));
+
+        // First call — prompt + remember at T0.
+        OutboundMessage promptReply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/ban " + target);
+        assertEquals(expectedBanPrompt(target), promptReply.text(),
+                "first /ban call must return the confirm prompt");
+
+        // Advance fake clock past the deadline (deadline = T0 + 60s).
+        confirmStateService.setClock(
+                Clock.fixed(t0.plus(Duration.ofSeconds(61)), ZoneOffset.UTC));
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/ban confirm");
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_CONFIRM_NO_PENDING), reply.text(),
+                "/ban confirm after the timeout must surface error.confirm.no_pending");
+        assertFalse(isBanned(target),
+                "/ban confirm after the timeout must not execute the UPDATE");
+    }
+
+    private String expectedBanPrompt(String target) {
+        return MessageFormat.format(
+                bundleLoader.get(BundleKeys.REPLY_CONFIRM_PROMPT_BAN),
+                Long.toString(confirmStateService.timeoutSeconds()),
+                ContactIds.redact(target));
     }
 
     private void setGuardianAdmin(boolean isAdmin) throws Exception {
@@ -469,6 +683,19 @@ class BanCommandHandlerTest {
              PreparedStatement ps = conn.prepareStatement(
                      "SELECT count(*) FROM audit_log WHERE target_contact_id LIKE ?")) {
             ps.setString(1, subPrefix + "%");
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getLong(1);
+            }
+        }
+    }
+
+    private long countAuditByActionAndTarget(String action, String targetContactId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT count(*) FROM audit_log WHERE action = ? AND target_contact_id = ?")) {
+            ps.setString(1, action);
+            ps.setString(2, targetContactId);
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return rs.getLong(1);

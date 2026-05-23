@@ -8,6 +8,7 @@ import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.command.ConfirmStateService;
 import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.util.TypeLiteral;
 import org.junit.jupiter.api.BeforeEach;
@@ -387,6 +388,12 @@ class InboundRouterNormalizeTest {
         router.inviteCodeConsumer = new NoopInviteCodeConsumer();
         router.banCheck = new NoopBanCheck();
         router.bundleLoader = new NoopBundleLoader();
+        // M1-051: step 4.5 confirm-cancel sweep peek call would NPE on
+        // a null @Inject field. A Noop returning Optional.empty() keeps
+        // the at-cap chat-mode path producing exactly its existing
+        // outbound (no extra cancellation reply leaks into the test's
+        // captured outbound queue).
+        router.confirmStateService = new NoopConfirmStateService();
         // dataSource intentionally left null — lookupUser is overridden
         // above so the DataSource field is never accessed.
         return router;
@@ -422,6 +429,32 @@ class InboundRouterNormalizeTest {
         @Override
         public String get(String key) {
             return "noop:" + key;
+        }
+    }
+
+    /**
+     * No-op {@link ConfirmStateService} — always reports no pending
+     * confirm state. The at-cap test does not exercise the step 4.5
+     * branch behavior, but step 4.5's peek call still fires; this
+     * fake keeps the call safe (no NPE on a null @Inject field) and
+     * cheap (no clock / map work).
+     */
+    private static final class NoopConfirmStateService extends ConfirmStateService {
+        @Override
+        public Optional<ConfirmStateService.PendingConfirm> peek(java.util.UUID actor, ScopeRef scope) {
+            return Optional.empty();
+        }
+        @Override
+        public Optional<ConfirmStateService.PendingConfirm> takeAny(java.util.UUID actor, ScopeRef scope) {
+            return Optional.empty();
+        }
+        @Override
+        public Optional<ConfirmStateService.PendingConfirm> takeMatching(java.util.UUID actor, ScopeRef scope, String commandName) {
+            return Optional.empty();
+        }
+        @Override
+        public void remember(java.util.UUID actor, ScopeRef scope, ConfirmStateService.PendingConfirm pending) {
+            // no-op
         }
     }
 }

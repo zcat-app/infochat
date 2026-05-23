@@ -7,6 +7,7 @@ import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.messaging.InboundContext;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -14,7 +15,10 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.text.MessageFormat;
+import java.time.Clock;
 import java.time.OffsetDateTime;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -44,6 +48,15 @@ class InviteCommandHandlerTest {
     @Inject DataSource dataSource;
     @Inject BundleLoader bundleLoader;
     @Inject InboundContext inboundContext;
+    @Inject ConfirmStateService confirmStateService;
+
+    @AfterEach
+    void restoreClock() {
+        // Restore production clock between tests in case a scenario
+        // swapped it via setClock — keeps subsequent scenarios from
+        // inheriting a warped clock.
+        confirmStateService.setClock(Clock.systemUTC());
+    }
 
     @BeforeEach
     void cleanup() throws Exception {
@@ -177,21 +190,34 @@ class InviteCommandHandlerTest {
     }
 
     // ----- (26) CONTACT_BOUND happy path ----------------------------------
+    // M1-051 augmentation: assert no pending state appears on
+    // ConfirmStateService.peek — --contact is excluded from the
+    // confirm gate per spec §Admin line 881 ("No confirmation required
+    // (risk is bounded to one specific identity)").
 
     @Test
-    void inviteCreateContactBoundHappyPath() throws Exception {
+    void inviteCreateContactBoundHappyPathDoesNotInvokeConfirmGate() throws Exception {
         String actor = PREFIX + "cbHappy-actor";
         String target = PREFIX + "cbHappy-target";
-        seedUser(actor, true);
+        UUID actorId = seedUser(actor, true);
 
         OutboundMessage reply = handler.handle(
                 new ScopeRef.Dm(actor),
                 "/invite create --adapter " + ADAPTER + " --contact " + target);
 
-        // Reply contains the new code's UUID literal (length 36).
+        // Reply contains the new code's UUID literal (length 36) —
+        // the FIRST call executed the M1-044c INSERT directly, NOT a
+        // confirm prompt.
         String body = reply.text();
         UUID code = extractUuid(body);
         assertNotNull(code, "reply must contain the new code's UUID: " + body);
+
+        // No pending confirm state was stored — --contact bypasses the gate.
+        Optional<ConfirmStateService.PendingConfirm> peeked =
+                confirmStateService.peek(actorId, new ScopeRef.Dm(actor));
+        assertFalse(peeked.isPresent(),
+                "ConfirmStateService.peek must be empty after /invite create --contact "
+                        + "(--contact is not in the confirmable-command catalogue)");
 
         // invite_code row exists with the expected shape.
         try (Connection conn = dataSource.getConnection();
@@ -213,18 +239,32 @@ class InviteCommandHandlerTest {
     }
 
     // ----- (27) OPEN happy path -------------------------------------------
+    // M1-051 augmentation: drives prompt-then-confirm. The M1-044c
+    // post-create assertions on the invite_code row + INVITE_CREATE
+    // audit row survive verbatim; the new intermediate-state assertion
+    // (no invite_code row after the prompt) proves the first call
+    // wrote no DB state.
 
     @Test
     void inviteCreateOpenHappyPath() throws Exception {
         String actor = PREFIX + "openHappy-actor";
-        seedUser(actor, true);
+        UUID actorId = seedUser(actor, true);
+        long invitesBefore = countInvitesByCreator(actorId);
+
+        OutboundMessage promptReply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/invite create --adapter " + ADAPTER + " --open");
+        assertEquals(expectedOpenPrompt(ADAPTER), promptReply.text(),
+                "first /invite create --open call must return the confirm prompt");
+        assertEquals(invitesBefore, countInvitesByCreator(actorId),
+                "first /invite create --open must not write an invite_code row");
 
         OutboundMessage reply = handler.handle(
                 new ScopeRef.Dm(actor),
-                "/invite create --adapter " + ADAPTER + " --open");
+                "/invite create --open confirm");
 
         UUID code = extractUuid(reply.text());
-        assertNotNull(code, "reply must contain the new code's UUID");
+        assertNotNull(code, "confirm reply must contain the new code's UUID");
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
@@ -271,6 +311,10 @@ class InviteCommandHandlerTest {
     }
 
     // ----- (29) Open cap met → open_cap_met -------------------------------
+    // M1-051 augmentation: the cap check fires inside createOpen,
+    // which now runs on the CONFIRM path. The first call returns the
+    // prompt unconditionally (cap not pre-flighted); the confirm call
+    // surfaces ERROR_INVITE_OPEN_CAP_MET.
 
     @Test
     void inviteCreateWhenOpenCapMetReturnsOpenCapMet() throws Exception {
@@ -284,9 +328,16 @@ class InviteCommandHandlerTest {
             seedInvitePending("OPEN_ADAPTER", null, guardianId);
         }
 
-        OutboundMessage reply = handler.handle(
+        OutboundMessage promptReply = handler.handle(
                 new ScopeRef.Dm(actor),
                 "/invite create --adapter " + ADAPTER + " --open");
+        assertEquals(expectedOpenPrompt(ADAPTER), promptReply.text(),
+                "first /invite create --open call must return the confirm prompt even when "
+                        + "the cap will trip on confirm");
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/invite create --open confirm");
 
         assertEquals(bundleLoader.get(BundleKeys.ERROR_INVITE_OPEN_CAP_MET), reply.text());
         assertEquals(0L, countInvitesByCreator(actorId),
@@ -336,6 +387,7 @@ class InviteCommandHandlerTest {
     }
 
     // ----- (31) /invite revoke happy path ---------------------------------
+    // M1-051 augmentation: drives prompt-then-confirm.
 
     @Test
     void inviteRevokeHappyPathTransitionsRowToRevoked() throws Exception {
@@ -344,9 +396,15 @@ class InviteCommandHandlerTest {
         UUID code = UUID.randomUUID();
         seedInvitePending("CONTACT_BOUND", PREFIX + "revoke-target", actorId, code);
 
-        OutboundMessage reply = handler.handle(
+        OutboundMessage promptReply = handler.handle(
                 new ScopeRef.Dm(actor),
                 "/invite revoke " + code);
+        assertEquals(expectedRevokePrompt(code), promptReply.text(),
+                "first /invite revoke call must return the confirm prompt");
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/invite revoke confirm");
 
         assertEquals(bundleLoader.get(BundleKeys.REPLY_INVITE_REVOKED), reply.text());
         // invite_code row transitioned to REVOKED.
@@ -365,6 +423,10 @@ class InviteCommandHandlerTest {
     }
 
     // ----- (32) /invite revoke on already-revoked → not_pending -----------
+    // M1-051 augmentation: the not-PENDING check fires inside
+    // executeRevoke (the FOR UPDATE row lock returns no row); the
+    // first call still stores pending + returns the prompt, the
+    // confirm call surfaces ERROR_INVITE_REVOKE_NOT_PENDING.
 
     @Test
     void inviteRevokeOnAlreadyRevokedReturnsNotPending() throws Exception {
@@ -375,14 +437,154 @@ class InviteCommandHandlerTest {
 
         long auditBefore = countAuditRowsForCodeInviteRow("INVITE_REVOKE", code);
 
-        OutboundMessage reply = handler.handle(
+        OutboundMessage promptReply = handler.handle(
                 new ScopeRef.Dm(actor),
                 "/invite revoke " + code);
+        assertEquals(expectedRevokePrompt(code), promptReply.text(),
+                "first /invite revoke call must return the confirm prompt even when "
+                        + "the row is already REVOKED (check fires on confirm)");
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/invite revoke confirm");
 
         assertEquals(bundleLoader.get(BundleKeys.ERROR_INVITE_REVOKE_NOT_PENDING), reply.text());
         // No new audit row written (transaction rolled back).
         assertEquals(auditBefore, countAuditRowsForCodeInviteRow("INVITE_REVOKE", code),
                 "no audit row may be written when /invite revoke targets an already-REVOKED row");
+    }
+
+    // ----- M1-051 first-call prompt + confirm scenarios -------------------
+
+    @Test
+    void inviteCreateOpenFirstCallReturnsPromptAndWritesIntentAuditRowOnly() throws Exception {
+        String actor = PREFIX + "openFirst-actor";
+        UUID actorId = seedUser(actor, true);
+        long invitesBefore = countInvitesByCreator(actorId);
+        long intentBefore = countAuditByActorAndAction(actorId, "INVITE_CREATE_INTENT");
+        long completionBefore = countAuditByActorAndAction(actorId, "INVITE_CREATE");
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/invite create --adapter " + ADAPTER + " --open");
+
+        assertEquals(expectedOpenPrompt(ADAPTER), reply.text(),
+                "first /invite create --open call must return the confirm prompt");
+        assertEquals(invitesBefore, countInvitesByCreator(actorId),
+                "first /invite create --open must not write an invite_code row");
+
+        // Spec §Authorization model step 8: audit-on-intent. The
+        // first-call writes exactly ONE INVITE_CREATE_INTENT audit
+        // row BEFORE remember()/prompt; no INVITE_CREATE (completion)
+        // row may appear here — that fires on confirm.
+        assertEquals(intentBefore + 1,
+                countAuditByActorAndAction(actorId, "INVITE_CREATE_INTENT"),
+                "first /invite create --open writes exactly ONE INVITE_CREATE_INTENT row");
+        assertEquals(completionBefore,
+                countAuditByActorAndAction(actorId, "INVITE_CREATE"),
+                "first /invite create --open must NOT write an INVITE_CREATE (completion) row");
+
+        Optional<ConfirmStateService.PendingConfirm> peeked =
+                confirmStateService.peek(actorId, new ScopeRef.Dm(actor));
+        assertTrue(peeked.isPresent(),
+                "ConfirmStateService.peek must show pending under (actor.id, scope)");
+        assertEquals("invite:create:open", peeked.get().commandName(),
+                "pending commandName must be \"invite:create:open\"");
+    }
+
+    @Test
+    void inviteCreateOpenConfirmWithinWindowExecutesCreateTransaction() throws Exception {
+        // End-state assertions duplicate inviteCreateOpenHappyPath's
+        // post-confirm checks; this scenario exists to pin the
+        // confirm-within-window contract as a directly named acceptance
+        // item AND assert pending state is cleared after confirm.
+        String actor = PREFIX + "openConfirm-actor";
+        UUID actorId = seedUser(actor, true);
+
+        handler.handle(new ScopeRef.Dm(actor),
+                "/invite create --adapter " + ADAPTER + " --open");
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/invite create --open confirm");
+
+        UUID code = extractUuid(reply.text());
+        assertNotNull(code, "/invite create --open confirm reply must contain the new code's UUID");
+        assertEquals(1L, countAuditRowsForCode("INVITE_CREATE", code),
+                "/invite create --open confirm must write exactly one INVITE_CREATE audit row");
+        Optional<ConfirmStateService.PendingConfirm> peeked =
+                confirmStateService.peek(actorId, new ScopeRef.Dm(actor));
+        assertFalse(peeked.isPresent(),
+                "ConfirmStateService.peek must be empty after the confirm executes");
+    }
+
+    @Test
+    void inviteRevokeFirstCallThenConfirmExecutesRevokeTransaction() throws Exception {
+        String actor = PREFIX + "revokeConfirm-actor";
+        UUID actorId = seedUser(actor, true);
+        UUID code = UUID.randomUUID();
+        seedInvitePending("CONTACT_BOUND", PREFIX + "revokeConfirm-target", actorId, code);
+
+        // First call — prompt, no invite_code mutation, ONE intent row.
+        OutboundMessage promptReply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/invite revoke " + code);
+        assertEquals(expectedRevokePrompt(code), promptReply.text(),
+                "first /invite revoke call must return the confirm prompt");
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT status FROM invite_code WHERE code = ?")) {
+            ps.setObject(1, code);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next());
+                assertEquals("PENDING", rs.getString("status"),
+                        "first /invite revoke must not flip the row to REVOKED");
+            }
+        }
+        // Spec §Authorization step 8: first-call writes a single
+        // INVITE_REVOKE_INTENT row referencing the parsed code; the
+        // INVITE_REVOKE (completion) row fires on confirm below.
+        assertEquals(1L, countAuditRowsForCode("INVITE_REVOKE_INTENT", code),
+                "first /invite revoke must write exactly one INVITE_REVOKE_INTENT row");
+        assertEquals(0L, countAuditRowsForCodeInviteRow("INVITE_REVOKE", code),
+                "first /invite revoke must NOT write an INVITE_REVOKE (completion) row");
+
+        // Confirm — executes the M1-044c revoke transaction.
+        OutboundMessage confirmReply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/invite revoke confirm");
+        assertEquals(bundleLoader.get(BundleKeys.REPLY_INVITE_REVOKED), confirmReply.text());
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT status FROM invite_code WHERE code = ?")) {
+            ps.setObject(1, code);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next());
+                assertEquals("REVOKED", rs.getString("status"),
+                        "confirm must flip the row to REVOKED");
+            }
+        }
+        assertEquals(1L, countAuditRowsForCodeInviteRow("INVITE_REVOKE", code),
+                "confirm must write exactly one INVITE_REVOKE audit row");
+        // Both the intent (first call) and the completion (confirm)
+        // rows persist — operators see WHO attempted AND that it
+        // executed.
+        assertEquals(1L, countAuditRowsForCode("INVITE_REVOKE_INTENT", code),
+                "the INVITE_REVOKE_INTENT row from the first call must remain after confirm");
+    }
+
+    private String expectedOpenPrompt(String targetAdapter) {
+        return MessageFormat.format(
+                bundleLoader.get(BundleKeys.REPLY_CONFIRM_PROMPT_INVITE_CREATE_OPEN),
+                Long.toString(confirmStateService.timeoutSeconds()),
+                targetAdapter);
+    }
+
+    private String expectedRevokePrompt(UUID code) {
+        return MessageFormat.format(
+                bundleLoader.get(BundleKeys.REPLY_CONFIRM_PROMPT_INVITE_REVOKE),
+                Long.toString(confirmStateService.timeoutSeconds()),
+                code.toString().substring(0, 8));
     }
 
     // ----- helpers ---------------------------------------------------------
@@ -476,6 +678,19 @@ class InviteCommandHandlerTest {
              PreparedStatement ps = conn.prepareStatement(
                      "SELECT count(*) FROM invite_code WHERE created_by = ?")) {
             ps.setObject(1, createdBy);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getLong(1);
+            }
+        }
+    }
+
+    private long countAuditByActorAndAction(UUID actorUserId, String action) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT count(*) FROM audit_log WHERE actor_user_id = ? AND action = ?")) {
+            ps.setObject(1, actorUserId);
+            ps.setString(2, action);
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return rs.getLong(1);
