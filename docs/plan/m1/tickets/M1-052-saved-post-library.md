@@ -9,7 +9,7 @@ deferred_on: M1-056
 deferred_reason: spec-amend
 files_budget: 12
 files_scope:
-  - infochat-core/src/main/resources/db/migration/V14__saved_post.sql
+  - infochat-core/src/main/resources/db/migration/V15__saved_post.sql
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/SaveCommandHandler.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/SavedCommandHandler.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/UnsaveCommandHandler.java
@@ -35,17 +35,17 @@ out_of_scope:
   - any change to the M1-051 ConfirmStateService — none of `/save`, `/saved`, `/unsave` is confirmable per spec; the handlers do NOT integrate with ConfirmStateService and the M1-051 step 4.5 router sweep is unaffected
   - any TranslationProvider interaction — T2-C territory; new bundle entries are English only
   - any change to InboundRouter intake-step splice from M1-044b — handlers register as new CommandHandler beans and the router picks them up via `Instance<CommandHandler>` iteration; no router edit
-  - any change to the V5 `users.save_count` column or its denormalization shape — V5 already declares `save_count INT NOT NULL DEFAULT 0`; this ticket's V14 migration only adds the triggers that maintain it
+  - any change to the V5 `users.save_count` column or its denormalization shape — V5 already declares `save_count INT NOT NULL DEFAULT 0`; this ticket's V15 migration only adds the triggers that maintain it
   - any change to CommandPermissions — `saved` is already in the slow-start ALLOWED set; `save` and `unsave` are intentionally outside it per spec §Slow-start tier (Blocked column)
   - any chat-mode interaction — T2-D territory
   - any per-user save-cap value change — value lives in design notes (`docs/design/02-schema.md` §2.6.1 commits 1000 as the spec-level cap); this ticket consumes the value via a profile-driven config property
 acceptance:
-  - "Flyway migration `infochat-core/src/main/resources/db/migration/V14__saved_post.sql` applies cleanly on a fresh DB. The migration creates the `saved_post` table per `docs/design/02-schema.md` §2.6.1 (PK = `(user_id, post_uid)`; FKs to `users(id)` and `source(id)`; snapshot columns `title`, `body`, `url`, `author`, `published_at`, `snapshot_tags`; personal columns `personal_tags`, `note`; `saved_at` defaulting to `now()`) AND the two `AFTER INSERT|DELETE ... FOR EACH ROW EXECUTE FUNCTION trg_saved_post_count()` triggers that maintain `users.save_count`. **The `saved_post` row carries `user_id` only — there is NO scope discriminator column**, per spec §Invariants 1 carve-out and §Per-user state. The DDL CHECK constraints (if any) MUST NOT introduce a scope_kind / scope_id column. Migration filename **MUST** be the next-free `V<N>__saved_post.sql` integer at the moment of `/m1-tick start` — T2-H.a (M1-055a) also claims `V14` and may have consumed it before this ticket lands; the implementing session re-runs `ls infochat-core/src/main/resources/db/migration/ | sort -V | tail` and renames the file plus all V14 references in test resources / scripts if needed"
-  - "`SaveCommandHandler` is a CDI bean implementing `CommandHandler` with `name() == \"save\"`. It is discovered by `InboundRouter` via the existing `Instance<CommandHandler>` iteration — no router case-edit, no manual registration. Argument shape: positional `<uid>` plus optional `-t personal-tags` (comma-separated). The handler runs inside ONE database transaction that: (1) reads the actor row + `save_count` via `SELECT ... FROM users WHERE id = ? FOR UPDATE` (atomic cap enforcement per spec §Content + design §2.6.1); (2) reads the target post via `SELECT id, title, body, url, author, published_at, source_id, post_uid, status FROM post WHERE post_uid = ? AND status = 'READY'`; (3) on row-not-found OR status != READY, returns `error.save.unknown_uid` (the visibility filter — QUARANTINED and NEEDS_REVIEW posts are indistinguishable from missing UIDs at the user surface, per spec §Content Visibility-of-target rules); (4) on `save_count >= cap` (cap value injected via `@ConfigProperty(name = \"infochat.save.cap\")`), returns `error.save.cap_met` (the friendly cap-exceeded error pointing the user at /unsave); (5) otherwise INSERTs a `saved_post` row snapshotting the post's body+title+url+author+published_at+source_id+bot's current `bootstrap_tags` into `snapshot_tags`, with the caller's `-t` values into `personal_tags`; (6) returns `reply.save.success` interpolated with the UID. The V14 trigger increments `users.save_count` automatically. A duplicate save against the same `(user_id, post_uid)` PK collides per the table's PK constraint — the handler MUST surface `error.save.already_saved` rather than letting the SQLException escape (handler-side check via the SELECT step OR caught at INSERT time; either is acceptable)"
-  - "SaveCommandHandlerTest is plain JUnit per the M1-049 test pyramid (no `@QuarkusTest`); it exercises the handler against a Testcontainers Postgres bootstrapped with V1..V14 migrations (`@TestInstance(Lifecycle.PER_CLASS)` + Flyway-on-startup helper, the M1-044c pattern). Scenarios — each is a separate `@Test` method whose method name reads as the assertion: `saveHappyPathReturnsSuccessAndWritesSnapshotRow`, `saveAgainstQuarantinedPostReturnsUnknownUid`, `saveAgainstNeedsReviewPostReturnsUnknownUid`, `saveAgainstUnknownUidReturnsUnknownUid`, `saveAgainstAlreadySavedPostReturnsAlreadySaved`, `saveAtCapReturnsCapMetAndWritesNoRow`, `saveWithPersonalTagsPopulatesPersonalTagsColumn`, `saveSnapshotsBodyTitleUrlAuthorPublishedAtAndSourceId`"
+  - "Flyway migration `infochat-core/src/main/resources/db/migration/V15__saved_post.sql` applies cleanly on a fresh DB. The migration creates the `saved_post` table per `docs/design/02-schema.md` §2.6.1 (PK = `(user_id, post_uid)`; FKs to `users(id)` and `source(id)`; snapshot columns `title`, `body`, `url`, `author`, `published_at`, `snapshot_tags`; personal columns `personal_tags`, `note`; `saved_at` defaulting to `now()`) AND the two `AFTER INSERT|DELETE ... FOR EACH ROW EXECUTE FUNCTION trg_saved_post_count()` triggers that maintain `users.save_count`. **The `saved_post` row carries `user_id` only — there is NO scope discriminator column**, per spec §Invariants 1 carve-out and §Per-user state. The DDL CHECK constraints (if any) MUST NOT introduce a scope_kind / scope_id column. Migration filename is `V15__saved_post.sql` — T2-H.a (M1-055a) consumed `V14__asset_config.sql` first in its sibling worktree, so this ticket lands on V15. The implementing session re-runs `ls infochat-core/src/main/resources/db/migration/ | sort -V | tail` at `/m1-tick start` to confirm V14 is still the highest applied migration on `main` (M1-055a not yet merged) AND that V15 remains free; if either has shifted further, rebase the filename plus all V15 references in test resources / scripts accordingly"
+  - "`SaveCommandHandler` is a CDI bean implementing `CommandHandler` with `name() == \"save\"`. It is discovered by `InboundRouter` via the existing `Instance<CommandHandler>` iteration — no router case-edit, no manual registration. Argument shape: positional `<uid>` plus optional `-t personal-tags` (comma-separated). The handler runs inside ONE database transaction that: (1) reads the actor row + `save_count` via `SELECT ... FROM users WHERE id = ? FOR UPDATE` (atomic cap enforcement per spec §Content + design §2.6.1); (2) reads the target post via `SELECT id, title, body, url, author, published_at, source_id, post_uid, status FROM post WHERE post_uid = ? AND status = 'READY'`; (3) on row-not-found OR status != READY, returns `error.save.unknown_uid` (the visibility filter — QUARANTINED and NEEDS_REVIEW posts are indistinguishable from missing UIDs at the user surface, per spec §Content Visibility-of-target rules); (4) on `save_count >= cap` (cap value injected via `@ConfigProperty(name = \"infochat.save.cap\")`), returns `error.save.cap_met` (the friendly cap-exceeded error pointing the user at /unsave); (5) otherwise INSERTs a `saved_post` row snapshotting the post's body+title+url+author+published_at+source_id+bot's current `bootstrap_tags` into `snapshot_tags`, with the caller's `-t` values into `personal_tags`; (6) returns `reply.save.success` interpolated with the UID. The V15 trigger increments `users.save_count` automatically. A duplicate save against the same `(user_id, post_uid)` PK collides per the table's PK constraint — the handler MUST surface `error.save.already_saved` rather than letting the SQLException escape (handler-side check via the SELECT step OR caught at INSERT time; either is acceptable)"
+  - "SaveCommandHandlerTest is plain JUnit per the M1-049 test pyramid (no `@QuarkusTest`); it exercises the handler against a Testcontainers Postgres bootstrapped with V1..V15 migrations (`@TestInstance(Lifecycle.PER_CLASS)` + Flyway-on-startup helper, the M1-044c pattern). Scenarios — each is a separate `@Test` method whose method name reads as the assertion: `saveHappyPathReturnsSuccessAndWritesSnapshotRow`, `saveAgainstQuarantinedPostReturnsUnknownUid`, `saveAgainstNeedsReviewPostReturnsUnknownUid`, `saveAgainstUnknownUidReturnsUnknownUid`, `saveAgainstAlreadySavedPostReturnsAlreadySaved`, `saveAtCapReturnsCapMetAndWritesNoRow`, `saveWithPersonalTagsPopulatesPersonalTagsColumn`, `saveSnapshotsBodyTitleUrlAuthorPublishedAtAndSourceId`"
   - "`SavedCommandHandler` is a CDI bean implementing `CommandHandler` with `name() == \"saved\"`. Argument shape: optional positional `[tag]` plus optional `-w <window>` plus optional `--page N`. The handler reads the actor's saves via `SELECT post_uid, title, url, snapshot_tags, personal_tags, saved_at FROM saved_post WHERE user_id = ? [AND <personal_tags filter>] [AND saved_at > ?] ORDER BY saved_at DESC LIMIT <pagesize> OFFSET <(N-1)*pagesize>` — the query carries **no scope filter** (per-user-globally per spec §Content Decision D13). Page size is a fixed constant from `docs/design/03-commands.md` §`/saved` (20). The reply header **MUST** disclose per-user-global semantics — a bundle key e.g. `reply.saved.header.global` whose text mentions saves are visible across DM and groups so a user invoking `/saved` from a group is not surprised by DM-only saves appearing"
   - "SavedCommandHandlerTest scenarios: `savedReturnsEmptyHeaderWhenLibraryEmpty`, `savedReplyHeaderDisclosesGlobalScope`, `savedListsAllRowsRegardlessOfCallingScope` (seed two saves — one whose `saved_at` was originally created from a DM context, one from a group context — and assert both appear from BOTH DM and group invocations; the cross-scope appearance IS the per-user-global semantics), `savedFiltersByPersonalTag`, `savedFiltersByWindow`, `savedPaginatesByPageFlag`"
-  - "`UnsaveCommandHandler` is a CDI bean implementing `CommandHandler` with `name() == \"unsave\"`. Argument shape: positional `<uid>`. The handler issues `DELETE FROM saved_post WHERE user_id = ? AND post_uid = ?` and returns `reply.unsave.success` on `affectedRows == 1` or `error.unsave.unknown_uid` on `affectedRows == 0`. The V14 trigger decrements `users.save_count` automatically. No confirm gate — spec §Content explicitly says `/unsave` has no confirmation"
+  - "`UnsaveCommandHandler` is a CDI bean implementing `CommandHandler` with `name() == \"unsave\"`. Argument shape: positional `<uid>`. The handler issues `DELETE FROM saved_post WHERE user_id = ? AND post_uid = ?` and returns `reply.unsave.success` on `affectedRows == 1` or `error.unsave.unknown_uid` on `affectedRows == 0`. The V15 trigger decrements `users.save_count` automatically. No confirm gate — spec §Content explicitly says `/unsave` has no confirmation"
   - "UnsaveCommandHandlerTest scenarios: `unsaveHappyPathRemovesRowAndDecrementsSaveCount`, `unsaveUnknownUidReturnsUnknownUidAndLeavesSaveCountUnchanged`, `unsaveAfterSaveAtCapAllowsSubsequentSave` (saturate at cap, /unsave one, then a second /save admits — verifies the trigger-driven decrement keeps the cap check correct)"
   - "SaveCapConcurrencyIT is a `@QuarkusTest`-shaped IT against Testcontainers Postgres. Seeds the actor's `users.save_count` to cap-1 (where cap is the test profile's `infochat.save.cap` value), then issues two `/save` calls from two threads simultaneously against two different READY posts. Asserts exactly one save admits (one INSERT succeeds, one returns `error.save.cap_met`) AND `users.save_count == cap` afterwards. The IT exists because the `SELECT ... FOR UPDATE` lock in the handler is the **only** atomic-cap guarantee — a unit test against a single-threaded handler cannot exercise the lock; the IT does. Method name: `concurrentSavesAtCapMinusOneAdmitExactlyOne`"
   - "SavedLibraryIT is a `@QuarkusTest`-shaped IT that drives `/save`, `/saved`, `/unsave` end-to-end via the InMemoryAdapter (mirrors the M1-036 AddSourceIT pattern). One scenario: seed one READY post, deliver `/save <uid>` from the actor in DM, assert one outbound reply matches `reply.save.success`; deliver `/saved` from the same actor in a DIFFERENT scope (group scope simulated by the InMemoryAdapter's group deliver hook), assert the outbound lists the saved row + carries the per-user-global header disclosure; deliver `/unsave <uid>` in DM, assert the row is removed AND `users.save_count == 0`. Method name: `saveListUnsaveRoundtripCrossScopeVisibility`"
@@ -54,7 +54,7 @@ acceptance:
   - "`mvn -B clean verify` from the repo root exits 0. All pre-existing tests still pass — the bundle-completeness assertion catches any missing key; the M1-051 ConfirmStateServiceTest / ConfirmFlowIT remain green because none of `/save`, `/saved`, `/unsave` consumes ConfirmStateService; the M1-049 plain-JUnit handler tests are unaffected; the M1-035 / M1-036 source / summary surfaces are unchanged"
 test_plan:
   adds:
-    - infochat-core/src/main/resources/db/migration/V14__saved_post.sql
+    - infochat-core/src/main/resources/db/migration/V15__saved_post.sql
     - infochat-provider/src/main/java/app/zcat/infochat/provider/command/SaveCommandHandler.java
     - infochat-provider/src/main/java/app/zcat/infochat/provider/command/SavedCommandHandler.java
     - infochat-provider/src/main/java/app/zcat/infochat/provider/command/UnsaveCommandHandler.java
@@ -158,13 +158,15 @@ UID — the handler queries `post WHERE post_uid = ? AND status =
 at the user surface. The flow never lets a user bookmark content
 they cannot see.
 
-The migration claims the next-free `V<N>__saved_post.sql` integer.
-At the moment this ticket was authored, V13 was the last applied
-migration. T2-H.a (M1-055a) also claims `V14__asset_config.sql` on
-a sibling branch and **may consume V14** before this ticket starts
-— the implementing session re-runs `ls infochat-core/src/main/resources/db/migration/ | sort -V`
-at `/m1-tick start` and renames the file plus any V14 string
-references in test resources / scripts if needed.
+The migration is `V15__saved_post.sql`. At the moment this ticket
+was authored, V13 was the last applied migration on `main`; T2-H.a
+(M1-055a) consumed `V14__asset_config.sql` first in its sibling
+worktree, so this ticket lands on V15. The implementing session
+re-runs `ls infochat-core/src/main/resources/db/migration/ | sort -V`
+at `/m1-tick start` to confirm V14 is still the highest applied
+migration on `main` (M1-055a not yet merged) AND that V15 remains
+free; if either has shifted further, rebase the filename plus any
+V15 string references in test resources / scripts accordingly.
 
 `complexity: medium` — three small handlers + one migration + one
 concurrency IT. The atomic-cap IT is the load-bearing test; the
@@ -244,7 +246,7 @@ Highlights:
   UPDATE` on `users.save_count` (the denormalized counter) as the
   atomic mechanism. The handler reads `save_count` inside the
   transaction with the row lock; on cap-met the transaction
-  aborts before any INSERT runs. The V14 triggers maintain the
+  aborts before any INSERT runs. The V15 triggers maintain the
   count under contention.
 - **InboundRouter behavior.** No router edit — `InboundRouter.handleSlash`
   (`InboundRouter.java:559-568`) iterates `Instance<CommandHandler>`
@@ -271,13 +273,13 @@ Highlights:
   `AuditAction` enum in `infochat-core` contains no `SAVE` or
   `UNSAVE` value, and adding one would be a spec amendment. The
   handlers write zero rows to `audit_log`.
-- **T2-H parallel collision.** T2-H.a (asset_config +
-  price_snapshot) also claims the next-free `V<N>` integer.
-  Whichever ticket lands first claims its V<N>; the second
-  rebases its migration filename plus any V<N> string references
-  in tests. No reservation is pre-allocated. T2-B.1 carries the
-  smaller migration surface and the recommended-merge-first
-  position per the T2-B handoff.
+- **T2-H parallel collision (resolved).** T2-H.a (asset_config +
+  price_snapshot) consumed `V14__asset_config.sql` first in its
+  sibling worktree; this ticket lands on `V15__saved_post.sql`.
+  The implementing session re-checks at `/m1-tick start` that V14
+  remains the highest applied migration on `main` (M1-055a
+  unmerged) and V15 is still free; rebase further if either has
+  shifted.
 
 ## Pre-flight self-check (author-side)
 
