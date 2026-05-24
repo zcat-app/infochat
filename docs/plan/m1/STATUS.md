@@ -10,10 +10,10 @@
 
 | Status | Count |
 |---|---|
-| pending | 7 |
+| pending | 6 |
 | in-progress | 0 |
 | in-review | 0 |
-| escalated | 0 |
+| escalated | 1 |
 | done | 62 |
 | deferred | 6 |
 | **total** | **75** |
@@ -25,7 +25,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-052 — Saved-post library — /save + /saved + /unsave + saved_post snapshot (complexity: medium, risk: medium)
-- M1-053 — Source-management admin commands — list / remove / enable / disable (complexity: high, risk: high)
 - M1-054 — Per-scope tag preferences — /follow-tag + /unfollow-tag + tag-mode state machine (complexity: medium, risk: medium)
 - M1-055a — bootstrap-assets.json parser + asset_config table + default-row consistency check + Collector @Startup loader (complexity: high, risk: high)
 
@@ -54,8 +53,7 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
 | ID | Title | Trigger | Date |
 |---|---|---|---|
-
-_(none)_
+| M1-053 | Source-management admin commands — list / remove / enable / disable | ? | 2026-05-24 |
 
 ---
 
@@ -200,7 +198,7 @@ M1-049 (done)
 M1-050 (done)
   └── M1-047 (done) [see above]
 M1-051 (done)
-  ├── M1-053 (pending) ← runnable
+  ├── M1-053 (escalated)
   └── M1-054 (pending) ← runnable
 M1-052 (pending) ← runnable
 M1-055a (pending) ← runnable

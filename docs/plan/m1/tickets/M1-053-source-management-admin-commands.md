@@ -1,9 +1,61 @@
 ---
 id: M1-053
 title: Source-management admin commands — list / remove / enable / disable
-status: pending
+status: escalated
 created: 2026-05-24
 last_updated: 2026-05-24
+clarity_check:
+  date: 2026-05-24
+  verdict: PASS
+  warnings: []
+  blockers: []
+escalations:
+  - date: 2026-05-24
+    reason: outline-fail
+    reviewer_verdict_excerpt: |
+      OUTLINE FAILED — escalation recommended
+
+      REASON: The ticket's out_of_scope clause #3 declares ConfirmStateService.java
+      unchanged and asserts that the handlers only "register two new commandName
+      keys (\"remove-source\", \"source-enable\") via remember / takeMatching calls
+      inside the handlers." Ground-truth verification of
+      infochat-provider/src/main/java/app/zcat/infochat/provider/command/ConfirmStateService.java
+      lines 114–252 shows the remember(UUID, ScopeRef, PendingConfirm) API accepts
+      only the sealed interface PendingConfirm permits PendingConfirm.Ban,
+      PendingConfirm.InviteCreateOpen, PendingConfirm.InviteRevoke typed payload
+      (line 221–224). The commandName() and sweepPrefix() strings are overridden
+      per-variant on each record; the three existing permits return "ban" /
+      "invite:create:open" / "invite:revoke" and carry typed args (target contact
+      id, target adapter, invite UUID) that do not fit a source-id payload. Java
+      sealed types require new implementations to be either listed in the permits
+      clause or nested in the same source file as the sealed declaration; both
+      mechanisms require editing ConfirmStateService.java. There is no Map-based /
+      untyped payload escape. Acceptance items 4 and 6 explicitly require
+      confirmStateService.remember(actor.id, scope, "remove-source", ...) and
+      "source-enable" — these calls cannot compile without new
+      PendingConfirm.RemoveSource and PendingConfirm.SourceEnable permits, which
+      forces an edit to ConfirmStateService.java, which forces a thirteenth file
+      beyond files_budget: 12, and which directly violates out_of_scope clause #3.
+      No implementable outline exists within the ticket's files_scope /
+      files_budget / out_of_scope constraints.
+
+      Secondary blocker: acceptance items 6 and 8 reference consecutive_failure_count
+      = 0 in the UPDATE on source; the actual V6 column is consecutive_failures
+      (infochat-core/src/main/resources/db/migration/V6__sources_tags.sql:49), so
+      the UPDATE statements as written would fail at runtime — a smaller refinement
+      but worth bundling.
+
+      SUGGESTED ESCALATION: refine
+
+      Recommended refinement: amend out_of_scope clause #3 to authorize the
+      additive edit to ConfirmStateService.java's sealed PendingConfirm permits
+      list and add two new record cases (PendingConfirm.RemoveSource(UUID sourceId)
+      and PendingConfirm.SourceEnable(UUID sourceId)); add
+      infochat-provider/src/main/java/app/zcat/infochat/provider/command/ConfirmStateService.java
+      to files_scope and bump files_budget to 13; correct the column name in
+      acceptance items 6 and 8 from consecutive_failure_count to consecutive_failures.
+      After refinement, re-run the plan step to surface any additional API-surface
+      or ground-truth gaps that the round-1 audit did not reach.
 blocked_by:
   - M1-051
 files_budget: 12
