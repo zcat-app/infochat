@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 11 |
+| pending | 10 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 70 |
+| done | 71 |
 | deferred | 6 |
 | **total** | **87** |
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-055b — Asset fetchers (per public-endpoint host) + price_snapshot store + per-host tick cadence + NOTIFY emit (complexity: high, risk: high)
+- M1-055c — /zcash + /monero handlers + reply renderer + AssetCommandFamilyOracle impl swap + /help context-awareness (complexity: high, risk: high)
 - M1-059 — TranslationProvider impl — LlmTranslationProvider + 24h translation cache + router language widening + SummaryCommandHandler pipeline splice (complexity: high, risk: high)
 - M1-061 — chat_session + chat_memory + chat_message + summary_anchor DDL (complexity: medium, risk: medium)
 
@@ -43,8 +43,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-055 — blocked_by: M1-055a (done), M1-055b (pending), M1-055c (pending)
-- M1-055c — blocked_by: M1-055a (done), M1-055b (pending)
+- M1-055 — blocked_by: M1-055a (done), M1-055b (done), M1-055c (pending)
 - M1-062 — blocked_by: M1-061 (pending)
 - M1-063 — blocked_by: M1-062 (pending)
 - M1-064 — blocked_by: M1-063 (pending)
@@ -73,12 +72,12 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-058 | ThrottledAdminNotifier (T2-G infrastructure) + admin_notification_state table | 2026-05-24 | round 1 APPROVE |
 | M1-057 | Unseal PendingConfirm + extract variants | 2026-05-24 | round 1 APPROVE |
 | M1-056 | Amend test-pyramid — restructure §Handler unit tests for two-shape reality | 2026-05-24 | round 1 APPROVE |
+| M1-055b | Asset fetchers (per public-endpoint host) + price_snapshot store + per-host tick cadence + NOTIFY emit | 2026-05-24 | round 1 APPROVE |
 | M1-055a | bootstrap-assets.json parser + asset_config table + default-row consistency check + Collector @Startup loader | 2026-05-24 | round 1 APPROVE |
 | M1-054 | Per-scope tag preferences — /follow-tag + /unfollow-tag + tag-mode state machine | 2026-05-24 | round 2 APPROVE |
 | M1-053 | Source-management admin commands — list / remove / enable / disable | 2026-05-24 | round 1 OVERRIDE-APPROVE |
 | M1-052 | Saved-post library — /save + /saved + /unsave + saved_post snapshot | 2026-05-24 | round 1 APPROVE |
 | M1-046 | /grant-admin + /revoke-admin (per-adapter scope, global last-admin counter) | 2026-05-24 | round 1 APPROVE |
-| M1-045 | Slow-start probation tier + restricted command set (step 5) + /vouch | 2026-05-24 | round 3 APPROVE |
 
 ---
 
@@ -209,16 +208,16 @@ M1-051 (done)
 M1-052 (done)
 M1-055a (done)
   ├── M1-055 (pending)
-  ├── M1-055b (pending) ← runnable
+  ├── M1-055b (done)
   │     ├── M1-055 (pending) [see above]
-  │     └── M1-055c (pending)
+  │     └── M1-055c (pending) ← runnable
   │           └── M1-055 (pending) [see above]
   └── M1-055c (pending) [see above]
 M1-056 (done)
 M1-057 (done)
   └── M1-054 (done) [see above]
 M1-058 (done)
-  └── M1-055b (pending) [see above]
+  └── M1-055b (done) [see above]
 M1-059 (pending) ← runnable
 M1-060 (done)
 M1-061 (pending) ← runnable

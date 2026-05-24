@@ -1,0 +1,349 @@
+package app.zcat.infochat.collector.assets;
+
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import javax.sql.DataSource;
+
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.jboss.logging.Logger;
+import org.jspecify.annotations.NonNull;
+
+import app.zcat.infochat.collector.assets.source.AssetDataSource;
+import app.zcat.infochat.collector.assets.source.AssetDataSource.FetchException;
+import app.zcat.infochat.collector.assets.store.PriceSnapshotStore;
+import app.zcat.infochat.collector.notifier.ThrottledAdminNotifier;
+import io.quarkus.runtime.Startup;
+import io.quarkus.scheduler.Scheduled;
+import jakarta.annotation.Priority;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
+import jakarta.inject.Inject;
+
+/**
+ * Drives the per-host asset-snapshot fetch loop. One {@code @Scheduled}
+ * tick per data-source host (CoinGecko / Kraken / Bitfinex in v1) per
+ * spec §Asset commands — "All {@code kraken} snapshots across every
+ * enabled asset share one tick cadence; same for {@code coingecko}
+ * and {@code bitfinex}". Per-pair scheduling would multiply outbound
+ * traffic by N and break the upstream rate-limit budget.
+ *
+ * <h2>Per-tick flow</h2>
+ * For the host that fired the tick: enumerate enabled {@code asset_config}
+ * rows whose {@code sub_verb = <host>}, look up the matching
+ * {@link AssetDataSource} bean by {@link AssetDataSource#id}, invoke
+ * {@link AssetDataSource#fetchSnapshot} for each pair, and hand each
+ * successful result to {@link PriceSnapshotStore#store}.
+ *
+ * <h2>D42 failure-counter state machine</h2>
+ * Each successful fetch resets {@code asset_config.consecutive_failures}
+ * to 0 and updates {@code last_success_at}. Each {@link FetchException}
+ * increments the counter and updates {@code last_failure_at}. On
+ * threshold breach the row's {@code status} flips
+ * {@code active → failed} (guarded by {@code AND status='active'} so a
+ * second threshold breach against an already-failed row is a no-op)
+ * and exactly ONE throttled admin notification fires via
+ * {@link ThrottledAdminNotifier} (M1-058). Recovery from {@code failed}
+ * is operator-side per docs/design/10-asset-commands.md §10.8b.
+ *
+ * <h2>Profile-driven cadence</h2>
+ * The three {@code infochat.assets.refresh.<host>} keys are profile-
+ * driven per design §10.4 (laptop 60s, vps 90s, pi 300s, remote-llm
+ * 90s). Following the codebase convention enforced at
+ * {@code FetchScheduler.java}:95-100, the {@code @ConfigProperty}
+ * fields carry NO inline {@code defaultValue} — defaults live in
+ * {@code application.properties}. The {@code @ConfigProperty} fields
+ * also satisfy the M1-055b acceptance contract that mandates both
+ * a {@code @Scheduled(every=...)} reference and a backing
+ * {@code @ConfigProperty} declaration per host; Quarkus binds the
+ * Duration value into each field even though the per-tick logic
+ * reads the configured cadence indirectly via the
+ * {@code @Scheduled} expression.
+ *
+ * <h2>Startup ordering</h2>
+ * {@code @Priority(400)} per
+ * {@code docs/design/01-architecture.md} §1.4.3 — same tier as
+ * {@code FetchScheduler}: runs after Flyway (100), BootstrapLoaders
+ * (200), and OutboxRehydrator (300), so the {@code asset_config}
+ * rows the bootstrap loader writes are visible when the first tick
+ * fires.
+ *
+ * <h2>Scope discipline</h2>
+ * Asset snapshots are NOT posts (spec §Asset commands — "Data is not
+ * posts"). The fetcher never delegates to OutboxRehydrator,
+ * NewPostHandler, PostEvalPipeline, or any Stage 1/2 component —
+ * snapshots write directly to {@code price_snapshot} via
+ * {@link PriceSnapshotStore}.
+ */
+@Startup
+@Priority(400)
+@ApplicationScoped
+public class AssetSnapshotFetcher {
+
+    private static final Logger LOG = Logger.getLogger(AssetSnapshotFetcher.class);
+
+    private static final String COINGECKO = "coingecko";
+    private static final String KRAKEN = "kraken";
+    private static final String BITFINEX = "bitfinex";
+
+    @Inject
+    DataSource dataSource;
+
+    @Inject
+    PriceSnapshotStore snapshotStore;
+
+    @Inject
+    ThrottledAdminNotifier adminNotifier;
+
+    // CDI discovers all three concrete AssetDataSource beans here.
+    // The matching to a particular asset_config.sub_verb row happens
+    // via AssetDataSource.id() at tick time (see resolveSource).
+    @Inject
+    Instance<AssetDataSource> sources;
+
+    // Profile-driven cadences per design §10.4. NO inline defaultValue
+    // — the per-profile blocks in application.properties are the
+    // source of truth; the base value is the test-time fallback.
+    // (FetchScheduler.java:95-100 codifies this rule.) The fields are
+    // currently informational — the @Scheduled expression below
+    // resolves the same property string at deploy time — but kept
+    // here as the explicit binding the acceptance contract requires
+    // and as the hook a future runtime-tuning ticket can read.
+    @SuppressWarnings("unused")
+    @ConfigProperty(name = "infochat.assets.refresh.coingecko")
+    Duration coingeckoRefresh;
+
+    @SuppressWarnings("unused")
+    @ConfigProperty(name = "infochat.assets.refresh.kraken")
+    Duration krakenRefresh;
+
+    @SuppressWarnings("unused")
+    @ConfigProperty(name = "infochat.assets.refresh.bitfinex")
+    Duration bitfinexRefresh;
+
+    // Single-global-default property: inline defaultValue is permitted
+    // per the codebase's split convention (FetchScheduler.java:95-100
+    // forbids inline defaults on profile-driven keys only). Operator
+    // override: -Dinfochat.assets.failure-threshold=N.
+    @ConfigProperty(name = "infochat.assets.failure-threshold", defaultValue = "5")
+    int failureThreshold;
+
+    // Per-host source map cached at first tick; the Instance<>
+    // resolution is non-deterministic ordering but stable per JVM.
+    private volatile Map<String, AssetDataSource> sourcesById;
+
+    @Scheduled(every = "{infochat.assets.refresh.coingecko}")
+    public void onCoingeckoTick() {
+        runHostTick(COINGECKO);
+    }
+
+    @Scheduled(every = "{infochat.assets.refresh.kraken}")
+    public void onKrakenTick() {
+        runHostTick(KRAKEN);
+    }
+
+    @Scheduled(every = "{infochat.assets.refresh.bitfinex}")
+    public void onBitfinexTick() {
+        runHostTick(BITFINEX);
+    }
+
+    /**
+     * Run one tick for the named host: enumerate enabled rows, fetch
+     * each one, hand off on success, update the D42 counters on
+     * failure. Package-private factored so each per-host tick reads
+     * uniformly. Visible-for-test so unit tests can fire ticks
+     * deterministically against a halted scheduler.
+     */
+    public void runHostTick(@NonNull String host) {
+        List<EnabledPair> rows;
+        try {
+            rows = enumerateEnabled(host);
+        } catch (SQLException e) {
+            LOG.warnf(e, "AssetSnapshotFetcher: failed to enumerate asset_config for host=%s", host);
+            return;
+        }
+        for (EnabledPair row : rows) {
+            tickOnePair(host, row);
+        }
+    }
+
+    private void tickOnePair(@NonNull String host, @NonNull EnabledPair row) {
+        AssetDataSource source = resolveSource(host);
+        if (source == null) {
+            LOG.warnf("AssetSnapshotFetcher: no AssetDataSource bean for host=%s; skipping", host);
+            return;
+        }
+        PriceSnapshot snapshot;
+        try {
+            snapshot = source.fetchSnapshot(row.asset(), row.defaultQuoteCurrency());
+        } catch (FetchException e) {
+            recordFailure(row, e);
+            return;
+        } catch (RuntimeException e) {
+            // Defensive guard: an impl bug must not break the tick
+            // loop for sibling pairs. Treat as a failure for D42
+            // counter purposes — operator visibility is the priority.
+            LOG.warnf(e, "AssetSnapshotFetcher: %s.fetchSnapshot threw RuntimeException for asset=%s vs=%s",
+                host, row.asset(), row.defaultQuoteCurrency());
+            recordFailure(row, new FetchException(
+                "RuntimeException from " + host + ".fetchSnapshot: " + e.getClass().getSimpleName(), e));
+            return;
+        }
+        try {
+            snapshotStore.store(snapshot);
+            recordSuccess(row);
+        } catch (RuntimeException e) {
+            // Snapshot store failure is a DB problem, NOT a fetch
+            // problem; the D42 counter is for upstream fetch health.
+            // Surface and keep ticking.
+            LOG.warnf(e, "AssetSnapshotFetcher: snapshot store failed for asset=%s sub_verb=%s",
+                row.asset(), row.subVerb());
+        }
+    }
+
+    private void recordSuccess(@NonNull EnabledPair row) {
+        final String sql =
+            "UPDATE asset_config "
+            + "   SET consecutive_failures = 0, "
+            + "       last_success_at = NOW() "
+            + " WHERE asset = ? AND sub_verb = ?";
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, row.asset());
+            ps.setString(2, row.subVerb());
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            LOG.warnf(e, "AssetSnapshotFetcher: success-counter UPDATE failed for asset=%s sub_verb=%s",
+                row.asset(), row.subVerb());
+        }
+    }
+
+    private void recordFailure(@NonNull EnabledPair row, @NonNull FetchException cause) {
+        // Step 1: bump the per-pair counter, capture the post-bump
+        // value via RETURNING. The atomic increment guarantees N
+        // concurrent ticks (shouldn't happen — single scheduler — but
+        // defensive in case of operator-side concurrent runs) produce
+        // exactly N increments.
+        final String bumpSql =
+            "UPDATE asset_config "
+            + "   SET consecutive_failures = consecutive_failures + 1, "
+            + "       last_failure_at = NOW() "
+            + " WHERE asset = ? AND sub_verb = ? "
+            + "RETURNING consecutive_failures";
+        int newCount;
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(bumpSql)) {
+            ps.setString(1, row.asset());
+            ps.setString(2, row.subVerb());
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    // Row vanished between enumerate and bump
+                    // (operator-side disable). No-op.
+                    return;
+                }
+                newCount = rs.getInt(1);
+            }
+        } catch (SQLException e) {
+            LOG.warnf(e, "AssetSnapshotFetcher: failure-counter bump failed for asset=%s sub_verb=%s",
+                row.asset(), row.subVerb());
+            return;
+        }
+
+        LOG.warnf(cause, "AssetSnapshotFetcher: fetch failed for asset=%s sub_verb=%s (count=%d)",
+            row.asset(), row.subVerb(), newCount);
+
+        if (newCount < failureThreshold) {
+            return;
+        }
+
+        // Step 2: flip status active → failed, guarded so a second
+        // threshold breach against an already-failed row updates 0
+        // rows and skips the notifier. The single notifyOnce per
+        // active→failed transition is the spec-committed invariant
+        // (security.md §Per-source health — "exactly one admin
+        // notification on transition into failed").
+        final String flipSql =
+            "UPDATE asset_config "
+            + "   SET status = 'failed' "
+            + " WHERE asset = ? AND sub_verb = ? AND status = 'active'";
+        int flipped;
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(flipSql)) {
+            ps.setString(1, row.asset());
+            ps.setString(2, row.subVerb());
+            flipped = ps.executeUpdate();
+        } catch (SQLException e) {
+            LOG.warnf(e, "AssetSnapshotFetcher: status-flip UPDATE failed for asset=%s sub_verb=%s",
+                row.asset(), row.subVerb());
+            return;
+        }
+        if (flipped == 0) {
+            return;
+        }
+
+        String key = "asset-source-failed:" + row.asset() + ":" + row.subVerb();
+        String errorClass = cause.getCause() == null
+            ? cause.getClass().getSimpleName()
+            : cause.getCause().getClass().getSimpleName();
+        String message = cause.getMessage() == null ? "" : cause.getMessage();
+        adminNotifier.notifyOnce(key, errorClass, message);
+    }
+
+    private List<EnabledPair> enumerateEnabled(@NonNull String host) throws SQLException {
+        final String sql =
+            "SELECT asset, sub_verb, default_quote_currency "
+            + "  FROM asset_config "
+            + " WHERE sub_verb = ? AND enabled = true AND status = 'active'";
+        List<EnabledPair> out = new ArrayList<>();
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, host);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    out.add(new EnabledPair(rs.getString(1), rs.getString(2), rs.getString(3)));
+                }
+            }
+        }
+        return out;
+    }
+
+    private AssetDataSource resolveSource(@NonNull String host) {
+        Map<String, AssetDataSource> snapshot = sourcesById;
+        if (snapshot == null) {
+            snapshot = buildSourceMap();
+            sourcesById = snapshot;
+        }
+        return snapshot.get(host);
+    }
+
+    private synchronized Map<String, AssetDataSource> buildSourceMap() {
+        if (sourcesById != null) {
+            return sourcesById;
+        }
+        Map<String, AssetDataSource> built = new HashMap<>();
+        for (AssetDataSource s : sources) {
+            built.put(s.id(), s);
+        }
+        return Map.copyOf(built);
+    }
+
+    /**
+     * Test-only hook to drop the cached source map. Tests that swap
+     * {@link AssetDataSource} beans via {@code QuarkusMock} after the
+     * first tick has populated the cache need to reset it; production
+     * code never calls this. Package-private so cross-package tests
+     * cannot reach in.
+     */
+    void resetSourceCacheForTest() {
+        sourcesById = null;
+    }
+
+    record EnabledPair(String asset, String subVerb, String defaultQuoteCurrency) {}
+}

@@ -1,9 +1,23 @@
 ---
 id: M1-055b
 title: Asset fetchers (per public-endpoint host) + price_snapshot store + per-host tick cadence + NOTIFY emit
-status: pending
+status: done
 created: 2026-05-24
 last_updated: 2026-05-24
+reviews:
+  - round: 1
+    date: 2026-05-24
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 14
+      added: 1990
+      removed: 10
 blocked_by:
   - M1-055a
   - M1-058
@@ -99,6 +113,12 @@ decision_refs:
   - D34
   - D39
   - D42
+clarity_check:
+  date: 2026-05-24
+  verdict: PASS
+  warnings: []
+  blockers: []
+outline_file: target/m1-tick-outline-M1-055b.md
 escalations:
   - date: 2026-05-24
     reason: clarity-fail
@@ -124,6 +144,18 @@ revisions:
         - docs/spec/security.md §DB roles
         - docs/spec/security.md §SSRF and outbound connections
         - docs/spec/decisions.md D42
+redteam_findings: []
+redteam_audits:
+  - date: 2026-05-24
+    verdict: CLEAN
+    base: 5154f4c^
+    head: 5154f4c
+    verdict_file: docs/plan/m1/redteam/M1-055b-2026-05-24.md
+    out_of_model_count: 0
+    note: >
+      Clean audit. All outbound HTTP through SsrfGuardedHttpClient. DB
+      roles correctly configured. No user-facing surfaces. NOTIFY payload
+      parameterized. Failure-counter state machine follows D42 spec.
 ---
 
 # M1-055b: Asset fetchers (per public-endpoint host) + price_snapshot store + per-host tick cadence + NOTIFY emit
