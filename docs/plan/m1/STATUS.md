@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 62 |
 | deferred | 6 |
-| **total** | **71** |
+| **total** | **75** |
 
 ---
 
@@ -27,6 +27,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-052 — Saved-post library — /save + /saved + /unsave + saved_post snapshot (complexity: medium, risk: medium)
 - M1-053 — Source-management admin commands — list / remove / enable / disable (complexity: high, risk: high)
 - M1-054 — Per-scope tag preferences — /follow-tag + /unfollow-tag + tag-mode state machine (complexity: medium, risk: medium)
+- M1-055a — bootstrap-assets.json parser + asset_config table + default-row consistency check + Collector @Startup loader (complexity: high, risk: high)
 
 ---
 
@@ -43,7 +44,9 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-055 — blocked_by: M1-055a (pending), M1-055b (pending), M1-055c (pending)
+- M1-055b — blocked_by: M1-055a (pending)
+- M1-055c — blocked_by: M1-055a (pending), M1-055b (pending)
 
 ---
 
@@ -200,4 +203,11 @@ M1-051 (done)
   ├── M1-053 (pending) ← runnable
   └── M1-054 (pending) ← runnable
 M1-052 (pending) ← runnable
+M1-055a (pending) ← runnable
+  ├── M1-055 (pending)
+  ├── M1-055b (pending)
+  │     ├── M1-055 (pending) [see above]
+  │     └── M1-055c (pending)
+  │           └── M1-055 (pending) [see above]
+  └── M1-055c (pending) [see above]
 ```

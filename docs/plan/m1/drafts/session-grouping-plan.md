@@ -142,9 +142,9 @@ of this prep session's handoff).
 | **T2-E** privacy | /forget + /export | Standalone — `docs/spec/commands.md` §Conversation control (privacy section) + audit-log invariants from §Audit. Best after T2-D so /forget knows what tables to purge. | 1 ticket |
 | **T2-F** groups | group support + /promote + /demote + @mention + /group-timezone, periodic digests + summary_cache + staggered scheduler + degraded fallback | Both cite `docs/spec/schema.md` §Identity (groups) + `docs/spec/commands.md` §Group commands. Digests need groups to exist. | 2 tickets |
 | **T2-G** quarantine | /quarantine list/approve/reject + re-evaluation job + NEEDS_REVIEW + admin notification throttling | Standalone — `docs/spec/security.md` §Quarantine workflow + §Re-evaluation job + §Failure handling. Self-contained admin workflow. | 1 ticket |
-| **T2-H** assets | asset commands /zcash + /monero + bootstrap-assets.json + asset_config + price_snapshot + asset Fetchers | Standalone — `docs/spec/commands.md` §Asset commands + `docs/design/10-asset-commands.md`. Operator-optional feature; conformant deployment without it. | 1 ticket |
+| **T2-H** assets | **M1-055** (umbrella — cross-Collector roundtrip IT) + **M1-055a** (bootstrap-assets.json parser + V14 asset_config migration + default-row consistency check + Collector @Startup loader) + **M1-055b** (AssetDataSource SPI + per-host impls + AssetSnapshotFetcher + PriceSnapshotStore + V15 price_snapshot migration + per-host tick cadence + NOTIFY emit + per-source failure-counter) + **M1-055c** (AssetCommandRouter + handlers + AssetReplyRenderer + AssetSnapshotReader + AssetRegistry + AssetCommandFamilyOracle impl swap + /help context-awareness + bundle keys). All cite `docs/spec/commands.md` §Asset commands + `docs/design/10-asset-commands.md`. Operator-optional feature; conformant deployment without it. The umbrella + 3-subs split mirrors M1-008 / M1-044 — the file count exceeded the umbrella's files_budget. | 4 tickets (M1-055 umbrella, M1-055a, M1-055b, M1-055c) |
 
-Tier 2 subtotal: 8 groups, 15 tickets.
+Tier 2 subtotal: 8 groups, 18 tickets.
 
 ### Tier 3 — adapters and breadth
 
