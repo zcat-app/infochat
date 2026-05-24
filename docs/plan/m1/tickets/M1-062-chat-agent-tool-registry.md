@@ -1,9 +1,9 @@
 ---
 id: M1-062
 title: Chat agent tool registry + dispatcher + prompt shape
-status: pending
+status: done
 created: 2026-05-24
-last_updated: 2026-05-24
+last_updated: 2026-05-25
 blocked_by:
   - M1-061
 files_budget: 12
@@ -60,12 +60,69 @@ spec_refs:
 decision_refs:
   - D21
   - D28
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-05-25
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 14
+      added: 1131
+      removed: 9
+outline_file: target/m1-tick-outline-M1-062.md
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
-clarity_check: {}
+redteam_findings:
+  - date: 2026-05-25
+    category: DOS
+    severity: low
+    promise: |
+      Tool calls per chat turn — fixed cap. Tool results are cached within
+      a single turn so identical calls don't re-query.
+    gap: |
+      Convenience dispatch() overload creates a fresh TurnContext per call,
+      bypassing per-turn cap and cache. The TurnContext-aware overload
+      correctly enforces both, but the bypass is public.
+    repro: |
+      M1-063 session dispatch uses the convenience overload. LLM issues 100
+      tool calls; each gets a fresh context; cap never fires; cache empty.
+    suggested_fix_class: trust-boundary-tightening
+redteam_audits:
+  - date: 2026-05-25
+    verdict: FINDINGS
+    base: main
+    head: m1/M1-062-chat-agent-tool-registry
+    verdict_file: docs/plan/m1/redteam/M1-062-2026-05-25.md
+    findings_count: 4
+    out_of_model_count: 1
+    note: |
+      Two high-severity findings (list-size unbounded DOS, memory pre-fetch
+      outside untrusted delimiter) and two medium (unbounded result sets,
+      no per-turn cap/cache). Done commit is immutable; fixes land as
+      remediation tickets. Finding 4 may belong to M1-063 scope.
+  - date: 2026-05-25
+    verdict: FINDINGS
+    base: main
+    head: m1/M1-062-chat-agent-tool-registry
+    verdict_file: docs/plan/m1/redteam/M1-062-2026-05-25-r2.md
+    findings_count: 1
+    out_of_model_count: 1
+    note: |
+      Second audit post-remediation. All four original findings (2 high,
+      2 medium) resolved. One new low: convenience dispatch() overload
+      bypasses per-turn state. Acceptable residual risk; naturally
+      addressed when M1-063 wires TurnContext.
+clarity_check:
+  date: 2026-05-24
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-062: Chat agent tool registry + dispatcher + prompt shape
