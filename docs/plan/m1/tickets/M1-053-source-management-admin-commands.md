@@ -1,9 +1,11 @@
 ---
 id: M1-053
 title: Source-management admin commands — list / remove / enable / disable
-status: escalated
+status: deferred
 created: 2026-05-24
 last_updated: 2026-05-24
+deferred_on: M1-057
+deferred_reason: blocked-on-new-ticket
 clarity_check:
   date: 2026-05-24
   verdict: PASS
