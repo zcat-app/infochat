@@ -35,8 +35,7 @@ out_of_scope:
   - any modification to ModelTask.java — CHAT_AGENT already exists in the enum
   - any auto-compress trigger or compression LLM call — M1-064 territory
 acceptance:
-  - "ChatToolRegistry.java exists as @ApplicationScoped and exposes a public method returning the closed set of tool names. The set equals exactly {searchPosts, getPost, getReferences, recallMemory, listSaves} — the five names from docs/spec/security.md §Prompt-injection defenses tool table. Verify: ChatToolRegistryTest.registryContainsExactlySpecTools passes"
-  - "ChatToolRegistryTest.registryContainsExactlySpecTools asserts the registry's name set equals the spec table byte-for-byte; no extra names, no missing names. This is the CI assertion required by spec: 'CI fails on a mismatch in either direction.' Verify: grep -iE 'void.*registryContainsExactlySpecTools' ChatToolRegistryTest.java returns >=1 match"
+  - "ChatToolRegistry.java exists as @ApplicationScoped and exposes a public method returning the closed set of tool names. The set equals exactly {searchPosts, getPost, getReferences, recallMemory, listSaves} — the five names from the tool allowlist in docs/spec/security.md §Prompt-injection defenses (LLM call sites). ChatToolRegistryTest.registryContainsExactlySpecTools asserts byte-for-byte equality (no extra names, no missing names) — this is the CI assertion required by spec: 'CI fails on a mismatch in either direction.' Verify: ChatToolRegistryTest.registryContainsExactlySpecTools passes"
   - "ChatToolDispatcher.java exists and dispatches a tool call by name to the matching tool implementation. An unrecognized tool name is rejected with a typed validation-error reply (spec: 'nothing else is callable'). Verify: ChatToolDispatcherTest.rejectsUnknownToolName passes"
   - "Every tool implementation validates all free-form string and list inputs against a profile-driven length cap BEFORE any SQL runs (spec: 'a call exceeding the cap is rejected by the tool dispatcher before any SQL runs and the LLM sees a typed validation-error reply'). Verify: ChatToolDispatcherTest.rejectsOversizedInput passes"
   - "SearchPostsTool reads only READY posts visible in the calling (user, scope), filtered by the scope's tag_mode rules (spec §searchPosts). Tag inputs are validated against the controlled vocabulary. Verify: ChatToolDispatcherTest.searchPostsScopeFiltered passes"
@@ -56,7 +55,6 @@ test_plan:
     - all tests currently green on main
 spec_refs:
   - docs/spec/security.md §Prompt-injection defenses (LLM call sites)
-  - docs/spec/security.md §Prompt-injection defenses — tool allowlist table
   - docs/spec/llm.md §Memory retrieval
   - docs/spec/commands.md §Chat mode
 decision_refs:
