@@ -387,6 +387,57 @@ public final class BundleKeys {
     /** Shared group-scope reject for /grant-admin and /revoke-admin: the ScopeRef.Group SPI does not carry the actor's contact id in v1, so the handler cannot verify bot-admin tier. T2-F lands the SPI widening. */
     public static final String ERROR_GROUP_ADMIN_NOT_IN_V1 = "error.group_admin_not_in_v1";
 
+    // ----- /save + /saved + /unsave (M1-052) ------------------------------
+    // Per docs/spec/commands.md §Content (/save, /saved, /unsave) +
+    // docs/spec/schema.md §Per-user state + §Invariants (1 carve-out, 6
+    // carve-out) + docs/design/02-schema.md §2.6.1 + docs/design/03-commands.md
+    // §/save /§/saved /§/unsave. Saved-post library is per-user-globally
+    // (decision D13); the /saved reply header MUST disclose this.
+    //
+    // The three _GROUP_NOT_IN_V1 keys cover the v1 group-scope short-
+    // circuit: ScopeRef.Group carries adapterGroupId only (no actor
+    // contact id), so the CommandHandler SPI cannot resolve the inbound
+    // sender's identity in group scope (mirrors the AddSourceCommandHandler
+    // / GrantAdminCommandHandler / RevokeAdminCommandHandler convention).
+    // Each command gets its own key (rather than one shared key) so T2-F
+    // can independently translate them when the SPI widens.
+
+    /** {@code /save <uid>}: the post is missing, QUARANTINED, or NEEDS_REVIEW (visibility-of-target rule — non-READY posts are indistinguishable from a missing UID at the user surface). */
+    public static final String ERROR_SAVE_UNKNOWN_UID = "error.save.unknown_uid";
+
+    /** {@code /save <uid>} when the actor's {@code users.save_count} is already at the per-user cap; points the user at /unsave. */
+    public static final String ERROR_SAVE_CAP_MET = "error.save.cap_met";
+
+    /** {@code /save <uid>} on a post already in the actor's library — PK collision on (user_id, post_uid). */
+    public static final String ERROR_SAVE_ALREADY_SAVED = "error.save.already_saved";
+
+    /** {@code /save} invoked from group scope — v1 short-circuit; T2-F lands the group-actor seam. */
+    public static final String ERROR_SAVE_GROUP_NOT_IN_V1 = "error.save.group_not_in_v1";
+
+    /** {@code /save} success reply. {@code {0}} = the post UID the caller saved. */
+    public static final String REPLY_SAVE_SUCCESS = "reply.save.success";
+
+    /** {@code /saved} reply header — MUST disclose per-user-global semantics. {@code {0}} = displayed-count, {@code {1}} = total-count, {@code {2}} = current page, {@code {3}} = total pages, {@code {4}} = optional filter clause. */
+    public static final String REPLY_SAVED_HEADER_GLOBAL = "reply.saved.header.global";
+
+    /** {@code /saved} per-row template. {@code {0}} = post UID, {@code {1}} = title, {@code {2}} = saved_at relative, {@code {3}} = tag list (comma-joined). */
+    public static final String REPLY_SAVED_LINE = "reply.saved.line";
+
+    /** {@code /saved} empty-library reply. */
+    public static final String REPLY_SAVED_EMPTY = "reply.saved.empty";
+
+    /** {@code /saved} invoked from group scope — v1 short-circuit; T2-F lands the group-actor seam. */
+    public static final String ERROR_SAVED_GROUP_NOT_IN_V1 = "error.saved.group_not_in_v1";
+
+    /** {@code /unsave <uid>}: the actor has no saved_post row for that UID. */
+    public static final String ERROR_UNSAVE_UNKNOWN_UID = "error.unsave.unknown_uid";
+
+    /** {@code /unsave} success reply. {@code {0}} = the post UID the caller removed. */
+    public static final String REPLY_UNSAVE_SUCCESS = "reply.unsave.success";
+
+    /** {@code /unsave} invoked from group scope — v1 short-circuit; T2-F lands the group-actor seam. */
+    public static final String ERROR_UNSAVE_GROUP_NOT_IN_V1 = "error.unsave.group_not_in_v1";
+
     private BundleKeys() {
         throw new AssertionError("BundleKeys is a constant holder and must not be instantiated");
     }
