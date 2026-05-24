@@ -92,7 +92,6 @@ spec_refs:
   - docs/spec/schema.md §Operational
   - docs/spec/security.md §DB roles
   - docs/spec/security.md §SSRF and outbound connections
-  - docs/spec/decisions.md D42
 decision_refs:
   - D22
   - D30
@@ -100,6 +99,31 @@ decision_refs:
   - D34
   - D39
   - D42
+escalations:
+  - date: 2026-05-24
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      N/A — clarity pre-flight FAIL (no reviewer round).
+      Blockers from target/m1-tick-clarity-M1-055b.txt:
+        1. spec_refs entry "docs/spec/decisions.md D42" resolves to ANCHOR-NOT-FOUND.
+           decisions.md stores entries as inline prose, not ATX headings;
+           no heading containing "d42" exists. D42 belongs in decision_refs:,
+           where it already appears. Mirrors M1-058 clarity-fail precedent
+           (M1-058 hit identical blocker with D22 + D42 on 2026-05-24).
+revisions:
+  - date: 2026-05-24
+    reason: refine after clarity-fail (drop the lone D-only spec_refs entry
+      `docs/spec/decisions.md D42` that cannot resolve to an ATX heading;
+      commands.md §Asset commands already in spec_refs inlines the D42
+      per-source failure-counter contract; decision_refs preserves the
+      D42 linkage. Mirrors M1-058's same-day refine.)
+    snapshot:
+      spec_refs:
+        - docs/spec/commands.md §Asset commands
+        - docs/spec/schema.md §Operational
+        - docs/spec/security.md §DB roles
+        - docs/spec/security.md §SSRF and outbound connections
+        - docs/spec/decisions.md D42
 ---
 
 # M1-055b: Asset fetchers (per public-endpoint host) + price_snapshot store + per-host tick cadence + NOTIFY emit
