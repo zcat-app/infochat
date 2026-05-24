@@ -1,11 +1,9 @@
 ---
 id: M1-053
 title: Source-management admin commands — list / remove / enable / disable
-status: deferred
+status: pending
 created: 2026-05-24
 last_updated: 2026-05-24
-deferred_on: M1-057
-deferred_reason: blocked-on-new-ticket
 clarity_check:
   date: 2026-05-24
   verdict: PASS
@@ -138,7 +136,11 @@ decision_refs:
 reviews: {}
 overrides: []
 aborted_attempts: []
-reopens: []
+reopens:
+  - date: 2026-05-24
+    prior_deferred_reason: blocked-on-new-ticket
+    prior_deferred_on: M1-057
+    reason: M1-057 unsealed PendingConfirm; blocker cleared
 redteam_findings: []
 clarity_check: {}
 ---
