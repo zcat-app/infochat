@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Author-side static linter for ticket files.
 
-Runs two static checks against a ticket's frontmatter and body to catch
+Runs static checks against a ticket's frontmatter and body to catch
 mechanical authoring errors at author time, *before* `/m1-tick start`
 spawns the clarity-reviewer subagent.
 
@@ -15,6 +15,13 @@ Exit codes:
   1 — at least one file has BLOCKERS
 
 The checks:
+
+  SPEC-REFS-RESOLVABLE       BLOCKER / WARN
+    Every spec_ref entry must point at a file that exists and contain
+    a heading whose text (lowercased) includes the section-title
+    (lowercased) as a substring.  Uses the same fence-aware ATX
+    heading extraction algorithm as the clarity-reviewer subagent.
+    ANCHOR-NOT-FOUND → BLOCKER; AMBIGUOUS → WARN.
 
   FILES-SCOPE-COVERAGE       WARN
     (a) test_plan.adds / test_plan.modifies entries not in files_scope
@@ -85,6 +92,9 @@ def _targeted_extract(fm_text):
     acceptance = _extract_list_field(fm_text, "acceptance")
     if acceptance is not None:
         out["acceptance"] = acceptance
+    spec_refs = _extract_list_field(fm_text, "spec_refs")
+    if spec_refs is not None:
+        out["spec_refs"] = spec_refs
     test_plan = _extract_test_plan(fm_text)
     if test_plan is not None:
         out["test_plan"] = test_plan
@@ -189,6 +199,100 @@ def extract_section(body, section_name):
     next_m = re.search(r"^##\s", body[start:], re.MULTILINE)
     end = start + next_m.start() if next_m else len(body)
     return body[start:end]
+
+
+# ---------- check: spec_refs resolvable ----------
+
+_FENCE_RE = re.compile(r"^[ ]{0,3}(?:`{3,}|~{3,})")
+_ATX_RE = re.compile(r"^[ ]{0,3}(#{1,6})[ \t]+\S")
+_TRAILING_HASHES_RE = re.compile(r"\s+#+\s*$")
+
+
+def _extract_headings(text):
+    """Extract ATX headings from markdown, respecting fenced code blocks.
+
+    Same algorithm as the clarity-reviewer subagent's anchor resolution:
+    toggle fence_open on fence delimiters, skip fenced lines, record ATX
+    headings with their line number and stripped heading text.
+    """
+    headings = []
+    fence_open = False
+    for lineno, line in enumerate(text.split("\n"), start=1):
+        if _FENCE_RE.match(line):
+            fence_open = not fence_open
+            continue
+        if fence_open:
+            continue
+        if not _ATX_RE.match(line):
+            continue
+        heading_text = line.lstrip()
+        heading_text = heading_text.lstrip("#")
+        heading_text = heading_text.lstrip(" \t")
+        heading_text = _TRAILING_HASHES_RE.sub("", heading_text).rstrip()
+        headings.append((lineno, heading_text))
+    return headings
+
+
+_headings_cache: dict[str, list[tuple[int, str]]] = {}
+
+
+def check_spec_refs_resolvable(fm):
+    findings = []
+    spec_refs = fm.get("spec_refs") or []
+    if not isinstance(spec_refs, list):
+        return findings
+
+    for ref in spec_refs:
+        if not isinstance(ref, str):
+            continue
+        parts = ref.split(" §", 1)
+        if len(parts) != 2:
+            findings.append(_finding(
+                "SPEC-REFS-RESOLVABLE", "BLOCKER", None,
+                detail=f"spec_ref '{ref}' does not match '<path> §<title>' format",
+            ))
+            continue
+
+        file_path_str, section_title = parts
+        file_path = pathlib.Path(file_path_str)
+
+        if not file_path.is_file():
+            findings.append(_finding(
+                "SPEC-REFS-RESOLVABLE", "BLOCKER", None,
+                detail=f"spec_ref file '{file_path_str}' does not exist",
+            ))
+            continue
+
+        if file_path_str not in _headings_cache:
+            try:
+                _headings_cache[file_path_str] = _extract_headings(
+                    file_path.read_text(encoding="utf-8"))
+            except OSError as e:
+                findings.append(_finding(
+                    "SPEC-REFS-RESOLVABLE", "BLOCKER", None,
+                    detail=f"spec_ref file '{file_path_str}' unreadable: {e}",
+                ))
+                continue
+
+        headings = _headings_cache[file_path_str]
+        search = section_title.lower()
+        matches = [(ln, h) for ln, h in headings if search in h.lower()]
+
+        if len(matches) == 0:
+            findings.append(_finding(
+                "SPEC-REFS-RESOLVABLE", "BLOCKER", None,
+                detail=f"spec_ref '{ref}' → ANCHOR-NOT-FOUND "
+                       f"(no heading in {file_path_str} contains '{section_title}')",
+            ))
+        elif len(matches) > 1:
+            lines = ", ".join(str(ln) for ln, _ in matches)
+            findings.append(_finding(
+                "SPEC-REFS-RESOLVABLE", "WARN", None,
+                detail=f"spec_ref '{ref}' → AMBIGUOUS (lines: {lines}); "
+                       f"clarity checker will pick one by depth heuristic",
+            ))
+
+    return findings
 
 
 # ---------- check: files_scope coverage ----------
@@ -349,6 +453,7 @@ def lint_one(path, quiet):
     fm, body, fm_error = split_ticket(path)
     findings = []
     acceptance = fm.get("acceptance") or []
+    findings.extend(check_spec_refs_resolvable(fm))
     findings.extend(check_files_scope_coverage(fm, body))
     findings.extend(check_prose_verb(acceptance))
     return report_file(path, findings, fm_error, quiet)

@@ -18,6 +18,7 @@ files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/RetryCommandHandlerTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/CancellationServiceTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/SummaryAnchorRepositoryTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryCommandHandlerTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterStopRetryIT.java
 complexity: high
 risk: high
@@ -55,15 +56,16 @@ test_plan:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterStopRetryIT.java
   modifies:
     - infochat-provider/src/main/java/app/zcat/infochat/provider/command/SummaryCommandHandler.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryCommandHandlerTest.java
   preserves:
     - all tests currently green on main
 spec_refs:
-  - docs/spec/commands.md §Conversation control — /stop
-  - docs/spec/commands.md §Conversation control — /retry
-  - docs/spec/schema.md §Per-scope state — Summary anchor
-  - docs/spec/security.md §Prompt-injection defenses (tool cancellation)
-  - docs/design/03-commands.md §3.9 /stop, /retry
-  - docs/design/02-schema.md §2.6.5 summary_anchor
+  - docs/spec/commands.md §Conversation control
+  - docs/spec/schema.md §Per-scope state
+  - docs/spec/security.md §Prompt-injection defenses (LLM call sites)
+  - docs/spec/security.md §LLM output sanitizer
+  - docs/design/03-commands.md §3.9 Conversation control
+  - docs/design/02-schema.md §2.6.5 `summary_anchor`
 decision_refs:
   - D19
   - D31
@@ -129,6 +131,10 @@ See the YAML `acceptance:` list above. In summary:
   cancel takes effect.
 - Adjacent pattern: `SummaryCommandHandler` for the existing LLM-call +
   degraded-fallback pattern that `/retry` reuses.
+- Authorized test changes to `SummaryCommandHandlerTest.java`: add
+  `SummaryAnchorRepository` dependency wiring (mock/stub); assert anchor
+  row is written on successful `/summary`; assert no anchor write on
+  degraded-fallback path. Existing test assertions must remain green.
 - `/stop` during probation: allowed, returns the idempotent no-op (probation
   users can't have in-flight LLM jobs since chat mode and `/retry` are
   blocked).
