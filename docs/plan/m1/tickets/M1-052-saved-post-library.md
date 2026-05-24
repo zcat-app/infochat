@@ -1,10 +1,12 @@
 ---
 id: M1-052
 title: Saved-post library — /save + /saved + /unsave + saved_post snapshot
-status: pending
+status: deferred
 created: 2026-05-24
 last_updated: 2026-05-24
 blocked_by: []
+deferred_on: M1-056
+deferred_reason: spec-amend
 files_budget: 12
 files_scope:
   - infochat-core/src/main/resources/db/migration/V14__saved_post.sql
@@ -83,7 +85,41 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-05-24
+  verdict: WARN
+  warnings:
+    - "files_scope hardcodes V14__saved_post.sql but M1-055a may consume V14 first, requiring rename to V15+; acceptance item 1 instructs the implementer how to handle it. Reviewer should verify the actual migration filename in the diff matches what was agreed at start time."
+  blockers: []
+escalations:
+  - date: 2026-05-24
+    reason: premise-fail
+    reviewer_verdict_excerpt: |
+      N/A — developer-surfaced before any implementation. Acceptance item 3
+      requires SaveCommandHandlerTest to be BOTH "plain JUnit per the M1-049
+      test pyramid (no @QuarkusTest)" AND "exercises the handler against a
+      Testcontainers Postgres bootstrapped with V1..V14 migrations
+      (`@TestInstance(Lifecycle.PER_CLASS)` + Flyway-on-startup helper, the
+      M1-044c pattern)". These three citations are mutually exclusive in
+      the project:
+        (a) docs/process/test-pyramid.md §Handler unit tests MUST NOT use a
+            real DataSource. The two canonical examples
+            (AddSourceCommandHandlerTest, SummaryCommandHandlerTest) both
+            use StubUserDataSource (hand-rolled, not a real DB).
+        (b) The "M1-044c pattern" (GrantAdminCommandHandlerTest) is itself
+            `@QuarkusTest` using Quarkus DevServices — NOT plain JUnit,
+            NOT Testcontainers.
+        (c) No plain-JUnit + manual-Testcontainers + Flyway-on-startup
+            pattern exists anywhere in the project; inventing it would
+            require ~200 lines of new infrastructure + a Maven dependency.
+      Acceptance items 5 (SavedCommandHandlerTest) and 7
+      (UnsaveCommandHandlerTest) inherit the same shape ambiguity.
+      Resolution: spec-amend via M1-056 — carve out a "Thin-SQL handler
+      exception" subsection in docs/process/test-pyramid.md §Handler unit
+      tests legitimizing the M1-044c `@QuarkusTest` pattern for handlers
+      whose business logic IS DB interaction. After M1-056 lands, M1-052
+      reopens and refines acceptance items 3/5/7 to cite the codified
+      exception.
 ---
 
 # M1-052: Saved-post library — /save + /saved + /unsave + saved_post snapshot
