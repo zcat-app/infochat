@@ -1,14 +1,29 @@
 ---
 id: M1-061
 title: chat_session + chat_memory + chat_message + summary_anchor DDL
-status: pending
+status: done
 created: 2026-05-24
 last_updated: 2026-05-24
+escalations:
+  - date: 2026-05-24
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      SPEC-REFS-VALID FAIL: spec_refs entry 'docs/design/02-schema.md §§2.6.2–2.6.5'
+      uses range notation that does not resolve to any single heading per the anchor
+      resolution algorithm. No heading in docs/design/02-schema.md matches the
+      section-title '§2.6.2–2.6.5' or '2.6.2–2.6.5'. Replace with individual
+      per-section entries.
+  - date: 2026-05-24
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      SPEC-REFS-VALID FAIL: four design-doc spec_refs omit backtick characters
+      present in actual headings (e.g. '§2.6.2 chat_memory' vs heading
+      '2.6.2 `chat_memory` (D40, Invariant 9)'). Add backticks to match.
 blocked_by: []
 files_budget: 5
 files_scope:
-  - infochat-core/src/main/resources/db/migration/V17__chat_tables.sql
-  - infochat-core/src/main/resources/db/migration/V18__summary_anchor.sql
+  - infochat-core/src/main/resources/db/migration/V18__chat_tables.sql
+  - infochat-core/src/main/resources/db/migration/V19__summary_anchor.sql
   - infochat-provider/src/main/java/app/zcat/infochat/provider/scheduler/ChatMemoryPruner.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/scheduler/ChatMemoryPrunerTest.java
 complexity: medium
@@ -42,22 +57,63 @@ test_plan:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/scheduler/ChatMemoryPrunerTest.java
   preserves:
     - all tests currently green on main
+revisions:
+  - date: 2026-05-24
+    reason: clarity-fail refine
+    change: "replaced spec_refs range entry 'docs/design/02-schema.md §§2.6.2–2.6.5' with four individual per-section entries"
+  - date: 2026-05-24
+    reason: clarity-fail refine
+    change: "added backtick characters to four design-doc spec_refs entries to match actual heading text (e.g. §2.6.2 `chat_memory` instead of §2.6.2 chat_memory)"
 spec_refs:
   - docs/spec/schema.md §Per-scope state (Chat memory, Chat session, Summary anchor)
   - docs/spec/schema.md §Invariants (Invariant 9 — Chat-memory TTL)
-  - docs/design/02-schema.md §§2.6.2–2.6.5
+  - docs/design/02-schema.md §2.6.2 `chat_memory`
+  - docs/design/02-schema.md §2.6.3 `chat_session`
+  - docs/design/02-schema.md §2.6.4 `chat_message`
+  - docs/design/02-schema.md §2.6.5 `summary_anchor`
 decision_refs:
   - D19
   - D25
   - D36
   - D37
   - D40
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-05-24
+    verdict: REWORK
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: FAIL
+    diff_stats:
+      files: 6
+      added: 430
+      removed: 16
+  - round: 2
+    date: 2026-05-24
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 453
+      removed: 19
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-05-24
+  verdict: WARN
+  warnings:
+    - "SECURITY-FLAG-CONSISTENT WARN: DB role grants on four new tables touch the security boundary; consider security_relevant: true"
+    - "ACCEPTANCE-RUNNABLE item 9 WARN: ChatMemoryPruner verify grep omits chat_message from the alternation pattern"
 ---
 
 # M1-061: chat_session + chat_memory + chat_message + summary_anchor DDL
@@ -118,3 +174,10 @@ No changes to existing migrations, no changes to InboundRouter or any handler.
 - Relevant design: `docs/design/02-schema.md` §§2.6.2–2.6.5.
 - Adjacent pattern: V15 (`saved_post`) for the GRANT style; V10 (`quarantine`)
   for the partial unique index pattern.
+
+## Round 1 rework
+
+1. **Flyway version collision**: V17__price_snapshot.sql already exists on main
+   (from M1-055b, now done). Rename V17__chat_tables.sql → V18__chat_tables.sql
+   and V18__summary_anchor.sql → V19__summary_anchor.sql per the "next-free
+   V<N>" convention noted in §Notes.
