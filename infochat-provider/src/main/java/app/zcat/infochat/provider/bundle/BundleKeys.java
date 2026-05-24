@@ -564,6 +564,56 @@ public final class BundleKeys {
     /** {@code /source-disable} success reply. Token {@code {0}} = source display name. */
     public static final String REPLY_SOURCE_DISABLE_SUCCESS = "reply.source_disable.success";
 
+    // ----- /follow-tag + /unfollow-tag (M1-054) ---------------------------
+    // Per docs/spec/commands.md §Per-scope tag preferences +
+    // docs/spec/schema.md §Sources and tags. The two handlers mutate
+    // scope_tag + scope_preferences.tag_mode in one transaction; v1
+    // group scope short-circuits to *_GROUP_ADMIN_ONLY because the
+    // frozen CommandHandler SPI does not carry the inbound caller's
+    // contact id in group scope (the same AddSourceCommandHandler /
+    // GrantAdminCommandHandler reason — T2-F lands the actor seam).
+
+    /** {@code /follow-tag <t>} where {@code <t>} is not in the controlled vocabulary; bundle template surfaces a fuzzy-suggestion footer. */
+    public static final String ERROR_FOLLOW_TAG_UNKNOWN_TAG = "error.follow_tag.unknown_tag";
+
+    /** {@code /follow-tag} from a non-admin in group scope (in v1, ALL group-scope callers — the actor-seam landing is T2-F). */
+    public static final String ERROR_FOLLOW_TAG_GROUP_ADMIN_ONLY = "error.follow_tag.group_admin_only";
+
+    /** {@code /follow-tag <t>} in {@code tag_mode='ALL'}: flipped to EXPLICIT, seeded a single tag. Token {@code {0}} = followed tag. */
+    public static final String REPLY_FOLLOW_TAG_SUCCESS_FROM_ALL = "reply.follow_tag.success_from_all";
+
+    /** {@code /follow-tag <t>} in {@code tag_mode='EXPLICIT'}: idempotent add in place. Token {@code {0}} = followed tag. */
+    public static final String REPLY_FOLLOW_TAG_SUCCESS_IN_PLACE = "reply.follow_tag.success_in_place";
+
+    /** {@code /unfollow-tag <t>} where {@code <t>} is not in the controlled vocabulary; bundle template surfaces a fuzzy-suggestion footer. */
+    public static final String ERROR_UNFOLLOW_TAG_UNKNOWN_TAG = "error.unfollow_tag.unknown_tag";
+
+    /** {@code /unfollow-tag} from a non-admin in group scope (in v1, ALL group-scope callers). */
+    public static final String ERROR_UNFOLLOW_TAG_GROUP_ADMIN_ONLY = "error.unfollow_tag.group_admin_only";
+
+    /** {@code /unfollow-tag <t> --all} — positional tag and {@code --all} flag are mutually exclusive. */
+    public static final String ERROR_UNFOLLOW_TAG_MUTUALLY_EXCLUSIVE = "error.unfollow_tag.mutually_exclusive";
+
+    /** {@code /unfollow-tag <t>} in {@code tag_mode='ALL'}: flipped to EXPLICIT, seeded the all-minus-one set. Token {@code {0}} = unfollowed tag. */
+    public static final String REPLY_UNFOLLOW_TAG_SUCCESS_FROM_ALL = "reply.unfollow_tag.success_from_all";
+
+    /** {@code /unfollow-tag <t>} in {@code tag_mode='EXPLICIT'}: row deleted in place (followed set still non-empty). Token {@code {0}} = unfollowed tag. */
+    public static final String REPLY_UNFOLLOW_TAG_SUCCESS_IN_PLACE = "reply.unfollow_tag.success_in_place";
+
+    /** {@code /unfollow-tag <t>} in {@code tag_mode='EXPLICIT'} that empties the set: post-delete count reached zero, mode flipped back to ALL. Token {@code {0}} = unfollowed tag. */
+    public static final String REPLY_UNFOLLOW_TAG_FLIPS_BACK_TO_ALL = "reply.unfollow_tag.flips_back_to_all";
+
+    /**
+     * First-call prompt template for {@code /unfollow-tag --all}. Tokens:
+     * {@code {0}} = timeout in whole seconds, {@code {1}} = current
+     * scope_tag row count (so the user sees the size of the wipe).
+     */
+    public static final String REPLY_CONFIRM_PROMPT_UNFOLLOW_TAG_ALL =
+            "reply.confirm.prompt.unfollow_tag_all";
+
+    /** {@code /unfollow-tag --all confirm} success — bulk reset committed. Token {@code {0}} = count of deleted rows. */
+    public static final String REPLY_UNFOLLOW_TAG_ALL_SUCCESS = "reply.unfollow_tag_all.success";
+
     private BundleKeys() {
         throw new AssertionError("BundleKeys is a constant holder and must not be instantiated");
     }

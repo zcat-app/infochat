@@ -1,7 +1,7 @@
 ---
 id: M1-054
 title: Per-scope tag preferences — /follow-tag + /unfollow-tag + tag-mode state machine
-status: pending
+status: done
 created: 2026-05-24
 last_updated: 2026-05-24
 blocked_by:
@@ -11,6 +11,7 @@ files_budget: 8
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/FollowTagCommandHandler.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/UnfollowTagCommandHandler.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/command/UnfollowTagAllConfirm.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
   - infochat-provider/src/main/resources/bundles/en.properties
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/FollowTagCommandHandlerTest.java
@@ -32,9 +33,9 @@ out_of_scope:
   - any /list-sources / /remove-source / /source-enable / /source-disable handler — T2-B.2 territory
 acceptance:
   - "`FollowTagCommandHandler` is a CDI bean implementing `CommandHandler` with `name() == \"follow-tag\"`. Argument shape: positional `<tag>` (one tag per invocation). Permission gate runs FIRST in the handler: (a) DM scope — the caller's own scope is the target; (b) group scope — the caller MUST be the group admin (per spec §Permission model Group-admin set explicitly lists `/follow-tag in groups`); non-admin in group returns `error.follow_tag.group_admin_only`. The handler validates the tag against the controlled vocabulary — a tag value NOT in `tag` returns `error.follow_tag.unknown_tag` with fuzzy-suggestion footer (the same friendly-error shape as `/add-source --tags`). On valid tag input, the handler executes the mode-transition state machine in ONE transaction: (1) `SELECT tag_mode FROM scope_preferences WHERE scope_kind = ? AND scope_id = ? FOR UPDATE` (the row exists for every active scope per the M1-007c / M1-035 scope-bootstrap path); (2) if `tag_mode = 'ALL'` → flip to `EXPLICIT` AND `INSERT INTO scope_tag (scope_kind, scope_id, tag_id) VALUES (?, ?, ?)` (seed the single followed tag — `I asked for X, only X` per spec); (3) if `tag_mode = 'EXPLICIT'` → `INSERT INTO scope_tag ... ON CONFLICT DO NOTHING` (idempotent add in place); (4) increment `scope_preferences.tag_subscription_version` so the digest cache invalidates on the next read; (5) return `reply.follow_tag.success_from_all` for the ALL→EXPLICIT transition (interpolating the followed tag) OR `reply.follow_tag.success_in_place` for the EXPLICIT add (interpolating the tag)"
-  - "FollowTagCommandHandlerTest is plain JUnit per the M1-049 test pyramid (no `@QuarkusTest`). Scenarios — one `@Test` per branch: `followTagDmInAllModeFlipsToExplicitAndSeedsSingleTag`, `followTagDmInExplicitModeAddsRowInPlace`, `followTagDmInExplicitModeIdempotentOnDuplicateAdd`, `followTagDmUnknownTagReturnsFuzzySuggestionError`, `followTagGroupNonAdminReturnsGroupAdminOnlyError`, `followTagGroupAdminFlipsModeForGroupScope`, `followTagIncrementsTagSubscriptionVersion`"
+  - "FollowTagCommandHandlerTest is Shape B (Thin-SQL) per `docs/process/test-pyramid.md` §Shape B: `@QuarkusTest` against the default-profile DevServices Postgres image, `@Inject` for the handler and its DataSource / BundleLoader / InboundContext collaborators, direct `handler.handle(scope, rawText)` calls (the router-leak rule applies — no `adapter.deliverDm(...)` here; the full chain belongs to TagModeRoundtripIT). `@BeforeEach` cleanup deletes test rows by a class-wide contact-id prefix the same way the M1-046 GrantAdminCommandHandlerTest / M1-044c BanCommandHandlerTest precedents do. Scenarios — one `@Test` per branch: `followTagDmInAllModeFlipsToExplicitAndSeedsSingleTag`, `followTagDmInExplicitModeAddsRowInPlace`, `followTagDmInExplicitModeIdempotentOnDuplicateAdd`, `followTagDmUnknownTagReturnsFuzzySuggestionError`, `followTagGroupScopeShortCircuitsToGroupAdminOnly`, `followTagIncrementsTagSubscriptionVersion`. The original `followTagGroupAdminFlipsModeForGroupScope` scenario is dropped: the frozen `CommandHandler.handle(ScopeRef, String)` SPI does not carry the inbound caller's contact id in group scope (`ScopeRef.Group` holds only the adapter-side group id), so the handler cannot consult `group_membership` to identify a group admin; v1 short-circuits ALL group calls to `error.follow_tag.group_admin_only` per the M1-036 AddSourceCommandHandler precedent. T2-F wires the actor seam and the group-admin proceed-path test lands then."
   - "`UnfollowTagCommandHandler` is a CDI bean implementing `CommandHandler` with `name() == \"unfollow-tag\"`. Argument shape: positional `<tag>` OR the `--all` flag (mutually exclusive — passing both returns `error.unfollow_tag.mutually_exclusive`). Permission gate is identical to FollowTagCommandHandler (DM = own scope; group = group-admin only). The handler branches on the argument shape: (A) `<tag>` form — validates the tag against vocabulary (same error path as /follow-tag), then in ONE transaction: (1) SELECT tag_mode FOR UPDATE; (2) if `tag_mode = 'ALL'` → flip to `EXPLICIT` AND seed `scope_tag` rows for **all currently subscribed-source `bootstrap_tags` for this scope MINUS the unfollowed tag** (`I want everything except X` per spec) — the seeding query joins `source_subscription` × `source` × `unnest(bootstrap_tags)` × `tag` filtered to the scope; (3) if `tag_mode = 'EXPLICIT'` → `DELETE FROM scope_tag WHERE scope_kind = ? AND scope_id = ? AND tag_id = ?`; if the post-delete row count for `(scope_kind, scope_id)` is 0 → flip `tag_mode` back to `ALL`; (4) increment `tag_subscription_version`; (5) return the appropriate success reply. (B) `--all` form — confirm-gated. Two-call shape: first call (no trailing ` confirm`) registers a pending confirm via `confirmStateService.remember(actor.id, scope, \"unfollow-tag-all\", ...)` and returns `reply.confirm.prompt.unfollow_tag_all` (interpolates timeout seconds + the current scope's row count to give the user a warning of what they are clearing). Confirm call (`/unfollow-tag --all confirm`) takes the pending via `takeMatching`; on empty Optional → `error.confirm.no_pending`; on non-empty → in ONE transaction: `DELETE FROM scope_tag WHERE scope_kind = ? AND scope_id = ?`, `UPDATE scope_preferences SET tag_mode = 'ALL', tag_subscription_version = tag_subscription_version + 1 WHERE scope_kind = ? AND scope_id = ?`, returns `reply.unfollow_tag_all.success` (the count of deleted rows)"
-  - "UnfollowTagCommandHandlerTest scenarios: `unfollowTagDmInAllModeFlipsToExplicitAndSeedsAllMinusOne` (seed three subscribed-source bootstrap_tags = {a,b,c}; unfollow b in ALL mode; assert tag_mode='EXPLICIT' AND scope_tag = {a,c}), `unfollowTagDmInExplicitModeRemovesRowInPlace`, `unfollowTagDmInExplicitModeRowCountToZeroFlipsBackToAll`, `unfollowTagDmUnknownTagReturnsFuzzySuggestionError`, `unfollowTagGroupNonAdminReturnsGroupAdminOnlyError`, `unfollowTagAllFirstCallReturnsPromptAndNoStateChange`, `unfollowTagAllConfirmWithinWindowDeletesAllRowsAndFlipsToAll`, `unfollowTagAllConfirmWithoutPendingReturnsNoPending`, `unfollowTagMutuallyExclusivePositionalAndAllFlagReturnsError`, `unfollowTagIncrementsTagSubscriptionVersionOnEveryMutation`"
+  - "UnfollowTagCommandHandlerTest is Shape B (Thin-SQL) per `docs/process/test-pyramid.md` §Shape B: `@QuarkusTest` against the default-profile DevServices Postgres image, `@Inject` for the handler and its DataSource / BundleLoader / InboundContext / ConfirmStateService collaborators, direct `handler.handle(scope, rawText)` calls (the router-leak rule applies — no `adapter.deliverDm(...)` here; the full chain belongs to TagModeRoundtripIT). `@BeforeEach` cleanup deletes test rows by a class-wide contact-id prefix the same way the M1-046 GrantAdminCommandHandlerTest / M1-044c BanCommandHandlerTest precedents do; an `@AfterEach` restores `confirmStateService.setClock(Clock.systemUTC())` per the BanCommandHandlerTest precedent. Scenarios: `unfollowTagDmInAllModeFlipsToExplicitAndSeedsAllMinusOne` (seed three subscribed-source bootstrap_tags = {a,b,c}; unfollow b in ALL mode; assert tag_mode='EXPLICIT' AND scope_tag = {a,c}), `unfollowTagDmInExplicitModeRemovesRowInPlace`, `unfollowTagDmInExplicitModeRowCountToZeroFlipsBackToAll`, `unfollowTagDmUnknownTagReturnsFuzzySuggestionError`, `unfollowTagGroupScopeShortCircuitsToGroupAdminOnly` (renamed from `unfollowTagGroupNonAdminReturnsGroupAdminOnlyError` for symmetry with the FollowTag rename; same v1 actor-seam reason — handler can't distinguish group-admin from non-admin and short-circuits all group calls), `unfollowTagAllFirstCallReturnsPromptAndNoStateChange`, `unfollowTagAllConfirmWithinWindowDeletesAllRowsAndFlipsToAll`, `unfollowTagAllConfirmWithoutPendingReturnsNoPending`, `unfollowTagMutuallyExclusivePositionalAndAllFlagReturnsError`, `unfollowTagIncrementsTagSubscriptionVersionOnEveryMutation`"
   - "TagModeRoundtripIT is a `@QuarkusTest`-shaped IT that exercises the ALL→EXPLICIT→ALL round-trip end-to-end via the InMemoryAdapter. Method `tagModeRoundtripAllExplicitAll` — seed an actor + a source-subscription whose source carries `bootstrap_tags = {ai, security, java}`; assert the scope starts in `tag_mode='ALL'`; deliver `/follow-tag ai` in DM; assert `tag_mode='EXPLICIT'` AND `scope_tag` contains exactly one row (ai); deliver `/follow-tag java`; assert `scope_tag` contains {ai, java} AND tag_mode unchanged; deliver `/unfollow-tag ai`; assert `scope_tag` contains {java}; deliver `/unfollow-tag java`; assert `scope_tag` is empty AND `tag_mode='ALL'`; assert `tag_subscription_version` has incremented exactly four times across the round-trip. Method `unfollowTagAllConfirmRoundtrip` — seed `scope_tag = {ai, security}` in EXPLICIT mode; deliver `/unfollow-tag --all`; assert prompt outbound + no state change; deliver `/unfollow-tag --all confirm`; assert success reply naming the deletion count AND `scope_tag` is empty AND `tag_mode='ALL'` AND `tag_subscription_version` incremented once for the bulk reset"
   - "Each handler consumes the M1-040 `InboundContext` request-scoped bean for the actor/scope lookup; contact-id-bearing exception messages are interpolated via `ContactIds.redact` per the M1-038 / M1-039 redaction precedent. The handlers write zero rows to `audit_log` — verified by the unit-test scenarios `followTagWritesNoAuditRow` and `unfollowTagAllWritesNoAuditRow` (each asserts the post-execution `SELECT COUNT(*) FROM audit_log WHERE user_id = ?` matches the pre-execution count)"
   - "`BundleKeys.java` adds the new constants: `ERROR_FOLLOW_TAG_UNKNOWN_TAG`, `ERROR_FOLLOW_TAG_GROUP_ADMIN_ONLY`, `REPLY_FOLLOW_TAG_SUCCESS_FROM_ALL`, `REPLY_FOLLOW_TAG_SUCCESS_IN_PLACE`, `ERROR_UNFOLLOW_TAG_UNKNOWN_TAG`, `ERROR_UNFOLLOW_TAG_GROUP_ADMIN_ONLY`, `ERROR_UNFOLLOW_TAG_MUTUALLY_EXCLUSIVE`, `REPLY_UNFOLLOW_TAG_SUCCESS_FROM_ALL`, `REPLY_UNFOLLOW_TAG_SUCCESS_IN_PLACE`, `REPLY_UNFOLLOW_TAG_FLIPS_BACK_TO_ALL`, `REPLY_CONFIRM_PROMPT_UNFOLLOW_TAG_ALL`, `REPLY_UNFOLLOW_TAG_ALL_SUCCESS`. `bundles/en.properties` adds the corresponding entries; the M1-035c `BundleLoaderTest` reflective check enforces alignment"
@@ -65,7 +66,33 @@ risk: medium
 round_cap: 2
 security_relevant: false
 migration_touch: false
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-05-24
+    verdict: REWORK
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 9
+      added: 2441
+      removed: 4
+  - round: 2
+    date: 2026-05-24
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 2481
+      removed: 12
 overrides: []
 aborted_attempts: []
 reopens:
@@ -74,7 +101,11 @@ reopens:
     prior_deferred_on: M1-057
     reason: M1-057 landed — blocker resolved
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-05-24
+  verdict: PASS
+  warnings: []
+  blockers: []
 escalations:
   - date: 2026-05-24
     reason: budget-breach
@@ -94,6 +125,48 @@ escalations:
       the same shape is the workflow's pattern signal; defer onto
       M1-057 (unseal PendingConfirm + extract variants) rather than
       patching M1-054 in isolation.
+  - date: 2026-05-24
+    reason: premise-fail
+    reviewer_verdict_excerpt: |
+      N/A — escalation surfaced by developer during /m1-tick start M1-054
+      (post-clarity-PASS, pre-implementation). Acceptance items 2 + 4
+      explicitly require the handler tests to be "plain JUnit per the
+      M1-049 test pyramid (no `@QuarkusTest`)". This conflicts with
+      `docs/process/test-pyramid.md` as amended by M1-056 (commit
+      48749), which codifies a two-shape selection rule:
+        - Shape A (plain JUnit, no Quarkus boot) when handler has ≥2
+          non-DB collaborators with rich orchestration logic.
+        - Shape B (@QuarkusTest, real DevServices Postgres, direct
+          handler.handle()) when handler has ≤1 non-DB collaborator
+          AND ≥2 real-DB-dependent statements (FOR UPDATE locking,
+          PK/FK/CHECK constraints, triggers, INSERT...SELECT joins).
+      FollowTagCommandHandler + UnfollowTagCommandHandler fit Shape B
+      unambiguously: 0 rich non-DB collaborators (BundleLoader is
+      config-style; InboundContext is a request-scoped string holder;
+      ConfirmStateService is a thin in-memory state holder), and 5+
+      real-DB-dependent statements per state-machine transition
+      (SELECT FOR UPDATE on scope_preferences; INSERT on scope_tag PK
+      + FK to tag(id); UPDATE on tag_mode CHECK; INSERT...SELECT from
+      4-way join over source_subscription × source ×
+      unnest(bootstrap_tags) × tag; DELETE with row-count semantics
+      for the EXPLICIT→ALL flip-back branch). Test-pyramid §Shape B
+      explicitly warns that stubbing JDBC for Thin-SQL handlers
+      "reduces tests to whitebox tautologies (asserting that the
+      handler issued the exact SQL string the test stubbed)" — and
+      hand-rolling proxy stubs for 6 distinct query shapes would also
+      violate feedback_avoid_test_inner_classes (>3 inner classes per
+      test file). All six Shape-B canonical examples named in the doc
+      (GrantAdmin / Revoke / Ban / Unban / Invite / Vouch) use
+      @QuarkusTest for exactly this combination.
+      Proposed refinement: acceptance items 2 + 4 reword "plain JUnit
+      per the M1-049 test pyramid (no `@QuarkusTest`)" → "Shape B per
+      docs/process/test-pyramid.md §Shape B (Thin-SQL): @QuarkusTest,
+      real DevServices Postgres, direct handler.handle() calls (the
+      router-leak rule still applies — no adapter.deliverDm here; the
+      TagModeRoundtripIT handles the full chain)". Test method names
+      stay; scenarios stay; files_scope unchanged; files_budget
+      unchanged. Audit-zero assertion (item 5) becomes cleaner — real
+      SELECT COUNT(*) against the real audit_log partitioned table.
 ---
 
 # M1-054: Per-scope tag preferences — /follow-tag + /unfollow-tag + tag-mode state machine
@@ -282,3 +355,26 @@ Highlights:
 ```bash
 python3 scripts/lint-ticket.py docs/plan/m1/tickets/M1-054-per-scope-tag-preferences.md
 ```
+
+## Round 1 rework
+
+Reviewer verdict (round 1, 2026-05-24): REWORK. All checks otherwise PASS
+(scope drift, test integrity, out-of-scope, negative space, acceptance,
+spec conformance, parameter contracts). Two surgical-changes cleanups
+remain — fix only the named items, re-run `mvn -B clean verify`, then
+`/m1-tick review M1-054`.
+
+1. Remove the unused import
+   `import static org.junit.jupiter.api.Assertions.assertFalse;` from
+   `infochat-provider/src/test/java/app/zcat/infochat/provider/command/FollowTagCommandHandlerTest.java`.
+   No `assertFalse(...)` call appears in that class — only `assertEquals`
+   and `assertTrue` are used. Per
+   `docs/process/engineering-rules-verbatim.md` §1 ("Clean up
+   imports/variables that YOUR changes made unused").
+
+2. Remove the unused import
+   `import static org.junit.jupiter.api.Assertions.assertNotEquals;`
+   from
+   `infochat-provider/src/test/java/app/zcat/infochat/provider/command/UnfollowTagCommandHandlerTest.java`.
+   No `assertNotEquals(...)` call appears in that class. Per
+   `docs/process/engineering-rules-verbatim.md` §1.

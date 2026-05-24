@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 67 |
+| done | 68 |
 | deferred | 6 |
 | **total** | **78** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-054 — Per-scope tag preferences — /follow-tag + /unfollow-tag + tag-mode state machine (complexity: medium, risk: medium)
 - M1-058 — ThrottledAdminNotifier (T2-G infrastructure) + admin_notification_state table (complexity: medium, risk: low)
 
 ---
@@ -66,13 +65,13 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-057 | Unseal PendingConfirm + extract variants | 2026-05-24 | round 1 APPROVE |
 | M1-056 | Amend test-pyramid — restructure §Handler unit tests for two-shape reality | 2026-05-24 | round 1 APPROVE |
 | M1-055a | bootstrap-assets.json parser + asset_config table + default-row consistency check + Collector @Startup loader | 2026-05-24 | round 1 APPROVE |
+| M1-054 | Per-scope tag preferences — /follow-tag + /unfollow-tag + tag-mode state machine | 2026-05-24 | round 2 APPROVE |
 | M1-053 | Source-management admin commands — list / remove / enable / disable | 2026-05-24 | round 1 OVERRIDE-APPROVE |
 | M1-052 | Saved-post library — /save + /saved + /unsave + saved_post snapshot | 2026-05-24 | round 1 APPROVE |
 | M1-046 | /grant-admin + /revoke-admin (per-adapter scope, global last-admin counter) | 2026-05-24 | round 1 APPROVE |
 | M1-045 | Slow-start probation tier + restricted command set (step 5) + /vouch | 2026-05-24 | round 3 APPROVE |
 | M1-051 | ConfirmStateService — pre-dispatch confirm gate for /ban + /invite create --open + /invite revoke | 2026-05-23 | round 2 APPROVE |
 | M1-044e | InboundRouter splice red-team fixes (DM-gate pre-dispatch, rate-cap precedence, lookupUser redaction, non-UUID counter) | 2026-05-23 | round 1 APPROVE |
-| M1-044 | Invite-code intake umbrella — invite/ban/unban DM-gate roundtrip IT | 2026-05-23 | round 1 APPROVE |
 
 ---
 
@@ -199,7 +198,7 @@ M1-050 (done)
   └── M1-047 (done) [see above]
 M1-051 (done)
   ├── M1-053 (done)
-  └── M1-054 (pending) ← runnable
+  └── M1-054 (done)
 M1-052 (done)
 M1-055a (done)
   ├── M1-055 (pending)
@@ -210,7 +209,7 @@ M1-055a (done)
   └── M1-055c (pending) [see above]
 M1-056 (done)
 M1-057 (done)
-  └── M1-054 (pending) [see above]
+  └── M1-054 (done) [see above]
 M1-058 (pending) ← runnable
   └── M1-055b (pending) [see above]
 ```
