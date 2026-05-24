@@ -1,9 +1,52 @@
 ---
 id: M1-055c
 title: /zcash + /monero handlers + reply renderer + AssetCommandFamilyOracle impl swap + /help context-awareness
-status: pending
+status: done
 created: 2026-05-24
 last_updated: 2026-05-24
+reviews:
+  - round: 1
+    date: 2026-05-24
+    verdict: REWORK
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PARTIAL
+    diff_stats:
+      files: 15
+      added: 1507
+      removed: 56
+  - round: 2
+    date: 2026-05-24
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 15
+      added: 1533
+      removed: 56
+redteam_findings: []
+redteam_audits:
+  - date: 2026-05-24
+    verdict: CLEAN
+    base: 38e8636
+    head: abf0a8b
+    verdict_file: docs/plan/m1/redteam/M1-055c-2026-05-24.md
+    out_of_model_count: 0
+    note: |
+      No findings. Read-only DB queries, parameterized SQL, input validated
+      against operator-configured sets, full existing auth pipeline preserved.
+clarity_check:
+  date: 2026-05-24
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by:
   - M1-055a
   - M1-055b
@@ -27,6 +70,7 @@ risk: high
 round_cap: 3
 security_relevant: true
 migration_touch: false
+outline_file: target/m1-tick-outline-M1-055c.md
 out_of_scope:
   - any change to the spec — §Asset commands + §Slow-start tier + §Capability flags + design §10.5 reply layout are complete on main HEAD; this ticket implements them
   - any change to M1-055a's BootstrapAssetsParser / BootstrapAssetsEntry / BootstrapAssetsLoader / V14__asset_config.sql — that commit is FROZEN; this ticket consumes `asset_config` rows as input

@@ -653,6 +653,56 @@ public final class BundleKeys {
      */
     public static final String ERROR_LANG_GROUP_ADMIN_NOT_IN_V1 = "error.lang.group_admin_not_in_v1";
 
+    // ----- Asset command reply layout (M1-055c) ----------------------------
+    // Per docs/spec/commands.md §Asset commands + docs/design/10-asset-commands.md
+    // §10.5 Reply layout. Plain text only — bare URLs per D30, no markdown
+    // link syntax, no supportsCodeFormatting/supportsMarkdownLinks branch.
+    // The renderer silently omits absent snapshot fields (never invents zeros).
+
+    /** Header line: {@code <DisplayName> (<source>)} plus optional {@code  ⚠ stale} marker. */
+    public static final String REPLY_ASSET_HEADER = "reply.asset.header";
+
+    /** Price line: quote-currency price. Token {@code {0}} = formatted price. */
+    public static final String REPLY_ASSET_PRICE_LINE = "reply.asset.price_line";
+
+    /** 1h delta line (coingecko only). Token {@code {0}} = signed percentage. */
+    public static final String REPLY_ASSET_DELTA_1H = "reply.asset.delta_1h";
+
+    /** 24h delta line with spread (coingecko). Tokens: {@code {0}} = signed pct, {@code {1}} = high, {@code {2}} = low. */
+    public static final String REPLY_ASSET_DELTA_24H = "reply.asset.delta_24h";
+
+    /** 24h spread line (exchange sub-verbs where no delta is available). Tokens: {@code {0}} = high, {@code {1}} = low. */
+    public static final String REPLY_ASSET_SPREAD = "reply.asset.spread";
+
+    /** Capture timestamp + cache age line. Tokens: {@code {0}} = UTC time, {@code {1}} = cache age in seconds. */
+    public static final String REPLY_ASSET_CAPTURE_LINE = "reply.asset.capture_line";
+
+    /** Stale-data warning marker appended to the header when {@code now - captured_at > 2 * refresh_interval}. */
+    public static final String REPLY_ASSET_STALE_MARKER = "reply.asset.stale_marker";
+
+    // ----- Asset command friendly errors (M1-055c) ---------------------------
+    // Per docs/spec/commands.md §Asset commands + docs/design/10-asset-commands.md
+    // §10.8 Friendly errors. Mirrors the tag-argument error shape per
+    // docs/spec/commands.md §Friendly errors.
+
+    /** Bare {@code /<asset>} when no {@code is_default = true} row exists. */
+    public static final String ERROR_ASSET_NOT_CONFIGURED = "error.asset.not_configured";
+
+    /** Bare {@code /<asset>} when the default-flagged row has {@code enabled = false}. Token {@code {0}} = comma-joined enabled sub-verbs. */
+    public static final String ERROR_ASSET_DEFAULT_DISABLED = "error.asset.default_disabled";
+
+    /** Unknown sub-verb with fuzzy suggestion. Tokens: {@code {0}} = supplied, {@code {1}} = best match, {@code {2}} = asset name, {@code {3}} = comma-joined available. */
+    public static final String ERROR_ASSET_UNKNOWN_SUB_VERB = "error.asset.unknown_sub_verb";
+
+    /** Sub-verb exists globally but not enabled for this asset. Tokens: {@code {0}} = sub-verb, {@code {1}} = asset name, {@code {2}} = comma-joined available. */
+    public static final String ERROR_ASSET_SUB_VERB_NOT_ENABLED = "error.asset.sub_verb_not_enabled";
+
+    /** Unsupported {@code --vs} currency with fuzzy suggestion. Tokens: {@code {0}} = supplied, {@code {1}} = best match, {@code {2}} = asset name, {@code {3}} = comma-joined available. */
+    public static final String ERROR_ASSET_UNSUPPORTED_QUOTE_CURRENCY = "error.asset.unsupported_quote_currency";
+
+    /** No snapshot row at all for the requested {@code (asset, sub-verb, vs)} triple. */
+    public static final String ERROR_ASSET_NO_DATA = "error.asset.no_data";
+
     private BundleKeys() {
         throw new AssertionError("BundleKeys is a constant holder and must not be instantiated");
     }
