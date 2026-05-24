@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 11 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 70 |
 | deferred | 6 |
-| **total** | **80** |
+| **total** | **87** |
 
 ---
 
@@ -26,6 +26,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-055b — Asset fetchers (per public-endpoint host) + price_snapshot store + per-host tick cadence + NOTIFY emit (complexity: high, risk: high)
 - M1-059 — TranslationProvider impl — LlmTranslationProvider + 24h translation cache + router language widening + SummaryCommandHandler pipeline splice (complexity: high, risk: high)
+- M1-061 — chat_session + chat_memory + chat_message + summary_anchor DDL (complexity: medium, risk: medium)
 
 ---
 
@@ -44,6 +45,12 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
 - M1-055 — blocked_by: M1-055a (done), M1-055b (pending), M1-055c (pending)
 - M1-055c — blocked_by: M1-055a (done), M1-055b (pending)
+- M1-062 — blocked_by: M1-061 (pending)
+- M1-063 — blocked_by: M1-062 (pending)
+- M1-064 — blocked_by: M1-063 (pending)
+- M1-065 — blocked_by: M1-063 (pending)
+- M1-066 — blocked_by: M1-061 (pending)
+- M1-067 — blocked_by: M1-061 (pending)
 
 ---
 
@@ -214,4 +221,11 @@ M1-058 (done)
   └── M1-055b (pending) [see above]
 M1-059 (pending) ← runnable
 M1-060 (done)
+M1-061 (pending) ← runnable
+  ├── M1-062 (pending)
+  │     └── M1-063 (pending)
+  │           ├── M1-064 (pending)
+  │           └── M1-065 (pending)
+  ├── M1-066 (pending)
+  └── M1-067 (pending)
 ```
