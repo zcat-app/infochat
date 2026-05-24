@@ -7,7 +7,7 @@ last_updated: 2026-05-24
 blocked_by:
   - M1-055a
   - M1-055b
-files_budget: 12
+files_budget: 13
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/asset/AssetCommandRouter.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/asset/AssetHandler.java
@@ -21,6 +21,7 @@ files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/asset/AssetHandlerTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/asset/AssetReplyRendererTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/asset/AssetCommandFamilyOracleTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/asset/AssetHandlerIT.java
 complexity: high
 risk: high
 round_cap: 3
@@ -66,7 +67,7 @@ acceptance:
   - "infochat-provider/src/main/resources/bundles/en.properties gains one entry per BundleKeys.java constant added. The text values are NOT empty strings; each carries the user-facing reply or friendly-error wording per design §10.5 / §10.8. The BundleLoaderTest reflection check (M1-035c precedent) MUST stay green — every constant on BundleKeys.java has a corresponding entry in en.properties. Verify: `grep -cE '^reply\\.asset\\.|^error\\.asset\\.' en.properties` returns ≥12"
   - "AssetCommandFamilyOracleTest is plain JUnit per the M1-049 test pyramid (no `@QuarkusTest`); it exercises the swapped `isAssetCommand` method against a hand-constructed AssetRegistry (or DataSource) seeded with known enabled / disabled / unknown assets. The test exercises both signature-stability (same method shape as before the swap) and behavior (registry-driven verdicts). Verify: AssetCommandFamilyOracleTest does NOT carry `@QuarkusTest` — `grep -E '@QuarkusTest' AssetCommandFamilyOracleTest.java` returns ZERO matches"
   - "CommandPermissions.java is NOT modified by this ticket — the M1-045 consumer of `AssetCommandFamilyOracle.isAssetCommand(slashCommand)` continues to compile and pass its existing tests (CommandPermissionsTest). After this ticket's swap a probation user invoking `/zcash` is allowed because `commandPermissions.isAllowedDuringProbation(\"/zcash <sub-verb>\")` now returns true (the asset-command family carve-out fires via the swapped oracle). Verify: `git diff main -- infochat-provider/src/main/java/app/zcat/infochat/provider/command/CommandPermissions.java` shows ZERO changes (the verification is reviewer-side; the acceptance pins the spec-load-bearing invariant by reference to the FROZEN file)"
-  - "An AssetHandlerIT (Provider-internal IT, separate from the umbrella's cross-Collector IT) lives at infochat-provider/src/test/java/app/zcat/infochat/provider/command/asset/AssetHandlerIT.java exercises bare `/zcash` → seeded snapshot row → rendered reply path via InMemoryAdapter. The IT is `@QuarkusTest`, `*IT`-suffixed for failsafe, and seeds the `price_snapshot` row directly via JDBC (no fetcher tick — that's the umbrella's IT). Adds AssetHandlerIT.java to files_scope at /m1-tick start if the author concludes the existing AssetHandlerTest's plain-JUnit shape covers the seam — this acceptance item is OPTIONAL and can be satisfied by a single additional file under the existing files_budget. NOTE: if added at start time, declare it in the test_plan.adds list during the refinement round; this is the one shape decision the brief leaves to the implementing author"
+  - "infochat-provider/src/test/java/app/zcat/infochat/provider/command/asset/AssetHandlerIT.java exists as a Provider-internal IT (separate from the umbrella's cross-Collector IT). It is `@QuarkusTest`, `*IT`-suffixed for failsafe, and exercises the bare `/zcash` → seeded `price_snapshot` row → rendered reply path via the in-memory adapter (test-time deployment shape per `docs/spec/deployment.md` §Deployment scenarios; no SimpleX or Signal in IT). The IT seeds the `price_snapshot` row directly via JDBC (no fetcher tick — that's the umbrella's IT). Verify: `grep -E '@QuarkusTest' AssetHandlerIT.java` returns ≥1 match AND the file name ends in `IT.java` so the failsafe plugin picks it up"
   - "mvn -B clean verify from the repo root exits 0; every prior test continues to pass: M1-045's CommandPermissionsTest (asserting probation behavior), M1-035c's HelpCommandHandlerTest (whose assertion shape extends but does not regress), M1-035c's BundleLoaderTest (reflection check passes with the new constants), every M1-055a + M1-055b test, every M1-008..M1-054 test currently green on main"
 test_plan:
   adds:
@@ -78,6 +79,7 @@ test_plan:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/command/asset/AssetHandlerTest.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/command/asset/AssetReplyRendererTest.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/command/asset/AssetCommandFamilyOracleTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/command/asset/AssetHandlerIT.java
   modifies:
     - infochat-provider/src/main/java/app/zcat/infochat/provider/command/AssetCommandFamilyOracle.java
     - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/HelpCommandHandler.java
@@ -94,6 +96,7 @@ spec_refs:
   - docs/spec/security.md §DB roles
   - docs/spec/security.md §Slow-start tier
   - docs/spec/messaging.md §Capability flags (minimum set)
+  - docs/spec/deployment.md §Deployment scenarios
 decision_refs:
   - D30
   - D34
@@ -242,13 +245,6 @@ M1-055b's commits.
   `refresh_interval` lookup reads the same
   `@ConfigProperty` keys M1-055b's fetcher writes
   (`infochat.assets.refresh.<host>`).
-- **AssetHandlerIT shape decision.** The acceptance item
-  for the Provider-internal IT (separate from the
-  umbrella's cross-Collector IT) is optional — the author
-  may add it at /m1-tick start if `AssetHandlerTest`'s
-  plain-JUnit shape leaves a gap, or rely on the umbrella's
-  IT plus the plain JUnit tests. If adding, declare the
-  file in test_plan.adds during the refinement round.
 - **Audit-row policy.** Asset reads + handler dispatches
   are NOT audit-logged per spec — the audit-log table is
   for privileged user actions and operator boot events,
