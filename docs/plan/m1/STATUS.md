@@ -26,7 +26,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-054 — Per-scope tag preferences — /follow-tag + /unfollow-tag + tag-mode state machine (complexity: medium, risk: medium)
 - M1-055a — bootstrap-assets.json parser + asset_config table + default-row consistency check + Collector @Startup loader (complexity: high, risk: high)
-- M1-056 — Amend test-pyramid — carve out thin-SQL handler exception (complexity: low, risk: low)
+- M1-056 — Amend test-pyramid — restructure §Handler unit tests for two-shape reality (complexity: low, risk: low)
 - M1-057 — Unseal PendingConfirm + extract variants (complexity: medium, risk: medium)
 
 ---
