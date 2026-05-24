@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 5 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 69 |
 | deferred | 6 |
-| **total** | **78** |
+| **total** | **80** |
 
 ---
 
@@ -25,6 +25,8 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-055b — Asset fetchers (per public-endpoint host) + price_snapshot store + per-host tick cadence + NOTIFY emit (complexity: high, risk: high)
+- M1-059 — TranslationProvider impl — LlmTranslationProvider + 24h translation cache + router language widening + SummaryCommandHandler pipeline splice (complexity: high, risk: high)
+- M1-060 — /lang <code> command + cs.properties bundle + BundleLoader per-scope language lookup with en fallback (complexity: medium, risk: medium)
 
 ---
 
@@ -211,4 +213,6 @@ M1-057 (done)
   └── M1-054 (done) [see above]
 M1-058 (done)
   └── M1-055b (pending) [see above]
+M1-059 (pending) ← runnable
+M1-060 (pending) ← runnable
 ```
