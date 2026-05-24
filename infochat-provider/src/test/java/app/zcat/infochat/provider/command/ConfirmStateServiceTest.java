@@ -39,8 +39,8 @@ class ConfirmStateServiceTest {
         ConfirmStateService service = new ConfirmStateService(fixedAt(T0), TIMEOUT);
         UUID actor = UUID.randomUUID();
         ScopeRef scope = new ScopeRef.Dm("actor-contact");
-        ConfirmStateService.PendingConfirm.Ban payload =
-                new ConfirmStateService.PendingConfirm.Ban("target-contact", "spam");
+        BanConfirm payload =
+                new BanConfirm("target-contact", "spam");
 
         service.remember(actor, scope, payload);
 
@@ -63,8 +63,8 @@ class ConfirmStateServiceTest {
         ConfirmStateService service = new ConfirmStateService(fixedAt(T0), TIMEOUT);
         UUID actor = UUID.randomUUID();
         ScopeRef scope = new ScopeRef.Dm("actor-contact");
-        ConfirmStateService.PendingConfirm.Ban payload =
-                new ConfirmStateService.PendingConfirm.Ban("target-contact", null);
+        BanConfirm payload =
+                new BanConfirm("target-contact", null);
 
         service.remember(actor, scope, payload);
 
@@ -93,7 +93,7 @@ class ConfirmStateServiceTest {
         UUID actor = UUID.randomUUID();
         ScopeRef scope = new ScopeRef.Dm("actor-contact");
         service.remember(actor, scope,
-                new ConfirmStateService.PendingConfirm.Ban("target-contact", "spam"));
+                new BanConfirm("target-contact", "spam"));
 
         // Advance fake clock past the deadline (deadline = T0 + 60s; pick T0 + 61s).
         service.setClock(fixedAt(T0.plus(TIMEOUT).plusSeconds(1)));
@@ -115,8 +115,8 @@ class ConfirmStateServiceTest {
         ConfirmStateService service = new ConfirmStateService(fixedAt(T0), TIMEOUT);
         UUID actor = UUID.randomUUID();
         ScopeRef scope = new ScopeRef.Dm("actor-contact");
-        ConfirmStateService.PendingConfirm.InviteRevoke payload =
-                new ConfirmStateService.PendingConfirm.InviteRevoke(UUID.randomUUID());
+        InviteRevokeConfirm payload =
+                new InviteRevokeConfirm(UUID.randomUUID());
 
         service.remember(actor, scope, payload);
 
@@ -137,10 +137,10 @@ class ConfirmStateServiceTest {
         UUID actor = UUID.randomUUID();
         ScopeRef scope = new ScopeRef.Dm("actor-contact");
 
-        ConfirmStateService.PendingConfirm.Ban first =
-                new ConfirmStateService.PendingConfirm.Ban("first-target", null);
-        ConfirmStateService.PendingConfirm.InviteCreateOpen second =
-                new ConfirmStateService.PendingConfirm.InviteCreateOpen("inmemory");
+        BanConfirm first =
+                new BanConfirm("first-target", null);
+        InviteCreateOpenConfirm second =
+                new InviteCreateOpenConfirm("inmemory");
 
         service.remember(actor, scope, first);
         service.remember(actor, scope, second);
@@ -172,10 +172,10 @@ class ConfirmStateServiceTest {
         // actor id alone is sufficient to isolate the entries; per-scope
         // isolation is verified inline by the ScopeRef record equality.
 
-        ConfirmStateService.PendingConfirm.Ban payloadA =
-                new ConfirmStateService.PendingConfirm.Ban("target-a", null);
-        ConfirmStateService.PendingConfirm.Ban payloadB =
-                new ConfirmStateService.PendingConfirm.Ban("target-b", null);
+        BanConfirm payloadA =
+                new BanConfirm("target-a", null);
+        BanConfirm payloadB =
+                new BanConfirm("target-b", null);
         service.remember(actorA, scope, payloadA);
         service.remember(actorB, scope, payloadB);
 

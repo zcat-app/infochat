@@ -218,8 +218,7 @@ public class InviteCommandHandler implements CommandHandler {
             if (taken.isEmpty()) {
                 return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONFIRM_NO_PENDING));
             }
-            ConfirmStateService.PendingConfirm.InviteCreateOpen pending =
-                    (ConfirmStateService.PendingConfirm.InviteCreateOpen) taken.get();
+            InviteCreateOpenConfirm pending = (InviteCreateOpenConfirm) taken.get();
             return createOpen(scope, actor, inboundAdapter, pending.targetAdapter());
         }
 
@@ -269,7 +268,7 @@ public class InviteCommandHandler implements CommandHandler {
             throw new RuntimeException("Failed to write INVITE_CREATE_INTENT audit row", e);
         }
         confirmStateService.remember(actor.id, scope,
-                new ConfirmStateService.PendingConfirm.InviteCreateOpen(targetAdapter));
+                new InviteCreateOpenConfirm(targetAdapter));
         String prompt = MessageFormat.format(
                 bundleLoader.get(BundleKeys.REPLY_CONFIRM_PROMPT_INVITE_CREATE_OPEN),
                 Long.toString(confirmStateService.timeoutSeconds()),
@@ -506,8 +505,7 @@ public class InviteCommandHandler implements CommandHandler {
             if (taken.isEmpty()) {
                 return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONFIRM_NO_PENDING));
             }
-            ConfirmStateService.PendingConfirm.InviteRevoke pending =
-                    (ConfirmStateService.PendingConfirm.InviteRevoke) taken.get();
+            InviteRevokeConfirm pending = (InviteRevokeConfirm) taken.get();
             return executeRevoke(scope, actor, inboundAdapter, pending.code());
         }
 
@@ -544,7 +542,7 @@ public class InviteCommandHandler implements CommandHandler {
             throw new RuntimeException("Failed to write INVITE_REVOKE_INTENT audit row", e);
         }
         confirmStateService.remember(actor.id, scope,
-                new ConfirmStateService.PendingConfirm.InviteRevoke(code));
+                new InviteRevokeConfirm(code));
         String prompt = MessageFormat.format(
                 bundleLoader.get(BundleKeys.REPLY_CONFIRM_PROMPT_INVITE_REVOKE),
                 Long.toString(confirmStateService.timeoutSeconds()),

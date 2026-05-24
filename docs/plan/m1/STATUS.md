@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 63 |
+| done | 64 |
 | deferred | 9 |
 | **total** | **77** |
 
@@ -25,7 +25,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-055a — bootstrap-assets.json parser + asset_config table + default-row consistency check + Collector @Startup loader (complexity: high, risk: high)
-- M1-057 — Unseal PendingConfirm + extract variants (complexity: medium, risk: medium)
 
 ---
 
@@ -63,6 +62,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-057 | Unseal PendingConfirm + extract variants | 2026-05-24 | round 1 APPROVE |
 | M1-056 | Amend test-pyramid — restructure §Handler unit tests for two-shape reality | 2026-05-24 | round 1 APPROVE |
 | M1-046 | /grant-admin + /revoke-admin (per-adapter scope, global last-admin counter) | 2026-05-24 | round 1 APPROVE |
 | M1-045 | Slow-start probation tier + restricted command set (step 5) + /vouch | 2026-05-24 | round 3 APPROVE |
@@ -72,7 +72,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-041 | Audit-log writer + RedactionHook + LlmOutputSanitizer audit row | 2026-05-23 | round 2 APPROVE |
 | M1-049 | Process fix D: test pyramid — handler/router/IT decoupling | 2026-05-22 | round 1 APPROVE |
 | M1-047 | Process-fix umbrella: stays-green + pyramid + contracts | 2026-05-22 | round 1 APPROVE |
-| M1-044d | Contact-id redaction + breach-audit ordering (M1-044a fixes) | 2026-05-22 | round 1 APPROVE |
 
 ---
 
@@ -216,7 +215,7 @@ M1-055a (pending) ← runnable
   └── M1-055c (pending) [see above]
 M1-056 (done)
   └── M1-052 (deferred)
-M1-057 (pending) ← runnable
+M1-057 (done)
   ├── M1-053 (deferred) [see above]
   └── M1-054 (deferred) [see above]
 ```

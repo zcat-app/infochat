@@ -196,32 +196,36 @@ public class ConfirmStateService {
     private record Stored(PendingConfirm pending, Instant deadline) {}
 
     /**
-     * Typed pending-confirm payload. Sealed because the confirmable-command
-     * catalogue (design 03-commands.md §Confirmation for destructive
-     * commands) is closed — adding a new permit ships with the matching
-     * handler-side remember/takeMatching wiring in the same ticket.
+     * Typed pending-confirm payload. Open-extension contract: each
+     * confirmable command provides its own top-level record implementing
+     * this interface, located alongside its command handler. The
+     * confirmable-command catalogue is still a design-doc invariant
+     * enumerated in {@code docs/design/03-commands.md} §Confirmation
+     * for destructive commands; this interface no longer mechanically
+     * enforces the closure via a {@code sealed} / {@code permits}
+     * clause, because every new variant ships with the matching
+     * handler-side {@code remember} / {@code takeMatching} wiring in
+     * the same ticket — the spec coupling lives in the design doc, not
+     * in this file's permits list.
      *
-     * <p>Two distinct discriminators:</p>
+     * <p>Each implementing record MUST satisfy two contracts:</p>
      * <ul>
-     *   <li>{@link #commandName()} — colon-namespaced key for
-     *       {@link ConfirmStateService#takeMatching}. Disambiguates
-     *       commands that share a dispatch-level surface name (e.g.
-     *       {@code "invite:create:open"} vs {@code "invite:revoke"})
-     *       but route through the same handler. The router's step 4.5
-     *       sweep does NOT consume this.</li>
-     *   <li>{@link #sweepPrefix()} — the slash-stripped user-visible
-     *       prefix the router's step 4.5 sweep matches against to
-     *       recognize the confirm-shape body. The canonical confirm
+     *   <li>{@link #commandName()} MUST equal the {@code takeMatching}
+     *       key the matching handler passes — and MUST be unique across
+     *       the catalogue (a colon-namespaced form is used where one
+     *       handler exposes multiple confirmable subcommands, e.g.
+     *       {@code "invite:create:open"} vs {@code "invite:revoke"}).
+     *       The router's step 4.5 sweep does NOT consume this.</li>
+     *   <li>{@link #sweepPrefix()} MUST equal the slash-stripped user-
+     *       visible prefix the router's step 4.5 sweep matches against
+     *       to recognize the confirm-shape body. The canonical confirm
      *       form is {@code "/" + sweepPrefix() + " confirm"}; the
      *       "args retyped" relaxation is any body starting with
      *       {@code "/" + sweepPrefix() + " "} that ends in
      *       {@code " confirm"}.</li>
      * </ul>
      */
-    public sealed interface PendingConfirm
-            permits PendingConfirm.Ban,
-                    PendingConfirm.InviteCreateOpen,
-                    PendingConfirm.InviteRevoke {
+    public interface PendingConfirm {
 
         /** Colon-namespaced takeMatching key (see interface javadoc). */
         String commandName();
@@ -231,23 +235,5 @@ public class ConfirmStateService {
          * sweep matches against to recognize the confirm-shape body.
          */
         String sweepPrefix();
-
-        /** Pending {@code /ban <contact> [--reason ...]} payload. */
-        record Ban(String targetContactId, String reason) implements PendingConfirm {
-            @Override public String commandName() { return "ban"; }
-            @Override public String sweepPrefix() { return "ban"; }
-        }
-
-        /** Pending {@code /invite create --adapter <name> --open} payload. */
-        record InviteCreateOpen(String targetAdapter) implements PendingConfirm {
-            @Override public String commandName() { return "invite:create:open"; }
-            @Override public String sweepPrefix() { return "invite create --open"; }
-        }
-
-        /** Pending {@code /invite revoke <code>} payload. */
-        record InviteRevoke(java.util.UUID code) implements PendingConfirm {
-            @Override public String commandName() { return "invite:revoke"; }
-            @Override public String sweepPrefix() { return "invite revoke"; }
-        }
     }
 }

@@ -9,6 +9,7 @@ import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.command.BanConfirm;
 import app.zcat.infochat.provider.command.ConfirmStateService;
 import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.util.TypeLiteral;
@@ -55,7 +56,7 @@ class InboundRouterConfirmCancelTest {
         // Pending /ban exists; user sends /help (any other input) →
         // sweep takeAny + cancellation reply sent BEFORE dispatch.
         FakeConfirmStateService confirmState = new FakeConfirmStateService(
-                Optional.of(new ConfirmStateService.PendingConfirm.Ban("target-1", null)));
+                Optional.of(new BanConfirm("target-1", null)));
         CapturingAdapter capture = new CapturingAdapter();
         InboundRouter router = newRouter(confirmState, capture);
 
@@ -84,7 +85,7 @@ class InboundRouterConfirmCancelTest {
         // confirm-shape) → sweep does NOT takeAny, no cancellation
         // reply, dispatch proceeds.
         FakeConfirmStateService confirmState = new FakeConfirmStateService(
-                Optional.of(new ConfirmStateService.PendingConfirm.Ban("target-2", "spam")));
+                Optional.of(new BanConfirm("target-2", "spam")));
         CapturingAdapter capture = new CapturingAdapter();
         RecordingCommandHandler banHandler = new RecordingCommandHandler("ban", "ban-dispatched");
         InboundRouter router = newRouter(confirmState, capture);

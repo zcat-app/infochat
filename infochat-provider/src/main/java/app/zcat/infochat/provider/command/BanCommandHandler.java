@@ -159,8 +159,7 @@ public class BanCommandHandler implements CommandHandler {
             if (taken.isEmpty()) {
                 return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONFIRM_NO_PENDING));
             }
-            ConfirmStateService.PendingConfirm.Ban pendingBan =
-                    (ConfirmStateService.PendingConfirm.Ban) taken.get();
+            BanConfirm pendingBan = (BanConfirm) taken.get();
             return executeBan(scope, actor, adapter,
                     pendingBan.targetContactId(), pendingBan.reason());
         }
@@ -214,7 +213,7 @@ public class BanCommandHandler implements CommandHandler {
             throw new RuntimeException("Failed to write BAN_INTENT audit row", e);
         }
         confirmStateService.remember(actor.id, scope,
-                new ConfirmStateService.PendingConfirm.Ban(targetContactId, args.reason));
+                new BanConfirm(targetContactId, args.reason));
         String prompt = MessageFormat.format(
                 bundleLoader.get(BundleKeys.REPLY_CONFIRM_PROMPT_BAN),
                 Long.toString(confirmStateService.timeoutSeconds()),

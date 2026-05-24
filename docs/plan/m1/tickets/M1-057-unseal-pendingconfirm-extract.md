@@ -1,11 +1,26 @@
 ---
 id: M1-057
 title: Unseal PendingConfirm + extract variants
-status: pending
+status: done
 created: 2026-05-24
 last_updated: 2026-05-24
+escalations:
+  - date: 2026-05-24
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A — escalation surfaced by developer during round-1 implementation,
+      before any reviewer pass. ConfirmStateServiceTest.java (M1-051's plain-
+      JUnit service-tier test) holds 14 references to the soon-to-be-removed
+      nested types (ConfirmStateService.PendingConfirm.{Ban, InviteCreateOpen,
+      InviteRevoke}) on lines 42-43, 66-67, 96, 118-119, 140-143, 175-178.
+      After acceptance item 5 removes the nested records, the test cannot
+      compile until those references swap to the new top-level names. The
+      mechanical swap is authorized by acceptance item 11's verification
+      clause and by test_plan.preserves line 63, but the file is absent from
+      files_scope (which lists exactly 9 paths, matching files_budget: 9).
+      Touching it would breach the budget and the scope fence simultaneously.
 blocked_by: []
-files_budget: 9
+files_budget: 10
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/ConfirmStateService.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/BanConfirm.java
@@ -13,6 +28,7 @@ files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/InviteRevokeConfirm.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/BanCommandHandler.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/InviteCommandHandler.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/ConfirmStateServiceTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterConfirmCancelTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterProbationOrderingTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterNormalizeTest.java
@@ -28,7 +44,7 @@ out_of_scope:
   - any new `PendingConfirm` variant — M1-053 (`RemoveSourceConfirm`, `SourceEnableConfirm`), M1-054 (`UnfollowTagAllConfirm`), and future tickets (`ClearConfirm`, `ForgetConfirm`, `QuarantineRejectConfirm`) add theirs separately AFTER this lands; this ticket only de-seals and migrates the three existing variants
   - any change to `BanCommandHandler` / `InviteCommandHandler` business logic — only mechanical type-name swaps (`ConfirmStateService.PendingConfirm.Ban` → `BanConfirm`, etc.); no audit-row, reply-key, transaction-shape, or arg-parsing changes
   - any change to the existing test scenarios in `InboundRouterConfirmCancelTest`, `InboundRouterProbationOrderingTest`, `InboundRouterNormalizeTest` — only mechanical type-name swaps; no new test methods, no removed test methods, no assertion changes
-  - any change to the M1-051 `ConfirmStateServiceTest` (it tests the service's storage / expiry / takeMatching semantics generically — it does not reference any specific variant and must keep passing without modification)
+  - any change to the M1-051 `ConfirmStateServiceTest` beyond mechanical type-name swaps on the specific variant constructors it uses to seed pending entries (`ConfirmStateService.PendingConfirm.Ban` → `BanConfirm`, `ConfirmStateService.PendingConfirm.InviteCreateOpen` → `InviteCreateOpenConfirm`, `ConfirmStateService.PendingConfirm.InviteRevoke` → `InviteRevokeConfirm`) — the test's storage / expiry / takeMatching scenarios, assertion shapes, fixture setup, and the interface-typed local variables stay unchanged; `git diff main -- infochat-provider/src/test/java/app/zcat/infochat/provider/command/ConfirmStateServiceTest.java` shows only those mechanical swaps
   - any change to `ConfirmFlowIT` (the M1-051 cross-cutting IT) — if it constructs `PendingConfirm.Ban` etc. via the in-memory adapter intake path, the test code path is via the handler (which IS modified), not via direct construction; the IT must continue passing unchanged
   - any new lint rule / clarity-prompt addition forbidding inner-class confirm payloads — the convention is set by the refactor's existence and the three new top-level files; pattern-enforcement-by-lint is over-process and waits until a future ticket demonstrably repeats the gaming
   - any rename of the existing `ConfirmStateService.PendingConfirm` interface itself — the interface stays where it is, in its existing nested-inside-the-service position (it is a *service-defined contract*, distinct from its implementations; nesting an interface is not the same anti-pattern as nesting variants)
@@ -43,7 +59,7 @@ acceptance:
   - "`InboundRouterConfirmCancelTest.java` updated: 2 references to `new ConfirmStateService.PendingConfirm.Ban(...)` (lines 58, 87 of the pre-refactor file) replaced with `new BanConfirm(...)`. No other change to test scenarios, assertion text, fixture setup, or fake-service shape. Verify: test class compiles and every `@Test` method continues to pass."
   - "`InboundRouterProbationOrderingTest.java` updated: references to `ConfirmStateService.PendingConfirm` types in the fake-service signatures are unchanged (the fakes return / accept `Optional<ConfirmStateService.PendingConfirm>` which is the interface type, not a specific variant); any test construction of specific variants is replaced with the new top-level names. No other change. Verify: test class compiles and every `@Test` method continues to pass."
   - "`InboundRouterNormalizeTest.java` updated: same shape as `InboundRouterProbationOrderingTest` — only references to specific variant constructors swap to top-level names; interface-typed fake signatures unchanged. Verify: test class compiles and every `@Test` method continues to pass."
-  - "`ConfirmStateServiceTest` (the M1-051 service-tier plain-JUnit test) passes WITHOUT MODIFICATION. The test exercises storage / expiry / takeMatching semantics over the `PendingConfirm` interface generically; it constructs concrete variants via the new top-level names where it needs to seed pending entries, but its assertion shapes are unchanged. The verification is: `git diff main -- infochat-provider/src/test/java/app/zcat/infochat/provider/command/ConfirmStateServiceTest.java` shows only mechanical type-name swaps, zero scenario / assertion / fixture changes."
+  - "`ConfirmStateServiceTest` (the M1-051 service-tier plain-JUnit test) updated with mechanical type-name swaps ONLY: `ConfirmStateService.PendingConfirm.Ban` → `BanConfirm` (occurrences at lines 42-43, 66-67, 96, 140-141, 175-178 of the pre-refactor file), `ConfirmStateService.PendingConfirm.InviteCreateOpen` → `InviteCreateOpenConfirm` (lines 142-143), `ConfirmStateService.PendingConfirm.InviteRevoke` → `InviteRevokeConfirm` (lines 118-119). The test exercises storage / expiry / takeMatching semantics over the `PendingConfirm` interface generically; assertion shapes, scenarios, fixture setup, and interface-typed local variables are unchanged. The verification is: `git diff main -- infochat-provider/src/test/java/app/zcat/infochat/provider/command/ConfirmStateServiceTest.java` shows only mechanical type-name swaps, zero scenario / assertion / fixture changes."
   - "M1-051's `ConfirmFlowIT` (the cross-cutting `@QuarkusTest` IT exercising the full pending→confirm cycle through the in-memory adapter) passes without modification. The IT drives the cycle via the handler-side intake path, not via direct `PendingConfirm` construction; the handler changes (mechanical type-name swaps in `BanCommandHandler` / `InviteCommandHandler`) preserve the wire-level shape end-to-end."
   - "`mvn -B clean verify` from the repo root exits 0. Every pre-existing test passes: `ConfirmStateServiceTest`, `ConfirmFlowIT`, `BanCommandHandlerTest`, `InviteCommandHandlerTest`, `InboundRouterConfirmCancelTest`, `InboundRouterProbationOrderingTest`, `InboundRouterNormalizeTest`, `InboundRouterIntakeOrderingTest`, plus every other M1-001 .. M1-056 test currently green on main."
 test_plan:
@@ -55,6 +71,7 @@ test_plan:
     - infochat-provider/src/main/java/app/zcat/infochat/provider/command/ConfirmStateService.java
     - infochat-provider/src/main/java/app/zcat/infochat/provider/command/BanCommandHandler.java
     - infochat-provider/src/main/java/app/zcat/infochat/provider/command/InviteCommandHandler.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/command/ConfirmStateServiceTest.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterConfirmCancelTest.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterProbationOrderingTest.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterNormalizeTest.java
@@ -68,12 +85,38 @@ spec_refs:
   - docs/spec/commands.md §Surface conventions
   - docs/design/03-commands.md §Confirmation for destructive commands
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-05-24
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 165
+      removed: 73
 overrides: []
 aborted_attempts: []
 reopens: []
+revisions:
+  - date: 2026-05-24
+    reason: budget-breach (ConfirmStateServiceTest mechanical swap was authorized in acceptance/test_plan but omitted from files_scope/files_budget)
+    snapshot_summary: |
+      files_budget: 9 → 10
+      files_scope: + ConfirmStateServiceTest.java
+      out_of_scope #7: rewrote — old text falsely claimed the test "does not reference any specific variant"; new text bounds the change to mechanical type-name swaps (consistent with acceptance #11 verification clause and test_plan.preserves)
+      acceptance #11: removed contradictory "WITHOUT MODIFICATION" headline; the verification clause already correctly bounds the change to mechanical swaps
+      test_plan.modifies: + ConfirmStateServiceTest.java (matches files_scope addition)
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-05-24
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-057: Unseal PendingConfirm + extract variants
