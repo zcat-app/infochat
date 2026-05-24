@@ -6,7 +6,7 @@ created: 2026-05-24
 last_updated: 2026-05-24
 blocked_by:
   - M1-051
-files_budget: 13
+files_budget: 12
 files_scope:
   - infochat-core/src/main/java/app/zcat/infochat/core/audit/AuditAction.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/ListSourcesCommandHandler.java
@@ -256,15 +256,17 @@ Highlights:
   which is invariant-impossible per spec — but the handler
   defensively checks anyway for defence-in-depth, matching the
   M1-039 ban-check precedent).
-- **Files-budget tightness.** files_budget is set to 13 — exactly
-  the count of paths in `files_scope`. The `SourceManagementIT`
-  probe fixture follows the M1-036 precedent
-  (`AddSourceIT.java:271` defines `LoopbackProbe` as a nested
+- **Files-budget tightness.** files_budget is set to 12 — exactly
+  the count of paths in `files_scope` (9 new files + 3 modified:
+  4 handlers + 4 handler tests + 1 IT, plus AuditAction.java,
+  BundleKeys.java, en.properties). The `SourceManagementIT` probe
+  fixture follows the M1-036 precedent (`AddSourceIT.java:271`
+  defines `LoopbackProbe` as a nested
   `public static class ... extends UrlProbe` annotated
   `@Alternative` inside the IT file — one inner class, well below
   the [[feedback_avoid_test_inner_classes]] >3 threshold), so no
-  14th fixture file is needed. If the implementing session finds
-  the count rising past 13 for OTHER reasons (e.g., a
+  13th fixture file is needed. If the implementing session finds
+  the count rising past 12 for OTHER reasons (e.g., a
   `SourceManagementArgs.java` parser extraction, a shared
   `SourceCommandPermissionCheck` helper), the workflow path is
   the M1-008 / M1-044 umbrella+subs escape hatch — escalate at
