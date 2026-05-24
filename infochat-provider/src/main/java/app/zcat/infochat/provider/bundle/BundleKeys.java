@@ -354,6 +354,39 @@ public final class BundleKeys {
      */
     public static final String ERROR_VOUCH_BANNED_TARGET = "error.vouch.banned_target";
 
+    // ----- /grant-admin + /revoke-admin (M1-046) --------------------------
+    // Per docs/spec/security.md §Authorization model
+    // (last-admin protection + per-adapter scope) +
+    // docs/spec/commands.md §Admin (bot admin). The two handlers mutate
+    // users.is_admin and are inbound-adapter-scoped; the V5
+    // trg_last_admin_protection_update trigger is the load-bearing
+    // last-line defense the revoke handler catches via SQLException
+    // substring match on `last_admin_protection`.
+
+    /** {@code /grant-admin <contact>} against a {@code is_banned=TRUE} row — granting admin to a banned user is incoherent. */
+    public static final String ERROR_GRANT_ADMIN_BANNED_TARGET = "error.grant_admin.banned_target";
+
+    /** {@code /grant-admin <contact>} against a row that is already {@code is_admin=TRUE} (no-op friendly reply). */
+    public static final String ERROR_GRANT_ADMIN_ALREADY_ADMIN = "error.grant_admin.already_admin";
+
+    /** {@code /grant-admin} success reply. {@code {0}} = the redacted target contact id (per {@code ContactIds.redact}). */
+    public static final String REPLY_GRANT_ADMIN_SUCCESS = "reply.grant_admin.success";
+
+    /** {@code /revoke-admin <self>}: actor and target are the same {@code users.id}. First-line UX guard; V5 trigger is the last-line defense. */
+    public static final String ERROR_REVOKE_ADMIN_CANNOT_REVOKE_SELF = "error.revoke_admin.cannot_revoke_self";
+
+    /** {@code /revoke-admin <contact>} against a row that is already {@code is_admin=FALSE} (no-op friendly reply). */
+    public static final String ERROR_REVOKE_ADMIN_NOT_ADMIN = "error.revoke_admin.not_admin";
+
+    /** {@code /revoke-admin} of the only remaining {@code is_admin=TRUE AND is_banned=FALSE} row — caught from the V5 {@code trg_last_admin_protection_update} trigger. Mentions the global last-admin invariant + a hint that another admin must be granted first. */
+    public static final String ERROR_REVOKE_ADMIN_LAST_ADMIN = "error.revoke_admin.last_admin";
+
+    /** {@code /revoke-admin} success reply. {@code {0}} = the redacted target contact id (per {@code ContactIds.redact}). */
+    public static final String REPLY_REVOKE_ADMIN_SUCCESS = "reply.revoke_admin.success";
+
+    /** Shared group-scope reject for /grant-admin and /revoke-admin: the ScopeRef.Group SPI does not carry the actor's contact id in v1, so the handler cannot verify bot-admin tier. T2-F lands the SPI widening. */
+    public static final String ERROR_GROUP_ADMIN_NOT_IN_V1 = "error.group_admin_not_in_v1";
+
     private BundleKeys() {
         throw new AssertionError("BundleKeys is a constant holder and must not be instantiated");
     }

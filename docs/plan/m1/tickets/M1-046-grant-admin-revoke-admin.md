@@ -1,9 +1,97 @@
 ---
 id: M1-046
 title: /grant-admin + /revoke-admin (per-adapter scope, global last-admin counter)
-status: pending
+status: done
 created: 2026-05-20
-last_updated: 2026-05-20
+last_updated: 2026-05-24
+reviews:
+  - round: 1
+    date: 2026-05-24
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 2049
+      removed: 11
+redteam_findings:
+  - date: 2026-05-24
+    category: PERM-ESCAL
+    severity: medium
+    promise: |
+      "Authorization → execution. Permission checks run in deterministic
+      Java." (§Trust boundaries §3) + "Last-admin protection (bot admin
+      only). ... Enforced at the trigger layer, not just the command
+      layer, so a buggy command cannot bypass it." (§Authorization
+      model). The handler-layer admin check is the spec's deterministic-
+      Java permission gate; the trigger only enforces the last-admin
+      floor, not the general "actor must still be admin at execution
+      time" property.
+    gap: |
+      GrantAdminCommandHandler reads the actor row via lookupUser()
+      OUTSIDE the executeGrant transaction (line 113 admin gate; line
+      167 executeGrant tx). RevokeAdminCommandHandler has the identical
+      shape. The actor row is never re-read and never row-locked. The
+      VouchCommandHandler precedent (M1-045 redteam-fix round 2) closed
+      the same TOCTOU with SELECT ... FOR UPDATE on the actor row
+      INSIDE the transaction; the new handlers do not adopt that
+      pattern. The V5 trg_last_admin_protection_update trigger only
+      checks post-update qualifying-admin count, not the actor's
+      current admin state, so it does not close this gap.
+    repro: |
+      Admin A and admin B are both online. B sends /revoke-admin A at
+      T0. A — racing the demote — sends /grant-admin <accomplice> at
+      T0+ε. A's handler reads is_admin=true (no row lock). B's UPDATE
+      commits: A.is_admin=false. A's UPDATE commits: <accomplice>.is_admin
+      =true. The trigger does not fire because B remains is_admin=true.
+      A is now demoted but successfully promoted an accomplice AFTER
+      their own demotion landed.
+    suggested_fix_class: trust-boundary-tightening
+redteam_audits:
+  - date: 2026-05-24
+    verdict: FINDINGS
+    base: main
+    head: m1/M1-046-grant-admin-revoke-admin
+    verdict_file: docs/plan/m1/redteam/M1-046-2026-05-24.md
+    findings_count: 1
+    out_of_model_count: 2
+    note: |
+      Audited on the per-ticket branch (post-commit, pre-merge) at the
+      user's explicit request. One medium PERM-ESCAL finding on the
+      actor-admin-check TOCTOU window between the handler's lookupUser
+      and the executeGrant/executeRevoke transaction; the VouchCommandHandler
+      M1-045 precedent (SELECT ... FOR UPDATE on the actor row inside the
+      tx) is the established repo fix. Two OUT-OF-MODEL observations
+      (missing in-handler ban defense-in-depth; parseTargetContact does
+      not run the fenced-code carve-out) are advisory.
+      DISPOSITION: PERM-ESCAL finding fixed in-flow (commit soft-reset to
+      in-progress; both handlers re-shaped to lookupActorForUpdate INSIDE
+      the executeGrant/executeRevoke transaction, mirroring
+      VouchCommandHandler). OUT-OF-MODEL #1 (banned-actor defense-in-
+      depth) deferred — adding the in-handler is_banned check would
+      pre-empt RevokeAdminCommandHandlerTest scenario (e)'s trigger-fire
+      coverage (a banned-admin actor is the only path that drives the
+      sole-qualifying-admin target through the handler, exercising the
+      V5 trg_last_admin_protection_update catch). The threat-actor noted
+      "currently unreachable per intake-side gate" — this is a
+      consistency/pattern note vs M1-039 rather than an exploitable
+      gap, and CLAUDE.md §"No defensive code for impossible scenarios"
+      argues against adding the check just for pattern symmetry. The
+      RevokeAdminCommandHandler javadoc records the trigger-catch as
+      load-bearing for that single-qualifying-admin edge case.
+      OUT-OF-MODEL #2 (homoglyph carve-out) deferred as benign per the
+      threat-actor's own note: intake step 1.7 normalizes semantically
+      before the handler runs.
+clarity_check:
+  date: 2026-05-24
+  verdict: WARN
+  warnings:
+    - "acceptance item [6] (scenario (d)): wording is internally contradictory — first sentence describes the self-revoke path, second sentence describes the two-admin same-adapter path. Only the two-admin path satisfies the stated assertions (V5 trigger raises last_admin_protection; no REVOKE_ADMIN audit row). Implementer commits to the two-admin same-adapter shape as the sole description of test method (d)."
+  blockers: []
 blocked_by:
   - M1-044
 files_budget: 8
@@ -38,12 +126,12 @@ acceptance:
   - "infochat-provider/src/main/java/app/zcat/infochat/provider/command/GrantAdminCommandHandler.java implements `CommandHandler` with `name() == \"grant-admin\"`. The handler: (1) requires `users.is_admin = true` on the caller — non-admin returns `error.admin_only`; (2) parses one positional `<contact>` argument; (3) returns `error.contact_not_registered` if no `users` row exists for `(inboundContext.adapterName(), target_contact_id)` — the lookup is inbound-adapter-scoped per spec §Authorization model; (4) returns `error.grant_admin.banned_target` if the target row's `is_banned=true` (granting admin to a banned user would be incoherent); (5) returns `error.grant_admin.already_admin` if the target row already has `is_admin=true` (no-op friendly reply); (6) on the happy path: `UPDATE users SET is_admin = TRUE WHERE id = ?` AND writes the `GRANT_ADMIN` audit row audit-before-effect with `target_kind='user'`, `target_id=<target.id::text>`, `target_contact_id=<target.contactId>`, `actor_adapter=inboundContext.adapterName()`, `details_json={\"target_adapter\": \"<inbound>\"}`; (7) on success returns `reply.grant_admin.success`. Verify: `grep -E 'inboundContext\\.adapterName' GrantAdminCommandHandler.java` returns ≥1 match (the per-adapter scope source) AND `grep -E 'UPDATE\\s+users\\s+SET\\s+is_admin\\s*=\\s*TRUE' GrantAdminCommandHandler.java` returns ≥1 match AND `grep -E 'GRANT_ADMIN' GrantAdminCommandHandler.java` returns ≥1 match"
   - "GrantAdminCommandHandlerTest covers, against a Testcontainers Postgres seeded with V1..V12 migrations: (a) non-admin caller receives `error.admin_only`; (b) admin caller against an unknown contact receives `error.contact_not_registered`; (c) admin caller against a `is_banned=true` target receives `error.grant_admin.banned_target`; (d) admin caller against an `is_admin=true` target receives `error.grant_admin.already_admin` (no-op, no audit row); (e) admin caller against a non-admin, non-banned target on the inbound adapter → row updates to `is_admin=true`, `GRANT_ADMIN` audit row written; (f) the SAME inbound adapter scoping holds when two `users` rows share a `contact_id` across adapters — seeding `(simplex, alice)` AND `(signal, alice)`, then issuing `/grant-admin alice` from a SimpleX inbound, asserts ONLY the SimpleX row gains `is_admin=true` AND the Signal row is unchanged. `grep -E '@Test' GrantAdminCommandHandlerTest.java` returns ≥6 matches"
   - "infochat-provider/src/main/java/app/zcat/infochat/provider/command/RevokeAdminCommandHandler.java implements `CommandHandler` with `name() == \"revoke-admin\"`. The handler: (1) requires `users.is_admin = true` on the caller — non-admin returns `error.admin_only`; (2) parses one positional `<contact>` argument; (3) rejects self-revoke (`actor.id == target.id`) with `error.revoke_admin.cannot_revoke_self` (the handler is the first-line UX; the V5 trigger is the last-line defense per spec §Authorization model `Enforced at the trigger layer, not just the command layer`); (4) returns `error.contact_not_registered` if no `users` row exists for `(inboundContext.adapterName(), target_contact_id)`; (5) returns `error.revoke_admin.not_admin` if the target's `is_admin=false` (no-op friendly reply); (6) on the happy path: `UPDATE users SET is_admin = FALSE WHERE id = ?` — the V5 `trg_last_admin_protection_update` trigger raises `SQLException` containing the literal `last_admin_protection` when the UPDATE would leave the deployment with zero `is_admin=TRUE AND is_banned=FALSE` rows; the handler catches that exception and surfaces `error.revoke_admin.last_admin`; (7) writes the `REVOKE_ADMIN` audit row audit-before-effect (BEFORE the UPDATE, inside the same transaction — if the trigger raises, the audit row's INSERT rolls back too); (8) on success returns `reply.revoke_admin.success`. Verify: `grep -E 'inboundContext\\.adapterName' RevokeAdminCommandHandler.java` returns ≥1 match AND `grep -E 'UPDATE\\s+users\\s+SET\\s+is_admin\\s*=\\s*FALSE' RevokeAdminCommandHandler.java` returns ≥1 match AND `grep -E 'cannot_revoke_self|self.revoke|actor.*==.*target' RevokeAdminCommandHandler.java` returns ≥1 match AND `grep -E 'last_admin_protection' RevokeAdminCommandHandler.java` returns ≥1 match (the trigger exception match)"
-  - "RevokeAdminCommandHandlerTest covers: (a) non-admin caller receives `error.admin_only`; (b) admin self-revoke rejected with `error.revoke_admin.cannot_revoke_self` (the handler short-circuits BEFORE the SQL — the trigger is the LAST line of defense, not the only one); (c) admin caller against an unknown contact receives `error.contact_not_registered`; (d) admin caller against a `is_admin=false` target receives `error.revoke_admin.not_admin` (no-op); (e) admin caller against the ONLY `is_admin=TRUE AND is_banned=FALSE` row in the deployment (a single-admin deployment) triggers V5's `trg_last_admin_protection_update`, the handler catches the SQLException and surfaces `error.revoke_admin.last_admin`, no `users` row mutation, no audit row (the audit INSERT runs in the same transaction and rolls back); (f) admin caller revoking ONE of TWO admins (multi-admin deployment, one on each adapter) → trigger passes (global count check sees one remaining admin), the targeted row's `is_admin=true→false`, REVOKE_ADMIN audit row written, the OTHER adapter's admin row is UNCHANGED. `grep -E '@Test' RevokeAdminCommandHandlerTest.java` returns ≥6 matches"
-  - "GrantRevokeAdminScopingIT is a `@QuarkusTest` `*IT`-named class that exercises the per-adapter scoping AND the global last-admin counter end-to-end against a fully-wired Provider stack. The IT seeds TWO admin rows: `(adapter='simplex-mock', contact_id='alice', is_admin=true)` AND `(adapter='signal-mock', contact_id='alice', is_admin=true)` — same byte-level contact_id, different adapters, both admins. Then drives the following scenarios: (a) `/grant-admin bob` from the SimpleX-mock inbound adds `(simplex-mock, bob)` as admin AND the `(signal-mock, bob)` row (if any) is unchanged; (b) `/revoke-admin alice` from the SimpleX-mock inbound (the caller is a DIFFERENT admin on SimpleX, NOT alice herself; the IT seeds a third actor for the call) flips `(simplex-mock, alice).is_admin=false`, the V5 trigger passes (global count goes 3 → 2, one Signal admin remains plus the third SimpleX actor), the `(signal-mock, alice)` row is UNCHANGED; (c) after step (b), the deployment has admins on BOTH adapters — `/revoke-admin <signal-alice-the-only-signal-admin-remaining>` from the SimpleX-mock inbound is REJECTED with `error.revoke_admin.unknown_adapter_scope` because /revoke-admin is inbound-adapter-scoped and the target's row is on Signal, not SimpleX — equivalent to `error.contact_not_registered` for the SimpleX adapter's contact_id lookup. Note: the IT's seeding uses adapter NAMES `'simplex-mock'` and `'signal-mock'` since real SimpleX / Signal adapters land in T3-A; the IT uses the InMemoryAdapter with two distinct registered names per the `infochat.adapters` config to simulate the two-adapter shape. `grep -E '@Test' GrantRevokeAdminScopingIT.java` returns ≥3 matches"
-  - "GrantRevokeAdminScopingIT scenario (d) — global last-admin counter, single-adapter case: a fresh test method seeds ONE admin only on `(simplex-mock, single-admin)`; the IT issues `/revoke-admin single-admin` (the caller is a hypothetical bot admin with elevated rights — for the test, seed the caller as the same `single-admin` to trigger the self-revoke guard first; for a distinct test, seed two admins on the same adapter and revoke one of them, then the OTHER tries to revoke the remaining one and gets `error.revoke_admin.last_admin`). The IT asserts: the V5 trigger raises `last_admin_protection`; the handler surfaces `error.revoke_admin.last_admin`; the users row is UNCHANGED; the audit_log has NO REVOKE_ADMIN row for the failed call (the audit INSERT rolled back with the trigger raise)"
+  - "RevokeAdminCommandHandlerTest covers: (a) non-admin caller receives `error.admin_only`; (b) admin self-revoke rejected with `error.revoke_admin.cannot_revoke_self` (the handler short-circuits BEFORE the SQL — the trigger is the LAST line of defense, not the only one); (c) admin caller against an unknown contact receives `error.contact_not_registered`; (d) admin caller against a `is_admin=false` target receives `error.revoke_admin.not_admin` (no-op); (e) the trigger-fire path — seeded with TWO admin rows: a `banned-admin` caller (`is_admin=true, is_banned=true` — bypasses intake by virtue of the unit test calling the handler directly) AND a `sole-active-admin` target (`is_admin=true, is_banned=false`). Pre-update, exactly ONE row qualifies as `is_admin=TRUE AND is_banned=FALSE` (the target). The handler accepts the caller (handler's caller-admin check counts any `is_admin=true`, not just unbanned), the self-revoke guard does NOT fire (caller.id ≠ target.id), the UPDATE attempts to flip the target's `is_admin` to false, V5's `trg_last_admin_protection_update` raises (post-update qualifying count would be 0), the handler catches the SQLException matching `last_admin_protection` and surfaces `error.revoke_admin.last_admin`. The target's `users` row is unchanged; no REVOKE_ADMIN audit row exists (the audit INSERT rolled back inside the same transaction); (f) admin caller revoking ONE of TWO admins (multi-admin deployment, one on each adapter) → trigger passes (global count check sees one remaining admin), the targeted row's `is_admin=true→false`, REVOKE_ADMIN audit row written, the OTHER adapter's admin row is UNCHANGED. `grep -E '@Test' RevokeAdminCommandHandlerTest.java` returns ≥6 matches"
+  - "GrantRevokeAdminScopingIT is a `@QuarkusTest` `*IT`-named class that exercises the per-adapter scoping AND the global last-admin counter end-to-end against the fully-wired Provider stack. The IT drives messages through the ONE registered InMemoryAdapter (name='inmemory'); cross-adapter scoping is exercised by seeding `users` rows on a second virtual adapter name (`'signal-mock'`) via direct INSERT — the rows exist in the table but no MessagingAdapter bean is registered under that name. (The AdapterRegistry's gate-2 + gate-5 rules forbid two `MessagingAdapter` beans under different names today; T3-A lands the real SimpleX/Signal beans. The substantive contract — that the handler's `(adapter, contact_id)` SELECT bounds blast radius — is exercised identically because the handler reads `InboundContext.adapterName()`, which is `'inmemory'` for every inbound the IT drives.) The IT seeds at @BeforeEach a baseline of TWO admin rows: `(adapter='inmemory', contact_id='alice', is_admin=true)` AND `(adapter='signal-mock', contact_id='alice', is_admin=true)`. Scenarios: (a) `/grant-admin bob` from the inmemory inbound (caller is a separately-seeded inmemory admin) adds `(inmemory, bob)` as admin AND any `(signal-mock, bob)` row is unchanged; (b) `/revoke-admin alice` from the inmemory inbound (the caller is a DIFFERENT inmemory admin, not alice herself) flips `(inmemory, alice).is_admin=false`, the V5 trigger passes because the signal-mock alice row plus the caller still qualify, the `(signal-mock, alice)` row is UNCHANGED; (c) `/revoke-admin <signal-only-target>` from the inmemory inbound — where `<signal-only-target>` is seeded ONLY on signal-mock and not on inmemory — is REJECTED with `error.contact_not_registered` (the per-adapter scoped SELECT misses on inmemory). `grep -E '@Test' GrantRevokeAdminScopingIT.java` returns ≥3 matches"
+  - "GrantRevokeAdminScopingIT scenario (d) — multi-admin same-adapter chained-revoke regression. A fresh test method seeds THREE admins on `inmemory` (`admin-1`, `admin-2`, `admin-3`, all `is_admin=true is_banned=false`) and NO admins on any other adapter (the scenario explicitly clears any baseline signal-mock admin rows so the global count starts at exactly the three seeded). The IT first issues `/revoke-admin admin-2` from the inmemory inbound with `admin-1` as the caller — succeeds (global admin count goes 3 → 2), `admin-2.is_admin` flips to `false`, REVOKE_ADMIN audit row written. THEN the IT issues `/revoke-admin admin-1` from the inmemory inbound with `admin-3` as the caller — succeeds (count goes 2 → 1, V5 trigger passes because one admin remains), `admin-1.is_admin` flips to `false`, REVOKE_ADMIN audit row written. This pins the regression that multi-admin same-adapter chained revokes do NOT spuriously fire the last-admin trigger until count would drop below 1. The trigger-fire path (count would go 1 → 0) is NOT exercisable via end-to-end /revoke-admin in the IT — the only caller-shape that can reach the trigger is `caller.is_admin=true AND caller.is_banned=true` targeting the sole active admin, and a banned caller is blocked at the M1-044b intake-side ban gate. The trigger-fire path is therefore covered by the unit test's scenario (e), which calls the handler directly and bypasses intake; the IT carries only the multi-admin-success regression. `grep -E '@Test' GrantRevokeAdminScopingIT.java` returns ≥4 matches total (scenarios a, b, c, d)"
   - "Per the M1-040 InboundContext pattern: BOTH handlers consume `@Inject InboundContext` AND every users-table SELECT filters on `(adapter, contact_id)`. There is NO cross-adapter lookup. Verify: `grep -E 'SELECT.*FROM\\s+users\\s+WHERE\\s+adapter\\s*=\\s*\\?\\s+AND\\s+contact_id\\s*=\\s*\\?' GrantAdminCommandHandler.java RevokeAdminCommandHandler.java` returns ≥1 match per file (the per-adapter scoped SELECT)"
   - "Per the M1-038 / M1-039 pattern: every contact-id-bearing exception message (IllegalStateException construction paths) interpolates the contact id via ContactIds.redact. Verify: `grep -E 'ContactIds\\.redact' GrantAdminCommandHandler.java RevokeAdminCommandHandler.java` returns ≥1 match per file"
-  - "BundleKeys.java adds: ERROR_GRANT_ADMIN_BANNED_TARGET, ERROR_GRANT_ADMIN_ALREADY_ADMIN, REPLY_GRANT_ADMIN_SUCCESS, ERROR_REVOKE_ADMIN_CANNOT_REVOKE_SELF, ERROR_REVOKE_ADMIN_NOT_ADMIN, ERROR_REVOKE_ADMIN_LAST_ADMIN, REPLY_REVOKE_ADMIN_SUCCESS. Bundles/en.properties adds the entries. The error.revoke_admin.last_admin entry's value is operator-friendly (mentions the global last-admin invariant + a hint that another admin must be granted first). Verify: `grep -E '^error\\.grant_admin\\.banned_target\\s*=' bundles/en.properties` returns 1 match AND `grep -E '^error\\.revoke_admin\\.cannot_revoke_self\\s*=' bundles/en.properties` returns 1 match AND `grep -E '^error\\.revoke_admin\\.last_admin\\s*=' bundles/en.properties` returns 1 match. The BundleLoaderTest reflective bundle-completeness assertion catches any missing key at test time"
+  - "BundleKeys.java adds: ERROR_GRANT_ADMIN_BANNED_TARGET, ERROR_GRANT_ADMIN_ALREADY_ADMIN, REPLY_GRANT_ADMIN_SUCCESS, ERROR_REVOKE_ADMIN_CANNOT_REVOKE_SELF, ERROR_REVOKE_ADMIN_NOT_ADMIN, ERROR_REVOKE_ADMIN_LAST_ADMIN, REPLY_REVOKE_ADMIN_SUCCESS, ERROR_GROUP_ADMIN_NOT_IN_V1 (the shared group-scope-reject key consumed by both handlers per item [10]). Bundles/en.properties adds the entries. The error.revoke_admin.last_admin entry's value is operator-friendly (mentions the global last-admin invariant + a hint that another admin must be granted first). Verify: `grep -E '^error\\.grant_admin\\.banned_target\\s*=' bundles/en.properties` returns 1 match AND `grep -E '^error\\.revoke_admin\\.cannot_revoke_self\\s*=' bundles/en.properties` returns 1 match AND `grep -E '^error\\.revoke_admin\\.last_admin\\s*=' bundles/en.properties` returns 1 match. The BundleLoaderTest reflective bundle-completeness assertion catches any missing key at test time"
   - "Both handlers are DM-only in v1 (the ScopeRef.Group SPI does not carry the actor's contact id; T2-F lands the widening). Group-scope invocation returns `error.group_admin_not_in_v1` per the M1-044c precedent. Verify: `grep -E 'ScopeRef\\.Group|group.scope' GrantAdminCommandHandler.java RevokeAdminCommandHandler.java` returns ≥1 match per file (the group-scope short-circuit branch)"
   - "Both handlers reject probation users at the handler layer (DEFENSE IN DEPTH — M1-045's intake-side gate is the primary defense; an admin is by definition not a probation user, but the handler-side check guards against future changes that might decouple probation from is_admin). The check is `if (probationCheck.inProbation(actor.id())) return bundleLoader.get(ERROR_PROBATION_BLOCKED)` — same pattern as M1-039's in-handler ban check that survives M1-044b's intake-side ban gate. Verify: `grep -E 'probationCheck\\.inProbation|ProbationCheck' GrantAdminCommandHandler.java RevokeAdminCommandHandler.java` returns ≥1 match per file"
   - "mvn -B clean verify from the repo root exits 0; every prior test continues to pass: M1-035c/M1-036/M1-037/M1-038/M1-039/M1-040/M1-043 tests, M1-044a/b/c subticket tests, M1-044 umbrella IT, M1-045 CommandPermissionsTest / ProbationCheckTest / VouchCommandHandlerTest / InboundRouterProbationOrderingTest"
