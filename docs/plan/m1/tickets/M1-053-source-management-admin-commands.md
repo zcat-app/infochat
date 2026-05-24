@@ -1,10 +1,16 @@
 ---
 id: M1-053
 title: Source-management admin commands — list / remove / enable / disable
-status: pending
+status: done
 created: 2026-05-24
 last_updated: 2026-05-24
-clarity_check: {}
+outline_file: target/m1-tick-outline-M1-053.md
+clarity_check:
+  date: 2026-05-24
+  verdict: WARN
+  warnings:
+    - "FILES-BUDGET: M1-057's out_of_scope item 4 anticipates M1-053 adding RemoveSourceConfirm.java and SourceEnableConfirm.java as separate top-level files (BanConfirm/InviteCreateOpenConfirm/InviteRevokeConfirm precedent). Neither appears in files_scope, and files_budget: 12 leaves no room. Implementable via nested package-private records inside the handler files, but the ticket does not say so explicitly."
+  blockers: []
 escalations:
   - date: 2026-05-24
     reason: outline-fail
@@ -52,14 +58,70 @@ escalations:
       acceptance items 6 and 8 from consecutive_failure_count to consecutive_failures.
       After refinement, re-run the plan step to surface any additional API-surface
       or ground-truth gaps that the round-1 audit did not reach.
+  - date: 2026-05-24
+    reason: manual-verdict
+    reviewer_verdict_excerpt: |
+      VERDICT: MANUAL
+
+      ACCEPTANCE-CHECK: PARTIAL
+        Item 3 (ListSourcesCommandHandlerTest "plain JUnit per the M1-049
+        test pyramid (no @QuarkusTest)"): FAIL — the file is annotated
+        @QuarkusTest, not plain JUnit. All nine listed scenario method names
+        are present and pass. The file's javadoc cites a deviation
+        justification ("six of the nine scenarios assert on real SQL
+        behavior, so this file follows the Shape B pattern") referencing
+        target/m1-tick-outline-M1-053.md §Risks #3, which was wiped by
+        `mvn clean` and is therefore not auditable from the committed
+        artifact. The deviation is principled per
+        docs/process/test-pyramid.md §Shape B (Thin-SQL) but is not
+        authorized by the ticket body.
+
+      REWORK ITEMS:
+        1. ListSourcesCommandHandlerTest uses @QuarkusTest but acceptance
+           item 3 explicitly requires "plain JUnit per the M1-049 test
+           pyramid (no @QuarkusTest)." The deviation is principled (the
+           handler reads from joined real-DB tables and stubbed JDBC would
+           produce tautological tests, while H2/in-memory substitutes are
+           forbidden by §8 stack-specific rules) and is documented in the
+           test javadoc, but the ticket body itself was not amended to
+           authorize the deviation. Two resolution paths: (a) refine
+           acceptance item 3 to authorize the Shape B (Thin-SQL)
+           @QuarkusTest pattern with an inline rationale citing
+           docs/process/test-pyramid.md §Shape B and the handler's ≥2-real-
+           DB-statements profile, then re-commit; OR (b) re-implement the
+           test as plain JUnit with hand-stubbed JDBC collaborators and
+           accept the lower-fidelity assertions. Path (a) matches the
+           test-pyramid's explicit allowance and is the right path on
+           engineering merits.
+
+      UNCERTAINTY:
+        Item 3's failure is a genuine rules-collision per
+        engineering-rules-verbatim.md §6 ("Never trade rules against each
+        other"). The ticket literal demands plain JUnit (no @QuarkusTest),
+        but satisfying the literal without violating test-integrity rules
+        (§8 stack-specific: no H2/HSQLDB substitute) and the test-pyramid
+        heuristic (Shape B for thin-SQL handlers) would require stubbing
+        the JDBC chain — producing tautological tests that assert the
+        handler issued the exact SQL the test stubbed, with no real-DB
+        constraint or join verification. The dev picked which rule to bend
+        (the acceptance literal) rather than escalating. The correct
+        workflow path on a rules collision is escalate, not silently
+        deviate. MANUAL surfaces the decision to the user: either bless
+        the deviation by amending acceptance item 3, or require the lower-
+        fidelity plain-JUnit shape. The full test suite is green (BUILD
+        SUCCESS, plus BundleLoaderTest reflective check), so blessing the
+        deviation is the lower-risk path; the issue is procedural rather
+        than substantive.
 blocked_by:
   - M1-051
-files_budget: 12
+files_budget: 14
 files_scope:
   - infochat-core/src/main/java/app/zcat/infochat/core/audit/AuditAction.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/ListSourcesCommandHandler.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/RemoveSourceCommandHandler.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/command/RemoveSourceConfirm.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/SourceEnableCommandHandler.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/command/SourceEnableConfirm.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/SourceDisableCommandHandler.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
   - infochat-provider/src/main/resources/bundles/en.properties
@@ -76,7 +138,7 @@ migration_touch: false
 out_of_scope:
   - any change to the spec — docs/spec/commands.md §Source management + §Permission model + docs/spec/schema.md §Sources and tags + docs/spec/security.md §Source URL visibility + §Authorization model are the source of truth
   - any change to the `source` table or its `status` / `deleted_at` columns — V6 already shipped both with the three-status state machine and the soft-delete column; no Flyway migration in this ticket
-  - any change to ConfirmStateService — the M1-051 service is consumed unchanged; this ticket only registers two new `commandName` keys (`"remove-source"`, `"source-enable"`) via `remember` / `takeMatching` calls inside the handlers
+  - any change to ConfirmStateService.java itself — the M1-051 service implementation is consumed unchanged; this ticket adds two new top-level package-private records (`RemoveSourceConfirm`, `SourceEnableConfirm`) implementing the post-M1-057 unsealed `ConfirmStateService.PendingConfirm` interface, with `commandName()` returning `"remove-source"` / `"source-enable"` respectively — matching the M1-051 `BanConfirm` / `InviteCreateOpenConfirm` / `InviteRevokeConfirm` precedent (separate file per variant, anticipated by M1-057 out_of_scope clause #4)
   - any change to the M1-044b InboundRouter intake-step splice — the step 4.5 confirm-cancel sweep treats the new commands uniformly through their `sweepPrefix` (the command name); no router case-edit, no new step
   - any change to M1-036's `UrlProbe` — the existing HTTP-shaped probe is consumed unchanged by `/source-enable` (HEAD-or-small-range-GET semantics already implemented for `/add-source`)
   - any StreamSource (Nostr / Bluesky / etc.) probe path in `/source-enable` — v1's `/add-source` is HTTP-only today (per the `AddSourceArgs.java` lines 232 to 237 comment which states that the probe layer accepts http/https only, and that wss/ws (Nostr) and other StreamSource shapes are spec'd for the kind resolver but the probe path is HTTP-only in MVP). No StreamSource probe primitive exists in Collector or Provider (no `StreamSourceSupervisor` yet; `FetchScheduler.java` line 54 names it as future work). Soft-deleted / failed / disabled StreamSource rows can only arise from `bootstrap-sources.json`; a separate ticket will land the relay-probe primitive alongside the Nostr fetcher when `StreamSourceSupervisor` arrives. This ticket implements `/source-enable`'s HTTP path only; `/source-enable` against a non-HTTP-shaped source kind returns `error.source_enable.kind_not_supported_in_v1` with no audit row and no state change
@@ -91,22 +153,25 @@ out_of_scope:
 acceptance:
   - "`AuditAction.java` (`infochat-core`) gains two new enum values: `REMOVE_SOURCE_INTENT` and `SOURCE_ENABLE_INTENT`. These are the step-8 audit-on-intent verbs (spec §Authorization model: `7. Permission check ... 8. Audit-log the intent. 9. Execute.`) that fire at the first-call prompt path for `/remove-source` and for `/source-enable` against a soft-deleted row. The existing `REMOVE_SOURCE`, `SOURCE_ENABLE`, `SOURCE_DISABLE` verbs continue to denote the step-9 execute rows. The shape mirrors the M1-051 precedent (`BAN_INTENT`, `INVITE_CREATE_INTENT`, `INVITE_REVOKE_INTENT`)"
   - "`ListSourcesCommandHandler` is a CDI bean implementing `CommandHandler` with `name() == \"list-sources\"`. Argument shape: optional flags `[--all]`, `[--include-deleted]`, `[--page N]`. Permission gate runs FIRST in the handler: (1) a non-admin caller passing `--all` OR `--include-deleted` receives `error.list_sources.admin_only_flag` — the flag is **NOT** silently stripped (spec §Permission model: 'Admin-only flags are part of command identity'); (2) `--include-deleted` is valid only WITH `--all` — passing `--include-deleted` without `--all` returns `error.list_sources.include_deleted_requires_all` even for an admin caller. On the happy paths: (a) no flags, DM scope — returns the caller's `source_subscription` rows (only) with each source's title/url/kind/status flagged; (b) no flags, group scope — returns the group's `source_subscription` rows (visible to every group member per Decision D7); (c) `--all` (admin) — returns every `source` row globally where `deleted_at IS NULL`, regardless of subscription, with `failed` and `disabled` statuses flagged inline; (d) `--all --include-deleted` (admin) — additionally returns soft-deleted rows (`deleted_at IS NOT NULL`). Replies for the `--all` paths include the spec's required URL-visibility caveat (`security.md` §Source URL visibility): `reply.list_sources.url_visibility_caveat` bundle key text included in the reply header"
-  - "ListSourcesCommandHandlerTest is plain JUnit per the M1-049 test pyramid (no `@QuarkusTest`). Scenarios — one `@Test` per branch: `listSourcesNonAdminWithAllFlagReturnsAdminOnlyError`, `listSourcesNonAdminWithIncludeDeletedFlagReturnsAdminOnlyError`, `listSourcesIncludeDeletedWithoutAllReturnsRequiresAllError`, `listSourcesDmReturnsCallerSubscriptionsOnly`, `listSourcesGroupReturnsGroupSubscriptionsForEveryMember`, `listSourcesAllReturnsEveryNonDeletedSourceGlobally`, `listSourcesAllFlagsFailedAndDisabledStatusesInline`, `listSourcesAllIncludeDeletedAdditionallyReturnsSoftDeletedRows`, `listSourcesAllReplyIncludesUrlVisibilityCaveat`"
-  - "`RemoveSourceCommandHandler` is a CDI bean implementing `CommandHandler` with `name() == \"remove-source\"`. Argument shape: positional `<id>` (source id, UUID or short prefix). Permission gate: non-admin caller returns `error.admin_only`. The handler integrates with M1-051 `ConfirmStateService` under the two-call shape: (1) **first call** (body does NOT end in ` confirm`) — validates admin-gate + source-id resolves + source is not already soft-deleted; on validation success, writes the step-8 `REMOVE_SOURCE_INTENT` audit row inside a transaction, registers a pending confirm via `confirmStateService.remember(actor.id, scope, \"remove-source\", <prepared-args-bundle-including-source-id>)`, returns `reply.confirm.prompt.remove_source` (interpolates redacted source name + affected-subscriber count + timeout seconds); (2) **confirm call** (body ends in ` confirm`) — `confirmStateService.takeMatching(actor.id, scope, \"remove-source\")` returns the pending args; on empty Optional → `error.confirm.no_pending`; on non-empty → executes the soft-delete inside ONE transaction: writes the `REMOVE_SOURCE` audit row audit-before-effect, `UPDATE source SET deleted_at = now() WHERE id = ?`, `DELETE FROM source_subscription WHERE source_id = ?` (the cascade-delete per spec §Source management), returns `reply.remove_source.success` with the cascade-deleted subscription count. Validation failures on the first-call path write NO audit row and store NO pending state"
+  - "ListSourcesCommandHandlerTest follows the Shape B (Thin-SQL) pattern per `docs/process/test-pyramid.md` §Shape B: `@QuarkusTest` against the DevServices Postgres image, `@Inject DataSource`, direct `handler.handle(scope, rawText)` dispatch (no router involvement). Rationale: the handler has zero non-DB collaborators (BundleLoader is infrastructure; DataSource is the DB chain itself) and five real-DB-dependent SELECT statements — `SELECT_USER_SQL`, `SELECT_GROUP_SQL`, `SELECT_SCOPED_SOURCES_SQL` (JOIN `source` ↔ `source_subscription` on `scope_kind`+`scope_id` with `deleted_at IS NULL` partition), `SELECT_ALL_NON_DELETED_SOURCES_SQL`, `SELECT_ALL_INCLUDING_DELETED_SOURCES_SQL` — whose behavioral contract IS the SQL (the JOIN-and-partition semantics, the `deleted_at` filter, the per-status rendering). The §Shape B selector applies (≤1 non-DB collaborator AND ≥2 DB statements with real-DB semantics); stubbing the JDBC chain would reduce six of the nine scenarios to whitebox tautologies asserting the handler issued the exact SQL the test stubbed. Companion handlers in this ticket (`RemoveSourceCommandHandlerTest`, `SourceEnableCommandHandlerTest`, `SourceDisableCommandHandlerTest`) also follow Shape B for the same reasons. The test javadoc documents the shape and the per-test `m1-053-list-` row-prefix isolation. Scenarios — one `@Test` per branch: `listSourcesNonAdminWithAllFlagReturnsAdminOnlyError`, `listSourcesNonAdminWithIncludeDeletedFlagReturnsAdminOnlyError`, `listSourcesIncludeDeletedWithoutAllReturnsRequiresAllError`, `listSourcesDmReturnsCallerSubscriptionsOnly`, `listSourcesGroupReturnsGroupSubscriptionsForEveryMember`, `listSourcesAllReturnsEveryNonDeletedSourceGlobally`, `listSourcesAllFlagsFailedAndDisabledStatusesInline`, `listSourcesAllIncludeDeletedAdditionallyReturnsSoftDeletedRows`, `listSourcesAllReplyIncludesUrlVisibilityCaveat`"
+  - "`RemoveSourceCommandHandler` is a CDI bean implementing `CommandHandler` with `name() == \"remove-source\"`. Argument shape: positional `<id>` (source id, parsed as a `UUID` literal via `UUID.fromString` — parse failure returns `error.remove_source.unknown_id`; short-prefix matching is out-of-scope for v1). Permission gate: non-admin caller returns `error.admin_only`. The handler integrates with M1-051 `ConfirmStateService` under the two-call shape: (1) **first call** (body does NOT end in ` confirm`) — validates admin-gate + source-id resolves + source is not already soft-deleted; on validation success, writes the step-8 `REMOVE_SOURCE_INTENT` audit row inside a transaction, registers a pending confirm via `confirmStateService.remember(actor.id, scope, new RemoveSourceConfirm(sourceId))` — `RemoveSourceConfirm` is a package-private top-level record implementing `ConfirmStateService.PendingConfirm` whose `commandName()` returns `\"remove-source\"`; the call shape matches the post-M1-057 unsealed 3-arg signature `remember(UUID, ScopeRef, PendingConfirm)`. Returns `reply.confirm.prompt.remove_source` (interpolates redacted source name + affected-subscriber count + timeout seconds); (2) **confirm call** (body ends in ` confirm`) — `confirmStateService.takeMatching(actor.id, scope, \"remove-source\")` returns the pending `PendingConfirm` (downcast to `RemoveSourceConfirm` to read the source id); on empty Optional → `error.confirm.no_pending`; on non-empty → executes the soft-delete inside ONE transaction: writes the `REMOVE_SOURCE` audit row audit-before-effect, `UPDATE source SET deleted_at = now() WHERE id = ?`, `DELETE FROM source_subscription WHERE source_id = ?` (the cascade-delete per spec §Source management), returns `reply.remove_source.success` with the cascade-deleted subscription count. Validation failures on the first-call path write NO audit row and store NO pending state"
   - "RemoveSourceCommandHandlerTest scenarios: `removeSourceNonAdminReturnsAdminOnlyError`, `removeSourceFirstCallReturnsPromptAndWritesIntentAuditRowOnly` (asserts ONE audit_log row with `action='REMOVE_SOURCE_INTENT'`, no `source.deleted_at` mutation, no `source_subscription` row deletion, ConfirmStateService.peek shows pending state), `removeSourceConfirmWithinWindowExecutesSoftDeleteAndCascade` (asserts second audit row with `action='REMOVE_SOURCE'`, `source.deleted_at IS NOT NULL`, every `source_subscription` row for the source is gone, both audit rows persist), `removeSourceConfirmWithoutPendingReturnsNoPending`, `removeSourceFirstCallAgainstAlreadySoftDeletedReturnsAlreadyDeleted` (no audit row, no pending state)"
-  - "`SourceEnableCommandHandler` is a CDI bean implementing `CommandHandler` with `name() == \"source-enable\"`. Argument shape: positional `<id>`. Permission gate: non-admin returns `error.admin_only`. Kind gate (runs BEFORE state-branching, AFTER admin gate and source-id resolution): if `source.kind` is not HTTP-shaped (v1: only `rss` qualifies; `nostr`, `bluesky`, and any other StreamSource kind do NOT), the handler returns `error.source_enable.kind_not_supported_in_v1` immediately — no probe, no audit row, no state change. The kind gate matches the v1 reality pinned by `AddSourceArgs.java:232-237` (probe layer is HTTP-only). For HTTP-shaped sources, the handler branches on the row's current state: (a) `failed` OR `disabled` (NOT soft-deleted) — runs the probe (HEAD/small-range-GET via M1-036's `UrlProbe`); probe failure leaves the source in its prior state with `error.source_enable.probe_failed`; probe success transitions in one transaction: writes the `SOURCE_ENABLE` audit row audit-before-effect, `UPDATE source SET status = 'active', consecutive_failures = 0 WHERE id = ?`, returns `reply.source_enable.success` (no soft-delete disclosure on this path); NO confirm. (b) Soft-deleted (`deleted_at IS NOT NULL`) — requires confirm. First call: validates admin-gate + source resolves + kind is HTTP-shaped + writes the `SOURCE_ENABLE_INTENT` audit row in a transaction, registers a pending confirm via `remember(actor.id, scope, \"source-enable\", ...)`, returns `reply.confirm.prompt.source_enable_soft_deleted` (interpolates redacted source name + timeout seconds + the 'No subscriptions will be restored' notice). Confirm call: `takeMatching` returns the args; runs the probe; probe failure leaves the row soft-deleted (no audit row, no state change); probe success transitions in one transaction: writes `SOURCE_ENABLE`, `UPDATE source SET deleted_at = NULL, status = 'active', consecutive_failures = 0 WHERE id = ?`, returns `reply.source_enable.success.from_soft_deleted` including the literal disclosure `reply.source_enable.no_subscriptions_restored` (per spec §Source management: 'No subscriptions were restored — affected scopes must /add-source again to re-subscribe'). The disclosure is omitted on the `failed`/`disabled` paths"
+  - "`SourceEnableCommandHandler` is a CDI bean implementing `CommandHandler` with `name() == \"source-enable\"`. Argument shape: positional `<id>` (source id, parsed as a `UUID` literal via `UUID.fromString` — parse failure returns `error.source_enable.unknown_id`; short-prefix matching is out-of-scope for v1). Permission gate: non-admin returns `error.admin_only`. Kind gate (runs BEFORE state-branching, AFTER admin gate and source-id resolution): if `source.kind` is not HTTP-shaped (v1: only `rss` qualifies; `nostr`, `bluesky`, and any other StreamSource kind do NOT), the handler returns `error.source_enable.kind_not_supported_in_v1` immediately — no probe, no audit row, no state change. The kind gate matches the v1 reality pinned by `AddSourceArgs.java:232-237` (probe layer is HTTP-only). For HTTP-shaped sources, the handler branches on the row's current state: (a) `failed` OR `disabled` (NOT soft-deleted) — runs the probe (HEAD/small-range-GET via M1-036's `UrlProbe`); probe failure leaves the source in its prior state with `error.source_enable.probe_failed`; probe success transitions in one transaction: writes the `SOURCE_ENABLE` audit row audit-before-effect, `UPDATE source SET status = 'active', consecutive_failures = 0 WHERE id = ?`, returns `reply.source_enable.success` (no soft-delete disclosure on this path); NO confirm. (b) Soft-deleted (`deleted_at IS NOT NULL`) — requires confirm. First call: validates admin-gate + source resolves + kind is HTTP-shaped + writes the `SOURCE_ENABLE_INTENT` audit row in a transaction, registers a pending confirm via `confirmStateService.remember(actor.id, scope, new SourceEnableConfirm(sourceId))` — `SourceEnableConfirm` is a package-private top-level record implementing `ConfirmStateService.PendingConfirm` whose `commandName()` returns `\"source-enable\"`; the call shape matches the post-M1-057 unsealed 3-arg signature `remember(UUID, ScopeRef, PendingConfirm)`. Returns `reply.confirm.prompt.source_enable_soft_deleted` (interpolates redacted source name + timeout seconds + the 'No subscriptions will be restored' notice). Confirm call: `takeMatching(actor.id, scope, \"source-enable\")` returns the pending `PendingConfirm` (downcast to `SourceEnableConfirm` to read the source id); runs the probe; probe failure leaves the row soft-deleted (no audit row, no state change); probe success transitions in one transaction: writes `SOURCE_ENABLE`, `UPDATE source SET deleted_at = NULL, status = 'active', consecutive_failures = 0 WHERE id = ?`, returns `reply.source_enable.success.from_soft_deleted` including the literal disclosure `reply.source_enable.no_subscriptions_restored` (per spec §Source management: 'No subscriptions were restored — affected scopes must /add-source again to re-subscribe'). The disclosure is omitted on the `failed`/`disabled` paths"
   - "SourceEnableCommandHandlerTest scenarios: `sourceEnableNonAdminReturnsAdminOnlyError`, `sourceEnableAgainstNostrKindReturnsKindNotSupportedError` (seed a `kind='nostr'` source in `failed` state; assert reply is `error.source_enable.kind_not_supported_in_v1`, no probe invocation, no audit row, no state change), `sourceEnableFromFailedRunsProbeNoConfirm`, `sourceEnableFromDisabledRunsProbeNoConfirm`, `sourceEnableFromFailedWithFailingProbeLeavesRowFailed`, `sourceEnableFromSoftDeletedFirstCallReturnsPromptAndWritesIntentAuditRowOnly`, `sourceEnableSoftDeletedConfirmWithinWindowRunsProbeAndRevives` (asserts second audit row `action='SOURCE_ENABLE'`, `deleted_at IS NULL`, `status='active'`, reply contains the no-subscriptions-restored disclosure, no `source_subscription` rows were re-created), `sourceEnableSoftDeletedConfirmWithFailingProbeLeavesRowSoftDeleted`, `sourceEnableConfirmWithoutPendingReturnsNoPending`, `sourceEnableFromActiveReturnsAlreadyActive` (no audit row, no state change)"
   - "`SourceDisableCommandHandler` is a CDI bean implementing `CommandHandler` with `name() == \"source-disable\"`. Argument shape: positional `<id>`. Permission gate: non-admin returns `error.admin_only`. NO probe (per spec — operator is intentionally pausing the source). NO confirm. The handler executes in one transaction: validates the source row is `status = 'active' AND deleted_at IS NULL`; if not → `error.source_disable.not_active`; otherwise writes the `SOURCE_DISABLE` audit row audit-before-effect, `UPDATE source SET status = 'disabled' WHERE id = ?`, returns `reply.source_disable.success`"
   - "SourceDisableCommandHandlerTest scenarios: `sourceDisableNonAdminReturnsAdminOnlyError`, `sourceDisableHappyPathTransitionsActiveToDisabled`, `sourceDisableAgainstFailedSourceReturnsNotActive`, `sourceDisableAgainstAlreadyDisabledSourceReturnsNotActive`, `sourceDisableAgainstSoftDeletedSourceReturnsNotActive`"
   - "SourceManagementIT is the cross-cutting `@QuarkusTest`-shaped IT exercising the two confirm-gated paths end-to-end via the InMemoryAdapter (mirrors the M1-051 ConfirmFlowIT pattern). Method `removeSourcePromptThenConfirmCascadeDeletesSubscriptions` — seed an admin user + a source with three `source_subscription` rows (different scopes); deliver `/remove-source <id>` in DM; assert outbound is the confirm prompt AND no subscription deletion has happened AND one audit_log row with `REMOVE_SOURCE_INTENT`; deliver `/remove-source <id> confirm`; assert outbound is the success reply AND `source.deleted_at IS NOT NULL` AND zero `source_subscription` rows reference the source AND a second audit_log row with `REMOVE_SOURCE`. Method `sourceEnablePromptThenConfirmRevivesSoftDeletedRow` — seed an admin user + a soft-deleted source with NO subscriptions; deliver `/source-enable <id>` in DM; assert prompt + `SOURCE_ENABLE_INTENT` audit row + no state change; deliver `/source-enable <id> confirm`; assert success reply containing the no-subscriptions-restored disclosure + `source.deleted_at IS NULL` AND `source.status='active'` + a second `SOURCE_ENABLE` audit row. The IT uses a deterministic test-fixture probe seam (a CDI `@Alternative` UrlProbe that returns SUCCESS) so the test does not depend on outbound network access"
   - "`BundleKeys.java` adds the new constants for every reply / error key referenced above: `ERROR_LIST_SOURCES_ADMIN_ONLY_FLAG`, `ERROR_LIST_SOURCES_INCLUDE_DELETED_REQUIRES_ALL`, `REPLY_LIST_SOURCES_URL_VISIBILITY_CAVEAT`, `REPLY_LIST_SOURCES_HEADER`, `REPLY_LIST_SOURCES_LINE`, `REPLY_LIST_SOURCES_EMPTY`, `ERROR_REMOVE_SOURCE_UNKNOWN_ID`, `ERROR_REMOVE_SOURCE_ALREADY_DELETED`, `REPLY_CONFIRM_PROMPT_REMOVE_SOURCE`, `REPLY_REMOVE_SOURCE_SUCCESS`, `ERROR_SOURCE_ENABLE_UNKNOWN_ID`, `ERROR_SOURCE_ENABLE_PROBE_FAILED`, `ERROR_SOURCE_ENABLE_ALREADY_ACTIVE`, `ERROR_SOURCE_ENABLE_KIND_NOT_SUPPORTED_IN_V1`, `REPLY_CONFIRM_PROMPT_SOURCE_ENABLE_SOFT_DELETED`, `REPLY_SOURCE_ENABLE_SUCCESS`, `REPLY_SOURCE_ENABLE_SUCCESS_FROM_SOFT_DELETED`, `REPLY_SOURCE_ENABLE_NO_SUBSCRIPTIONS_RESTORED`, `ERROR_SOURCE_DISABLE_UNKNOWN_ID`, `ERROR_SOURCE_DISABLE_NOT_ACTIVE`, `REPLY_SOURCE_DISABLE_SUCCESS`. `bundles/en.properties` adds the corresponding entries (the M1-035c `BundleLoaderTest` reflective check enforces alignment)"
   - "Each of the four handlers consumes the M1-040 `InboundContext` request-scoped bean for the actor lookup (the `(adapter, contact_id)` per-adapter SELECT pattern established by M1-036 / M1-044c / M1-046). Every contact-id appearing in an exception message is interpolated via `ContactIds.redact` per the M1-038 / M1-039 redaction precedent. Group-scope invocation on any of the four handlers returns `error.group_admin_not_in_v1` (the M1-044c precedent — admin commands are DM-only in v1; T2-F lands the widening)"
+  - "`ListSourcesCommandHandler` writes one `audit_log` row on the privileged admin-only `--all` paths (spec §Authorization model step 8 + §Source URL visibility). `AuditAction.java` gains one additional enum value: `LIST_SOURCES_ALL`. After the admin permission gate passes and BEFORE `adminAllPath(...)` executes the deployment-wide SELECT, the handler writes one audit row via `AuditLogWriter.write(conn, row)` with `action=LIST_SOURCES_ALL`, `targetKind=\"source\"` (V5 closed set requires an existing entity-kind), `targetId=\"all\"` (sentinel literal for the deployment-wide enumeration, since `target_id` is TEXT NOT NULL with no UUID format constraint), `actorUserId=actor.id`, `actorContactId=callerContactId`, `actorAdapter=adapter`, and `detailsJson={\"include_deleted\":<true|false>}` encoding the `--include-deleted` variant. The audit-write runs in its own short transaction (own DataSource connection with `setAutoCommit(false)` + `commit()` / `rollback()` on exception) per the existing per-handler pattern. Non-admin callers passing `--all` write NO audit row (the admin gate fails first, before audit fires). Unprivileged DM/group reads (no flags) write NO audit row — matching the established read-only-doesn't-audit pattern (e.g. `SummaryCommandHandler`); the spec gap the redteam finding pinned is specifically the privileged-read enumeration of source URLs that §Source URL visibility flags as operator-visible. `ListSourcesCommandHandlerTest` extends with four new `@Test` scenarios: `listSourcesAllWritesPrivilegedReadAuditRow` (asserts exactly one `audit_log` row with `action='LIST_SOURCES_ALL'`, `target_kind='source'`, `target_id='all'`, `actor_user_id=actor.id`, and `details_json` containing `\"include_deleted\":false`); `listSourcesAllIncludeDeletedAuditRowEncodesIncludeDeletedTrue` (same row but `details_json` contains `\"include_deleted\":true`); `listSourcesNonAdminWithAllFlagWritesNoAuditRow` (admin gate rejection path leaves zero `audit_log` rows); `listSourcesDmReturnsCallerSubscriptionsOnlyWritesNoAuditRow` (unprivileged DM path leaves zero `audit_log` rows). Resolves the medium AUDIT-EVASION finding captured in `redteam_findings[0]` (2026-05-24)"
   - "`mvn -B clean verify` from the repo root exits 0. The pre-existing M1-051 ConfirmStateServiceTest / ConfirmFlowIT continue to pass — this ticket's new commands extend the consumer list but do NOT modify ConfirmStateService itself. The M1-036 AddSourceIT continues to pass — this ticket reads `source` rows but does NOT modify the source-table-write path. The M1-049 plain-JUnit handler tests remain unaffected"
 test_plan:
   adds:
     - infochat-provider/src/main/java/app/zcat/infochat/provider/command/ListSourcesCommandHandler.java
     - infochat-provider/src/main/java/app/zcat/infochat/provider/command/RemoveSourceCommandHandler.java
+    - infochat-provider/src/main/java/app/zcat/infochat/provider/command/RemoveSourceConfirm.java
     - infochat-provider/src/main/java/app/zcat/infochat/provider/command/SourceEnableCommandHandler.java
+    - infochat-provider/src/main/java/app/zcat/infochat/provider/command/SourceEnableConfirm.java
     - infochat-provider/src/main/java/app/zcat/infochat/provider/command/SourceDisableCommandHandler.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/command/ListSourcesCommandHandlerTest.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/command/RemoveSourceCommandHandlerTest.java
@@ -129,15 +194,149 @@ spec_refs:
   - docs/spec/security.md §Authorization model
 decision_refs:
   - D7
-reviews: {}
-overrides: []
+reviews:
+  - round: 1
+    date: 2026-05-24
+    verdict: MANUAL
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PARTIAL
+    diff_stats:
+      files: 16
+      added: 3532
+      removed: 27
+  - round: 1
+    date: 2026-05-24
+    verdict: OVERRIDE-APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PARTIAL
+    override_ref: 0
+overrides:
+  - date: 2026-05-24
+    objection: |
+      ListSourcesCommandHandlerTest uses @QuarkusTest but acceptance item 3
+      explicitly requires "plain JUnit per the M1-049 test pyramid (no
+      @QuarkusTest)." The deviation is principled (the handler reads from
+      joined real-DB tables and stubbed JDBC would produce tautological tests,
+      while H2/in-memory substitutes are forbidden by §8 stack-specific rules)
+      and is documented in the test javadoc, but the ticket body itself was
+      not amended to authorize the deviation.
+    user_justification: |
+      I (the user) guided the developer to align with the other Shape B
+      implementations (per docs/process/test-pyramid.md §Shape B Thin-SQL).
+      Shape B catches SQL bugs that Shape A — with hand-stubbed JDBC
+      collaborators — would silently pass: the stubs would tautologically
+      return whatever the test arranged, defeating the point of asserting
+      on the handler's joined-row behavior against the real schema. The
+      tests run green against real Postgres via Quarkus DevServices. I'm
+      blessing the deviation rather than re-implementing as lower-fidelity
+      plain JUnit; the engineering merit aligns with the test-pyramid's
+      explicit Shape B allowance, and the acceptance literal was the
+      ambiguity, not the implementation choice. Approved as is.
 aborted_attempts: []
 reopens:
   - date: 2026-05-24
     prior_deferred_reason: blocked-on-new-ticket
     prior_deferred_on: M1-057
     reason: M1-057 unsealed PendingConfirm; blocker cleared
-redteam_findings: []
+redteam_findings:
+  - date: 2026-05-24
+    category: AUDIT-EVASION
+    severity: medium
+    promise: |
+      docs/spec/security.md §Authorization model — "Authorization
+      evaluation order on every inbound message: ... 7. Permission
+      check ... 8. Audit-log the intent. 9. Execute." Combined with
+      §Source URL visibility ("every URL added via /add-source (DM or
+      group) is visible to bot admins through /list-sources --all") and
+      §Secrets handling ("The audit log records intent (command name,
+      actor, scope, target)"). Step 8 commits to audit-on-intent for
+      every inbound message that passes the permission step; the
+      `--all` form of `/list-sources` is an admin-gated privileged
+      disclosure (every source identifier across the deployment,
+      including soft-deleted rows under `--include-deleted`).
+    gap: |
+      infochat-provider/src/main/java/app/zcat/infochat/provider/command/ListSourcesCommandHandler.java
+      lines 56-64 (javadoc) and the entire `handle(...)` body lines
+      111-167 — the handler explicitly opts out of writing any
+      `audit_log` row ("a list-only command writes no audit_log row
+      even on the admin --all path"), and no `auditLogWriter.write(...)`
+      call appears in any code path including the privileged `--all` /
+      `--all --include-deleted` admin paths.
+      infochat-core/src/main/java/app/zcat/infochat/core/audit/AuditAction.java
+      is not extended with a `LIST_SOURCES`/`LIST_SOURCES_ALL` verb
+      either.
+    repro: |
+      A rogue or session-compromised bot admin issues `/list-sources
+      --all --include-deleted` once or repeatedly to harvest every
+      source identifier (URL) across the deployment — including private
+      feeds that §Source URL visibility flags as operator-visible and
+      historical soft-deleted rows. The harvest leaves no trace in
+      `audit_log`; subsequent forensic review cannot determine which
+      admin enumerated the source catalog, when, or how often, even
+      though the same admin's destructive operations on those rows
+      (`/remove-source`, `/source-enable`) would be fully recorded
+      under `REMOVE_SOURCE_INTENT` / `SOURCE_ENABLE_INTENT`. This
+      asymmetry — destructive writes audited, privileged reads not —
+      is exactly the gap step-8's per-inbound commitment is meant to
+      close.
+    suggested_fix_class: audit-log-coverage
+redteam_audits:
+  - date: 2026-05-24
+    verdict: FINDINGS
+    base: main
+    head: c11ed17
+    verdict_file: docs/plan/m1/redteam/M1-053-2026-05-24.md
+    findings_count: 1
+    out_of_model_count: 1
+    note: |
+      /redteam M1-053 --in-progress ran post-/m1-tick-commit,
+      pre-/m1-tick-merge (the branch commit c11ed17 is the audit head;
+      the squash-merge to main has not yet happened). The audit was
+      triggered by crash-recovery — the previous session committed the
+      implementation, captured the MANUAL reviewer verdict, flipped
+      status to done, then crashed before redteam and merge. The
+      resumed session applied path-a (amend acceptance item 3 to
+      authorize the Shape B @QuarkusTest pattern) and ran this audit.
+
+      Single finding (medium AUDIT-EVASION): ListSourcesCommandHandler
+      explicitly opts out of writing audit rows on the admin-only
+      --all / --include-deleted paths. The handler's javadoc cites an
+      "Invariant 7" rationale (audit-on-intent only on confirm-gated
+      destructive admin actions), but spec §Authorization model step 8
+      commits to audit-on-intent for every inbound message that reaches
+      permission check, and §Source URL visibility flags --all as a
+      privilege boundary. The asymmetry — destructive writes audited
+      via *_INTENT verbs, privileged reads not — is the gap.
+
+      One OUT-OF-MODEL TOCTOU observation about the unlocked preflight
+      read and outbound probe is forward-looking (only relevant if a
+      future ticket adds /rename-source or /edit-source-url); v1
+      freezes source.identifier so the window is closed by immutability.
+
+      Disposition: path (a) chosen. Status flipped back to in-progress;
+      a new acceptance item authorizes the audit-on-privileged-read
+      addition (one new verb `LIST_SOURCES_ALL`, audit row written
+      after the admin gate and before the deployment-wide SELECT,
+      with `details_json` carrying the `include_deleted` variant);
+      ListSourcesCommandHandler is extended to write the audit row;
+      ListSourcesCommandHandlerTest is extended with four new
+      scenarios. The fix lands on this branch in one rework commit,
+      then `/m1-tick merge` collapses the chain into a single squash-
+      merge commit on main.
+
+      Per memory/feedback_redteam_postcommit_merge_pitfall.md: this
+      branch will have multiple commits at merge time. Verify the
+      squash-merge subject lands as `M1-053: <implementation summary>`
+      and amend with the implementation commit SHA if `-C <tip>` picks
+      up the wrong canonical message.
 ---
 
 # M1-053: Source-management admin commands — list / remove / enable / disable
@@ -281,13 +480,23 @@ Highlights:
     commands — the M1-051 confirm-gate state machine.
 - **ConfirmStateService consumption.** Two new keyspace entries
   via `confirmStateService.remember(actor.id, scope,
-  "remove-source", ...)` and `confirmStateService.remember(actor.id,
-  scope, "source-enable", ...)`. The `sweepPrefix` (used by the
-  router's step 4.5 sweep) defaults to the same `commandName`
-  string so the existing `isConfirmShape` match logic accepts
-  `/remove-source <id> confirm` and
-  `/source-enable <id> confirm` body shapes without any router
-  edit.
+  new RemoveSourceConfirm(sourceId))` and `confirmStateService.remember(
+  actor.id, scope, new SourceEnableConfirm(sourceId))`. The two new
+  records are top-level package-private files
+  (`RemoveSourceConfirm.java`, `SourceEnableConfirm.java`)
+  implementing the post-M1-057 unsealed
+  `ConfirmStateService.PendingConfirm` interface — matching the
+  M1-051 separate-file precedent (`BanConfirm.java`,
+  `InviteCreateOpenConfirm.java`, `InviteRevokeConfirm.java`) that
+  M1-057 out_of_scope clause #4 explicitly anticipated for this
+  ticket. Each record overrides `commandName()` (`"remove-source"`
+  / `"source-enable"`) and the default `sweepPrefix()` returns the
+  same string, so the router's step 4.5 sweep's existing
+  `isConfirmShape(normalized, pending)` accepts
+  `/remove-source <id> confirm` and `/source-enable <id> confirm`
+  without any router edit. The `takeMatching` call sites use the
+  3-arg `(UUID, ScopeRef, String commandName)` overload (no change
+  to ConfirmStateService).
 - **Audit-on-intent placement.** The intent audit INSERT runs
   inside the first-call transaction BEFORE the
   `confirmStateService.remember` call so a remember-then-crash
@@ -307,17 +516,17 @@ Highlights:
   which is invariant-impossible per spec — but the handler
   defensively checks anyway for defence-in-depth, matching the
   M1-039 ban-check precedent).
-- **Files-budget tightness.** files_budget is set to 12 — exactly
-  the count of paths in `files_scope` (9 new files + 3 modified:
-  4 handlers + 4 handler tests + 1 IT, plus AuditAction.java,
-  BundleKeys.java, en.properties). The `SourceManagementIT` probe
-  fixture follows the M1-036 precedent (`AddSourceIT.java:271`
-  defines `LoopbackProbe` as a nested
+- **Files-budget tightness.** files_budget is set to 14 — exactly
+  the count of paths in `files_scope` (11 new files + 3 modified:
+  4 handlers + 2 PendingConfirm records + 4 handler tests + 1 IT,
+  plus AuditAction.java, BundleKeys.java, en.properties). The
+  `SourceManagementIT` probe fixture follows the M1-036 precedent
+  (`AddSourceIT.java:271` defines `LoopbackProbe` as a nested
   `public static class ... extends UrlProbe` annotated
   `@Alternative` inside the IT file — one inner class, well below
   the [[feedback_avoid_test_inner_classes]] >3 threshold), so no
-  13th fixture file is needed. If the implementing session finds
-  the count rising past 12 for OTHER reasons (e.g., a
+  15th fixture file is needed. If the implementing session finds
+  the count rising past 14 for OTHER reasons (e.g., a
   `SourceManagementArgs.java` parser extraction, a shared
   `SourceCommandPermissionCheck` helper), the workflow path is
   the M1-008 / M1-044 umbrella+subs escape hatch — escalate at

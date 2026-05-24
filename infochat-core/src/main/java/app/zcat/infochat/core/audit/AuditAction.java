@@ -29,6 +29,17 @@ package app.zcat.infochat.core.audit;
  *       by the step-9 execute path), so an admin who probes and
  *       abandons leaves an audit trail even when no destructive
  *       mutation lands.</li>
+ *   <li>{@link #LIST_SOURCES_ALL} records the privileged
+ *       {@code /list-sources --all [--include-deleted]} read — an
+ *       admin-only deployment-wide enumeration of source URLs that
+ *       spec §Source URL visibility flags as operator-visible. The
+ *       {@code --include-deleted} variant is encoded in the audit
+ *       row's {@code details_json} so one verb covers both
+ *       privileged forms. Unprivileged DM/group reads of
+ *       {@code /list-sources} write NO audit row (matching the
+ *       established read-only-doesn't-audit pattern); the gap the
+ *       audit closes is specifically the privileged-read
+ *       enumeration of every source URL across the deployment.</li>
  * </ul>
  *
  * <p>{@link #STARTUP_RELEASE_ON_STAGE2_FAILURE_TRUE} pre-dates this
@@ -65,8 +76,11 @@ public enum AuditAction {
     DEMOTE_GROUP_ADMIN,
     ADD_SOURCE,
     REMOVE_SOURCE,
+    REMOVE_SOURCE_INTENT,
     SOURCE_ENABLE,
+    SOURCE_ENABLE_INTENT,
     SOURCE_DISABLE,
+    LIST_SOURCES_ALL,
     APPROVE_QUARANTINE,
     REJECT_QUARANTINE,
     FORGET,

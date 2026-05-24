@@ -438,6 +438,132 @@ public final class BundleKeys {
     /** {@code /unsave} invoked from group scope — v1 short-circuit; T2-F lands the group-actor seam. */
     public static final String ERROR_UNSAVE_GROUP_NOT_IN_V1 = "error.unsave.group_not_in_v1";
 
+    // ----- Source-management admin commands (M1-053) ----------------------
+    // /list-sources, /remove-source, /source-enable, /source-disable per
+    // docs/spec/commands.md §Source management + §Permission model +
+    // docs/spec/security.md §Source URL visibility + §Authorization model.
+    // The `--all` and `--include-deleted` flags on /list-sources are
+    // bot-admin-only flag-as-identity (a non-admin caller never sees the
+    // flag silently stripped). /remove-source and /source-enable
+    // (soft-deleted path only) are confirm-gated via M1-051
+    // ConfirmStateService; the two new PendingConfirm record types
+    // (RemoveSourceConfirm, SourceEnableConfirm) live as top-level files
+    // alongside this constant catalogue.
+
+    /** {@code /list-sources --all} or {@code --include-deleted} from a non-admin caller — flag-as-identity rejection. */
+    public static final String ERROR_LIST_SOURCES_ADMIN_ONLY_FLAG = "error.list_sources.admin_only_flag";
+
+    /** {@code /list-sources --include-deleted} without {@code --all} — even an admin must pair the two. */
+    public static final String ERROR_LIST_SOURCES_INCLUDE_DELETED_REQUIRES_ALL =
+            "error.list_sources.include_deleted_requires_all";
+
+    /**
+     * URL-visibility caveat appended to the header on the {@code --all}
+     * paths per {@code docs/spec/security.md} §Source URL visibility.
+     * The bundle text MUST contain the literal {@code visible to bot
+     * admins} (asserted by {@code ListSourcesCommandHandlerTest}).
+     */
+    public static final String REPLY_LIST_SOURCES_URL_VISIBILITY_CAVEAT =
+            "reply.list_sources.url_visibility_caveat";
+
+    /** Header line printed before the per-source rows. */
+    public static final String REPLY_LIST_SOURCES_HEADER = "reply.list_sources.header";
+
+    /**
+     * Per-row template. Tokens: {@code {0}} = display name, {@code {1}} = identifier (URL),
+     * {@code {2}} = kind ({@code rss|bluesky|...}), {@code {3}} = status flag
+     * ({@code active|failed|disabled|deleted}).
+     */
+    public static final String REPLY_LIST_SOURCES_LINE = "reply.list_sources.line";
+
+    /** Reply when zero rows would be returned for the requested view. */
+    public static final String REPLY_LIST_SOURCES_EMPTY = "reply.list_sources.empty";
+
+    /** {@code /remove-source <id>}: parse failure on the positional {@code <id>} (not a UUID literal). */
+    public static final String ERROR_REMOVE_SOURCE_UNKNOWN_ID = "error.remove_source.unknown_id";
+
+    /** {@code /remove-source <id>}: target row is already soft-deleted ({@code deleted_at IS NOT NULL}). */
+    public static final String ERROR_REMOVE_SOURCE_ALREADY_DELETED = "error.remove_source.already_deleted";
+
+    /**
+     * First-call prompt template for {@code /remove-source}. Tokens:
+     * {@code {0}} = source display name, {@code {1}} = affected-subscriber count
+     * (rows in {@code source_subscription} that will be cascade-deleted),
+     * {@code {2}} = timeout in whole seconds.
+     */
+    public static final String REPLY_CONFIRM_PROMPT_REMOVE_SOURCE = "reply.confirm.prompt.remove_source";
+
+    /**
+     * {@code /remove-source confirm} success reply. Tokens: {@code {0}} =
+     * source display name, {@code {1}} = cascade-deleted subscription count.
+     */
+    public static final String REPLY_REMOVE_SOURCE_SUCCESS = "reply.remove_source.success";
+
+    /** {@code /source-enable <id>}: parse failure on the positional {@code <id>} (not a UUID literal). */
+    public static final String ERROR_SOURCE_ENABLE_UNKNOWN_ID = "error.source_enable.unknown_id";
+
+    /**
+     * {@code /source-enable <id>}: probe failed (HTTP 4xx/5xx, SSRF block,
+     * timeout, or unreachable). Single key collapses all failure shapes —
+     * the source remains in its prior state regardless.
+     */
+    public static final String ERROR_SOURCE_ENABLE_PROBE_FAILED = "error.source_enable.probe_failed";
+
+    /** {@code /source-enable <id>}: target row is already {@code status='active'} and not soft-deleted. */
+    public static final String ERROR_SOURCE_ENABLE_ALREADY_ACTIVE = "error.source_enable.already_active";
+
+    /**
+     * {@code /source-enable <id>}: target row's {@code kind} is not in
+     * the v1 HTTP-shaped probe-supported set (only {@code rss} qualifies
+     * today; {@code nostr}/{@code bluesky}/etc. await {@code
+     * StreamSourceSupervisor}).
+     */
+    public static final String ERROR_SOURCE_ENABLE_KIND_NOT_SUPPORTED_IN_V1 =
+            "error.source_enable.kind_not_supported_in_v1";
+
+    /**
+     * First-call prompt template for {@code /source-enable} against a
+     * soft-deleted row. Tokens: {@code {0}} = source display name,
+     * {@code {1}} = timeout in whole seconds. The bundle text MUST
+     * include the literal {@code No subscriptions will be restored}
+     * (asserted by {@code SourceEnableCommandHandlerTest}).
+     */
+    public static final String REPLY_CONFIRM_PROMPT_SOURCE_ENABLE_SOFT_DELETED =
+            "reply.confirm.prompt.source_enable_soft_deleted";
+
+    /**
+     * {@code /source-enable} success reply on the {@code failed}/{@code disabled}
+     * path (no soft-delete revival). Token {@code {0}} = source display name.
+     */
+    public static final String REPLY_SOURCE_ENABLE_SUCCESS = "reply.source_enable.success";
+
+    /**
+     * {@code /source-enable confirm} success reply on the soft-deleted
+     * revival path. Token {@code {0}} = source display name. The bundle
+     * text MUST include the {@link #REPLY_SOURCE_ENABLE_NO_SUBSCRIPTIONS_RESTORED}
+     * literal — the handler concatenates the two keys for one outbound.
+     */
+    public static final String REPLY_SOURCE_ENABLE_SUCCESS_FROM_SOFT_DELETED =
+            "reply.source_enable.success.from_soft_deleted";
+
+    /**
+     * The required spec disclosure literal appended to the soft-deleted
+     * revival reply. Per {@code docs/spec/commands.md} §Source management:
+     * "No subscriptions were restored — affected scopes must /add-source
+     * again to re-subscribe." Asserted as a literal substring.
+     */
+    public static final String REPLY_SOURCE_ENABLE_NO_SUBSCRIPTIONS_RESTORED =
+            "reply.source_enable.no_subscriptions_restored";
+
+    /** {@code /source-disable <id>}: parse failure on the positional {@code <id>} (not a UUID literal). */
+    public static final String ERROR_SOURCE_DISABLE_UNKNOWN_ID = "error.source_disable.unknown_id";
+
+    /** {@code /source-disable <id>}: target row is not currently {@code status='active' AND deleted_at IS NULL}. */
+    public static final String ERROR_SOURCE_DISABLE_NOT_ACTIVE = "error.source_disable.not_active";
+
+    /** {@code /source-disable} success reply. Token {@code {0}} = source display name. */
+    public static final String REPLY_SOURCE_DISABLE_SUCCESS = "reply.source_disable.success";
+
     private BundleKeys() {
         throw new AssertionError("BundleKeys is a constant holder and must not be instantiated");
     }
