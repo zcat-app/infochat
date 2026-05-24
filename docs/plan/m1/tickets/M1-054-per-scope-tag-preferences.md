@@ -1,11 +1,9 @@
 ---
 id: M1-054
 title: Per-scope tag preferences — /follow-tag + /unfollow-tag + tag-mode state machine
-status: deferred
+status: pending
 created: 2026-05-24
 last_updated: 2026-05-24
-deferred_on: M1-057
-deferred_reason: blocked-on-new-ticket
 blocked_by:
   - M1-051
   - M1-057
@@ -70,7 +68,11 @@ migration_touch: false
 reviews: {}
 overrides: []
 aborted_attempts: []
-reopens: []
+reopens:
+  - date: 2026-05-24
+    prior_deferred_reason: blocked-on-new-ticket
+    prior_deferred_on: M1-057
+    reason: M1-057 landed — blocker resolved
 redteam_findings: []
 clarity_check: {}
 escalations:
