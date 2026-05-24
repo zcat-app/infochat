@@ -33,8 +33,7 @@ out_of_scope:
   - any LLM output sanitizer change — the sanitizer is called, not modified
   - any translation pipeline change — M1-059 territory; chat-mode translation wiring is noted as T2-D territory in M1-059's out_of_scope but this ticket uses the existing TranslationPipeline bean if the scope has a non-en language
 acceptance:
-  - "InboundRouter.java's non-slash branch no longer returns the static CHAT_MODE_REPLY constant. Instead it dispatches to ChatAgent for the calling (user, scope). Verify: InboundRouterChatModeIT.chatModeDispatchesToAgent passes"
-  - "InboundRouterChatModeIT.chatModeDispatchesToAgent sends a non-slash message via InMemoryAdapter and asserts the reply is LLM-generated (not the static sentinel). Verify: grep -iE 'void.*chatModeDispatchesToAgent' InboundRouterChatModeIT.java returns >=1 match"
+  - "InboundRouter.java's non-slash branch no longer returns the static CHAT_MODE_REPLY constant. Instead it dispatches to ChatAgent for the calling (user, scope). The test sends a non-slash message via InMemoryAdapter and asserts the reply is LLM-generated (not the static sentinel). Verify: InboundRouterChatModeIT.chatModeDispatchesToAgent passes"
   - "ChatAgent.java exists as @ApplicationScoped and orchestrates: (1) pre-fetch memory, (2) build prompt with random-marker wrapper, (3) call LLM via CHAT_AGENT ModelTask, (4) dispatch tool calls via ChatToolDispatcher, (5) persist turns in chat_message, (6) sanitize output via LlmOutputSanitizer, (7) run through TranslationPipeline if scope language is non-en. Verify: ChatAgentTest.orchestrationSequenceIsCorrect passes"
   - "ChatSessionRepository.java persists each user turn and assistant turn as chat_message rows, incrementing chat_session.next_seq via the DB trigger. A new session is created (INSERT into chat_session) on first message for a (user, scope) pair. Verify: ChatSessionRepositoryTest.persistsTurnsAndCreatesSession passes"
   - "The chat-mode body cap is enforced BEFORE the message reaches the chat agent. Messages exceeding the profile-driven cap (spec §Input length limits: profile.context_window / 8 chars) receive a friendly error and no LLM call. Verify: InboundRouterChatModeIT.rejectsOversizedChatMessage passes"
@@ -53,10 +52,11 @@ test_plan:
     - all tests currently green on main
 spec_refs:
   - docs/spec/commands.md §Chat mode
-  - docs/spec/security.md §Failure handling — Chat-mode replies
+  - docs/spec/security.md §Failure handling
   - docs/spec/security.md §Prompt-injection defenses
-  - docs/spec/schema.md §Per-scope state (Chat session / context window)
-  - docs/design/03-commands.md §3.1 (One in-flight interruptible request, Chat-mode body cap)
+  - docs/spec/schema.md §Per-scope state
+  - docs/design/03-commands.md §One in-flight interruptible request per (user, scope)
+  - docs/design/03-commands.md §Input length limits
 decision_refs:
   - D21
   - D24
