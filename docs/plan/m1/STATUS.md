@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 61 |
 | deferred | 6 |
-| **total** | **68** |
+| **total** | **71** |
 
 ---
 
@@ -25,6 +25,9 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-046 — /grant-admin + /revoke-admin (per-adapter scope, global last-admin counter) (complexity: medium, risk: high)
+- M1-052 — Saved-post library — /save + /saved + /unsave + saved_post snapshot (complexity: medium, risk: medium)
+- M1-053 — Source-management admin commands — list / remove / enable / disable (complexity: high, risk: high)
+- M1-054 — Per-scope tag preferences — /follow-tag + /unfollow-tag + tag-mode state machine (complexity: medium, risk: medium)
 
 ---
 
@@ -195,4 +198,7 @@ M1-049 (done)
 M1-050 (done)
   └── M1-047 (done) [see above]
 M1-051 (done)
+  ├── M1-053 (pending) ← runnable
+  └── M1-054 (pending) ← runnable
+M1-052 (pending) ← runnable
 ```
