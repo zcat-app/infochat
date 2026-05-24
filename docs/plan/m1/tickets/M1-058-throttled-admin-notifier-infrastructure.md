@@ -1,10 +1,76 @@
 ---
 id: M1-058
 title: ThrottledAdminNotifier (T2-G infrastructure) + admin_notification_state table
-status: pending
+status: done
 created: 2026-05-24
 last_updated: 2026-05-24
 blocked_by: []
+reviews:
+  - round: 1
+    date: 2026-05-24
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 662
+      removed: 8
+redteam_findings:
+  - date: 2026-05-24
+    category: INJECTION
+    severity: low
+    promise: |
+      Threat model §Secrets handling commits to redacted/structured
+      non-audit logging; combined with the diff's own contract that
+      the canonical "ADMIN-NOTIFY key=... error=... message=..." line
+      is "pinned for operator log scraping", the format is a
+      security-relevant interface whose integrity the notifier owns.
+    gap: |
+      ThrottledAdminNotifier.notifyOnce formats key, errorClass, and
+      message into the WARN log line with no newline/CR scrubbing,
+      no length cap, and no character allowlist. V16's notification_key
+      and error_class TEXT columns also carry no CHECK constraint to
+      bound length or forbid control characters at the DB layer.
+    repro: |
+      A future caller forwarding externally-influenced text (e.g. a
+      parser exception getMessage() including bytes from a malformed
+      feed body) passes that text into message or errorClass. Embedded
+      "\n" emits a second WARN line that matches operator's
+      "grep ADMIN-NOTIFY" scrape — fabricated entries appear in the
+      operator's alert pipeline, or genuine entries are flooded out.
+      Currently unreachable (no callers; M1-058 is pure infrastructure)
+      but exploitable as soon as any retrofit ticket wires a real
+      caller in.
+    suggested_fix_class: input-sanitization
+redteam_audits:
+  - date: 2026-05-24
+    verdict: FINDINGS
+    base: main
+    head: m1/M1-058-throttled-admin-notifier-infrastructure
+    verdict_file: docs/plan/m1/redteam/M1-058-2026-05-24.md
+    findings_count: 1
+    out_of_model_count: 2
+    note: |
+      One low INJECTION finding, currently unreachable (infrastructure
+      ticket with no callers). Two advisory OUT-OF-MODEL observations:
+      degraded-DB fallback log format does not match the canonical
+      ADMIN-NOTIFY scrape pattern; Provider role lacks INSERT/UPDATE
+      on admin_notification_state. Disposition: do NOT amend the
+      M1-058 commit (no amend-after-pass). Hardening lands as a
+      follow-up ticket whose acceptance sanitizes notifyOnce inputs
+      (strip CR/LF, cap key/error_class/message lengths) BEFORE any
+      retrofit ticket wires a real caller in. See verdict_file for
+      verbatim verdict + OUT-OF-MODEL detail.
+clarity_check:
+  date: 2026-05-24
+  verdict: WARN
+  warnings:
+    - "COMPLEXITY-RISK-CALIBRATED: risk=low with migration_touch=true is borderline; V16 is purely additive (new table, no FK on existing tables) which makes risk=low defensible, but the combination with security_relevant=true suggests risk=medium might be a closer fit. Not a blocker."
+  blockers: []
 files_budget: 5
 files_scope:
   - infochat-core/src/main/resources/db/migration/V16__admin_notification_state.sql
