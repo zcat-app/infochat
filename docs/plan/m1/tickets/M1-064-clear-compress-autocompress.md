@@ -50,11 +50,10 @@ test_plan:
   preserves:
     - all tests currently green on main
 spec_refs:
-  - docs/spec/commands.md §Conversation control — /clear
-  - docs/spec/commands.md §Conversation control — /compress
-  - docs/spec/security.md §Failure handling — Compression failure
-  - docs/spec/llm.md §Failure handling — Compression
-  - docs/design/03-commands.md §3.9 /clear, /compress
+  - docs/spec/commands.md §Conversation control
+  - docs/spec/security.md §Failure handling
+  - docs/spec/llm.md §Failure handling (recap)
+  - docs/design/03-commands.md §3.9 Conversation control
 decision_refs:
   - D24
   - D25

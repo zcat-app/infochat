@@ -46,10 +46,10 @@ test_plan:
   preserves:
     - all tests currently green on main
 spec_refs:
-  - docs/spec/commands.md §Conversation control — /forget
-  - docs/spec/schema.md §Invariants (Invariant 7, Invariant 10)
-  - docs/spec/security.md §Secrets handling (user-content rule)
-  - docs/design/03-commands.md §3.9 /forget
+  - docs/spec/commands.md §Conversation control
+  - docs/spec/schema.md §Invariants
+  - docs/spec/security.md §Secrets handling
+  - docs/design/03-commands.md §3.9 Conversation control
 decision_refs:
   - D13
   - D37

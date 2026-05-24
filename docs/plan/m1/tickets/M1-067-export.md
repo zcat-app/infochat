@@ -49,9 +49,9 @@ test_plan:
   preserves:
     - all tests currently green on main
 spec_refs:
-  - docs/spec/commands.md §Conversation control — /export
+  - docs/spec/commands.md §Conversation control
   - docs/spec/security.md §Rate limiting
-  - docs/design/03-commands.md §3.9 /export
+  - docs/design/03-commands.md §3.9 Conversation control
 decision_refs:
   - D13
 reviews: {}
