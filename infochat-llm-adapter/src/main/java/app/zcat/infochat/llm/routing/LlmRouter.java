@@ -11,6 +11,7 @@ import org.eclipse.microprofile.config.Config;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -114,7 +115,7 @@ public class LlmRouter {
      */
     @Inject
     public LlmRouter(Instance<LlmProvider> providers, Config mpConfig) {
-        this(buildFromCdi(providers), new MicroProfileConfigReader(mpConfig));
+        this(buildFromCdi(providers, mpConfig), new MicroProfileConfigReader(mpConfig));
     }
 
     /**
@@ -228,11 +229,11 @@ public class LlmRouter {
      * when {@link #CONFIG_KEY_DEFAULT_PROVIDER} names a different
      * provider that isn't on the test classpath.
      */
-    private static List<Entry> buildFromCdi(Instance<LlmProvider> providers) {
+    private static List<Entry> buildFromCdi(Instance<LlmProvider> providers, Config mpConfig) {
         List<Entry> out = new ArrayList<>();
         for (LlmProvider p : providers) {
             String name = providerName(p);
-            Set<String> langs = supportedLanguagesFor(p);
+            Set<String> langs = supportedLanguagesFor(p, mpConfig);
             out.add(new Entry(name, p, langs));
         }
         if (out.isEmpty()) {
@@ -253,20 +254,43 @@ public class LlmRouter {
         if (p instanceof OpenAiCompatibleProvider) {
             return OpenAiCompatibleProvider.PROVIDER_NAME;
         }
-        return p.getClass().getSimpleName();
+        // CDI client proxies are subclasses whose name carries a
+        // framework suffix (e.g. _ClientProxy). Walk up to the
+        // developer-authored class so the operator-facing config key
+        // is stable across framework versions.
+        Class<?> cls = p.getClass();
+        while (cls.getSimpleName().contains("_") && cls.getSuperclass() != null
+                && LlmProvider.class.isAssignableFrom(cls.getSuperclass())) {
+            cls = cls.getSuperclass();
+        }
+        return cls.getSimpleName();
     }
 
     /**
-     * Capability set for a CDI-discovered provider. v1 hard-codes
-     * English-only for the OpenAI-compatible adapter; future ticket
-     * authors add per-class entries here as they wire multilingual
-     * backends.
+     * Config-driven capability set for a CDI-discovered provider.
+     * Reads {@code infochat.llm.<providerName>.languages} (comma-
+     * separated ISO 639-1 codes, e.g. {@code en,cs}); defaults to
+     * {@code Set.of("en")} when the key is absent or empty so
+     * existing deployments that do not configure the key are
+     * byte-identical to the pre-config-driven behavior.
+     *
+     * <p>Package-private (not private) so {@link LlmRouterTest} can
+     * exercise the helper directly with a hand-rolled {@link Config}.
      */
-    private static Set<String> supportedLanguagesFor(LlmProvider p) {
-        if (p instanceof OpenAiCompatibleProvider) {
+    static Set<String> supportedLanguagesFor(LlmProvider p, Config config) {
+        String key = "infochat.llm." + providerName(p) + ".languages";
+        Optional<String> raw = config.getOptionalValue(key, String.class);
+        if (raw.isEmpty() || raw.get().isBlank()) {
             return Set.of("en");
         }
-        return Set.of();
+        Set<String> langs = new LinkedHashSet<>();
+        for (String part : raw.get().split(",")) {
+            String trimmed = part.trim().toLowerCase(Locale.ROOT);
+            if (!trimmed.isEmpty()) {
+                langs.add(trimmed);
+            }
+        }
+        return langs.isEmpty() ? Set.of("en") : Set.copyOf(langs);
     }
 
     /**

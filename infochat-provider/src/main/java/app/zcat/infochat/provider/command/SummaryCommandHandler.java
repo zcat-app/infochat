@@ -17,6 +17,7 @@ import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Result;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator.ClusterProse;
+import app.zcat.infochat.provider.translation.TranslationPipeline;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -78,6 +79,9 @@ public class SummaryCommandHandler implements CommandHandler {
     private static final String SELECT_USER_ID_BY_ADAPTER_AND_CONTACT_ID =
             "SELECT id FROM users WHERE adapter = ? AND contact_id = ?";
 
+    private static final String SELECT_SCOPE_LANGUAGE =
+            "SELECT language FROM scope_preferences WHERE scope_kind = ? AND scope_id = ?";
+
     /** Max fuzzy-suggestion entries surfaced in the unknown-tag error. */
     private static final int FUZZY_SUGGESTION_MAX = 5;
 
@@ -98,6 +102,9 @@ public class SummaryCommandHandler implements CommandHandler {
 
     @Inject
     LlmOutputSanitizer llmOutputSanitizer;
+
+    @Inject
+    TranslationPipeline translationPipeline;
 
     @Inject
     InboundContext inboundContext;
@@ -143,6 +150,8 @@ public class SummaryCommandHandler implements CommandHandler {
             return reply(scope, bundleLoader.get(BundleKeys.REPLY_SUMMARY_NO_POSTS_YET));
         }
 
+        String scopeLanguage = readScopeLanguage(scopeKind, scopeId.get());
+
         List<Cluster> clusters = clusterTraversal.cluster(result.posts());
         List<ClusterProse> prose = summaryProseGenerator.generate(clusters, "en");
 
@@ -169,7 +178,7 @@ public class SummaryCommandHandler implements CommandHandler {
         }
 
         for (ClusterProse cp : prose) {
-            appendClusterBlock(out, cp);
+            appendClusterBlock(out, cp, scopeLanguage);
         }
 
         return reply(scope, out.toString().stripTrailing());
@@ -180,7 +189,8 @@ public class SummaryCommandHandler implements CommandHandler {
      * {@code summary:} is LLM-authored (degraded entries write the
      * degraded prose into the same slot).
      */
-    private void appendClusterBlock(StringBuilder out, ClusterProse cp) {
+    private void appendClusterBlock(StringBuilder out, ClusterProse cp,
+                                     String scopeLanguage) {
         Cluster cluster = cp.cluster();
         List<Post> posts = cluster.posts();
         Post first = posts.get(0);
@@ -205,10 +215,14 @@ public class SummaryCommandHandler implements CommandHandler {
         out.append("score: ").append(sourceSet.size())
            .append(sourceSet.size() == 1 ? " source" : " sources")
            .append("\n");
-        // summary: (LLM-authored, sanitized) or degraded prose.
+        // summary: degraded prose bypasses the pipeline per D43
+        // (bundle-not-translator invariant); non-degraded prose runs
+        // through sanitizer-1 then the translation pipeline (which
+        // internally runs sanitizer-2 + cache).
         String summaryText = cp.degraded()
                 ? cp.prose()
-                : llmOutputSanitizer.sanitize(cp.prose());
+                : translationPipeline.run(
+                        llmOutputSanitizer.sanitize(cp.prose()), scopeLanguage);
         out.append("summary: ").append(summaryText).append("\n");
         // classification: comma-joined union of cluster.posts.tags.
         out.append("classification: ").append(joinedTags(posts)).append("\n");
@@ -252,6 +266,28 @@ public class SummaryCommandHandler implements CommandHandler {
             // diagnostic. The cause preserves the exception chain.
             throw new IllegalStateException(
                     "SummaryCommandHandler.resolveScopeId failed", e);
+        }
+    }
+
+    /**
+     * Read the scope's configured language from
+     * {@code scope_preferences.language}. Defaults to {@code "en"}
+     * when no row exists (scope never invoked {@code /lang}).
+     */
+    private String readScopeLanguage(String scopeKind, UUID scopeId) {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(SELECT_SCOPE_LANGUAGE)) {
+            ps.setString(1, scopeKind);
+            ps.setObject(2, scopeId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return "en";
+                }
+                return rs.getString("language");
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "SummaryCommandHandler.readScopeLanguage failed", e);
         }
     }
 

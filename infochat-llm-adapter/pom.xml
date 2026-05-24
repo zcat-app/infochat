@@ -81,6 +81,18 @@
             <artifactId>quarkus-core</artifactId>
             <scope>provided</scope>
         </dependency>
+        <!--
+             infochat-messaging-adapter (provided scope) brings the
+             TranslationProvider SPI that LlmTranslationProvider
+             implements. Provided-scope so downstream consumers
+             (infochat-collector) do not transitively inherit a
+             runtime messaging-adapter dependency they don't need.
+        -->
+        <dependency>
+            <groupId>app.zcat.infochat</groupId>
+            <artifactId>infochat-messaging-adapter</artifactId>
+            <scope>provided</scope>
+        </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>

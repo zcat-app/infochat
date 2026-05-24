@@ -4,12 +4,18 @@ import app.zcat.infochat.llm.LlmProvider;
 import app.zcat.infochat.llm.LlmResponse;
 import app.zcat.infochat.llm.ModelTask;
 import app.zcat.infochat.llm.impl.OpenAiCompatibleProvider;
+import org.eclipse.microprofile.config.Config;
+import org.eclipse.microprofile.config.ConfigValue;
+import org.eclipse.microprofile.config.spi.ConfigSource;
+import org.eclipse.microprofile.config.spi.Converter;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
@@ -124,6 +130,61 @@ class LlmRouterTest {
     }
 
     /**
+     * M1-059 scenario 1: TRANSLATOR task with a provider that declares
+     * Czech support resolves to that provider via the language-aware
+     * capability branch (priority 2).
+     */
+    @Test
+    void forTaskTRANSLATORResolvesProviderWithConfiguredCsLanguage() {
+        StubProvider czechProvider = new StubProvider();
+        LlmRouter router = new LlmRouter(
+            List.of(new LlmRouter.Entry(NAME_DEFAULT, czechProvider, Set.of("en", "cs"))),
+            LlmRouter.ConfigReader.fromMap(Map.of(
+                LlmRouter.CONFIG_KEY_DEFAULT_PROVIDER, NAME_DEFAULT)));
+
+        LlmProvider resolved = router.forTask(ModelTask.TRANSLATOR, "cs");
+
+        assertSame(czechProvider, resolved,
+            "TRANSLATOR with cs scope must resolve the provider declaring Czech support");
+    }
+
+    /**
+     * M1-059 scenario 2: TRANSLATOR task with no Czech-capable provider
+     * still returns a non-null provider via the priority-3 default
+     * branch — the router never returns null.
+     */
+    @Test
+    void forTaskTRANSLATORWithoutLanguageConfigStillFallsBackToDefaultProvider() {
+        StubProvider defaultProvider = new StubProvider();
+        LlmRouter router = new LlmRouter(
+            List.of(new LlmRouter.Entry(NAME_DEFAULT, defaultProvider, Set.of("en"))),
+            LlmRouter.ConfigReader.fromMap(Map.of(
+                LlmRouter.CONFIG_KEY_DEFAULT_PROVIDER, NAME_DEFAULT)));
+
+        LlmProvider resolved = router.forTask(ModelTask.TRANSLATOR, "cs");
+
+        assertSame(defaultProvider, resolved,
+            "TRANSLATOR without a Czech-capable provider must fall back to the default");
+    }
+
+    /**
+     * M1-059 scenario 3: the static helper
+     * {@link LlmRouter#supportedLanguagesFor(LlmProvider, Config)}
+     * defaults to {@code Set.of("en")} when the per-provider
+     * {@code infochat.llm.<name>.languages} key is unset.
+     */
+    @Test
+    void supportedLanguagesForDefaultsToEnglishOnlyWhenLanguagesConfigUnset() {
+        StubProvider provider = new StubProvider();
+        Config emptyConfig = new StubConfig(Map.of());
+
+        Set<String> langs = LlmRouter.supportedLanguagesFor(provider, emptyConfig);
+
+        assertEquals(Set.of("en"), langs,
+            "unset languages config must default to English-only");
+    }
+
+    /**
      * Lightweight test stub: implements {@link LlmProvider} so the
      * router's resolution chain can be exercised end-to-end without
      * pulling Quarkus or constructing an
@@ -138,6 +199,69 @@ class LlmRouterTest {
         public LlmResponse generate(ModelTask task, String systemPrompt, String userPrompt) {
             throw new UnsupportedOperationException(
                 "StubProvider.generate must not be invoked by router-resolution tests");
+        }
+    }
+
+    /**
+     * Minimal MicroProfile {@link Config} stub backed by a fixed map.
+     * Only {@link #getOptionalValue(String, Class)} is implemented —
+     * the router's {@code supportedLanguagesFor} helper uses that
+     * single method.
+     */
+    @SuppressWarnings("unchecked")
+    private static final class StubConfig implements Config {
+        private final Map<String, String> values;
+
+        StubConfig(Map<String, String> values) {
+            this.values = Map.copyOf(values);
+        }
+
+        @Override
+        public <T> T getValue(String propertyName, Class<T> propertyType) {
+            throw new UnsupportedOperationException("getValue not stubbed");
+        }
+
+        @Override
+        public ConfigValue getConfigValue(String propertyName) {
+            throw new UnsupportedOperationException("getConfigValue not stubbed");
+        }
+
+        @Override
+        public <T> Optional<T> getOptionalValue(String propertyName, Class<T> propertyType) {
+            if (propertyType != String.class) {
+                throw new UnsupportedOperationException("only String type supported in stub");
+            }
+            return (Optional<T>) Optional.ofNullable(values.get(propertyName));
+        }
+
+        @Override
+        public <T> List<T> getValues(String propertyName, Class<T> propertyType) {
+            throw new UnsupportedOperationException("getValues not stubbed");
+        }
+
+        @Override
+        public <T> Optional<List<T>> getOptionalValues(String propertyName, Class<T> propertyType) {
+            throw new UnsupportedOperationException("getOptionalValues not stubbed");
+        }
+
+        @Override
+        public Iterable<String> getPropertyNames() {
+            return values.keySet();
+        }
+
+        @Override
+        public Iterable<ConfigSource> getConfigSources() {
+            return List.of();
+        }
+
+        @Override
+        public <T> Optional<Converter<T>> getConverter(Class<T> forType) {
+            return Optional.empty();
+        }
+
+        @Override
+        public <T> T unwrap(Class<T> type) {
+            throw new UnsupportedOperationException("unwrap not stubbed");
         }
     }
 }
