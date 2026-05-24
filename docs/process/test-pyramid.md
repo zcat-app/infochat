@@ -6,7 +6,18 @@ The split lands as the structural fix for M1-044b's premise-fail #2: when handle
 
 ## Handler unit tests
 
-**Responsibility.** Pin the behavior of one `CommandHandler` implementation in isolation: argument parsing, permission gates, collaborator orchestration, reply-building. One `@Test` per behavioral branch the handler owns.
+**Responsibility.** Pin the behavior of one `CommandHandler` implementation in isolation: argument parsing, permission gates, collaborator orchestration, reply-building, and the handler's transactional contract with the DB where the contract IS the SQL. One `@Test` per behavioral branch the handler owns.
+
+**MUST NOT use (applies to BOTH shapes below):**
+- `adapter.deliverDm(...)` or any other path that exercises `InboundRouter`. If the test calls `router.onMessage`, it is a router-tier test, not a handler-tier test.
+
+The router-leak prohibition is the load-bearing convention this layer enforces. It exists because of M1-044b premise-fail #2: when handler tests routed through `adapter.deliverDm → InboundRouter → handler`, a router-level edit (invite gate / ban check splice) changed handler-test outcomes even though the handler under test was byte-for-byte unchanged. After this convention lands those tests stop exercising the router at all; router changes can only break router-tier tests + ITs. The rule applies regardless of which shape below the test takes.
+
+Two shapes ship today, each fitting a different handler type. Pick the shape that matches the handler under test; both are equally legitimate.
+
+### Shape A: Collaborator-orchestrator
+
+**When to use.** The handler has ≥2 non-DB collaborators with rich orchestration logic (`UrlProbe`, `EligiblePostQuery`, `ClusterTraversal`, `SummaryProseGenerator`, etc.). The interesting behavior is how the handler sequences and reacts to those collaborators; the DB is incidental and can be stubbed without losing test value.
 
 **MAY use:**
 - Plain JUnit 5 (`@Test`, `@BeforeEach`, `Assertions.*`). No Quarkus boot, no CDI container.
@@ -18,13 +29,37 @@ The split lands as the structural fix for M1-044b's premise-fail #2: when handle
 **MUST NOT use:**
 - `@QuarkusTest` or `@TestProfile`.
 - `@Inject` or any CDI annotation.
-- `adapter.deliverDm(...)` or any other path that exercises `InboundRouter`. If the test calls `router.onMessage`, it is a router-tier test, not a handler-tier test.
 - A real `DataSource` connection. Stub the JDBC chain (`DataSource` → `Connection` → `PreparedStatement` → `ResultSet`) with hand-rolled subclasses that return canned `ResultSet` rows. The integration-tier ITs cover real-Postgres behavior.
 
 **Canonical examples:**
 - `HelpCommandHandlerTest` — the simplest shape. Constructs the handler, assigns the real `BundleLoader` (or a `RecordingBundleLoader` spy), calls `handler.handle()` direct.
 - `SummaryCommandHandlerTest` — the larger shape. Seven collaborators stubbed; nine scenarios, one per behavioral branch.
 - `AddSourceCommandHandlerTest` — pins URL-probe outcomes per scenario via a hand-rolled `UrlProbe` subclass.
+
+### Shape B: Thin-SQL
+
+**When to use.** The handler has ≤1 non-DB collaborator AND ≥2 DB statements that depend on real-DB semantics — triggers, `FOR UPDATE` locking, `RETURNING` clauses, PK / `UNIQUE` / FK / `CHECK` constraints, or partition-routing. Thin-SQL handlers have no rich orchestration logic to assert in isolation; stubbing the JDBC chain reduces tests to whitebox tautologies (asserting that the handler issued the exact SQL string the test stubbed). The handler's behavioral contract IS the DB interaction (lock acquisition, trigger-driven state, constraint enforcement); the test must observe the DB to verify the contract.
+
+The orthodox alternative — stubbed JDBC at the handler tier plus a separate migration-test layer that asserts trigger and constraint behavior in isolation — is rejected here. No migration-test layer exists in the project; building one would be larger-scope than codifying the shape that already ships, and would add a third layer whose only job is to mirror invariants the handler tier already exercises end-to-end against the real Postgres image.
+
+**MAY use:**
+- `@QuarkusTest` (no `@TestProfile` is needed; the default profile activates Quarkus DevServices Postgres).
+- `@Inject DataSource` (the real connection pool against the DevServices Postgres image; the V1..VN migrations run on container start so every trigger, constraint, stored procedure, and `CHECK` predicate the handler depends on is in place).
+- `@Inject BundleLoader`, `@Inject InboundContext`, `@Inject <HandlerUnderTest>`, plus the handler's at-most-one non-DB collaborator (resolved through CDI rather than hand-assigned).
+- Direct `handler.handle(scope, rawText)` calls — same direct-dispatch shape as Shape A; the test never goes through the router.
+- A `@BeforeEach` cleanup that runs SQL against the `DataSource` to drop test rows by a class-wide contact-id prefix; the cleanup may temporarily disable append-only triggers in a `try`/`finally` so the table cannot be left without its invariant.
+
+**MUST NOT use:**
+- `adapter.deliverDm(...)` or any other path that exercises `InboundRouter` (the section-root router-leak rule, repeated for emphasis — Shape B's `@QuarkusTest` boot includes the router, but the test still calls `handler.handle(...)` directly).
+- Assertions that overlap with integration-tier ITs by going through `inMemoryAdapter.deliverDm(...) → router → handler`. If the test would benefit from full-chain observation, write an IT instead.
+
+**Canonical examples:**
+- `infochat-provider/src/test/java/app/zcat/infochat/provider/command/GrantAdminCommandHandlerTest.java` — the primary canonical example. Exercises the M1-046 audit-before-effect transaction (`SELECT ... FOR UPDATE` on the actor row + target lookup + audit-row INSERT + `UPDATE users` against the V5 last-admin-protection trigger).
+- `infochat-provider/src/test/java/app/zcat/infochat/provider/command/RevokeAdminCommandHandlerTest.java` — companion to GrantAdmin; observes the V5 `trg_last_admin_protection_update` trigger raising `last_admin_protection` and the handler translating it to `error.revoke_admin.last_admin`.
+- `infochat-provider/src/test/java/app/zcat/infochat/provider/command/BanCommandHandlerTest.java` — multi-row audit correlation (BAN + INVITE_REVOKE sharing one request_id) + V5 trigger-driven preban INSERT path.
+- `infochat-provider/src/test/java/app/zcat/infochat/provider/command/UnbanCommandHandlerTest.java` — `SET LOCAL infochat.request_id` + V5 `delete_preban_user` SECURITY DEFINER stored procedure via JDBC `CALL`.
+- `infochat-provider/src/test/java/app/zcat/infochat/provider/command/InviteCommandHandlerTest.java` — per-adapter open cap + global contact cap + `SELECT ... FOR UPDATE` on `invite_code` + `gen_random_uuid()` from pgcrypto.
+- `infochat-provider/src/test/java/app/zcat/infochat/provider/command/VouchCommandHandlerTest.java` — actor `FOR UPDATE` TOCTOU close + two-transitions-in-one-statement `UPDATE` (`probation_until` + `registration_state` CASE).
 
 ## Router unit tests
 
@@ -68,6 +103,8 @@ The split lands as the structural fix for M1-044b's premise-fail #2: when handle
 A simple test for placement: which production class is the test exercising directly?
 
 - One `CommandHandler` implementation, no router involvement → **handler unit test**.
+  - Handler has ≤1 non-DB collaborator AND ≥2 real-DB-dependent statements → [Shape B (Thin-SQL)](#shape-b-thin-sql).
+  - Otherwise → [Shape A (Collaborator-orchestrator)](#shape-a-collaborator-orchestrator).
 - `InboundRouter` itself, no real handler implementations → **router unit test**.
 - The wired chain (adapter ↔ router ↔ handler ↔ DB) → **integration test**.
 

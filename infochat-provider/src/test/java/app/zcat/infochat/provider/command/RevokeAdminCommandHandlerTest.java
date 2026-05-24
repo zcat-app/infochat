@@ -31,6 +31,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * scenario (a)..(f) in M1-046, refined to commit to the
  * banned-admin-caller-vs-sole-active-admin shape for the trigger-fire
  * path (scenario (e)) per the M1-046 clarity refinement.
+ *
+ * @implNote Canonical thin-SQL handler exception per
+ *     {@code docs/process/test-pyramid.md} §Shape B: Thin-SQL.
  */
 @QuarkusTest
 class RevokeAdminCommandHandlerTest {

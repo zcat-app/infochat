@@ -39,6 +39,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
  * runs can be deleted alongside the users they reference. The
  * triggers are re-enabled in {@code finally} so the invariant is
  * intact for the test body and any other concurrent reader.
+ *
+ * @implNote Canonical thin-SQL handler exception per
+ *     {@code docs/process/test-pyramid.md} §Shape B: Thin-SQL.
  */
 @QuarkusTest
 class VouchCommandHandlerTest {

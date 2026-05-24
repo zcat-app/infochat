@@ -37,6 +37,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * for the cleanup pass (we own the table) so audit rows from prior
  * runs can be deleted alongside the rows they reference. The triggers
  * are re-enabled in {@code finally}.</p>
+ *
+ * @implNote Canonical thin-SQL handler exception per
+ *     {@code docs/process/test-pyramid.md} §Shape B: Thin-SQL.
  */
 @QuarkusTest
 class InviteCommandHandlerTest {

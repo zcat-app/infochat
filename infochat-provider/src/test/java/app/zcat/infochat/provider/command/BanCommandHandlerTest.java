@@ -48,6 +48,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * table; assertions filter audit rows by the per-method sub-prefix
  * via {@code target_contact_id LIKE ?}, so rows from prior test runs
  * never collide with the current scenario.</p>
+ *
+ * @implNote Canonical thin-SQL handler exception per
+ *     {@code docs/process/test-pyramid.md} §Shape B: Thin-SQL.
  */
 @QuarkusTest
 class BanCommandHandlerTest {

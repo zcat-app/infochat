@@ -1,7 +1,7 @@
 ---
 id: M1-056
 title: Amend test-pyramid — restructure §Handler unit tests for two-shape reality
-status: pending
+status: done
 created: 2026-05-24
 last_updated: 2026-05-24
 blocked_by: []
@@ -61,12 +61,29 @@ spec_refs:
 decision_refs: []
 spec_amend_for: docs/process/test-pyramid.md:§Handler unit tests
 spec_amend_parent: M1-052
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-05-24
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 9
+      added: 74
+      removed: 17
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-05-24
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-056: Amend test-pyramid — restructure §Handler unit tests for two-shape reality
@@ -118,13 +135,13 @@ This ticket is a one-section restructure of one process doc, plus optional one-l
 - **Restructure target**: `docs/process/test-pyramid.md` §Handler unit tests (lines 7–27 of the current 74-line doc). The router-leak prohibition currently lives as one item in the MUST NOT bullet list (line 21); the restructure hoists it to the section root so its applicability to both shapes is visible.
 - **Shape A canonical examples** (preserved from M1-049's current text): `HelpCommandHandlerTest`, `SummaryCommandHandlerTest`, `AddSourceCommandHandlerTest`.
 - **Shape B canonical examples** (new content): `GrantAdminCommandHandlerTest` (primary; cited by full path), plus `RevokeAdminCommandHandlerTest`, `BanCommandHandlerTest`, `UnbanCommandHandlerTest`, `InviteCommandHandlerTest`, `VouchCommandHandlerTest`.
-- **Per-sibling assessment template** (for acceptance item 5; implementer Reads each sibling file then fills these in during implementation):
-  - `GrantAdminCommandHandlerTest`: [scenario A or B with enumerated real-DB statements]
-  - `RevokeAdminCommandHandlerTest`: [...]
-  - `BanCommandHandlerTest`: [...]
-  - `UnbanCommandHandlerTest`: [...]
-  - `InviteCommandHandlerTest`: [...]
-  - `VouchCommandHandlerTest`: [...]
+- **Per-sibling assessment** (acceptance item 5; one bullet per sibling, authored after Reading each file):
+  - `GrantAdminCommandHandlerTest`: qualifies — 4 real-DB-dependent statements (1. `SELECT ... FOR UPDATE` on the actor `users` row — FOR UPDATE locking; 2. `SELECT` target by `(adapter, contact_id)` — UNIQUE-constraint-scoped lookup; 3. `INSERT audit_log` via `AuditLogWriter` — V5 `trg_audit_log_no_update` + `trg_audit_log_no_delete` append-only triggers; 4. `UPDATE users SET is_admin = TRUE` — V5 `trg_last_admin_protection_update` trigger guards the column).
+  - `RevokeAdminCommandHandlerTest`: qualifies — 4 real-DB-dependent statements (1. `SELECT ... FOR UPDATE` on the actor `users` row; 2. `SELECT` target by `(adapter, contact_id)`; 3. `INSERT audit_log` — V5 append-only triggers; 4. `UPDATE users SET is_admin = FALSE` — V5 `trg_last_admin_protection_update` trigger raises `last_admin_protection` which the handler catches and translates to `error.revoke_admin.last_admin`; the trigger fire path is observable only against the real DB).
+  - `BanCommandHandlerTest`: qualifies — ≥7 real-DB-dependent statements (1. `SELECT users` — UNIQUE-scoped; 2. `INSERT audit_log BAN_INTENT` — V5 triggers; 3. `SELECT ... FOR UPDATE` on `invite_code` for CONTACT_BOUND pending rows — FOR UPDATE locking; 4. `INSERT audit_log BAN`; 5. `INSERT audit_log INVITE_REVOKE` per locked invite — V5 triggers; 6. `INSERT users` preban OR `UPDATE users SET is_banned=TRUE` — V5 `trg_last_admin_protection_update` raises `last_admin_protection` for last-admin ban; 7. `UPDATE invite_code SET status = 'REVOKED'` — `CHECK` constraint on `invite_type`).
+  - `UnbanCommandHandlerTest`: qualifies — ≥5 real-DB-dependent statements (1. `SELECT users` — UNIQUE-scoped; 2. `SELECT g.id, g.display_name FROM group_membership JOIN groups` — FK relationship between `group_membership.user_id`/`group_id` and `users.id`/`groups.id`; 3. `INSERT audit_log UNBAN` — V5 append-only triggers; 4. `UPDATE users` to clear `is_banned`/`banned_at`/`banned_by`/`ban_reason`; 5. `SET LOCAL infochat.request_id = '<uuid>'` followed by `CALL delete_preban_user(?, ?)` — the V5 SECURITY DEFINER stored procedure reads `current_setting('infochat.request_id', TRUE)` and atomically writes `UNBAN_PREBAN_DELETE` + DELETEs the row, observable only against the real DB).
+  - `InviteCommandHandlerTest`: qualifies — ≥9 real-DB-dependent statements (1. `SELECT users` — UNIQUE-scoped; 2. `SELECT count(*) FROM invite_code WHERE invite_type='OPEN_ADAPTER'` per-adapter open cap; 3. `SELECT count(*) FROM invite_code WHERE invite_type='CONTACT_BOUND'` global contact cap; 4. `SELECT gen_random_uuid()` — pgcrypto extension, real-DB only; 5. `INSERT audit_log INVITE_CREATE_INTENT` — V5 triggers; 6. `INSERT invite_code` — V5 `CHECK` constraint on `invite_type`/`status` plus FK `created_by`; 7. `INSERT audit_log INVITE_CREATE`/`INVITE_REVOKE_INTENT`/`INVITE_REVOKE`; 8. `SELECT id FROM invite_code WHERE code = ? AND status = 'PENDING' FOR UPDATE` — FOR UPDATE locking on the revoke path; 9. `UPDATE invite_code SET status = 'REVOKED'`. Non-DB collaborators: `ConfirmStateService` (in-memory pending-confirm store) + `AdapterRegistry` (config-shaped lookup of enabled adapters) — `AdapterRegistry` is a thin config read rather than rich orchestration logic, so the handler still falls within the ≤1 rich-collaborator threshold).
+  - `VouchCommandHandlerTest`: qualifies — 4 real-DB-dependent statements (1. `SELECT ... FOR UPDATE` on actor — FOR UPDATE locking closes the `/revoke-admin` TOCTOU; 2. `SELECT` target by `(adapter, contact_id)` returning `registration_state`/`probation_until`/`is_banned`; 3. `INSERT audit_log VOUCH` — V5 append-only triggers; 4. `UPDATE users SET probation_until = NULL, registration_state = CASE WHEN registration_state = 'group_only' THEN 'vouched' ELSE registration_state END` — two transitions in one statement, observable only against the real DB).
 - **M1-049 lineage**: M1-049 is `done` (commit `c71ce14`, 2026-05-22) and immutable per the workflow rule "Never amend a passed commit". This ticket modifies the DELIVERABLE (test-pyramid.md) rather than the historical ticket. The restructure preserves M1-049's load-bearing contribution (router-leak rule + M1-044b premise-fail #2 rationale) verbatim at the new section root.
 - **M1-052 reopen path**: after this ticket lands, `/m1-tick reopen M1-052` revives the deferred ticket. The M1-052 refinement cites `docs/process/test-pyramid.md` §Shape B: Thin-SQL as the binding test-pattern reference for acceptance items 3/5/7.
 - **M1-053 reopen path** (informational, not required by this ticket): M1-053 is independently deferred on M1-057 (sealed-type unseal), not on M1-056. After M1-057 lands AND M1-056 lands, M1-053's reopen + refine can cite the same §Shape B subsection. The two reopens are independent.

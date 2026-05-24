@@ -34,6 +34,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code audit_log} is append-only (V5 {@code trg_audit_log_*}
  * triggers); cleanup temporarily disables those triggers in a
  * try/finally so the table cannot be left without its invariant.</p>
+ *
+ * @implNote Canonical thin-SQL handler exception per
+ *     {@code docs/process/test-pyramid.md} §Shape B: Thin-SQL.
  */
 @QuarkusTest
 class GrantAdminCommandHandlerTest {
