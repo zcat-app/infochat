@@ -10,12 +10,12 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 5 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 64 |
-| deferred | 9 |
+| deferred | 8 |
 | **total** | **77** |
 
 ---
@@ -24,6 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
+- M1-052 — Saved-post library — /save + /saved + /unsave + saved_post snapshot (complexity: medium, risk: medium)
 - M1-055a — bootstrap-assets.json parser + asset_config table + default-row consistency check + Collector @Startup loader (complexity: high, risk: high)
 
 ---
@@ -92,9 +93,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 - M1-020 → M1-038
 - M1-031 → unspecified
 - M1-042 → unspecified
-
-### spec-amend (1)
-- M1-052 → M1-056
 
 ---
 
@@ -206,6 +204,7 @@ M1-050 (done)
 M1-051 (done)
   ├── M1-053 (deferred)
   └── M1-054 (deferred)
+M1-052 (pending) ← runnable
 M1-055a (pending) ← runnable
   ├── M1-055 (pending)
   ├── M1-055b (pending)
@@ -214,7 +213,6 @@ M1-055a (pending) ← runnable
   │           └── M1-055 (pending) [see above]
   └── M1-055c (pending) [see above]
 M1-056 (done)
-  └── M1-052 (deferred)
 M1-057 (done)
   ├── M1-053 (deferred) [see above]
   └── M1-054 (deferred) [see above]

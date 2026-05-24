@@ -1,12 +1,10 @@
 ---
 id: M1-052
 title: Saved-post library — /save + /saved + /unsave + saved_post snapshot
-status: deferred
+status: pending
 created: 2026-05-24
 last_updated: 2026-05-24
 blocked_by: []
-deferred_on: M1-056
-deferred_reason: spec-amend
 files_budget: 12
 files_scope:
   - infochat-core/src/main/resources/db/migration/V15__saved_post.sql
@@ -42,11 +40,11 @@ out_of_scope:
 acceptance:
   - "Flyway migration `infochat-core/src/main/resources/db/migration/V15__saved_post.sql` applies cleanly on a fresh DB. The migration creates the `saved_post` table per `docs/design/02-schema.md` §2.6.1 (PK = `(user_id, post_uid)`; FKs to `users(id)` and `source(id)`; snapshot columns `title`, `body`, `url`, `author`, `published_at`, `snapshot_tags`; personal columns `personal_tags`, `note`; `saved_at` defaulting to `now()`) AND the two `AFTER INSERT|DELETE ... FOR EACH ROW EXECUTE FUNCTION trg_saved_post_count()` triggers that maintain `users.save_count`. **The `saved_post` row carries `user_id` only — there is NO scope discriminator column**, per spec §Invariants 1 carve-out and §Per-user state. The DDL CHECK constraints (if any) MUST NOT introduce a scope_kind / scope_id column. Migration filename is `V15__saved_post.sql` — T2-H.a (M1-055a) consumed `V14__asset_config.sql` first in its sibling worktree, so this ticket lands on V15. The implementing session re-runs `ls infochat-core/src/main/resources/db/migration/ | sort -V | tail` at `/m1-tick start` to confirm V14 is still the highest applied migration on `main` (M1-055a not yet merged) AND that V15 remains free; if either has shifted further, rebase the filename plus all V15 references in test resources / scripts accordingly"
   - "`SaveCommandHandler` is a CDI bean implementing `CommandHandler` with `name() == \"save\"`. It is discovered by `InboundRouter` via the existing `Instance<CommandHandler>` iteration — no router case-edit, no manual registration. Argument shape: positional `<uid>` plus optional `-t personal-tags` (comma-separated). The handler runs inside ONE database transaction that: (1) reads the actor row + `save_count` via `SELECT ... FROM users WHERE id = ? FOR UPDATE` (atomic cap enforcement per spec §Content + design §2.6.1); (2) reads the target post via `SELECT id, title, body, url, author, published_at, source_id, post_uid, status FROM post WHERE post_uid = ? AND status = 'READY'`; (3) on row-not-found OR status != READY, returns `error.save.unknown_uid` (the visibility filter — QUARANTINED and NEEDS_REVIEW posts are indistinguishable from missing UIDs at the user surface, per spec §Content Visibility-of-target rules); (4) on `save_count >= cap` (cap value injected via `@ConfigProperty(name = \"infochat.save.cap\")`), returns `error.save.cap_met` (the friendly cap-exceeded error pointing the user at /unsave); (5) otherwise INSERTs a `saved_post` row snapshotting the post's body+title+url+author+published_at+source_id+bot's current `bootstrap_tags` into `snapshot_tags`, with the caller's `-t` values into `personal_tags`; (6) returns `reply.save.success` interpolated with the UID. The V15 trigger increments `users.save_count` automatically. A duplicate save against the same `(user_id, post_uid)` PK collides per the table's PK constraint — the handler MUST surface `error.save.already_saved` rather than letting the SQLException escape (handler-side check via the SELECT step OR caught at INSERT time; either is acceptable)"
-  - "SaveCommandHandlerTest is plain JUnit per the M1-049 test pyramid (no `@QuarkusTest`); it exercises the handler against a Testcontainers Postgres bootstrapped with V1..V15 migrations (`@TestInstance(Lifecycle.PER_CLASS)` + Flyway-on-startup helper, the M1-044c pattern). Scenarios — each is a separate `@Test` method whose method name reads as the assertion: `saveHappyPathReturnsSuccessAndWritesSnapshotRow`, `saveAgainstQuarantinedPostReturnsUnknownUid`, `saveAgainstNeedsReviewPostReturnsUnknownUid`, `saveAgainstUnknownUidReturnsUnknownUid`, `saveAgainstAlreadySavedPostReturnsAlreadySaved`, `saveAtCapReturnsCapMetAndWritesNoRow`, `saveWithPersonalTagsPopulatesPersonalTagsColumn`, `saveSnapshotsBodyTitleUrlAuthorPublishedAtAndSourceId`"
+  - "SaveCommandHandlerTest follows **Shape B (Thin-SQL)** per `docs/process/test-pyramid.md` §Handler unit tests — `@QuarkusTest` against Quarkus DevServices Postgres (the V1..V15 migrations run on container start), `@Inject DataSource` + `@Inject SaveCommandHandler` + `@Inject BundleLoader` + `@Inject InboundContext`, direct `handler.handle(...)` dispatch (the test MUST NOT route through `InboundRouter` per the section-root rule), `@BeforeEach` cleanup against the actor's contact-id prefix. Shape B fits per the choosing-rule's literal criterion (`test-pyramid.md:106` — ≥2 real-DB-dependent statements: `SELECT … FOR UPDATE` on `users` for atomic cap; `INSERT` against the `(user_id, post_uid)` PK; INSERT-trigger on `users.save_count`). Canonical comparator: `GrantAdminCommandHandlerTest`. Scenarios — each is a separate `@Test` method whose method name reads as the assertion: `saveHappyPathReturnsSuccessAndWritesSnapshotRow`, `saveAgainstQuarantinedPostReturnsUnknownUid`, `saveAgainstNeedsReviewPostReturnsUnknownUid`, `saveAgainstUnknownUidReturnsUnknownUid`, `saveAgainstAlreadySavedPostReturnsAlreadySaved`, `saveAtCapReturnsCapMetAndWritesNoRow`, `saveWithPersonalTagsPopulatesPersonalTagsColumn`, `saveSnapshotsBodyTitleUrlAuthorPublishedAtAndSourceId`"
   - "`SavedCommandHandler` is a CDI bean implementing `CommandHandler` with `name() == \"saved\"`. Argument shape: optional positional `[tag]` plus optional `-w <window>` plus optional `--page N`. The handler reads the actor's saves via `SELECT post_uid, title, url, snapshot_tags, personal_tags, saved_at FROM saved_post WHERE user_id = ? [AND <personal_tags filter>] [AND saved_at > ?] ORDER BY saved_at DESC LIMIT <pagesize> OFFSET <(N-1)*pagesize>` — the query carries **no scope filter** (per-user-globally per spec §Content Decision D13). Page size is a fixed constant from `docs/design/03-commands.md` §`/saved` (20). The reply header **MUST** disclose per-user-global semantics — a bundle key e.g. `reply.saved.header.global` whose text mentions saves are visible across DM and groups so a user invoking `/saved` from a group is not surprised by DM-only saves appearing"
-  - "SavedCommandHandlerTest scenarios: `savedReturnsEmptyHeaderWhenLibraryEmpty`, `savedReplyHeaderDisclosesGlobalScope`, `savedListsAllRowsRegardlessOfCallingScope` (seed two saves — one whose `saved_at` was originally created from a DM context, one from a group context — and assert both appear from BOTH DM and group invocations; the cross-scope appearance IS the per-user-global semantics), `savedFiltersByPersonalTag`, `savedFiltersByWindow`, `savedPaginatesByPageFlag`"
+  - "SavedCommandHandlerTest follows **Shape B (Thin-SQL)** per `docs/process/test-pyramid.md` §Handler unit tests — same `@QuarkusTest` + DevServices Postgres shape as SaveCommandHandlerTest. Although the handler issues a single `SELECT` (the literal `test-pyramid.md:106` choosing-rule would point to Shape A), Shape B applies by the section's **rationale paragraph** (`test-pyramid.md:41`): the handler's behavioral contract IS the SQL predicate (per-user-global with no scope discriminator clause; optional `personal_tags` filter; optional `saved_at > ?` window; `ORDER BY saved_at DESC LIMIT/OFFSET` pagination). Shape A would either inspect the assembled SQL string at the JDBC stub (the whitebox tautology the rationale paragraph warns against) or return canned rows regardless of args (so the predicate logic is unobserved at the handler tier) — neither is meaningful. Real-DB observation against seeded `saved_post` rows is the only honest way to verify the contract. Scenarios: `savedReturnsEmptyHeaderWhenLibraryEmpty`, `savedReplyHeaderDisclosesGlobalScope`, `savedListsAllRowsRegardlessOfCallingScope` (seed two saves — one whose `saved_at` was originally created from a DM context, one from a group context — and assert both appear from BOTH DM and group invocations; the cross-scope appearance IS the per-user-global semantics), `savedFiltersByPersonalTag`, `savedFiltersByWindow`, `savedPaginatesByPageFlag`"
   - "`UnsaveCommandHandler` is a CDI bean implementing `CommandHandler` with `name() == \"unsave\"`. Argument shape: positional `<uid>`. The handler issues `DELETE FROM saved_post WHERE user_id = ? AND post_uid = ?` and returns `reply.unsave.success` on `affectedRows == 1` or `error.unsave.unknown_uid` on `affectedRows == 0`. The V15 trigger decrements `users.save_count` automatically. No confirm gate — spec §Content explicitly says `/unsave` has no confirmation"
-  - "UnsaveCommandHandlerTest scenarios: `unsaveHappyPathRemovesRowAndDecrementsSaveCount`, `unsaveUnknownUidReturnsUnknownUidAndLeavesSaveCountUnchanged`, `unsaveAfterSaveAtCapAllowsSubsequentSave` (saturate at cap, /unsave one, then a second /save admits — verifies the trigger-driven decrement keeps the cap check correct)"
+  - "UnsaveCommandHandlerTest follows **Shape B (Thin-SQL)** per `docs/process/test-pyramid.md` §Handler unit tests — same `@QuarkusTest` + DevServices Postgres shape as SaveCommandHandlerTest. Although the handler issues a single `DELETE` (the literal `test-pyramid.md:106` choosing-rule would point to Shape A), Shape B applies by the section's **rationale paragraph** (`test-pyramid.md:41`): the handler's behavioral contract includes the trigger-driven `users.save_count` decrement, which is load-bearing — the cap-reset mechanism (saturate-then-unsave-then-save-readmits) depends on the trigger firing on every `DELETE`. Shape A would assert only the `affectedRows` branch (success vs unknown-uid) and lose trigger observation at the handler tier; the `unsaveAfterSaveAtCapAllowsSubsequentSave` scenario verifies the trigger explicitly and is meaningful only against the real DB. Scenarios: `unsaveHappyPathRemovesRowAndDecrementsSaveCount`, `unsaveUnknownUidReturnsUnknownUidAndLeavesSaveCountUnchanged`, `unsaveAfterSaveAtCapAllowsSubsequentSave` (saturate at cap, /unsave one, then a second /save admits — verifies the trigger-driven decrement keeps the cap check correct)"
   - "SaveCapConcurrencyIT is a `@QuarkusTest`-shaped IT against Testcontainers Postgres. Seeds the actor's `users.save_count` to cap-1 (where cap is the test profile's `infochat.save.cap` value), then issues two `/save` calls from two threads simultaneously against two different READY posts. Asserts exactly one save admits (one INSERT succeeds, one returns `error.save.cap_met`) AND `users.save_count == cap` afterwards. The IT exists because the `SELECT ... FOR UPDATE` lock in the handler is the **only** atomic-cap guarantee — a unit test against a single-threaded handler cannot exercise the lock; the IT does. Method name: `concurrentSavesAtCapMinusOneAdmitExactlyOne`"
   - "SavedLibraryIT is a `@QuarkusTest`-shaped IT that drives `/save`, `/saved`, `/unsave` end-to-end via the InMemoryAdapter (mirrors the M1-036 AddSourceIT pattern). One scenario: seed one READY post, deliver `/save <uid>` from the actor in DM, assert one outbound reply matches `reply.save.success`; deliver `/saved` from the same actor in a DIFFERENT scope (group scope simulated by the InMemoryAdapter's group deliver hook), assert the outbound lists the saved row + carries the per-user-global header disclosure; deliver `/unsave <uid>` in DM, assert the row is removed AND `users.save_count == 0`. Method name: `saveListUnsaveRoundtripCrossScopeVisibility`"
   - "`BundleKeys.java` adds the new `public static final String` constants: `ERROR_SAVE_UNKNOWN_UID`, `ERROR_SAVE_CAP_MET`, `ERROR_SAVE_ALREADY_SAVED`, `REPLY_SAVE_SUCCESS`, `REPLY_SAVED_HEADER_GLOBAL`, `REPLY_SAVED_LINE`, `REPLY_SAVED_EMPTY`, `ERROR_UNSAVE_UNKNOWN_UID`, `REPLY_UNSAVE_SUCCESS`. `bundles/en.properties` adds the corresponding entries. The `BundleLoaderTest` reflective assertion (from M1-035c) catches any missing key or orphan automatically — running `mvn -B clean verify` from the repo root exits 0 with the new keys"
@@ -77,13 +75,18 @@ spec_refs:
   - docs/spec/schema.md §Sources and tags
   - docs/spec/schema.md §Invariants
   - docs/spec/security.md §Slow-start tier
+  - docs/process/test-pyramid.md §Handler unit tests
 decision_refs:
   - D13
   - D33
 reviews: {}
 overrides: []
 aborted_attempts: []
-reopens: []
+reopens:
+  - date: 2026-05-24
+    prior_deferred_reason: spec-amend
+    prior_deferred_on: M1-056
+    reason: M1-056 (test-pyramid Shape B carve-out) landed; reopening with acceptance items 3/5/7 rewritten to cite Shape B and spec_refs widened to include the amended pyramid section
 redteam_findings: []
 clarity_check:
   date: 2026-05-24
@@ -280,6 +283,32 @@ Highlights:
   remains the highest applied migration on `main` (M1-055a
   unmerged) and V15 is still free; rebase further if either has
   shifted.
+- **Test-shape choice (Shape B for all three handler tests).**
+  Items 3 / 5 / 7 above all cite Shape B (Thin-SQL) per
+  `docs/process/test-pyramid.md` §Handler unit tests.
+  SaveCommandHandlerTest fits the literal `test-pyramid.md:106`
+  choosing-rule (≥2 real-DB-dependent statements). The other two
+  (SavedCommandHandlerTest, UnsaveCommandHandlerTest) each issue a
+  single statement and so do NOT fit the literal rule — they
+  invoke Shape B by the section's **rationale paragraph**
+  (`test-pyramid.md:41`) which states "the handler's behavioral
+  contract IS the DB interaction (lock acquisition,
+  trigger-driven state, constraint enforcement); the test must
+  observe the DB to verify the contract". For /saved that
+  contract is the SQL predicate construction
+  (per-user-global / tag filter / window / pagination); for
+  /unsave it is the trigger-driven `users.save_count` decrement
+  that makes the cap-reset mechanism work. Shape A for either
+  would either reduce to whitebox-tautology against a JDBC stub
+  or to a rendering-only test that leaves the contract
+  unobserved — both are degenerate. The literal rule undercounts
+  thin handlers whose ONE statement has rich semantics; the
+  rationale paragraph is the canonical defense. Reviewer is
+  invited to flag this if the literal-rule reading is preferred,
+  in which case the resolution path is a follow-up amendment to
+  broaden the `test-pyramid.md:106` choosing-rule rather than
+  re-shaping the M1-052 tests against the rationale's own
+  warning.
 
 ## Pre-flight self-check (author-side)
 
