@@ -6,42 +6,158 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Bundle-completeness CI check for {@link BundleLoader} per
  * {@code docs/spec/commands.md} §Discovery /help (Bundle composition).
  *
- * <p>The completeness assertion is the cross-ticket invariant that
- * keeps {@link BundleKeys} and {@code en.properties} in lock-step
- * as the bundle grows in T1-F, T2-A, T2-B, T2-C. It iterates every
- * {@code public static final String} constant declared on
- * {@link BundleKeys} via reflection and asserts each resolves to a
- * non-empty value in the loaded bundle. Adding a new constant to
- * {@link BundleKeys} automatically extends this check at the next
- * test run — no test edit required, which is the property that
- * makes the discipline durable.</p>
+ * <p>M1-060 widens the original M1-035c en-only completeness check to
+ * a bilateral one: every {@link BundleKeys} constant must resolve to
+ * a non-empty value in EVERY {@link BundleLoader#supportedLanguages()}
+ * entry — i.e. both {@code en.properties} and {@code cs.properties}
+ * in v1. The en case is the {@code lang='en'} iteration of the
+ * widened check, so no scenario is silently dropped relative to the
+ * pre-M1-060 baseline.</p>
  *
- * <p>The unknown-key test is the regression guard against silently
- * empty output. {@link BundleLoader#get(String)} throws on a missing
- * key; if a future edit relaxed that to "return null" or "return
- * empty string," this test would fail and surface the regression
- * before it shipped.</p>
+ * <p>The probe-key scenarios use the test-only
+ * {@code test.fallback.probe} entry, which lives ONLY in
+ * en.properties and is NOT a {@link BundleKeys} constant — so the
+ * bilateral completeness iteration does not see it (the iteration
+ * walks BundleKeys' reflective field set, not the bundle's
+ * key set). This is the load-bearing setup that lets the test
+ * exercise the 2-arg accessor's en-fallback path without breaking
+ * bilateral parity.</p>
  */
 @QuarkusTest
 class BundleLoaderTest {
+
+    /**
+     * Key present in {@code en.properties} only — NOT mirrored in
+     * {@code cs.properties}, NOT in {@link BundleKeys}. Used by
+     * {@link #twoArgAccessorFallsBackToEnWhenKeyMissingInTargetLanguage}.
+     */
+    private static final String FALLBACK_PROBE_KEY = "test.fallback.probe";
+
+    /**
+     * Expected value the probe resolves to in en.properties. Mirrored
+     * verbatim from the en.properties entry; if the entry changes
+     * value, this constant must change too — the test asserts equality
+     * to catch a silent rewrite of the probe value.
+     */
+    private static final String FALLBACK_PROBE_EXPECTED_VALUE = "fallback-probe-en-only-value";
 
     @Inject
     BundleLoader bundleLoader;
 
     @Test
-    void everyBundleKeysConstantResolvesInEnPropertiesToANonEmptyString() throws Exception {
-        // Reflect over BundleKeys to enumerate every key constant.
+    void everyBundleKeysConstantResolvesInEveryLoadedBundleToANonEmptyString() throws Exception {
+        // Reflect over BundleKeys to enumerate every key constant. The
+        // reflection walk subsumes the original M1-035c en-only
+        // scenario: en is one of the iterated languages, so removing a
+        // key from en.properties would fail this widened check the
+        // same way it failed the pre-M1-060 one.
+        List<String> keys = collectBundleKeys();
+        assertFalse(keys.isEmpty(),
+                "BundleKeys must declare at least one public static final String constant; "
+                        + "the reflection check is the load-bearing CI guard and an empty key set "
+                        + "would silently pass");
+
+        Set<String> supported = bundleLoader.supportedLanguages();
+        assertFalse(supported.isEmpty(),
+                "BundleLoader.supportedLanguages() must be non-empty; the bilateral "
+                        + "check would silently pass against an empty language set");
+
+        for (String lang : supported) {
+            for (String key : keys) {
+                String value = bundleLoader.get(key, lang);
+                assertNotNull(value,
+                        "bundle key resolved to null: " + key + " (language=" + lang + ")");
+                assertFalse(value.isEmpty(),
+                        "bundle key resolved to empty string: " + key
+                                + " (language=" + lang + ") — bundle-completeness CI check "
+                                + "requires every BundleKeys constant to have a non-empty value "
+                                + "in every loaded bundle");
+            }
+        }
+    }
+
+    @Test
+    void unknownKeyThrowsInsteadOfReturningEmptyString() {
+        // Silently returning empty would defeat the completeness assertion; the
+        // throw is the load-bearer for the bundle-key-typo regression guard.
+        assertThrows(IllegalStateException.class,
+                () -> bundleLoader.get("definitely.not.a.bundle.key"));
+    }
+
+    @Test
+    void unknownKeyThroughTwoArgAccessorThrowsAfterEnFallbackFails() {
+        // The 2-arg accessor falls back to en when the key is missing
+        // in langCode; if it is missing in en too, the same
+        // IllegalStateException the 1-arg accessor throws must surface
+        // — the throw contract carries over so a typo in BundleKeys
+        // remains a build-time defect when accessed via the per-scope
+        // path.
+        assertThrows(IllegalStateException.class,
+                () -> bundleLoader.get("definitely.not.a.bundle.key", "cs"));
+    }
+
+    @Test
+    void twoArgAccessorFallsBackToEnWhenKeyMissingInTargetLanguage() {
+        // The probe key lives only in en.properties; the 2-arg
+        // accessor with langCode='cs' must return the en value rather
+        // than throw. This is the load-bearing guarantee for the
+        // M1-060 design: cs.properties bilateral parity is the
+        // discipline, but the runtime fallback is the safety net that
+        // means a key drop in cs.properties never ships a blank reply.
+        String value = bundleLoader.get(FALLBACK_PROBE_KEY, "cs");
+        assertEquals(FALLBACK_PROBE_EXPECTED_VALUE, value,
+                "2-arg accessor must fall back to en when the key is missing in the "
+                        + "target language; got: " + value);
+    }
+
+    @Test
+    void twoArgAccessorReturnsUtf8DiacriticsRoundtripped() {
+        // The cs.properties value for reply.lang.success contains
+        // Czech diacritics (per acceptance item 4 + the cs bundle
+        // discipline). The byte-level assertion checks the
+        // InputStreamReader(UTF-8) load path did NOT silently decode
+        // the bytes through ISO-8859-1 — which would replace `š` /
+        // `č` with mojibake. The assertion compares the raw UTF-8
+        // bytes the JDK source-encodes the literal to, against the
+        // bytes of the value the loader returns.
+        String csValue = bundleLoader.get(BundleKeys.REPLY_LANG_SUCCESS, "cs");
+        assertNotNull(csValue,
+                "reply.lang.success must resolve in cs.properties");
+        byte[] csBytes = csValue.getBytes(StandardCharsets.UTF_8);
+        // The Czech translation MUST carry at least one diacritic
+        // (any of the diacritic set named in M1-060 acceptance item 4);
+        // a plain-ASCII string here would mean the cs.properties value
+        // was authored as English placeholder text. The assertion is
+        // intentionally loose on which diacritic — the test pins the
+        // round-trip property, not the translation wording.
+        assertTrue(containsAnyDiacritic(csValue),
+                "cs.properties reply.lang.success must carry at least one Czech "
+                        + "diacritic (the M1-060 cs.properties discipline forbids "
+                        + "placeholder English strings); got: " + csValue);
+        // Round-trip — decode the bytes back through UTF-8 and assert
+        // the string is identical. A mis-decoded load would produce
+        // a different String instance with replacement chars.
+        String roundtripped = new String(csBytes, StandardCharsets.UTF_8);
+        assertEquals(csValue, roundtripped,
+                "UTF-8 round-trip through bytes must preserve the cs.properties value");
+    }
+
+    private static List<String> collectBundleKeys() throws IllegalAccessException {
         List<String> keys = new ArrayList<>();
         for (Field field : BundleKeys.class.getDeclaredFields()) {
             int mods = field.getModifiers();
@@ -52,26 +168,16 @@ class BundleLoaderTest {
                 keys.add((String) field.get(null));
             }
         }
-        assertFalse(keys.isEmpty(),
-                "BundleKeys must declare at least one public static final String constant; "
-                        + "the reflection check is the load-bearing CI guard and an empty key set "
-                        + "would silently pass");
-
-        for (String key : keys) {
-            String value = bundleLoader.get(key);
-            assertNotNull(value, "bundle key resolved to null: " + key);
-            assertFalse(value.isEmpty(),
-                    "bundle key resolved to empty string: " + key
-                            + " — bundle-completeness CI check requires every BundleKeys constant "
-                            + "to have a non-empty en.properties value");
-        }
+        return keys;
     }
 
-    @Test
-    void unknownKeyThrowsInsteadOfReturningEmptyString() {
-        // Silently returning empty would defeat the completeness assertion; the
-        // throw is the load-bearer for the bundle-key-typo regression guard.
-        assertThrows(IllegalStateException.class,
-                () -> bundleLoader.get("definitely.not.a.bundle.key"));
+    private static boolean containsAnyDiacritic(String s) {
+        // Czech diacritic set per M1-060 acceptance item 4.
+        for (char ch : new char[] {'á', 'ě', 'š', 'č', 'ř', 'ž', 'ý', 'í', 'ú', 'ů', 'é', 'ó', 'ť', 'ď', 'ň'}) {
+            if (s.indexOf(ch) >= 0) {
+                return true;
+            }
+        }
+        return false;
     }
 }

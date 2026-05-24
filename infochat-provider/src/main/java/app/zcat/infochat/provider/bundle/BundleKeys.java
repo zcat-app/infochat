@@ -614,6 +614,45 @@ public final class BundleKeys {
     /** {@code /unfollow-tag --all confirm} success — bulk reset committed. Token {@code {0}} = count of deleted rows. */
     public static final String REPLY_UNFOLLOW_TAG_ALL_SUCCESS = "reply.unfollow_tag_all.success";
 
+    // ----- /lang <code> (M1-060) ------------------------------------------
+    // Per docs/spec/commands.md §Conversation control + §Permission model +
+    // docs/spec/llm.md §Translation flow + docs/spec/schema.md §Per-scope
+    // state. The handler is the user-facing mutator that lets
+    // scope_preferences.language move off the V7 default 'en' to one of
+    // the loaded-bundle codes. Group scope short-circuits to
+    // _GROUP_ADMIN_NOT_IN_V1 per the M1-054 FollowTagCommandHandler /
+    // UnfollowTagCommandHandler SPI-freeze precedent (the frozen
+    // CommandHandler.handle(ScopeRef, String) SPI carries no inbound
+    // caller's contact id in group scope; T2-F lands the actor seam).
+
+    /**
+     * {@code /lang <code>} success reply, resolved via the NEW 2-arg
+     * {@code bundleLoader.get(key, langCode)} accessor with
+     * {@code langCode} = the newly-written code, so the confirmation
+     * reply itself lands in the just-set language. Token {@code {0}} =
+     * the written language code (e.g. {@code cs}).
+     */
+    public static final String REPLY_LANG_SUCCESS = "reply.lang.success";
+
+    /**
+     * {@code /lang <code>} unsupported-code reply per spec §Conversation
+     * control: "An unsupported code produces a friendly error that lists
+     * the supported codes — never a silent no-op and never a fall-through
+     * to the default." Token {@code {0}} = the comma-separated list of
+     * supported codes derived from {@code bundleLoader.supportedLanguages()}.
+     */
+    public static final String ERROR_LANG_UNSUPPORTED_CODE = "error.lang.unsupported_code";
+
+    /**
+     * {@code /lang} in group scope: short-circuit per the M1-054
+     * SPI-freeze precedent (group-actor identity is not carried by the
+     * frozen CommandHandler SPI; T2-F lands the seam). Distinct from
+     * {@link #ERROR_GROUP_ADMIN_NOT_IN_V1} (the shared M1-046 admin-tier
+     * key) so T2-F can independently translate {@code /lang}'s group
+     * reply when the SPI widens.
+     */
+    public static final String ERROR_LANG_GROUP_ADMIN_NOT_IN_V1 = "error.lang.group_admin_not_in_v1";
+
     private BundleKeys() {
         throw new AssertionError("BundleKeys is a constant holder and must not be instantiated");
     }

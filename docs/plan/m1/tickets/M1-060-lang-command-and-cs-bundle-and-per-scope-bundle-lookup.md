@@ -1,7 +1,7 @@
 ---
 id: M1-060
 title: /lang <code> command + cs.properties bundle + BundleLoader per-scope language lookup with en fallback
-status: pending
+status: done
 created: 2026-05-24
 last_updated: 2026-05-24
 blocked_by: []
@@ -71,12 +71,29 @@ risk: medium
 round_cap: 2
 security_relevant: false
 migration_touch: false
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-05-24
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 1184
+      removed: 78
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-05-24
+  verdict: PASS
+  warnings: []
+  blockers: []
 escalations: []
 ---
 

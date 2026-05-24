@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 69 |
+| done | 70 |
 | deferred | 6 |
 | **total** | **80** |
 
@@ -26,7 +26,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-055b — Asset fetchers (per public-endpoint host) + price_snapshot store + per-host tick cadence + NOTIFY emit (complexity: high, risk: high)
 - M1-059 — TranslationProvider impl — LlmTranslationProvider + 24h translation cache + router language widening + SummaryCommandHandler pipeline splice (complexity: high, risk: high)
-- M1-060 — /lang <code> command + cs.properties bundle + BundleLoader per-scope language lookup with en fallback (complexity: medium, risk: medium)
 
 ---
 
@@ -63,6 +62,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-060 | /lang <code> command + cs.properties bundle + BundleLoader per-scope language lookup with en fallback | 2026-05-24 | round 1 APPROVE |
 | M1-058 | ThrottledAdminNotifier (T2-G infrastructure) + admin_notification_state table | 2026-05-24 | round 1 APPROVE |
 | M1-057 | Unseal PendingConfirm + extract variants | 2026-05-24 | round 1 APPROVE |
 | M1-056 | Amend test-pyramid — restructure §Handler unit tests for two-shape reality | 2026-05-24 | round 1 APPROVE |
@@ -72,7 +72,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-052 | Saved-post library — /save + /saved + /unsave + saved_post snapshot | 2026-05-24 | round 1 APPROVE |
 | M1-046 | /grant-admin + /revoke-admin (per-adapter scope, global last-admin counter) | 2026-05-24 | round 1 APPROVE |
 | M1-045 | Slow-start probation tier + restricted command set (step 5) + /vouch | 2026-05-24 | round 3 APPROVE |
-| M1-051 | ConfirmStateService — pre-dispatch confirm gate for /ban + /invite create --open + /invite revoke | 2026-05-23 | round 2 APPROVE |
 
 ---
 
@@ -214,5 +213,5 @@ M1-057 (done)
 M1-058 (done)
   └── M1-055b (pending) [see above]
 M1-059 (pending) ← runnable
-M1-060 (pending) ← runnable
+M1-060 (done)
 ```
