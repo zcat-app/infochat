@@ -1,0 +1,29 @@
+{
+  "default_vs": "usd",
+  "assets": [
+    {
+      "id": "zcash",
+      "display_name": "Zcash",
+      "ticker": "ZEC",
+      "default_sub_verb": "coingecko",
+      "sub_verbs": [
+        { "id": "coingecko", "external_id": "zcash" },
+        { "id": "kraken",    "external_id": "ZECUSD" },
+        { "id": "bitfinex",  "external_id": "tZECUSD" }
+      ],
+      "supported_vs": ["usd", "eur", "czk", "btc"]
+    },
+    {
+      "id": "monero",
+      "display_name": "Monero",
+      "ticker": "XMR",
+      "default_sub_verb": "coingecko",
+      "sub_verbs": [
+        { "id": "coingecko", "external_id": "monero" },
+        { "id": "kraken",    "external_id": "XMRUSD" },
+        { "id": "bitfinex",  "external_id": "tXMRUSD" }
+      ],
+      "supported_vs": ["usd", "eur", "czk", "btc"]
+    }
+  ]
+}

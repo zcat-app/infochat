@@ -1,10 +1,48 @@
 ---
 id: M1-055a
 title: bootstrap-assets.json parser + asset_config table + default-row consistency check + Collector @Startup loader
-status: pending
+status: done
 created: 2026-05-24
 last_updated: 2026-05-24
 blocked_by: []
+clarity_check:
+  date: 2026-05-24
+  verdict: PASS
+  warnings: []
+  blockers: []
+outline_file: target/m1-tick-outline-M1-055a.md
+reviews:
+  - round: 1
+    date: 2026-05-24
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 9
+      added: 1247
+      removed: 10
+redteam_findings: []
+redteam_audits:
+  - date: 2026-05-24
+    verdict: CLEAN
+    base: ce2a5f8^
+    head: ce2a5f8
+    verdict_file: docs/plan/m1/redteam/M1-055a-2026-05-24.md
+    out_of_model_count: 2
+    note: |
+      Operator-supplied JSON is trusted per spec; this diff lands only
+      operator-trusted bootstrap input + a least-privilege DB schema
+      (V14 grants Provider SELECT-only on asset_config; DELETE REVOKEd
+      from all service roles). No auth/authz/ban/LLM-tool-call surface
+      touched. Two OUT-OF-MODEL advisories on operator-trusted input
+      (jsonEscape() control-char coverage; kraken attribution URL
+      character-set validation) noted but require no remediation —
+      they fall outside the documented threat surface. No follow-up
+      ticket warranted.
 files_budget: 7
 files_scope:
   - infochat-collector/src/main/java/app/zcat/infochat/collector/bootstrap/BootstrapAssetsParser.java
