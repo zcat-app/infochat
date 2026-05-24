@@ -1,0 +1,25 @@
+{
+  "default_vs": "usd",
+  "assets": [
+    {
+      "id": "zcash",
+      "display_name": "Zcash",
+      "ticker": "ZEC",
+      "default_sub_verb": "coingecko",
+      "sub_verbs": [
+        { "id": "coingecko", "external_id": "zcash" }
+      ],
+      "supported_vs": ["usd", "eur", "btc"]
+    },
+    {
+      "id": "monero",
+      "display_name": "Monero",
+      "ticker": "XMR",
+      "default_sub_verb": "coingecko",
+      "sub_verbs": [
+        { "id": "coingecko", "external_id": "monero" }
+      ],
+      "supported_vs": ["usd", "eur", "btc"]
+    }
+  ]
+}

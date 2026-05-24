@@ -1,9 +1,14 @@
 ---
 id: M1-055
 title: Asset commands umbrella — /zcash + /monero + bootstrap-assets + asset_config + price_snapshot roundtrip IT
-status: pending
+status: done
 created: 2026-05-24
-last_updated: 2026-05-24
+last_updated: 2026-05-25
+clarity_check:
+  date: 2026-05-25
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by:
   - M1-055a
   - M1-055b
@@ -17,6 +22,64 @@ risk: medium
 round_cap: 2
 security_relevant: true
 migration_touch: false
+reviews:
+  - round: 1
+    date: 2026-05-25
+    verdict: REWORK
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PARTIAL
+    diff_stats:
+      files: 4
+      added: 412
+      removed: 24
+  - round: 2
+    date: 2026-05-25
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 438
+      removed: 24
+redteam_findings:
+  - date: 2026-05-25
+    category: AUDIT-EVASION
+    severity: medium
+    promise: |
+      Authorization evaluation order on every inbound message: ...
+      8. Audit-log the intent. 9. Execute.
+    gap: |
+      AssetCommandsRoundtripIT asserts banned user produces zero
+      SLASH_DISPATCH audit rows but successful-dispatch tests make
+      no assertion that a SLASH_DISPATCH audit row IS created.
+    repro: |
+      A future refactor drops audit-log write from asset-command
+      dispatch; this IT continues to pass; asset commands execute
+      without audit trail.
+    suggested_fix_class: audit-log-coverage
+redteam_audits:
+  - date: 2026-05-25
+    verdict: FINDINGS
+    base: main
+    head: m1/M1-055-asset-commands-umbrella
+    verdict_file: docs/plan/m1/redteam/M1-055-2026-05-25.md
+    findings_count: 1
+    out_of_model_count: 1
+    note: |
+      One medium AUDIT-EVASION finding: the IT asserts the negative
+      (banned user no audit row) but not the positive (successful
+      dispatch produces an audit row). Note: SLASH_DISPATCH is not
+      currently in AuditAction — the absence assertion is vacuously
+      true today. Remediation is a new ticket adding the positive
+      audit-row assertion once the dispatch audit verb exists.
 out_of_scope:
   - any change to the spec — §Asset commands + §Operational asset_config + §Operational price_snapshot are complete on main HEAD; this umbrella is test-only
   - any change to M1-055a's bootstrap parser, BootstrapAssetsEntry record, V<N>__asset_config.sql migration, default-row consistency check, or Collector @Startup loader — that commit is FROZEN at its review round
