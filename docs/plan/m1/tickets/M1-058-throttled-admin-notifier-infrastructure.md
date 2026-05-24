@@ -52,13 +52,32 @@ test_plan:
     - all tests currently green on main
 spec_refs:
   - docs/spec/schema.md §Operational
-  - docs/spec/decisions.md D22
-  - docs/spec/decisions.md D42
   - docs/spec/security.md §Failure handling
 decision_refs:
   - D22
   - D34
   - D42
+escalations:
+  - date: 2026-05-24
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      N/A — clarity pre-flight FAIL (no reviewer round).
+      Blockers from target/m1-tick-clarity-M1-058.txt:
+        1. spec_refs entry "docs/spec/decisions.md D22" resolves to ANCHOR-NOT-FOUND.
+           D22 is a table row in decisions.md, not a section heading.
+        2. spec_refs entry "docs/spec/decisions.md D42" resolves to ANCHOR-NOT-FOUND.
+           Same root cause: D42 is a table row, not a section heading.
+revisions:
+  - date: 2026-05-24
+    reason: refine after clarity-fail (drop two D-only spec_refs entries that
+      cannot resolve to ATX headings; security.md §Failure handling already in
+      spec_refs inlines both D22 and D42; decision_refs preserves the linkage)
+    snapshot:
+      spec_refs:
+        - docs/spec/schema.md §Operational
+        - docs/spec/decisions.md D22
+        - docs/spec/decisions.md D42
+        - docs/spec/security.md §Failure handling
 ---
 
 # M1-058: ThrottledAdminNotifier (T2-G infrastructure) + admin_notification_state table
