@@ -86,6 +86,30 @@ redteam_audits:
       OUT-OF-MODEL #2 (homoglyph carve-out) deferred as benign per the
       threat-actor's own note: intake step 1.7 normalizes semantically
       before the handler runs.
+  - date: 2026-05-24
+    verdict: CLEAN
+    base: main
+    head: m1/M1-046-grant-admin-revoke-admin
+    verdict_file: docs/plan/m1/redteam/M1-046-2026-05-24-post-fix.md
+    findings_count: 0
+    out_of_model_count: 3
+    note: |
+      Re-audit run post-commit pre-merge to verify the in-flow PERM-ESCAL
+      fix (handlers reshaped to lookupActorForUpdate INSIDE the
+      executeGrant/executeRevoke transaction). Threat-actor confirmed
+      CLEAN — the first audit's TOCTOU does not reappear; the FOR UPDATE
+      row lock + in-tx admin re-check closes the window. Three OUT-OF-
+      MODEL observations advisory only: (1) no explicit rate limit on
+      grant/revoke admin (admin-tier abuse is inside the trust boundary,
+      spec does not promise defense), (2) defense-in-depth asymmetry
+      (probation re-checked in handler, is_banned is not — intake-side
+      ban gate is the system boundary, current shape defensible per
+      §No-defensive-code), (3) no audit row on reject paths (spec
+      §Authorization step 8 "Audit-log the intent" is ambiguous on
+      intent-to-execute vs intent-to-mutate; current implementation
+      audits intent-to-mutate; admins can enumerate user state via
+      differential replies without audit trail). None of the three rise
+      to a finding; no remediation ticket required.
 clarity_check:
   date: 2026-05-24
   verdict: WARN
