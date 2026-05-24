@@ -1,11 +1,14 @@
 ---
 id: M1-054
 title: Per-scope tag preferences — /follow-tag + /unfollow-tag + tag-mode state machine
-status: pending
+status: deferred
 created: 2026-05-24
 last_updated: 2026-05-24
+deferred_on: M1-057
+deferred_reason: blocked-on-new-ticket
 blocked_by:
   - M1-051
+  - M1-057
 files_budget: 8
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/FollowTagCommandHandler.java
@@ -70,6 +73,25 @@ aborted_attempts: []
 reopens: []
 redteam_findings: []
 clarity_check: {}
+escalations:
+  - date: 2026-05-24
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      Surfaced during /m1-tick start M1-054 (post-clarity-PASS).
+      Implementation requires consuming ConfirmStateService.remember(...)
+      for the /unfollow-tag --all confirm gate. remember() only accepts
+      a PendingConfirm payload (line 116 of ConfirmStateService.java),
+      and PendingConfirm is a sealed nested interface (lines 221-252)
+      permitting only Ban, InviteCreateOpen, InviteRevoke. Adding the
+      required "unfollow-tag-all" commandName forces a new permit on
+      ConfirmStateService.java — outside files_scope and explicitly
+      forbidden by out_of_scope clause 9 ("any change to M1-051
+      ConfirmStateService"). Same root cause as M1-053's outline-fail
+      (commit b36ef1c) — sealed-type extension serializes all
+      confirmable-command tickets through one file. Two failures of
+      the same shape is the workflow's pattern signal; defer onto
+      M1-057 (unseal PendingConfirm + extract variants) rather than
+      patching M1-054 in isolation.
 ---
 
 # M1-054: Per-scope tag preferences — /follow-tag + /unfollow-tag + tag-mode state machine
