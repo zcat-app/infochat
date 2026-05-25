@@ -64,14 +64,14 @@ public class ExportCommandHandler implements CommandHandler {
     ExportDataCollector dataCollector;
 
     /**
-     * Chat-mode body cap per hardware profile. The effective page cap
-     * for export pagination is this value minus {@link #HEADER_BUDGET}.
-     * Profile-specific overrides can be added to
-     * {@code application.properties}; the default matches the laptop
-     * profile.
+     * Export page cap per hardware profile. The effective page cap for
+     * export pagination is this value minus {@link #HEADER_BUDGET}.
+     * Separate from the chat-mode body cap ({@code infochat.chat.body-cap})
+     * because export output sizing and chat input gating are independent
+     * concerns with different test-profile values.
      */
-    @ConfigProperty(name = "infochat.chat.body-cap", defaultValue = "2048")
-    int chatBodyCap;
+    @ConfigProperty(name = "infochat.export.page-cap", defaultValue = "2048")
+    int exportPageCap;
 
     @Override
     public String name() {
@@ -99,7 +99,7 @@ public class ExportCommandHandler implements CommandHandler {
         ExportDataCollector.ExportResult result =
                 dataCollector.collect(userId, "dm", userId);
 
-        int effectiveCap = chatBodyCap - HEADER_BUDGET;
+        int effectiveCap = exportPageCap - HEADER_BUDGET;
         List<String> pages = ExportPaginator.paginate(result.tables(), effectiveCap);
 
         String body = formatPages(pages);

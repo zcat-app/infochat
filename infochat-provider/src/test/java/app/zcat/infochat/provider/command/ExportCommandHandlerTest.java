@@ -87,7 +87,7 @@ class ExportCommandHandlerTest {
 
         UUID sourceId = seedSource(PREFIX + "page-source");
         // Seed enough saved_post rows to force pagination at the
-        // test body-cap (default 2048 - 32 = 2016 effective cap).
+        // export page-cap (default 2048 - 32 = 2016 effective cap).
         for (int i = 0; i < 40; i++) {
             seedSavedPost(userId, sourceId, PREFIX + "page-uid-" + i,
                     new String[]{"tag-" + i},
