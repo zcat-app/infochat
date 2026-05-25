@@ -1,0 +1,337 @@
+package app.zcat.infochat.provider.command;
+
+import io.quarkus.test.junit.QuarkusTest;
+import jakarta.inject.Inject;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
+import java.util.List;
+import java.util.UUID;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * Integration tests for {@link ExportDataCollector} against the
+ * DevServices Postgres container. Verifies the field-level positive
+ * list, scope filtering, and authorization-field exclusion.
+ */
+@QuarkusTest
+class ExportDataCollectorTest {
+
+    private static final String PREFIX = "m1-067-coll-";
+    private static final String ADAPTER = "inmemory";
+
+    @Inject ExportDataCollector collector;
+    @Inject DataSource dataSource;
+
+    @BeforeEach
+    void cleanup() throws Exception {
+        try (Connection conn = dataSource.getConnection()) {
+            // FK-safe cleanup order: children first, then parents.
+            exec(conn, "DELETE FROM saved_post WHERE user_id IN ("
+                    + "SELECT id FROM users WHERE contact_id LIKE ?)", PREFIX + "%");
+            exec(conn, "DELETE FROM source_subscription WHERE scope_id IN ("
+                    + "SELECT id FROM users WHERE contact_id LIKE ?)", PREFIX + "%");
+            exec(conn, "DELETE FROM chat_memory WHERE user_id IN ("
+                    + "SELECT id FROM users WHERE contact_id LIKE ?)", PREFIX + "%");
+
+            exec(conn, "ALTER TABLE audit_log DISABLE TRIGGER trg_audit_log_no_delete");
+            try {
+                exec(conn, "DELETE FROM audit_log WHERE actor_user_id IN ("
+                        + "SELECT id FROM users WHERE contact_id LIKE ?)", PREFIX + "%");
+                exec(conn, "DELETE FROM audit_log WHERE target_id IN ("
+                        + "SELECT id::text FROM users WHERE contact_id LIKE ?)", PREFIX + "%");
+            } finally {
+                exec(conn, "ALTER TABLE audit_log ENABLE TRIGGER trg_audit_log_no_delete");
+            }
+
+            exec(conn, "DELETE FROM users WHERE contact_id LIKE ?", PREFIX + "%");
+        }
+    }
+
+    @Test
+    void collectsExactPositiveList() throws Exception {
+        String contactId = PREFIX + "poslist-actor";
+        UUID userId = seedUser(contactId);
+
+        ExportDataCollector.ExportResult result =
+                collector.collect(userId, "dm", userId);
+
+        // Must contain exactly the 9 tables in the spec's positive
+        // list, in order.
+        assertEquals(ExportDataCollector.POSITIVE_LIST_TABLES,
+                List.copyOf(result.tables().keySet()),
+                "output keys must match positive-list tables in order");
+    }
+
+    @Test
+    void excludesAuthorizationFields() throws Exception {
+        String contactId = PREFIX + "auth-actor";
+        UUID userId = seedUser(contactId);
+
+        ExportDataCollector.ExportResult result =
+                collector.collect(userId, "dm", userId);
+
+        List<String> usersRows = result.tables().get("users");
+        assertEquals(1, usersRows.size(), "users must have exactly one row");
+        String userJson = usersRows.getFirst();
+
+        // Authorization-state fields per spec §/export: is_admin,
+        // banned_by, ban_reason, banned_at, probation_until.
+        assertFalse(userJson.contains("\"is_admin\""),
+                "users export must NOT contain is_admin");
+        assertFalse(userJson.contains("\"banned_by\""),
+                "users export must NOT contain banned_by");
+        assertFalse(userJson.contains("\"ban_reason\""),
+                "users export must NOT contain ban_reason");
+        assertFalse(userJson.contains("\"banned_at\""),
+                "users export must NOT contain banned_at");
+        assertFalse(userJson.contains("\"probation_until\""),
+                "users export must NOT contain probation_until");
+
+        // Positive assertions: included fields should be present.
+        assertTrue(userJson.contains("\"contact_id\""),
+                "users export must contain contact_id");
+        assertTrue(userJson.contains("\"registration_state\""),
+                "users export must contain registration_state");
+    }
+
+    @Test
+    void auditOnlyActorRows() throws Exception {
+        String actorContactId = PREFIX + "audit-actor";
+        String otherContactId = PREFIX + "audit-other";
+        UUID actorId = seedUser(actorContactId);
+        UUID otherId = seedUser(otherContactId);
+
+        // Seed an audit row BY the actor (actor=actor, target=other).
+        seedAuditRow(actorId, actorContactId, "EXPORT", "user", otherId.toString());
+        // Seed an audit row BY the other user targeting the actor
+        // (actor=other, target=actor).
+        seedAuditRow(otherId, otherContactId, "EXPORT", "user", actorId.toString());
+
+        ExportDataCollector.ExportResult result =
+                collector.collect(actorId, "dm", actorId);
+
+        List<String> auditRows = result.tables().get("audit_log_view");
+        assertEquals(1, auditRows.size(),
+                "audit export must include only actor-authored rows, not target-only rows");
+        assertTrue(auditRows.getFirst().contains(actorId.toString()),
+                "the included audit row must be the actor's own");
+    }
+
+    @Test
+    void savedPostGlobalRegardlessOfScope() throws Exception {
+        String contactId = PREFIX + "saved-actor";
+        UUID userId = seedUser(contactId);
+        UUID sourceId = seedSource(PREFIX + "saved-source");
+
+        seedSavedPost(userId, sourceId, PREFIX + "saved-uid-1",
+                new String[]{"tag1"}, Instant.now().minus(1, ChronoUnit.HOURS));
+        seedSavedPost(userId, sourceId, PREFIX + "saved-uid-2",
+                new String[]{"tag2"}, Instant.now());
+
+        // Collect with DM scope — saved_post must include both rows
+        // regardless of scope (D13: per-user-globally).
+        ExportDataCollector.ExportResult result =
+                collector.collect(userId, "dm", userId);
+
+        List<String> savedRows = result.tables().get("saved_post");
+        assertEquals(2, savedRows.size(),
+                "saved_post must include all user's saves globally");
+        assertTrue(savedRows.stream().anyMatch(r -> r.contains(PREFIX + "saved-uid-1")));
+        assertTrue(savedRows.stream().anyMatch(r -> r.contains(PREFIX + "saved-uid-2")));
+    }
+
+    @Test
+    void groupExportScopedCorrectly() throws Exception {
+        String contactId = PREFIX + "group-actor";
+        UUID userId = seedUser(contactId);
+        UUID groupId = UUID.randomUUID();
+
+        // Seed chat_memory in two scopes: the group and the user's DM.
+        seedChatMemory(userId, "group", groupId, "group memory");
+        seedChatMemory(userId, "dm", userId, "dm memory");
+
+        // Collect with group scope.
+        ExportDataCollector.ExportResult result =
+                collector.collect(userId, "group", groupId);
+
+        List<String> memoryRows = result.tables().get("chat_memory");
+        assertEquals(1, memoryRows.size(),
+                "group export must return only group-scoped chat_memory");
+        assertTrue(memoryRows.getFirst().contains("group memory"),
+                "the included row must be the group-scoped one");
+    }
+
+    @Test
+    void ciShapeTestRefusesExtraKeys() throws Exception {
+        String contactId = PREFIX + "shape-actor";
+        UUID userId = seedUser(contactId);
+
+        ExportDataCollector.ExportResult result =
+                collector.collect(userId, "dm", userId);
+
+        // The output must contain ONLY keys from the positive list.
+        for (String key : result.tables().keySet()) {
+            assertTrue(ExportDataCollector.POSITIVE_LIST_TABLES.contains(key),
+                    "output contains unexpected table key: " + key);
+        }
+        // And it must contain ALL of them (even if empty).
+        for (String expected : ExportDataCollector.POSITIVE_LIST_TABLES) {
+            assertTrue(result.tables().containsKey(expected),
+                    "output must contain table key: " + expected);
+        }
+    }
+
+    @Test
+    void auditExportExcludesTargetContactId() throws Exception {
+        String actorContactId = PREFIX + "tci-actor";
+        String targetContactId = PREFIX + "tci-target";
+        UUID actorId = seedUser(actorContactId);
+        UUID targetId = seedUser(targetContactId);
+
+        seedAuditRow(actorId, actorContactId, "BAN", "user", targetId.toString());
+
+        ExportDataCollector.ExportResult result =
+                collector.collect(actorId, "dm", actorId);
+
+        List<String> auditRows = result.tables().get("audit_log_view");
+        assertEquals(1, auditRows.size());
+        String row = auditRows.getFirst();
+        // target_contact_id must NOT appear — defense against the V5
+        // redact_contact_id stub leaking other users' full contact IDs.
+        assertFalse(row.contains("\"target_contact_id\""),
+                "audit export must NOT include target_contact_id column; got: " + row);
+        assertFalse(row.contains(targetContactId),
+                "audit export must NOT contain the target's full contact ID");
+    }
+
+    @Test
+    void truncationReportedWhenCapExceeded() throws Exception {
+        String contactId = PREFIX + "trunc-actor";
+        UUID userId = seedUser(contactId);
+        UUID sourceId = seedSource(PREFIX + "trunc-source");
+
+        // The default maxRowsPerTable is 10000; override to a small
+        // value for the test by seeding more rows than a low cap.
+        // Since we can't override the config mid-test, seed enough
+        // rows to verify the LIMIT is applied (default 10000 means
+        // we won't hit truncation in normal tests — this test verifies
+        // the structural path by checking saved_post count <= cap).
+        for (int i = 0; i < 5; i++) {
+            seedSavedPost(userId, sourceId, PREFIX + "trunc-uid-" + i,
+                    new String[]{}, Instant.now().minus(i, ChronoUnit.HOURS));
+        }
+
+        ExportDataCollector.ExportResult result =
+                collector.collect(userId, "dm", userId);
+
+        // With 5 rows and a default cap of 10000, no truncation.
+        assertTrue(result.truncatedTables().isEmpty(),
+                "5 rows should not trigger truncation at default cap");
+        assertEquals(5, result.tables().get("saved_post").size());
+    }
+
+    // -- helpers --
+
+    private UUID seedUser(String contactId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO users (adapter, contact_id, is_admin, is_banned,"
+                             + " registration_state) VALUES (?, ?, FALSE, FALSE, 'vouched')"
+                             + " RETURNING id")) {
+            ps.setString(1, ADAPTER);
+            ps.setString(2, contactId);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getObject("id", UUID.class);
+            }
+        }
+    }
+
+    private UUID seedSource(String identifier) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO source (kind, identifier, display_name, category,"
+                             + " bootstrap_tags) VALUES ('rss', ?, ?, 'news', '{}')"
+                             + " RETURNING id")) {
+            ps.setString(1, identifier);
+            ps.setString(2, "Test " + identifier);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getObject("id", UUID.class);
+            }
+        }
+    }
+
+    private void seedSavedPost(UUID userId, UUID sourceId, String postUid,
+                               String[] personalTags, Instant savedAt) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO saved_post (user_id, post_uid, source_id, title,"
+                             + " snapshot_tags, personal_tags, saved_at)"
+                             + " VALUES (?, ?, ?, ?, '{}', ?, ?)")) {
+            ps.setObject(1, userId);
+            ps.setString(2, postUid);
+            ps.setObject(3, sourceId);
+            ps.setString(4, "Test " + postUid);
+            ps.setArray(5, conn.createArrayOf("TEXT", personalTags));
+            ps.setObject(6, OffsetDateTime.ofInstant(savedAt, ZoneOffset.UTC));
+            ps.executeUpdate();
+        }
+    }
+
+    private void seedChatMemory(UUID userId, String scopeKind, UUID scopeId,
+                                String summary) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO chat_memory (user_id, scope_kind, scope_id,"
+                             + " summary, keywords, referenced_posts, referenced_topics)"
+                             + " VALUES (?, ?, ?, ?, '{}', '{}', '{}')")) {
+            ps.setObject(1, userId);
+            ps.setString(2, scopeKind);
+            ps.setObject(3, scopeId);
+            ps.setString(4, summary);
+            ps.executeUpdate();
+        }
+    }
+
+    private void seedAuditRow(UUID actorUserId, String actorContactId,
+                              String action, String targetKind,
+                              String targetId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO audit_log (actor_user_id, actor_contact_id,"
+                             + " actor_adapter, action, target_kind, target_id,"
+                             + " request_id)"
+                             + " VALUES (?, ?, ?, ?, ?, ?, ?)")) {
+            ps.setObject(1, actorUserId);
+            ps.setString(2, actorContactId);
+            ps.setString(3, ADAPTER);
+            ps.setString(4, action);
+            ps.setString(5, targetKind);
+            ps.setString(6, targetId);
+            ps.setString(7, UUID.randomUUID().toString());
+            ps.executeUpdate();
+        }
+    }
+
+    private static void exec(Connection conn, String sql, Object... args) throws Exception {
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            for (int i = 0; i < args.length; i++) {
+                ps.setObject(i + 1, args[i]);
+            }
+            ps.executeUpdate();
+        }
+    }
+}

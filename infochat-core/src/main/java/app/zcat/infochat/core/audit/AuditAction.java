@@ -83,6 +83,7 @@ public enum AuditAction {
     LIST_SOURCES_ALL,
     APPROVE_QUARANTINE,
     REJECT_QUARANTINE,
+    EXPORT,
     FORGET,
     SET_LANG,
     SET_TIMEZONE,

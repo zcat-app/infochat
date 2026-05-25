@@ -1,13 +1,14 @@
 ---
 id: M1-067
 title: /export — user data export with field-level positive list
-status: pending
+status: done
 created: 2026-05-24
-last_updated: 2026-05-24
+last_updated: 2026-05-25
 blocked_by:
   - M1-061
-files_budget: 6
+files_budget: 7
 files_scope:
+  - infochat-core/src/main/java/app/zcat/infochat/core/audit/AuditAction.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/ExportCommandHandler.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/ExportDataCollector.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/ExportPaginator.java
@@ -54,12 +55,74 @@ spec_refs:
   - docs/design/03-commands.md §3.9 Conversation control
 decision_refs:
   - D13
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-05-25
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 9
+      added: 1417
+      removed: 10
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
-clarity_check: {}
+redteam_findings:
+  - date: 2026-05-25
+    category: DOS
+    severity: medium
+    promise: |
+      Per-user token buckets bound [...] Parser-only + DB-read paginated commands — cheap.
+    gap: |
+      All SQL queries in ExportDataCollector lack LIMIT; audit_log_view and saved_post can return unbounded result sets loaded into memory.
+    repro: |
+      A bot admin with thousands of audit rows sends /export; concurrent requests exhaust heap.
+    suggested_fix_class: rate-limit
+  - date: 2026-05-25
+    category: INFO-LEAK
+    severity: low
+    promise: |
+      audit_log_view applies redact_contact_id() on contact IDs.
+    gap: |
+      redact_contact_id is a V5 stub returning input unchanged; export leaks full target_contact_id of other users in admin audit rows.
+    repro: |
+      Bot admin who has banned/vouched users sends /export; target_contact_id is unredacted.
+    suggested_fix_class: trust-boundary-tightening
+redteam_audits:
+  - date: 2026-05-25
+    verdict: FINDINGS
+    base: main
+    head: m1/M1-067-export
+    verdict_file: docs/plan/m1/redteam/M1-067-2026-05-25.md
+    findings_count: 2
+    out_of_model_count: 1
+    note: |
+      1 medium DOS (unbounded queries), 1 low INFO-LEAK (redact_contact_id stub). Neither blocks merge; both tracked for remediation.
+escalations:
+  - date: 2026-05-25
+    reason: budget-breach
+    reviewer_verdict_excerpt: "N/A"
+revisions:
+  - date: 2026-05-25
+    reason: "budget-breach refine: add AuditAction.java to files_scope, bump files_budget 6→7"
+    prior_files_budget: 6
+    prior_files_scope:
+      - infochat-provider/src/main/java/app/zcat/infochat/provider/command/ExportCommandHandler.java
+      - infochat-provider/src/main/java/app/zcat/infochat/provider/command/ExportDataCollector.java
+      - infochat-provider/src/main/java/app/zcat/infochat/provider/command/ExportPaginator.java
+      - infochat-provider/src/test/java/app/zcat/infochat/provider/command/ExportCommandHandlerTest.java
+      - infochat-provider/src/test/java/app/zcat/infochat/provider/command/ExportDataCollectorTest.java
+      - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterExportIT.java
+clarity_check:
+  date: 2026-05-25
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-067: /export — user data export with field-level positive list
