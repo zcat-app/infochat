@@ -1,11 +1,24 @@
 ---
 id: M1-071
 title: Fix DAG violation — move LlmTranslationProvider out of llm-adapter
-status: pending
+status: done
 created: 2026-05-25
 last_updated: 2026-05-25
+clarity_check:
+  date: 2026-05-25
+  verdict: PASS
+  warnings: []
+  blockers: []
+revisions:
+  - date: 2026-05-25
+    reason: clarity-fail refine
+    snapshot:
+      spec_refs:
+        - "docs/spec/architecture.md §Module DAG"
+        - "docs/design/09-reference.md §Sibling modules MUST NOT depend on each other"
+      acceptance_item_3: "LlmRouter.validateRegistry() @PostConstruct method is removed (dead defensive code, §7). Verify: code inspection + LlmRouterTest green"
 blocked_by: []
-files_budget: 8
+files_budget: 10
 files_scope:
   - infochat-llm-adapter/pom.xml
   - infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/translation/LlmTranslationProvider.java
@@ -13,6 +26,8 @@ files_scope:
   - infochat-provider/pom.xml
   - infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/routing/LlmRouter.java
   - infochat-llm-adapter/src/test/java/app/zcat/infochat/llm/translation/LlmTranslationProviderTest.java
+  - infochat-llm-adapter/src/test/java/app/zcat/infochat/llm/routing/LlmRouterTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/translation/LlmTranslationProviderTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/translation/TranslationPipelineTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/translation/TranslationPipelineIT.java
 complexity: medium
@@ -29,7 +44,7 @@ out_of_scope:
 acceptance:
   - "infochat-llm-adapter/pom.xml no longer declares any dependency on infochat-messaging-adapter (neither compile nor provided). Verify: grep for infochat-messaging-adapter in infochat-llm-adapter/pom.xml returns empty"
   - "LlmTranslationProvider.java exists under infochat-provider (e.g. app.zcat.infochat.provider.translation package) and implements TranslationProvider. CDI discovers it correctly. Verify: TranslationPipelineIT.translationRoundTrip still passes"
-  - "LlmRouter.validateRegistry() @PostConstruct method is removed (dead defensive code, §7). Verify: code inspection + LlmRouterTest green"
+  - "LlmRouter.validateRegistry() @PostConstruct method is removed (dead defensive code, §7). Verify: grep -r validateRegistry LlmRouter.java returns empty + LlmRouterTest green"
   - "LlmRouter.forTask normalizes scopeLanguage to lowercase before set lookup. Verify: LlmRouterTest.caseInsensitiveLanguageLookup passes"
   - "mvn clean verify (full suite) is green"
 test_plan:
@@ -40,9 +55,43 @@ test_plan:
   preserves:
     - all tests currently green on main
 spec_refs:
-  - docs/spec/architecture.md §Module DAG
-  - docs/design/09-reference.md §Sibling modules MUST NOT depend on each other
+  - docs/spec/architecture.md §Architectural principles
+  - docs/design/09-reference.md §9.1 Module dependency DAG
 decision_refs: []
+reviews:
+  - round: 1
+    date: 2026-05-25
+    verdict: REWORK
+    checks:
+      scope_drift: FAIL
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 74
+      removed: 48
+  - round: 2
+    date: 2026-05-25
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 85
+      removed: 48
+escalations:
+  - date: 2026-05-25
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      SPEC-REFS-VALID: FAIL
+        - docs/spec/architecture.md §Module DAG: ANCHOR-NOT-FOUND. No heading containing "module dag".
+        - docs/design/09-reference.md §Sibling modules MUST NOT depend on each other: ANCHOR-NOT-FOUND. The rule is body text inside §9.1 Module dependency DAG.
 ---
 
 ## Context
@@ -56,3 +105,7 @@ Additionally, `LlmRouter` has a redundant `@PostConstruct validateRegistry()` th
 1. Move `LlmTranslationProvider` from `infochat-llm-adapter` to `infochat-provider` (which already depends on both siblings). Remove the `infochat-messaging-adapter` dependency from `infochat-llm-adapter/pom.xml`.
 2. Delete `LlmRouter.validateRegistry()` (dead code — constructor + `List.copyOf` already guarantee non-empty).
 3. Normalize `scopeLanguage` to `toLowerCase(Locale.ROOT)` in `LlmRouter.forTask` before the set lookup.
+
+## Round 1 rework
+
+1. Add two missing paths to `files_scope`: (a) `infochat-llm-adapter/src/test/java/app/zcat/infochat/llm/routing/LlmRouterTest.java` and (b) `infochat-provider/src/test/java/app/zcat/infochat/provider/translation/LlmTranslationProviderTest.java`. Both are required by the ticket's own acceptance criteria and test_plan but were omitted from `files_scope`.

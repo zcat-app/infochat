@@ -185,6 +185,29 @@ class LlmRouterTest {
     }
 
     /**
+     * M1-071: uppercase scopeLanguage is normalized to lowercase before
+     * the language-aware capability branch runs its {@code contains}
+     * check. Without normalization, "CS" would miss the set {"cs"}
+     * and fall through to the profile default instead.
+     */
+    @Test
+    void caseInsensitiveLanguageLookup() {
+        StubProvider englishProvider = new StubProvider();
+        StubProvider czechProvider = new StubProvider();
+        LlmRouter router = new LlmRouter(
+            List.of(
+                new LlmRouter.Entry(NAME_ENGLISH, englishProvider, Set.of("en")),
+                new LlmRouter.Entry(NAME_CZECH, czechProvider, Set.of("cs"))),
+            LlmRouter.ConfigReader.fromMap(Map.of(
+                LlmRouter.CONFIG_KEY_DEFAULT_PROVIDER, NAME_ENGLISH)));
+
+        LlmProvider resolved = router.forTask(ModelTask.SUMMARIZER, "CS");
+
+        assertSame(czechProvider, resolved,
+            "uppercase 'CS' must resolve to the Czech-capable provider after case normalization");
+    }
+
+    /**
      * Lightweight test stub: implements {@link LlmProvider} so the
      * router's resolution chain can be exercised end-to-end without
      * pulling Quarkus or constructing an

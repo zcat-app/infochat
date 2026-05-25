@@ -1,4 +1,4 @@
-package app.zcat.infochat.llm.translation;
+package app.zcat.infochat.provider.translation;
 
 import app.zcat.infochat.llm.LlmProvider;
 import app.zcat.infochat.llm.LlmResponse;

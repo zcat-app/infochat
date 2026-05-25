@@ -3,7 +3,6 @@ package app.zcat.infochat.llm.routing;
 import app.zcat.infochat.llm.LlmProvider;
 import app.zcat.infochat.llm.ModelTask;
 import app.zcat.infochat.llm.impl.OpenAiCompatibleProvider;
-import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
@@ -127,7 +126,7 @@ public class LlmRouter {
         if (task == null) {
             throw new IllegalArgumentException("LlmRouter.forTask: task must be non-null");
         }
-        String lang = scopeLanguage == null ? "en" : scopeLanguage;
+        String lang = scopeLanguage == null ? "en" : scopeLanguage.toLowerCase(Locale.ROOT);
 
         // Priority 1: per-task override property.
         String overrideKey = perTaskOverrideKey(task);
@@ -291,20 +290,6 @@ public class LlmRouter {
             }
         }
         return langs.isEmpty() ? Set.of("en") : Set.copyOf(langs);
-    }
-
-    /**
-     * Sanity check that the router has at least one entry after CDI
-     * wiring. Runs once at bean startup to surface a misconfigured
-     * deployment loudly rather than on the first {@link #forTask}
-     * call.
-     */
-    @PostConstruct
-    void validateRegistry() {
-        if (entries.isEmpty()) {
-            throw new IllegalStateException(
-                "LlmRouter: no provider entries registered at @PostConstruct");
-        }
     }
 
     /**

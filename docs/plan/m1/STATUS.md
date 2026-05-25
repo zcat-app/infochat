@@ -25,7 +25,7 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-069 — Chat-mode group-scope session isolation (complexity: medium, risk: high)
-- M1-071 — Fix DAG violation — move LlmTranslationProvider out of llm-adapter (complexity: medium, risk: medium)
+- M1-074 — EmbeddingWorker transaction narrowing + TransactionHelper extraction (complexity: medium, risk: medium)
 - M1-075 — InboundRouter LLM rate-cap map eviction + body-size optimization (complexity: low, risk: low)
 - M1-076 — SSRF module — remove compat shims, deduplicate redirect loop, align timeout (complexity: medium, risk: medium)
 - M1-077 — BootstrapLoader tag normalization alignment with TagVocabulary (complexity: low, risk: low)
@@ -65,9 +65,9 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
-| M1-074 | EmbeddingWorker transaction narrowing + TransactionHelper extraction | 2026-05-25 | round 2 APPROVE |
 | M1-073 | LlmOutputSanitizer — word-boundary command matching | 2026-05-25 | round 1 APPROVE |
 | M1-072 | DefaultRedactionHook generic pattern — JSON-safe replacement | 2026-05-25 | round 1 APPROVE |
+| M1-071 | Fix DAG violation — move LlmTranslationProvider out of llm-adapter | 2026-05-25 | round 2 APPROVE |
 | M1-070 | Chat agent tool instructions parameter alignment + final-call strip | 2026-05-25 | round 1 APPROVE |
 | M1-068 | Chat agent redteam hardening (M1-063 remediation) | 2026-05-25 | round 2 APPROVE |
 | M1-067 | /export — user data export with field-level positive list | 2026-05-25 | round 1 APPROVE |
@@ -227,10 +227,10 @@ M1-061 (done)
   └── M1-067 (done)
 M1-069 (pending) ← runnable
 M1-070 (done)
-M1-071 (pending) ← runnable
+M1-071 (done)
 M1-072 (done)
 M1-073 (done)
-M1-074 (done)
+M1-074 (pending) ← runnable
 M1-075 (pending) ← runnable
 M1-076 (pending) ← runnable
 M1-077 (pending) ← runnable
