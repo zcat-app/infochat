@@ -5,6 +5,7 @@ import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.group.GroupMembershipRepository;
 import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -82,6 +83,9 @@ public class FollowTagCommandHandler implements CommandHandler {
     private static final String SELECT_USER_ID_BY_ADAPTER_AND_CONTACT_ID =
             "SELECT id FROM users WHERE adapter = ? AND contact_id = ?";
 
+    private static final String SELECT_GROUP_ID_SQL =
+            "SELECT id FROM groups WHERE adapter = ? AND upstream_group_id = ?";
+
     private static final String UPSERT_SCOPE_PREFERENCES_SQL =
             "INSERT INTO scope_preferences (scope_kind, scope_id) "
                     + "VALUES (?, ?) ON CONFLICT (scope_kind, scope_id) DO NOTHING";
@@ -122,6 +126,9 @@ public class FollowTagCommandHandler implements CommandHandler {
     @Inject
     InboundContext inboundContext;
 
+    @Inject
+    GroupMembershipRepository groupMembershipRepository;
+
     @Override
     public String name() {
         return "follow-tag";
@@ -129,14 +136,30 @@ public class FollowTagCommandHandler implements CommandHandler {
 
     @Override
     public OutboundMessage handle(@NonNull ScopeRef scope, @NonNull String rawText) {
-        // Step 1 — permission gate. Group scope short-circuits before
-        // any DB read: the frozen CommandHandler SPI does not carry
-        // the inbound caller's contact id in group scope, so the
-        // handler cannot distinguish group-admin from non-admin. v1
-        // rejects ALL group calls; T2-F lands the actor seam and the
-        // group-admin proceed path.
-        if (scope instanceof ScopeRef.Group) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_FOLLOW_TAG_GROUP_ADMIN_ONLY));
+        // Permission gate: group scope requires group-admin.
+        final String scopeKind;
+        final UUID scopeId;
+        if (scope instanceof ScopeRef.Group group) {
+            Optional<UUID> actorId = lookupActorId(inboundContext.senderContactId());
+            if (actorId.isEmpty()) {
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_FOLLOW_TAG_GROUP_ADMIN_ONLY));
+            }
+            UUID groupDbId = lookupGroupId(group.adapterGroupId());
+            if (groupDbId == null
+                    || (!isBotAdmin(actorId.get())
+                        && !groupMembershipRepository.isGroupAdmin(groupDbId, actorId.get()))) {
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_FOLLOW_TAG_GROUP_ADMIN_ONLY));
+            }
+            scopeKind = "group";
+            scopeId = groupDbId;
+        } else {
+            ScopeRef.Dm dm = (ScopeRef.Dm) scope;
+            Optional<UUID> actorId = lookupActorId(dm.contactId());
+            if (actorId.isEmpty()) {
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL));
+            }
+            scopeKind = "dm";
+            scopeId = actorId.get();
         }
 
         String suppliedTag = parsePositionalTag(rawText);
@@ -144,11 +167,6 @@ public class FollowTagCommandHandler implements CommandHandler {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL));
         }
 
-        // Step 2 — vocabulary validation. The append-only vocabulary
-        // (spec §Sources and tags Vocabulary lifecycle) means a tag
-        // whose only contributing source was removed long ago is
-        // still a valid input; ONLY tags that never entered the
-        // vocabulary are rejected.
         Optional<UUID> tagId = lookupTagId(suppliedTag);
         if (tagId.isEmpty()) {
             List<String> vocab = readVocabulary();
@@ -159,25 +177,14 @@ public class FollowTagCommandHandler implements CommandHandler {
             return reply(scope, body);
         }
 
-        // DM scope → scope_id is the actor's users.id (M1-036
-        // AddSourceCommandHandler precedent: per-user/per-scope rows
-        // are keyed on the actor's UUID, not the contact_id literal).
-        ScopeRef.Dm dm = (ScopeRef.Dm) scope;
-        Optional<UUID> actorId = lookupActorId(dm.contactId());
-        if (actorId.isEmpty()) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL));
-        }
-        UUID scopeId = actorId.get();
-
-        // Step 3 — one-transaction state machine.
-        return executeFollowTagTransaction(scope, scopeId, tagId.get(), suppliedTag);
+        return executeFollowTagTransaction(scope, scopeKind, scopeId, tagId.get(), suppliedTag);
     }
 
     private OutboundMessage executeFollowTagTransaction(ScopeRef scope,
+                                                        String scopeKind,
                                                         UUID scopeId,
                                                         UUID tagIdValue,
                                                         String tagName) {
-        String scopeKind = "dm";
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
@@ -219,12 +226,12 @@ public class FollowTagCommandHandler implements CommandHandler {
                 conn.rollback();
                 throw new IllegalStateException(
                         "FollowTagCommandHandler.executeFollowTag failed for contact_id="
-                                + ContactIds.redact(((ScopeRef.Dm) scope).contactId()), e);
+                                + ContactIds.redact(inboundContext.senderContactId()), e);
             }
         } catch (SQLException e) {
             throw new IllegalStateException(
                     "FollowTagCommandHandler connection failed for contact_id="
-                            + ContactIds.redact(((ScopeRef.Dm) scope).contactId()), e);
+                            + ContactIds.redact(inboundContext.senderContactId()), e);
         }
     }
 
@@ -294,6 +301,38 @@ public class FollowTagCommandHandler implements CommandHandler {
             throw new IllegalStateException(
                     "FollowTagCommandHandler.lookupActorId failed for contact_id="
                             + ContactIds.redact(contactId), e);
+        }
+    }
+
+    private UUID lookupGroupId(String adapterGroupId) {
+        String adapter = inboundContext.adapterName();
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(SELECT_GROUP_ID_SQL)) {
+            ps.setString(1, adapter);
+            ps.setString(2, adapterGroupId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return null;
+                }
+                return rs.getObject("id", UUID.class);
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "FollowTagCommandHandler.lookupGroupId failed", e);
+        }
+    }
+
+    private boolean isBotAdmin(UUID userId) {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT is_admin FROM users WHERE id = ?")) {
+            ps.setObject(1, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() && rs.getBoolean("is_admin");
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "FollowTagCommandHandler.isBotAdmin failed", e);
         }
     }
 

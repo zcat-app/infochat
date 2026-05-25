@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 10 |
+| pending | 9 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 95 |
+| done | 96 |
 | deferred | 6 |
 | **total** | **111** |
 
@@ -25,7 +25,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-079c — /promote + /demote + /group-timezone + auto-promote + group dispatch (complexity: high, risk: medium)
-- M1-079d — Admin-gated handler group unwinding (source/tag/lang) (complexity: medium, risk: medium)
 - M1-081a — Re-eval job + quarantine NOTIFY + tagger partial-valid + TTL (complexity: high, risk: high)
 
 ---
@@ -43,7 +42,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-079 — blocked_by: M1-079a (done), M1-079b (done), M1-079c (pending), M1-079d (pending), M1-079e (done)
+- M1-079 — blocked_by: M1-079a (done), M1-079b (done), M1-079c (pending), M1-079d (done), M1-079e (done)
 - M1-080 — blocked_by: M1-080a (pending), M1-080b (pending), M1-080c (pending)
 - M1-080a — blocked_by: M1-079 (pending)
 - M1-080b — blocked_by: M1-080a (pending)
@@ -69,6 +68,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-079e | Member-access handler group unwinding + DM-only gates | 2026-05-25 | round 1 APPROVE |
+| M1-079d | Admin-gated handler group unwinding (source/tag/lang) | 2026-05-25 | round 1 APPROVE |
 | M1-079b | InMemoryAdapter group SPI + membership event model | 2026-05-25 | round 1 APPROVE |
 | M1-079a | GroupRepository + GroupMembershipRepository | 2026-05-25 | round 1 APPROVE |
 | M1-078 | JSpecify @NonNull/@Nullable annotation sweep across all modules | 2026-05-25 | round 1 APPROVE |
@@ -77,7 +77,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-075 | InboundRouter LLM rate-cap map eviction + body-size optimization | 2026-05-25 | round 2 APPROVE |
 | M1-074 | EmbeddingWorker transaction narrowing + TransactionHelper extraction | 2026-05-25 | round 2 APPROVE |
 | M1-073 | LlmOutputSanitizer — word-boundary command matching | 2026-05-25 | round 1 APPROVE |
-| M1-072 | DefaultRedactionHook generic pattern — JSON-safe replacement | 2026-05-25 | round 1 APPROVE |
 
 ---
 
@@ -251,7 +250,7 @@ M1-079a (done)
   │     └── M1-079 (pending) [see above]
   ├── M1-079c (pending) ← runnable
   │     └── M1-079 (pending) [see above]
-  ├── M1-079d (pending) ← runnable
+  ├── M1-079d (done)
   │     └── M1-079 (pending) [see above]
   ├── M1-079e (done)
   │     └── M1-079 (pending) [see above]

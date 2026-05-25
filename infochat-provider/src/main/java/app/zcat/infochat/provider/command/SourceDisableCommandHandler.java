@@ -8,6 +8,7 @@ import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.group.GroupMembershipRepository;
 import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -64,6 +65,9 @@ public class SourceDisableCommandHandler implements CommandHandler {
     private static final String SELECT_USER_SQL =
             "SELECT id, contact_id, is_admin FROM users WHERE adapter = ? AND contact_id = ?";
 
+    private static final String SELECT_GROUP_ID_SQL =
+            "SELECT id FROM groups WHERE adapter = ? AND upstream_group_id = ?";
+
     private static final String SELECT_SOURCE_SQL =
             "SELECT display_name, status, deleted_at FROM source WHERE id = ?";
 
@@ -85,6 +89,9 @@ public class SourceDisableCommandHandler implements CommandHandler {
     @Inject
     AuditLogWriter auditLogWriter;
 
+    @Inject
+    GroupMembershipRepository groupMembershipRepository;
+
     @Override
     public String name() {
         return "source-disable";
@@ -92,15 +99,15 @@ public class SourceDisableCommandHandler implements CommandHandler {
 
     @Override
     public OutboundMessage handle(@NonNull ScopeRef scope, @NonNull String rawText) {
-        // Group scope is not supported in v1 — the frozen ScopeRef.Group
-        // does not carry the actor's contact id, so the admin gate
-        // cannot resolve the caller. T2-F widens the SPI.
-        if (scope instanceof ScopeRef.Group) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_GROUP_ADMIN_NOT_IN_V1));
+        if (scope instanceof ScopeRef.Group group) {
+            if (!isGroupAdmin(group)) {
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_GROUP_ADMIN_NOT_IN_V1));
+            }
         }
 
         String adapter = inboundContext.adapterName();
-        String callerContactId = contactIdOf(scope);
+        String callerContactId = scope instanceof ScopeRef.Dm dm
+                ? dm.contactId() : inboundContext.senderContactId();
 
         Optional<UserRow> actorOpt = lookupUser(adapter, callerContactId);
         if (actorOpt.isEmpty() || !actorOpt.get().isAdmin) {
@@ -271,8 +278,36 @@ public class SourceDisableCommandHandler implements CommandHandler {
         return new OutboundMessage(scope, text, Instant.now(), UUID.randomUUID().toString());
     }
 
-    private static String contactIdOf(ScopeRef scope) {
-        return scope instanceof ScopeRef.Dm dm ? dm.contactId() : null;
+    private boolean isGroupAdmin(ScopeRef.Group group) {
+        String adapter = inboundContext.adapterName();
+        String senderContact = inboundContext.senderContactId();
+        Optional<UserRow> user = lookupUser(adapter, senderContact);
+        if (user.isEmpty()) {
+            return false;
+        }
+        if (user.get().isAdmin) {
+            return true;
+        }
+        UUID groupDbId = lookupGroupId(adapter, group.adapterGroupId());
+        return groupDbId != null
+                && groupMembershipRepository.isGroupAdmin(groupDbId, user.get().id);
+    }
+
+    private UUID lookupGroupId(String adapter, String upstreamGroupId) {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(SELECT_GROUP_ID_SQL)) {
+            ps.setString(1, adapter);
+            ps.setString(2, upstreamGroupId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return null;
+                }
+                return rs.getObject("id", UUID.class);
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "SourceDisableCommandHandler.lookupGroupId failed", e);
+        }
     }
 
     private record UserRow(UUID id, String contactId, boolean isAdmin) {}

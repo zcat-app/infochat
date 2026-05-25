@@ -5,6 +5,7 @@ import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.group.GroupMembershipRepository;
 import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -14,6 +15,7 @@ import org.jspecify.annotations.NonNull;
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.text.MessageFormat;
 import java.time.Instant;
@@ -90,15 +92,19 @@ public class LangCommandHandler implements CommandHandler {
     private static final String SELECT_USER_ID_BY_ADAPTER_AND_CONTACT_ID =
             "SELECT id FROM users WHERE adapter = ? AND contact_id = ?";
 
+    private static final String SELECT_GROUP_ID_SQL =
+            "SELECT id FROM groups WHERE adapter = ? AND upstream_group_id = ?";
+
     private static final String UPSERT_SCOPE_LANGUAGE_SQL =
             "INSERT INTO scope_preferences (scope_kind, scope_id, language) "
-                    + "VALUES ('dm', ?, ?) "
+                    + "VALUES (?, ?, ?) "
                     + "ON CONFLICT (scope_kind, scope_id) "
                     + "DO UPDATE SET language = EXCLUDED.language";
 
     @Inject BundleLoader bundleLoader;
     @Inject DataSource dataSource;
     @Inject InboundContext inboundContext;
+    @Inject GroupMembershipRepository groupMembershipRepository;
 
     @Override
     public String name() {
@@ -107,15 +113,30 @@ public class LangCommandHandler implements CommandHandler {
 
     @Override
     public OutboundMessage handle(@NonNull ScopeRef scope, @NonNull String rawText) {
-        // Step 1 — permission gate. Group scope short-circuits before
-        // any DB read: the frozen CommandHandler SPI does not carry
-        // the inbound caller's contact id in group scope. v1 rejects
-        // ALL group calls; T2-F lands the actor seam and the
-        // group-admin proceed path. Distinct error key from the
-        // shared ERROR_GROUP_ADMIN_NOT_IN_V1 (M1-046 admin-tier) so
-        // T2-F can independently translate /lang's group reply.
-        if (scope instanceof ScopeRef.Group) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_LANG_GROUP_ADMIN_NOT_IN_V1));
+        // Permission gate: group scope requires group-admin.
+        final String scopeKind;
+        final UUID scopeId;
+        if (scope instanceof ScopeRef.Group group) {
+            UUID actorId = lookupActorId(inboundContext.senderContactId());
+            if (actorId == null) {
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_LANG_GROUP_ADMIN_NOT_IN_V1));
+            }
+            UUID groupDbId = lookupGroupId(group.adapterGroupId());
+            if (groupDbId == null
+                    || (!isBotAdmin(actorId)
+                        && !groupMembershipRepository.isGroupAdmin(groupDbId, actorId))) {
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_LANG_GROUP_ADMIN_NOT_IN_V1));
+            }
+            scopeKind = "group";
+            scopeId = groupDbId;
+        } else {
+            ScopeRef.Dm dm = (ScopeRef.Dm) scope;
+            UUID actorId = lookupActorId(dm.contactId());
+            if (actorId == null) {
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL));
+            }
+            scopeKind = "dm";
+            scopeId = actorId;
         }
 
         String suppliedCode = parsePositionalCode(rawText);
@@ -127,17 +148,7 @@ public class LangCommandHandler implements CommandHandler {
             return reply(scope, body);
         }
 
-        ScopeRef.Dm dm = (ScopeRef.Dm) scope;
-        UUID actorId = lookupActorId(dm.contactId());
-        if (actorId == null) {
-            // Defense-in-depth — InboundRouter intake step 2 / step 3
-            // ensures a users row exists before dispatch reaches a
-            // command handler. A null here would surface as the generic
-            // error.internal so the caller is not silently dropped.
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL));
-        }
-
-        upsertScopeLanguage(scope, actorId, suppliedCode);
+        upsertScopeLanguage(scopeKind, scopeId, suppliedCode);
 
         String body = MessageFormat.format(
                 bundleLoader.get(BundleKeys.REPLY_LANG_SUCCESS, suppliedCode),
@@ -145,16 +156,17 @@ public class LangCommandHandler implements CommandHandler {
         return reply(scope, body);
     }
 
-    private void upsertScopeLanguage(ScopeRef scope, UUID scopeId, String langCode) {
+    private void upsertScopeLanguage(String scopeKind, UUID scopeId, String langCode) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(UPSERT_SCOPE_LANGUAGE_SQL)) {
-            ps.setObject(1, scopeId);
-            ps.setString(2, langCode);
+            ps.setString(1, scopeKind);
+            ps.setObject(2, scopeId);
+            ps.setString(3, langCode);
             ps.executeUpdate();
         } catch (SQLException e) {
             throw new IllegalStateException(
                     "LangCommandHandler.upsertScopeLanguage failed for contact_id="
-                            + ContactIds.redact(((ScopeRef.Dm) scope).contactId()), e);
+                            + ContactIds.redact(inboundContext.senderContactId()), e);
         }
     }
 
@@ -165,7 +177,7 @@ public class LangCommandHandler implements CommandHandler {
                      SELECT_USER_ID_BY_ADAPTER_AND_CONTACT_ID)) {
             ps.setString(1, adapter);
             ps.setString(2, contactId);
-            try (var rs = ps.executeQuery()) {
+            try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) {
                     return null;
                 }
@@ -175,6 +187,38 @@ public class LangCommandHandler implements CommandHandler {
             throw new IllegalStateException(
                     "LangCommandHandler.lookupActorId failed for contact_id="
                             + ContactIds.redact(contactId), e);
+        }
+    }
+
+    private UUID lookupGroupId(String adapterGroupId) {
+        String adapter = inboundContext.adapterName();
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(SELECT_GROUP_ID_SQL)) {
+            ps.setString(1, adapter);
+            ps.setString(2, adapterGroupId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return null;
+                }
+                return rs.getObject("id", UUID.class);
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "LangCommandHandler.lookupGroupId failed", e);
+        }
+    }
+
+    private boolean isBotAdmin(UUID userId) {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT is_admin FROM users WHERE id = ?")) {
+            ps.setObject(1, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() && rs.getBoolean("is_admin");
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "LangCommandHandler.isBotAdmin failed", e);
         }
     }
 

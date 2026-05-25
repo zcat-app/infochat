@@ -5,6 +5,7 @@ import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.group.GroupMembershipRepository;
 import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -61,6 +62,9 @@ public class UnfollowTagCommandHandler implements CommandHandler {
 
     private static final String SELECT_USER_ID_BY_ADAPTER_AND_CONTACT_ID =
             "SELECT id FROM users WHERE adapter = ? AND contact_id = ?";
+
+    private static final String SELECT_GROUP_ID_SQL =
+            "SELECT id FROM groups WHERE adapter = ? AND upstream_group_id = ?";
 
     private static final String UPSERT_SCOPE_PREFERENCES_SQL =
             "INSERT INTO scope_preferences (scope_kind, scope_id) "
@@ -135,6 +139,9 @@ public class UnfollowTagCommandHandler implements CommandHandler {
     @Inject
     ConfirmStateService confirmStateService;
 
+    @Inject
+    GroupMembershipRepository groupMembershipRepository;
+
     @Override
     public String name() {
         return "unfollow-tag";
@@ -142,18 +149,34 @@ public class UnfollowTagCommandHandler implements CommandHandler {
 
     @Override
     public OutboundMessage handle(@NonNull ScopeRef scope, @NonNull String rawText) {
-        // Group scope short-circuits — see FollowTagCommandHandler's
-        // permission-gate javadoc for the T2-F actor-seam deferral.
-        if (scope instanceof ScopeRef.Group) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_UNFOLLOW_TAG_GROUP_ADMIN_ONLY));
+        // Permission gate: group scope requires group-admin.
+        final String scopeKind;
+        final UUID scopeId;
+        final UUID actorId;
+        if (scope instanceof ScopeRef.Group group) {
+            Optional<UUID> actorIdOpt = lookupActorId(inboundContext.senderContactId());
+            if (actorIdOpt.isEmpty()) {
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_UNFOLLOW_TAG_GROUP_ADMIN_ONLY));
+            }
+            UUID groupDbId = lookupGroupId(group.adapterGroupId());
+            if (groupDbId == null
+                    || (!isBotAdmin(actorIdOpt.get())
+                        && !groupMembershipRepository.isGroupAdmin(groupDbId, actorIdOpt.get()))) {
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_UNFOLLOW_TAG_GROUP_ADMIN_ONLY));
+            }
+            actorId = actorIdOpt.get();
+            scopeKind = "group";
+            scopeId = groupDbId;
+        } else {
+            ScopeRef.Dm dm = (ScopeRef.Dm) scope;
+            Optional<UUID> actorIdOpt = lookupActorId(dm.contactId());
+            if (actorIdOpt.isEmpty()) {
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL));
+            }
+            actorId = actorIdOpt.get();
+            scopeKind = "dm";
+            scopeId = actorIdOpt.get();
         }
-
-        ScopeRef.Dm dm = (ScopeRef.Dm) scope;
-        Optional<UUID> actorIdOpt = lookupActorId(dm.contactId());
-        if (actorIdOpt.isEmpty()) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL));
-        }
-        UUID actorId = actorIdOpt.get();
 
         UnfollowTagArgs parsed = UnfollowTagArgs.parse(rawText);
 
@@ -172,13 +195,13 @@ public class UnfollowTagCommandHandler implements CommandHandler {
             if (taken.isEmpty()) {
                 return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONFIRM_NO_PENDING));
             }
-            return executeUnfollowTagAllTransaction(scope, actorId);
+            return executeUnfollowTagAllTransaction(scope, scopeKind, scopeId);
         }
 
         // First-call `--all` (no trailing ` confirm`): register pending
         // and return the prompt + current row-count warning.
         if (parsed.hasAllFlag) {
-            long currentCount = countScopeTagRows(actorId);
+            long currentCount = countScopeTagRows(scopeKind, scopeId);
             confirmStateService.remember(actorId, scope, new UnfollowTagAllConfirm());
             String prompt = MessageFormat.format(
                     bundleLoader.get(BundleKeys.REPLY_CONFIRM_PROMPT_UNFOLLOW_TAG_ALL),
@@ -203,14 +226,14 @@ public class UnfollowTagCommandHandler implements CommandHandler {
         }
 
         return executeUnfollowTagPositionalTransaction(
-                scope, actorId, tagId.get(), parsed.positionalTag);
+                scope, scopeKind, scopeId, tagId.get(), parsed.positionalTag);
     }
 
     private OutboundMessage executeUnfollowTagPositionalTransaction(ScopeRef scope,
+                                                                    String scopeKind,
                                                                     UUID scopeId,
                                                                     UUID tagIdValue,
                                                                     String tagName) {
-        String scopeKind = "dm";
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
@@ -257,17 +280,17 @@ public class UnfollowTagCommandHandler implements CommandHandler {
                 conn.rollback();
                 throw new IllegalStateException(
                         "UnfollowTagCommandHandler.executeUnfollowTagPositional failed for contact_id="
-                                + ContactIds.redact(((ScopeRef.Dm) scope).contactId()), e);
+                                + ContactIds.redact(inboundContext.senderContactId()), e);
             }
         } catch (SQLException e) {
             throw new IllegalStateException(
                     "UnfollowTagCommandHandler connection failed for contact_id="
-                            + ContactIds.redact(((ScopeRef.Dm) scope).contactId()), e);
+                            + ContactIds.redact(inboundContext.senderContactId()), e);
         }
     }
 
-    private OutboundMessage executeUnfollowTagAllTransaction(ScopeRef scope, UUID scopeId) {
-        String scopeKind = "dm";
+    private OutboundMessage executeUnfollowTagAllTransaction(ScopeRef scope,
+                                                             String scopeKind, UUID scopeId) {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
@@ -293,13 +316,13 @@ public class UnfollowTagCommandHandler implements CommandHandler {
         } catch (SQLException e) {
             throw new IllegalStateException(
                     "UnfollowTagCommandHandler connection failed for contact_id="
-                            + ContactIds.redact(((ScopeRef.Dm) scope).contactId()), e);
+                            + ContactIds.redact(inboundContext.senderContactId()), e);
         }
     }
 
-    private long countScopeTagRows(UUID scopeId) {
+    private long countScopeTagRows(String scopeKind, UUID scopeId) {
         try (Connection conn = dataSource.getConnection()) {
-            return countScopeTagRowsInTx(conn, "dm", scopeId);
+            return countScopeTagRowsInTx(conn, scopeKind, scopeId);
         } catch (SQLException e) {
             throw new IllegalStateException(
                     "UnfollowTagCommandHandler.countScopeTagRows failed", e);
@@ -414,6 +437,38 @@ public class UnfollowTagCommandHandler implements CommandHandler {
             throw new IllegalStateException(
                     "UnfollowTagCommandHandler.lookupActorId failed for contact_id="
                             + ContactIds.redact(contactId), e);
+        }
+    }
+
+    private UUID lookupGroupId(String adapterGroupId) {
+        String adapter = inboundContext.adapterName();
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(SELECT_GROUP_ID_SQL)) {
+            ps.setString(1, adapter);
+            ps.setString(2, adapterGroupId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return null;
+                }
+                return rs.getObject("id", UUID.class);
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "UnfollowTagCommandHandler.lookupGroupId failed", e);
+        }
+    }
+
+    private boolean isBotAdmin(UUID userId) {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT is_admin FROM users WHERE id = ?")) {
+            ps.setObject(1, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() && rs.getBoolean("is_admin");
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "UnfollowTagCommandHandler.isBotAdmin failed", e);
         }
     }
 

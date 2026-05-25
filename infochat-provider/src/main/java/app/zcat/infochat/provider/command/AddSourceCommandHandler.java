@@ -15,6 +15,7 @@ import app.zcat.infochat.provider.source.KindResolver.Resolution;
 import app.zcat.infochat.provider.source.SourceUpsertService;
 import app.zcat.infochat.provider.source.SourceUpsertService.Outcome;
 import app.zcat.infochat.provider.source.SourceUpsertService.UpsertResult;
+import app.zcat.infochat.provider.group.GroupMembershipRepository;
 import app.zcat.infochat.provider.source.UrlProbe;
 import app.zcat.infochat.provider.source.UrlProbe.ProbeResult;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -77,8 +78,11 @@ import java.util.UUID;
 @ApplicationScoped
 public class AddSourceCommandHandler implements CommandHandler {
 
-    private static final String SELECT_USER_FLAGS_FOR_DM_SQL =
+    private static final String SELECT_USER_FLAGS_SQL =
             "SELECT id, is_admin, is_banned FROM users WHERE adapter = ? AND contact_id = ?";
+
+    private static final String SELECT_GROUP_ID_SQL =
+            "SELECT id FROM groups WHERE adapter = ? AND upstream_group_id = ?";
 
     @Inject
     BundleLoader bundleLoader;
@@ -98,6 +102,9 @@ public class AddSourceCommandHandler implements CommandHandler {
     @Inject
     InboundContext inboundContext;
 
+    @Inject
+    GroupMembershipRepository groupMembershipRepository;
+
     @Override
     public String name() {
         return "add-source";
@@ -111,38 +118,36 @@ public class AddSourceCommandHandler implements CommandHandler {
         }
         AddSourceArgs args = ((Success) parsed).args();
 
-        // Actor lookup + ban check BEFORE the scope discriminator: §User
-        // ban's "Banned user receives one fixed reply per inbound message,
-        // regardless of input" is a per-handler invariant, so no
-        // scope-specific branch is allowed to short-circuit ahead of it.
-        // ScopeRef.Group carries adapterGroupId only (no contactId), so
-        // lookupActor returns Optional.empty() for group scope today and
-        // the ban check is observably a no-op there until T2-F or T2-A
-        // wires the actor seam. The reorder is the structural commitment
-        // that ensures the discriminator below cannot silently steal the
-        // ban path once the actor identity becomes reachable.
-        Optional<UserRow> actor = lookupActor(scope);
+        String contactId = scope instanceof ScopeRef.Dm dm
+                ? dm.contactId() : inboundContext.senderContactId();
+        Optional<UserRow> actor = lookupActor(contactId);
         if (actor.isPresent() && actor.get().isBanned) {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADD_SOURCE_BANNED));
         }
 
-        // Group scope: MVP rejects unconditionally with group_admin_only.
-        // The frozen CommandHandler SPI does not carry the inbound
-        // actor's identity in group scope (ScopeRef.Group holds only
-        // the adapter-side group id), so the handler cannot consult
-        // group_membership for the caller. The ticket's out_of_scope
-        // commits to "the rejection branch falls through the auth
-        // check WITHOUT requiring group-membership infrastructure";
-        // T2-F wires the real actor seam + group-admin proceed path.
-        if (scope instanceof ScopeRef.Group) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADD_SOURCE_GROUP_ADMIN_ONLY));
-        }
-
-        // DM scope: actor must be present (AutoRegisterService runs
-        // upstream of every dispatch). Surface as a generic friendly
-        // error if absent.
-        if (actor.isEmpty()) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL));
+        // Group scope: group-admin permission gate via
+        // GroupMembershipRepository. Admin callers proceed to the
+        // add-source logic; non-admin callers get the friendly error.
+        final String scopeKind;
+        final UUID scopeId;
+        if (scope instanceof ScopeRef.Group group) {
+            if (actor.isEmpty()) {
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADD_SOURCE_GROUP_ADMIN_ONLY));
+            }
+            UUID groupDbId = lookupGroupId(group.adapterGroupId());
+            if (groupDbId == null
+                    || (!actor.get().isAdmin
+                        && !groupMembershipRepository.isGroupAdmin(groupDbId, actor.get().id))) {
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADD_SOURCE_GROUP_ADMIN_ONLY));
+            }
+            scopeKind = "group";
+            scopeId = groupDbId;
+        } else {
+            if (actor.isEmpty()) {
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL));
+            }
+            scopeKind = "dm";
+            scopeId = actor.get().id;
         }
         UserRow user = actor.get();
 
@@ -170,13 +175,11 @@ public class AddSourceCommandHandler implements CommandHandler {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADD_SOURCE_AMBIGUOUS_URL));
         }
 
-        // Upsert + reply. DM scope only at this point — group scope
-        // short-circuited above to the group_admin_only reply.
         String displayName = SourceUpsertService.defaultDisplayName(
                 args.url().toString(), args.displayNameOverride());
 
         UpsertResult result = sourceUpsertService.upsert(
-                user.id, user.isAdmin, "dm", user.id,
+                user.id, user.isAdmin, scopeKind, scopeId,
                 kind, args.url().toString(),
                 displayName, args.category(), args.tags());
 
@@ -210,14 +213,13 @@ public class AddSourceCommandHandler implements CommandHandler {
         return new OutboundMessage(scope, text, Instant.now(), UUID.randomUUID().toString());
     }
 
-    private Optional<UserRow> lookupActor(ScopeRef scope) {
-        String contactId = contactIdOf(scope);
+    private Optional<UserRow> lookupActor(String contactId) {
         if (contactId == null) {
             return Optional.empty();
         }
         String adapterName = inboundContext.adapterName();
         try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(SELECT_USER_FLAGS_FOR_DM_SQL)) {
+             PreparedStatement ps = conn.prepareStatement(SELECT_USER_FLAGS_SQL)) {
             ps.setString(1, adapterName);
             ps.setString(2, contactId);
             try (ResultSet rs = ps.executeQuery()) {
@@ -230,27 +232,28 @@ public class AddSourceCommandHandler implements CommandHandler {
                 return Optional.of(new UserRow(id, isAdmin, isBanned));
             }
         } catch (SQLException e) {
-            // Redact the contact id in the wrapping message: §Secrets
-            // handling commits "Contact IDs are logged in redacted form
-            // (prefix + ellipsis + suffix) outside the audit log." The
-            // SQLException cause is preserved as-is so ops still see the
-            // full SQL diagnostic in the cause's stack trace; only the
-            // user-derived string in the IllegalStateException message
-            // is redacted.
             throw new IllegalStateException(
                     "AddSourceCommandHandler.lookupActor failed for contact_id="
                             + ContactIds.redact(contactId), e);
         }
     }
 
-    /**
-     * Extract the DM contact id from a {@link ScopeRef}. The handler
-     * is only reached with DM scope (group scope short-circuits
-     * upstream to the group_admin_only reply); a non-DM scope here
-     * is an upstream bug surfaced as {@link Optional#empty()}.
-     */
-    private static String contactIdOf(ScopeRef scope) {
-        return scope instanceof ScopeRef.Dm dm ? dm.contactId() : null;
+    private UUID lookupGroupId(String adapterGroupId) {
+        String adapter = inboundContext.adapterName();
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(SELECT_GROUP_ID_SQL)) {
+            ps.setString(1, adapter);
+            ps.setString(2, adapterGroupId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return null;
+                }
+                return rs.getObject("id", UUID.class);
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "AddSourceCommandHandler.lookupGroupId failed", e);
+        }
     }
 
     /**

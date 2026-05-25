@@ -1,9 +1,28 @@
 ---
 id: M1-079d
 title: Admin-gated handler group unwinding (source/tag/lang)
-status: pending
+status: done
 created: 2026-05-25
 last_updated: 2026-05-25
+reviews:
+  - round: 1
+    date: 2026-05-25
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: WARN
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 647
+      removed: 152
+clarity_check:
+  date: 2026-05-25
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by:
   - M1-079a
 files_budget: 12
@@ -73,6 +92,58 @@ spec_refs:
   - docs/spec/security.md §Authorization model
 decision_refs:
   - D9
+redteam_findings:
+  - date: 2026-05-25
+    category: PERM-ESCAL
+    severity: high
+    promise: |
+      "Group-admin (or bot admin acting in the group)" — bot-admin >= group-admin tier.
+    gap: |
+      AddSourceCommandHandler.java:139, FollowTagCommandHandler.java:149,
+      LangCommandHandler.java:126, UnfollowTagCommandHandler.java:163 — gate checks
+      only isGroupAdmin with no bot-admin fallback.
+    repro: |
+      Bot admin (is_admin=true) who is NOT group_admin sends /follow-tag in group →
+      denied. Spec promises bot admins can execute group-admin-tier commands in groups.
+    suggested_fix_class: missing-auth-check
+  - date: 2026-05-25
+    category: PERM-ESCAL
+    severity: medium
+    promise: |
+      "Bot-admin only: /remove-source, /source-enable, /source-disable" — executable
+      by bot admin regardless of scope.
+    gap: |
+      SourceDisableCommandHandler.java:103, SourceEnableCommandHandler.java:131,
+      RemoveSourceCommandHandler.java:118 — isGroupAdmin gate fires before bot-admin check.
+    repro: |
+      Bot admin (is_admin=true, is_group_admin=false) sends /source-disable in group →
+      ERROR_GROUP_ADMIN_NOT_IN_V1 before reaching the bot-admin gate.
+    suggested_fix_class: missing-auth-check
+  - date: 2026-05-25
+    category: AUDIT-EVASION
+    severity: medium
+    promise: |
+      "Authorization evaluation order: ... 8. Audit-log the intent."
+    gap: |
+      FollowTag, UnfollowTag, Lang handlers now execute privileged group-scope mutations
+      with no audit_log rows. The code path was previously dead (blanket reject).
+    repro: |
+      Group admin sends /follow-tag sensitive-topic → modifies group scope_tag → no
+      audit_log row. Later investigation cannot attribute the change.
+    suggested_fix_class: audit-log-coverage
+redteam_audits:
+  - date: 2026-05-25
+    verdict: FINDINGS
+    base: dc9a04422a05f92e960efa7e0e23d125eba0fa60
+    head: m1/M1-079d-admin-gated-handler-group-unwi
+    verdict_file: docs/plan/m1/redteam/M1-079d-2026-05-25.md
+    findings_count: 3
+    out_of_model_count: 1
+    note: |
+      3 findings (1 high PERM-ESCAL, 2 medium). Bot-admin fallback missing in
+      group-admin gate, and newly-live group-scope tag/lang mutations lack audit.
+      Disposition: user decides whether to fix on this branch before merge or
+      file a remediation ticket.
 ---
 
 # M1-079d: Admin-gated handler group unwinding (source/tag/lang)
