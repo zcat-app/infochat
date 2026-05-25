@@ -1,7 +1,7 @@
 ---
 id: M1-069
 title: Chat-mode group-scope session isolation
-status: ready
+status: pending
 created: 2026-05-25
 last_updated: 2026-05-25
 blocked_by: []

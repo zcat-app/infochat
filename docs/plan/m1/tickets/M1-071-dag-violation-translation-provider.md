@@ -1,7 +1,7 @@
 ---
 id: M1-071
 title: Fix DAG violation — move LlmTranslationProvider out of llm-adapter
-status: ready
+status: pending
 created: 2026-05-25
 last_updated: 2026-05-25
 blocked_by: []

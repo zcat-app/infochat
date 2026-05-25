@@ -1,7 +1,7 @@
 ---
 id: M1-072
 title: DefaultRedactionHook generic pattern — JSON-safe replacement
-status: ready
+status: pending
 created: 2026-05-25
 last_updated: 2026-05-25
 blocked_by: []

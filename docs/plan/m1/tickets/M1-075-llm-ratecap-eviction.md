@@ -1,7 +1,7 @@
 ---
 id: M1-075
 title: InboundRouter LLM rate-cap map eviction + body-size optimization
-status: ready
+status: pending
 created: 2026-05-25
 last_updated: 2026-05-25
 blocked_by: []

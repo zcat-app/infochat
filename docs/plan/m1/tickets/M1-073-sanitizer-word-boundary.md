@@ -1,7 +1,7 @@
 ---
 id: M1-073
 title: LlmOutputSanitizer — word-boundary command matching
-status: ready
+status: pending
 created: 2026-05-25
 last_updated: 2026-05-25
 blocked_by: []

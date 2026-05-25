@@ -1,7 +1,7 @@
 ---
 id: M1-076
 title: SSRF module — remove compat shims, deduplicate redirect loop, align timeout
-status: ready
+status: pending
 created: 2026-05-25
 last_updated: 2026-05-25
 blocked_by: []

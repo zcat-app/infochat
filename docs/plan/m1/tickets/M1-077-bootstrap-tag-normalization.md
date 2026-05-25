@@ -1,7 +1,7 @@
 ---
 id: M1-077
 title: BootstrapLoader tag normalization alignment with TagVocabulary
-status: ready
+status: pending
 created: 2026-05-25
 last_updated: 2026-05-25
 blocked_by: []

@@ -1,7 +1,7 @@
 ---
 id: M1-078
 title: JSpecify @NonNull/@Nullable annotation sweep across all modules
-status: ready
+status: pending
 created: 2026-05-25
 last_updated: 2026-05-25
 blocked_by: []
