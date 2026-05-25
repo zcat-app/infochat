@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 10 |
+| pending | 12 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 92 |
+| done | 93 |
 | deferred | 6 |
-| **total** | **108** |
+| **total** | **111** |
 
 ---
 
@@ -24,7 +24,11 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-079a — V20 groups/group_membership migration + repositories (complexity: medium, risk: medium)
+- M1-079b — InMemoryAdapter group SPI + membership event model (complexity: medium, risk: low)
+- M1-079c — /promote + /demote + /group-timezone + auto-promote + group dispatch (complexity: high, risk: medium)
+- M1-079d — Admin-gated handler group unwinding (source/tag/lang) (complexity: medium, risk: medium)
+- M1-079e — Member-access handler group unwinding + DM-only gates (complexity: medium, risk: low)
+- M1-081a — Re-eval job + quarantine NOTIFY + tagger partial-valid + TTL (complexity: high, risk: high)
 
 ---
 
@@ -41,15 +45,13 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-079 — blocked_by: M1-079a (pending), M1-079b (pending), M1-079c (pending), M1-079d (pending), M1-079e (pending)
-- M1-079b — blocked_by: M1-079a (pending)
-- M1-079c — blocked_by: M1-079a (pending)
-- M1-079d — blocked_by: M1-079a (pending)
-- M1-079e — blocked_by: M1-079a (pending)
+- M1-079 — blocked_by: M1-079a (done), M1-079b (pending), M1-079c (pending), M1-079d (pending), M1-079e (pending)
 - M1-080 — blocked_by: M1-080a (pending), M1-080b (pending), M1-080c (pending)
 - M1-080a — blocked_by: M1-079 (pending)
 - M1-080b — blocked_by: M1-080a (pending)
 - M1-080c — blocked_by: M1-080a (pending), M1-080b (pending)
+- M1-081 — blocked_by: M1-081a (pending), M1-081b (pending)
+- M1-081b — blocked_by: M1-081a (pending)
 
 ---
 
@@ -68,6 +70,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-079a | GroupRepository + GroupMembershipRepository | 2026-05-25 | round 1 APPROVE |
 | M1-078 | JSpecify @NonNull/@Nullable annotation sweep across all modules | 2026-05-25 | round 1 APPROVE |
 | M1-077 | BootstrapLoader tag normalization alignment with TagVocabulary | 2026-05-25 | round 2 APPROVE |
 | M1-076 | SSRF module — remove compat shims, deduplicate redirect loop, align timeout | 2026-05-25 | round 2 APPROVE |
@@ -77,7 +80,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-072 | DefaultRedactionHook generic pattern — JSON-safe replacement | 2026-05-25 | round 1 APPROVE |
 | M1-071 | Fix DAG violation — move LlmTranslationProvider out of llm-adapter | 2026-05-25 | round 2 APPROVE |
 | M1-070 | Chat agent tool instructions parameter alignment + final-call strip | 2026-05-25 | round 1 APPROVE |
-| M1-069 | Chat-mode group-scope session isolation | 2026-05-25 | round 1 APPROVE |
 
 ---
 
@@ -238,7 +240,7 @@ M1-075 (done)
 M1-076 (done)
 M1-077 (done)
 M1-078 (done)
-M1-079a (pending) ← runnable
+M1-079a (done)
   ├── M1-079 (pending)
   │     └── M1-080a (pending)
   │           ├── M1-080 (pending)
@@ -247,12 +249,16 @@ M1-079a (pending) ← runnable
   │           │     └── M1-080c (pending)
   │           │           └── M1-080 (pending) [see above]
   │           └── M1-080c (pending) [see above]
-  ├── M1-079b (pending)
+  ├── M1-079b (pending) ← runnable
   │     └── M1-079 (pending) [see above]
-  ├── M1-079c (pending)
+  ├── M1-079c (pending) ← runnable
   │     └── M1-079 (pending) [see above]
-  ├── M1-079d (pending)
+  ├── M1-079d (pending) ← runnable
   │     └── M1-079 (pending) [see above]
-  └── M1-079e (pending)
-        └── M1-079 (pending) [see above]
+  ├── M1-079e (pending) ← runnable
+  │     └── M1-079 (pending) [see above]
+  └── M1-081a (pending) ← runnable
+        ├── M1-081 (pending)
+        └── M1-081b (pending)
+              └── M1-081 (pending) [see above]
 ```
