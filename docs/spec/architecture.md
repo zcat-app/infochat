@@ -41,7 +41,8 @@ Collector and Provider communicate only through the shared database:
     mechanism: high-water mark on Provider side (see Catch-up
     below).
   - `new_price_snapshot` — fires on a successful Fetcher write to
-    `price_snapshot`. Payload carries `(asset, sub_verb)`.
+    `price_snapshot`. Payload carries `(asset, source)` where
+    `source` is the sub-verb value (e.g. `coingecko`, `kraken`).
     Correctness mechanism: best-effort; the Provider's in-process
     cache is **flushed entirely on every Postgres reconnect** so
     a missed NOTIFY during a connection blip cannot serve a stale
