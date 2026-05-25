@@ -1,9 +1,9 @@
 ---
 id: M1-081b
 title: Quarantine admin commands + review listener + /audit
-status: pending
+status: done
 created: 2026-05-25
-last_updated: 2026-05-25
+last_updated: 2026-05-26
 blocked_by:
   - M1-081a
 files_budget: 10
@@ -16,6 +16,7 @@ files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/QuarantineCommandHandlerTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/AuditCommandHandlerTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/outbox/QuarantineReviewListenerTest.java
+  - infochat-provider/src/main/resources/bundles/en.properties
 complexity: medium
 risk: medium
 round_cap: 2
@@ -71,12 +72,102 @@ decision_refs:
   - D9
   - D34
 
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-05-26
+    verdict: REWORK
+    checks:
+      scope_drift: FAIL
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 11
+      added: 2076
+      removed: 9
+  - round: 2
+    date: 2026-05-26
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 11
+      added: 2098
+      removed: 11
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
-clarity_check: {}
+redteam_findings:
+  - date: 2026-05-26
+    category: DOS
+    severity: medium
+    promise: |
+      Rate limiting... `/quarantine approve` — per-admin bucket.
+    gap: |
+      QuarantineCommandHandler.java handleApprove calls the approve_quarantine
+      stored procedure with no command-level rate limiting. Only the generic
+      transport-level rate cap applies.
+    repro: |
+      A compromised bot-admin sends rapid /quarantine approve <id1>, <id2>, ...
+      Each call executes the stored procedure (row lock + body replace + audit
+      INSERT + NOTIFY), mass-approving quarantine entries faster than the
+      operator can react.
+    suggested_fix_class: rate-limit
+  - date: 2026-05-26
+    category: AUDIT-EVASION
+    severity: medium
+    promise: |
+      Authorization evaluation order step 8: Audit-log the intent. Any new
+      command goes through the same audit-before-effect rule.
+    gap: |
+      AuditCommandHandler and QuarantineCommandHandler handleList perform
+      privileged admin-only reads without writing any audit row. The codebase
+      pattern audits admin-only reads (LIST_SOURCES_ALL for /list-sources --all).
+    repro: |
+      A compromised bot-admin issues /audit --action BAN to enumerate all ban
+      events, or /quarantine list --all to enumerate quarantine entries. No
+      audit row records this reconnaissance.
+    suggested_fix_class: audit-log-coverage
+  - date: 2026-05-26
+    category: AUDIT-EVASION
+    severity: low
+    promise: |
+      /quarantine list defaults to PENDING rows only; BENIGN_CLOSED rows not
+      surfaced unless --all. Command signature includes --page N.
+    gap: |
+      QuarantineCommandHandler handleList hardcodes page=1 and pageSize=20
+      with no --page parsing. Entries beyond index 20 are invisible to the
+      admin through the chat interface.
+    repro: |
+      An adversary injects 25+ quarantine-triggering posts. Admin sees only
+      the 20 most recent; older, potentially more dangerous entries are hidden.
+    suggested_fix_class: other
+redteam_audits:
+  - date: 2026-05-26
+    verdict: FINDINGS
+    base: main
+    head: m1/M1-081b-quarantine-admin-commands-revi
+    verdict_file: docs/plan/m1/redteam/M1-081b-2026-05-26.md
+    findings_count: 3
+    out_of_model_count: 2
+    note: |
+      Three findings: 2 medium (missing /quarantine approve rate bucket;
+      missing audit-log coverage for /quarantine list and /audit reads) and
+      1 low (missing --page support in /quarantine list). All are remediation-
+      ticket candidates — the done commit is immutable per workflow rules.
+      Two out-of-model observations: fail-closed lookupActor masking DB
+      failures as permission denials; fragile substring matching in
+      mapStoredProcError.
+clarity_check:
+  date: 2026-05-25
+  verdict: WARN
+  warnings:
+    - "Acceptance item 21 (BundleKeys.java constants) is a prose assertion with no test method — reviewer must check by diff inspection"
 ---
 
 # M1-081b: Quarantine admin commands + review listener + /audit
@@ -174,3 +265,9 @@ that may have been missed during Provider downtime.
 - `AuditCommandHandler` reads `audit_log_view` (V5); no raw
   `audit_log` table access. The view already applies
   `redact_contact_id` — the command surfaces the masked values.
+
+## Round 1 rework
+
+1. SCOPE-DRIFT-CHECK FAIL: `en.properties` touched but not in
+   `files_scope`. Fix: add the path to `files_scope` (budget of 10
+   already accommodates it). Ticket-metadata fix only, no code change.

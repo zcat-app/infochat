@@ -841,6 +841,85 @@ public final class BundleKeys {
     /** {@code /group-timezone} success. Token {@code {0}} = the timezone that was set. */
     public static final String REPLY_GROUP_TIMEZONE_SUCCESS = "reply.group_timezone.success";
 
+    // ----- /quarantine list|approve|reject (M1-081b) ---------------------------
+    // Per docs/spec/commands.md §Admin (bot admin) + docs/spec/security.md
+    // §Quarantine workflow. The handler dispatches on list/approve/reject
+    // subcommands; approve and reject call the SECURITY DEFINER stored
+    // procedures from V21. Plain text only.
+
+    /** {@code /quarantine} with no subcommand or an unrecognized one. */
+    public static final String ERROR_QUARANTINE_UNKNOWN_SUBCOMMAND =
+            "error.quarantine.unknown_subcommand";
+
+    /** {@code /quarantine approve} or {@code /quarantine reject} with no quarantine ID argument. Token {@code {0}} = the subcommand name. */
+    public static final String ERROR_QUARANTINE_MISSING_ID = "error.quarantine.missing_id";
+
+    /** {@code /quarantine approve <id>} or {@code reject <id>} where {@code <id>} is not a valid UUID. Token {@code {0}} = the supplied string. */
+    public static final String ERROR_QUARANTINE_INVALID_ID = "error.quarantine.invalid_id";
+
+    /** Stored procedure raised "quarantine row not found" — the supplied UUID does not match a quarantine row. Token {@code {0}} = the supplied UUID. */
+    public static final String ERROR_QUARANTINE_NOT_FOUND = "error.quarantine.not_found";
+
+    /** Stored procedure raised "expected PENDING or BENIGN_CLOSED" — the quarantine row exists but is in a non-actionable state. Token {@code {0}} = the supplied UUID. */
+    public static final String ERROR_QUARANTINE_INVALID_STATE = "error.quarantine.invalid_state";
+
+    /**
+     * Header line for {@code /quarantine list}. Tokens:
+     * {@code {0}} = displayed row count, {@code {1}} = current page (1-indexed),
+     * {@code {2}} = total pages.
+     */
+    public static final String REPLY_QUARANTINE_LIST_HEADER = "reply.quarantine.list.header";
+
+    /**
+     * Per-row template for {@code /quarantine list}. Tokens:
+     * {@code {0}} = quarantine id, {@code {1}} = post UID,
+     * {@code {2}} = flagged_by, {@code {3}} = flagged_at (ISO),
+     * {@code {4}} = rule_id, {@code {5}} = status.
+     */
+    public static final String REPLY_QUARANTINE_LIST_LINE = "reply.quarantine.list.line";
+
+    /** {@code /quarantine list} with zero matching rows. */
+    public static final String REPLY_QUARANTINE_LIST_EMPTY = "reply.quarantine.list.empty";
+
+    /** {@code /quarantine approve} success. Token {@code {0}} = quarantine id. */
+    public static final String REPLY_QUARANTINE_APPROVE_SUCCESS =
+            "reply.quarantine.approve.success";
+
+    /** {@code /quarantine reject} success. Token {@code {0}} = quarantine id. */
+    public static final String REPLY_QUARANTINE_REJECT_SUCCESS =
+            "reply.quarantine.reject.success";
+
+    // ----- /audit (M1-081b) --------------------------------------------------
+    // Per docs/spec/commands.md §Admin (bot admin) + docs/spec/security.md
+    // §DB roles. Reads audit_log_view (V5 redacted view). Filters by
+    // --actor, --action, --page. Plain text only.
+
+    /**
+     * {@code /audit --action <verb>} where {@code <verb>} is not in the
+     * closed {@link app.zcat.infochat.core.audit.AuditAction} enum.
+     * Token {@code {0}} = the supplied verb, {@code {1}} = comma-joined
+     * accepted values.
+     */
+    public static final String ERROR_AUDIT_UNKNOWN_ACTION = "error.audit.unknown_action";
+
+    /**
+     * Header line for {@code /audit}. Tokens:
+     * {@code {0}} = displayed row count, {@code {1}} = current page (1-indexed),
+     * {@code {2}} = total pages.
+     */
+    public static final String REPLY_AUDIT_HEADER = "reply.audit.header";
+
+    /**
+     * Per-row template for {@code /audit}. Tokens:
+     * {@code {0}} = created_at (ISO), {@code {1}} = action,
+     * {@code {2}} = actor contact id (redacted), {@code {3}} = target_kind,
+     * {@code {4}} = target_id.
+     */
+    public static final String REPLY_AUDIT_LINE = "reply.audit.line";
+
+    /** {@code /audit} with zero matching rows. */
+    public static final String REPLY_AUDIT_EMPTY = "reply.audit.empty";
+
     private BundleKeys() {
         throw new AssertionError("BundleKeys is a constant holder and must not be instantiated");
     }

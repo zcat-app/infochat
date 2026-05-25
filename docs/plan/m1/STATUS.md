@@ -14,9 +14,9 @@
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 100 |
+| done | 101 |
 | deferred | 6 |
-| **total** | **112** |
+| **total** | **113** |
 
 ---
 
@@ -26,7 +26,8 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-079 — Group infrastructure umbrella — group lifecycle roundtrip IT (complexity: medium, risk: medium)
 - M1-080b — DigestWorker + degraded fallback + subscription-version cache (complexity: high, risk: high)
-- M1-081b — Quarantine admin commands + review listener + /audit (complexity: medium, risk: medium)
+- M1-081 — Quarantine admin workflow + re-evaluation pipeline umbrella (complexity: medium, risk: high)
+- M1-083 — Quarantine/audit redteam remediation — rate bucket, audit coverage, pagination (complexity: medium, risk: medium)
 
 ---
 
@@ -45,7 +46,6 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
 - M1-080 — blocked_by: M1-080a (done), M1-080b (pending), M1-080c (pending)
 - M1-080c — blocked_by: M1-080a (done), M1-080b (pending), M1-082 (done)
-- M1-081 — blocked_by: M1-081a (done), M1-081b (pending)
 
 ---
 
@@ -65,6 +65,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-082 | Relocate ThrottledAdminNotifier to infochat-core | 2026-05-26 | round 2 APPROVE |
+| M1-081b | Quarantine admin commands + review listener + /audit | 2026-05-26 | round 2 APPROVE |
 | M1-080a | V21 summary_cache + DigestScheduler + staggered slots | 2026-05-26 | round 2 APPROVE |
 | M1-081a | Re-eval job + quarantine NOTIFY + tagger partial-valid + TTL | 2026-05-25 | round 2 APPROVE |
 | M1-079e | Member-access handler group unwinding + DM-only gates | 2026-05-25 | round 1 APPROVE |
@@ -73,7 +74,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-079b | InMemoryAdapter group SPI + membership event model | 2026-05-25 | round 1 APPROVE |
 | M1-079a | GroupRepository + GroupMembershipRepository | 2026-05-25 | round 1 APPROVE |
 | M1-078 | JSpecify @NonNull/@Nullable annotation sweep across all modules | 2026-05-25 | round 1 APPROVE |
-| M1-077 | BootstrapLoader tag normalization alignment with TagVocabulary | 2026-05-25 | round 2 APPROVE |
 
 ---
 
@@ -252,9 +252,10 @@ M1-079a (done)
   ├── M1-079e (done)
   │     └── M1-079 (pending) [see above]
   └── M1-081a (done)
-        ├── M1-081 (pending)
-        └── M1-081b (pending) ← runnable
-              └── M1-081 (pending) [see above]
+        ├── M1-081 (pending) ← runnable
+        └── M1-081b (done)
+              ├── M1-081 (pending) [see above]
+              └── M1-083 (pending) ← runnable
 M1-082 (done)
   └── M1-080c (pending) [see above]
 ```
