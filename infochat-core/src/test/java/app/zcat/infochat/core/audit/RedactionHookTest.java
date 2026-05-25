@@ -55,6 +55,10 @@ class RedactionHookTest {
                 "family " + family + " — raw key survived: " + redacted.detailsJson());
         assertTrue(redacted.detailsJson().contains(DefaultRedactionHook.REDACTED_PLACEHOLDER),
                 "family " + family + " — placeholder missing: " + redacted.detailsJson());
+        if (family.startsWith("Generic")) {
+            assertTrue(redacted.detailsJson().contains("api_key="),
+                    "generic pattern must preserve keyword prefix: " + redacted.detailsJson());
+        }
     }
 
     @Test
@@ -169,6 +173,33 @@ class RedactionHookTest {
                 "fallback must carry the _redacted=true flag: " + redacted);
         assertTrue(redacted.contains("\"reason\""),
                 "fallback must carry a reason key for operator triage: " + redacted);
+    }
+
+    @Test
+    void genericPatternPreservesJsonStructure() {
+        String value = "AbCdEf0123456789AbCdEf0123456789AbCd";
+        String detailsJson = "{\"token\":\"" + value + "\"}";
+        RedactionHook.AuditRow row = audit(detailsJson);
+
+        RedactionHook.AuditRow redacted = hook.redact(row);
+
+        assertFalse(redacted.detailsJson().contains(value),
+                "secret value survived: " + redacted.detailsJson());
+        assertTrue(redacted.detailsJson().contains("\"token\""),
+                "keyword was consumed by replacement: " + redacted.detailsJson());
+        assertTrue(redacted.detailsJson().contains("\"token\":\""),
+                "JSON structure was damaged: " + redacted.detailsJson());
+    }
+
+    @Test
+    void genericPatternProducesValidJson() {
+        String value = "A".repeat(64);
+        String detailsJson = "{\"token\":\"" + value + "\"}";
+        RedactionHook.AuditRow row = audit(detailsJson);
+
+        RedactionHook.AuditRow redacted = hook.redact(row);
+
+        assertEquals("{\"token\":\"[REDACTED]\"}", redacted.detailsJson());
     }
 
     private static RedactionHook.AuditRow audit(String detailsJson) {

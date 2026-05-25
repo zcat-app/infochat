@@ -89,9 +89,10 @@ public class DefaultRedactionHook implements RedactionHook {
             Pattern.compile("AIza[0-9A-Za-z_-]{35}"),
             // Slack xox[abprs]-…
             Pattern.compile("xox[abprs]-[A-Za-z0-9-]{10,}"),
-            // Generic 32+-char hex/base64 adjacent to api_key/secret/token/password/bearer
+            // Generic 32+-char hex/base64 adjacent to api_key/secret/token/password/bearer.
+            // Group 1 captures keyword + separator so replaceAll("$1…") preserves them.
             Pattern.compile(
-                    "(?i)(?:api[_-]?key|secret|token|password|bearer)[\"'\\s:=]{0,5}([A-Za-z0-9+/=_-]{32,})")
+                    "(?i)((?:api[_-]?key|secret|token|password|bearer)[\"'\\s:=]{0,5})[A-Za-z0-9+/=_-]{32,}")
     );
 
     /**
@@ -140,10 +141,13 @@ public class DefaultRedactionHook implements RedactionHook {
             for (Pattern pattern : CATALOGUE) {
                 Matcher m = pattern.matcher(new InterruptibleCharSequence(current, deadlineNanos));
                 if (m.find()) {
-                    // The shared replacement pass uses Matcher.replaceAll
-                    // on the same matcher; reset is implicit. Each match
-                    // is replaced with [REDACTED] verbatim.
-                    current = m.replaceAll(Matcher.quoteReplacement(REDACTED_PLACEHOLDER));
+                    if (m.groupCount() > 0) {
+                        // Generic pattern captures keyword + separator in group 1;
+                        // replacing only the trailing value keeps surrounding JSON valid.
+                        current = m.replaceAll("$1" + Matcher.quoteReplacement(REDACTED_PLACEHOLDER));
+                    } else {
+                        current = m.replaceAll(Matcher.quoteReplacement(REDACTED_PLACEHOLDER));
+                    }
                 }
             }
         } catch (RegexInterruptedException e) {

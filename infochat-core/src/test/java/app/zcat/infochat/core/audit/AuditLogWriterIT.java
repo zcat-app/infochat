@@ -193,6 +193,40 @@ class AuditLogWriterIT extends PostgresSchemaTestBase {
         }
     }
 
+    @Test
+    void redactedJsonCastsSuccessfully() throws SQLException {
+        String value = "A".repeat(64);
+        String detailsJson = "{\"token\":\"" + value + "\"}";
+        String targetId = "generic-redact-target-" + UUID.randomUUID();
+
+        RedactionHook.AuditRow row = RedactionHook.AuditRow.builder()
+                .action(AuditAction.LLM_OUTPUT_SANITIZED)
+                .targetKind("system")
+                .targetId(targetId)
+                .requestId("req-generic-redact-1")
+                .detailsJson(detailsJson)
+                .build();
+
+        try (Connection c = newConnection()) {
+            c.setAutoCommit(true);
+            writer.write(c, row);
+        }
+
+        try (Connection c = newConnection();
+             Statement s = c.createStatement();
+             ResultSet rs = s.executeQuery(
+                     "SELECT details_json::text FROM audit_log WHERE target_id = '" + targetId + "'")) {
+            assertTrue(rs.next(), "audit row missing — INSERT or JSONB cast failed");
+            String stored = rs.getString(1);
+            assertFalse(stored.contains(value),
+                    "raw secret value reached the database: " + stored);
+            assertTrue(stored.contains("\"token\""),
+                    "keyword was consumed by redaction: " + stored);
+            assertTrue(stored.contains(DefaultRedactionHook.REDACTED_PLACEHOLDER),
+                    "redaction placeholder missing: " + stored);
+        }
+    }
+
     private UUID seedOneActorUser() throws SQLException {
         try (Connection c = newConnection();
              var ps = c.prepareStatement(
