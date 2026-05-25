@@ -146,15 +146,22 @@ public interface MessagingAdapter {
     void setInboundHandler(@NonNull InboundHandler handler);
 
     /**
+     * Receive a group-membership lifecycle signal from the adapter.
+     * Default is no-op so adapters that do not support groups (or
+     * whose group wiring is not yet implemented) are unaffected.
+     * Provider overrides this via {@link #setInboundHandler} plus
+     * direct consumption on the adapter instance.
+     *
+     * @param event the membership event; never null.
+     */
+    default void onMembershipEvent(@NonNull MembershipEvent event) {
+        // No-op — adapters surface events; Provider consumes them.
+    }
+
+    /**
      * Functional callback Provider registers with each
      * {@link MessagingAdapter}. Pure SPI; concrete dispatching to
      * command handlers / chat mode lives in Provider.
-     *
-     * <p>v1 ships only the message-delivery shape; the group
-     * membership-event callbacks
-     * ({@code onUserJoinedGroup} / {@code onUserLeftGroup}) from
-     * {@code docs/design/06-messaging.md} §6.2 are deferred to T2-F
-     * with the rest of group-scope dispatch.</p>
      */
     @FunctionalInterface
     interface InboundHandler {

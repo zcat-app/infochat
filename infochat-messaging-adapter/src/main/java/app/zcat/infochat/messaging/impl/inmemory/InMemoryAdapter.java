@@ -7,6 +7,7 @@ import app.zcat.infochat.messaging.CapabilityFlags;
 import app.zcat.infochat.messaging.FailureCategory;
 import app.zcat.infochat.messaging.Identity;
 import app.zcat.infochat.messaging.InboundMessage;
+import app.zcat.infochat.messaging.MembershipEvent;
 import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.MessagingException;
@@ -18,6 +19,7 @@ import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
@@ -78,6 +80,8 @@ public final class InMemoryAdapter implements MessagingAdapter {
     private final Map<String, List<UpdateEvent>> history = new ConcurrentHashMap<>();
     private final Map<String, Boolean> finalized = new ConcurrentHashMap<>();
     private final Map<String, Identity> knownIdentities = new ConcurrentHashMap<>();
+    private final Map<String, Set<String>> groups = new ConcurrentHashMap<>();
+    private final List<MembershipEvent> membershipEvents = new CopyOnWriteArrayList<>();
 
     private volatile InboundHandler handler;
 
@@ -184,6 +188,89 @@ public final class InMemoryAdapter implements MessagingAdapter {
         current.onMessage(msg);
     }
 
+    // -- Group primitives (test infrastructure) --------------------------------
+
+    /** Register a group for subsequent member and mention operations. */
+    public void createGroup(@NonNull String groupId) {
+        groups.putIfAbsent(groupId, ConcurrentHashMap.newKeySet());
+    }
+
+    /** Add a member to an existing group. */
+    public void addMember(@NonNull String groupId, @NonNull String contactId) {
+        Set<String> members = groups.get(groupId);
+        if (members == null) {
+            throw new IllegalStateException(
+                    "Group not registered: " + groupId);
+        }
+        members.add(contactId);
+    }
+
+    /** Remove a member and fire a {@link MembershipEvent.UserLeft}. */
+    public void removeMember(@NonNull String groupId, @NonNull String contactId) {
+        Set<String> members = groups.get(groupId);
+        if (members == null) {
+            throw new IllegalStateException(
+                    "Group not registered: " + groupId);
+        }
+        members.remove(contactId);
+        var event = new MembershipEvent.UserLeft(groupId, contactId);
+        membershipEvents.add(event);
+        onMembershipEvent(event);
+    }
+
+    /** Remove the bot from a group and fire a {@link MembershipEvent.BotRemoved}. */
+    public void removeBot(@NonNull String groupId) {
+        var event = new MembershipEvent.BotRemoved(groupId);
+        membershipEvents.add(event);
+        onMembershipEvent(event);
+    }
+
+    /**
+     * Synthesise a group-scope {@link InboundMessage} from the given
+     * group, sender, and text, and synchronously invoke the registered
+     * {@link InboundHandler}. Mirrors {@link #deliverDm} for groups.
+     */
+    public void deliverGroupMention(@NonNull String groupId,
+                                    @NonNull String senderContactId,
+                                    @NonNull String text) {
+        InboundHandler current = handler;
+        if (current == null) {
+            throw new IllegalStateException(
+                    "InMemoryAdapter.deliverGroupMention called before setInboundHandler");
+        }
+        Identity sender = knownIdentities.computeIfAbsent(
+                senderContactId,
+                cid -> new Identity(cid, cid, Instant.now()));
+        InboundMessage msg = new InboundMessage(
+                sender,
+                new ScopeRef.Group(groupId),
+                text,
+                Instant.now(),
+                "inmem-msg-" + handleIdGen.incrementAndGet());
+        current.onMessage(msg);
+    }
+
+    /** Snapshot of membership events recorded by this adapter. */
+    public List<MembershipEvent> membershipEvents() {
+        return List.copyOf(membershipEvents);
+    }
+
+    /** Whether a group is registered. */
+    public boolean hasGroup(@NonNull String groupId) {
+        return groups.containsKey(groupId);
+    }
+
+    /** Snapshot of current members in a group. */
+    public Set<String> groupMembers(@NonNull String groupId) {
+        Set<String> members = groups.get(groupId);
+        if (members == null) {
+            return Set.of();
+        }
+        return Set.copyOf(members);
+    }
+
+    // -- Existing query accessors ------------------------------------------------
+
     /** Snapshot of every {@link OutboundMessage} passed to {@link #send}. */
     public List<OutboundMessage> sentMessages() {
         return List.copyOf(sent);
@@ -215,6 +302,8 @@ public final class InMemoryAdapter implements MessagingAdapter {
         history.clear();
         finalized.clear();
         knownIdentities.clear();
+        groups.clear();
+        membershipEvents.clear();
         handleIdGen.set(0);
     }
 

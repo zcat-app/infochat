@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 12 |
+| pending | 11 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 93 |
+| done | 94 |
 | deferred | 6 |
 | **total** | **111** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-079b — InMemoryAdapter group SPI + membership event model (complexity: medium, risk: low)
 - M1-079c — /promote + /demote + /group-timezone + auto-promote + group dispatch (complexity: high, risk: medium)
 - M1-079d — Admin-gated handler group unwinding (source/tag/lang) (complexity: medium, risk: medium)
 - M1-079e — Member-access handler group unwinding + DM-only gates (complexity: medium, risk: low)
@@ -45,7 +44,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-079 — blocked_by: M1-079a (done), M1-079b (pending), M1-079c (pending), M1-079d (pending), M1-079e (pending)
+- M1-079 — blocked_by: M1-079a (done), M1-079b (done), M1-079c (pending), M1-079d (pending), M1-079e (pending)
 - M1-080 — blocked_by: M1-080a (pending), M1-080b (pending), M1-080c (pending)
 - M1-080a — blocked_by: M1-079 (pending)
 - M1-080b — blocked_by: M1-080a (pending)
@@ -70,6 +69,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-079b | InMemoryAdapter group SPI + membership event model | 2026-05-25 | round 1 APPROVE |
 | M1-079a | GroupRepository + GroupMembershipRepository | 2026-05-25 | round 1 APPROVE |
 | M1-078 | JSpecify @NonNull/@Nullable annotation sweep across all modules | 2026-05-25 | round 1 APPROVE |
 | M1-077 | BootstrapLoader tag normalization alignment with TagVocabulary | 2026-05-25 | round 2 APPROVE |
@@ -79,7 +79,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-073 | LlmOutputSanitizer — word-boundary command matching | 2026-05-25 | round 1 APPROVE |
 | M1-072 | DefaultRedactionHook generic pattern — JSON-safe replacement | 2026-05-25 | round 1 APPROVE |
 | M1-071 | Fix DAG violation — move LlmTranslationProvider out of llm-adapter | 2026-05-25 | round 2 APPROVE |
-| M1-070 | Chat agent tool instructions parameter alignment + final-call strip | 2026-05-25 | round 1 APPROVE |
 
 ---
 
@@ -249,7 +248,7 @@ M1-079a (done)
   │           │     └── M1-080c (pending)
   │           │           └── M1-080 (pending) [see above]
   │           └── M1-080c (pending) [see above]
-  ├── M1-079b (pending) ← runnable
+  ├── M1-079b (done)
   │     └── M1-079 (pending) [see above]
   ├── M1-079c (pending) ← runnable
   │     └── M1-079 (pending) [see above]

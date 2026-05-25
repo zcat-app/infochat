@@ -1,9 +1,28 @@
 ---
 id: M1-079b
 title: InMemoryAdapter group SPI + membership event model
-status: pending
+status: done
 created: 2026-05-25
 last_updated: 2026-05-25
+reviews:
+  - round: 1
+    date: 2026-05-25
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 241
+      removed: 14
+clarity_check:
+  date: 2026-05-25
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by:
   - M1-079a
 files_budget: 8
