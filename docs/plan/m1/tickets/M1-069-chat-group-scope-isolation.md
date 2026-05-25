@@ -1,7 +1,7 @@
 ---
 id: M1-069
 title: Chat-mode group-scope session isolation
-status: pending
+status: done
 created: 2026-05-25
 last_updated: 2026-05-25
 blocked_by: []
@@ -39,10 +39,61 @@ test_plan:
   preserves:
     - all tests currently green on main
 spec_refs:
-  - docs/spec/architecture.md §Principle 4 (per-scope isolation)
-  - docs/spec/schema.md §Invariant 1 (scope-tuple keying)
+  - docs/spec/architecture.md §Architectural principles
+  - docs/spec/schema.md §Invariants
   - docs/spec/security.md §Authorization model
 decision_refs: []
+clarity_check:
+  date: 2026-05-25
+  verdict: PASS
+  warnings: []
+  blockers: []
+revisions:
+  - date: 2026-05-25
+    reason: clarity-fail
+    changes: "Fixed spec_refs anchors: §Principle 4 (per-scope isolation) → §Architectural principles; §Invariant 1 (scope-tuple keying) → §Invariants"
+reviews:
+  - round: 1
+    date: 2026-05-25
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 177
+      removed: 12
+escalations:
+  - date: 2026-05-25
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      SPEC-REFS-VALID: FAIL
+        - docs/spec/architecture.md §Principle 4 (per-scope isolation): ANCHOR-NOT-FOUND
+        - docs/spec/schema.md §Invariant 1 (scope-tuple keying): ANCHOR-NOT-FOUND
+redteam_findings:
+  - date: 2026-05-25
+    category: INFO-LEAK
+    severity: medium
+    promise: |
+      Per-(user, scope) isolation for state, memory, saves. Never leak across users or between DM and group.
+    gap: |
+      InboundRouter.java:479 — summaryAnchorRepository.clear(anchorActorId, anchorActorId) passes actorId as both userId and scopeId. After M1-069 fixes chat-mode dispatch to use the group UUID as scopeId, the anchor-clear at line 479 remains inconsistent: a group-scope non-/retry message clears the DM-scope anchor instead of the group-scope anchor.
+    repro: |
+      (1) User issues /summary in DM, creating a DM-scope anchor. (2) User sends a chat message in a group. (3) Step 4.6 fires clear(actorId, actorId), deleting the DM-scope anchor. (4) User returns to DM, /retry fails — anchor was silently destroyed by a group-scope action.
+    suggested_fix_class: trust-boundary-tightening
+redteam_audits:
+  - date: 2026-05-25
+    verdict: FINDINGS
+    base: main
+    head: m1/M1-069-chat-mode-group-scope-session
+    verdict_file: docs/plan/m1/redteam/M1-069-2026-05-25.md
+    findings_count: 1
+    out_of_model_count: 1
+    note: |
+      1 medium INFO-LEAK finding: summaryAnchorRepository.clear() at step 4.6 still uses actorId as scopeId for group scope, creating a cross-scope side effect after M1-069's partial fix. Pre-existing bug made more visible by the fix. Recommend a new remediation ticket.
 ---
 
 ## Context

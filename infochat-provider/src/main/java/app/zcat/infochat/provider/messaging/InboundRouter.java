@@ -210,6 +210,10 @@ public class InboundRouter {
             "SELECT id, is_banned, registration_state FROM users "
                     + "WHERE adapter = ? AND contact_id = ?";
 
+    private static final String SELECT_GROUP_SQL =
+            "SELECT id FROM groups WHERE adapter = ? AND upstream_group_id = ? "
+                    + "AND removed_at IS NULL";
+
     @Inject
     Instance<CommandHandler> commandHandlers;
 
@@ -487,8 +491,8 @@ public class InboundRouter {
             } else {
                 // Chat-mode dispatch: enforce body cap, then LLM rate cap,
                 // then delegate to ChatAgent. scope_kind is "dm" or "group";
-                // scope_id is the user's UUID for DM (per-user isolation,
-                // schema §Per-scope state).
+                // scope_id is the user's UUID for DM, the group's UUID for
+                // group scope (per-scope isolation, schema §Invariants).
                 if (normalized.length() > chatBodyCap) {
                     body = bundleLoader.get(BundleKeys.ERROR_CHAT_BODY_TOO_LARGE);
                 } else {
@@ -497,7 +501,9 @@ public class InboundRouter {
                         body = bundleLoader.get(BundleKeys.ERROR_CHAT_LLM_RATE_CAP);
                     } else {
                         String scopeKind = chatModeScopeKindOf(msg.scope());
-                        body = chatAgent.handle(actorId, scopeKind, actorId, normalized);
+                        UUID scopeId = resolveChatScopeId(
+                                msg.scope(), actorId, adapterName);
+                        body = chatAgent.handle(actorId, scopeKind, scopeId, normalized);
                     }
                 }
             }
@@ -679,6 +685,37 @@ public class InboundRouter {
             case ScopeRef.Dm ignored -> "dm";
             case ScopeRef.Group ignored -> "group";
         };
+    }
+
+    // DM scope → actorId; group scope → group UUID from the groups table.
+    // By step 6, the group row is guaranteed to exist: step 3's
+    // AutoRegisterService.resolveOrRegisterGroup created it on the first
+    // group-scope message from any contact in this group.
+    private UUID resolveChatScopeId(@NonNull ScopeRef scope,
+                                    @NonNull UUID actorId,
+                                    @NonNull String adapterName) {
+        return switch (scope) {
+            case ScopeRef.Dm ignored -> actorId;
+            case ScopeRef.Group group -> lookupGroupId(adapterName, group.adapterGroupId());
+        };
+    }
+
+    private UUID lookupGroupId(@NonNull String adapter, @NonNull String upstreamGroupId) {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(SELECT_GROUP_SQL)) {
+            ps.setString(1, adapter);
+            ps.setString(2, upstreamGroupId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    throw new IllegalStateException(
+                            "InboundRouter: group not found for adapter=" + adapter);
+                }
+                return (UUID) rs.getObject("id");
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "InboundRouter.lookupGroupId failed for adapter=" + adapter, e);
+        }
     }
 
     // Per-user sliding-window LLM rate cap. Prunes call timestamps

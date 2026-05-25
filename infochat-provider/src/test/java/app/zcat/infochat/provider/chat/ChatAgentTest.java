@@ -236,6 +236,29 @@ class ChatAgentTest {
     }
 
     @Test
+    void distinctGroupsProduceDistinctSessions() {
+        UUID groupA = UUID.randomUUID();
+        UUID groupB = UUID.randomUUID();
+        llmProvider.responses.add(new LlmResponse("Reply A"));
+        llmProvider.responses.add(new LlmResponse("Reply B"));
+
+        String replyA = agent.handle(USER_ID, "group", groupA, "hello group A");
+        String replyB = agent.handle(USER_ID, "group", groupB, "hello group B");
+
+        assertEquals("Reply A", replyA);
+        assertEquals("Reply B", replyB);
+        // 4 persisted turns: user-A, assistant-A, user-B, assistant-B
+        assertEquals(4, sessionPersistCalls,
+                "distinct scopes must produce independent session persists");
+        assertEquals(2, llmProvider.callCount,
+                "each scope must get its own LLM call");
+        assertTrue(persistedTexts.contains("hello group A"),
+                "group A message should be persisted");
+        assertTrue(persistedTexts.contains("hello group B"),
+                "group B message should be persisted");
+    }
+
+    @Test
     void parseToolArgsHandlesSimpleJson() {
         var args = ChatAgent.parseToolArgs("{\"query\": \"test\", \"limit\": 10}");
         assertEquals("test", args.get("query"));
