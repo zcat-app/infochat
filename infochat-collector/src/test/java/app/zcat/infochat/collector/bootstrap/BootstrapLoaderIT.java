@@ -1,13 +1,18 @@
 package app.zcat.infochat.collector.bootstrap;
 
+import io.quarkus.arc.ClientProxy;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
+import org.junit.jupiter.api.io.TempDir;
 
 import javax.sql.DataSource;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -15,6 +20,7 @@ import java.sql.Statement;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -182,6 +188,28 @@ class BootstrapLoaderIT {
                 assertNotNull(rs.getTimestamp("deleted_at"),
                     "deleted_at must remain set after the loader's no-op pass");
             }
+        }
+    }
+
+    @Test
+    @Order(4)
+    void invalidTagInBootstrapJsonFailsFast(@TempDir Path tempDir) throws IOException {
+        Path fixture = tempDir.resolve("invalid-tags.json");
+        Files.writeString(fixture, """
+            [{"kind":"rss","identifier":"https://example.com/feed",\
+            "name":"X","category":"news","tags":["machine learning"]}]
+            """);
+
+        BootstrapLoader unwrapped = ClientProxy.unwrap(loader);
+        String original = unwrapped.sourcesFilePath;
+        try {
+            unwrapped.sourcesFilePath = fixture.toString();
+            IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> loader.runLoad());
+            assertTrue(ex.getMessage().contains("machine learning"),
+                "exception message must name the invalid tag; got: " + ex.getMessage());
+        } finally {
+            unwrapped.sourcesFilePath = original;
         }
     }
 }

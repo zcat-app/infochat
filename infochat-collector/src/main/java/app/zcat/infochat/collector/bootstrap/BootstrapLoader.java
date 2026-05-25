@@ -29,6 +29,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * Reads {@code bootstrap-sources.json} at Collector startup and idempotently
@@ -86,6 +87,12 @@ import java.util.Map;
 public class BootstrapLoader {
 
     private static final Logger LOG = Logger.getLogger(BootstrapLoader.class);
+
+    // Same pattern as TagVocabulary.TAG_NAME_PATTERN; duplicated here
+    // because that constant is package-private. TODO(T1-D): consolidate
+    // into shared TagNormalizer helper.
+    private static final Pattern TAG_NAME_PATTERN =
+        Pattern.compile("^[a-z0-9][a-z0-9-]{0,47}$");
 
     static final String AUDIT_VERB = AuditAction.BOOTSTRAP_SOURCE_LOAD.name();
 
@@ -250,13 +257,20 @@ public class BootstrapLoader {
     }
 
     /**
-     * NFC + Locale.ROOT lower-case. Temporary inline placement; T1-D's
-     * tagger will introduce a shared {@code TagNormalizer} helper used
-     * by both this loader and the runtime tagger pipeline.
+     * NFC + Locale.ROOT lower-case + character-class validation against
+     * {@link #TAG_NAME_PATTERN}. Throws on invalid tags so the operator
+     * gets a fast-fail at startup rather than a cryptic DB constraint
+     * violation mid-transaction.
      */
     // TODO(T1-D): move to TagNormalizer helper
     private static String normalizeTag(String raw) {
-        return Normalizer.normalize(raw, Normalizer.Form.NFC).toLowerCase(Locale.ROOT);
+        String normalized = Normalizer.normalize(raw, Normalizer.Form.NFC).toLowerCase(Locale.ROOT);
+        if (!TAG_NAME_PATTERN.matcher(normalized).matches()) {
+            throw new IllegalStateException(
+                "BootstrapLoader: invalid tag '" + raw + "' (normalized: '" + normalized
+                    + "') — must match " + TAG_NAME_PATTERN.pattern());
+        }
+        return normalized;
     }
 
     private static String sha256Hex(byte[] data) {
