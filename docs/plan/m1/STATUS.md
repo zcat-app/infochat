@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 9 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 82 |
+| done | 83 |
 | deferred | 6 |
-| **total** | **88** |
+| **total** | **98** |
 
 ---
 
@@ -24,7 +24,15 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none)_
+- M1-069 — Chat-mode group-scope session isolation (complexity: medium, risk: high)
+- M1-070 — Chat agent tool instructions parameter alignment + final-call strip (complexity: medium, risk: medium)
+- M1-071 — Fix DAG violation — move LlmTranslationProvider out of llm-adapter (complexity: medium, risk: medium)
+- M1-072 — DefaultRedactionHook generic pattern — JSON-safe replacement (complexity: low, risk: medium)
+- M1-074 — EmbeddingWorker transaction narrowing + TransactionHelper extraction (complexity: medium, risk: medium)
+- M1-075 — InboundRouter LLM rate-cap map eviction + body-size optimization (complexity: low, risk: low)
+- M1-076 — SSRF module — remove compat shims, deduplicate redirect loop, align timeout (complexity: medium, risk: medium)
+- M1-077 — BootstrapLoader tag normalization alignment with TagVocabulary (complexity: low, risk: low)
+- M1-078 — JSpecify @NonNull/@Nullable annotation sweep across all modules (complexity: medium, risk: low)
 
 ---
 
@@ -60,6 +68,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-073 | LlmOutputSanitizer — word-boundary command matching | 2026-05-25 | round 1 APPROVE |
 | M1-068 | Chat agent redteam hardening (M1-063 remediation) | 2026-05-25 | round 2 APPROVE |
 | M1-067 | /export — user data export with field-level positive list | 2026-05-25 | round 1 APPROVE |
 | M1-066 | /forget — per-scope privacy purge with remaining-scopes disclosure | 2026-05-25 | round 2 APPROVE |
@@ -69,8 +78,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-062 | Chat agent tool registry + dispatcher + prompt shape | 2026-05-25 | round 1 APPROVE |
 | M1-055 | Asset commands umbrella — /zcash + /monero + bootstrap-assets + asset_config + price_snapshot roundtrip IT | 2026-05-25 | round 2 APPROVE |
 | M1-061 | chat_session + chat_memory + chat_message + summary_anchor DDL | 2026-05-24 | round 2 APPROVE |
-| M1-060 | /lang <code> command + cs.properties bundle + BundleLoader per-scope language lookup with en fallback | 2026-05-24 | round 1 APPROVE |
-| M1-059 | TranslationProvider impl — LlmTranslationProvider + 24h translation cache + router language widening + SummaryCommandHandler pipeline splice | 2026-05-24 | round 1 APPROVE |
 
 ---
 
@@ -216,15 +223,19 @@ M1-060 (done)
 M1-061 (done)
   ├── M1-062 (done)
   │     └── M1-063 (done)
-<<<<<<< HEAD
-  │           ├── M1-064 (pending) ← runnable
-  │           ├── M1-065 (pending) ← runnable
-  │           └── M1-068 (done)
-=======
   │           ├── M1-064 (done)
   │           ├── M1-065 (done)
-  │           └── M1-068 (pending) ← runnable
->>>>>>> 61340bc (M1-065: /stop cancellation + /retry anchor-based replay)
+  │           └── M1-068 (done)
   ├── M1-066 (done)
   └── M1-067 (done)
+M1-069 (pending) ← runnable
+M1-070 (pending) ← runnable
+M1-071 (pending) ← runnable
+M1-072 (pending) ← runnable
+M1-073 (done)
+M1-074 (pending) ← runnable
+M1-075 (pending) ← runnable
+M1-076 (pending) ← runnable
+M1-077 (pending) ← runnable
+M1-078 (pending) ← runnable
 ```

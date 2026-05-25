@@ -185,7 +185,7 @@ public class LlmOutputSanitizer {
         String current = input;
         List<String> matches = new ArrayList<>();
         for (String token : CLOSED_LIST) {
-            Pattern p = Pattern.compile(Pattern.quote(token));
+            Pattern p = Pattern.compile(Pattern.quote(token) + "(?=$|[^a-zA-Z0-9\\-])");
             Matcher m = p.matcher(current);
             StringBuilder rewritten = null;
             while (m.find()) {

@@ -182,6 +182,46 @@ class LlmOutputSanitizerTest {
         assertStripped("/unfollow-tag");
     }
 
+    // ----- word-boundary matching ----------------------------------------
+
+    @Test
+    void matchesBanFollowedBySpace() {
+        String output = LlmOutputSanitizer.applyClosedListStrip("Try /ban user for violations.");
+        assertTrue(output.contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
+                "/ban followed by space must be redacted. Got: " + output);
+        assertFalse(output.contains("/ban"),
+                "/ban must be absent from output. Got: " + output);
+    }
+
+    @Test
+    void doesNotMatchBanInsideLongerWord() {
+        String output = LlmOutputSanitizer.applyClosedListStrip(
+                "Check /bandwidth and /banning policies.");
+        assertFalse(output.contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
+                "/ban must not match inside /bandwidth or /banning. Got: " + output);
+        assertTrue(output.contains("/bandwidth"));
+        assertTrue(output.contains("/banning"));
+    }
+
+    @Test
+    void noSubstringFalsePositives() {
+        String output = LlmOutputSanitizer.applyClosedListStrip(
+                "The /language setting and /auditing module are unrelated.");
+        assertFalse(output.contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
+                "/lang must not match /language, /audit must not match /auditing. Got: " + output);
+        assertTrue(output.contains("/language"));
+        assertTrue(output.contains("/auditing"));
+    }
+
+    @Test
+    void matchesTokenAtEndOfString() {
+        String output = LlmOutputSanitizer.applyClosedListStrip("Run /ban");
+        assertTrue(output.contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
+                "/ban at end of string must be redacted. Got: " + output);
+        assertFalse(output.contains("/ban"),
+                "/ban must be absent from output. Got: " + output);
+    }
+
     // ----- markdown-link strip pass -------------------------------------
 
     @Test

@@ -1,7 +1,21 @@
 ---
 id: M1-073
 title: LlmOutputSanitizer — word-boundary command matching
-status: pending
+status: done
+reviews:
+  - round: 1
+    date: 2026-05-25
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 71
+      removed: 16
 created: 2026-05-25
 last_updated: 2026-05-25
 blocked_by: []
@@ -37,6 +51,22 @@ test_plan:
 spec_refs:
   - docs/spec/security.md §LLM output sanitizer
 decision_refs: []
+clarity_check:
+  date: 2026-05-25
+  verdict: WARN
+  warnings:
+    - "Acceptance item 1 references matchesBanFollowedBySpace but it is not in test_plan.adds or test_plan.modifies — ambiguous whether pre-existing or new"
+redteam_findings: []
+redteam_audits:
+  - date: 2026-05-25
+    verdict: CLEAN
+    base: main
+    head: m1/M1-073-sanitizer-word-boundary
+    verdict_file: docs/plan/m1/redteam/M1-073-2026-05-25.md
+    out_of_model_count: 0
+    note: |
+      No findings. Word-boundary lookahead narrows matching without creating
+      bypass paths for actual admin command strings.
 ---
 
 ## Context
