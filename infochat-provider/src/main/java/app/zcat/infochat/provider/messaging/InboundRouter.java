@@ -15,6 +15,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.context.control.ActivateRequestContext;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
+import io.quarkus.scheduler.Scheduled;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
@@ -22,7 +23,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.sql.DataSource;
-import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -326,7 +326,7 @@ public class InboundRouter {
         // flood cannot leak MESSAGE_TOO_LARGE_REPLY outbound, and BEFORE
         // normalize so NFKC amplification cannot drive cost on
         // adversarial inputs.
-        if (raw != null && raw.getBytes(StandardCharsets.UTF_8).length > maxInboundBodyBytes) {
+        if (raw != null && exceedsUtf8ByteLength(raw, maxInboundBodyBytes)) {
             sendReply(msg.scope(), MESSAGE_TOO_LARGE_REPLY);
             return;
         }
@@ -735,6 +735,55 @@ public class InboundRouter {
             timestamps.addLast(now);
             return true;
         }
+    }
+
+    @Scheduled(every = "{infochat.chat.llm-rate-cap-sweep-interval:5m}")
+    void evictIdleLlmRateCapEntries() {
+        evictIdleLlmRateCapEntries(System.currentTimeMillis());
+    }
+
+    // 2x the 60 s rate-cap window: timestamps older than this are pruned;
+    // entries whose deque is then empty are removed from the map.
+    void evictIdleLlmRateCapEntries(long nowMillis) {
+        long cutoff = nowMillis - 120_000;
+        llmCallTimestamps.entrySet().removeIf(entry -> {
+            Deque<Long> timestamps = entry.getValue();
+            synchronized (timestamps) {
+                while (!timestamps.isEmpty() && timestamps.peekFirst() < cutoff) {
+                    timestamps.pollFirst();
+                }
+                return timestamps.isEmpty();
+            }
+        });
+    }
+
+    int llmRateCapEntryCount() {
+        return llmCallTimestamps.size();
+    }
+
+    /**
+     * Count UTF-8 byte length without allocating a byte[]. Returns true
+     * as soon as the running count exceeds {@code limit} (early exit).
+     */
+    static boolean exceedsUtf8ByteLength(@NonNull String s, int limit) {
+        int count = 0;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c <= 0x7F) {
+                count += 1;
+            } else if (c <= 0x7FF) {
+                count += 2;
+            } else if (Character.isHighSurrogate(c)) {
+                count += 4;
+                i++;
+            } else {
+                count += 3;
+            }
+            if (count > limit) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

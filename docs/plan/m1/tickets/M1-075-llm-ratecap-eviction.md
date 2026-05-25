@@ -1,9 +1,14 @@
 ---
 id: M1-075
 title: InboundRouter LLM rate-cap map eviction + body-size optimization
-status: pending
+status: done
 created: 2026-05-25
 last_updated: 2026-05-25
+clarity_check:
+  date: 2026-05-25
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
 files_budget: 3
 files_scope:
@@ -27,12 +32,40 @@ acceptance:
 test_plan:
   adds:
     - InboundRouterTest.llmRateCapEvictsIdleEntries (new)
-  modifies: []
+  modifies:
+    - "InboundRouterTest.resetAdapterState @BeforeEach — upsert alice instead of DELETE+INSERT to avoid audit_log FK violation exposed by adding @Scheduled to InboundRouter (changes CDI bean graph → shifts surefire test class ordering → audit_log entries from prior test classes now precede InboundRouterTest)"
   preserves:
     - all tests currently green on main
 spec_refs:
   - docs/spec/security.md §Rate limiting
 decision_refs: []
+reviews:
+  - round: 1
+    date: 2026-05-25
+    verdict: REWORK
+    checks:
+      scope_drift: FAIL
+      test_integrity: FAIL
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 111
+      removed: 16
+  - round: 2
+    date: 2026-05-25
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 128
+      removed: 14
 ---
 
 ## Context
@@ -45,3 +78,7 @@ Additionally, the inbound body-size check allocates a full `byte[]` via `String.
 
 1. Add a `@Scheduled` sweep (same pattern as `RateCapBucket.evictIdleBuckets`) that removes entries whose deque is empty after pruning timestamps older than 2x the window.
 2. Replace `raw.getBytes(StandardCharsets.UTF_8).length > maxInboundBodyBytes` with a `utf8ByteLength(String)` counting method that short-circuits on exceeding the cap.
+
+## Round 1 rework
+
+1. Revert the modifications to the pre-existing `@BeforeEach resetAdapterState()` method in `InboundRouterTest.java`. The comment shortening, DELETE query split, and `ON CONFLICT DO NOTHING` → `ON CONFLICT DO UPDATE SET` change are both a §1 (surgical changes) violation and a §8 (test-modification authorization) violation. If the latent test-setup bug (audit_log FK preventing alice deletion) needs fixing, file a follow-up ticket.

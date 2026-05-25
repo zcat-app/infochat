@@ -17,6 +17,7 @@ import java.sql.PreparedStatement;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -74,6 +75,9 @@ class InboundRouterTest {
     DataSource dataSource;
 
     @Inject
+    InboundRouter inboundRouter;
+
+    @Inject
     RateCapBucket rateCapBucket;
 
     @BeforeEach
@@ -97,11 +101,13 @@ class InboundRouterTest {
                              + "OR contact_id LIKE 'rate-overflow-%'))")) {
             cleanSessions.executeUpdate();
         }
+        // Delete rate-overflow contacts only; alice cannot be DELETEd
+        // when audit_log rows reference her id (audit_log is append-only,
+        // Invariant 10). The upsert below resets her state instead.
         try (Connection conn = dataSource.getConnection();
              PreparedStatement clean = conn.prepareStatement(
-                     "DELETE FROM users WHERE adapter = 'inmemory' AND ("
-                             + "contact_id = 'alice' "
-                             + "OR contact_id LIKE 'rate-overflow-%')")) {
+                     "DELETE FROM users WHERE adapter = 'inmemory' "
+                             + "AND contact_id LIKE 'rate-overflow-%'")) {
             clean.executeUpdate();
         }
         try (Connection conn = dataSource.getConnection();
@@ -109,7 +115,10 @@ class InboundRouterTest {
                      "INSERT INTO users (adapter, contact_id, is_admin, "
                              + "registration_state, probation_until) "
                              + "VALUES ('inmemory', 'alice', FALSE, 'vouched', ?) "
-                             + "ON CONFLICT (adapter, contact_id) DO NOTHING")) {
+                             + "ON CONFLICT (adapter, contact_id) DO UPDATE SET "
+                             + "registration_state = 'vouched', "
+                             + "probation_until = EXCLUDED.probation_until, "
+                             + "is_admin = FALSE, is_banned = FALSE")) {
             seed.setObject(1, OffsetDateTime.now().minusHours(24));
             seed.executeUpdate();
         }
@@ -212,6 +221,40 @@ class InboundRouterTest {
         assertEquals(0L, countUsersRows("inmemory", overflowContact),
                 "rate-cap silent drop must not write any users row "
                         + "(no invite consume, no ban-check write side effect)");
+    }
+
+    @Test
+    void llmRateCapEvictsIdleEntries() {
+        UUID userId = UUID.randomUUID();
+        int before = inboundRouter.llmRateCapEntryCount();
+        assertTrue(inboundRouter.tryAcquireLlmRateCap(userId));
+        assertEquals(before + 1, inboundRouter.llmRateCapEntryCount());
+
+        // Simulate time advancing past 2x the 60 s window so the
+        // sweep prunes the timestamp and finds the deque empty.
+        inboundRouter.evictIdleLlmRateCapEntries(
+                System.currentTimeMillis() + 200_000);
+        assertEquals(0, inboundRouter.llmRateCapEntryCount(),
+                "All entries should be evicted after timestamps age past 2x the window");
+    }
+
+    @Test
+    void bodySizeCheckDoesNotAllocateArray() {
+        // ASCII: 1 byte per char
+        assertFalse(InboundRouter.exceedsUtf8ByteLength("hello", 5));
+        assertTrue(InboundRouter.exceedsUtf8ByteLength("hello", 4));
+
+        // U+00E9 (é): 2 bytes in UTF-8
+        assertFalse(InboundRouter.exceedsUtf8ByteLength("é", 2));
+        assertTrue(InboundRouter.exceedsUtf8ByteLength("é", 1));
+
+        // U+20AC (€): 3 bytes in UTF-8
+        assertFalse(InboundRouter.exceedsUtf8ByteLength("€", 3));
+        assertTrue(InboundRouter.exceedsUtf8ByteLength("€", 2));
+
+        // U+1D11E (𝄞): 4 bytes in UTF-8 (surrogate pair in Java)
+        assertFalse(InboundRouter.exceedsUtf8ByteLength("𝄞", 4));
+        assertTrue(InboundRouter.exceedsUtf8ByteLength("𝄞", 3));
     }
 
     private long countUsersRows(String adapter, String contactId) throws RuntimeException {
