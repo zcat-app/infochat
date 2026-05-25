@@ -4,9 +4,12 @@ import app.zcat.infochat.llm.EmbeddingProvider;
 import app.zcat.infochat.llm.EmbeddingResult;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.annotation.Priority;
+import org.jspecify.annotations.Nullable;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Alternative;
 import jakarta.inject.Inject;
+import jakarta.transaction.Status;
+import jakarta.transaction.UserTransaction;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
@@ -23,6 +26,7 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -77,6 +81,9 @@ class EmbeddingWorkerIT {
 
     @Inject
     EmbeddingProvider embeddingProvider;
+
+    @Inject
+    UserTransaction userTransaction;
 
     private StubEmbeddingProvider stub() {
         return (StubEmbeddingProvider) embeddingProvider;
@@ -180,9 +187,9 @@ class EmbeddingWorkerIT {
 
         assertEquals(1, stub().callCount(),
             "dim mismatch must NOT retry (it is not a batch-failure case)");
-        // Transactional rollback: embedding_done stays FALSE, no
-        // post_embedding rows inserted, post stays in-flight for
-        // the operator's re-embed procedure.
+        // Throw lands before the narrow transaction starts: no DB
+        // writes executed, so embedding_done stays FALSE and the
+        // post stays in-flight for the operator's re-embed procedure.
         assertEmbeddingDone(a.id, false);
         assertEmbeddingDone(b.id, false);
         assertEquals(0, postEmbeddingCount(a.id));
@@ -215,6 +222,31 @@ class EmbeddingWorkerIT {
             "fresh tagger_done=true / embedding_done=false post MUST appear in pickup");
         assertEquals(0, stub().callCount(),
             "enumeratePending must not invoke the provider");
+    }
+
+    // ---------- 6. transaction does not span the embed HTTP call ----------
+
+    @Test
+    @Order(6)
+    void transactionDoesNotSpanHttpCall() throws Exception {
+        SeededPost a = seedPickupReadyPost("embed-it-txn-a");
+
+        AtomicInteger jtaStatusDuringEmbed = new AtomicInteger(-1);
+        stub().setEmbedCallback(() -> {
+            try {
+                jtaStatusDuringEmbed.set(userTransaction.getStatus());
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        });
+        stub().queueSuccess(List.of(zeroVector(EXPECTED_DIMENSION)));
+
+        embeddingWorker.processBatch(List.of(rowFor(a)));
+
+        assertEquals(Status.STATUS_NO_TRANSACTION, jtaStatusDuringEmbed.get(),
+            "no JTA transaction should be active during the embedding HTTP call");
+        assertEmbeddingDone(a.id, true);
+        assertEquals(1, postEmbeddingCount(a.id));
     }
 
     // ---------- helpers ----------
@@ -365,10 +397,16 @@ class EmbeddingWorkerIT {
 
         private final Deque<Response> queue = new ArrayDeque<>();
         private int callCount = 0;
+        private Runnable embedCallback;
 
         public void reset() {
             queue.clear();
             callCount = 0;
+            embedCallback = null;
+        }
+
+        public void setEmbedCallback(@Nullable Runnable callback) {
+            this.embedCallback = callback;
         }
 
         public int callCount() {
@@ -386,6 +424,9 @@ class EmbeddingWorkerIT {
         @Override
         public List<EmbeddingResult> embed(List<String> texts) {
             callCount++;
+            if (embedCallback != null) {
+                embedCallback.run();
+            }
             Response r = queue.pollFirst();
             if (r == null) {
                 throw new RuntimeException(

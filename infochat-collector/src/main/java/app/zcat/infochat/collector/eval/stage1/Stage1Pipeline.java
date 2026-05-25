@@ -1,5 +1,6 @@
 package app.zcat.infochat.collector.eval.stage1;
 
+import app.zcat.infochat.collector.eval.TransactionHelper;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.apache.commons.text.StringEscapeUtils;
@@ -368,7 +369,8 @@ public class Stage1Pipeline {
             // propagate uncaught (which would leave the post at
             // RAW indefinitely and stall the eval queue).
             String sanitizedClean = safeSanitize(normalized);
-            inTransaction(conn -> updatePostBodyAndFlags(conn, postId, postFetchedAt, sanitizedClean, false));
+            TransactionHelper.inTransaction(dataSource, "Stage1Pipeline", conn ->
+            updatePostBodyAndFlags(conn, postId, postFetchedAt, sanitizedClean, false));
             return new Stage1Result(normalized, sanitizedClean, false, false);
         }
 
@@ -399,7 +401,7 @@ public class Stage1Pipeline {
         // would not, leaving the consistency property
         // "post.body's placeholders match quarantine rows" broken).
         String sanitizedRedacted = safeSanitize(redacted.toString());
-        inTransaction(conn -> {
+        TransactionHelper.inTransaction(dataSource, "Stage1Pipeline", conn -> {
             for (QuarantineDao.QuarantineRow row : rowsToInsert) {
                 quarantineDao.insert(conn, row);
             }
@@ -433,7 +435,7 @@ public class Stage1Pipeline {
         String placeholderId = PlaceholderIds.next();
         String placeholderMarker = PlaceholderIds.marker(placeholderId);
 
-        inTransaction(conn -> {
+        TransactionHelper.inTransaction(dataSource, "Stage1Pipeline", conn -> {
             quarantineDao.insert(conn, new QuarantineDao.QuarantineRow(
                 postId, postUid, postFetchedAt,
                 REGEX_TIMEOUT_RULE_ID, 0, normalized.length(),
@@ -487,7 +489,7 @@ public class Stage1Pipeline {
         String placeholderId = PlaceholderIds.next();
         String placeholderMarker = PlaceholderIds.marker(placeholderId);
 
-        inTransaction(conn -> {
+        TransactionHelper.inTransaction(dataSource, "Stage1Pipeline", conn -> {
             quarantineDao.insert(conn, new QuarantineDao.QuarantineRow(
                 postId, postUid, postFetchedAt,
                 SANITIZER_EXCEPTION_RULE_ID, 0, normalized.length(),
@@ -495,36 +497,6 @@ public class Stage1Pipeline {
             updatePostQuarantined(conn, postId, postFetchedAt, placeholderMarker);
         });
         return new Stage1Result(normalized, placeholderMarker, true, true);
-    }
-
-    /**
-     * Run the given writes inside a single transaction. Per the
-     * {@link app.zcat.infochat.collector.bootstrap.BootstrapLoader}
-     * precedent, raw JDBC ownership of {@code autoCommit=false} +
-     * explicit commit/rollback is the project's transactional shape
-     * for multi-statement units of work.
-     */
-    private void inTransaction(TxBody body) {
-        try (Connection conn = dataSource.getConnection()) {
-            conn.setAutoCommit(false);
-            try {
-                body.run(conn);
-                conn.commit();
-            } catch (RuntimeException | SQLException e) {
-                conn.rollback();
-                throw (e instanceof RuntimeException re)
-                    ? re
-                    : new IllegalStateException("Stage1Pipeline: transactional write failed", e);
-            }
-        } catch (SQLException e) {
-            throw new IllegalStateException(
-                "Stage1Pipeline: failed to acquire connection or rollback", e);
-        }
-    }
-
-    @FunctionalInterface
-    private interface TxBody {
-        void run(Connection conn) throws SQLException;
     }
 
     private static void updatePostBodyAndFlags(Connection conn, UUID postId, Instant postFetchedAt,

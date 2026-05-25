@@ -1,12 +1,12 @@
 package app.zcat.infochat.collector.eval.embedding;
 
+import app.zcat.infochat.collector.eval.TransactionHelper;
 import app.zcat.infochat.llm.EmbeddingProvider;
 import app.zcat.infochat.llm.EmbeddingResult;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.transaction.Transactional;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 import org.postgresql.util.PGobject;
@@ -70,7 +70,7 @@ import java.util.concurrent.Semaphore;
  * has validated the singleton), this worker throws
  * {@link IllegalStateException} immediately — NOT a batch-failure
  * retry, but a metadata-invariant violation. The throw unwinds the
- * {@code @Transactional} {@link #processBatch} boundary so no
+ * narrow {@link TransactionHelper#inTransaction} boundary so no
  * {@code post_embedding} rows are inserted and {@code embedding_done}
  * stays {@code FALSE} for every post in the batch. The operator runs
  * the re-embed procedure ({@code docs/design/02-schema.md} §2.8).
@@ -81,8 +81,9 @@ import java.util.concurrent.Semaphore;
  * per-stage flags are the durable cursor"), {@code embedding_done=TRUE}
  * is the cursor advance for the Embedding boundary. The INSERT of the
  * {@code post_embedding} row AND the UPDATE of {@code embedding_done}
- * happen inside the same {@code @Transactional} batch so a crash
- * between them is rolled back (the next tick re-picks the same posts).
+ * happen inside the same {@link TransactionHelper#inTransaction}
+ * boundary so a crash between them is rolled back (the next tick
+ * re-picks the same posts).
  *
  * <h2>{@code embedding_model} column</h2>
  *
@@ -173,20 +174,21 @@ public class EmbeddingWorker {
     }
 
     /**
-     * Process one batch in a single transaction. Public/non-static so
-     * the IT can invoke it directly with a hand-rolled batch (the
-     * scheduler is halted in the test profile per M1-034a's
+     * Process one batch. Public/non-static so the IT can invoke it
+     * directly with a hand-rolled batch (the scheduler is halted in
+     * the test profile per M1-034a's
      * {@code %test.quarkus.scheduler.start-mode=halted}).
      *
-     * <p>The {@code @Transactional} boundary is the same-transaction
-     * rule for this stage: an INSERT-then-UPDATE pair must commit or
-     * rollback together. A per-vector dimensionality mismatch throws
-     * BEFORE any INSERT or UPDATE so the rollback is a no-op against
-     * the on-disk state; the post stays {@code embedding_done=FALSE}
-     * and the next tick re-picks it (or the operator runs the re-embed
-     * procedure).
+     * <p>The transaction boundary is deliberately narrow: only the
+     * INSERT-then-UPDATE pair runs inside
+     * {@link TransactionHelper#inTransaction} so the semaphore
+     * acquisition and the outbound embedding HTTP call do not hold
+     * a connection idle-in-transaction. A per-vector dimensionality
+     * mismatch throws BEFORE any INSERT or UPDATE so the rollback is
+     * a no-op against the on-disk state; the post stays
+     * {@code embedding_done=FALSE} and the next tick re-picks it (or
+     * the operator runs the re-embed procedure).
      */
-    @Transactional
     public void processBatch(List<PostRow> batch) {
         concurrencyPermits.acquireUninterruptibly();
         try {
@@ -210,7 +212,8 @@ public class EmbeddingWorker {
                             + "(error_class=%s; first=%s second=%s)",
                         batch.size(), ERROR_CLASS_EMBEDDING_BATCH_FAILURE,
                         attempt.failureReason(), retry.failureReason());
-                    advanceEmbeddingDoneOnly(batch);
+                    TransactionHelper.inTransaction(dataSource, "EmbeddingWorker", conn ->
+                        advanceEmbeddingDoneOnly(conn, batch));
                     return;
                 }
                 attempt = retry;
@@ -233,8 +236,10 @@ public class EmbeddingWorker {
                 }
             }
 
-            insertEmbeddingRows(batch, results);
-            advanceEmbeddingDoneOnly(batch);
+            TransactionHelper.inTransaction(dataSource, "EmbeddingWorker", conn -> {
+                insertEmbeddingRows(conn, batch, results);
+                advanceEmbeddingDoneOnly(conn, batch);
+            });
         } finally {
             concurrencyPermits.release();
         }
@@ -289,12 +294,12 @@ public class EmbeddingWorker {
      * the cached metadata identifier — the canonical record per the
      * model identity guard.
      */
-    private void insertEmbeddingRows(List<PostRow> batch, List<EmbeddingResult> results) {
+    private void insertEmbeddingRows(Connection conn, List<PostRow> batch,
+                                     List<EmbeddingResult> results) throws SQLException {
         final String sql =
             "INSERT INTO post_embedding (post_id, embedding, embedding_model, fetched_at) "
                 + "VALUES (?, ?::vector, ?, ?)";
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
             for (int i = 0; i < batch.size(); i++) {
                 PostRow row = batch.get(i);
                 ps.setObject(1, row.id());
@@ -304,9 +309,6 @@ public class EmbeddingWorker {
                 ps.addBatch();
             }
             ps.executeBatch();
-        } catch (SQLException e) {
-            throw new IllegalStateException(
-                "EmbeddingWorker: INSERT INTO post_embedding failed for batch of " + batch.size(), e);
         }
     }
 
@@ -318,20 +320,16 @@ public class EmbeddingWorker {
      * clause matches the partitioned-PK shape so the UPDATE plans on
      * the right partition.
      */
-    private void advanceEmbeddingDoneOnly(List<PostRow> batch) {
+    private void advanceEmbeddingDoneOnly(Connection conn, List<PostRow> batch) throws SQLException {
         final String sql =
             "UPDATE post SET embedding_done = TRUE WHERE id = ? AND fetched_at = ?";
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
             for (PostRow row : batch) {
                 ps.setObject(1, row.id());
                 ps.setTimestamp(2, Timestamp.from(row.fetchedAt()));
                 ps.addBatch();
             }
             ps.executeBatch();
-        } catch (SQLException e) {
-            throw new IllegalStateException(
-                "EmbeddingWorker: UPDATE post.embedding_done failed for batch of " + batch.size(), e);
         }
     }
 

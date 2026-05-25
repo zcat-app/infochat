@@ -1,5 +1,6 @@
 package app.zcat.infochat.collector.eval.stage2;
 
+import app.zcat.infochat.collector.eval.TransactionHelper;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -78,8 +79,8 @@ import java.util.UUID;
  * the corresponding quarantine transition (BENIGN case), or (b)
  * {@code post.status='QUARANTINED'} without the
  * {@code stage2_done=true} cursor that the rehydrator reads to
- * decide whether to re-enqueue. Matches the Stage1Pipeline
- * {@code inTransaction(...)} pattern; raw JDBC, no ORM.
+ * decide whether to re-enqueue. Uses the shared
+ * {@link TransactionHelper#inTransaction} pattern; raw JDBC, no ORM.
  *
  * <h2>Original (pre-Stage-1) content is NEVER auto-released</h2>
  * <p>The BENIGN and infra-fail-release paths leave the
@@ -126,7 +127,7 @@ public class Stage2VerdictHandler {
     }
 
     private void applyBenign(UUID postId, Instant postFetchedAt) {
-        inTransaction(conn -> {
+        TransactionHelper.inTransaction(dataSource, "Stage2VerdictHandler", conn -> {
             updatePostStage2DoneRaw(conn, postId, postFetchedAt, /* stage2Failed */ false);
             updateStage1QuarantineRowsToBenignClosed(conn, postId);
         });
@@ -135,7 +136,8 @@ public class Stage2VerdictHandler {
     }
 
     private void applyQuarantineVerdict(UUID postId, Instant postFetchedAt, Verdict verdict) {
-        inTransaction(conn -> updatePostQuarantined(conn, postId, postFetchedAt, /* stage2Failed */ false));
+        TransactionHelper.inTransaction(dataSource, "Stage2VerdictHandler", conn ->
+            updatePostQuarantined(conn, postId, postFetchedAt, /* stage2Failed */ false));
         // UNKNOWN feeds the future re-eval queue (T2-G); the queue
         // reads (status='QUARANTINED' AND stage2_done=true AND
         // stage2_failed=false) so the flags set here are the
@@ -146,12 +148,14 @@ public class Stage2VerdictHandler {
 
     private void applyInfraFailure(UUID postId, Instant postFetchedAt) {
         if (releaseOnStage2Failure) {
-            inTransaction(conn -> updatePostStage2DoneRaw(conn, postId, postFetchedAt, /* stage2Failed */ true));
+            TransactionHelper.inTransaction(dataSource, "Stage2VerdictHandler", conn ->
+                updatePostStage2DoneRaw(conn, postId, postFetchedAt, /* stage2Failed */ true));
             LOG.warnf("Stage 2 infrastructure failure (error_class=%s) post_id=%s — released with Stage 1 redactions "
                     + "(stage2_done=true, stage2_failed=true, status=RAW); release-on-stage2-failure=true",
                 ERROR_CLASS_STAGE2_INFRA_FAILURE, postId);
         } else {
-            inTransaction(conn -> updatePostQuarantined(conn, postId, postFetchedAt, /* stage2Failed */ true));
+            TransactionHelper.inTransaction(dataSource, "Stage2VerdictHandler", conn ->
+                updatePostQuarantined(conn, postId, postFetchedAt, /* stage2Failed */ true));
             LOG.warnf("Stage 2 infrastructure failure (error_class=%s) post_id=%s — quarantined "
                     + "(stage2_done=true, stage2_failed=true, status=QUARANTINED); release-on-stage2-failure=false",
                 ERROR_CLASS_STAGE2_INFRA_FAILURE, postId);
@@ -218,30 +222,6 @@ public class Stage2VerdictHandler {
             ps.setObject(1, postId);
             ps.executeUpdate();
         }
-    }
-
-    /** Same transactional shape as Stage1Pipeline.inTransaction. */
-    private void inTransaction(TxBody body) {
-        try (Connection conn = dataSource.getConnection()) {
-            conn.setAutoCommit(false);
-            try {
-                body.run(conn);
-                conn.commit();
-            } catch (RuntimeException | SQLException e) {
-                conn.rollback();
-                throw (e instanceof RuntimeException re)
-                    ? re
-                    : new IllegalStateException("Stage2VerdictHandler: transactional write failed", e);
-            }
-        } catch (SQLException e) {
-            throw new IllegalStateException(
-                "Stage2VerdictHandler: failed to acquire connection or rollback", e);
-        }
-    }
-
-    @FunctionalInterface
-    private interface TxBody {
-        void run(Connection conn) throws SQLException;
     }
 
     /**
