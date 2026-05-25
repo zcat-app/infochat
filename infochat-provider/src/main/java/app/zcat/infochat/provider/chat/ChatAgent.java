@@ -21,6 +21,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -65,6 +66,7 @@ public class ChatAgent {
     private final LlmOutputSanitizer outputSanitizer;
     private final TranslationPipeline translationPipeline;
     private final BundleLoader bundleLoader;
+    private final AutoCompressTrigger autoCompressTrigger;
     private final DataSource dataSource;
 
     @Inject
@@ -76,6 +78,7 @@ public class ChatAgent {
                      @NonNull LlmOutputSanitizer outputSanitizer,
                      @NonNull TranslationPipeline translationPipeline,
                      @NonNull BundleLoader bundleLoader,
+                     @NonNull AutoCompressTrigger autoCompressTrigger,
                      @NonNull DataSource dataSource) {
         this.inFlightTracker = inFlightTracker;
         this.promptBuilder = promptBuilder;
@@ -85,6 +88,7 @@ public class ChatAgent {
         this.outputSanitizer = outputSanitizer;
         this.translationPipeline = translationPipeline;
         this.bundleLoader = bundleLoader;
+        this.autoCompressTrigger = autoCompressTrigger;
         this.dataSource = dataSource;
     }
 
@@ -136,10 +140,21 @@ public class ChatAgent {
         String sanitized = outputSanitizer.sanitize(finalText);
 
         // 6. Translate if scope language is non-en
+        String reply;
         if (!"en".equals(scopeLanguage)) {
-            return translationPipeline.run(sanitized, scopeLanguage);
+            reply = translationPipeline.run(sanitized, scopeLanguage);
+        } else {
+            reply = sanitized;
         }
-        return sanitized;
+
+        // 7. Auto-compress: fires between turns (after reply computed,
+        // before next message). Notification appended to the reply.
+        Optional<String> autoCompressNotice =
+                autoCompressTrigger.checkAndCompress(userId, scopeKind, scopeId, scopeLanguage);
+        if (autoCompressNotice.isPresent()) {
+            return reply + "\n\n" + autoCompressNotice.get();
+        }
+        return reply;
     }
 
     /**

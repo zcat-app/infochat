@@ -235,9 +235,19 @@ class ChatAgentTest {
             @Override public String get(String key, String langCode) { return key; }
         };
 
+        // No-op trigger that never fires (threshold unreachable)
+        AutoCompressTrigger noopTrigger = new AutoCompressTrigger(
+                Integer.MAX_VALUE, bundle, null, null) {
+            @Override
+            public java.util.Optional<String> checkAndCompress(
+                    UUID u, String sk, UUID si, String sl) {
+                return java.util.Optional.empty();
+            }
+        };
+
         return new TestChatAgent(
                 inFlightTracker, promptBuilder, dispatcher, sessionRepo,
-                router, sanitizer, pipeline, bundle, language);
+                router, sanitizer, pipeline, bundle, noopTrigger, language);
     }
 
     // Subclass that overrides readScopeLanguage so no JDBC is needed
@@ -248,9 +258,10 @@ class ChatAgentTest {
                       ChatToolDispatcher dispatcher, ChatSessionRepository repo,
                       LlmRouter router, LlmOutputSanitizer sanitizer,
                       TranslationPipeline pipeline, BundleLoader bundle,
+                      AutoCompressTrigger autoCompressTrigger,
                       String language) {
             super(tracker, builder, dispatcher, repo, router,
-                    sanitizer, pipeline, bundle, null);
+                    sanitizer, pipeline, bundle, autoCompressTrigger, null);
             this.language = language;
         }
 

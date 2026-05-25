@@ -732,6 +732,38 @@ public final class BundleKeys {
     /** Non-slash message body exceeds the profile-driven chat-mode body cap (context_window / 8 chars). */
     public static final String ERROR_CHAT_BODY_TOO_LARGE = "error.chat.body_too_large";
 
+    // ----- /clear + /compress + auto-compress (M1-064) -----------------------
+    // Per docs/spec/commands.md §Conversation control and
+    // docs/design/03-commands.md §3.9 Conversation control.
+
+    /**
+     * First-call prompt template for {@code /clear}. Tokens:
+     * {@code {0}} = timeout in whole seconds.
+     */
+    public static final String REPLY_CONFIRM_PROMPT_CLEAR = "reply.confirm.prompt.clear";
+
+    /** {@code /clear confirm} success reply — context window wiped, chat_memory preserved (D25). */
+    public static final String REPLY_CLEAR_SUCCESS = "reply.clear.success";
+
+    /** {@code /clear confirm} on a (user, scope) with no active chat_session — idempotent no-op. */
+    public static final String REPLY_CLEAR_NOOP = "reply.clear.noop";
+
+    /** {@code /compress} success reply. Token {@code {0}} = number of messages compressed. */
+    public static final String REPLY_COMPRESS_SUCCESS = "reply.compress.success";
+
+    /** {@code /compress} no-op — no messages in the session to compress. */
+    public static final String REPLY_COMPRESS_NOOP = "reply.compress.noop";
+
+    /**
+     * Shared failure reply for both manual {@code /compress} and auto-compress.
+     * Per spec §Failure handling — Compression failure: session held at ceiling,
+     * friendly error surfaces on the current or next chat-mode message.
+     */
+    public static final String ERROR_COMPRESS_FAILED = "error.compress.failed";
+
+    /** One-line system message sent on successful auto-compress (D43 bundle string). */
+    public static final String REPLY_AUTO_COMPRESS_NOTICE = "reply.auto_compress.notice";
+
     private BundleKeys() {
         throw new AssertionError("BundleKeys is a constant holder and must not be instantiated");
     }
