@@ -40,7 +40,7 @@ public interface RedactionHook {
      *         An impl that does not need to redact MAY return the
      *         input unchanged.
      */
-    AuditRow redact(AuditRow row);
+    AuditRow redact(@NonNull AuditRow row);
 
     /**
      * In-memory representation of one audit_log row before the
@@ -79,9 +79,9 @@ public interface RedactionHook {
             @Nullable UUID actorUserId,
             @Nullable String actorContactId,
             @Nullable String actorAdapter,
-            AuditAction action,
-            String targetKind,
-            String targetId,
+            @NonNull AuditAction action,
+            @NonNull String targetKind,
+            @NonNull String targetId,
             @Nullable String targetContactId,
             @Nullable UUID scopeId,
             @Nullable String requestId,

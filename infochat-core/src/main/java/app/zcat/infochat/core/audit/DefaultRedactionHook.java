@@ -1,6 +1,7 @@
 package app.zcat.infochat.core.audit;
 
 import jakarta.enterprise.context.ApplicationScoped;
+import org.jspecify.annotations.NonNull;
 
 import java.util.List;
 import java.util.regex.Matcher;
@@ -105,7 +106,7 @@ public class DefaultRedactionHook implements RedactionHook {
     static final long DEFAULT_TIMEOUT_MS = 100L;
 
     @Override
-    public AuditRow redact(AuditRow row) {
+    public AuditRow redact(@NonNull AuditRow row) {
         String detailsJson = row.detailsJson();
         if (detailsJson == null || detailsJson.isEmpty()) {
             return row;

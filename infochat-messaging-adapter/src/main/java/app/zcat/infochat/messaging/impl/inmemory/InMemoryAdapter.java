@@ -1,5 +1,7 @@
 package app.zcat.infochat.messaging.impl.inmemory;
 
+import org.jspecify.annotations.NonNull;
+
 import app.zcat.infochat.messaging.AdapterTrustLevel;
 import app.zcat.infochat.messaging.CapabilityFlags;
 import app.zcat.infochat.messaging.FailureCategory;
@@ -110,7 +112,7 @@ public final class InMemoryAdapter implements MessagingAdapter {
     }
 
     @Override
-    public Identity assertIdentity(InboundMessage msg) {
+    public Identity assertIdentity(@NonNull InboundMessage msg) {
         // The in-memory adapter has no cryptographic verification step;
         // the test driver populated the Identity when it synthesised
         // the inbound message. SimpleX/Signal will assert against the
@@ -119,7 +121,7 @@ public final class InMemoryAdapter implements MessagingAdapter {
     }
 
     @Override
-    public MessageHandle send(OutboundMessage msg) throws MessagingException {
+    public MessageHandle send(@NonNull OutboundMessage msg) throws MessagingException {
         long id = handleIdGen.incrementAndGet();
         MessageHandle handle = new MessageHandle("inmem-" + id);
         InMemoryMessageHandle internal = new InMemoryMessageHandle(id, msg);
@@ -131,25 +133,25 @@ public final class InMemoryAdapter implements MessagingAdapter {
     }
 
     @Override
-    public void update(MessageHandle handle, String body) throws MessagingException {
+    public void update(@NonNull MessageHandle handle, @NonNull String body) throws MessagingException {
         requireKnownAndOpen(handle);
         history.get(handle.opaqueValue()).add(new UpdateEvent(body, false));
     }
 
     @Override
-    public void finalize(MessageHandle handle, String body) throws MessagingException {
+    public void finalize(@NonNull MessageHandle handle, @NonNull String body) throws MessagingException {
         requireKnownAndOpen(handle);
         history.get(handle.opaqueValue()).add(new UpdateEvent(body, true));
         finalized.put(handle.opaqueValue(), Boolean.TRUE);
     }
 
     @Override
-    public void setTyping(ScopeRef scope, boolean typing) {
+    public void setTyping(@NonNull ScopeRef scope, boolean typing) {
         typingEvents.add(new TypingEvent(scope, typing));
     }
 
     @Override
-    public void setInboundHandler(InboundHandler handler) {
+    public void setInboundHandler(@NonNull InboundHandler handler) {
         this.handler = handler;
     }
 
@@ -161,7 +163,7 @@ public final class InMemoryAdapter implements MessagingAdapter {
      * verify identity stability can rely on the same instance being
      * delivered for every message with the same id).
      */
-    public void deliverDm(String contactId, String text) {
+    public void deliverDm(@NonNull String contactId, @NonNull String text) {
         InboundHandler current = handler;
         if (current == null) {
             // Adapter boundary: a test driver dispatching to an
@@ -192,7 +194,7 @@ public final class InMemoryAdapter implements MessagingAdapter {
      * initial send body and the finalize body when present). Order is
      * insertion order: send → update*… → finalize?.
      */
-    public List<UpdateEvent> updateHistory(MessageHandle handle) {
+    public List<UpdateEvent> updateHistory(@NonNull MessageHandle handle) {
         List<UpdateEvent> events = history.get(handle.opaqueValue());
         if (events == null) {
             return Collections.emptyList();
@@ -235,8 +237,8 @@ public final class InMemoryAdapter implements MessagingAdapter {
     }
 
     /** Update / finalize event recorded per handle in the order applied. */
-    public record UpdateEvent(String body, boolean isFinal) {}
+    public record UpdateEvent(@NonNull String body, boolean isFinal) {}
 
     /** Typing on/off event recorded in the order applied. */
-    public record TypingEvent(ScopeRef scope, boolean typing) {}
+    public record TypingEvent(@NonNull ScopeRef scope, boolean typing) {}
 }

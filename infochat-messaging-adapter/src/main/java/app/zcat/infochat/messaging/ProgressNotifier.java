@@ -1,5 +1,7 @@
 package app.zcat.infochat.messaging;
 
+import org.jspecify.annotations.NonNull;
+
 /**
  * Cross-cutting stage-event notifier (decision D31,
  * {@code docs/spec/messaging.md} §Progress notifications). Long-running
@@ -42,5 +44,5 @@ public interface ProgressNotifier {
      *              last-edit timestamp).
      * @param stage the stage that has just been entered; never null.
      */
-    void publish(ScopeRef scope, ProgressStage stage);
+    void publish(@NonNull ScopeRef scope, @NonNull ProgressStage stage);
 }

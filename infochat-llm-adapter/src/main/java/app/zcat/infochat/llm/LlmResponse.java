@@ -1,5 +1,7 @@
 package app.zcat.infochat.llm;
 
+import org.jspecify.annotations.NonNull;
+
 /**
  * The single value an {@link LlmProvider} call returns. v1 commits only
  * to the model-produced text; per-call token usage, finish-reason,
@@ -10,5 +12,5 @@ package app.zcat.infochat.llm;
  * <p>The record wrapper exists so adding such a companion field later
  * is a one-spot diff, not a cross-call-site signature change.</p>
  */
-public record LlmResponse(String text) {
+public record LlmResponse(@NonNull String text) {
 }

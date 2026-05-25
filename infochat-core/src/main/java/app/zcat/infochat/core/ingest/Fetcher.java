@@ -1,5 +1,7 @@
 package app.zcat.infochat.core.ingest;
 
+import org.jspecify.annotations.NonNull;
+
 import java.util.List;
 
 /**
@@ -28,5 +30,5 @@ public interface Fetcher {
      * @return zero or more normalized posts, in source-supplied order.
      *         Never null; an empty list means "no new items right now".
      */
-    List<NormalizedPost> fetch(long sourceId, String identifier);
+    List<NormalizedPost> fetch(long sourceId, @NonNull String identifier);
 }

@@ -1,5 +1,7 @@
 package app.zcat.infochat.messaging;
 
+import org.jspecify.annotations.NonNull;
+
 import java.util.Locale;
 
 /**
@@ -46,5 +48,5 @@ public interface TranslationProvider {
      * @return the translated text in the {@code to} language; never
      *         null.
      */
-    String translate(String text, Locale from, Locale to);
+    String translate(@NonNull String text, @NonNull Locale from, @NonNull Locale to);
 }

@@ -1,5 +1,7 @@
 package app.zcat.infochat.messaging;
 
+import org.jspecify.annotations.NonNull;
+
 import java.time.Instant;
 
 /**
@@ -20,9 +22,9 @@ import java.time.Instant;
  * token before delivery.</p>
  */
 public record InboundMessage(
-        Identity sender,
-        ScopeRef scope,
-        String text,
-        Instant receivedAt,
-        String adapterMessageId) {
+        @NonNull Identity sender,
+        @NonNull ScopeRef scope,
+        @NonNull String text,
+        @NonNull Instant receivedAt,
+        @NonNull String adapterMessageId) {
 }

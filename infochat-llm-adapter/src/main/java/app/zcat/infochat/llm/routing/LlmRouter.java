@@ -1,5 +1,8 @@
 package app.zcat.infochat.llm.routing;
 
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
+
 import app.zcat.infochat.llm.LlmProvider;
 import app.zcat.infochat.llm.ModelTask;
 import app.zcat.infochat.llm.impl.OpenAiCompatibleProvider;
@@ -122,7 +125,7 @@ public class LlmRouter {
      * exactly one {@link LlmProvider}. Throws if no provider is
      * registered for the resolved name.
      */
-    public LlmProvider forTask(ModelTask task, String scopeLanguage) {
+    public LlmProvider forTask(@NonNull ModelTask task, @Nullable String scopeLanguage) {
         if (task == null) {
             throw new IllegalArgumentException("LlmRouter.forTask: task must be non-null");
         }
@@ -305,7 +308,7 @@ public class LlmRouter {
      *                            sets so a generic provider doesn't
      *                            front-run a capability-declaring one.
      */
-    public record Entry(String name, LlmProvider provider, Set<String> supportedLanguages) {
+    public record Entry(@NonNull String name, @NonNull LlmProvider provider, @Nullable Set<String> supportedLanguages) {
         public Entry {
             if (name == null || name.isEmpty()) {
                 throw new IllegalArgumentException("Entry.name must be non-empty");
@@ -327,9 +330,9 @@ public class LlmRouter {
      */
     @FunctionalInterface
     public interface ConfigReader {
-        Optional<String> get(String key);
+        Optional<String> get(@NonNull String key);
 
-        static ConfigReader fromMap(Map<String, String> map) {
+        static ConfigReader fromMap(@NonNull Map<String, String> map) {
             Map<String, String> snap = Map.copyOf(map);
             return key -> Optional.ofNullable(snap.get(key));
         }
@@ -344,7 +347,7 @@ public class LlmRouter {
         }
 
         @Override
-        public Optional<String> get(String key) {
+        public Optional<String> get(@NonNull String key) {
             return delegate.getOptionalValue(key, String.class)
                 .map(s -> s.trim())
                 .map(s -> s.toLowerCase(Locale.ROOT).equals("null") ? "" : s);

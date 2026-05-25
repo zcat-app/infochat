@@ -1,5 +1,7 @@
 package app.zcat.infochat.llm.impl;
 
+import org.jspecify.annotations.NonNull;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -103,7 +105,7 @@ public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
     }
 
     @Override
-    public List<EmbeddingResult> embed(List<String> texts) {
+    public List<EmbeddingResult> embed(@NonNull List<String> texts) {
         if (texts.isEmpty()) {
             return List.of();
         }

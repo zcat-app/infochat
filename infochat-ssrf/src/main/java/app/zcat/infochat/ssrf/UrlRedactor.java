@@ -1,5 +1,7 @@
 package app.zcat.infochat.ssrf;
 
+import org.jspecify.annotations.Nullable;
+
 import java.net.URI;
 import java.net.URISyntaxException;
 
@@ -39,7 +41,7 @@ public final class UrlRedactor {
         // static-only
     }
 
-    public static String redact(String url) {
+    public static String redact(@Nullable String url) {
         if (url == null) {
             return MALFORMED;
         }

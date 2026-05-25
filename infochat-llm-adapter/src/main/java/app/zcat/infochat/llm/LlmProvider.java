@@ -1,5 +1,7 @@
 package app.zcat.infochat.llm;
 
+import org.jspecify.annotations.NonNull;
+
 /**
  * Chat-completion + structured-output classification SPI. One
  * {@code generate} call against one {@link ModelTask} + prompt pair
@@ -31,5 +33,5 @@ public interface LlmProvider {
      * @param userPrompt   the user-role prompt; never null.
      * @return the response carrying the model-produced text. Never null.
      */
-    LlmResponse generate(ModelTask task, String systemPrompt, String userPrompt);
+    LlmResponse generate(@NonNull ModelTask task, @NonNull String systemPrompt, @NonNull String userPrompt);
 }

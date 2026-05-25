@@ -1,5 +1,8 @@
 package app.zcat.infochat.messaging;
 
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
+
 import java.time.Instant;
 
 /**
@@ -14,5 +17,5 @@ import java.time.Instant;
  * themselves impersonate another user. {@code lastSeen} is informational
  * only — Provider may or may not surface it.</p>
  */
-public record Identity(String contactId, String displayName, Instant lastSeen) {
+public record Identity(@NonNull String contactId, @Nullable String displayName, @NonNull Instant lastSeen) {
 }

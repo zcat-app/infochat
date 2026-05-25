@@ -1,5 +1,7 @@
 package app.zcat.infochat.llm.impl;
 
+import org.jspecify.annotations.NonNull;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -134,7 +136,7 @@ public class OpenAiCompatibleProvider implements LlmProvider {
     }
 
     @Override
-    public LlmResponse generate(ModelTask task, String systemPrompt, String userPrompt) {
+    public LlmResponse generate(@NonNull ModelTask task, @NonNull String systemPrompt, @NonNull String userPrompt) {
         TaskConfig cfg = configFor(task);
         return doCall(cfg, systemPrompt, userPrompt);
     }

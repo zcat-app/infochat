@@ -1,5 +1,7 @@
 package app.zcat.infochat.llm.routing;
 
+import org.jspecify.annotations.NonNull;
+
 import app.zcat.infochat.llm.ModelTask;
 import io.quarkus.runtime.Startup;
 import jakarta.annotation.PostConstruct;
@@ -121,7 +123,7 @@ public class LlmRouterStartupGuard {
      * @PostConstruct above; no other consumer should call it
      * directly.
      */
-    public static void validateLocalOnlyConfiguration(Map<String, String> snapshot) {
+    public static void validateLocalOnlyConfiguration(@NonNull Map<String, String> snapshot) {
         String localOnlyRaw = snapshot.get(CONFIG_KEY_LOCAL_ONLY);
         boolean localOnly = "true".equalsIgnoreCase(stripOrEmpty(localOnlyRaw));
         if (!localOnly) {

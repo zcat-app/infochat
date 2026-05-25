@@ -1,5 +1,7 @@
 package app.zcat.infochat.ssrf;
 
+import org.jspecify.annotations.NonNull;
+
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.net.spi.InetAddressResolver;
@@ -58,7 +60,7 @@ public final class PinnedDnsResolver implements InetAddressResolver {
     }
 
     @Override
-    public Stream<InetAddress> lookupByName(String host, LookupPolicy lookupPolicy)
+    public Stream<InetAddress> lookupByName(@NonNull String host, @NonNull LookupPolicy lookupPolicy)
             throws UnknownHostException {
         // M1-026 Finding 2: canonicalize the host BEFORE pins.get().
         // The pin map is keyed by SsrfGuardedHttpClient.canonicalizeHost
@@ -120,7 +122,7 @@ public final class PinnedDnsResolver implements InetAddressResolver {
         private static volatile InetAddressResolver BUILTIN;
 
         @Override
-        public InetAddressResolver get(Configuration configuration) {
+        public InetAddressResolver get(@NonNull Configuration configuration) {
             BUILTIN = configuration.builtinResolver();
             return new ForwardingResolver();
         }
@@ -166,7 +168,7 @@ public final class PinnedDnsResolver implements InetAddressResolver {
         private static final class ForwardingResolver implements InetAddressResolver {
 
             @Override
-            public Stream<InetAddress> lookupByName(String host, LookupPolicy lookupPolicy)
+            public Stream<InetAddress> lookupByName(@NonNull String host, @NonNull LookupPolicy lookupPolicy)
                     throws UnknownHostException {
                 Map<String, List<InetAddress>> pins = ACTIVE_PINS;
                 if (pins != null) {

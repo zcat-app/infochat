@@ -1,17 +1,38 @@
 ---
 id: M1-078
 title: JSpecify @NonNull/@Nullable annotation sweep across all modules
-status: pending
+status: done
 created: 2026-05-25
 last_updated: 2026-05-25
+reviews:
+  - round: 1
+    date: 2026-05-25
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 29
+      added: 155
+      removed: 72
+clarity_check:
+  date: 2026-05-25
+  verdict: WARN
+  warnings: ["ACCEPTANCE-RUNNABLE items 3 and 4 use 'code inspection' — a weak verification form; could be replaced with grep commands"]
+  blockers: []
 blocked_by: []
-files_budget: 25
+files_budget: 29
 files_scope:
   - infochat-core/src/main/java/app/zcat/infochat/core/ingest/Fetcher.java
   - infochat-core/src/main/java/app/zcat/infochat/core/ingest/NormalizedPost.java
   - infochat-core/src/main/java/app/zcat/infochat/core/ingest/StreamSource.java
   - infochat-core/src/main/java/app/zcat/infochat/core/audit/AuditLogWriter.java
   - infochat-core/src/main/java/app/zcat/infochat/core/audit/RedactionHook.java
+  - infochat-core/src/main/java/app/zcat/infochat/core/audit/DefaultRedactionHook.java
+  - infochat-core/src/main/java/app/zcat/infochat/core/log/ContactIds.java
   - infochat-ssrf/src/main/java/app/zcat/infochat/ssrf/SsrfGuardedHttpClient.java
   - infochat-ssrf/src/main/java/app/zcat/infochat/ssrf/IpBlocklist.java
   - infochat-ssrf/src/main/java/app/zcat/infochat/ssrf/PinnedDnsResolver.java
@@ -31,7 +52,9 @@ files_scope:
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/ProgressNotifier.java
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/TranslationProvider.java
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/inmemory/InMemoryAdapter.java
+  - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/inmemory/InMemoryMessageHandle.java
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/CapabilityFlags.java
+  - infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/LlmResponse.java
 complexity: medium
 risk: low
 round_cap: 2

@@ -1,5 +1,7 @@
 package app.zcat.infochat.ssrf;
 
+import org.jspecify.annotations.NonNull;
+
 import javax.net.ssl.SSLSession;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -265,7 +267,7 @@ public final class SsrfGuardedHttpClient {
      * Delegates to {@link #get(URI, Map)} with an empty header map;
      * see that method for the full SSRF guard pipeline description.
      */
-    public HttpResponse<byte[]> get(URI uri) throws IOException, InterruptedException {
+    public HttpResponse<byte[]> get(@NonNull URI uri) throws IOException, InterruptedException {
         return get(uri, Map.of());
     }
 
@@ -290,7 +292,7 @@ public final class SsrfGuardedHttpClient {
      * body), not for header overrides. {@link SsrfPolicyException}
      * is raised on any policy violation, matching {@link #get(URI)}.
      */
-    public HttpResponse<byte[]> get(URI uri, Map<String, String> extraHeaders)
+    public HttpResponse<byte[]> get(@NonNull URI uri, @NonNull Map<String, String> extraHeaders)
             throws IOException, InterruptedException {
         HttpResponse<InputStream> terminalResponse;
         ReentrantLock lock = PinnedDnsResolver.Provider.lock();

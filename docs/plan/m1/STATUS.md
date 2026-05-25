@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 12 |
+| pending | 11 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 90 |
+| done | 91 |
 | deferred | 6 |
 | **total** | **108** |
 
@@ -25,7 +25,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-075 — InboundRouter LLM rate-cap map eviction + body-size optimization (complexity: low, risk: low)
-- M1-078 — JSpecify @NonNull/@Nullable annotation sweep across all modules (complexity: medium, risk: low)
 - M1-079a — V20 groups/group_membership migration + repositories (complexity: medium, risk: medium)
 
 ---
@@ -70,6 +69,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-078 | JSpecify @NonNull/@Nullable annotation sweep across all modules | 2026-05-25 | round 1 APPROVE |
 | M1-077 | BootstrapLoader tag normalization alignment with TagVocabulary | 2026-05-25 | round 2 APPROVE |
 | M1-076 | SSRF module — remove compat shims, deduplicate redirect loop, align timeout | 2026-05-25 | round 2 APPROVE |
 | M1-074 | EmbeddingWorker transaction narrowing + TransactionHelper extraction | 2026-05-25 | round 2 APPROVE |
@@ -79,7 +79,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-070 | Chat agent tool instructions parameter alignment + final-call strip | 2026-05-25 | round 1 APPROVE |
 | M1-069 | Chat-mode group-scope session isolation | 2026-05-25 | round 1 APPROVE |
 | M1-068 | Chat agent redteam hardening (M1-063 remediation) | 2026-05-25 | round 2 APPROVE |
-| M1-067 | /export — user data export with field-level positive list | 2026-05-25 | round 1 APPROVE |
 
 ---
 
@@ -239,7 +238,7 @@ M1-074 (done)
 M1-075 (pending) ← runnable
 M1-076 (done)
 M1-077 (done)
-M1-078 (pending) ← runnable
+M1-078 (done)
 M1-079a (pending) ← runnable
   ├── M1-079 (pending)
   │     └── M1-080a (pending)

@@ -1,5 +1,7 @@
 package app.zcat.infochat.core.log;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * Contact-id redaction for non-audit operator logs, per
  * {@code docs/spec/security.md} §Secrets handling: "Contact IDs are
@@ -87,7 +89,7 @@ public final class ContactIds {
      *         {@code id.substring(0, PREFIX_LENGTH) + ELLIPSIS +
      *         id.substring(id.length() - SUFFIX_LENGTH)}.
      */
-    public static String redact(String id) {
+    public static String redact(@Nullable String id) {
         if (id == null) {
             return NULL_SENTINEL;
         }

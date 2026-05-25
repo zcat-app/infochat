@@ -1,5 +1,7 @@
 package app.zcat.infochat.messaging;
 
+import org.jspecify.annotations.NonNull;
+
 import java.time.Duration;
 
 /**
@@ -101,5 +103,5 @@ public record CapabilityFlags(
         int maxSendsPerSecond,
         boolean supportsMessageEdit,
         boolean supportsTypingIndicator,
-        Duration minEditInterval) {
+        @NonNull Duration minEditInterval) {
 }

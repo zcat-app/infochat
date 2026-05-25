@@ -2,6 +2,7 @@ package app.zcat.infochat.core.audit;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.jspecify.annotations.NonNull;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -77,7 +78,7 @@ public class AuditLogWriter {
      * @param redactionHook the redaction layer applied to every
      *                      row before INSERT.
      */
-    public AuditLogWriter(RedactionHook redactionHook) {
+    public AuditLogWriter(@NonNull RedactionHook redactionHook) {
         this.redactionHook = redactionHook;
     }
 
@@ -98,7 +99,7 @@ public class AuditLogWriter {
      *                      the caller is responsible for rolling
      *                      back the surrounding transaction.
      */
-    public void write(Connection conn, RedactionHook.AuditRow row) throws SQLException {
+    public void write(@NonNull Connection conn, RedactionHook.@NonNull AuditRow row) throws SQLException {
         RedactionHook.AuditRow redacted = redactionHook.redact(row);
         try (PreparedStatement ps = conn.prepareStatement(INSERT_SQL)) {
             if (redacted.actorUserId() == null) {
