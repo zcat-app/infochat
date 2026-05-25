@@ -1,4 +1,4 @@
-package app.zcat.infochat.collector.notifier;
+package app.zcat.infochat.core.notifier;
 
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;

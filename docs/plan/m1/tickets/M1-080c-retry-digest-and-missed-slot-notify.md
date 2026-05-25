@@ -7,6 +7,7 @@ last_updated: 2026-05-25
 blocked_by:
   - M1-080a
   - M1-080b
+  - M1-082
 files_budget: 8
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java
@@ -20,7 +21,7 @@ files_scope:
 complexity: medium
 risk: medium
 round_cap: 2
-security_relevant: false
+security_relevant: true
 migration_touch: false
 out_of_scope:
   - infochat-core/src/main/resources/db/migration/** — no migration
@@ -126,3 +127,7 @@ serialized).
 - M1-065's `/retry` (personal summary anchor) stays untouched in
   the DM-scope path. The `--digest` flag is the discriminator; its
   absence means the personal path runs as before.
+- `ThrottledAdminNotifier` lives in `infochat-core` (relocated from
+  `infochat-collector` by M1-082) with the provider role granted
+  INSERT/UPDATE on `admin_notification_state` (V22). The import path
+  is `app.zcat.infochat.core.notifier.ThrottledAdminNotifier`.

@@ -1,6 +1,6 @@
 package app.zcat.infochat.collector.eval.reeval;
 
-import app.zcat.infochat.collector.notifier.ThrottledAdminNotifier;
+import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;

@@ -1,6 +1,6 @@
 package app.zcat.infochat.collector.eval.reeval;
 
-import app.zcat.infochat.collector.notifier.ThrottledAdminNotifier;
+import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;

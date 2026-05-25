@@ -19,7 +19,7 @@ import org.jspecify.annotations.NonNull;
 import app.zcat.infochat.collector.assets.source.AssetDataSource;
 import app.zcat.infochat.collector.assets.source.AssetDataSource.FetchException;
 import app.zcat.infochat.collector.assets.store.PriceSnapshotStore;
-import app.zcat.infochat.collector.notifier.ThrottledAdminNotifier;
+import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import io.quarkus.runtime.Startup;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.annotation.Priority;

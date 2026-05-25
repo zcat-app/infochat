@@ -2,7 +2,6 @@ package app.zcat.infochat.provider.command;
 
 import app.zcat.infochat.messaging.ScopeRef;
 import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.enterprise.inject.Produces;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jspecify.annotations.NonNull;
@@ -32,26 +31,14 @@ import java.util.concurrent.atomic.AtomicReference;
  * without probing for cancellation themselves.</p>
  *
  * <p><b>Clock seam.</b> {@link Clock} is consumed via CDI; the
- * {@link #systemUtcClock()} producer ships in this file so production
- * gets {@link Clock#systemUTC()} without a separate bean class.
+ * production {@link Clock#systemUTC()} producer lives in
+ * {@code ThrottledAdminNotifier} (infochat-core).
  * Plain-JUnit tests instantiate the service directly with the
  * package-private test constructor; {@code @QuarkusTest} callers
  * advance time via the package-private {@link #setClock} setter.</p>
  */
 @ApplicationScoped
 public class ConfirmStateService {
-
-    /**
-     * CDI producer for the production {@link Clock}. Static so CDI
-     * does not need to instantiate {@link ConfirmStateService} to
-     * resolve the producer — the {@code @Inject Clock} field below
-     * receives the produced singleton, not a self-reference.
-     */
-    @Produces
-    @ApplicationScoped
-    static Clock systemUtcClock() {
-        return Clock.systemUTC();
-    }
 
     @ConfigProperty(name = "infochat.confirm.timeout", defaultValue = "60s")
     Duration timeout;

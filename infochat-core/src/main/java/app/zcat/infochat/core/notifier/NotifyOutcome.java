@@ -1,4 +1,4 @@
-package app.zcat.infochat.collector.notifier;
+package app.zcat.infochat.core.notifier;
 
 /**
  * Result of a {@link ThrottledAdminNotifier#notifyOnce} call. Lets

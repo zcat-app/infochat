@@ -4,7 +4,7 @@ import app.zcat.infochat.collector.eval.TransactionHelper;
 import app.zcat.infochat.collector.eval.stage2.Stage2VerdictHandler;
 import app.zcat.infochat.collector.eval.stage2.Stage2Worker;
 import app.zcat.infochat.collector.notify.QuarantineNotifyEmitter;
-import app.zcat.infochat.collector.notifier.ThrottledAdminNotifier;
+import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
