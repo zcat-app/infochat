@@ -75,7 +75,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-077 | BootstrapLoader tag normalization alignment with TagVocabulary | 2026-05-25 | round 2 APPROVE |
 | M1-076 | SSRF module — remove compat shims, deduplicate redirect loop, align timeout | 2026-05-25 | round 2 APPROVE |
 | M1-075 | InboundRouter LLM rate-cap map eviction + body-size optimization | 2026-05-25 | round 2 APPROVE |
-| M1-074 | EmbeddingWorker transaction narrowing + TransactionHelper extraction | 2026-05-25 | round 2 APPROVE |
 
 ---
 

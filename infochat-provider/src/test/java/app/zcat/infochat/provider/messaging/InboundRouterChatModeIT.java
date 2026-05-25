@@ -186,6 +186,42 @@ class InboundRouterChatModeIT {
         }
     }
 
+    @Test
+    void groupScopeAnchorClearUsesGroupId() throws Exception {
+        UUID userId = seedVouchedUserReturningId("user-anchor-1");
+        UUID groupId = seedGroup("group-anchor-1");
+        testLlmProvider.setResponseText("ack");
+
+        // Seed a summary_anchor row for (user, group-scope)
+        try (Connection conn = dataSource.getConnection()) {
+            exec(conn,
+                    "INSERT INTO summary_anchor "
+                  + "(user_id, scope_id, command_kind, command_name, arg_hash, post_uids) "
+                  + "VALUES (?, ?, 'personal', 'summary', 'hash1', '{}'::text[]) "
+                  + "ON CONFLICT (user_id, scope_id, command_kind) "
+                  + "  WHERE user_id IS NOT NULL "
+                  + "  DO NOTHING",
+                    userId, groupId);
+        }
+
+        // Send a non-/retry group message — should clear the group-scope anchor
+        deliverGroup(CONTACT_PREFIX + "user-anchor-1",
+                GROUP_PREFIX + "group-anchor-1", "hello triggers anchor clear");
+
+        // The group-scope anchor must be deleted
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT 1 FROM summary_anchor "
+                   + "WHERE user_id = ? AND scope_id = ? AND command_kind = 'personal'")) {
+            ps.setObject(1, userId);
+            ps.setObject(2, groupId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertFalse(rs.next(),
+                        "Group-scope anchor should be cleared by non-/retry group message");
+            }
+        }
+    }
+
     // --- helpers ---
 
     private void seedVouchedUser(String suffix) throws Exception {

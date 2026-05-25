@@ -496,7 +496,8 @@ public class InboundRouter {
         // /retry itself) and all chat-mode messages.
         if (!"retry".equals(commandName)) {
             UUID anchorActorId = snapshot.get().id();
-            summaryAnchorRepository.clear(anchorActorId, anchorActorId);
+            UUID anchorScopeId = resolveChatScopeId(msg.scope(), anchorActorId, adapterName);
+            summaryAnchorRepository.clear(anchorActorId, anchorScopeId);
         }
 
         // Step 6 — Parse + dispatch. The DM-gate (group_only + DM →
@@ -720,7 +721,7 @@ public class InboundRouter {
         };
     }
 
-    private UUID lookupGroupId(@NonNull String adapter, @NonNull String upstreamGroupId) {
+    UUID lookupGroupId(@NonNull String adapter, @NonNull String upstreamGroupId) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(SELECT_GROUP_SQL)) {
             ps.setString(1, adapter);

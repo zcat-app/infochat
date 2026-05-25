@@ -377,6 +377,11 @@ class InboundRouterIntakeOrderingTest {
                 return Optional.of(new UserSnapshot(
                         UUID.randomUUID(), false, "group_only"));
             }
+
+            @Override
+            UUID lookupGroupId(String adapter, String upstreamGroupId) {
+                return UUID.randomUUID();
+            }
         };
         router.commandHandlers = new SingletonInstance<>();
         router.autoRegisterService = new RecordingAutoRegisterService(log);
