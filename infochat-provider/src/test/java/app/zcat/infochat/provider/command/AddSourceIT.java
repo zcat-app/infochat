@@ -279,6 +279,7 @@ class AddSourceIT {
                     Duration.ofSeconds(2),
                     Duration.ofSeconds(5),
                     Duration.ofSeconds(5),
+                    Duration.ofMinutes(2),
                     10L * 1024,
                     3));
         }

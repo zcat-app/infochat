@@ -169,11 +169,12 @@ class UrlProbeTest {
 
         SsrfGuardedHttpClient slowTimingClient = new SsrfGuardedHttpClient(
                 new LoopbackPermitting(),
-                /* connectTimeout */ Duration.ofMillis(500),
-                /* requestTimeout */ Duration.ofMillis(300),
-                /* readTimeout    */ Duration.ofMillis(500),
-                /* bodyCap        */ 10L * 1024,
-                /* redirectCap    */ 3);
+                /* connectTimeout     */ Duration.ofMillis(500),
+                /* requestTimeout     */ Duration.ofMillis(300),
+                /* readTimeout        */ Duration.ofMillis(500),
+                /* bodyReadDeadline   */ Duration.ofMinutes(2),
+                /* bodyCap            */ 10L * 1024,
+                /* redirectCap        */ 3);
         UrlProbe probe = new UrlProbe(slowTimingClient);
 
         ProbeResult result = probe.probe(URI.create("http://127.0.0.1:" + port + "/slow"));
@@ -188,6 +189,7 @@ class UrlProbeTest {
                 Duration.ofSeconds(2),
                 Duration.ofSeconds(2),
                 Duration.ofSeconds(5),
+                Duration.ofMinutes(2),
                 10L * 1024,
                 3);
     }

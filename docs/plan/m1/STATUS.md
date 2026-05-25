@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 12 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 89 |
+| done | 90 |
 | deferred | 6 |
-| **total** | **99** |
+| **total** | **108** |
 
 ---
 
@@ -25,9 +25,8 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-075 — InboundRouter LLM rate-cap map eviction + body-size optimization (complexity: low, risk: low)
-- M1-076 — SSRF module — remove compat shims, deduplicate redirect loop, align timeout (complexity: medium, risk: medium)
 - M1-078 — JSpecify @NonNull/@Nullable annotation sweep across all modules (complexity: medium, risk: low)
-- M1-079 — Summary anchor clear: use group scopeId for group scope (complexity: low, risk: medium)
+- M1-079a — V20 groups/group_membership migration + repositories (complexity: medium, risk: medium)
 
 ---
 
@@ -44,7 +43,15 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-079 — blocked_by: M1-079a (pending), M1-079b (pending), M1-079c (pending), M1-079d (pending), M1-079e (pending)
+- M1-079b — blocked_by: M1-079a (pending)
+- M1-079c — blocked_by: M1-079a (pending)
+- M1-079d — blocked_by: M1-079a (pending)
+- M1-079e — blocked_by: M1-079a (pending)
+- M1-080 — blocked_by: M1-080a (pending), M1-080b (pending), M1-080c (pending)
+- M1-080a — blocked_by: M1-079 (pending)
+- M1-080b — blocked_by: M1-080a (pending)
+- M1-080c — blocked_by: M1-080a (pending), M1-080b (pending)
 
 ---
 
@@ -64,6 +71,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-077 | BootstrapLoader tag normalization alignment with TagVocabulary | 2026-05-25 | round 2 APPROVE |
+| M1-076 | SSRF module — remove compat shims, deduplicate redirect loop, align timeout | 2026-05-25 | round 2 APPROVE |
 | M1-074 | EmbeddingWorker transaction narrowing + TransactionHelper extraction | 2026-05-25 | round 2 APPROVE |
 | M1-073 | LlmOutputSanitizer — word-boundary command matching | 2026-05-25 | round 1 APPROVE |
 | M1-072 | DefaultRedactionHook generic pattern — JSON-safe replacement | 2026-05-25 | round 1 APPROVE |
@@ -72,7 +80,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-069 | Chat-mode group-scope session isolation | 2026-05-25 | round 1 APPROVE |
 | M1-068 | Chat agent redteam hardening (M1-063 remediation) | 2026-05-25 | round 2 APPROVE |
 | M1-067 | /export — user data export with field-level positive list | 2026-05-25 | round 1 APPROVE |
-| M1-066 | /forget — per-scope privacy purge with remaining-scopes disclosure | 2026-05-25 | round 2 APPROVE |
 
 ---
 
@@ -224,14 +231,30 @@ M1-061 (done)
   ├── M1-066 (done)
   └── M1-067 (done)
 M1-069 (done)
-  └── M1-079 (pending) ← runnable
 M1-070 (done)
 M1-071 (done)
 M1-072 (done)
 M1-073 (done)
 M1-074 (done)
 M1-075 (pending) ← runnable
-M1-076 (pending) ← runnable
+M1-076 (done)
 M1-077 (done)
 M1-078 (pending) ← runnable
+M1-079a (pending) ← runnable
+  ├── M1-079 (pending)
+  │     └── M1-080a (pending)
+  │           ├── M1-080 (pending)
+  │           ├── M1-080b (pending)
+  │           │     ├── M1-080 (pending) [see above]
+  │           │     └── M1-080c (pending)
+  │           │           └── M1-080 (pending) [see above]
+  │           └── M1-080c (pending) [see above]
+  ├── M1-079b (pending)
+  │     └── M1-079 (pending) [see above]
+  ├── M1-079c (pending)
+  │     └── M1-079 (pending) [see above]
+  ├── M1-079d (pending)
+  │     └── M1-079 (pending) [see above]
+  └── M1-079e (pending)
+        └── M1-079 (pending) [see above]
 ```

@@ -124,6 +124,7 @@ class SsrfGuardedHttpClientTest {
             Duration.ofSeconds(2),
             Duration.ofSeconds(2),
             Duration.ofSeconds(5),
+            Duration.ofMinutes(2),
             1024L,
             3);
 
@@ -202,6 +203,7 @@ class SsrfGuardedHttpClientTest {
                 null,
                 Duration.ofSeconds(1),
                 Duration.ofSeconds(1),
+                Duration.ofMinutes(2),
                 1024L,
                 3));
         assertTrue(ex.getMessage().contains("timeout must be configured"),
@@ -217,6 +219,7 @@ class SsrfGuardedHttpClientTest {
                 Duration.ofSeconds(1),
                 Duration.ZERO,
                 Duration.ofSeconds(1),
+                Duration.ofMinutes(2),
                 1024L,
                 3));
         assertTrue(ex.getMessage().contains("timeout must be configured"),
@@ -340,6 +343,7 @@ class SsrfGuardedHttpClientTest {
             Duration.ofSeconds(2),
             requestTimeout,
             readTimeout,
+            Duration.ofMinutes(2),
             10L * 1024 * 1024,
             3);
 
@@ -504,12 +508,18 @@ class SsrfGuardedHttpClientTest {
             + "missing on the install side");
     }
 
+    @Test
+    void defaultConnectTimeoutIsFiveSeconds() {
+        assertEquals(Duration.ofSeconds(5), SsrfGuardedHttpClient.DEFAULT_CONNECT_TIMEOUT);
+    }
+
     private SsrfGuardedHttpClient testModeClient() {
         return new SsrfGuardedHttpClient(
             new LoopbackPermitting(),
             Duration.ofSeconds(2),
             Duration.ofSeconds(5),
             Duration.ofSeconds(5),
+            Duration.ofMinutes(2),
             10L * 1024,
             3);
     }

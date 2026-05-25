@@ -169,6 +169,8 @@ class RssFetcherTest {
             new LoopbackPermittingBlocklist(),
             Duration.ofSeconds(2),
             Duration.ofSeconds(5),
+            Duration.ofSeconds(30),
+            Duration.ofMinutes(2),
             1024L,
             3));
 
@@ -183,6 +185,8 @@ class RssFetcherTest {
             new LoopbackPermittingBlocklist(),
             Duration.ofSeconds(2),
             Duration.ofSeconds(5),
+            Duration.ofSeconds(30),
+            Duration.ofMinutes(2),
             10L * 1024 * 1024,
             3);
         return new RssFetcher(client);

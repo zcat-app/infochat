@@ -87,7 +87,7 @@ import java.util.function.Function;
  */
 public final class SsrfGuardedHttpClient {
 
-    private static final Duration DEFAULT_CONNECT_TIMEOUT = Duration.ofSeconds(10);
+    static final Duration DEFAULT_CONNECT_TIMEOUT = Duration.ofSeconds(5);
 
     private static final Duration DEFAULT_REQUEST_TIMEOUT = Duration.ofSeconds(30);
 
@@ -133,37 +133,6 @@ public final class SsrfGuardedHttpClient {
              DEFAULT_BODY_READ_DEADLINE,
              DEFAULT_BODY_CAP,
              DEFAULT_REDIRECT_CAP);
-    }
-
-    /**
-     * M1-024 parameterized constructor — preserved as a stable public
-     * API surface. Supplies default read-timeout AND default
-     * body-read-deadline so existing M1-024 call sites continue to
-     * compile and behave identically.
-     */
-    public SsrfGuardedHttpClient(IpBlocklist blocklist,
-                                 Duration connectTimeout,
-                                 Duration requestTimeout,
-                                 long bodyCap,
-                                 int redirectCap) {
-        this(blocklist, connectTimeout, requestTimeout,
-             DEFAULT_READ_TIMEOUT, DEFAULT_BODY_READ_DEADLINE,
-             bodyCap, redirectCap);
-    }
-
-    /**
-     * M1-025 parameterized constructor — preserved as a stable public
-     * API surface. Supplies a default body-read-deadline so existing
-     * M1-025 call sites continue to compile and behave identically.
-     */
-    public SsrfGuardedHttpClient(IpBlocklist blocklist,
-                                 Duration connectTimeout,
-                                 Duration requestTimeout,
-                                 Duration readTimeout,
-                                 long bodyCap,
-                                 int redirectCap) {
-        this(blocklist, connectTimeout, requestTimeout, readTimeout,
-             DEFAULT_BODY_READ_DEADLINE, bodyCap, redirectCap);
     }
 
     /**
@@ -292,81 +261,12 @@ public final class SsrfGuardedHttpClient {
     }
 
     /**
-     * Issue a GET against {@code uri}. Throws
-     * {@link SsrfPolicyException} on any policy violation.
-     *
-     * <p>The JVM-wide {@link PinnedDnsResolver.Provider} lock is held
-     * across the redirect loop + the terminal hop's
-     * {@code httpClient.send}. It is RELEASED before the body-read
-     * phase — concurrent fetches to different hosts can interleave
-     * body reads without serializing on the JVM-wide lock (M1-026
-     * Finding 1 lock-starvation remediation).
+     * Issue a GET against {@code uri} with no extra headers.
+     * Delegates to {@link #get(URI, Map)} with an empty header map;
+     * see that method for the full SSRF guard pipeline description.
      */
     public HttpResponse<byte[]> get(URI uri) throws IOException, InterruptedException {
-        HttpResponse<InputStream> terminalResponse;
-        ReentrantLock lock = PinnedDnsResolver.Provider.lock();
-        lock.lock();
-        try {
-            URI current = uri;
-            int redirectCount = 0;
-            while (true) {
-                ResolvedHost resolved = resolveAndValidate(current);
-                // Pin the per-hop canonical host -> validated IPs map
-                // BEFORE constructing the per-call HttpClient. The
-                // JVM-wide resolver consults the pin slot on every
-                // lookup, so the connect's DNS will return our IPs.
-                PinnedDnsResolver.Provider.installPins(
-                    Map.of(resolved.canonicalHost(), resolved.addresses()));
-
-                // Redirect.NEVER — we handle redirects manually so
-                // each hop re-runs the pipeline AND updates the pin.
-                HttpClient perCallClient = HttpClient.newBuilder()
-                    .connectTimeout(connectTimeout)
-                    .followRedirects(HttpClient.Redirect.NEVER)
-                    .build();
-                HttpRequest request = HttpRequest.newBuilder()
-                    .uri(current)
-                    .timeout(requestTimeout)
-                    .header("Accept", ACCEPT_HEADER)
-                    .header("User-Agent", USER_AGENT)
-                    .GET()
-                    .build();
-                HttpResponse<InputStream> response =
-                    perCallClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
-
-                int status = response.statusCode();
-                if (status >= 300 && status < 400) {
-                    try (InputStream discard = response.body()) {
-                        // Drain via close(); redirect bodies carry
-                        // no payload we need.
-                    }
-                    redirectCount++;
-                    if (redirectCount > redirectCap) {
-                        throw new SsrfPolicyException("redirect cap exceeded");
-                    }
-                    String location = response.headers().firstValue("Location")
-                        .orElseThrow(() -> new SsrfPolicyException(
-                            "redirect response missing Location header"));
-                    current = current.resolve(location);
-                    continue;
-                }
-
-                terminalResponse = response;
-                break;
-            }
-        } finally {
-            PinnedDnsResolver.Provider.clearPins();
-            lock.unlock();
-        }
-
-        // Lock released; pins cleared. JDK does not re-resolve DNS
-        // during body read on an already-established connection, so
-        // releasing here is safe — and crucial for F1: concurrent
-        // get(uri) calls to different hosts can interleave body
-        // reads instead of serializing on the JVM-wide lock for the
-        // entire (drip-attacker-controllable) body-read phase.
-        byte[] body = readBounded(terminalResponse);
-        return new BoundedByteArrayResponse(terminalResponse, body);
+        return get(uri, Map.of());
     }
 
     /**
