@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -85,6 +86,17 @@ class InboundRouterTest {
         // INTERNAL_ERROR reply assertions in the M1-035b methods.
         // registration_state='vouched' also keeps step 7 DM-gate
         // (group_only-only) from firing.
+        // Clean chat_session rows first (FK from chat_session → users
+        // blocks DELETE FROM users when chat-mode dispatch has persisted
+        // session rows for these contacts).
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement cleanSessions = conn.prepareStatement(
+                     "DELETE FROM chat_session WHERE user_id IN ("
+                             + "SELECT id FROM users WHERE adapter = 'inmemory' AND ("
+                             + "contact_id = 'alice' "
+                             + "OR contact_id LIKE 'rate-overflow-%'))")) {
+            cleanSessions.executeUpdate();
+        }
         try (Connection conn = dataSource.getConnection();
              PreparedStatement clean = conn.prepareStatement(
                      "DELETE FROM users WHERE adapter = 'inmemory' AND ("
@@ -132,13 +144,16 @@ class InboundRouterTest {
     }
 
     @Test
-    void chatModeBodyProducesDeterministicNotInMvpReply() {
+    void chatModeBodyDispatchesToChatAgent() {
         inMemoryAdapter.deliverDm("alice", "hello there");
 
         List<OutboundMessage> sent = inMemoryAdapter.sentMessages();
         assertEquals(1, sent.size(),
                 "chat-mode body should produce exactly one outbound reply");
-        assertEquals(InboundRouter.CHAT_MODE_REPLY, sent.get(0).text());
+        // Chat mode now dispatches to ChatAgent (M1-063); the reply comes
+        // from TestLlmProvider, not the old CHAT_MODE_REPLY constant.
+        assertNotEquals(InboundRouter.CHAT_MODE_REPLY, sent.get(0).text(),
+                "Should dispatch to ChatAgent, not return the static sentinel");
     }
 
     @Test

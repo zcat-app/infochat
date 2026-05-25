@@ -239,6 +239,12 @@ public class InboundRouter {
     @Inject
     ProbationCheck probationCheck;
 
+    @Inject
+    app.zcat.infochat.provider.chat.ChatAgent chatAgent;
+
+    @ConfigProperty(name = "infochat.chat.body-cap", defaultValue = "2048")
+    int chatBodyCap;
+
     /**
      * Defense-in-depth body cap. The default is below the in-memory
      * adapter's declared {@code maxInboundMessageBytes} so a
@@ -451,9 +457,20 @@ public class InboundRouter {
         // See the step 4.7 comment block for the spec rationale.
         String body;
         try {
-            body = normalized.startsWith("/")
-                    ? handleSlash(msg.scope(), normalized)
-                    : CHAT_MODE_REPLY;
+            if (normalized.startsWith("/")) {
+                body = handleSlash(msg.scope(), normalized);
+            } else {
+                // Chat-mode dispatch: enforce body cap, then delegate to ChatAgent.
+                // scope_kind is "dm" or "group"; scope_id is the user's UUID
+                // for DM (per-user isolation, schema §Per-scope state).
+                if (normalized.length() > chatBodyCap) {
+                    body = bundleLoader.get(BundleKeys.ERROR_CHAT_BODY_TOO_LARGE);
+                } else {
+                    UUID actorId = snapshot.get().id();
+                    String scopeKind = chatModeScopeKindOf(msg.scope());
+                    body = chatAgent.handle(actorId, scopeKind, actorId, normalized);
+                }
+            }
         } catch (RuntimeException e) {
             log.error("InboundRouter dispatch failed for scope={}",
                     ContactIds.redact(scopeIdOf(msg.scope())), e);
@@ -624,6 +641,13 @@ public class InboundRouter {
         return switch (scope) {
             case ScopeRef.Dm dm -> dm.contactId();
             case ScopeRef.Group group -> group.adapterGroupId();
+        };
+    }
+
+    private static String chatModeScopeKindOf(ScopeRef scope) {
+        return switch (scope) {
+            case ScopeRef.Dm ignored -> "dm";
+            case ScopeRef.Group ignored -> "group";
         };
     }
 

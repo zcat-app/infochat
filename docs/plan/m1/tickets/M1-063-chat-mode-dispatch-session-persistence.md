@@ -1,22 +1,27 @@
 ---
 id: M1-063
 title: Chat-mode dispatch in InboundRouter + session persistence
-status: pending
+status: done
 created: 2026-05-24
-last_updated: 2026-05-24
+last_updated: 2026-05-25
 blocked_by:
   - M1-062
-files_budget: 10
+files_budget: 14
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/InboundRouter.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatAgent.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatSessionRepository.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/InFlightTracker.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/CommandPermissions.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
+  - infochat-provider/src/main/resources/application.properties
+  - infochat-provider/src/main/resources/bundles/en.properties
+  - infochat-provider/src/main/resources/bundles/cs.properties
   - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatSessionRepositoryTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/InFlightTrackerTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterChatModeIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterTest.java
 complexity: high
 risk: high
 round_cap: 3
@@ -64,12 +69,138 @@ decision_refs:
   - D35
   - D43
   - D45
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-05-25
+    verdict: REWORK
+    checks:
+      scope_drift: FAIL
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 15
+      added: 1132
+      removed: 16
+  - round: 2
+    date: 2026-05-25
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 15
+      added: 1187
+      removed: 18
+revisions:
+  - date: 2026-05-25
+    reason: budget-breach refine — adding 5 missing paths to
+      files_scope (BundleKeys.java, application.properties,
+      en.properties, cs.properties, InboundRouterTest.java) and
+      raising files_budget from 10 to 14.
+    prior_files_budget: 10
+    prior_files_scope:
+      - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/InboundRouter.java
+      - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatAgent.java
+      - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatSessionRepository.java
+      - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/InFlightTracker.java
+      - infochat-provider/src/main/java/app/zcat/infochat/provider/command/CommandPermissions.java
+      - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentTest.java
+      - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatSessionRepositoryTest.java
+      - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/InFlightTrackerTest.java
+      - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterChatModeIT.java
+escalations:
+  - date: 2026-05-25
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      SCOPE-DRIFT-CHECK: FAIL — diff touches 13 non-exempt files but
+      ticket declares files_budget: 10 and files_scope of 9 paths.
+      Five files outside files_scope: BundleKeys.java,
+      application.properties, bundles/cs.properties,
+      bundles/en.properties, InboundRouterTest.java.
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
-clarity_check: {}
+redteam_findings:
+  - date: 2026-05-25
+    category: INJECTION
+    severity: high
+    promise: |
+      Every prompt that includes user-derived text is wrapped in a delimiter
+      block whose marker contains a per-call random value.
+    gap: |
+      ChatAgent.java:178-183 — tool results appended to conversation as bare
+      text without untrusted-content delimiter wrapping.
+    repro: |
+      Adversary-controlled RSS post body injected into tool result; LLM sees
+      it outside any delimiter wrapper.
+    suggested_fix_class: input-sanitization
+  - date: 2026-05-25
+    category: AUDIT-EVASION
+    severity: high
+    promise: |
+      Authorization evaluation order step 8: audit-log the intent.
+    gap: |
+      InboundRouter.java:457-479 — chat-mode dispatch has no audit-log write.
+    repro: |
+      User sends chat-mode message; no audit_log row written for intent.
+    suggested_fix_class: audit-log-coverage
+  - date: 2026-05-25
+    category: INFO-LEAK
+    severity: medium
+    promise: |
+      The LLM tool surface is an internal implementation detail.
+    gap: |
+      ChatAgent.java:186-190 — final LLM call after MAX_TOOL_ITERATIONS can
+      emit raw TOOL_CALL text that leaks to the user.
+    repro: |
+      Complex query triggers 10 tool iterations; 11th response leaks tool
+      protocol to the user.
+    suggested_fix_class: input-sanitization
+  - date: 2026-05-25
+    category: DOS
+    severity: medium
+    promise: |
+      LLM-triggering operations have their own bucket, capped lower.
+    gap: |
+      InboundRouter.java:458-470 — no LLM-triggering rate limit check.
+    repro: |
+      60 chat messages/min × 11 LLM calls each = 660 LLM calls/min.
+    suggested_fix_class: rate-limit
+  - date: 2026-05-25
+    category: INFO-LEAK
+    severity: medium
+    promise: |
+      LLM output sanitizer strips admin commands before delivery.
+    gap: |
+      ChatAgent.java:129-136 — unsanitized LLM output persisted to
+      chat_message before sanitizer runs; propagates via memory pipeline.
+    repro: |
+      LLM emits admin commands; stored unsanitized in DB; compressed into
+      memory summaries fed to future prompts.
+    suggested_fix_class: input-sanitization
+redteam_audits:
+  - date: 2026-05-25
+    verdict: FINDINGS
+    base: 678641ac
+    head: m1/M1-063-chat-mode-dispatch-session-persistence
+    verdict_file: docs/plan/m1/redteam/M1-063-2026-05-25.md
+    findings_count: 5
+    out_of_model_count: 2
+    note: |
+      Pre-merge audit. 2 high (tool-result delimiter wrapping, audit-log
+      coverage), 3 medium (tool protocol leak, LLM rate limit, persist-
+      before-sanitize). Done commit is immutable; fixes land as new tickets.
+outline_file: target/m1-tick-outline-M1-063.md
+clarity_check:
+  date: 2026-05-25
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-063: Chat-mode dispatch in InboundRouter + session persistence
@@ -128,3 +259,12 @@ See the YAML `acceptance:` list above. In summary:
   `docs/design/04-security.md` §4.3 (chat agent defenses).
 - Adjacent code: `SummaryCommandHandler` for the existing LLM call +
   sanitizer + translation pipeline pattern.
+
+## Round 1 rework
+
+1. **SCOPE-DRIFT-CHECK FAIL**: The diff touches 13 non-exempt files but the
+   ticket declares `files_budget: 10` and a `files_scope` of 9 paths. Five
+   files outside `files_scope` are legitimately required: `BundleKeys.java`,
+   `application.properties`, `bundles/cs.properties`, `bundles/en.properties`,
+   and `InboundRouterTest.java`. Resolution: escalate → refine to add the 5
+   missing paths to `files_scope` and raise `files_budget` to at least 14.

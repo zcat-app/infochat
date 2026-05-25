@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 78 |
+| done | 77 |
 | deferred | 6 |
 | **total** | **87** |
 
@@ -24,7 +24,10 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-063 — Chat-mode dispatch in InboundRouter + session persistence (complexity: high, risk: high)
+- M1-064 — /clear + /compress + auto-compress (complexity: high, risk: medium)
+- M1-065 — /stop cancellation + /retry anchor-based replay (complexity: high, risk: high)
+- M1-066 — /forget — per-scope privacy purge with remaining-scopes disclosure (complexity: medium, risk: medium)
+- M1-067 — /export — user data export with field-level positive list (complexity: medium, risk: medium)
 
 ---
 
@@ -41,8 +44,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-064 — blocked_by: M1-063 (pending)
-- M1-065 — blocked_by: M1-063 (pending)
+_(none)_
 
 ---
 
@@ -61,8 +63,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
-| M1-067 | /export — user data export with field-level positive list | 2026-05-25 | round 1 APPROVE |
-| M1-066 | /forget — per-scope privacy purge with remaining-scopes disclosure | 2026-05-25 | round 2 APPROVE |
+| M1-063 | Chat-mode dispatch in InboundRouter + session persistence | 2026-05-25 | round 2 APPROVE |
 | M1-062 | Chat agent tool registry + dispatcher + prompt shape | 2026-05-25 | round 1 APPROVE |
 | M1-055 | Asset commands umbrella — /zcash + /monero + bootstrap-assets + asset_config + price_snapshot roundtrip IT | 2026-05-25 | round 2 APPROVE |
 | M1-061 | chat_session + chat_memory + chat_message + summary_anchor DDL | 2026-05-24 | round 2 APPROVE |
@@ -71,6 +72,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-058 | ThrottledAdminNotifier (T2-G infrastructure) + admin_notification_state table | 2026-05-24 | round 1 APPROVE |
 | M1-057 | Unseal PendingConfirm + extract variants | 2026-05-24 | round 1 APPROVE |
 | M1-056 | Amend test-pyramid — restructure §Handler unit tests for two-shape reality | 2026-05-24 | round 1 APPROVE |
+| M1-055c | /zcash + /monero handlers + reply renderer + AssetCommandFamilyOracle impl swap + /help context-awareness | 2026-05-24 | round 2 APPROVE |
 
 ---
 
@@ -215,9 +217,9 @@ M1-059 (done)
 M1-060 (done)
 M1-061 (done)
   ├── M1-062 (done)
-  │     └── M1-063 (pending) ← runnable
-  │           ├── M1-064 (pending)
-  │           └── M1-065 (pending)
-  ├── M1-066 (done)
-  └── M1-067 (done)
+  │     └── M1-063 (done)
+  │           ├── M1-064 (pending) ← runnable
+  │           └── M1-065 (pending) ← runnable
+  ├── M1-066 (pending) ← runnable
+  └── M1-067 (pending) ← runnable
 ```

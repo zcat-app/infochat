@@ -718,6 +718,20 @@ public final class BundleKeys {
     /** Idempotent no-op — nothing to purge. */
     public static final String REPLY_FORGET_NOOP = "reply.forget.noop";
 
+    // ----- Chat-mode errors (M1-063) ----------------------------------------
+    // Per docs/spec/commands.md §Chat mode + docs/spec/security.md §Failure
+    // handling — Chat-mode replies. All three are emitted by the chat-mode
+    // dispatch path (InboundRouter + ChatAgent); never by command handlers.
+
+    /** Chat agent's LLM is unreachable (connection failure, timeout, provider error). Per spec §Failure handling: "friendly error from the bundle." */
+    public static final String ERROR_CHAT_UNAVAILABLE = "error.chat.unavailable";
+
+    /** Second chat-mode message while one is still in-flight. Per spec §One in-flight interruptible request per (user, scope). */
+    public static final String ERROR_CHAT_IN_FLIGHT = "error.chat.in_flight";
+
+    /** Non-slash message body exceeds the profile-driven chat-mode body cap (context_window / 8 chars). */
+    public static final String ERROR_CHAT_BODY_TOO_LARGE = "error.chat.body_too_large";
+
     private BundleKeys() {
         throw new AssertionError("BundleKeys is a constant holder and must not be instantiated");
     }
