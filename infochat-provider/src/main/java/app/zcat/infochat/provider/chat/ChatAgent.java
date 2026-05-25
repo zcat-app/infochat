@@ -56,11 +56,14 @@ public class ChatAgent {
           + "one line per call in this format (no surrounding prose on the same line):\n"
           + "TOOL_CALL: toolName {\"param\": \"value\"}\n\n"
           + "Available tools:\n"
-          + "- searchPosts {\"query\": \"keyword\", \"limit\": 10} — search posts by keyword\n"
+          + "- searchPosts {\"tags\": [\"tag1\"], \"window\": \"P7D\", \"limit\": 10}"
+          + " — search posts by tags within a time window\n"
           + "- getPost {\"uid\": \"post-uid\"} — retrieve a single post by UID\n"
           + "- getReferences {\"uid\": \"post-uid\"} — get references for a post\n"
-          + "- recallMemory {\"query\": \"keyword\"} — recall conversation memories\n"
-          + "- listSaves {\"limit\": 10} — list the user's saved posts\n\n"
+          + "- recallMemory {\"keywords\": [\"keyword1\", \"keyword2\"]}"
+          + " — recall conversation memories by keyword\n"
+          + "- listSaves {\"tags\": [\"tag1\"], \"window\": \"P7D\"}"
+          + " — list saved posts filtered by personal tags within a time window\n\n"
           + "After receiving a tool result, you may call another tool or provide "
           + "your final answer as plain text. Do NOT call a tool and provide a "
           + "final answer in the same response.";
@@ -143,9 +146,10 @@ public class ChatAgent {
         LlmProvider provider = llmRouter.forTask(ModelTask.CHAT_AGENT, scopeLanguage);
 
         // 4. Run multi-turn tool loop
-        String systemPrompt = prompt.systemPrompt() + TOOL_INSTRUCTIONS;
-        String finalText = runToolLoop(provider, systemPrompt, prompt.userPrompt(),
-                userId, scopeKind, scopeId);
+        String baseSystemPrompt = prompt.systemPrompt();
+        String augmentedSystemPrompt = baseSystemPrompt + TOOL_INSTRUCTIONS;
+        String finalText = runToolLoop(provider, augmentedSystemPrompt, baseSystemPrompt,
+                prompt.userPrompt(), userId, scopeKind, scopeId);
 
         // 5. Strip any residual TOOL_CALL patterns that leaked past
         // the iteration cap — they are internal protocol, not user-visible.
@@ -186,7 +190,8 @@ public class ChatAgent {
      * tools, feeds results back, repeats until no tool calls remain or the
      * iteration cap is reached.
      */
-    String runToolLoop(LlmProvider provider, String systemPrompt, String userPrompt,
+    String runToolLoop(LlmProvider provider, String systemPrompt,
+                       String baseSystemPrompt, String userPrompt,
                        UUID userId, String scopeKind, UUID scopeId) {
         StringBuilder conversation = new StringBuilder(userPrompt);
         ChatToolDispatcher.TurnContext turnContext = new ChatToolDispatcher.TurnContext();
@@ -229,10 +234,10 @@ public class ChatAgent {
             conversation.append("\n\nPlease provide your response based on the tool result above.");
         }
 
-        // Exceeded iteration cap — run one final call without tool instructions
-        // to get a text-only response
+        // Exceeded iteration cap — final call uses base system prompt (without
+        // tool instructions) so the LLM cannot emit tool-call patterns
         LlmResponse finalResponse = provider.generate(
-                ModelTask.CHAT_AGENT, systemPrompt, conversation.toString());
+                ModelTask.CHAT_AGENT, baseSystemPrompt, conversation.toString());
         return finalResponse.text();
     }
 

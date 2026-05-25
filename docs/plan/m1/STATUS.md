@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 9 |
+| pending | 8 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 83 |
+| done | 84 |
 | deferred | 6 |
 | **total** | **98** |
 
@@ -25,7 +25,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-069 — Chat-mode group-scope session isolation (complexity: medium, risk: high)
-- M1-070 — Chat agent tool instructions parameter alignment + final-call strip (complexity: medium, risk: medium)
 - M1-071 — Fix DAG violation — move LlmTranslationProvider out of llm-adapter (complexity: medium, risk: medium)
 - M1-072 — DefaultRedactionHook generic pattern — JSON-safe replacement (complexity: low, risk: medium)
 - M1-074 — EmbeddingWorker transaction narrowing + TransactionHelper extraction (complexity: medium, risk: medium)
@@ -69,6 +68,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-073 | LlmOutputSanitizer — word-boundary command matching | 2026-05-25 | round 1 APPROVE |
+| M1-070 | Chat agent tool instructions parameter alignment + final-call strip | 2026-05-25 | round 1 APPROVE |
 | M1-068 | Chat agent redteam hardening (M1-063 remediation) | 2026-05-25 | round 2 APPROVE |
 | M1-067 | /export — user data export with field-level positive list | 2026-05-25 | round 1 APPROVE |
 | M1-066 | /forget — per-scope privacy purge with remaining-scopes disclosure | 2026-05-25 | round 2 APPROVE |
@@ -77,7 +77,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-063 | Chat-mode dispatch in InboundRouter + session persistence | 2026-05-25 | round 2 APPROVE |
 | M1-062 | Chat agent tool registry + dispatcher + prompt shape | 2026-05-25 | round 1 APPROVE |
 | M1-055 | Asset commands umbrella — /zcash + /monero + bootstrap-assets + asset_config + price_snapshot roundtrip IT | 2026-05-25 | round 2 APPROVE |
-| M1-061 | chat_session + chat_memory + chat_message + summary_anchor DDL | 2026-05-24 | round 2 APPROVE |
 
 ---
 
@@ -229,7 +228,7 @@ M1-061 (done)
   ├── M1-066 (done)
   └── M1-067 (done)
 M1-069 (pending) ← runnable
-M1-070 (pending) ← runnable
+M1-070 (done)
 M1-071 (pending) ← runnable
 M1-072 (pending) ← runnable
 M1-073 (done)

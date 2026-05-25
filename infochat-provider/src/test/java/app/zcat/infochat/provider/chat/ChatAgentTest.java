@@ -248,6 +248,59 @@ class ChatAgentTest {
         assertTrue(args.isEmpty());
     }
 
+    @Test
+    void toolInstructionsMatchSearchPostsParams() {
+        String instructions = ChatAgent.TOOL_INSTRUCTIONS;
+        assertTrue(instructions.contains("searchPosts"), "must mention searchPosts");
+        assertTrue(instructions.contains("\"tags\""), "searchPosts must document tags param");
+        assertTrue(instructions.contains("\"window\""), "searchPosts must document window param");
+        assertTrue(instructions.contains("\"limit\""), "searchPosts must document limit param");
+    }
+
+    @Test
+    void toolInstructionsMatchRecallMemoryParams() {
+        String instructions = ChatAgent.TOOL_INSTRUCTIONS;
+        assertTrue(instructions.contains("recallMemory"), "must mention recallMemory");
+        assertTrue(instructions.contains("\"keywords\""), "recallMemory must document keywords param");
+        assertFalse(instructions.contains("recallMemory") && instructions.contains("\"query\"")
+                && instructions.indexOf("\"query\"") > instructions.indexOf("recallMemory")
+                && instructions.indexOf("\"query\"") < instructions.indexOf("recallMemory") + 80,
+                "recallMemory must not use the wrong param name 'query'");
+    }
+
+    @Test
+    void toolInstructionsMatchListSavesParams() {
+        String instructions = ChatAgent.TOOL_INSTRUCTIONS;
+        assertTrue(instructions.contains("listSaves"), "must mention listSaves");
+        // listSaves line must contain tags and window
+        int listSavesIdx = instructions.indexOf("listSaves");
+        int nextToolIdx = instructions.indexOf("\n", listSavesIdx);
+        String listSavesLine = instructions.substring(listSavesIdx,
+                nextToolIdx > 0 ? nextToolIdx : instructions.length());
+        assertTrue(listSavesLine.contains("\"tags\""), "listSaves must document tags param");
+        assertTrue(listSavesLine.contains("\"window\""), "listSaves must document window param");
+    }
+
+    @Test
+    void finalCallOmitsToolInstructions() {
+        // Fill MAX_TOOL_ITERATIONS with tool calls to hit the cap
+        for (int i = 0; i < ChatAgent.MAX_TOOL_ITERATIONS; i++) {
+            llmProvider.responses.add(
+                    new LlmResponse("TOOL_CALL: getPost {\"uid\": \"abc\"}"));
+        }
+        // Final response after cap
+        llmProvider.responses.add(new LlmResponse("Here is the summary."));
+
+        agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "summarize");
+
+        // The last LLM call is the final call (iteration cap + 1)
+        assertEquals(ChatAgent.MAX_TOOL_ITERATIONS + 1, llmProvider.callCount);
+        assertFalse(llmProvider.lastSystemPrompt.contains("TOOL_CALL:"),
+                "final call system prompt must not contain tool call format instructions");
+        assertFalse(llmProvider.lastSystemPrompt.contains("Available tools:"),
+                "final call system prompt must not contain tool list");
+    }
+
     // --- factory + test subclass ---
 
     private TestChatAgent buildAgent(String language) {
@@ -373,6 +426,7 @@ class ChatAgentTest {
         int callCount;
         boolean throwOnGenerate;
         String lastUserPrompt;
+        String lastSystemPrompt;
 
         @Override
         public LlmResponse generate(ModelTask task, String systemPrompt, String userPrompt) {
@@ -381,6 +435,7 @@ class ChatAgentTest {
             }
             callCount++;
             lastUserPrompt = userPrompt;
+            lastSystemPrompt = systemPrompt;
             if (callCount <= responses.size()) {
                 return responses.get(callCount - 1);
             }

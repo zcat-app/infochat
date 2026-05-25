@@ -1,7 +1,7 @@
 ---
 id: M1-070
 title: Chat agent tool instructions parameter alignment + final-call strip
-status: pending
+status: done
 created: 2026-05-25
 last_updated: 2026-05-25
 blocked_by: []
@@ -27,7 +27,7 @@ acceptance:
   - "TOOL_INSTRUCTIONS describes recallMemory with parameter {keywords} matching RecallMemoryTool's actual parsing. Verify: ChatAgentTest.toolInstructionsMatchRecallMemoryParams passes"
   - "TOOL_INSTRUCTIONS describes listSaves with parameters {tags, window} matching ListSavesTool's actual parsing. Verify: ChatAgentTest.toolInstructionsMatchListSavesParams passes"
   - "The final LLM call after MAX_TOOL_ITERATIONS uses the base system prompt WITHOUT tool instructions appended. Verify: ChatAgentTest.finalCallOmitsToolInstructions passes"
-  - "The comment on the final-call path accurately describes the code's behavior (no misleading 'without tool instructions' comment when tool instructions are still present). Code inspection."
+  - "The comment on the final-call code path in ChatAgent.java matches the actual behavior (base prompt without tool instructions). Verify: the ChatAgent.java diff shows comment and code are consistent on the final-call path"
   - "mvn -pl infochat-provider verify is green"
 test_plan:
   adds:
@@ -39,9 +39,43 @@ test_plan:
   preserves:
     - all tests currently green on main
 spec_refs:
-  - docs/spec/security.md §Chat-mode tool surface
+  - docs/spec/security.md §Prompt-injection defenses (LLM call sites)
   - docs/spec/commands.md §Chat mode
 decision_refs: []
+clarity_check:
+  date: 2026-05-25
+  verdict: WARN
+  warnings:
+    - "FILES-BUDGET-PLAUSIBLE: ChatToolDispatcherTest.java and InboundRouterChatModeIT.java in files_scope but not referenced by acceptance items"
+    - "SECURITY-FLAG-CONSISTENT: final-call strip is LLM call-site wiring per security.md; consider security_relevant: true"
+  blockers: []
+revisions:
+  - date: 2026-05-25
+    reason: clarity-fail refine
+    changes:
+      - "Acceptance item 5: replaced 'Code inspection.' with diff-checkable assertion"
+      - "spec_refs: fixed anchor from §Chat-mode tool surface to §Prompt-injection defenses (LLM call sites)"
+escalations:
+  - date: 2026-05-25
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      BLOCKERS:
+        1. ACCEPTANCE-RUNNABLE item 5: "Code inspection." is not a testable acceptance criterion.
+        2. SPEC-REFS-VALID: docs/spec/security.md §Chat-mode tool surface does not exist.
+reviews:
+  - round: 1
+    date: 2026-05-25
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 117
+      removed: 27
 ---
 
 ## Context
