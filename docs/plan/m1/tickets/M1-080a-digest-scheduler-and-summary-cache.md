@@ -1,24 +1,60 @@
 ---
 id: M1-080a
 title: V21 summary_cache + DigestScheduler + staggered slots
-status: pending
+status: done
 created: 2026-05-25
-last_updated: 2026-05-25
+last_updated: 2026-05-26
+clarity_check:
+  date: 2026-05-26
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by:
   - M1-079
 files_budget: 9
 files_scope:
-  - infochat-core/src/main/resources/db/migration/V21__summary_cache.sql
+  - infochat-core/src/main/java/app/zcat/infochat/core/audit/AuditAction.java
+  - infochat-core/src/main/resources/db/migration/V23__summary_cache.sql
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestScheduler.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestSlot.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/SummaryCacheRepository.java
+  - infochat-provider/src/main/resources/application.properties
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestSchedulerTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestSlotObserver.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/SummaryCacheRepositoryTest.java
+reviews:
+  - round: 1
+    date: 2026-05-26
+    verdict: REWORK
+    checks:
+      scope_drift: FAIL
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: WARN
+      acceptance: PASS
+    diff_stats:
+      files: 11
+      added: 733
+      removed: 11
+  - round: 2
+    date: 2026-05-26
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 11
+      added: 759
+      removed: 12
 complexity: high
 risk: medium
 round_cap: 3
 security_relevant: false
 migration_touch: true
+outline_file: target/m1-tick-outline-M1-080a.md
 out_of_scope:
   - infochat-messaging-adapter/** — no adapter changes for digests
   - any modification to M1-079a's V20 migration — FROZEN
@@ -121,3 +157,11 @@ handling) + `docs/spec/schema.md` §Operational (Summary cache entity).
   The repository's find method returns them for cache-hit validation.
 - The missed-slot audit row uses the existing `audit_log` table with
   action `DIGEST_SLOT_MISSED` and `target_kind='group'`.
+
+## Round 1 rework
+
+1. SCOPE-DRIFT-CHECK FAIL: files_scope was under-specified at authoring
+   time — missing AuditAction.java, V23 migration (was V21),
+   application.properties, and DigestSlotObserver.java. Fixed by
+   updating files_scope to list all 9 actual implementation paths.
+   files_budget unchanged (9 paths, 9 budget).
