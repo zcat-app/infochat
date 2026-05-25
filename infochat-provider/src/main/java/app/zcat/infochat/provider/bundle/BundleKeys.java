@@ -800,6 +800,47 @@ public final class BundleKeys {
     /** Status-drift notice prepended to retry output. Token {@code {0}} = excluded count, {@code {1}} = original count. */
     public static final String REPLY_RETRY_STATUS_DRIFT_NOTICE = "reply.retry.status_drift_notice";
 
+    // ----- /promote + /demote + /group-timezone (M1-079c) ---------------------
+    // Per docs/spec/security.md §Authorization model (one group admin per
+    // group, first-mention auto-promote, /promote swaps admin) +
+    // docs/spec/commands.md §Conversation control (/group-timezone).
+
+    /** {@code /promote} invoked from DM scope — requires group scope. */
+    public static final String ERROR_PROMOTE_GROUP_SCOPE_REQUIRED = "error.promote.group_scope_required";
+
+    /** {@code /promote <contact>} target is banned — reinstate first. */
+    public static final String ERROR_PROMOTE_TARGET_BANNED = "error.promote.target_banned";
+
+    /** {@code /promote <contact>} target is still in probation — ineligible per spec. */
+    public static final String ERROR_PROMOTE_TARGET_PROBATION = "error.promote.target_probation";
+
+    /** {@code /promote <contact>} target has no active membership in this group. */
+    public static final String ERROR_PROMOTE_TARGET_NOT_IN_GROUP = "error.promote.target_not_in_group";
+
+    /** {@code /promote} success. Token {@code {0}} = redacted target contact id. */
+    public static final String REPLY_PROMOTE_SUCCESS = "reply.promote.success";
+
+    /** {@code /demote} invoked from DM scope — requires group scope. */
+    public static final String ERROR_DEMOTE_GROUP_SCOPE_REQUIRED = "error.demote.group_scope_required";
+
+    /** {@code /demote <contact>} target is not the current group admin. */
+    public static final String ERROR_DEMOTE_TARGET_NOT_ADMIN = "error.demote.target_not_admin";
+
+    /** {@code /demote} success. Token {@code {0}} = redacted target contact id. */
+    public static final String REPLY_DEMOTE_SUCCESS = "reply.demote.success";
+
+    /** {@code /group-timezone} invoked from DM scope — group-only command. */
+    public static final String ERROR_GROUP_TIMEZONE_DM_SCOPE = "error.group_timezone.dm_scope";
+
+    /** {@code /group-timezone <tz>} where {@code <tz>} is not a valid IANA zone. Token {@code {0}} = supplied zone, {@code {1}} = fuzzy suggestions. */
+    public static final String ERROR_GROUP_TIMEZONE_INVALID_ZONE = "error.group_timezone.invalid_zone";
+
+    /** {@code /group-timezone} caller is neither group admin nor bot admin. */
+    public static final String ERROR_GROUP_TIMEZONE_NOT_ADMIN = "error.group_timezone.not_admin";
+
+    /** {@code /group-timezone} success. Token {@code {0}} = the timezone that was set. */
+    public static final String REPLY_GROUP_TIMEZONE_SUCCESS = "reply.group_timezone.success";
+
     private BundleKeys() {
         throw new AssertionError("BundleKeys is a constant holder and must not be instantiated");
     }

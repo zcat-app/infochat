@@ -1,9 +1,29 @@
 ---
 id: M1-079c
 title: /promote + /demote + /group-timezone + auto-promote + group dispatch
-status: pending
+status: done
 created: 2026-05-25
 last_updated: 2026-05-25
+reviews:
+  - round: 1
+    date: 2026-05-25
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 11
+      added: 1641
+      removed: 14
+clarity_check:
+  date: 2026-05-25
+  verdict: WARN
+  warnings:
+    - "COMPLEXITY-RISK-CALIBRATED: risk: medium is under-calibrated for a ticket that implements the group-admin promote/demote lifecycle (is_group_admin writes, authorization enforcement). Consider bumping to risk: high."
+  blockers: []
 blocked_by:
   - M1-079a
 files_budget: 12
@@ -24,6 +44,7 @@ risk: medium
 round_cap: 3
 security_relevant: true
 migration_touch: false
+outline_file: target/m1-tick-outline-M1-079c.md
 out_of_scope:
   - infochat-messaging-adapter/** (except consuming it) — InMemoryAdapter extension is M1-079b
   - infochat-core/src/main/resources/db/migration/** — no migration in this ticket (schema is M1-079a)
@@ -72,6 +93,52 @@ spec_refs:
 decision_refs:
   - D9
   - D16
+redteam_findings:
+  - date: 2026-05-25
+    category: PERM-ESCAL
+    severity: high
+    promise: |
+      Banned and probation users are ineligible for group-admin promotion.
+    gap: |
+      PromoteCommandHandler checks target.isBanned but does not check
+      probation_until. A bot admin can /promote a probation user.
+    repro: |
+      Bot admin /promote X while X is in probation → X becomes group admin.
+    suggested_fix_class: missing-auth-check
+  - date: 2026-05-25
+    category: AUDIT-EVASION
+    severity: medium
+    promise: |
+      Audit-log the intent for security-sensitive privilege-granting paths.
+    gap: |
+      GroupAutoPromoteService.tryAutoPromote writes no audit row when
+      auto-promote succeeds. The elevation is invisible in audit_log.
+    repro: |
+      User auto-promoted in a new group; no audit_log row records the event.
+    suggested_fix_class: audit-log-coverage
+  - date: 2026-05-25
+    category: PERM-ESCAL
+    severity: medium
+    promise: |
+      Banned-user check gates all application-level DB writes (step 4).
+    gap: |
+      InboundRouter's step 3 cont. fires ensureGroupMembership for ALL
+      known users (including banned) BEFORE the ban check at step 4.
+    repro: |
+      Banned user X messages a group → gets a membership row before step 4 stops them.
+    suggested_fix_class: trust-boundary-tightening
+redteam_audits:
+  - date: 2026-05-25
+    verdict: FINDINGS
+    base: "0d81d46^"
+    head: "0d81d46"
+    verdict_file: docs/plan/m1/redteam/M1-079c-2026-05-25.md
+    findings_count: 3
+    out_of_model_count: 1
+    note: |
+      1 high (missing probation check on /promote target), 2 medium
+      (auto-promote audit gap, membership write before ban check).
+      Ticket is done; remediation lands as a new ticket.
 ---
 
 # M1-079c: /promote + /demote + /group-timezone + auto-promote + group dispatch

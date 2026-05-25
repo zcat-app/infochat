@@ -11,6 +11,7 @@ import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import app.zcat.infochat.provider.command.CommandPermissions;
 import app.zcat.infochat.provider.command.ConfirmStateService;
+import app.zcat.infochat.provider.group.GroupAutoPromoteService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.context.control.ActivateRequestContext;
 import jakarta.enterprise.inject.Instance;
@@ -214,6 +215,10 @@ public class InboundRouter {
             "SELECT id FROM groups WHERE adapter = ? AND upstream_group_id = ? "
                     + "AND removed_at IS NULL";
 
+    private static final String ENSURE_MEMBERSHIP_SQL =
+            "INSERT INTO group_membership (group_id, user_id) VALUES (?, ?) "
+                    + "ON CONFLICT DO NOTHING";
+
     @Inject
     Instance<CommandHandler> commandHandlers;
 
@@ -240,6 +245,9 @@ public class InboundRouter {
 
     @Inject
     ConfirmStateService confirmStateService;
+
+    @Inject
+    GroupAutoPromoteService groupAutoPromoteService;
 
     @Inject
     CommandPermissions commandPermissions;
@@ -369,12 +377,7 @@ public class InboundRouter {
         // Step 3 — Group unknown contact + auto-register. Per spec
         // §Authorization model step 3: insert a row under
         // registration_state='group_only' with probation_until = NOW()
-        // + slow_start_window, then continue to step 4. The auto-
-        // promote slot and group_membership row inserts are deferred
-        // to T2-F. A freshly auto-registered user is never banned
-        // (V5 default is_banned=FALSE), so step 4 below will see
-        // is_banned=false either via BanCheck SQL or by the row that
-        // was just written.
+        // + slow_start_window, then continue to step 4.
         //
         // M1-045 redteam-fix (AUTH-BYPASS): re-fetch snapshot after
         // the insert so step 5's probation gate sees the just-written
@@ -390,10 +393,27 @@ public class InboundRouter {
 
         // Step 4 — ban check per spec §User ban + §Authorization model
         // step 4. The fixed error.ban.fixed reply is sent and dispatch
-        // stops.
+        // stops. Fires BEFORE auto-promote/membership so banned users
+        // never trigger application-level DB writes.
         if (banCheck.isBanned(adapterName, contactId)) {
             sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_BAN_FIXED));
             return;
+        }
+
+        // Step 4.1 — Group membership + auto-promote (M1-079c).
+        // Placed AFTER the ban check (step 4) so banned users never
+        // get a membership row written. For every non-banned group-
+        // scope sender, attempt auto-promote first (INSERT with
+        // is_group_admin=true ON CONFLICT DO NOTHING), then ensure a
+        // non-admin membership row exists. The null check mirrors the
+        // replyTarget pattern: plain-JUnit test subclasses do not wire
+        // CDI fields.
+        if (msg.scope() instanceof ScopeRef.Group group && snapshot.isPresent()
+                && groupAutoPromoteService != null) {
+            UUID groupId = lookupGroupId(adapterName, group.adapterGroupId());
+            UUID senderId = snapshot.get().id();
+            groupAutoPromoteService.tryAutoPromote(groupId, senderId, adapterName, contactId);
+            ensureGroupMembership(groupId, senderId);
         }
 
         // Step 4.7 — DM-gate carve-out (M1-045 redteam-fix INFO-LEAK).
@@ -715,6 +735,18 @@ public class InboundRouter {
         } catch (SQLException e) {
             throw new IllegalStateException(
                     "InboundRouter.lookupGroupId failed for adapter=" + adapter, e);
+        }
+    }
+
+    private void ensureGroupMembership(@NonNull UUID groupId, @NonNull UUID userId) {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(ENSURE_MEMBERSHIP_SQL)) {
+            ps.setObject(1, groupId);
+            ps.setObject(2, userId);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "InboundRouter.ensureGroupMembership failed", e);
         }
     }
 
