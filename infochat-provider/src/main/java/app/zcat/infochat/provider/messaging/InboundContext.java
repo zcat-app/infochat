@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.messaging;
 
 import jakarta.enterprise.context.RequestScoped;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Per-inbound-dispatch context bean. Carries the originating
@@ -33,6 +34,7 @@ import jakarta.enterprise.context.RequestScoped;
 public class InboundContext {
 
     private String adapterName;
+    private String senderContactId;
 
     /**
      * The originating adapter's {@code name()} for the current
@@ -49,5 +51,22 @@ public class InboundContext {
 
     public void setAdapterName(String adapterName) {
         this.adapterName = adapterName;
+    }
+
+    /**
+     * The sender's cryptographic contact id for the current inbound
+     * dispatch. Available for both DM and group scope — the sender
+     * always has a contact id regardless of scope shape. Handlers
+     * that need to look up the calling user by
+     * {@code (adapter, contact_id)} should use this instead of
+     * extracting the contact id from {@link app.zcat.infochat.messaging.ScopeRef},
+     * which only carries it for DM scope.
+     */
+    public String senderContactId() {
+        return senderContactId;
+    }
+
+    public void setSenderContactId(@Nullable String senderContactId) {
+        this.senderContactId = senderContactId;
     }
 }

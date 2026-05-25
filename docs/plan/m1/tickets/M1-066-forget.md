@@ -1,16 +1,19 @@
 ---
 id: M1-066
 title: /forget — per-scope privacy purge with remaining-scopes disclosure
-status: pending
+status: done
 created: 2026-05-24
-last_updated: 2026-05-24
+last_updated: 2026-05-25
 blocked_by:
   - M1-061
-files_budget: 6
+files_budget: 9
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/ForgetCommandHandler.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/ForgetConfirm.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/ForgetPurgeService.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
+  - infochat-provider/src/main/resources/bundles/en.properties
+  - infochat-provider/src/main/resources/bundles/cs.properties
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/ForgetCommandHandlerTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/ForgetPurgeServiceTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterForgetIT.java
@@ -53,12 +56,85 @@ spec_refs:
 decision_refs:
   - D13
   - D37
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-05-25
+    verdict: REWORK
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 11
+      added: 1317
+      removed: 14
+  - round: 2
+    date: 2026-05-25
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 11
+      added: 1409
+      removed: 20
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
-clarity_check: {}
+revisions:
+  - date: 2026-05-25
+    reason: budget-breach refine — files_budget 6→9, added BundleKeys.java + en.properties + cs.properties to files_scope
+    prior_files_budget: 6
+    prior_files_scope_count: 6
+escalations:
+  - date: 2026-05-25
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A
+redteam_findings:
+  - date: 2026-05-25
+    category: AUDIT-EVASION
+    severity: medium
+    promise: |
+      "The audit log records *intent* (command name, actor, scope, target),
+      not user-authored prose." (docs/spec/security.md §Secrets handling) and
+      "Audit-log the intent." (docs/spec/security.md §Authorization model step 8)
+    gap: |
+      ForgetCommandHandler.java insertAudit method builds the AuditRow without
+      scope_id, even though the scopeId variable is available at the call site
+      in executeForget. An operator reviewing the audit log after a /forget
+      cannot determine which scope was purged.
+    repro: |
+      (1) User A runs /forget confirm from DM scope.
+      (2) User A runs /forget confirm from Group-X scope.
+      (3) Operator queries audit_log WHERE action = 'FORGET' AND actor_user_id = A.
+      (4) Both rows lack scope_id; operator cannot distinguish which scope each
+      row corresponds to.
+    suggested_fix_class: audit-log-coverage
+redteam_audits:
+  - date: 2026-05-25
+    verdict: FINDINGS
+    base: main
+    head: m1/M1-066-forget
+    verdict_file: docs/plan/m1/redteam/M1-066-2026-05-25.md
+    findings_count: 1
+    out_of_model_count: 1
+    note: |
+      One medium AUDIT-EVASION finding: the /forget audit row omits scope_id,
+      so the operator cannot distinguish which scope was purged. The done
+      commit is immutable; the fix lands as a new remediation ticket. One
+      out-of-model note about group-scope contactIdOf returning null
+      (pre-existing pattern, group dispatch not yet wired).
+clarity_check:
+  date: 2026-05-25
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-066: /forget — per-scope privacy purge with remaining-scopes disclosure
@@ -104,3 +180,7 @@ See the YAML `acceptance:` list above. In summary:
 - Adjacent pattern: `BanConfirm` / `RemoveSourceConfirm` for the confirm
   variant; `SavedPostRepository` for the cascade-style DELETE.
 - Relevant design: `docs/design/03-commands.md` §3.9 /forget.
+
+## Round 1 rework
+
+1. **Audit-before-effect ordering (Invariant 7).** `ForgetCommandHandler.executeForget()` writes the audit row AFTER the DELETEs to use the row counts. The spec requires "before". Fix: pre-count rows via `SELECT COUNT(*)` for each table, write the audit row with those pre-counts, then execute the DELETEs. Update the code comment to reflect the new ordering.

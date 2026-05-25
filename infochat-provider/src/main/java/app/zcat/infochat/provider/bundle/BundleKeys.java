@@ -703,6 +703,21 @@ public final class BundleKeys {
     /** No snapshot row at all for the requested {@code (asset, sub-verb, vs)} triple. */
     public static final String ERROR_ASSET_NO_DATA = "error.asset.no_data";
 
+    // ----- /forget (M1-066) --------------------------------------------------
+    // Per docs/spec/commands.md §Conversation control — /forget.
+
+    /** First-call prompt template. Token {@code {0}} = timeout in whole seconds. */
+    public static final String REPLY_CONFIRM_PROMPT_FORGET = "reply.confirm.prompt.forget";
+
+    /** Confirmed purge, no remaining scopes — bare confirmation. */
+    public static final String REPLY_FORGET_CLEARED = "reply.forget.cleared";
+
+    /** Confirmed purge, N remaining scopes. Token {@code {0}} = remaining scope count. */
+    public static final String REPLY_FORGET_CLEARED_WITH_REMAINING = "reply.forget.cleared_with_remaining";
+
+    /** Idempotent no-op — nothing to purge. */
+    public static final String REPLY_FORGET_NOOP = "reply.forget.noop";
+
     private BundleKeys() {
         throw new AssertionError("BundleKeys is a constant holder and must not be instantiated");
     }

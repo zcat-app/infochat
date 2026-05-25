@@ -281,6 +281,7 @@ public class InboundRouter {
 
         String raw = msg.text();
         String contactId = msg.sender().contactId();
+        inboundContext.setSenderContactId(contactId);
 
         // Step 1.5 — transport-level rate cap. Fires FIRST per spec
         // §Authorization model step 1.5: over-cap inbound is dropped
