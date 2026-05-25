@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 8 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 97 |
+| done | 98 |
 | deferred | 6 |
 | **total** | **111** |
 
@@ -25,7 +25,7 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-079 — Group infrastructure umbrella — group lifecycle roundtrip IT (complexity: medium, risk: medium)
-- M1-081a — Re-eval job + quarantine NOTIFY + tagger partial-valid + TTL (complexity: high, risk: high)
+- M1-081b — Quarantine admin commands + review listener + /audit (complexity: medium, risk: medium)
 
 ---
 
@@ -46,8 +46,7 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 - M1-080a — blocked_by: M1-079 (pending)
 - M1-080b — blocked_by: M1-080a (pending)
 - M1-080c — blocked_by: M1-080a (pending), M1-080b (pending)
-- M1-081 — blocked_by: M1-081a (pending), M1-081b (pending)
-- M1-081b — blocked_by: M1-081a (pending)
+- M1-081 — blocked_by: M1-081a (done), M1-081b (pending)
 
 ---
 
@@ -66,6 +65,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-081a | Re-eval job + quarantine NOTIFY + tagger partial-valid + TTL | 2026-05-25 | round 2 APPROVE |
 | M1-079e | Member-access handler group unwinding + DM-only gates | 2026-05-25 | round 1 APPROVE |
 | M1-079d | Admin-gated handler group unwinding (source/tag/lang) | 2026-05-25 | round 1 APPROVE |
 | M1-079c | /promote + /demote + /group-timezone + auto-promote + group dispatch | 2026-05-25 | round 1 APPROVE |
@@ -253,8 +253,8 @@ M1-079a (done)
   │     └── M1-079 (pending) [see above]
   ├── M1-079e (done)
   │     └── M1-079 (pending) [see above]
-  └── M1-081a (pending) ← runnable
+  └── M1-081a (done)
         ├── M1-081 (pending)
-        └── M1-081b (pending)
+        └── M1-081b (pending) ← runnable
               └── M1-081 (pending) [see above]
 ```

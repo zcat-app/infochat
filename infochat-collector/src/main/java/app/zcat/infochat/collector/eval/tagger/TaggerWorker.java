@@ -2,6 +2,7 @@ package app.zcat.infochat.collector.eval.tagger;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import app.zcat.infochat.collector.notifier.ThrottledAdminNotifier;
 import app.zcat.infochat.llm.LlmProvider;
 import app.zcat.infochat.llm.LlmResponse;
 import app.zcat.infochat.llm.ModelTask;
@@ -152,6 +153,9 @@ public class TaggerWorker {
     @Inject
     TagVocabulary tagVocabulary;
 
+    @Inject
+    ThrottledAdminNotifier throttledAdminNotifier;
+
     @ConfigProperty(name = "infochat.llm.tagger.max-concurrency")
     int maxConcurrency;
 
@@ -256,11 +260,17 @@ public class TaggerWorker {
             return new TaggerOutcome(Outcome.LLM, second.validTags());
         }
 
-        // Second failure on any path → bootstrap-fallback audit log.
+        // Second failure on any path → bootstrap-fallback audit log +
+        // throttled admin notification coalesced on error_class.
         LOG.warnf(
             "TaggerWorker: tagger fallback to bootstrap for post_id=%s "
                 + "(first_kind=%s second_kind=%s error_class=%s)",
             row.id(), first.kind(), second.kind(), ERROR_CLASS_TAGGER_FALLBACK);
+        throttledAdminNotifier.notifyOnce(
+            ERROR_CLASS_TAGGER_FALLBACK,
+            ERROR_CLASS_TAGGER_FALLBACK,
+            "Tagger fallback to bootstrap_tags for post_id=" + row.id()
+                + " (first=" + first.kind() + " second=" + second.kind() + ")");
         return new TaggerOutcome(Outcome.BOOTSTRAP, row.bootstrapTags());
     }
 

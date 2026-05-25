@@ -1,0 +1,142 @@
+package app.zcat.infochat.collector.eval.reeval;
+
+import app.zcat.infochat.collector.eval.TransactionHelper;
+import app.zcat.infochat.collector.notify.QuarantineNotifyEmitter;
+import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.AuditLogWriter;
+import app.zcat.infochat.core.audit.RedactionHook;
+import io.quarkus.scheduler.Scheduled;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.jboss.logging.Logger;
+
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * Enforces Invariant 6: admin-review TTL auto-reject. A PENDING
+ * quarantine row aged past the profile-driven TTL transitions to
+ * REJECTED; the attached NEEDS_REVIEW post transitions to
+ * QUARANTINED; the placeholder becomes permanent. No admin
+ * notification fires (the notifier already paged on NEEDS_REVIEW
+ * entry).
+ *
+ * <p>BENIGN_CLOSED rows are NOT subject to the TTL — they stay
+ * BENIGN_CLOSED with no transition.
+ */
+@ApplicationScoped
+public class AdminReviewTtlJob {
+
+    private static final Logger LOG = Logger.getLogger(AdminReviewTtlJob.class);
+
+    @Inject
+    DataSource dataSource;
+
+    @Inject
+    QuarantineNotifyEmitter quarantineNotifyEmitter;
+
+    @Inject
+    AuditLogWriter auditLogWriter;
+
+    @ConfigProperty(name = "infochat.reeval.admin-review-ttl")
+    Duration adminReviewTtl;
+
+    @ConfigProperty(name = "infochat.reeval.ttl-batch-size", defaultValue = "32")
+    int batchSize;
+
+    @Scheduled(every = "{infochat.reeval.ttl-poll-interval}")
+    public void onTick() {
+        List<TtlCandidate> candidates;
+        try {
+            candidates = enumerateExpired();
+        } catch (SQLException e) {
+            LOG.warn("AdminReviewTtlJob: failed to enumerate expired rows; skipping tick", e);
+            return;
+        }
+        for (TtlCandidate candidate : candidates) {
+            try {
+                rejectExpired(candidate);
+            } catch (RuntimeException e) {
+                LOG.warnf(e, "AdminReviewTtlJob: failed to reject quarantine_id=%s; will retry next tick",
+                    candidate.quarantineId());
+            }
+        }
+    }
+
+    List<TtlCandidate> enumerateExpired() throws SQLException {
+        Instant cutoff = Instant.now().minus(adminReviewTtl);
+        final String sql =
+            "SELECT q.id, q.post_id, p.fetched_at "
+                + "FROM quarantine q "
+                + "JOIN post p ON p.id = q.post_id AND p.fetched_at = q.post_fetched_at "
+                + "WHERE q.status = 'PENDING' "
+                + "  AND q.flagged_at <= ? "
+                + "ORDER BY q.flagged_at "
+                + "LIMIT ?";
+        List<TtlCandidate> candidates = new ArrayList<>();
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setTimestamp(1, Timestamp.from(cutoff));
+            ps.setInt(2, batchSize);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    candidates.add(new TtlCandidate(
+                        (UUID) rs.getObject(1),
+                        (UUID) rs.getObject(2),
+                        rs.getTimestamp(3).toInstant()));
+                }
+            }
+        }
+        return candidates;
+    }
+
+    void rejectExpired(TtlCandidate candidate) {
+        TransactionHelper.inTransaction(dataSource, "AdminReviewTtlJob.reject", conn -> {
+            // Transition quarantine row PENDING→REJECTED.
+            final String rejectSql =
+                "UPDATE quarantine SET status = 'REJECTED', updated_at = now() "
+                    + "WHERE id = ? AND status = 'PENDING'";
+            try (PreparedStatement ps = conn.prepareStatement(rejectSql)) {
+                ps.setObject(1, candidate.quarantineId());
+                int updated = ps.executeUpdate();
+                if (updated == 0) {
+                    return;
+                }
+            }
+            // Transition post NEEDS_REVIEW→QUARANTINED (placeholder
+            // becomes permanent).
+            final String postSql =
+                "UPDATE post SET status = 'QUARANTINED', status_changed_at = now() "
+                    + "WHERE id = ? AND fetched_at = ? AND status = 'NEEDS_REVIEW'";
+            try (PreparedStatement ps = conn.prepareStatement(postSql)) {
+                ps.setObject(1, candidate.postId());
+                ps.setTimestamp(2, Timestamp.from(candidate.postFetchedAt()));
+                ps.executeUpdate();
+            }
+            quarantineNotifyEmitter.emit(conn, "quarantine", candidate.quarantineId(), "REJECTED");
+            RedactionHook.AuditRow auditRow = RedactionHook.AuditRow.builder()
+                .actorContactId("admin_review_ttl_job")
+                .action(AuditAction.QUARANTINE_TTL_REJECT)
+                .targetKind("quarantine")
+                .targetId(candidate.quarantineId().toString())
+                .detailsJson("{\"post_id\":\"" + candidate.postId() + "\"}")
+                .build();
+            auditLogWriter.write(conn, auditRow);
+        });
+        LOG.infof("AdminReviewTtlJob: TTL expired for quarantine_id=%s — auto-rejected",
+            candidate.quarantineId());
+    }
+
+    record TtlCandidate(UUID quarantineId, UUID postId, Instant postFetchedAt) {
+    }
+}

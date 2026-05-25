@@ -10,6 +10,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
+import org.jspecify.annotations.NonNull;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -138,6 +139,23 @@ public class Stage2Worker {
         try {
             Stage2VerdictHandler.Verdict outcome = invokeWithRetryOnce(postId, stage1Result.originalBody());
             verdictHandler.apply(postId, postFetchedAt, outcome);
+        } finally {
+            concurrencyPermits.release();
+        }
+    }
+
+    /**
+     * Verdict-only entry point for the re-evaluation job. Returns the
+     * Stage 2 verdict without applying any state-machine side effects
+     * — the re-eval job handles verdict dispatch differently (separate
+     * caps, audit trail, quarantine transitions).
+     *
+     * <p>Bounded by the same concurrency semaphore as {@link #judge}.
+     */
+    public Stage2VerdictHandler.Verdict judgeBody(@NonNull UUID postId, @NonNull String originalBody) {
+        concurrencyPermits.acquireUninterruptibly();
+        try {
+            return invokeWithRetryOnce(postId, originalBody);
         } finally {
             concurrencyPermits.release();
         }

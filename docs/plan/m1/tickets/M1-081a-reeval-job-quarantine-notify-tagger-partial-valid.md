@@ -1,12 +1,13 @@
 ---
 id: M1-081a
 title: Re-eval job + quarantine NOTIFY + tagger partial-valid + TTL
-status: pending
+status: done
 created: 2026-05-25
 last_updated: 2026-05-25
+outline_file: target/m1-tick-outline-M1-081a.md
 blocked_by:
   - M1-079a
-files_budget: 12
+files_budget: 15
 files_scope:
   - infochat-core/src/main/resources/db/migration/V21__quarantine_admin.sql
   - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/reeval/ReEvaluationJob.java
@@ -19,6 +20,9 @@ files_scope:
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/reeval/PerSourceUnknownTrackerTest.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/reeval/AdminReviewTtlJobTest.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/tagger/TaggerWorkerTest.java
+  - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/stage2/Stage2Worker.java
+  - infochat-collector/src/test/resources/application.properties
+  - infochat-core/src/main/java/app/zcat/infochat/core/audit/AuditAction.java
 complexity: high
 risk: high
 round_cap: 3
@@ -81,12 +85,89 @@ decision_refs:
   - D34
   - D42
 
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-05-25
+    verdict: REWORK
+    checks:
+      scope_drift: FAIL
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 16
+      added: 1770
+      removed: 17
+  - round: 2
+    date: 2026-05-25
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 16
+      added: 1788
+      removed: 19
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
-clarity_check: {}
+redteam_findings:
+  - date: 2026-05-25
+    category: DOS
+    severity: high
+    status: fixed
+    promise: |
+      A per-post attempt counter bounds retries; the infra-failure class and the UNKNOWN class carry separate, independent caps [...] INJECTION, MALWARE, or UNKNOWN on either class -> post stays QUARANTINED, the stage2_failed flag is preserved, and the attempt counter increments.
+    gap: |
+      ReEvaluationJob.processOne increments the attempt counter for ALL non-BENIGN verdicts including INFRA_FAILURE. The spec limits counter increments to INJECTION, MALWARE, or UNKNOWN verdicts only. INFRA_FAILURE is a transient condition that should not consume an attempt.
+    repro: |
+      A temporary LLM outage during re-eval ticks exhausts the cap for every post in the queue, draining them all to NEEDS_REVIEW despite no successful evaluation.
+    suggested_fix_class: other
+  - date: 2026-05-25
+    category: AUDIT-EVASION
+    severity: medium
+    status: fixed
+    promise: |
+      approve and reject run as stored procedures [...] that internally read the original under the procedure's elevated rights and perform the restore + audit-log + NOTIFY in one transaction.
+    gap: |
+      AdminReviewTtlJob.rejectExpired transitions quarantine PENDING→REJECTED without writing any audit_log entry. The stored procedure reject_quarantine writes audit for admin-initiated rejections, but the TTL auto-reject bypasses the procedure.
+    repro: |
+      A PENDING quarantine row ages past the TTL. The TTL job rejects it. An admin querying audit_log for this quarantine_id finds no REJECT row.
+    suggested_fix_class: audit-log-coverage
+  - date: 2026-05-25
+    category: DOS
+    severity: medium
+    status: fixed
+    promise: |
+      Per-source UNKNOWN auto-disable. A source whose Stage 2 UNKNOWN rate exceeds a profile-driven threshold over a profile-driven rolling window has its source.status transitioned to 'failed'.
+    gap: |
+      PerSourceUnknownTracker.checkAllSources counts ALL QUARANTINED posts with stage2_done=TRUE AND stage2_failed=FALSE as UNKNOWN, but this filter also matches INJECTION/MALWARE verdicts. No stage2_verdict column exists to distinguish them.
+    repro: |
+      A source with many legitimate INJECTION detections has its UNKNOWN rate inflated by INJECTION verdicts, leading to false-positive source disabling.
+    suggested_fix_class: other
+redteam_audits:
+  - date: 2026-05-25
+    verdict: FINDINGS
+    base: main
+    head: 8702037
+    verdict_file: docs/plan/m1/redteam/M1-081a-2026-05-25.md
+    findings_count: 3
+    out_of_model_count: 1
+    note: |
+      Three findings: (1) INFRA_FAILURE verdict consuming re-eval counter (DOS/high),
+      (2) TTL auto-reject missing audit row (AUDIT-EVASION/medium), (3) UNKNOWN
+      tracker conflating INJECTION/MALWARE with UNKNOWN (DOS/medium). All require
+      remediation tickets since M1-081a is status:done. One out-of-model observation
+      about SECURITY DEFINER search_path (pre-existing pattern, not new to this diff).
+clarity_check:
+  date: 2026-05-25
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-081a: Re-eval job + quarantine NOTIFY + tagger partial-valid + TTL

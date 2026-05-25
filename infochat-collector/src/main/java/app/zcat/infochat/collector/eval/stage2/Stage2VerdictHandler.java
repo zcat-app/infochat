@@ -1,6 +1,7 @@
 package app.zcat.infochat.collector.eval.stage2;
 
 import app.zcat.infochat.collector.eval.TransactionHelper;
+import app.zcat.infochat.collector.notify.QuarantineNotifyEmitter;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -9,6 +10,7 @@ import org.jboss.logging.Logger;
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -109,6 +111,9 @@ public class Stage2VerdictHandler {
     @Inject
     DataSource dataSource;
 
+    @Inject
+    QuarantineNotifyEmitter quarantineNotifyEmitter;
+
     @ConfigProperty(name = "infochat.security.release-on-stage2-failure")
     boolean releaseOnStage2Failure;
 
@@ -129,19 +134,20 @@ public class Stage2VerdictHandler {
     private void applyBenign(UUID postId, Instant postFetchedAt) {
         TransactionHelper.inTransaction(dataSource, "Stage2VerdictHandler", conn -> {
             updatePostStage2DoneRaw(conn, postId, postFetchedAt, /* stage2Failed */ false);
+            setStage2Verdict(conn, postId, postFetchedAt, "BENIGN");
             updateStage1QuarantineRowsToBenignClosed(conn, postId);
+            emitQuarantineNotifyForClosedRows(conn, postId);
         });
         LOG.infof("Stage 2 verdict: BENIGN post_id=%s — released to Tagger/Embedding (stage2_done=true, status=RAW)",
             postId);
     }
 
     private void applyQuarantineVerdict(UUID postId, Instant postFetchedAt, Verdict verdict) {
-        TransactionHelper.inTransaction(dataSource, "Stage2VerdictHandler", conn ->
-            updatePostQuarantined(conn, postId, postFetchedAt, /* stage2Failed */ false));
-        // UNKNOWN feeds the future re-eval queue (T2-G); the queue
-        // reads (status='QUARANTINED' AND stage2_done=true AND
-        // stage2_failed=false) so the flags set here are the
-        // cursor without any extra column.
+        TransactionHelper.inTransaction(dataSource, "Stage2VerdictHandler", conn -> {
+            updatePostQuarantined(conn, postId, postFetchedAt, /* stage2Failed */ false);
+            setStage2Verdict(conn, postId, postFetchedAt, verdict.name());
+            emitQuarantineNotifyForPendingRows(conn, postId);
+        });
         LOG.infof("Stage 2 verdict: %s post_id=%s — quarantined (stage2_done=true, status=QUARANTINED)",
             verdict, postId);
     }
@@ -204,6 +210,17 @@ public class Stage2VerdictHandler {
         }
     }
 
+    private static void setStage2Verdict(Connection conn, UUID postId, Instant postFetchedAt,
+                                          String verdict) throws SQLException {
+        final String sql = "UPDATE post SET stage2_verdict = ? WHERE id = ? AND fetched_at = ?";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, verdict);
+            ps.setObject(2, postId);
+            ps.setTimestamp(3, Timestamp.from(postFetchedAt));
+            ps.executeUpdate();
+        }
+    }
+
     /**
      * Transition the Stage 1 PENDING quarantine rows to
      * BENIGN_CLOSED on a BENIGN verdict. Only Stage 1 rows are
@@ -221,6 +238,45 @@ public class Stage2VerdictHandler {
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setObject(1, postId);
             ps.executeUpdate();
+        }
+    }
+
+    /**
+     * Emit quarantine_review NOTIFY for each BENIGN_CLOSED quarantine
+     * row belonging to this post. Called after the BENIGN verdict
+     * transitions Stage 1 rows from PENDING to BENIGN_CLOSED.
+     */
+    private void emitQuarantineNotifyForClosedRows(Connection conn, UUID postId) throws SQLException {
+        final String sql =
+            "SELECT id FROM quarantine WHERE post_id = ? AND status = 'BENIGN_CLOSED'";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setObject(1, postId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    UUID quarantineId = (UUID) rs.getObject(1);
+                    quarantineNotifyEmitter.emit(conn, "quarantine", quarantineId, "BENIGN_CLOSED");
+                }
+            }
+        }
+    }
+
+    /**
+     * Emit quarantine_review NOTIFY for each PENDING quarantine row
+     * belonging to this post. Called on INJECTION/MALWARE/UNKNOWN
+     * verdicts to signal that the quarantine decision is finalized
+     * and the admin review queue has a new entry.
+     */
+    private void emitQuarantineNotifyForPendingRows(Connection conn, UUID postId) throws SQLException {
+        final String sql =
+            "SELECT id FROM quarantine WHERE post_id = ? AND status = 'PENDING'";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setObject(1, postId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    UUID quarantineId = (UUID) rs.getObject(1);
+                    quarantineNotifyEmitter.emit(conn, "quarantine", quarantineId, "PENDING");
+                }
+            }
         }
     }
 
