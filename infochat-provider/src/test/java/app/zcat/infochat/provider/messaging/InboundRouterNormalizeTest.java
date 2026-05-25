@@ -8,6 +8,7 @@ import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import app.zcat.infochat.provider.command.ConfirmStateService;
 import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.util.TypeLiteral;
@@ -413,6 +414,9 @@ class InboundRouterNormalizeTest {
         // log-silent rationale.
         router.commandPermissions = new NoopCommandPermissions();
         router.probationCheck = new NoopProbationCheck();
+        router.summaryAnchorRepository = new SummaryAnchorRepository() {
+            @Override public void clear(UUID userId, UUID scopeId) {}
+        };
         // dataSource intentionally left null — lookupUser is overridden
         // above so the DataSource field is never accessed.
         return router;

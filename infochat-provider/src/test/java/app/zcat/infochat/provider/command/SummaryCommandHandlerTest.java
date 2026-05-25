@@ -3,6 +3,7 @@ package app.zcat.infochat.provider.command;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.messaging.InboundContext;
 import app.zcat.infochat.provider.summary.ClusterTraversal;
@@ -80,6 +81,7 @@ class SummaryCommandHandlerTest {
     private SummaryCommandHandler handler;
     private RecordingEligiblePostQuery eligiblePostQuery;
     private RecordingSummaryProseGenerator proseGenerator;
+    private RecordingSummaryAnchorRepository anchorRepository;
     private BundleLoader bundleLoader;
 
     @BeforeEach
@@ -87,6 +89,7 @@ class SummaryCommandHandlerTest {
         bundleLoader = newRealBundleLoader();
         eligiblePostQuery = new RecordingEligiblePostQuery();
         proseGenerator = new RecordingSummaryProseGenerator();
+        anchorRepository = new RecordingSummaryAnchorRepository();
         handler = new SummaryCommandHandler();
         handler.bundleLoader = bundleLoader;
         handler.dataSource = StubUserDataSource.userExists(UUID.randomUUID());
@@ -95,6 +98,7 @@ class SummaryCommandHandlerTest {
         handler.summaryProseGenerator = proseGenerator;
         handler.llmOutputSanitizer = new LlmOutputSanitizer();
         handler.translationPipeline = newEnShortCircuitPipeline();
+        handler.summaryAnchorRepository = anchorRepository;
         InboundContext context = new InboundContext();
         context.setAdapterName("inmemory");
         handler.inboundContext = context;
@@ -254,6 +258,33 @@ class SummaryCommandHandlerTest {
                 "sanitizer MUST strip /grant-admin from LLM-authored prose. Got: " + body);
         assertTrue(body.contains("[redacted command]"),
                 "sanitizer MUST replace the matched command with the fixed literal. Got: " + body);
+    }
+
+    @Test
+    void anchorWrittenOnSuccessfulSummary() {
+        Post p = post(PREFIX + "a1", "Anchor headline", Instant.now());
+        eligiblePostQuery.seedPosts(List.of(p), 0);
+        proseGenerator.setResponseText("Anchor prose.");
+
+        handler.handle(new ScopeRef.Dm(PREFIX + "anc"), "/summary");
+
+        assertEquals(1, anchorRepository.writeCount(),
+                "anchor must be written after successful /summary");
+        assertFalse(anchorRepository.lastPostUids().isEmpty(),
+                "anchor must contain the frozen post UIDs");
+    }
+
+    @Test
+    void anchorWrittenOnDegradedFallbackPath() {
+        Post p = post(PREFIX + "d2", "Degraded anchor headline", Instant.now());
+        eligiblePostQuery.seedPosts(List.of(p), 0);
+        proseGenerator.setDegradedMode(true);
+
+        handler.handle(new ScopeRef.Dm(PREFIX + "dega"), "/summary");
+
+        assertEquals(1, anchorRepository.writeCount(),
+                "anchor IS written on degraded path (spec: '/retry against "
+                        + "this degraded run regenerates the prose')");
     }
 
     // ----- fixtures + collaborator stubs --------------------------------
@@ -531,5 +562,35 @@ class SummaryCommandHandlerTest {
         public boolean isWrapperFor(Class<?> iface) {
             return false;
         }
+    }
+
+    /**
+     * Recording stub for {@link SummaryAnchorRepository}: captures
+     * write calls without touching the DB.
+     */
+    private static final class RecordingSummaryAnchorRepository extends SummaryAnchorRepository {
+        private final AtomicInteger writes = new AtomicInteger();
+        private volatile List<String> lastPostUids = List.of();
+
+        @Override
+        public void write(UUID userId, UUID scopeId,
+                          String commandName, String argHash,
+                          List<String> postUids, String clusterMapJson) {
+            writes.incrementAndGet();
+            lastPostUids = List.copyOf(postUids);
+        }
+
+        @Override
+        public Optional<AnchorRow> read(UUID userId, UUID scopeId) {
+            return Optional.empty();
+        }
+
+        @Override
+        public void clear(UUID userId, UUID scopeId) {
+            // no-op in test
+        }
+
+        int writeCount() { return writes.get(); }
+        List<String> lastPostUids() { return lastPostUids; }
     }
 }

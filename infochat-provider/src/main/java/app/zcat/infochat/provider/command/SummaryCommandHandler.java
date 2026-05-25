@@ -4,6 +4,7 @@ import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import app.zcat.infochat.provider.command.SummaryArgs.Failure;
 import app.zcat.infochat.provider.command.SummaryArgs.ParseResult;
 import app.zcat.infochat.provider.command.SummaryArgs.Success;
@@ -22,12 +23,16 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 import javax.sql.DataSource;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.text.MessageFormat;
 import java.time.Instant;
+import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
@@ -109,6 +114,9 @@ public class SummaryCommandHandler implements CommandHandler {
     @Inject
     InboundContext inboundContext;
 
+    @Inject
+    SummaryAnchorRepository summaryAnchorRepository;
+
     @Override
     public String name() {
         return "summary";
@@ -154,6 +162,17 @@ public class SummaryCommandHandler implements CommandHandler {
 
         List<Cluster> clusters = clusterTraversal.cluster(result.posts());
         List<ClusterProse> prose = summaryProseGenerator.generate(clusters, "en");
+
+        // Write the summary anchor — enables /retry to replay the prose
+        // layer with the same deterministic post selection (D19, D36).
+        // Written on both normal and degraded paths: spec says "/retry
+        // against this degraded run regenerates the prose if the LLM
+        // has recovered."
+        List<String> postUids = result.posts().stream().map(Post::uid).toList();
+        String argHash = computeArgHash(rawText);
+        String clusterMapJson = serializeClusterMap(clusters);
+        summaryAnchorRepository.write(
+                scopeId.get(), scopeId.get(), "summary", argHash, postUids, clusterMapJson);
 
         StringBuilder out = new StringBuilder();
 
@@ -301,5 +320,42 @@ public class SummaryCommandHandler implements CommandHandler {
 
     private OutboundMessage reply(ScopeRef scope, String text) {
         return new OutboundMessage(scope, text, Instant.now(), UUID.randomUUID().toString());
+    }
+
+    /**
+     * SHA-256 of the normalized command text, used as the arg_hash in
+     * the summary_anchor row so /retry can detect whether the same
+     * args were used.
+     */
+    static String computeArgHash(String rawText) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] hash = md.digest(rawText.strip().getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(hash);
+        } catch (NoSuchAlgorithmException e) {
+            throw new AssertionError("SHA-256 is a mandatory JDK algorithm", e);
+        }
+    }
+
+    /**
+     * Serialize the cluster mapping as a JSON array of objects, each
+     * with {@code topicId} and {@code postUids}. Minimal JSON without
+     * external dependencies.
+     */
+    static String serializeClusterMap(List<Cluster> clusters) {
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < clusters.size(); i++) {
+            if (i > 0) sb.append(",");
+            Cluster c = clusters.get(i);
+            sb.append("{\"topicId\":\"").append(c.topicId()).append("\",\"postUids\":[");
+            List<Post> posts = c.posts();
+            for (int j = 0; j < posts.size(); j++) {
+                if (j > 0) sb.append(",");
+                sb.append("\"").append(posts.get(j).uid()).append("\"");
+            }
+            sb.append("]}");
+        }
+        sb.append("]");
+        return sb.toString();
     }
 }

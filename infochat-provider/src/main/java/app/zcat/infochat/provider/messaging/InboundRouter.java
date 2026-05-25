@@ -8,6 +8,7 @@ import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import app.zcat.infochat.provider.command.CommandPermissions;
 import app.zcat.infochat.provider.command.ConfirmStateService;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -245,6 +246,9 @@ public class InboundRouter {
     @Inject
     app.zcat.infochat.provider.chat.ChatAgent chatAgent;
 
+    @Inject
+    SummaryAnchorRepository summaryAnchorRepository;
+
     @ConfigProperty(name = "infochat.chat.body-cap", defaultValue = "2048")
     int chatBodyCap;
 
@@ -461,6 +465,15 @@ public class InboundRouter {
         }
         // Matching confirm-shape: leave pending in place; the
         // handler's takeMatching pops it on the dispatch path.
+
+        // Step 4.6 — anchor-clear on non-/retry input (M1-065).
+        // Spec §/retry: "any non-/retry input from the same (user,
+        // scope) clears the anchor." Fires for all commands (except
+        // /retry itself) and all chat-mode messages.
+        if (!"retry".equals(commandName)) {
+            UUID anchorActorId = snapshot.get().id();
+            summaryAnchorRepository.clear(anchorActorId, anchorActorId);
+        }
 
         // Step 6 — Parse + dispatch. The DM-gate (group_only + DM →
         // error.invite.required) moved to step 4.7 above so blocked

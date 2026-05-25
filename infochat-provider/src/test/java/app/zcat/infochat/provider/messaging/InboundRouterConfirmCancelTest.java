@@ -8,6 +8,7 @@ import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
+import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.command.BanConfirm;
 import app.zcat.infochat.provider.command.ConfirmStateService;
@@ -169,6 +170,9 @@ class InboundRouterConfirmCancelTest {
         // log-silent rationale.
         router.commandPermissions = new NoopCommandPermissions();
         router.probationCheck = new NoopProbationCheck();
+        router.summaryAnchorRepository = new SummaryAnchorRepository() {
+            @Override public void clear(UUID userId, UUID scopeId) {}
+        };
         router.maxInboundBodyBytes = 65536;
         router.setReplyTarget(target);
         return router;

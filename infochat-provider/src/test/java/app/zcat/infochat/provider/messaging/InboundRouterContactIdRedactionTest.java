@@ -10,6 +10,7 @@ import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import app.zcat.infochat.provider.command.ConfirmStateService;
 import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.util.TypeLiteral;
@@ -186,6 +187,9 @@ class InboundRouterContactIdRedactionTest {
         // log-silent rationale.
         router.commandPermissions = new NoopCommandPermissions();
         router.probationCheck = new NoopProbationCheck();
+        router.summaryAnchorRepository = new SummaryAnchorRepository() {
+            @Override public void clear(UUID userId, UUID scopeId) {}
+        };
         return router;
     }
 

@@ -1,0 +1,454 @@
+package app.zcat.infochat.provider.command;
+
+import app.zcat.infochat.messaging.OutboundMessage;
+import app.zcat.infochat.messaging.ScopeRef;
+import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.chat.CancellationService;
+import app.zcat.infochat.provider.chat.InFlightTracker;
+import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
+import app.zcat.infochat.provider.chat.SummaryAnchorRepository.AnchorRow;
+import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
+import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.summary.ClusterTraversal.Cluster;
+import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
+import app.zcat.infochat.provider.summary.SummaryProseGenerator;
+import app.zcat.infochat.provider.summary.SummaryProseGenerator.ClusterProse;
+import app.zcat.infochat.provider.translation.TranslationCache;
+import app.zcat.infochat.provider.translation.TranslationPipeline;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import javax.sql.DataSource;
+import java.io.PrintWriter;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+import java.sql.Array;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.SQLFeatureNotSupportedException;
+import java.sql.Statement;
+import java.sql.Timestamp;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.logging.Logger;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+class RetryCommandHandlerTest {
+
+    private static final String PREFIX = "m1-065-retry-";
+    private static final UUID USER_ID = UUID.randomUUID();
+
+    private RetryCommandHandler handler;
+    private StubAnchorRepository anchorRepo;
+    private RecordingProseGenerator proseGenerator;
+    private InFlightTracker tracker;
+
+    @BeforeEach
+    void setUp() throws Exception {
+        anchorRepo = new StubAnchorRepository();
+        proseGenerator = new RecordingProseGenerator();
+        tracker = new InFlightTracker();
+
+        CancellationService cancellationService = new CancellationService();
+        java.lang.reflect.Field timeoutField = CancellationService.class.getDeclaredField("statementTimeout");
+        timeoutField.setAccessible(true);
+        timeoutField.set(cancellationService, Duration.ofSeconds(30));
+
+        handler = new RetryCommandHandler();
+        handler.bundleLoader = newRealBundleLoader();
+        handler.cancellationService = cancellationService;
+        handler.dataSource = stubUserAndPostsDataSource(USER_ID, List.of());
+        handler.summaryAnchorRepository = anchorRepo;
+        handler.summaryProseGenerator = proseGenerator;
+        handler.llmOutputSanitizer = new LlmOutputSanitizer();
+        handler.translationPipeline = newEnShortCircuitPipeline();
+        handler.inFlightTracker = tracker;
+        handler.retryCap = 3;
+        handler.statusDriftThreshold = 0.25;
+        InboundContext ctx = new InboundContext();
+        ctx.setAdapterName("inmemory");
+        handler.inboundContext = ctx;
+    }
+
+    @Test
+    void handlerNameIsLiteralRetry() {
+        assertEquals("retry", handler.name());
+    }
+
+    @Test
+    void retriesFromAnchor() {
+        List<String> postUids = List.of(PREFIX + "r1");
+        String clusterMapJson = "[{\"topicId\":\"t-abc\",\"postUids\":[\"" + postUids.get(0) + "\"]}]";
+        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary", "hash", postUids, clusterMapJson);
+
+        // Stub the DataSource to return the posts as READY
+        Post readyPost = post(PREFIX + "r1", "Retry headline", Instant.now());
+        handler.dataSource = stubUserAndPostsDataSource(USER_ID, List.of(readyPost));
+        proseGenerator.responseText = "Retried prose.";
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(PREFIX + "anchor"), "/retry");
+
+        assertTrue(proseGenerator.callCount > 0,
+                "prose generator must be called for the retry");
+        assertTrue(reply.text().contains("Retried prose."),
+                "reply must contain the re-generated prose. Got: " + reply.text());
+    }
+
+    @Test
+    void rejectsWhenCapExhausted() {
+        List<String> postUids = List.of(PREFIX + "cap1");
+        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary", "hash", postUids, null);
+
+        // Provide READY posts so handler reaches the cap check
+        Post readyPost = post(PREFIX + "cap1", "Cap headline", Instant.now());
+        handler.dataSource = stubUserAndPostsDataSource(USER_ID, List.of(readyPost));
+
+        // Exhaust the cap (3 retries)
+        anchorRepo.incrementAndGetRetryCount(USER_ID, USER_ID);
+        anchorRepo.incrementAndGetRetryCount(USER_ID, USER_ID);
+        anchorRepo.incrementAndGetRetryCount(USER_ID, USER_ID);
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(PREFIX + "cap"), "/retry");
+
+        assertTrue(reply.text().contains("Retry limit reached"),
+                "reply must indicate cap exhausted. Got: " + reply.text());
+        assertEquals(0, proseGenerator.callCount,
+                "prose generator must NOT be called when cap is exhausted");
+    }
+
+    @Test
+    void filtersNonReadyUids() {
+        // Anchor has 4 UIDs but only 1 is READY (the rest are filtered out).
+        // 3/4 = 75% drift > 25% threshold, so the drift notice must appear.
+        List<String> postUids = List.of(
+                PREFIX + "f1", PREFIX + "f2",
+                PREFIX + "f3", PREFIX + "f4");
+        String json = "[{\"topicId\":\"t-x\",\"postUids\":[\""
+                + postUids.get(0) + "\",\"" + postUids.get(1) + "\",\""
+                + postUids.get(2) + "\",\"" + postUids.get(3) + "\"]}]";
+        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary", "hash", postUids, json);
+
+        // Only one post is READY
+        Post readyPost = post(postUids.get(0), "Surviving post", Instant.now());
+        handler.dataSource = stubUserAndPostsDataSource(USER_ID, List.of(readyPost));
+        proseGenerator.responseText = "Filtered retry.";
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(PREFIX + "filter"), "/retry");
+
+        assertTrue(reply.text().contains("3 of 4"),
+                "drift notice must cite excluded/original counts. Got: " + reply.text());
+        assertTrue(reply.text().contains("Filtered retry."),
+                "reply must contain the prose for surviving posts. Got: " + reply.text());
+    }
+
+    @Test
+    void filtersToEmptyReturnsError() {
+        List<String> postUids = List.of(PREFIX + "gone1");
+        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary", "hash", postUids, null);
+
+        // No posts are READY
+        handler.dataSource = stubUserAndPostsDataSource(USER_ID, List.of());
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(PREFIX + "empty"), "/retry");
+
+        assertTrue(reply.text().contains("no longer available"),
+                "reply must indicate no eligible posts. Got: " + reply.text());
+        assertEquals(0, proseGenerator.callCount,
+                "prose generator must NOT be called when all UIDs filtered out");
+        assertEquals(0, anchorRepo.incrementCallCount,
+                "retry counter must not increment when all posts are filtered out");
+    }
+
+    @Test
+    void noAnchorReturnsError() {
+        // No anchor seeded
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(PREFIX + "noanchor"), "/retry");
+
+        assertTrue(reply.text().contains("Nothing to retry"),
+                "reply must indicate no anchor. Got: " + reply.text());
+        assertEquals(0, proseGenerator.callCount);
+    }
+
+    @Test
+    void outputPassesThroughSanitizer() {
+        List<String> postUids = List.of(PREFIX + "s1");
+        String json = "[{\"topicId\":\"t-san\",\"postUids\":[\"" + postUids.get(0) + "\"]}]";
+        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary", "hash", postUids, json);
+
+        Post readyPost = post(PREFIX + "s1", "San headline", Instant.now());
+        handler.dataSource = stubUserAndPostsDataSource(USER_ID, List.of(readyPost));
+        // The LLM output contains a privileged command
+        proseGenerator.responseText = "Run /grant-admin to escalate.";
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(PREFIX + "san"), "/retry");
+
+        assertFalse(reply.text().contains("/grant-admin"),
+                "sanitizer must strip /grant-admin. Got: " + reply.text());
+        assertTrue(reply.text().contains("[redacted command]"),
+                "sanitizer must replace with [redacted command]. Got: " + reply.text());
+    }
+
+    // ----- fixtures + stubs ------------------------------------------------
+
+    private static Post post(String uid, String title, Instant publishedAt) {
+        return new Post(
+                UUID.randomUUID(), uid, UUID.randomUUID(), "TestSrc",
+                title, "https://example.com/" + uid, "Body for " + title,
+                publishedAt, List.of("test-tag"));
+    }
+
+    private static class StubAnchorRepository extends SummaryAnchorRepository {
+        private AnchorRow seeded = null;
+        int incrementCallCount = 0;
+
+        void seedAnchor(UUID userId, UUID scopeId, String commandName,
+                        String argHash, List<String> postUids, String clusterMapJson) {
+            seeded = new AnchorRow(userId, scopeId, commandName, argHash,
+                    postUids, clusterMapJson, Instant.now());
+        }
+
+        @Override
+        public int incrementAndGetRetryCount(UUID userId, UUID scopeId) {
+            incrementCallCount++;
+            return super.incrementAndGetRetryCount(userId, scopeId);
+        }
+
+        @Override
+        public void write(UUID userId, UUID scopeId, String commandName,
+                          String argHash, List<String> postUids, String clusterMapJson) {
+            seeded = new AnchorRow(userId, scopeId, commandName, argHash,
+                    postUids, clusterMapJson, Instant.now());
+            clearRetryCount(userId, scopeId);
+        }
+
+        @Override
+        public Optional<AnchorRow> read(UUID userId, UUID scopeId) {
+            return Optional.ofNullable(seeded);
+        }
+
+        @Override
+        public void clear(UUID userId, UUID scopeId) {
+            seeded = null;
+            clearRetryCount(userId, scopeId);
+        }
+    }
+
+    private static class RecordingProseGenerator extends SummaryProseGenerator {
+        int callCount = 0;
+        String responseText = "default retry prose";
+
+        @Override
+        public List<ClusterProse> generate(List<Cluster> clusters, String scopeLanguage) {
+            List<ClusterProse> out = new ArrayList<>();
+            for (Cluster c : clusters) {
+                callCount++;
+                out.add(new ClusterProse(c, responseText, false));
+            }
+            return out;
+        }
+    }
+
+    private static TranslationPipeline newEnShortCircuitPipeline() throws Exception {
+        TranslationPipeline pipeline = new TranslationPipeline();
+        java.lang.reflect.Field cacheField = TranslationPipeline.class.getDeclaredField("translationCache");
+        cacheField.setAccessible(true);
+        cacheField.set(pipeline, new TranslationCache());
+
+        java.lang.reflect.Field providerField = TranslationPipeline.class.getDeclaredField("translationProvider");
+        providerField.setAccessible(true);
+        providerField.set(pipeline, (app.zcat.infochat.messaging.TranslationProvider) (text, from, to) -> text);
+
+        java.lang.reflect.Field sanitizerField = TranslationPipeline.class.getDeclaredField("llmOutputSanitizer");
+        sanitizerField.setAccessible(true);
+        sanitizerField.set(pipeline, new LlmOutputSanitizer());
+        return pipeline;
+    }
+
+    private static BundleLoader newRealBundleLoader() throws Exception {
+        BundleLoader loader = new BundleLoader();
+        Method load = BundleLoader.class.getDeclaredMethod("load");
+        load.setAccessible(true);
+        load.invoke(loader);
+        return loader;
+    }
+
+    /**
+     * Stub DataSource that handles two SQL patterns:
+     * 1. SELECT id FROM users WHERE adapter = ? AND contact_id = ? → returns userId
+     * 2. SELECT ... FROM post ... WHERE p.uid = ANY(?) AND p.status = 'READY' → returns readyPosts
+     * 3. SELECT language FROM scope_preferences ... → returns "en"
+     */
+    private static DataSource stubUserAndPostsDataSource(UUID userId, List<Post> readyPosts) {
+        return new DataSource() {
+            @Override
+            public Connection getConnection() {
+                return (Connection) Proxy.newProxyInstance(
+                        Connection.class.getClassLoader(),
+                        new Class<?>[] { Connection.class },
+                        (proxy, method, args) -> switch (method.getName()) {
+                            case "prepareStatement" -> {
+                                String sql = (String) args[0];
+                                yield newPreparedStatement(sql, userId, readyPosts);
+                            }
+                            case "createStatement" -> newStatementProxy();
+                            case "createArrayOf" -> newArrayProxy();
+                            case "close" -> null;
+                            default -> throw new UnsupportedOperationException(
+                                    "Conn." + method.getName());
+                        });
+            }
+
+            @Override public Connection getConnection(String u, String p) { return getConnection(); }
+            @Override public PrintWriter getLogWriter() { throw new UnsupportedOperationException(); }
+            @Override public void setLogWriter(PrintWriter out) { throw new UnsupportedOperationException(); }
+            @Override public void setLoginTimeout(int seconds) { throw new UnsupportedOperationException(); }
+            @Override public int getLoginTimeout() { throw new UnsupportedOperationException(); }
+            @Override public Logger getParentLogger() throws SQLFeatureNotSupportedException { throw new SQLFeatureNotSupportedException(); }
+            @Override public <T> T unwrap(Class<T> iface) { throw new UnsupportedOperationException(); }
+            @Override public boolean isWrapperFor(Class<?> iface) { return false; }
+        };
+    }
+
+    private static PreparedStatement newPreparedStatement(String sql, UUID userId, List<Post> readyPosts) {
+        boolean isUsersQuery = sql.contains("FROM users");
+        boolean isPostsQuery = sql.contains("FROM post");
+        boolean isScopePrefsQuery = sql.contains("scope_preferences");
+        return (PreparedStatement) Proxy.newProxyInstance(
+                PreparedStatement.class.getClassLoader(),
+                new Class<?>[] { PreparedStatement.class },
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "setString", "setObject", "setArray", "setInt" -> null;
+                    case "executeQuery" -> {
+                        if (isUsersQuery) yield userIdResultSet(userId);
+                        if (isPostsQuery) yield postsResultSet(readyPosts);
+                        if (isScopePrefsQuery) yield languageResultSet();
+                        yield emptyResultSet();
+                    }
+                    case "close" -> null;
+                    default -> throw new UnsupportedOperationException(
+                            "PS." + method.getName());
+                });
+    }
+
+    private static Statement newStatementProxy() {
+        return (Statement) Proxy.newProxyInstance(
+                Statement.class.getClassLoader(),
+                new Class<?>[] { Statement.class },
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "execute" -> false;
+                    case "close" -> null;
+                    default -> throw new UnsupportedOperationException(
+                            "Stmt." + method.getName());
+                });
+    }
+
+    private static Array newArrayProxy() {
+        return (Array) Proxy.newProxyInstance(
+                Array.class.getClassLoader(),
+                new Class<?>[] { Array.class },
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "getArray" -> new String[0];
+                    case "free" -> null;
+                    default -> throw new UnsupportedOperationException(
+                            "Array." + method.getName());
+                });
+    }
+
+    private static ResultSet userIdResultSet(UUID userId) {
+        boolean[] consumed = { false };
+        return (ResultSet) Proxy.newProxyInstance(
+                ResultSet.class.getClassLoader(),
+                new Class<?>[] { ResultSet.class },
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "next" -> { if (consumed[0]) yield false; consumed[0] = true; yield true; }
+                    case "getObject" -> userId;
+                    case "close" -> null;
+                    default -> throw new UnsupportedOperationException("RS." + method.getName());
+                });
+    }
+
+    private static ResultSet postsResultSet(List<Post> posts) {
+        int[] idx = { -1 };
+        return (ResultSet) Proxy.newProxyInstance(
+                ResultSet.class.getClassLoader(),
+                new Class<?>[] { ResultSet.class },
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "next" -> { idx[0]++; yield idx[0] < posts.size(); }
+                    case "getObject" -> {
+                        Post p = posts.get(idx[0]);
+                        String col = (String) args[0];
+                        yield switch (col) {
+                            case "id" -> p.id();
+                            case "source_id" -> p.sourceId();
+                            default -> throw new UnsupportedOperationException("col: " + col);
+                        };
+                    }
+                    case "getString" -> {
+                        Post p = posts.get(idx[0]);
+                        String col = (String) args[0];
+                        yield switch (col) {
+                            case "uid" -> p.uid();
+                            case "source_display_name" -> p.sourceDisplayName();
+                            case "title" -> p.title();
+                            case "url" -> p.url();
+                            case "body" -> p.body();
+                            default -> throw new UnsupportedOperationException("col: " + col);
+                        };
+                    }
+                    case "getTimestamp" -> Timestamp.from(posts.get(idx[0]).publishedAt());
+                    case "getArray" -> {
+                        Post p = posts.get(idx[0]);
+                        yield (Array) Proxy.newProxyInstance(
+                                Array.class.getClassLoader(),
+                                new Class<?>[] { Array.class },
+                                (aProxy, aMethod, aArgs) -> switch (aMethod.getName()) {
+                                    case "getArray" -> p.tags().toArray(new String[0]);
+                                    case "free" -> null;
+                                    default -> throw new UnsupportedOperationException(
+                                            "TagArray." + aMethod.getName());
+                                });
+                    }
+                    case "close" -> null;
+                    default -> throw new UnsupportedOperationException("RS." + method.getName());
+                });
+    }
+
+    private static ResultSet languageResultSet() {
+        boolean[] consumed = { false };
+        return (ResultSet) Proxy.newProxyInstance(
+                ResultSet.class.getClassLoader(),
+                new Class<?>[] { ResultSet.class },
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "next" -> { if (consumed[0]) yield false; consumed[0] = true; yield true; }
+                    case "getString" -> "en";
+                    case "close" -> null;
+                    default -> throw new UnsupportedOperationException("RS." + method.getName());
+                });
+    }
+
+    private static ResultSet emptyResultSet() {
+        return (ResultSet) Proxy.newProxyInstance(
+                ResultSet.class.getClassLoader(),
+                new Class<?>[] { ResultSet.class },
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "next" -> false;
+                    case "close" -> null;
+                    default -> throw new UnsupportedOperationException("RS." + method.getName());
+                });
+    }
+}

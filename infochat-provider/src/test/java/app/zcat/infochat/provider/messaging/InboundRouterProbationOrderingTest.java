@@ -11,6 +11,7 @@ import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.command.AssetCommandFamilyOracle;
 import app.zcat.infochat.provider.command.CommandPermissions;
+import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import app.zcat.infochat.provider.command.ConfirmStateService;
 import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.util.TypeLiteral;
@@ -314,6 +315,9 @@ class InboundRouterProbationOrderingTest {
         router.confirmStateService = new NoopConfirmStateService();
         router.commandPermissions = new RecordingCommandPermissions(log, allowedDuringProbation);
         router.probationCheck = new RecordingProbationCheck(log, inProbation, probationExpiry);
+        router.summaryAnchorRepository = new SummaryAnchorRepository() {
+            @Override public void clear(UUID userId, UUID scopeId) {}
+        };
         router.maxInboundBodyBytes = 65536;
         return router;
     }
@@ -374,6 +378,9 @@ class InboundRouterProbationOrderingTest {
         router.confirmStateService = new NoopConfirmStateService();
         router.commandPermissions = new RecordingCommandPermissions(log, allowedDuringProbation);
         router.probationCheck = new RecordingProbationCheck(log, inProbation, probationExpiry);
+        router.summaryAnchorRepository = new SummaryAnchorRepository() {
+            @Override public void clear(UUID userId, UUID scopeId) {}
+        };
         router.maxInboundBodyBytes = 65536;
         return router;
     }

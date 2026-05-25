@@ -767,6 +767,36 @@ public final class BundleKeys {
     /** One-line system message sent on successful auto-compress (D43 bundle string). */
     public static final String REPLY_AUTO_COMPRESS_NOTICE = "reply.auto_compress.notice";
 
+    // ----- /stop (M1-065) -----------------------------------------------------
+    // Per docs/spec/commands.md §Conversation control — /stop.
+
+    /** Cancelled an in-flight interruptible request. */
+    public static final String REPLY_STOP_CANCELLED = "reply.stop.cancelled";
+
+    /** Cancelled a pending destructive-command confirmation. Token {@code {0}} = command name. */
+    public static final String REPLY_STOP_CONFIRM_CANCELLED = "reply.stop.confirm_cancelled";
+
+    /** Idempotent no-op — nothing in flight and no pending confirmation. */
+    public static final String REPLY_STOP_NOOP = "reply.stop.noop";
+
+    /** Both an in-flight request and a pending confirmation were cancelled. Token {@code {0}} = command name. */
+    public static final String REPLY_STOP_BOTH_CANCELLED = "reply.stop.both_cancelled";
+
+    // ----- /retry (M1-065) ----------------------------------------------------
+    // Per docs/spec/commands.md §Conversation control — /retry.
+
+    /** Retry cap exhausted. Token {@code {0}} = cap value. */
+    public static final String ERROR_RETRY_CAP_EXHAUSTED = "error.retry.cap_exhausted";
+
+    /** No eligible anchor (never ran /summary, or anchor was cleared). */
+    public static final String ERROR_RETRY_NO_ANCHOR = "error.retry.no_anchor";
+
+    /** All frozen UIDs are no longer READY — nothing to retry. */
+    public static final String ERROR_RETRY_NO_ELIGIBLE_POSTS = "error.retry.no_eligible_posts";
+
+    /** Status-drift notice prepended to retry output. Token {@code {0}} = excluded count, {@code {1}} = original count. */
+    public static final String REPLY_RETRY_STATUS_DRIFT_NOTICE = "reply.retry.status_drift_notice";
+
     private BundleKeys() {
         throw new AssertionError("BundleKeys is a constant holder and must not be instantiated");
     }
