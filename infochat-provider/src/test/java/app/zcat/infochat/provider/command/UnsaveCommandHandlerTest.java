@@ -165,21 +165,26 @@ class UnsaveCommandHandlerTest {
     }
 
     @Test
-    void unsaveFromGroupScopeReturnsGroupNotInV1() throws Exception {
-        OutboundMessage reply = unsaveHandler.handle(
-                new ScopeRef.Group("adapter-group-id"), "/unsave abc");
+    void unsave_succeedsInGroupScope() throws Exception {
+        String contactId = PREFIX + "group-actor";
+        inboundContext.setSenderContactId(contactId);
+        UUID userId = seedUser(contactId);
+        UUID sourceId = seedSource(PREFIX + "group-source");
+        String uid = PREFIX + "group-uid";
+        seedSavedPost(userId, sourceId, uid);
+        assertEquals(1, readSaveCount(contactId),
+                "seed save must put save_count at 1");
 
-        assertEquals(bundleLoader.get(BundleKeys.ERROR_UNSAVE_GROUP_NOT_IN_V1), reply.text(),
-                "group-scope /unsave must short-circuit with error.unsave.group_not_in_v1");
-        // No actor seeded for this branch, so no saved_post row could exist.
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(
-                     "SELECT 1 FROM saved_post WHERE post_uid = 'abc'")) {
-            try (ResultSet rs = ps.executeQuery()) {
-                assertFalse(rs.next(),
-                        "group-scope short-circuit must not touch saved_post");
-            }
-        }
+        OutboundMessage reply = unsaveHandler.handle(
+                new ScopeRef.Group("adapter-group-id"), "/unsave " + uid);
+
+        assertEquals(MessageFormat.format(bundleLoader.get(BundleKeys.REPLY_UNSAVE_SUCCESS), uid),
+                reply.text(),
+                "/unsave in group scope must succeed for any active group member");
+        assertEquals(0L, countSavedPostsForUser(userId),
+                "saved_post row must be removed after group-scope /unsave");
+        assertEquals(0, readSaveCount(contactId),
+                "users.save_count must decrement after group-scope /unsave");
     }
 
     // ----- helpers --------------------------------------------------------

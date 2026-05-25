@@ -286,25 +286,22 @@ class SaveCommandHandlerTest {
     }
 
     @Test
-    void saveFromGroupScopeReturnsGroupNotInV1() throws Exception {
-        // No actor seed and no post seed — the group-scope branch
-        // returns BEFORE any DB touch.
-        OutboundMessage reply = handler.handle(
-                new ScopeRef.Group("adapter-group-id"), "/save abc");
+    void save_succeedsInGroupScope() throws Exception {
+        String contactId = PREFIX + "group-actor";
+        inboundContext.setSenderContactId(contactId);
+        seedUser(contactId);
+        UUID sourceId = seedSource(PREFIX + "group-source", new String[] { "news" });
+        String uid = PREFIX + "group-uid";
+        seedPost(sourceId, uid, "READY", "Title G", "Body G", "https://example.com/g", null, null);
 
-        assertEquals(bundleLoader.get(BundleKeys.ERROR_SAVE_GROUP_NOT_IN_V1), reply.text(),
-                "group-scope /save must short-circuit with error.save.group_not_in_v1");
-        // Sanity: the saved_post table is untouched by the short-circuit
-        // (no actor seeded, no row could exist).
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(
-                     "SELECT 1 FROM saved_post WHERE post_uid LIKE ?")) {
-            ps.setString(1, PREFIX + "%");
-            try (ResultSet rs = ps.executeQuery()) {
-                assertFalse(rs.next(),
-                        "group-scope short-circuit must not write any saved_post row");
-            }
-        }
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Group("adapter-group-id"), "/save " + uid);
+
+        assertEquals(MessageFormat.format(bundleLoader.get(BundleKeys.REPLY_SAVE_SUCCESS), uid),
+                reply.text(),
+                "/save in group scope must succeed for any active group member");
+        assertEquals(1, readSaveCount(contactId),
+                "users.save_count must increment after group-scope /save");
     }
 
     // ----- helpers --------------------------------------------------------

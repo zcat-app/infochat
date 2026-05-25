@@ -26,11 +26,6 @@ import java.util.UUID;
  *
  * <p>Dispatch sequence:
  * <ol>
- *   <li>Group-scope short-circuit BEFORE arg parsing and BEFORE opening
- *       the transaction — {@link ScopeRef.Group} carries
- *       {@code adapterGroupId} only (no contactId). Mirrors
- *       {@code AddSourceCommandHandler.java:130-138}. T2-F lands the
- *       SPI widening.</li>
  *   <li>Parse positional {@code <uid>}. Missing → fall back to
  *       {@code error.unsave.unknown_uid} (the spec catalogue does not
  *       assign a separate "no UID supplied" reply for {@code /unsave}).</li>
@@ -72,19 +67,13 @@ public class UnsaveCommandHandler implements CommandHandler {
 
     @Override
     public OutboundMessage handle(@NonNull ScopeRef scope, @NonNull String rawText) {
-        // Step 1 — group-scope short-circuit. Mirrors
-        // AddSourceCommandHandler.java:130-138.
-        if (scope instanceof ScopeRef.Group) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_UNSAVE_GROUP_NOT_IN_V1));
-        }
-
         String uid = parseUid(rawText);
         if (uid == null) {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_UNSAVE_UNKNOWN_UID));
         }
 
         String adapter = inboundContext.adapterName();
-        String callerContactId = contactIdOf(scope);
+        String callerContactId = resolveContactId(scope);
         if (callerContactId == null) {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_UNSAVE_UNKNOWN_UID));
         }
@@ -130,12 +119,14 @@ public class UnsaveCommandHandler implements CommandHandler {
         }
     }
 
-    private OutboundMessage reply(ScopeRef scope, String text) {
-        return new OutboundMessage(scope, text, Instant.now(), UUID.randomUUID().toString());
+    private String resolveContactId(ScopeRef scope) {
+        return scope instanceof ScopeRef.Dm dm
+                ? dm.contactId()
+                : inboundContext.senderContactId();
     }
 
-    private static String contactIdOf(ScopeRef scope) {
-        return scope instanceof ScopeRef.Dm dm ? dm.contactId() : null;
+    private OutboundMessage reply(ScopeRef scope, String text) {
+        return new OutboundMessage(scope, text, Instant.now(), UUID.randomUUID().toString());
     }
 
     private static String parseUid(String rawText) {

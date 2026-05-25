@@ -194,13 +194,20 @@ class SavedCommandHandlerTest {
     }
 
     @Test
-    void savedFromGroupScopeReturnsGroupNotInV1() throws Exception {
-        // No actor seed — short-circuit returns BEFORE any DB read.
+    void saved_succeedsInGroupScope() throws Exception {
+        String contactId = PREFIX + "group-actor";
+        inboundContext.setSenderContactId(contactId);
+        UUID userId = seedUser(contactId);
+        UUID sourceId = seedSource(PREFIX + "group-source");
+        seedSavedPost(userId, sourceId, PREFIX + "group-uid-1", "Title",
+                new String[] {}, new String[] {},
+                Instant.now().minus(1, ChronoUnit.HOURS));
+
         OutboundMessage reply = handler.handle(
                 new ScopeRef.Group("adapter-group-id"), "/saved");
 
-        assertEquals(bundleLoader.get(BundleKeys.ERROR_SAVED_GROUP_NOT_IN_V1), reply.text(),
-                "group-scope /saved must short-circuit with error.saved.group_not_in_v1");
+        assertTrue(reply.text().contains(PREFIX + "group-uid-1"),
+                "/saved in group scope must list the actor's saved posts");
     }
 
     // ----- helpers --------------------------------------------------------

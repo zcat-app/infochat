@@ -36,12 +36,6 @@ import java.util.UUID;
  *
  * <p>Dispatch sequence:
  * <ol>
- *   <li>Group-scope short-circuit BEFORE arg parsing and BEFORE
- *       opening the transaction — {@link ScopeRef.Group} carries
- *       {@code adapterGroupId} only (no contactId), so the handler
- *       cannot resolve the caller's {@code users} row. T2-F lands the
- *       SPI widening that lets group-scope DM-user commands work.
- *       Mirrors {@code AddSourceCommandHandler.java:130-138}.</li>
  *   <li>Parse positional {@code <uid>} plus optional {@code -t personal-tags}.
  *       A missing UID falls back to {@code error.save.unknown_uid} —
  *       the spec catalogue does not assign a separate "missing arg"
@@ -138,27 +132,14 @@ public class SaveCommandHandler implements CommandHandler {
 
     @Override
     public OutboundMessage handle(@NonNull ScopeRef scope, @NonNull String rawText) {
-        // Step 1 — group-scope short-circuit. ScopeRef.Group carries
-        // adapterGroupId only; T2-F lands the SPI widening. Mirrors
-        // AddSourceCommandHandler.java:130-138.
-        if (scope instanceof ScopeRef.Group) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_SAVE_GROUP_NOT_IN_V1));
-        }
-
-        // Step 2 — parse positional <uid> and optional -t personal-tags.
         ParsedArgs args = parseArgs(rawText);
         if (args.uid == null) {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_SAVE_UNKNOWN_UID));
         }
 
         String adapter = inboundContext.adapterName();
-        String callerContactId = contactIdOf(scope);
+        String callerContactId = resolveContactId(scope);
         if (callerContactId == null) {
-            // ScopeRef.Group was filtered above; a null contactId here
-            // means the SPI surfaced a non-DM, non-Group case that the
-            // sealed interface does not currently expose. Fail closed
-            // through the unknown-uid reply (same shape as a missing
-            // actor row) rather than a generic error.
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_SAVE_UNKNOWN_UID));
         }
 
@@ -302,12 +283,14 @@ public class SaveCommandHandler implements CommandHandler {
         }
     }
 
-    private OutboundMessage reply(ScopeRef scope, String text) {
-        return new OutboundMessage(scope, text, Instant.now(), UUID.randomUUID().toString());
+    private String resolveContactId(ScopeRef scope) {
+        return scope instanceof ScopeRef.Dm dm
+                ? dm.contactId()
+                : inboundContext.senderContactId();
     }
 
-    private static String contactIdOf(ScopeRef scope) {
-        return scope instanceof ScopeRef.Dm dm ? dm.contactId() : null;
+    private OutboundMessage reply(ScopeRef scope, String text) {
+        return new OutboundMessage(scope, text, Instant.now(), UUID.randomUUID().toString());
     }
 
     /**

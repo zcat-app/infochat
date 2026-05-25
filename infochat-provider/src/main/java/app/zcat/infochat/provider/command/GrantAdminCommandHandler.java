@@ -34,10 +34,10 @@ import java.util.UUID;
  *
  * <p>Dispatch sequence:
  * <ol>
- *   <li>Group-scope short-circuit — {@link ScopeRef.Group} has no
- *       actor contact id in v1, so the handler cannot resolve the
- *       caller; return {@code error.group_admin_not_in_v1}. T2-F
- *       lands the SPI widening.</li>
+ *   <li>DM-only gate — {@link ScopeRef.Group} returns
+ *       {@code error.command_dm_only}. Bot-admin commands are
+ *       per-adapter and have no group-scope semantic per spec
+ *       §Admin (bot admin).</li>
  *   <li>Parse one positional {@code <contact>} argument — fail fast
  *       before opening the transaction.</li>
  *   <li>Open the transaction ({@code autoCommit=false}). All
@@ -138,12 +138,8 @@ public class GrantAdminCommandHandler implements CommandHandler {
 
     @Override
     public OutboundMessage handle(@NonNull ScopeRef scope, @NonNull String rawText) {
-        // Step 1 — group-scope short-circuit. ScopeRef.Group carries
-        // adapterGroupId only (no contactId), so the handler cannot
-        // resolve the caller's users row. T2-F lands the SPI widening
-        // that lets group-scope admin commands work.
         if (scope instanceof ScopeRef.Group) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_GROUP_ADMIN_NOT_IN_V1));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY));
         }
 
         String adapter = inboundContext.adapterName();

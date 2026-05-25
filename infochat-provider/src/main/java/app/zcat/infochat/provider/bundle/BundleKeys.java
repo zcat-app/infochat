@@ -188,6 +188,9 @@ public final class BundleKeys {
     // commands is keyed here. Plain text only — single backticks for
     // inline literals, bare URLs, no markdown link syntax.
 
+    /** Command invoked in group scope that is permanently DM-only by design. */
+    public static final String ERROR_COMMAND_DM_ONLY = "error.command_dm_only";
+
     /** Non-admin invoked an admin-tier command. */
     public static final String ERROR_ADMIN_ONLY = "error.admin_only";
 

@@ -41,13 +41,6 @@ import java.util.regex.Pattern;
  *
  * <p>Dispatch sequence:
  * <ol>
- *   <li>Group-scope short-circuit BEFORE arg parsing and BEFORE opening
- *       any transaction — {@link ScopeRef.Group} carries
- *       {@code adapterGroupId} only (no contactId). Mirrors
- *       {@code AddSourceCommandHandler.java:130-138}. T2-F lands the
- *       SPI widening that lets a group caller see their per-user-global
- *       library; v1 satisfies the spec §Content disclosure-header letter
- *       at the DM reply header (always present).</li>
  *   <li>Parse {@code [tag] [-w <duration>] [--page N]}. All three are
  *       optional. Unknown flags fall back silently — the listing query
  *       is read-only and idempotent so a malformed flag just collapses
@@ -102,18 +95,10 @@ public class SavedCommandHandler implements CommandHandler {
 
     @Override
     public OutboundMessage handle(@NonNull ScopeRef scope, @NonNull String rawText) {
-        // Step 1 — group-scope short-circuit. Mirrors
-        // AddSourceCommandHandler.java:130-138 / GrantAdminCommandHandler.
-        if (scope instanceof ScopeRef.Group) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_SAVED_GROUP_NOT_IN_V1));
-        }
-
         ParsedArgs args = parseArgs(rawText);
         String adapter = inboundContext.adapterName();
-        String callerContactId = contactIdOf(scope);
+        String callerContactId = resolveContactId(scope);
         if (callerContactId == null) {
-            // Sealed-interface non-DM-non-Group fall-through. Same
-            // shape as missing-actor: empty library.
             return reply(scope, bundleLoader.get(BundleKeys.REPLY_SAVED_EMPTY));
         }
 
@@ -283,12 +268,14 @@ public class SavedCommandHandler implements CommandHandler {
         return minutes + "m ago";
     }
 
-    private OutboundMessage reply(ScopeRef scope, String text) {
-        return new OutboundMessage(scope, text, Instant.now(), UUID.randomUUID().toString());
+    private String resolveContactId(ScopeRef scope) {
+        return scope instanceof ScopeRef.Dm dm
+                ? dm.contactId()
+                : inboundContext.senderContactId();
     }
 
-    private static String contactIdOf(ScopeRef scope) {
-        return scope instanceof ScopeRef.Dm dm ? dm.contactId() : null;
+    private OutboundMessage reply(ScopeRef scope, String text) {
+        return new OutboundMessage(scope, text, Instant.now(), UUID.randomUUID().toString());
     }
 
     /**

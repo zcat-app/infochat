@@ -1,9 +1,10 @@
 ---
 id: M1-079e
 title: Member-access handler group unwinding + DM-only gates
-status: pending
+status: done
 created: 2026-05-25
 last_updated: 2026-05-25
+started: 2026-05-25
 blocked_by:
   - M1-079a
 files_budget: 10
@@ -23,6 +24,12 @@ risk: low
 round_cap: 2
 security_relevant: false
 migration_touch: false
+clarity_check:
+  date: 2026-05-25
+  verdict: WARN
+  warnings:
+    - "risk: low may be under-calibrated for bot-admin command surface handlers"
+    - "security_relevant: false on ticket modifying bot-admin command handlers (change is error-message swap only)"
 out_of_scope:
   - infochat-messaging-adapter/** — adapter layer is M1-079b
   - infochat-core/src/main/resources/db/migration/** — no migration
@@ -62,6 +69,20 @@ spec_refs:
 decision_refs:
   - D9
   - D13
+reviews:
+  - round: 1
+    date: 2026-05-25
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 12
+      added: 93
+      removed: 117
 ---
 
 # M1-079e: Member-access handler group unwinding + DM-only gates
