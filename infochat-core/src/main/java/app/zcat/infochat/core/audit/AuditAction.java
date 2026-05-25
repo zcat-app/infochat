@@ -19,6 +19,10 @@ package app.zcat.infochat.core.audit;
  *       per-(adapter, contact_id) brute-force breach audit row.</li>
  *   <li>V13 (this ticket) adds {@link #LLM_OUTPUT_SANITIZED} for
  *       the per-occurrence sanitizer hit audit row.</li>
+ *   <li>M1-068 adds {@link #CHAT_MODE} for the per-request audit
+ *       row written by {@link app.zcat.infochat.provider.chat.ChatAgent}
+ *       before the LLM call in chat-mode dispatch. The row records
+ *       actor + scope but never user-authored prose.</li>
  *   <li>M1-051 adds {@link #BAN_INTENT},
  *       {@link #INVITE_CREATE_INTENT}, and
  *       {@link #INVITE_REVOKE_INTENT} for the spec §Authorization
@@ -85,6 +89,7 @@ public enum AuditAction {
     REJECT_QUARANTINE,
     EXPORT,
     FORGET,
+    CHAT_MODE,
     SET_LANG,
     SET_TIMEZONE,
     LLM_OUTPUT_SANITIZED,

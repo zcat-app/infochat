@@ -24,8 +24,8 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
+- M1-064 — /clear + /compress + auto-compress (complexity: high, risk: medium)
 - M1-065 — /stop cancellation + /retry anchor-based replay (complexity: high, risk: high)
-- M1-068 — Chat agent redteam hardening (M1-063 remediation) (complexity: medium, risk: high)
 
 ---
 
@@ -61,9 +61,9 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-068 | Chat agent redteam hardening (M1-063 remediation) | 2026-05-25 | round 2 APPROVE |
 | M1-067 | /export — user data export with field-level positive list | 2026-05-25 | round 1 APPROVE |
 | M1-066 | /forget — per-scope privacy purge with remaining-scopes disclosure | 2026-05-25 | round 2 APPROVE |
-| M1-064 | /clear + /compress + auto-compress | 2026-05-25 | round 2 APPROVE |
 | M1-063 | Chat-mode dispatch in InboundRouter + session persistence | 2026-05-25 | round 2 APPROVE |
 | M1-062 | Chat agent tool registry + dispatcher + prompt shape | 2026-05-25 | round 1 APPROVE |
 | M1-055 | Asset commands umbrella — /zcash + /monero + bootstrap-assets + asset_config + price_snapshot roundtrip IT | 2026-05-25 | round 2 APPROVE |
@@ -216,9 +216,9 @@ M1-060 (done)
 M1-061 (done)
   ├── M1-062 (done)
   │     └── M1-063 (done)
-  │           ├── M1-064 (done)
+  │           ├── M1-064 (pending) ← runnable
   │           ├── M1-065 (pending) ← runnable
-  │           └── M1-068 (pending) ← runnable
+  │           └── M1-068 (done)
   ├── M1-066 (done)
   └── M1-067 (done)
 ```

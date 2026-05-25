@@ -30,8 +30,11 @@ import java.text.MessageFormat;
 import java.text.Normalizer;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -245,6 +248,9 @@ public class InboundRouter {
     @ConfigProperty(name = "infochat.chat.body-cap", defaultValue = "2048")
     int chatBodyCap;
 
+    @ConfigProperty(name = "infochat.chat.llm-rate-cap-per-minute", defaultValue = "10")
+    int llmRateCapPerMinute;
+
     /**
      * Defense-in-depth body cap. The default is below the in-memory
      * adapter's declared {@code maxInboundMessageBytes} so a
@@ -254,6 +260,12 @@ public class InboundRouter {
      */
     @ConfigProperty(name = "infochat.router.max-inbound-body-bytes", defaultValue = "65536")
     int maxInboundBodyBytes;
+
+    // Per-user LLM call timestamps for the chat-mode rate cap.
+    // Keyed by users.id; each deque holds call epoch-millis within
+    // the last 60 s. Synchronized on the deque instance per entry.
+    private final ConcurrentHashMap<UUID, Deque<Long>> llmCallTimestamps =
+            new ConcurrentHashMap<>();
 
     private volatile MessagingAdapter replyTarget;
 
@@ -460,15 +472,20 @@ public class InboundRouter {
             if (normalized.startsWith("/")) {
                 body = handleSlash(msg.scope(), normalized);
             } else {
-                // Chat-mode dispatch: enforce body cap, then delegate to ChatAgent.
-                // scope_kind is "dm" or "group"; scope_id is the user's UUID
-                // for DM (per-user isolation, schema §Per-scope state).
+                // Chat-mode dispatch: enforce body cap, then LLM rate cap,
+                // then delegate to ChatAgent. scope_kind is "dm" or "group";
+                // scope_id is the user's UUID for DM (per-user isolation,
+                // schema §Per-scope state).
                 if (normalized.length() > chatBodyCap) {
                     body = bundleLoader.get(BundleKeys.ERROR_CHAT_BODY_TOO_LARGE);
                 } else {
                     UUID actorId = snapshot.get().id();
-                    String scopeKind = chatModeScopeKindOf(msg.scope());
-                    body = chatAgent.handle(actorId, scopeKind, actorId, normalized);
+                    if (!tryAcquireLlmRateCap(actorId)) {
+                        body = bundleLoader.get(BundleKeys.ERROR_CHAT_LLM_RATE_CAP);
+                    } else {
+                        String scopeKind = chatModeScopeKindOf(msg.scope());
+                        body = chatAgent.handle(actorId, scopeKind, actorId, normalized);
+                    }
                 }
             }
         } catch (RuntimeException e) {
@@ -649,6 +666,25 @@ public class InboundRouter {
             case ScopeRef.Dm ignored -> "dm";
             case ScopeRef.Group ignored -> "group";
         };
+    }
+
+    // Per-user sliding-window LLM rate cap. Prunes call timestamps
+    // older than 60 s, then checks if the user has exceeded the cap.
+    boolean tryAcquireLlmRateCap(UUID userId) {
+        Deque<Long> timestamps = llmCallTimestamps.computeIfAbsent(
+                userId, k -> new ArrayDeque<>());
+        long now = System.currentTimeMillis();
+        long windowStart = now - 60_000;
+        synchronized (timestamps) {
+            while (!timestamps.isEmpty() && timestamps.peekFirst() < windowStart) {
+                timestamps.pollFirst();
+            }
+            if (timestamps.size() >= llmRateCapPerMinute) {
+                return false;
+            }
+            timestamps.addLast(now);
+            return true;
+        }
     }
 
     /**

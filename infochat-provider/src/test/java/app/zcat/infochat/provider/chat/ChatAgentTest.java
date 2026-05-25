@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.chat;
 
+import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.llm.LlmProvider;
 import app.zcat.infochat.llm.LlmResponse;
 import app.zcat.infochat.llm.ModelTask;
@@ -41,6 +42,9 @@ class ChatAgentTest {
     private final List<String> persistedRoles = new ArrayList<>();
     private int dispatcherCalls;
     private String dispatcherLastToolName;
+    private int auditCalls;
+    private AuditAction lastAuditAction;
+    private final List<String> persistedTexts = new ArrayList<>();
     private TestChatAgent agent;
 
     @BeforeEach
@@ -53,7 +57,10 @@ class ChatAgentTest {
         translationCalls = 0;
         sessionPersistCalls = 0;
         persistedRoles.clear();
+        persistedTexts.clear();
         dispatcherCalls = 0;
+        auditCalls = 0;
+        lastAuditAction = null;
 
         agent = buildAgent("en");
     }
@@ -65,12 +72,14 @@ class ChatAgentTest {
         String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "hi");
 
         assertEquals(1, promptBuilderCalls, "prompt builder should be called once");
+        assertEquals(1, auditCalls, "audit row should be written once before LLM call");
+        assertEquals(AuditAction.CHAT_MODE, lastAuditAction);
         assertEquals(1, llmProvider.callCount, "LLM should be called once");
         assertEquals(0, dispatcherCalls, "no tool calls in response");
+        assertEquals(1, sanitizerCalls, "sanitizer should be called once (before persist)");
         assertEquals(2, sessionPersistCalls, "user + assistant turns persisted");
         assertEquals("user", persistedRoles.get(0));
         assertEquals("assistant", persistedRoles.get(1));
-        assertEquals(1, sanitizerCalls, "sanitizer should be called once");
         assertEquals(0, translationCalls, "no translation for en scope");
         assertEquals("Hello, how can I help?", reply);
     }
@@ -147,6 +156,86 @@ class ChatAgentTest {
     }
 
     @Test
+    void toolResultsWrappedInDelimiters() {
+        // First LLM call returns a tool call; second returns the final answer
+        llmProvider.responses.add(
+                new LlmResponse("TOOL_CALL: searchPosts {\"query\": \"test\"}"));
+        llmProvider.responses.add(
+                new LlmResponse("Here are the results."));
+
+        agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "search for test");
+
+        // The second LLM call's userPrompt should contain UNTRUSTED_CONTENT
+        // delimiters wrapping the tool result
+        assertTrue(llmProvider.lastUserPrompt.contains("<<<UNTRUSTED_CONTENT id=\""),
+                "Tool result must be wrapped in UNTRUSTED_CONTENT open delimiter");
+        assertTrue(llmProvider.lastUserPrompt.contains("<<<END id=\""),
+                "Tool result must be wrapped in UNTRUSTED_CONTENT close delimiter");
+    }
+
+    @Test
+    void chatModeIntentIsAuditLogged() {
+        llmProvider.responses.add(new LlmResponse("Hello"));
+
+        agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "hi");
+
+        assertEquals(1, auditCalls, "exactly one audit row per chat-mode request");
+        assertEquals(AuditAction.CHAT_MODE, lastAuditAction);
+    }
+
+    @Test
+    void finalResponseStripsToolCallPatterns() {
+        // Simulate hitting the iteration cap: the LLM keeps returning tool
+        // calls on every iteration, and the final forced-response still
+        // contains a TOOL_CALL pattern that must be stripped
+        for (int i = 0; i < ChatAgent.MAX_TOOL_ITERATIONS; i++) {
+            llmProvider.responses.add(
+                    new LlmResponse("TOOL_CALL: searchPosts {\"query\": \"x\"}"));
+        }
+        // Final response after cap still contains TOOL_CALL
+        llmProvider.responses.add(
+                new LlmResponse("Here is the answer. TOOL_CALL: getPost {\"uid\": \"abc\"}"));
+
+        String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "test");
+
+        assertFalse(reply.contains("TOOL_CALL:"),
+                "TOOL_CALL patterns must be stripped from the final response");
+        assertTrue(reply.contains("Here is the answer."),
+                "Non-tool-call text must be preserved");
+    }
+
+    @Test
+    void partialToolCallPatternStripped() {
+        // Partial TOOL_CALL (no JSON body) must also be stripped
+        for (int i = 0; i < ChatAgent.MAX_TOOL_ITERATIONS; i++) {
+            llmProvider.responses.add(
+                    new LlmResponse("TOOL_CALL: searchPosts {\"query\": \"x\"}"));
+        }
+        llmProvider.responses.add(
+                new LlmResponse("Answer here.\nTOOL_CALL: searchPosts"));
+
+        String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "test");
+
+        assertFalse(reply.contains("TOOL_CALL:"),
+                "Partial TOOL_CALL (no JSON body) must be stripped");
+        assertTrue(reply.contains("Answer here."));
+    }
+
+    @Test
+    void persistsSanitizedOutput() {
+        sanitizerOutput = "[redacted command]";
+        llmProvider.responses.add(new LlmResponse("Try /ban user123"));
+
+        agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "help");
+
+        // The persisted assistant text should be the sanitized version
+        assertEquals(2, persistedTexts.size());
+        assertEquals("help", persistedTexts.get(0), "user turn is the raw message");
+        assertEquals("[redacted command]", persistedTexts.get(1),
+                "assistant turn must be the sanitized output, not the raw LLM text");
+    }
+
+    @Test
     void parseToolArgsHandlesSimpleJson() {
         var args = ChatAgent.parseToolArgs("{\"query\": \"test\", \"limit\": 10}");
         assertEquals("test", args.get("query"));
@@ -199,6 +288,7 @@ class ChatAgentTest {
                                     String role, String content, int tokens) {
                 sessionPersistCalls++;
                 persistedRoles.add(role);
+                persistedTexts.add(content);
                 return sessionPersistCalls - 1;
             }
         };
@@ -250,8 +340,9 @@ class ChatAgentTest {
                 router, sanitizer, pipeline, bundle, noopTrigger, language);
     }
 
-    // Subclass that overrides readScopeLanguage so no JDBC is needed
-    static class TestChatAgent extends ChatAgent {
+    // Subclass that overrides readScopeLanguage and writeAuditRow
+    // so no JDBC is needed
+    class TestChatAgent extends ChatAgent {
         private final String language;
 
         TestChatAgent(InFlightTracker tracker, ChatPromptBuilder builder,
@@ -261,7 +352,7 @@ class ChatAgentTest {
                       AutoCompressTrigger autoCompressTrigger,
                       String language) {
             super(tracker, builder, dispatcher, repo, router,
-                    sanitizer, pipeline, bundle, autoCompressTrigger, null);
+                    sanitizer, pipeline, bundle, autoCompressTrigger, null, null);
             this.language = language;
         }
 
@@ -269,12 +360,19 @@ class ChatAgentTest {
         String readScopeLanguage(String scopeKind, UUID scopeId) {
             return language;
         }
+
+        @Override
+        void writeAuditRow(UUID userId, String scopeKind, UUID scopeId) {
+            auditCalls++;
+            lastAuditAction = AuditAction.CHAT_MODE;
+        }
     }
 
     static class StubLlmProvider implements LlmProvider {
         final List<LlmResponse> responses = new ArrayList<>();
         int callCount;
         boolean throwOnGenerate;
+        String lastUserPrompt;
 
         @Override
         public LlmResponse generate(ModelTask task, String systemPrompt, String userPrompt) {
@@ -282,6 +380,7 @@ class ChatAgentTest {
                 throw new RuntimeException("LLM unreachable");
             }
             callCount++;
+            lastUserPrompt = userPrompt;
             if (callCount <= responses.size()) {
                 return responses.get(callCount - 1);
             }

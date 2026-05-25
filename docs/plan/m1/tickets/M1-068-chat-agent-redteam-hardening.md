@@ -1,18 +1,23 @@
 ---
 id: M1-068
 title: Chat agent redteam hardening (M1-063 remediation)
-status: pending
+status: done
 created: 2026-05-25
 last_updated: 2026-05-25
+started: 2026-05-25
 blocked_by:
   - M1-063
-files_budget: 8
+files_budget: 9
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatAgent.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/InboundRouter.java
   - infochat-provider/src/main/resources/application.properties
   - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterChatModeIT.java
+  - infochat-core/src/main/java/app/zcat/infochat/core/audit/AuditAction.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
+  - infochat-provider/src/main/resources/bundles/en.properties
+  - infochat-provider/src/main/resources/bundles/cs.properties
 complexity: medium
 risk: high
 round_cap: 3
@@ -46,12 +51,83 @@ spec_refs:
 decision_refs:
   - D21
   - D43
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-05-25
+    verdict: REWORK
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PARTIAL
+    diff_stats:
+      files: 11
+      added: 261
+      removed: 41
+  - round: 2
+    date: 2026-05-25
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 11
+      added: 272
+      removed: 42
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
-clarity_check: {}
+redteam_findings:
+  - date: 2026-05-25
+    category: DOS
+    severity: low
+    promise: |
+      Per-user token buckets bound LLM-triggering operations — its own bucket, capped lower, profile-driven.
+    gap: |
+      InboundRouter.java llmCallTimestamps ConcurrentHashMap never evicts entries for inactive users.
+    repro: |
+      Over extended deployment, map accumulates permanent entries for every user who ever sent a chat message.
+    suggested_fix_class: other
+  - date: 2026-05-25
+    category: INFO-LEAK
+    severity: low
+    promise: |
+      Deterministic outbound regex pass strips admin command strings from LLM output.
+    gap: |
+      ChatAgent.java TOOL_CALL_PATTERN requires JSON body to match; partial tool calls bypass the strip.
+    repro: |
+      LLM emits "TOOL_CALL: searchPosts" without JSON args after iteration cap; user sees internal protocol.
+    suggested_fix_class: input-sanitization
+  - date: 2026-05-25
+    category: AUDIT-EVASION
+    severity: low
+    promise: |
+      Audit log records intent (command name, actor, scope, target).
+    gap: |
+      writeAuditRow does not record scopeId; group-scope audit rows are ambiguous across groups.
+    repro: |
+      User in multiple groups sends chat message; audit row cannot identify which group was targeted.
+    suggested_fix_class: audit-log-coverage
+redteam_audits:
+  - date: 2026-05-25
+    verdict: FINDINGS
+    base: "f553142^"
+    head: f553142
+    verdict_file: docs/plan/m1/redteam/M1-068-2026-05-25.md
+    findings_count: 3
+    out_of_model_count: 1
+    note: |
+      All three findings are low severity. Candidates for a follow-up
+      hardening ticket; none block merge.
+clarity_check:
+  date: 2026-05-25
+  verdict: WARN
+  warnings:
+    - "FILES-BUDGET-PLAUSIBLE: files_scope omits AuditAction.java; if CHAT_MODE is absent from enum, implementer must touch an unlisted file (within budget ceiling of 8)"
 ---
 
 # M1-068: Chat agent redteam hardening (M1-063 remediation)

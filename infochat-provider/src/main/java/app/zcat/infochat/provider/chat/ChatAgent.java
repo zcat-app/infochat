@@ -1,5 +1,8 @@
 package app.zcat.infochat.provider.chat;
 
+import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.AuditLogWriter;
+import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.llm.LlmProvider;
 import app.zcat.infochat.llm.LlmResponse;
 import app.zcat.infochat.llm.ModelTask;
@@ -39,6 +42,13 @@ public class ChatAgent {
     static final Pattern TOOL_CALL_PATTERN = Pattern.compile(
             "TOOL_CALL:\\s*(\\w+)\\s+(\\{.*?\\})", Pattern.DOTALL);
 
+    // Broader pattern for the strip pass: catches partial tool calls
+    // (no JSON body, broken JSON) that the parsing pattern above misses.
+    // LLM is instructed to put tool calls on their own line, so
+    // stripping to end-of-line is safe.
+    private static final Pattern TOOL_CALL_STRIP_PATTERN = Pattern.compile(
+            "TOOL_CALL:.*");
+
     static final int MAX_TOOL_ITERATIONS = 10;
 
     static final String TOOL_INSTRUCTIONS =
@@ -67,6 +77,7 @@ public class ChatAgent {
     private final TranslationPipeline translationPipeline;
     private final BundleLoader bundleLoader;
     private final AutoCompressTrigger autoCompressTrigger;
+    private final AuditLogWriter auditLogWriter;
     private final DataSource dataSource;
 
     @Inject
@@ -79,6 +90,7 @@ public class ChatAgent {
                      @NonNull TranslationPipeline translationPipeline,
                      @NonNull BundleLoader bundleLoader,
                      @NonNull AutoCompressTrigger autoCompressTrigger,
+                     @NonNull AuditLogWriter auditLogWriter,
                      @NonNull DataSource dataSource) {
         this.inFlightTracker = inFlightTracker;
         this.promptBuilder = promptBuilder;
@@ -89,6 +101,7 @@ public class ChatAgent {
         this.translationPipeline = translationPipeline;
         this.bundleLoader = bundleLoader;
         this.autoCompressTrigger = autoCompressTrigger;
+        this.auditLogWriter = auditLogWriter;
         this.dataSource = dataSource;
     }
 
@@ -122,24 +135,35 @@ public class ChatAgent {
         ChatPromptBuilder.BuiltPrompt prompt =
                 promptBuilder.build(userId, scopeKind, scopeId, userMessage);
 
-        // 2. Resolve LLM provider for chat task
+        // 2. Audit the chat-mode intent before the LLM call.
+        // No user-authored prose in the audit row — only actor + scope.
+        writeAuditRow(userId, scopeKind, scopeId);
+
+        // 3. Resolve LLM provider for chat task
         LlmProvider provider = llmRouter.forTask(ModelTask.CHAT_AGENT, scopeLanguage);
 
-        // 3. Run multi-turn tool loop
+        // 4. Run multi-turn tool loop
         String systemPrompt = prompt.systemPrompt() + TOOL_INSTRUCTIONS;
         String finalText = runToolLoop(provider, systemPrompt, prompt.userPrompt(),
                 userId, scopeKind, scopeId);
 
-        // 4. Persist both turns (user + assistant)
-        int userTokens = ChatSessionRepository.estimateTokens(userMessage);
-        sessionRepository.persistTurn(userId, scopeKind, scopeId, "user", userMessage, userTokens);
-        int assistantTokens = ChatSessionRepository.estimateTokens(finalText);
-        sessionRepository.persistTurn(userId, scopeKind, scopeId, "assistant", finalText, assistantTokens);
+        // 5. Strip any residual TOOL_CALL patterns that leaked past
+        // the iteration cap — they are internal protocol, not user-visible.
+        // Two passes: the specific pattern for full calls, then the broad
+        // pattern for partials (no JSON body, broken JSON)
+        finalText = TOOL_CALL_PATTERN.matcher(finalText).replaceAll("");
+        finalText = TOOL_CALL_STRIP_PATTERN.matcher(finalText).replaceAll("");
 
-        // 5. Sanitize output
+        // 6. Sanitize BEFORE persist so admin commands never enter the DB
         String sanitized = outputSanitizer.sanitize(finalText);
 
-        // 6. Translate if scope language is non-en
+        // 7. Persist both turns (user + sanitized assistant)
+        int userTokens = ChatSessionRepository.estimateTokens(userMessage);
+        sessionRepository.persistTurn(userId, scopeKind, scopeId, "user", userMessage, userTokens);
+        int assistantTokens = ChatSessionRepository.estimateTokens(sanitized);
+        sessionRepository.persistTurn(userId, scopeKind, scopeId, "assistant", sanitized, assistantTokens);
+
+        // 8. Translate if scope language is non-en
         String reply;
         if (!"en".equals(scopeLanguage)) {
             reply = translationPipeline.run(sanitized, scopeLanguage);
@@ -147,7 +171,7 @@ public class ChatAgent {
             reply = sanitized;
         }
 
-        // 7. Auto-compress: fires between turns (after reply computed,
+        // 9. Auto-compress: fires between turns (after reply computed,
         // before next message). Notification appended to the reply.
         Optional<String> autoCompressNotice =
                 autoCompressTrigger.checkAndCompress(userId, scopeKind, scopeId, scopeLanguage);
@@ -190,11 +214,18 @@ public class ChatAgent {
                 case ChatToolDispatcher.ToolResult.ValidationError v -> "Error: " + v.reason();
             };
 
-            // Append the assistant's tool call and the result to the
-            // conversation so the next LLM call sees the full history
+            // Wrap tool results in UNTRUSTED_CONTENT delimiters — tool
+            // output is external data and gets the same injection defense
+            // as user messages and memory hits in ChatPromptBuilder
+            String resultMarker = UUID.randomUUID().toString();
+            String wrappedResult =
+                    String.format(ChatPromptBuilder.UNTRUSTED_CONTENT_OPEN_FORMAT, resultMarker)
+                    + "\n" + resultText + "\n"
+                    + String.format(ChatPromptBuilder.UNTRUSTED_CONTENT_CLOSE_FORMAT, resultMarker);
+
             conversation.append("\n\nAssistant: ").append(text);
             conversation.append("\n\nTool result for ").append(toolName).append(":\n");
-            conversation.append(resultText);
+            conversation.append(wrappedResult);
             conversation.append("\n\nPlease provide your response based on the tool result above.");
         }
 
@@ -265,6 +296,27 @@ public class ChatAgent {
             parts.add(s.substring(start).trim());
         }
         return parts.toArray(new String[0]);
+    }
+
+    // Package-private so ChatAgentTest can override with a no-op.
+    // target_kind is "user" (the actor); scope_kind ("dm"/"group") goes
+    // into details_json so the audit row passes the V5 CHECK constraint
+    // (allowed: user, group, source, post, invite, quarantine, asset,
+    // memory, system).
+    void writeAuditRow(UUID userId, String scopeKind, UUID scopeId) {
+        try (Connection conn = dataSource.getConnection()) {
+            RedactionHook.AuditRow row = RedactionHook.AuditRow.builder()
+                    .actorUserId(userId)
+                    .action(AuditAction.CHAT_MODE)
+                    .targetKind("user")
+                    .targetId(userId.toString())
+                    .detailsJson("{\"scope_kind\":\"" + scopeKind
+                            + "\",\"scope_id\":\"" + scopeId + "\"}")
+                    .build();
+            auditLogWriter.write(conn, row);
+        } catch (SQLException e) {
+            throw new IllegalStateException("ChatAgent.writeAuditRow failed", e);
+        }
     }
 
     // Package-private so ChatAgentTest can override with a fixed value

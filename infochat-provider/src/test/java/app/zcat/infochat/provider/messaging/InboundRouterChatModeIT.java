@@ -47,10 +47,21 @@ class InboundRouterChatModeIT {
                     "DELETE FROM chat_session WHERE user_id IN ("
                   + "SELECT id FROM users WHERE contact_id LIKE ? AND contact_id != ?)",
                     CONTACT_PREFIX + "%", GUARDIAN);
-            // Clean prior test users
-            exec(conn,
-                    "DELETE FROM users WHERE contact_id LIKE ? AND contact_id != ?",
-                    CONTACT_PREFIX + "%", GUARDIAN);
+            // Disable append-only triggers so test cleanup can delete
+            // audit_log rows (FK on actor_user_id blocks user deletion)
+            exec(conn, "ALTER TABLE audit_log DISABLE TRIGGER trg_audit_log_no_delete");
+            try {
+                exec(conn,
+                        "DELETE FROM audit_log WHERE actor_user_id IN ("
+                      + "SELECT id FROM users WHERE contact_id LIKE ? AND contact_id != ?)",
+                        CONTACT_PREFIX + "%", GUARDIAN);
+                // Clean prior test users
+                exec(conn,
+                        "DELETE FROM users WHERE contact_id LIKE ? AND contact_id != ?",
+                        CONTACT_PREFIX + "%", GUARDIAN);
+            } finally {
+                exec(conn, "ALTER TABLE audit_log ENABLE TRIGGER trg_audit_log_no_delete");
+            }
         }
     }
 
@@ -108,6 +119,27 @@ class InboundRouterChatModeIT {
 
         OutboundMessage reply = lastReply();
         assertEquals(bundleLoader.get("error.chat.unavailable"), reply.text());
+    }
+
+    @Test
+    void llmRateCapRejectsExcessiveRequests() throws Exception {
+        seedVouchedUser("user-5");
+        testLlmProvider.setResponseText("ok");
+
+        // %test cap is 3 per minute — send 4 messages in quick succession
+        for (int i = 0; i < 3; i++) {
+            adapter.deliverDm(CONTACT_PREFIX + "user-5", "msg " + i);
+        }
+        int callsBeforeCap = testLlmProvider.callCount();
+
+        // 4th message should be rejected by the rate cap
+        adapter.deliverDm(CONTACT_PREFIX + "user-5", "one too many");
+
+        OutboundMessage reply = lastReply();
+        assertEquals(bundleLoader.get("error.chat.llm_rate_cap"), reply.text(),
+                "4th message should get the LLM rate cap error");
+        assertEquals(callsBeforeCap, testLlmProvider.callCount(),
+                "LLM should NOT be called when rate cap is exceeded");
     }
 
     // --- helpers ---
