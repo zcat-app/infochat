@@ -37,10 +37,10 @@ public interface ProgressNotifier {
     /**
      * Publish one stage event.
      *
-     * @param scope the destination scope (DM contact id or group id);
-     *              never null. The notifier maintains per-scope state
-     *              (placeholder handle, last-edit timestamp).
+     * @param scope the destination scope; never null. The notifier
+     *              maintains per-scope state (placeholder handle,
+     *              last-edit timestamp).
      * @param stage the stage that has just been entered; never null.
      */
-    void publish(String scope, ProgressStage stage);
+    void publish(ScopeRef scope, ProgressStage stage);
 }
