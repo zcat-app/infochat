@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 7 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 110 |
+| done | 114 |
 | deferred | 4 |
 | **total** | **121** |
 
@@ -24,8 +24,9 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-080 — Periodic digests umbrella — digest lifecycle roundtrip IT (complexity: medium, risk: medium)
-- M1-086 — FetchScheduler polymorphic per-kind dispatch (complexity: medium, risk: medium)
+- M1-087 — BlueskyFetcher — AT Protocol polled feed (complexity: low, risk: low)
+- M1-090 — YouTubeFetcher — channel Atom feed (complexity: low, risk: low)
+- M1-091 — OdyseeFetcher — Odysee/LBRY RSS feed (complexity: low, risk: low)
 
 ---
 
@@ -42,11 +43,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-087 — blocked_by: M1-086 (pending)
-- M1-088 — blocked_by: M1-086 (pending)
-- M1-089 — blocked_by: M1-086 (pending)
-- M1-090 — blocked_by: M1-086 (pending)
-- M1-091 — blocked_by: M1-086 (pending)
+_(none)_
 
 ---
 
@@ -65,6 +62,9 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-089 | NitterFetcher — Nitter instance RSS feed | 2026-05-26 | round 2 APPROVE |
+| M1-088 | RedditFetcher — subreddit JSON feed | 2026-05-26 | round 2 APPROVE |
+| M1-086 | FetchScheduler polymorphic per-kind dispatch | 2026-05-26 | round 2 APPROVE |
 | M1-085 | AnthropicProvider — native Messages API with prompt caching | 2026-05-26 | round 2 APPROVE |
 | M1-084 | MembershipEvent wiring + tryAutoPromote re-promote path | 2026-05-26 | round 1 APPROVE |
 | M1-083 | Quarantine/audit redteam remediation — rate bucket, audit coverage, pagination | 2026-05-26 | round 1 APPROVE |
@@ -72,9 +72,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-081b | Quarantine admin commands + review listener + /audit | 2026-05-26 | round 2 APPROVE |
 | M1-081 | Quarantine admin workflow + re-evaluation pipeline umbrella | 2026-05-26 | round 1 APPROVE |
 | M1-080c | /retry --digest routing + missed-slot admin notification | 2026-05-26 | round 1 APPROVE |
-| M1-080b | DigestWorker + degraded fallback + subscription-version cache | 2026-05-26 | round 1 APPROVE |
-| M1-080a | V21 summary_cache + DigestScheduler + staggered slots | 2026-05-26 | round 2 APPROVE |
-| M1-021 | Identity/audit redteam remediation (V6 — actor checks, search_path, ban-self trigger, audit-actor integrity) | 2026-05-26 | round 1 APPROVE |
 
 ---
 
@@ -235,11 +232,11 @@ M1-078 (done)
 M1-079a (done)
   ├── M1-079 (deferred)
   │     └── M1-080a (done)
-  │           ├── M1-080 (pending) ← runnable
+  │           ├── M1-080 (done)
   │           ├── M1-080b (done)
-  │           │     ├── M1-080 (pending) [see above]
+  │           │     ├── M1-080 (done) [see above]
   │           │     └── M1-080c (done)
-  │           │           └── M1-080 (pending) [see above]
+  │           │           └── M1-080 (done) [see above]
   │           └── M1-080c (done) [see above]
   ├── M1-079b (done)
   │     └── M1-079 (deferred) [see above]
@@ -259,10 +256,10 @@ M1-082 (done)
 M1-084 (done)
   └── M1-079 (deferred) [see above]
 M1-085 (done)
-M1-086 (pending) ← runnable
-  ├── M1-087 (pending)
-  ├── M1-088 (pending)
-  ├── M1-089 (pending)
-  ├── M1-090 (pending)
-  └── M1-091 (pending)
+M1-086 (done)
+  ├── M1-087 (pending) ← runnable
+  ├── M1-088 (done)
+  ├── M1-089 (done)
+  ├── M1-090 (pending) ← runnable
+  └── M1-091 (pending) ← runnable
 ```
