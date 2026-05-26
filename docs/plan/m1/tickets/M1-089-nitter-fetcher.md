@@ -1,9 +1,16 @@
 ---
 id: M1-089
 title: "NitterFetcher — Nitter instance RSS feed"
-status: pending
+status: done
 created: 2026-05-26
 last_updated: 2026-05-26
+clarity_check:
+  date: 2026-05-26
+  verdict: WARN
+  warnings:
+    - "FILES-BUDGET-PLAUSIBLE: files_scope does not list the test fixture file implied by the Notes; fixture can be inlined in the test class"
+    - "SELF-CONTAINED-CHECK: acceptance item 3 (No pagination) contradicts docs/spec/architecture.md §Ingest SPIs which lists Nitter among paginated feeds; RSS endpoint has no pagination cursor"
+  blockers: []
 blocked_by:
   - M1-086
 files_budget: 5
@@ -15,6 +22,33 @@ complexity: low
 risk: low
 round_cap: 2
 security_relevant: false
+reviews:
+  - round: 1
+    date: 2026-05-26
+    verdict: REWORK
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 261
+      removed: 7
+  - round: 2
+    date: 2026-05-26
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 275
+      removed: 7
 migration_touch: false
 out_of_scope:
   - infochat-core/** — no SPI changes
