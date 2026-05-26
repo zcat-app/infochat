@@ -20,6 +20,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.text.MessageFormat;
 import java.time.Instant;
 import java.util.List;
@@ -191,6 +192,9 @@ public class GrantAdminCommandHandler implements CommandHandler {
                     return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
                 }
                 UserRow actor = actorOpt.get();
+                try (Statement st = conn.createStatement()) {
+                    st.execute("SET LOCAL infochat.actor_id = '" + actor.id + "'");
+                }
 
                 // Step 3b — probation guard (defense-in-depth).
                 // M1-045's intake-side step-5 gate is the primary

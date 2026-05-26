@@ -20,6 +20,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.text.MessageFormat;
 import java.time.Instant;
 import java.util.List;
@@ -206,6 +207,9 @@ public class RevokeAdminCommandHandler implements CommandHandler {
                     return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
                 }
                 UserRow actor = actorOpt.get();
+                try (Statement st = conn.createStatement()) {
+                    st.execute("SET LOCAL infochat.actor_id = '" + actor.id + "'");
+                }
 
                 // Step 4b — probation guard (defense-in-depth).
                 if (probationCheck.inProbation(actor.id)) {

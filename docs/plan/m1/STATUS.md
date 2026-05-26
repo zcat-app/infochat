@@ -14,8 +14,8 @@
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 106 |
-| deferred | 7 |
+| done | 107 |
+| deferred | 6 |
 | **total** | **121** |
 
 ---
@@ -74,8 +74,8 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-080c | /retry --digest routing + missed-slot admin notification | 2026-05-26 | round 1 APPROVE |
 | M1-080b | DigestWorker + degraded fallback + subscription-version cache | 2026-05-26 | round 1 APPROVE |
 | M1-080a | V21 summary_cache + DigestScheduler + staggered slots | 2026-05-26 | round 2 APPROVE |
+| M1-021 | Identity/audit redteam remediation (V6 — actor checks, search_path, ban-self trigger, audit-actor integrity) | 2026-05-26 | round 1 APPROVE |
 | M1-081a | Re-eval job + quarantine NOTIFY + tagger partial-valid + TTL | 2026-05-25 | round 2 APPROVE |
-| M1-079e | Member-access handler group unwinding + DM-only gates | 2026-05-25 | round 1 APPROVE |
 
 ---
 
@@ -86,9 +86,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 ### decomposed (1)
 - M1-034 → M1-034a
-
-### end-of-tier-1-redteam (1)
-- M1-021 → unspecified
 
 ### post-mvp-hardening (4)
 - M1-019 → M1-033
@@ -124,7 +121,7 @@ M1-001 (done)
   │     │     │     │     ├── M1-032 (done) [see above]
   │     │     │     │     ├── M1-034 (deferred) [see above]
   │     │     │     │     └── M1-034a (done) [see above]
-  │     │     │     ├── M1-021 (deferred)
+  │     │     │     ├── M1-021 (done)
   │     │     │     └── M1-022 (done)
   │     │     │           └── M1-028 (done) [see above]
   │     │     ├── M1-008b (done)

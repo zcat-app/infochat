@@ -20,6 +20,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.text.MessageFormat;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -113,6 +114,9 @@ public class QuarantineCommandHandler implements CommandHandler {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
+                try (Statement st = conn.createStatement()) {
+                    st.execute("SET LOCAL infochat.actor_id = '" + actor.id + "'");
+                }
                 RedactionHook.AuditRow auditRow = RedactionHook.AuditRow.builder()
                         .actorUserId(actor.id)
                         .actorContactId(actor.contactId)
@@ -202,12 +206,17 @@ public class QuarantineCommandHandler implements CommandHandler {
         }
 
         try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            try (Statement st = conn.createStatement()) {
+                st.execute("SET LOCAL infochat.actor_id = '" + actor.id + "'");
+            }
             try (PreparedStatement ps = conn.prepareStatement(
                     "SELECT approve_quarantine(?, ?)")) {
                 ps.setObject(1, quarantineId);
                 ps.setObject(2, actor.id);
                 ps.execute();
             }
+            conn.commit();
             return reply(scope, MessageFormat.format(
                     bundleLoader.get(BundleKeys.REPLY_QUARANTINE_APPROVE_SUCCESS),
                     quarantineId.toString()));
@@ -237,12 +246,17 @@ public class QuarantineCommandHandler implements CommandHandler {
         }
 
         try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            try (Statement st = conn.createStatement()) {
+                st.execute("SET LOCAL infochat.actor_id = '" + actor.id + "'");
+            }
             try (PreparedStatement ps = conn.prepareStatement(
                     "SELECT reject_quarantine(?, ?)")) {
                 ps.setObject(1, quarantineId);
                 ps.setObject(2, actor.id);
                 ps.execute();
             }
+            conn.commit();
             return reply(scope, MessageFormat.format(
                     bundleLoader.get(BundleKeys.REPLY_QUARANTINE_REJECT_SUCCESS),
                     quarantineId.toString()));

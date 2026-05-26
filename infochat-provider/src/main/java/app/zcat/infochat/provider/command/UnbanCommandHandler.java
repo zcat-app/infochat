@@ -166,6 +166,9 @@ public class UnbanCommandHandler implements CommandHandler {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
+                try (Statement st = conn.createStatement()) {
+                    st.execute("SET LOCAL infochat.actor_id = '" + actor.id + "'");
+                }
                 restored = selectGroupAdminMemberships(conn, target.id);
 
                 insertUnbanAudit(conn, actor, adapter, target.id, targetContactId,
@@ -223,6 +226,7 @@ public class UnbanCommandHandler implements CommandHandler {
             conn.setAutoCommit(false);
             try {
                 try (Statement st = conn.createStatement()) {
+                    st.execute("SET LOCAL infochat.actor_id = '" + actorId + "'");
                     st.execute("SET LOCAL infochat.request_id = '" + requestId + "'");
                 }
                 try (PreparedStatement cs = conn.prepareStatement(CALL_DELETE_PREBAN_USER_SQL)) {

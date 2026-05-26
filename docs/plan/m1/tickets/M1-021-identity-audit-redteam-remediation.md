@@ -1,18 +1,40 @@
 ---
 id: M1-021
 title: Identity/audit redteam remediation (V6 — actor checks, search_path, ban-self trigger, audit-actor integrity)
-status: deferred
-deferred_reason: end-of-tier-1-redteam
+status: done
 created: 2026-05-13
-last_updated: 2026-05-15
+last_updated: 2026-05-26
+reviews:
+  - round: 1
+    date: 2026-05-26
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 538
+      removed: 24
+clarity_check:
+  date: 2026-05-26
+  verdict: PASS
+  warnings: []
+  blockers: []
+reopens:
+  - date: 2026-05-26
+    prior_deferred_reason: end-of-tier-1-redteam
+    reason: Ready to implement
 blocked_by:
   - M1-008a
 files_budget: 4
 files_scope:
-  - infochat-core/src/main/resources/db/migration/V6__identity_audit_remediation.sql
-  - infochat-core/src/test/java/io/infochat/core/schema/DeletePrebanActorCheckTest.java
-  - infochat-core/src/test/java/io/infochat/core/schema/CannotBanSelfTriggerTest.java
-  - infochat-core/src/test/java/io/infochat/core/schema/AuditActorIntegrityTest.java
+  - infochat-core/src/main/resources/db/migration/V24__identity_audit_remediation.sql
+  - infochat-core/src/test/java/app/zcat/infochat/core/schema/DeletePrebanActorCheckTest.java
+  - infochat-core/src/test/java/app/zcat/infochat/core/schema/CannotBanSelfTriggerTest.java
+  - infochat-core/src/test/java/app/zcat/infochat/core/schema/AuditActorIntegrityTest.java
 complexity: medium
 risk: high
 round_cap: 3
@@ -66,6 +88,65 @@ spec_refs:
 decision_refs:
   - D44
   - D46
+redteam_findings:
+  - date: 2026-05-26
+    category: AUDIT-EVASION
+    severity: high
+    promise: |
+      Audit rows faithfully attribute actions to the correct actor; trg_audit_log_actor_check guards actor consistency via session GUC.
+    gap: |
+      No application-layer code sets SET LOCAL infochat.actor_id before audit writes; the trigger's GUC-unset path allows any actor_user_id unchecked. Expected intermediate state — application-side wiring deferred to T1-D/E tickets.
+    repro: |
+      SQL injection crafts INSERT INTO audit_log with spoofed actor_user_id; GUC is NULL; trigger allows the INSERT.
+    suggested_fix_class: trust-boundary-tightening
+  - date: 2026-05-26
+    category: PERM-ESCAL
+    severity: high
+    promise: |
+      Spec §Authorization model: "cannot ban self" enforced at the trigger layer.
+    gap: |
+      No application-layer code sets SET LOCAL infochat.actor_id before UPDATE on users; the trigger's ban-self check is skipped when GUC is unset. Expected intermediate state — application-side wiring deferred to T1-D/E tickets.
+    repro: |
+      If BanCommandHandler's self-ban check has a bug, the UPDATE reaches the trigger; GUC is NULL; ban-self prevention skipped.
+    suggested_fix_class: trust-boundary-tightening
+  - date: 2026-05-26
+    category: PERM-ESCAL
+    severity: medium
+    promise: |
+      Spec §DB roles: SECURITY DEFINER procedures run with elevated privileges; search_path must be pinned.
+    gap: |
+      V21 approve_quarantine and reject_quarantine are SECURITY DEFINER without SET search_path = pg_catalog, public. Same vulnerability class as Finding 4 fixed in this diff. Pre-existing in V21 (M1-081a), not introduced by M1-021.
+    repro: |
+      SQL injection + SET search_path = attack_schema, public; procedure's audit INSERT resolves to shadow table.
+    suggested_fix_class: trust-boundary-tightening
+  - date: 2026-05-26
+    category: PERM-ESCAL
+    severity: medium
+    promise: |
+      Spec §Quarantine workflow: admins review via /quarantine approve|reject; authorization runs in deterministic code.
+    gap: |
+      V21 approve_quarantine and reject_quarantine accept p_actor_id without verifying actor exists or is admin. Same class as Findings 1+3 fixed in this diff. Pre-existing in V21 (M1-081a).
+    repro: |
+      SQL injection + SELECT approve_quarantine('<id>', '<non-admin-uuid>'); procedure approves quarantined post attributed to non-admin.
+    suggested_fix_class: missing-auth-check
+redteam_audits:
+  - date: 2026-05-26
+    verdict: FINDINGS
+    base: main
+    head: m1/M1-021-identity-audit-redteam-remediation
+    verdict_file: docs/plan/m1/redteam/M1-021-2026-05-26.md
+    findings_count: 4
+    out_of_model_count: 2
+    note: |
+      Findings 1-2 (high): GUC-based enforcement is deployed at schema layer but
+      dormant until application code wires SET LOCAL infochat.actor_id. This is the
+      designed two-ticket delivery (M1-021 = schema half; T1-D/E = application half),
+      documented in out_of_scope. No code change needed on M1-021; the gap closes when
+      the /ban, /revoke-admin, /grant-admin command handlers land.
+      Findings 3-4 (medium): V21 quarantine procedures (M1-081a) have the same
+      search_path + actor-check gaps this ticket fixes for delete_preban_user.
+      Remediation belongs in a new ticket targeting approve_quarantine and
+      reject_quarantine.
 ---
 
 # M1-021: Identity/audit redteam remediation (V6 — actor checks, search_path, ban-self trigger, audit-actor integrity)

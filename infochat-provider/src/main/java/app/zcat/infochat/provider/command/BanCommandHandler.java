@@ -19,6 +19,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.sql.Types;
 import java.text.MessageFormat;
 import java.time.Instant;
@@ -242,6 +243,9 @@ public class BanCommandHandler implements CommandHandler {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
+                try (Statement st = conn.createStatement()) {
+                    st.execute("SET LOCAL infochat.actor_id = '" + actor.id + "'");
+                }
                 // Lock + fetch the contact-bound pending invite ids the
                 // step-7 UPDATE will revoke. FOR UPDATE holds the rows
                 // for the rest of the transaction so the pre-written
