@@ -1,0 +1,239 @@
+package app.zcat.infochat.llm.impl;
+
+import org.jspecify.annotations.NonNull;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import app.zcat.infochat.llm.LlmProvider;
+import app.zcat.infochat.llm.LlmResponse;
+import app.zcat.infochat.llm.ModelTask;
+import app.zcat.infochat.llm.impl.OpenAiCompatibleProvider.LlmCallFailedException;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.Config;
+import org.jboss.logging.Logger;
+
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.Optional;
+
+/**
+ * Native Anthropic Messages API provider. Uses the Anthropic-specific
+ * wire format (top-level {@code system} array, not a
+ * {@code messages} entry) and marks the system prompt with
+ * {@code cache_control: {"type": "ephemeral"}} so the server-side
+ * prompt cache applies to the stable system prefix. This saves ~90%
+ * on repeated system prompts for the summarizer and chat agent.
+ *
+ * <h2>Wire format</h2>
+ * <pre>{@code
+ * {
+ *   "model": "<model-id>",
+ *   "max_tokens": <integer>,
+ *   "system": [
+ *     {"type": "text", "text": "<systemPrompt>",
+ *      "cache_control": {"type": "ephemeral"}}
+ *   ],
+ *   "messages": [
+ *     {"role": "user", "content": "<userPrompt>"}
+ *   ]
+ * }
+ * }</pre>
+ *
+ * <h2>Auth</h2>
+ * <p>{@code x-anthropic-version} carries the stable API version;
+ * {@code anthropic-api-key} carries the raw key (not Bearer). The
+ * api-key header is omitted when the config value is empty, matching
+ * {@link OpenAiCompatibleProvider}'s empty-key behavior.
+ *
+ * <h2>Per-task config</h2>
+ * <p>Config is read dynamically via {@link Config} rather than
+ * per-field {@code @ConfigProperty} injection. With 6 tasks × 5
+ * properties = 30 fields, dynamic lookup is cleaner. The property
+ * key pattern is {@code infochat.llm.<taskKeySegment>.<property>}.
+ * {@code max-tokens} is REQUIRED by the Anthropic API (unlike
+ * OpenAI where it is optional).
+ *
+ * <h2>Failure surface</h2>
+ * <p>Same contract as {@link OpenAiCompatibleProvider}: any
+ * {@link IOException}, {@link InterruptedException}, or non-2xx
+ * HTTP status throws {@link LlmCallFailedException}. Anthropic
+ * error responses ({@code "type": "error"}) include the inner
+ * {@code error.message} in the exception for diagnostics.
+ */
+@ApplicationScoped
+public class AnthropicProvider implements LlmProvider {
+
+    public static final String PROVIDER_NAME = "anthropic";
+
+    private static final String API_VERSION = "2023-06-01";
+    private static final Logger LOG = Logger.getLogger(AnthropicProvider.class);
+    private static final ObjectMapper JSON = new ObjectMapper();
+
+    private final Config config;
+    private final HttpClient http;
+
+    @Inject
+    public AnthropicProvider(@NonNull Config config) {
+        this(config, HttpClient.newHttpClient());
+    }
+
+    /** Test seam: caller-supplied HttpClient targets a local mock server. */
+    AnthropicProvider(Config config, HttpClient http) {
+        this.config = config;
+        this.http = http;
+    }
+
+    @Override
+    public @NonNull LlmResponse generate(@NonNull ModelTask task, @NonNull String systemPrompt,
+                                          @NonNull String userPrompt) {
+        TaskConfig cfg = configFor(task);
+        return doCall(cfg, systemPrompt, userPrompt);
+    }
+
+    private TaskConfig configFor(ModelTask task) {
+        String prefix = "infochat.llm." + taskKeySegment(task) + ".";
+        String baseUrl = config.getValue(prefix + "base-url", String.class);
+        String apiKey = config.getOptionalValue(prefix + "api-key", String.class).orElse("");
+        String model = config.getValue(prefix + "model", String.class);
+        long timeoutMs = config.getOptionalValue(prefix + "timeout-ms", Long.class).orElse(30000L);
+        int maxTokens = config.getValue(prefix + "max-tokens", Integer.class);
+        return new TaskConfig(baseUrl, apiKey, model, timeoutMs, maxTokens);
+    }
+
+    private LlmResponse doCall(TaskConfig cfg, String systemPrompt, String userPrompt) {
+        String body;
+        try {
+            ObjectNode root = JSON.createObjectNode();
+            root.put("model", cfg.model());
+            root.put("max_tokens", cfg.maxTokens());
+
+            ArrayNode system = root.putArray("system");
+            ObjectNode systemBlock = system.addObject();
+            systemBlock.put("type", "text");
+            systemBlock.put("text", systemPrompt);
+            ObjectNode cacheControl = systemBlock.putObject("cache_control");
+            cacheControl.put("type", "ephemeral");
+
+            ArrayNode messages = root.putArray("messages");
+            ObjectNode user = messages.addObject();
+            user.put("role", "user");
+            user.put("content", userPrompt);
+
+            body = JSON.writeValueAsString(root);
+        } catch (RuntimeException | com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new LlmCallFailedException(
+                "AnthropicProvider: failed to assemble request body", e);
+        }
+
+        URI uri = URI.create(joinPath(cfg.baseUrl(), "/messages"));
+        HttpRequest.Builder reqBuilder = HttpRequest.newBuilder(uri)
+            .timeout(Duration.ofMillis(cfg.timeoutMs()))
+            .header("Content-Type", "application/json")
+            .header("x-anthropic-version", API_VERSION)
+            .POST(HttpRequest.BodyPublishers.ofString(body));
+        if (!cfg.apiKey().isEmpty()) {
+            reqBuilder.header("anthropic-api-key", cfg.apiKey());
+        }
+        HttpRequest request = reqBuilder.build();
+
+        HttpResponse<String> response;
+        try {
+            response = http.send(request, HttpResponse.BodyHandlers.ofString());
+        } catch (IOException e) {
+            throw new LlmCallFailedException(
+                "AnthropicProvider: HTTP call failed for " + uri, e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new LlmCallFailedException(
+                "AnthropicProvider: HTTP call interrupted for " + uri, e);
+        }
+
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            String errorMsg = extractErrorMessage(response.body());
+            LOG.warnf("AnthropicProvider: non-2xx %d from %s; error: %s",
+                response.statusCode(), uri, errorMsg);
+            throw new LlmCallFailedException(
+                "AnthropicProvider: non-2xx status " + response.statusCode()
+                    + " from " + uri + ": " + errorMsg);
+        }
+
+        return parseContentText(response.body(), uri);
+    }
+
+    private static LlmResponse parseContentText(String responseBody, URI uri) {
+        JsonNode root;
+        try {
+            root = JSON.readTree(responseBody);
+        } catch (IOException e) {
+            throw new LlmCallFailedException(
+                "AnthropicProvider: failed to parse JSON response from " + uri, e);
+        }
+        JsonNode content = root.path("content");
+        if (!content.isArray() || content.isEmpty()) {
+            throw new LlmCallFailedException(
+                "AnthropicProvider: response missing content[] from " + uri);
+        }
+        JsonNode text = content.get(0).path("text");
+        if (!text.isTextual()) {
+            throw new LlmCallFailedException(
+                "AnthropicProvider: response missing content[0].text from " + uri);
+        }
+        return new LlmResponse(text.asText());
+    }
+
+    /**
+     * Extracts the diagnostic message from an Anthropic error
+     * response: {@code {"type":"error","error":{"type":"...","message":"..."}}}
+     */
+    private static String extractErrorMessage(String body) {
+        try {
+            JsonNode root = JSON.readTree(body);
+            if ("error".equals(root.path("type").asText())) {
+                return root.path("error").path("message").asText("(no message)");
+            }
+        } catch (Exception ignored) {
+            // Fall through to preview
+        }
+        return preview(body);
+    }
+
+    // Mirrors LlmRouter.taskKeySegment — duplicated here to avoid
+    // a cross-package dependency on a package-private method.
+    private static String taskKeySegment(ModelTask task) {
+        return switch (task) {
+            case SECURITY_JUDGE -> "security";
+            case TAGGER -> "tagger";
+            case ENTITY -> "entity";
+            case SUMMARIZER -> "summarizer";
+            case CHAT_AGENT -> "chat";
+            case TRANSLATOR -> "translator";
+        };
+    }
+
+    private static String joinPath(String base, String path) {
+        if (base.endsWith("/")) {
+            return base.substring(0, base.length() - 1) + path;
+        }
+        return base + path;
+    }
+
+    private static String preview(String s) {
+        if (s == null) {
+            return "<null>";
+        }
+        if (s.length() <= 200) {
+            return s;
+        }
+        return s.substring(0, 200) + "…(" + s.length() + " bytes)";
+    }
+
+    private record TaskConfig(String baseUrl, String apiKey, String model, long timeoutMs, int maxTokens) {
+    }
+}

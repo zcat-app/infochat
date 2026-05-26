@@ -3,6 +3,7 @@ package app.zcat.infochat.llm.routing;
 import app.zcat.infochat.llm.LlmProvider;
 import app.zcat.infochat.llm.LlmResponse;
 import app.zcat.infochat.llm.ModelTask;
+import app.zcat.infochat.llm.impl.AnthropicProvider;
 import app.zcat.infochat.llm.impl.OpenAiCompatibleProvider;
 import org.eclipse.microprofile.config.Config;
 import org.eclipse.microprofile.config.ConfigValue;
@@ -33,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 class LlmRouterTest {
 
     private static final String NAME_DEFAULT = OpenAiCompatibleProvider.PROVIDER_NAME;
+    private static final String NAME_ANTHROPIC = AnthropicProvider.PROVIDER_NAME;
     private static final String NAME_ALTERNATE = "alternate-provider";
     private static final String NAME_CZECH = "czech-capable";
     private static final String NAME_ENGLISH = "english-only";
@@ -205,6 +207,50 @@ class LlmRouterTest {
 
         assertSame(czechProvider, resolved,
             "uppercase 'CS' must resolve to the Czech-capable provider after case normalization");
+    }
+
+    /**
+     * M1-085: per-task override property set to "anthropic" routes
+     * SUMMARIZER to the AnthropicProvider entry. Exercises the
+     * priority-1 override branch with the new provider name.
+     */
+    @Test
+    void perTaskOverrideAnthropicRoutesToAnthropicProvider() {
+        StubProvider defaultProvider = new StubProvider();
+        StubProvider anthropicProvider = new StubProvider();
+        LlmRouter router = new LlmRouter(
+            List.of(
+                new LlmRouter.Entry(NAME_DEFAULT, defaultProvider, Set.of("en")),
+                new LlmRouter.Entry(NAME_ANTHROPIC, anthropicProvider, Set.of("en", "cs"))),
+            LlmRouter.ConfigReader.fromMap(Map.of(
+                "infochat.llm.summarizer.provider", NAME_ANTHROPIC)));
+
+        LlmProvider resolved = router.forTask(ModelTask.SUMMARIZER, "en");
+
+        assertSame(anthropicProvider, resolved,
+            "per-task override 'anthropic' must route to the anthropic provider entry");
+    }
+
+    /**
+     * M1-085: AnthropicProvider registered with Czech language support
+     * routes for the SUMMARIZER task when scope language is "cs" (via
+     * priority-2 language-aware capability branch).
+     */
+    @Test
+    void anthropicProviderWithCzechLanguageRoutesForCzechSummarizer() {
+        StubProvider defaultProvider = new StubProvider();
+        StubProvider anthropicProvider = new StubProvider();
+        LlmRouter router = new LlmRouter(
+            List.of(
+                new LlmRouter.Entry(NAME_DEFAULT, defaultProvider, Set.of("en")),
+                new LlmRouter.Entry(NAME_ANTHROPIC, anthropicProvider, Set.of("en", "cs"))),
+            LlmRouter.ConfigReader.fromMap(Map.of(
+                LlmRouter.CONFIG_KEY_DEFAULT_PROVIDER, NAME_DEFAULT)));
+
+        LlmProvider resolved = router.forTask(ModelTask.SUMMARIZER, "cs");
+
+        assertSame(anthropicProvider, resolved,
+            "language-aware branch must pick the Anthropic provider for Czech summarizer");
     }
 
     /**

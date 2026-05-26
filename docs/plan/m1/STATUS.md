@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 8 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 107 |
+| done | 108 |
 | deferred | 6 |
 | **total** | **121** |
 
@@ -25,7 +25,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-080 — Periodic digests umbrella — digest lifecycle roundtrip IT (complexity: medium, risk: medium)
-- M1-085 — AnthropicProvider — native Messages API with prompt caching (complexity: medium, risk: low)
 - M1-086 — FetchScheduler polymorphic per-kind dispatch (complexity: medium, risk: medium)
 
 ---
@@ -66,6 +65,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-085 | AnthropicProvider — native Messages API with prompt caching | 2026-05-26 | round 2 APPROVE |
 | M1-084 | MembershipEvent wiring + tryAutoPromote re-promote path | 2026-05-26 | round 1 APPROVE |
 | M1-083 | Quarantine/audit redteam remediation — rate bucket, audit coverage, pagination | 2026-05-26 | round 1 APPROVE |
 | M1-082 | Relocate ThrottledAdminNotifier to infochat-core | 2026-05-26 | round 2 APPROVE |
@@ -75,7 +75,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-080b | DigestWorker + degraded fallback + subscription-version cache | 2026-05-26 | round 1 APPROVE |
 | M1-080a | V21 summary_cache + DigestScheduler + staggered slots | 2026-05-26 | round 2 APPROVE |
 | M1-021 | Identity/audit redteam remediation (V6 — actor checks, search_path, ban-self trigger, audit-actor integrity) | 2026-05-26 | round 1 APPROVE |
-| M1-081a | Re-eval job + quarantine NOTIFY + tagger partial-valid + TTL | 2026-05-25 | round 2 APPROVE |
 
 ---
 
@@ -262,7 +261,7 @@ M1-082 (done)
   └── M1-080c (done) [see above]
 M1-084 (done)
   └── M1-079 (deferred) [see above]
-M1-085 (pending) ← runnable
+M1-085 (done)
 M1-086 (pending) ← runnable
   ├── M1-087 (pending)
   ├── M1-088 (pending)

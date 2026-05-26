@@ -5,6 +5,7 @@ import org.jspecify.annotations.Nullable;
 
 import app.zcat.infochat.llm.LlmProvider;
 import app.zcat.infochat.llm.ModelTask;
+import app.zcat.infochat.llm.impl.AnthropicProvider;
 import app.zcat.infochat.llm.impl.OpenAiCompatibleProvider;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -255,6 +256,9 @@ public class LlmRouter {
     private static String providerName(LlmProvider p) {
         if (p instanceof OpenAiCompatibleProvider) {
             return OpenAiCompatibleProvider.PROVIDER_NAME;
+        }
+        if (p instanceof AnthropicProvider) {
+            return AnthropicProvider.PROVIDER_NAME;
         }
         // CDI client proxies are subclasses whose name carries a
         // framework suffix (e.g. _ClientProxy). Walk up to the

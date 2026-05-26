@@ -94,7 +94,12 @@ public class LlmRouterStartupGuard {
      * offending task by enum value.
      */
     private static final Map<ModelTask, String> PER_TASK_BASE_URL_KEYS = Map.of(
-        ModelTask.SECURITY_JUDGE, "infochat.llm.security.base-url"
+        ModelTask.SECURITY_JUDGE, "infochat.llm.security.base-url",
+        ModelTask.TAGGER, "infochat.llm.tagger.base-url",
+        ModelTask.ENTITY, "infochat.llm.entity.base-url",
+        ModelTask.SUMMARIZER, "infochat.llm.summarizer.base-url",
+        ModelTask.CHAT_AGENT, "infochat.llm.chat.base-url",
+        ModelTask.TRANSLATOR, "infochat.llm.translator.base-url"
     );
 
     @Inject
