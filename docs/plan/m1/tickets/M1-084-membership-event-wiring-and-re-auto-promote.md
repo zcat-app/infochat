@@ -12,14 +12,54 @@ risk: medium
 round_cap: 2
 security_relevant: true
 migration_touch: false
-out_of_scope: []
-acceptance: []
+out_of_scope:
+  - "GroupDeleted / UserJoined event handling — only UserLeft and BotRemoved in scope"
+  - "Reopening or modifying M1-079 umbrella IT — this ticket ships production code only"
+  - "Schema migrations or DDL — the V5 trigger and one_admin_per_group index already exist"
+  - "Real adapter (SimpleX/Signal) membership-event emission — only InMemoryAdapter fires events in v1"
+  - "Changes to isEligible() logic in tryAutoPromote"
+  - "Changes to /promote, /demote, or any slash command implementation"
+  - "Changes to InboundRouter message-handling flow"
+acceptance:
+  - "MessagingAdapter exposes a setMembershipEventHandler hook (or equivalent wiring point) that the provider sets to receive MembershipEvent instances — parallel to the existing setInboundHandler pattern."
+  - "AdapterRegistry wires the membership-event handler on each activated adapter during startup, alongside the existing setInboundHandler call."
+  - "When MembershipEvent.UserLeft fires, the handler resolves adapter-level group ID and contact ID to internal UUIDs and calls GroupMembershipRepository.markMemberRemoved(groupId, userId). After the call, the row has removed_at IS NOT NULL and is_group_admin = false (V5 trigger)."
+  - "When MembershipEvent.BotRemoved fires, the handler resolves the adapter-level group ID and calls GroupRepository.markRemoved(groupId). After the call, the groups row has removed_at IS NOT NULL."
+  - "GroupAutoPromoteService.tryAutoPromote succeeds (returns true) for an existing group_membership row where is_group_admin = false and removed_at IS NULL. SQL changes from ON CONFLICT DO NOTHING to ON CONFLICT (group_id, user_id) DO UPDATE SET is_group_admin = true with a WHERE guard excluding removed rows."
+  - "Concurrent tryAutoPromote calls for the same group: at most one succeeds (enforced by one_admin_per_group partial unique index); the loser returns false without throwing."
+  - "Successful re-promote writes an audit-log entry with action PROMOTE_GROUP_ADMIN and detail {\"auto_promote\":true}, identical to the first-promote path."
 test_plan:
-  adds: []
+  adds:
+    - "MembershipEventHandler test: UserLeft -> verifies markMemberRemoved called with correct IDs"
+    - "MembershipEventHandler test: BotRemoved -> verifies markRemoved called with correct group ID"
+    - "GroupAutoPromoteService re-promote test: existing non-admin member returns true + audit written"
+    - "GroupAutoPromoteService re-promote test: removed member returns false"
   preserves:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
+clarity_check:
+  date: 2026-05-26
+  verdict: FAIL
+  warnings:
+    - "files_budget: 8 cannot be validated without acceptance criteria"
+  blockers:
+    - "acceptance: [] is empty — no runnable/testable acceptance items"
+    - "out_of_scope: [] is empty — no explicit boundaries defined"
+escalations:
+  - date: 2026-05-26
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      BLOCKERS:
+      1. acceptance: [] is empty — no runnable/testable acceptance items
+      2. out_of_scope: [] is empty — no explicit boundaries defined
+revisions:
+  - date: 2026-05-26
+    reason: clarity-fail
+    snapshot: |
+      acceptance: []
+      out_of_scope: []
+      test_plan.adds: []
 ---
 
 # M1-084: MembershipEvent wiring + tryAutoPromote re-promote path
@@ -53,12 +93,17 @@ ships the missing production code so the umbrella IT can reopen.
 
 ## Acceptance
 
-Skeleton — needs acceptance criteria, sizing, and out_of_scope filled
-in before `/m1-tick start M1-084` will pass clarity.
+See frontmatter `acceptance:` list — seven criteria covering:
+- (a–b) Adapter-to-provider membership-event wiring via setMembershipEventHandler
+- (c–d) UserLeft → markMemberRemoved, BotRemoved → markRemoved
+- (e–g) tryAutoPromote ON CONFLICT DO UPDATE path, race safety, audit log
 
 ## Out-of-scope
 
-Skeleton — needs explicit boundaries.
+See frontmatter `out_of_scope:` list — seven explicit boundaries
+covering GroupDeleted/UserJoined events, M1-079 umbrella IT changes,
+DDL/migrations, real adapter emission, isEligible logic, slash
+commands, and InboundRouter flow.
 
 ## Notes
 
