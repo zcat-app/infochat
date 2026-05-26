@@ -1,6 +1,8 @@
 package app.zcat.infochat.provider.command;
 
 import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.AuditLogWriter;
+import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
@@ -53,6 +55,7 @@ public class AuditCommandHandler implements CommandHandler {
     @Inject BundleLoader bundleLoader;
     @Inject DataSource dataSource;
     @Inject InboundContext inboundContext;
+    @Inject AuditLogWriter auditLogWriter;
 
     @Inject
     @ConfigProperty(name = "infochat.provider.audit.page-size", defaultValue = "20")
@@ -98,6 +101,37 @@ public class AuditCommandHandler implements CommandHandler {
                     // Sentinel UUID that will never match — produces zero rows
                     // without exposing existence-vs-no-rows distinction.
                     UUID.fromString("00000000-0000-0000-0000-000000000000"));
+        }
+
+        ActorRow actor = actorOpt.get();
+        try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                StringBuilder detailsJson = new StringBuilder("{");
+                detailsJson.append("\"actor\":").append(args.actor != null
+                        ? "\"" + escapeJson(args.actor) + "\"" : "null");
+                detailsJson.append(",\"action\":").append(args.action != null
+                        ? "\"" + escapeJson(args.action) + "\"" : "null");
+                detailsJson.append('}');
+                RedactionHook.AuditRow auditRow = RedactionHook.AuditRow.builder()
+                        .actorUserId(actor.id)
+                        .actorContactId(actor.contactId)
+                        .actorAdapter(adapter)
+                        .action(AuditAction.AUDIT_READ)
+                        .targetKind("system")
+                        .targetId("audit_log")
+                        .requestId(UUID.randomUUID().toString())
+                        .detailsJson(detailsJson.toString())
+                        .build();
+                auditLogWriter.write(conn, auditRow);
+                conn.commit();
+            } catch (SQLException e) {
+                conn.rollback();
+                throw e;
+            }
+        } catch (SQLException e) {
+            LOG.errorf(e, "/audit audit write failed");
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL));
         }
 
         int page = args.page;
@@ -173,6 +207,14 @@ public class AuditCommandHandler implements CommandHandler {
             LOG.errorf(e, "/audit query failed");
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL));
         }
+    }
+
+    static String escapeJson(String value) {
+        return value.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
     }
 
     private static void bindParams(PreparedStatement ps, List<Object> params) throws SQLException {

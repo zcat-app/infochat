@@ -5,6 +5,7 @@ import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.messaging.RateCapBucket;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.AfterEach;
@@ -39,6 +40,7 @@ class QuarantineCommandHandlerTest {
     @Inject DataSource dataSource;
     @Inject BundleLoader bundleLoader;
     @Inject InboundContext inboundContext;
+    @Inject RateCapBucket rateCapBucket;
 
     private UUID sourceId;
 
@@ -229,6 +231,91 @@ class QuarantineCommandHandlerTest {
 
         assertEquals("REJECTED", quarantineStatus(qId),
                 "BENIGN_CLOSED must transition to REJECTED");
+    }
+
+    // ---- Rate limiting ----
+
+    @Test
+    void approve_rateLimitAfterBucketDrains() throws Exception {
+        String admin = PREFIX + "rl-admin";
+        seedUser(admin, true, false, "vouched");
+        UUID qId = seedQuarantineRow("PENDING", PREFIX + "rl-p1");
+
+        // Drain the bucket for this admin's quarantine key.
+        // RateCapBucket default is 60/min; exhaust them all.
+        String rateBucketKey = null;
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT id FROM users WHERE adapter = ? AND contact_id = ?")) {
+            ps.setString(1, ADAPTER);
+            ps.setString(2, admin);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                rateBucketKey = rs.getObject("id", UUID.class).toString();
+            }
+        }
+        for (int i = 0; i < 60; i++) {
+            rateCapBucket.tryAcquire("quarantine", rateBucketKey);
+        }
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(admin), "/quarantine approve " + qId);
+
+        assertTrue(reply.text().contains("too quickly"),
+                "rate-exceeded approve must return rate-limit reply");
+        assertEquals("PENDING", quarantineStatus(qId),
+                "stored procedure must NOT be called when rate exceeded");
+    }
+
+    // ---- Audit logging ----
+
+    @Test
+    void list_writesQuarantineListAuditRow() throws Exception {
+        String admin = PREFIX + "audit-admin";
+        UUID adminId = seedUser(admin, true, false, "vouched");
+        seedQuarantineRow("PENDING", PREFIX + "audit-p1");
+
+        handler.handle(new ScopeRef.Dm(admin), "/quarantine list");
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT action, actor_user_id, actor_contact_id, actor_adapter, details_json "
+                             + "FROM audit_log WHERE action = 'QUARANTINE_LIST' "
+                             + "AND actor_user_id = ?")) {
+            ps.setObject(1, adminId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(), "QUARANTINE_LIST audit row must exist");
+                assertEquals("QUARANTINE_LIST", rs.getString("action"));
+                assertEquals(adminId, rs.getObject("actor_user_id", UUID.class));
+                assertEquals(admin, rs.getString("actor_contact_id"));
+                assertEquals(ADAPTER, rs.getString("actor_adapter"));
+                String details = rs.getString("details_json");
+                assertTrue(details.contains("\"show_all\"") && details.contains("false"),
+                        "details_json must record show_all flag, got: " + details);
+            }
+        }
+    }
+
+    // ---- Pagination ----
+
+    @Test
+    void list_page2ReturnsSecondPage() throws Exception {
+        String admin = PREFIX + "pg-admin";
+        seedUser(admin, true, false, "vouched");
+
+        // Seed 25 rows to push past page 1 (pageSize=20)
+        for (int i = 0; i < 25; i++) {
+            seedQuarantineRow("PENDING", PREFIX + "pg-p" + String.format("%03d", i));
+        }
+
+        OutboundMessage page2 = handler.handle(
+                new ScopeRef.Dm(admin), "/quarantine list --page 2");
+
+        assertTrue(page2.text().contains("page 2"),
+                "page 2 header must show page 2");
+        // Page 2 should have 5 rows (25 - 20)
+        assertTrue(page2.text().contains("5 rows"),
+                "page 2 must show the remaining rows");
     }
 
     // ---- Helpers ----

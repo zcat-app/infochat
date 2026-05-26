@@ -197,6 +197,52 @@ class AuditCommandHandlerTest {
                 "page 2 header must show page 2");
     }
 
+    // ---- Audit logging ----
+
+    @Test
+    void audit_writesAuditReadRow() throws Exception {
+        String admin = PREFIX + "auditread-admin";
+        UUID adminId = seedUser(admin, true, false, "vouched");
+
+        // Seed one audit row so the handler has data to return
+        seedAuditRow(adminId, admin, "BAN", "user", PREFIX + "auditread-t1", null);
+
+        handler.handle(new ScopeRef.Dm(admin), "/audit --action BAN");
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT action, actor_user_id, actor_contact_id, actor_adapter, details_json "
+                             + "FROM audit_log WHERE action = 'AUDIT_READ' "
+                             + "AND actor_user_id = ?")) {
+            ps.setObject(1, adminId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(), "AUDIT_READ audit row must exist");
+                assertEquals("AUDIT_READ", rs.getString("action"));
+                assertEquals(adminId, rs.getObject("actor_user_id", UUID.class));
+                assertEquals(admin, rs.getString("actor_contact_id"));
+                assertEquals(ADAPTER, rs.getString("actor_adapter"));
+                String details = rs.getString("details_json");
+                assertTrue(details.contains("\"action\"") && details.contains("\"BAN\""),
+                        "details_json must record the --action filter, got: " + details);
+            }
+        }
+    }
+
+    @Test
+    void audit_backslashInActorDoesNotBreakAuditWrite() throws Exception {
+        String admin = PREFIX + "bs-admin";
+        seedUser(admin, true, false, "vouched");
+
+        // A backslash in --actor must not break the detailsJson ::jsonb cast
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(admin), "/audit --actor test\\");
+
+        // The command should succeed (returning empty results for the
+        // non-existent actor), not return an internal error
+        assertEquals(bundleLoader.get(BundleKeys.REPLY_AUDIT_EMPTY), reply.text(),
+                "backslash in --actor must not break the audit write");
+    }
+
     // ---- Helpers ----
 
     private UUID seedUser(String contactId, boolean isAdmin, boolean isBanned,

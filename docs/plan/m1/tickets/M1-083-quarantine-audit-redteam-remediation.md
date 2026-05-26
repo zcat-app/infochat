@@ -1,9 +1,10 @@
 ---
 id: M1-083
 title: Quarantine/audit redteam remediation — rate bucket, audit coverage, pagination
-status: pending
+status: done
 created: 2026-05-26
 last_updated: 2026-05-26
+started: 2026-05-26
 blocked_by:
   - M1-081b
 remediates: M1-081b
@@ -47,18 +48,71 @@ test_plan:
     - all tests currently green on main
 spec_refs:
   - docs/spec/security.md §Rate limiting
-  - docs/spec/security.md §Authorization model step 8
+  - docs/spec/security.md §Authorization model
   - docs/spec/commands.md §Admin (bot admin)
 decision_refs:
   - D9
   - D34
 
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-05-26
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 265
+      removed: 20
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
-clarity_check: {}
+escalations:
+  - date: 2026-05-26
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      SPEC-REFS-VALID: docs/spec/security.md §Authorization model step 8 does not resolve to any heading; step 8 is a numbered list item within §Authorization model, not a heading — fix to §Authorization model
+redteam_findings:
+  - date: 2026-05-26
+    category: INJECTION
+    severity: low
+    promise: |
+      Audit-log the intent (security.md §Authorization model step 8);
+      audit-log writes pass through a redaction hook
+    gap: |
+      AuditCommandHandler.java:112 — args.actor embedded in hand-built
+      JSON with only double-quote escaping; backslash breaks ::jsonb cast,
+      aborting both audit write and query
+    repro: |
+      /audit --actor test\ → jsonb cast fails → audit write rolls back →
+      command returns internal error with no AUDIT_READ row written
+    suggested_fix_class: input-sanitization
+redteam_audits:
+  - date: 2026-05-26
+    verdict: FINDINGS
+    base: main
+    head: m1/M1-083-quarantine-audit-redteam-remediation
+    verdict_file: docs/plan/m1/redteam/M1-083-2026-05-26.md
+    findings_count: 1
+    out_of_model_count: 1
+    note: |
+      One low-severity INJECTION finding: incomplete JSON escaping in
+      AuditCommandHandler detailsJson construction. Fail-closed behavior
+      (both audit and query abort). One out-of-model observation about
+      missing per-command rate buckets for parser-only DB-read commands.
+revisions:
+  - date: 2026-05-26
+    reason: clarity-fail
+    change: "Fixed spec_ref §Authorization model step 8 → §Authorization model (step 8 is a list item, not a heading)"
+clarity_check:
+  date: 2026-05-26
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-083: Quarantine/audit redteam remediation

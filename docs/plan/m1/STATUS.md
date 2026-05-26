@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 102 |
+| done | 103 |
 | deferred | 6 |
 | **total** | **113** |
 
@@ -26,7 +26,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-079 — Group infrastructure umbrella — group lifecycle roundtrip IT (complexity: medium, risk: medium)
 - M1-080b — DigestWorker + degraded fallback + subscription-version cache (complexity: high, risk: high)
-- M1-083 — Quarantine/audit redteam remediation — rate bucket, audit coverage, pagination (complexity: medium, risk: medium)
 
 ---
 
@@ -63,6 +62,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-083 | Quarantine/audit redteam remediation — rate bucket, audit coverage, pagination | 2026-05-26 | round 1 APPROVE |
 | M1-082 | Relocate ThrottledAdminNotifier to infochat-core | 2026-05-26 | round 2 APPROVE |
 | M1-081b | Quarantine admin commands + review listener + /audit | 2026-05-26 | round 2 APPROVE |
 | M1-081 | Quarantine admin workflow + re-evaluation pipeline umbrella | 2026-05-26 | round 1 APPROVE |
@@ -72,7 +72,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-079d | Admin-gated handler group unwinding (source/tag/lang) | 2026-05-25 | round 1 APPROVE |
 | M1-079c | /promote + /demote + /group-timezone + auto-promote + group dispatch | 2026-05-25 | round 1 APPROVE |
 | M1-079b | InMemoryAdapter group SPI + membership event model | 2026-05-25 | round 1 APPROVE |
-| M1-079a | GroupRepository + GroupMembershipRepository | 2026-05-25 | round 1 APPROVE |
 
 ---
 
@@ -254,7 +253,7 @@ M1-079a (done)
         ├── M1-081 (done)
         └── M1-081b (done)
               ├── M1-081 (done) [see above]
-              └── M1-083 (pending) ← runnable
+              └── M1-083 (done)
 M1-082 (done)
   └── M1-080c (pending) [see above]
 ```

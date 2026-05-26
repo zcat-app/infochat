@@ -1,11 +1,15 @@
 package app.zcat.infochat.provider.command;
 
+import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.AuditLogWriter;
+import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.messaging.RateCapBucket;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -18,6 +22,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.text.MessageFormat;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
@@ -58,9 +64,13 @@ public class QuarantineCommandHandler implements CommandHandler {
     private static final String COUNT_ALL_SQL =
             "SELECT count(*) FROM quarantine_review_view";
 
+    private static final String RATE_LIMIT_KEY = "error.quarantine.rate_limit";
+
     @Inject BundleLoader bundleLoader;
     @Inject DataSource dataSource;
     @Inject InboundContext inboundContext;
+    @Inject RateCapBucket rateCapBucket;
+    @Inject AuditLogWriter auditLogWriter;
 
     @Override
     public String name() {
@@ -87,17 +97,42 @@ public class QuarantineCommandHandler implements CommandHandler {
         String remainder = split.length > 2 ? split[2] : "";
 
         return switch (subcommand) {
-            case "list" -> handleList(scope, remainder);
-            case "approve" -> handleApprove(scope, actor, remainder);
-            case "reject" -> handleReject(scope, actor, remainder);
+            case "list" -> handleList(scope, actor, adapter, remainder);
+            case "approve" -> handleApprove(scope, actor, adapter, remainder);
+            case "reject" -> handleReject(scope, actor, adapter, remainder);
             default -> reply(scope, bundleLoader.get(BundleKeys.ERROR_QUARANTINE_UNKNOWN_SUBCOMMAND));
         };
     }
 
-    private OutboundMessage handleList(ScopeRef scope, String remainder) {
-        boolean showAll = remainder.trim().equalsIgnoreCase("--all");
-        String countSql = showAll ? COUNT_ALL_SQL : COUNT_PENDING_SQL;
-        String dataSql = showAll ? LIST_ALL_SQL : LIST_PENDING_SQL;
+    private OutboundMessage handleList(ScopeRef scope, ActorRow actor,
+                                       String adapter, String remainder) {
+        ListArgs args = ListArgs.parse(remainder);
+        String countSql = args.showAll ? COUNT_ALL_SQL : COUNT_PENDING_SQL;
+        String dataSql = args.showAll ? LIST_ALL_SQL : LIST_PENDING_SQL;
+
+        try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                RedactionHook.AuditRow auditRow = RedactionHook.AuditRow.builder()
+                        .actorUserId(actor.id)
+                        .actorContactId(actor.contactId)
+                        .actorAdapter(adapter)
+                        .action(AuditAction.QUARANTINE_LIST)
+                        .targetKind("quarantine")
+                        .targetId("list")
+                        .requestId(UUID.randomUUID().toString())
+                        .detailsJson("{\"show_all\":" + args.showAll + "}")
+                        .build();
+                auditLogWriter.write(conn, auditRow);
+                conn.commit();
+            } catch (SQLException e) {
+                conn.rollback();
+                throw e;
+            }
+        } catch (SQLException e) {
+            LOG.errorf(e, "/quarantine list audit write failed");
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL));
+        }
 
         try (Connection conn = dataSource.getConnection()) {
             long totalCount;
@@ -113,11 +148,12 @@ public class QuarantineCommandHandler implements CommandHandler {
 
             int pageSize = 20;
             int totalPages = (int) Math.ceil((double) totalCount / pageSize);
-            int page = 1;
+            int page = Math.max(1, Math.min(args.page, totalPages));
 
+            long rowsOnPage = Math.min(totalCount - (long) (page - 1) * pageSize, pageSize);
             StringBuilder sb = new StringBuilder();
             sb.append(MessageFormat.format(bundleLoader.get(BundleKeys.REPLY_QUARANTINE_LIST_HEADER),
-                    String.valueOf(Math.min(totalCount, pageSize)),
+                    String.valueOf(rowsOnPage),
                     String.valueOf(page),
                     String.valueOf(totalPages)));
 
@@ -145,7 +181,12 @@ public class QuarantineCommandHandler implements CommandHandler {
         }
     }
 
-    private OutboundMessage handleApprove(ScopeRef scope, ActorRow actor, String remainder) {
+    private OutboundMessage handleApprove(ScopeRef scope, ActorRow actor,
+                                          String adapter, String remainder) {
+        if (!rateCapBucket.tryAcquire("quarantine", actor.id.toString())) {
+            return reply(scope, bundleLoader.get(RATE_LIMIT_KEY));
+        }
+
         String idStr = remainder.trim().split("\\s+")[0];
         if (idStr.isEmpty()) {
             return reply(scope, MessageFormat.format(
@@ -175,7 +216,12 @@ public class QuarantineCommandHandler implements CommandHandler {
         }
     }
 
-    private OutboundMessage handleReject(ScopeRef scope, ActorRow actor, String remainder) {
+    private OutboundMessage handleReject(ScopeRef scope, ActorRow actor,
+                                         String adapter, String remainder) {
+        if (!rateCapBucket.tryAcquire("quarantine", actor.id.toString())) {
+            return reply(scope, bundleLoader.get(RATE_LIMIT_KEY));
+        }
+
         String idStr = remainder.trim().split("\\s+")[0];
         if (idStr.isEmpty()) {
             return reply(scope, MessageFormat.format(
@@ -258,4 +304,36 @@ public class QuarantineCommandHandler implements CommandHandler {
     }
 
     record ActorRow(UUID id, String contactId, boolean isAdmin) {}
+
+    record ListArgs(boolean showAll, int page) {
+        static ListArgs parse(String remainder) {
+            boolean showAll = false;
+            int page = 1;
+            List<String> tokens = new ArrayList<>();
+            for (String tok : remainder.trim().split("\\s+")) {
+                if (!tok.isEmpty()) tokens.add(tok);
+            }
+            int i = 0;
+            while (i < tokens.size()) {
+                String tok = tokens.get(i).toLowerCase(Locale.ROOT);
+                if ("--all".equals(tok)) {
+                    showAll = true;
+                    i++;
+                } else if ("--page".equals(tok) && i + 1 < tokens.size()) {
+                    try {
+                        page = Math.max(1, Integer.parseInt(tokens.get(i + 1)));
+                    } catch (NumberFormatException ignored) { }
+                    i += 2;
+                } else if (tok.startsWith("--page=")) {
+                    try {
+                        page = Math.max(1, Integer.parseInt(tok.substring("--page=".length())));
+                    } catch (NumberFormatException ignored) { }
+                    i++;
+                } else {
+                    i++;
+                }
+            }
+            return new ListArgs(showAll, page);
+        }
+    }
 }
