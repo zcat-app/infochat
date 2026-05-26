@@ -1,9 +1,28 @@
 ---
 id: M1-080c
 title: /retry --digest routing + missed-slot admin notification
-status: pending
+status: done
 created: 2026-05-25
-last_updated: 2026-05-25
+last_updated: 2026-05-26
+reviews:
+  - round: 1
+    date: 2026-05-26
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 912
+      removed: 15
+clarity_check:
+  date: 2026-05-26
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by:
   - M1-080a
   - M1-080b
@@ -62,6 +81,60 @@ spec_refs:
 decision_refs:
   - D17
   - D22
+redteam_findings:
+  - date: 2026-05-26
+    category: AUDIT-EVASION
+    severity: high
+    promise: |
+      Authorization evaluation order on every inbound message:
+      ... 8. Audit-log the intent. 9. Execute.
+    gap: |
+      RetryCommandHandler.handleDigestRetry and DigestRetryService.retryDigest
+      execute a mutating operation (DELETE + LLM invocation + INSERT) with no
+      audit log write anywhere in the path.
+    repro: |
+      A group admin sends /retry --digest. The command succeeds. No row is
+      written to audit_log. An operator sees no record of who triggered
+      digest replacements.
+    suggested_fix_class: audit-log-coverage
+  - date: 2026-05-26
+    category: DOS
+    severity: medium
+    promise: |
+      LLM-triggering operations — its own bucket, capped lower, profile-driven.
+    gap: |
+      RetryCommandHandler.handleDigestRetry does not check any LLM rate-cap
+      bucket before calling digestRetryService.retryDigest(). The per-group
+      serialization prevents concurrency but not frequency.
+    repro: |
+      A group admin repeatedly sends /retry --digest. Each call is serialized
+      but unbounded in frequency, driving unbounded LLM cost.
+    suggested_fix_class: rate-limit
+  - date: 2026-05-26
+    category: PERM-ESCAL
+    severity: low
+    promise: |
+      Non-admin /retry --digest -> friendly error.
+    gap: |
+      rawText.contains("--digest") is a loose substring match. /retry --digestive
+      or /retry foo--digest route to the digest path instead of personal retry.
+    repro: |
+      A bot admin in a group sends /retry something --digest-mode. The substring
+      matches, routing to handleDigestRetry instead of personal retry.
+    suggested_fix_class: input-sanitization
+redteam_audits:
+  - date: 2026-05-26
+    verdict: FINDINGS
+    base: main
+    head: m1/M1-080c-retry-digest-and-missed-slot-notify
+    verdict_file: docs/plan/m1/redteam/M1-080c-2026-05-26.md
+    findings_count: 3
+    out_of_model_count: 1
+    note: |
+      Three findings: missing audit log (high), missing LLM rate cap (medium),
+      loose --digest substring match (low). All three are genuine gaps that
+      warrant a remediation ticket. The out-of-model observation about
+      multi-instance serialization is accepted per spec.
 ---
 
 # M1-080c: /retry --digest routing + missed-slot admin notification

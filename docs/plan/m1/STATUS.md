@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 104 |
+| done | 105 |
 | deferred | 7 |
 | **total** | **114** |
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-080c — /retry --digest routing + missed-slot admin notification (complexity: medium, risk: medium)
+- M1-080 — Periodic digests umbrella — digest lifecycle roundtrip IT (complexity: medium, risk: medium)
 - M1-084 — MembershipEvent wiring + tryAutoPromote re-promote path (complexity: medium, risk: medium)
 
 ---
@@ -42,7 +42,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-080 — blocked_by: M1-080a (done), M1-080b (done), M1-080c (pending)
+_(none)_
 
 ---
 
@@ -65,12 +65,12 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-082 | Relocate ThrottledAdminNotifier to infochat-core | 2026-05-26 | round 2 APPROVE |
 | M1-081b | Quarantine admin commands + review listener + /audit | 2026-05-26 | round 2 APPROVE |
 | M1-081 | Quarantine admin workflow + re-evaluation pipeline umbrella | 2026-05-26 | round 1 APPROVE |
+| M1-080c | /retry --digest routing + missed-slot admin notification | 2026-05-26 | round 1 APPROVE |
 | M1-080b | DigestWorker + degraded fallback + subscription-version cache | 2026-05-26 | round 1 APPROVE |
 | M1-080a | V21 summary_cache + DigestScheduler + staggered slots | 2026-05-26 | round 2 APPROVE |
 | M1-081a | Re-eval job + quarantine NOTIFY + tagger partial-valid + TTL | 2026-05-25 | round 2 APPROVE |
 | M1-079e | Member-access handler group unwinding + DM-only gates | 2026-05-25 | round 1 APPROVE |
 | M1-079d | Admin-gated handler group unwinding (source/tag/lang) | 2026-05-25 | round 1 APPROVE |
-| M1-079c | /promote + /demote + /group-timezone + auto-promote + group dispatch | 2026-05-25 | round 1 APPROVE |
 
 ---
 
@@ -237,12 +237,12 @@ M1-078 (done)
 M1-079a (done)
   ├── M1-079 (deferred)
   │     └── M1-080a (done)
-  │           ├── M1-080 (pending)
+  │           ├── M1-080 (pending) ← runnable
   │           ├── M1-080b (done)
   │           │     ├── M1-080 (pending) [see above]
-  │           │     └── M1-080c (pending) ← runnable
+  │           │     └── M1-080c (done)
   │           │           └── M1-080 (pending) [see above]
-  │           └── M1-080c (pending) [see above]
+  │           └── M1-080c (done) [see above]
   ├── M1-079b (done)
   │     └── M1-079 (deferred) [see above]
   ├── M1-079c (done)
@@ -257,7 +257,7 @@ M1-079a (done)
               ├── M1-081 (done) [see above]
               └── M1-083 (done)
 M1-082 (done)
-  └── M1-080c (pending) [see above]
+  └── M1-080c (done) [see above]
 M1-084 (pending) ← runnable
   └── M1-079 (deferred) [see above]
 ```

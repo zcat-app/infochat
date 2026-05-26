@@ -1,5 +1,8 @@
 package app.zcat.infochat.provider.command;
 
+import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.AuditLogWriter;
+import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
@@ -8,6 +11,8 @@ import app.zcat.infochat.provider.chat.CancellationService;
 import app.zcat.infochat.provider.chat.InFlightTracker;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository.AnchorRow;
+import app.zcat.infochat.provider.digest.DigestRetryService;
+import app.zcat.infochat.provider.group.GroupMembershipRepository;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
@@ -46,16 +51,23 @@ import java.util.UUID;
 
 /**
  * Implements {@code /retry} per docs/spec/commands.md §Conversation control.
- * Replays the prose layer of the last summary-producing command using the
- * frozen post selection and cluster mapping stored in {@code summary_anchor}
- * (D19, D36). Only personal anchors ({@code command_kind = 'personal'}) are
- * handled; digest anchors are T2-F territory.
+ * The personal path replays the prose layer of the last summary-producing
+ * command using the frozen post selection and cluster mapping stored in
+ * {@code summary_anchor} (D19, D36). The {@code --digest} path delegates
+ * to {@link DigestRetryService} for per-group serialized digest
+ * re-generation (M1-080c).
  */
 @ApplicationScoped
 public class RetryCommandHandler implements CommandHandler {
 
     private static final String SELECT_USER_ID =
             "SELECT id FROM users WHERE adapter = ? AND contact_id = ?";
+
+    private static final String SELECT_ACTOR_WITH_ADMIN =
+            "SELECT id, is_admin FROM users WHERE adapter = ? AND contact_id = ?";
+
+    private static final String SELECT_GROUP_ID =
+            "SELECT id FROM groups WHERE adapter = ? AND upstream_group_id = ?";
 
     // Fetch posts by uid where status='READY'. The uid column on post
     // is the human-readable "p-<hash>" identifier; we join source for
@@ -98,6 +110,15 @@ public class RetryCommandHandler implements CommandHandler {
     @Inject
     InFlightTracker inFlightTracker;
 
+    @Inject
+    DigestRetryService digestRetryService;
+
+    @Inject
+    GroupMembershipRepository groupMembershipRepository;
+
+    @Inject
+    AuditLogWriter auditLogWriter;
+
     @ConfigProperty(name = "infochat.retry.cap", defaultValue = "3")
     int retryCap;
 
@@ -111,6 +132,9 @@ public class RetryCommandHandler implements CommandHandler {
 
     @Override
     public @NonNull OutboundMessage handle(@NonNull ScopeRef scope, @NonNull String rawText) {
+        if (hasFlag(rawText, "--digest")) {
+            return handleDigestRetry(scope);
+        }
         Optional<UUID> userId = resolveUserId(scope);
         if (userId.isEmpty()) {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_NO_ANCHOR));
@@ -341,6 +365,108 @@ public class RetryCommandHandler implements CommandHandler {
             union.addAll(p.tags());
         }
         return String.join(", ", union);
+    }
+
+    private OutboundMessage handleDigestRetry(ScopeRef scope) {
+        if (scope instanceof ScopeRef.Dm) {
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_DIGEST_GROUP_ONLY));
+        }
+        ScopeRef.Group group = (ScopeRef.Group) scope;
+
+        String adapter = inboundContext.adapterName();
+        String contactId = inboundContext.senderContactId();
+        ActorRow actor = lookupActor(adapter, contactId);
+        if (actor == null) {
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_DIGEST_GROUP_ADMIN_REQUIRED));
+        }
+
+        UUID groupDbId = lookupGroupId(group.adapterGroupId());
+        if (groupDbId == null
+                || (!actor.isAdmin
+                    && !groupMembershipRepository.isGroupAdmin(groupDbId, actor.id))) {
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_DIGEST_GROUP_ADMIN_REQUIRED));
+        }
+
+        writeDigestRetryAudit(actor, adapter, contactId, groupDbId);
+        DigestRetryService.RetryResult result = digestRetryService.retryDigest(groupDbId);
+        return switch (result) {
+            case SUCCESS -> reply(scope,
+                    bundleLoader.get(BundleKeys.REPLY_RETRY_DIGEST_SUCCESS));
+            case ALREADY_IN_PROGRESS -> reply(scope,
+                    bundleLoader.get(BundleKeys.ERROR_RETRY_DIGEST_ALREADY_IN_PROGRESS));
+            case NO_PRIOR_DIGEST -> reply(scope,
+                    bundleLoader.get(BundleKeys.ERROR_RETRY_DIGEST_NO_PRIOR));
+            case RATE_LIMITED -> reply(scope,
+                    bundleLoader.get(BundleKeys.ERROR_RETRY_DIGEST_RATE_LIMITED));
+        };
+    }
+
+    private void writeDigestRetryAudit(ActorRow actor, String adapter,
+                                       String contactId, UUID groupDbId) {
+        try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                auditLogWriter.write(conn, new RedactionHook.AuditRow(
+                        actor.id, contactId, adapter,
+                        AuditAction.DIGEST_RETRY,
+                        "group", groupDbId.toString(),
+                        null, groupDbId, null, null));
+                conn.commit();
+            } catch (SQLException e) {
+                conn.rollback();
+                throw e;
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "RetryCommandHandler.writeDigestRetryAudit failed", e);
+        }
+    }
+
+    private ActorRow lookupActor(String adapter, String contactId) {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(SELECT_ACTOR_WITH_ADMIN)) {
+            ps.setString(1, adapter);
+            ps.setString(2, contactId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return null;
+                }
+                return new ActorRow(
+                        (UUID) rs.getObject("id"),
+                        rs.getBoolean("is_admin"));
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "RetryCommandHandler.lookupActor failed", e);
+        }
+    }
+
+    private UUID lookupGroupId(String adapterGroupId) {
+        String adapter = inboundContext.adapterName();
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(SELECT_GROUP_ID)) {
+            ps.setString(1, adapter);
+            ps.setString(2, adapterGroupId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return null;
+                }
+                return rs.getObject("id", UUID.class);
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "RetryCommandHandler.lookupGroupId failed", e);
+        }
+    }
+
+    private static boolean hasFlag(String rawText, String flag) {
+        for (String part : rawText.split("\\s+")) {
+            if (part.equals(flag)) return true;
+        }
+        return false;
+    }
+
+    private record ActorRow(UUID id, boolean isAdmin) {
     }
 
     private OutboundMessage reply(ScopeRef scope, String text) {

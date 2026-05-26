@@ -800,6 +800,29 @@ public final class BundleKeys {
     /** Status-drift notice prepended to retry output. Token {@code {0}} = excluded count, {@code {1}} = original count. */
     public static final String REPLY_RETRY_STATUS_DRIFT_NOTICE = "reply.retry.status_drift_notice";
 
+    // ----- /retry --digest (M1-080c) -----------------------------------------
+    // Per docs/spec/commands.md §Periodic group digests + §Conversation control.
+    // The --digest flag routes to DigestRetryService; the personal /retry
+    // path (M1-065) is untouched.
+
+    /** {@code /retry --digest} invoked from DM scope — digest retry is group-only. */
+    public static final String ERROR_RETRY_DIGEST_GROUP_ONLY = "error.retry.digest_group_only";
+
+    /** {@code /retry --digest} invoked by a non-admin caller. */
+    public static final String ERROR_RETRY_DIGEST_GROUP_ADMIN_REQUIRED = "error.retry.digest_group_admin_required";
+
+    /** {@code /retry --digest} when another retry is already in flight for this group. */
+    public static final String ERROR_RETRY_DIGEST_ALREADY_IN_PROGRESS = "error.retry.digest_already_in_progress";
+
+    /** {@code /retry --digest} when no prior digest exists for this group. */
+    public static final String ERROR_RETRY_DIGEST_NO_PRIOR = "error.retry.digest_no_prior";
+
+    /** {@code /retry --digest} rate-limited — too soon after the last retry for this group. */
+    public static final String ERROR_RETRY_DIGEST_RATE_LIMITED = "error.retry.digest_rate_limited";
+
+    /** {@code /retry --digest} success — digest re-generation initiated. */
+    public static final String REPLY_RETRY_DIGEST_SUCCESS = "reply.retry.digest_success";
+
     // ----- /promote + /demote + /group-timezone (M1-079c) ---------------------
     // Per docs/spec/security.md §Authorization model (one group admin per
     // group, first-mention auto-promote, /promote swaps admin) +

@@ -3,6 +3,7 @@ package app.zcat.infochat.provider.digest;
 import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
+import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Event;
@@ -59,6 +60,9 @@ public class DigestScheduler {
 
     @Inject
     SummaryCacheRepository summaryCacheRepository;
+
+    @Inject
+    ThrottledAdminNotifier throttledAdminNotifier;
 
     @ConfigProperty(name = "infochat.digest.morning-slot-hour", defaultValue = "8")
     int morningSlotHour;
@@ -145,6 +149,13 @@ public class DigestScheduler {
         summaryCacheRepository.insert(
                 groupId, slotKind, windowStart,
                 0L, 0L, "", true, windowEnd);
+        // Throttle key: one notification per unique missed slot, not per tick
+        String date = windowStart.toString().substring(0, 10);
+        throttledAdminNotifier.notifyOnce(
+                "digest_slot_missed:" + groupId + ":" + slotKind + ":" + date,
+                "DIGEST",
+                "Missed digest slot for group " + groupId
+                        + " slot " + slotKind + " window " + windowStart);
     }
 
     /**
