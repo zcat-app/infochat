@@ -1,11 +1,28 @@
 ---
 id: M1-079
 title: Group infrastructure umbrella — group lifecycle roundtrip IT
-status: deferred
-deferred_on: M1-084
-deferred_reason: blocked-on-new-ticket
+status: done
 created: 2026-05-25
 last_updated: 2026-05-26
+reviews:
+  - round: 1
+    date: 2026-05-26
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 3
+      added: 306
+      removed: 21
+reopens:
+  - date: 2026-05-26
+    prior_deferred_reason: blocked-on-new-ticket
+    prior_deferred_on: M1-084
+    reason: M1-084 landed
 escalations:
   - date: 2026-05-26
     reason: premise-fail
@@ -23,6 +40,17 @@ clarity_check:
   verdict: PASS
   warnings: []
   blockers: []
+  round: 2
+redteam_findings: []
+redteam_audits:
+  - date: 2026-05-26
+    verdict: CLEAN
+    base: main
+    head: m1/M1-079-group-infrastructure-umbrella
+    verdict_file: docs/plan/m1/redteam/M1-079-2026-05-26.md
+    out_of_model_count: 0
+    note: |
+      Test-only diff. No production code, no new attack surfaces. Clean.
 blocked_by:
   - M1-079a
   - M1-079b

@@ -10,12 +10,12 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 116 |
-| deferred | 4 |
+| done | 118 |
+| deferred | 3 |
 | **total** | **121** |
 
 ---
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-087 — BlueskyFetcher — AT Protocol polled feed (complexity: low, risk: low)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -64,19 +64,16 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-090 | YouTubeFetcher — channel Atom feed | 2026-05-26 | round 2 APPROVE |
 | M1-089 | NitterFetcher — Nitter instance RSS feed | 2026-05-26 | round 2 APPROVE |
 | M1-088 | RedditFetcher — subreddit JSON feed | 2026-05-26 | round 2 APPROVE |
+| M1-087 | BlueskyFetcher — AT Protocol polled feed | 2026-05-26 | round 2 APPROVE |
 | M1-086 | FetchScheduler polymorphic per-kind dispatch | 2026-05-26 | round 2 APPROVE |
 | M1-085 | AnthropicProvider — native Messages API with prompt caching | 2026-05-26 | round 2 APPROVE |
 | M1-084 | MembershipEvent wiring + tryAutoPromote re-promote path | 2026-05-26 | round 1 APPROVE |
 | M1-083 | Quarantine/audit redteam remediation — rate bucket, audit coverage, pagination | 2026-05-26 | round 1 APPROVE |
 | M1-082 | Relocate ThrottledAdminNotifier to infochat-core | 2026-05-26 | round 2 APPROVE |
-| M1-081b | Quarantine admin commands + review listener + /audit | 2026-05-26 | round 2 APPROVE |
 
 ---
 
 ## Deferred
-
-### blocked-on-new-ticket (1)
-- M1-079 → M1-084
 
 ### decomposed (1)
 - M1-034 → M1-034a
@@ -228,7 +225,7 @@ M1-076 (done)
 M1-077 (done)
 M1-078 (done)
 M1-079a (done)
-  ├── M1-079 (deferred)
+  ├── M1-079 (done)
   │     └── M1-080a (done)
   │           ├── M1-080 (done)
   │           ├── M1-080b (done)
@@ -237,13 +234,13 @@ M1-079a (done)
   │           │           └── M1-080 (done) [see above]
   │           └── M1-080c (done) [see above]
   ├── M1-079b (done)
-  │     └── M1-079 (deferred) [see above]
+  │     └── M1-079 (done) [see above]
   ├── M1-079c (done)
-  │     └── M1-079 (deferred) [see above]
+  │     └── M1-079 (done) [see above]
   ├── M1-079d (done)
-  │     └── M1-079 (deferred) [see above]
+  │     └── M1-079 (done) [see above]
   ├── M1-079e (done)
-  │     └── M1-079 (deferred) [see above]
+  │     └── M1-079 (done) [see above]
   └── M1-081a (done)
         ├── M1-081 (done)
         └── M1-081b (done)
@@ -252,10 +249,9 @@ M1-079a (done)
 M1-082 (done)
   └── M1-080c (done) [see above]
 M1-084 (done)
-  └── M1-079 (deferred) [see above]
 M1-085 (done)
 M1-086 (done)
-  ├── M1-087 (pending) ← runnable
+  ├── M1-087 (done)
   ├── M1-088 (done)
   ├── M1-089 (done)
   ├── M1-090 (done)
