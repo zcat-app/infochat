@@ -15,8 +15,8 @@
 | in-review | 0 |
 | escalated | 0 |
 | done | 103 |
-| deferred | 6 |
-| **total** | **113** |
+| deferred | 7 |
+| **total** | **114** |
 
 ---
 
@@ -24,8 +24,8 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-079 — Group infrastructure umbrella — group lifecycle roundtrip IT (complexity: medium, risk: medium)
 - M1-080b — DigestWorker + degraded fallback + subscription-version cache (complexity: high, risk: high)
+- M1-084 — MembershipEvent wiring + tryAutoPromote re-promote path (complexity: medium, risk: medium)
 
 ---
 
@@ -76,6 +76,9 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 ---
 
 ## Deferred
+
+### blocked-on-new-ticket (1)
+- M1-079 → M1-084
 
 ### decomposed (1)
 - M1-034 → M1-034a
@@ -233,7 +236,7 @@ M1-076 (done)
 M1-077 (done)
 M1-078 (done)
 M1-079a (done)
-  ├── M1-079 (pending) ← runnable
+  ├── M1-079 (deferred)
   │     └── M1-080a (done)
   │           ├── M1-080 (pending)
   │           ├── M1-080b (pending) ← runnable
@@ -242,13 +245,13 @@ M1-079a (done)
   │           │           └── M1-080 (pending) [see above]
   │           └── M1-080c (pending) [see above]
   ├── M1-079b (done)
-  │     └── M1-079 (pending) [see above]
+  │     └── M1-079 (deferred) [see above]
   ├── M1-079c (done)
-  │     └── M1-079 (pending) [see above]
+  │     └── M1-079 (deferred) [see above]
   ├── M1-079d (done)
-  │     └── M1-079 (pending) [see above]
+  │     └── M1-079 (deferred) [see above]
   ├── M1-079e (done)
-  │     └── M1-079 (pending) [see above]
+  │     └── M1-079 (deferred) [see above]
   └── M1-081a (done)
         ├── M1-081 (done)
         └── M1-081b (done)
@@ -256,4 +259,6 @@ M1-079a (done)
               └── M1-083 (done)
 M1-082 (done)
   └── M1-080c (pending) [see above]
+M1-084 (pending) ← runnable
+  └── M1-079 (deferred) [see above]
 ```

@@ -1,9 +1,28 @@
 ---
 id: M1-079
 title: Group infrastructure umbrella — group lifecycle roundtrip IT
-status: pending
+status: deferred
+deferred_on: M1-084
+deferred_reason: blocked-on-new-ticket
 created: 2026-05-25
-last_updated: 2026-05-25
+last_updated: 2026-05-26
+escalations:
+  - date: 2026-05-26
+    reason: premise-fail
+    reviewer_verdict_excerpt: |
+      Two implementation gaps block acceptance step (h):
+      (1) tryAutoPromote uses INSERT...ON CONFLICT DO NOTHING — only works
+      for users without a group_membership PK row. u-1 already has one
+      (created in step a, demoted in step f), so re-auto-promote silently
+      returns false.
+      (2) No MembershipEvent handler is wired — onMembershipEvent is a
+      default no-op on MessagingAdapter; adapter.removeMember() fires the
+      event into the void. group_membership.removed_at is never set.
+clarity_check:
+  date: 2026-05-26
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by:
   - M1-079a
   - M1-079b
