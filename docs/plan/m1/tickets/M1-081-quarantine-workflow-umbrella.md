@@ -1,9 +1,9 @@
 ---
 id: M1-081
 title: Quarantine admin workflow + re-evaluation pipeline umbrella
-status: pending
+status: done
 created: 2026-05-25
-last_updated: 2026-05-25
+last_updated: 2026-05-26
 blocked_by:
   - M1-081a
   - M1-081b
@@ -56,12 +56,39 @@ decision_refs:
   - D22
   - D34
 
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-05-26
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 3
+      added: 414
+      removed: 10
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-05-26
+    verdict: CLEAN
+    base: main
+    head: m1/M1-081-quarantine-workflow-umbrella
+    verdict_file: docs/plan/m1/redteam/M1-081-2026-05-26.md
+    out_of_model_count: 0
+    note: |
+      Test-only umbrella diff. Production security surface verified
+      end-to-end; no gap between threat model and delivery.
+clarity_check:
+  date: 2026-05-26
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-081: Quarantine admin workflow + re-evaluation pipeline umbrella
