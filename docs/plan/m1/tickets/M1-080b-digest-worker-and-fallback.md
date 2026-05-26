@@ -1,9 +1,29 @@
 ---
 id: M1-080b
 title: DigestWorker + degraded fallback + subscription-version cache
-status: pending
+status: done
 created: 2026-05-25
-last_updated: 2026-05-25
+last_updated: 2026-05-26
+reviews:
+  - round: 1
+    date: 2026-05-26
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 1165
+      removed: 10
+clarity_check:
+  date: 2026-05-26
+  verdict: WARN
+  warnings:
+    - "SELF-CONTAINED-CHECK: Acceptance item 1 references 'BundleLoader 2-arg form' without identifying the class's module or package"
+    - "SELF-CONTAINED-CHECK: Acceptance item 7 conflates the full cache contract (read + write) with this ticket's scope (write only)"
 blocked_by:
   - M1-080a
 files_budget: 10
@@ -21,6 +41,7 @@ risk: high
 round_cap: 3
 security_relevant: false
 migration_touch: false
+outline_file: target/m1-tick-outline-M1-080b.md
 out_of_scope:
   - infochat-core/src/main/resources/db/migration/** — no migration (V21 is M1-080a)
   - infochat-messaging-adapter/** — digest delivery uses the existing adapter.sendToGroup SPI
