@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 114 |
+| done | 115 |
 | deferred | 4 |
 | **total** | **121** |
 
@@ -26,7 +26,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-087 — BlueskyFetcher — AT Protocol polled feed (complexity: low, risk: low)
 - M1-090 — YouTubeFetcher — channel Atom feed (complexity: low, risk: low)
-- M1-091 — OdyseeFetcher — Odysee/LBRY RSS feed (complexity: low, risk: low)
 
 ---
 
@@ -62,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-091 | OdyseeFetcher — Odysee/LBRY RSS feed | 2026-05-26 | round 1 APPROVE |
 | M1-089 | NitterFetcher — Nitter instance RSS feed | 2026-05-26 | round 2 APPROVE |
 | M1-088 | RedditFetcher — subreddit JSON feed | 2026-05-26 | round 2 APPROVE |
 | M1-086 | FetchScheduler polymorphic per-kind dispatch | 2026-05-26 | round 2 APPROVE |
@@ -71,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-082 | Relocate ThrottledAdminNotifier to infochat-core | 2026-05-26 | round 2 APPROVE |
 | M1-081b | Quarantine admin commands + review listener + /audit | 2026-05-26 | round 2 APPROVE |
 | M1-081 | Quarantine admin workflow + re-evaluation pipeline umbrella | 2026-05-26 | round 1 APPROVE |
-| M1-080c | /retry --digest routing + missed-slot admin notification | 2026-05-26 | round 1 APPROVE |
 
 ---
 
@@ -261,5 +260,5 @@ M1-086 (done)
   ├── M1-088 (done)
   ├── M1-089 (done)
   ├── M1-090 (pending) ← runnable
-  └── M1-091 (pending) ← runnable
+  └── M1-091 (done)
 ```
