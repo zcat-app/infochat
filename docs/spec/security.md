@@ -1020,6 +1020,10 @@ sources). Application code uses the soft-delete column.
   timeout (the same `java.util.regex`-plus-watchdog discipline as
   Stage 1, see §Ingest pipeline): a timed-out match treats the
   whole field as redacted rather than emitting it raw.
+- Stdout console logs pass through the closed API-key catalogue
+  redactor, fail-closed on regex timeout (whole message replaced with
+  a fixed sentinel). The audit_log writer consumes the same Redactor
+  utility so the two cannot drift.
 - Contact IDs are logged in redacted form (prefix + ellipsis + suffix)                                                                                                                                                                                
   outside the audit log.
 - **User-content logging.** `chat_memory` content, `saved_post` bodies

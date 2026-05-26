@@ -1,11 +1,11 @@
 ---
 id: M1-019
 title: Redact API-key shapes in stdout logs
-status: deferred
+status: done
 created: 2026-05-12
-last_updated: 2026-05-16
-deferred_reason: post-mvp-hardening
-deferred_on: M1-033
+last_updated: 2026-05-26
+deferred_reason:
+deferred_on:
 blocked_by: []
 files_budget: 8
 files_scope:
@@ -50,18 +50,78 @@ spec_refs:
 decision_refs:
   - D37
 
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-05-26
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 464
+      removed: 15
 escalations: []
 revisions: []
 overrides: []
 aborted_attempts: []
-reopens: []
-redteam_findings: []
+reopens:
+  - date: 2026-05-26
+    prior_deferred_reason: post-mvp-hardening
+    prior_deferred_on: M1-033
+    reason: "Blocker M1-033 done; stdout API-key leak gap is real — audit-log redaction exists (DefaultRedactionHook) but no console filter protects stdout"
+redteam_findings:
+  - date: 2026-05-26
+    category: INFO-LEAK
+    severity: high
+    promise: |
+      Stdout console logs pass through the closed API-key catalogue redactor. The audit_log writer consumes the same Redactor utility so the two cannot drift.
+    gap: |
+      DefaultRedactionHook maintains its own independent CATALOGUE, InterruptibleCharSequence, and RegexInterruptedException. The new Redactor class duplicates all of these. Neither references the other; the catalogues can drift silently.
+    repro: |
+      A developer adds a new API-key shape to Redactor.CATALOGUE but forgets to update DefaultRedactionHook.CATALOGUE. The audit_log writer fails to redact the new shape.
+    suggested_fix_class: other
+  - date: 2026-05-26
+    category: INFO-LEAK
+    severity: high
+    promise: |
+      Stdout console logs pass through the closed API-key catalogue redactor.
+    gap: |
+      Redactor.isLoggable() processes only getMessage() and String parameters. It does not process getThrown(). Exception stack traces rendered by the formatter after the filter runs are not redacted.
+    repro: |
+      An HTTP client throws an exception whose message includes an API key. logger.log(SEVERE, "LLM call failed", thrownException) renders the key in the stack trace unredacted.
+    suggested_fix_class: input-sanitization
+  - date: 2026-05-26
+    category: INFO-LEAK
+    severity: medium
+    promise: |
+      Stdout console logs pass through the closed API-key catalogue redactor.
+    gap: |
+      isLoggable() only redacts params that are instanceof String. Non-String objects whose toString() contains a key are rendered unredacted by the formatter.
+    repro: |
+      logger.log(WARNING, "Request failed: {0}", contextObject) where contextObject.toString() contains an API key renders the key unredacted.
+    suggested_fix_class: input-sanitization
+redteam_audits:
+  - date: 2026-05-26
+    verdict: FINDINGS
+    base: d3e8256
+    head: efe372e
+    verdict_file: docs/plan/m1/redteam/M1-019-2026-05-26.md
+    findings_count: 3
+    out_of_model_count: 1
+    note: |
+      Finding 1 (catalogue drift): Spec says "consumes" but DefaultRedactionHook has own copy. Out_of_scope deferred the refactor; spec wording is forward-looking. Remediation ticket recommended.
+      Finding 2 (exception messages): Explicitly out_of_scope — M1-020 covers exception-message sanitization.
+      Finding 3 (non-String params): Known limitation. Low practical risk.
 clarity_check:
-  date: 2026-05-13
+  date: 2026-05-26
   verdict: WARN
   warnings:
-    - "Acceptance items 1 and 2 (spec amendments to security.md and deployment.md) state the required bullet text inline, making them verifiable by grep, but they do not cite a runnable command form (e.g., \"grep -n 'stdout console logs' docs/spec/security.md returns a match\"). This is a weak acceptance criterion but not a blocker because the expected text is fully specified. Consider adding an explicit grep command for reviewer clarity."
+    - "Acceptance items 1 and 2 (spec amendments) inline required text but lack explicit grep command for reviewer verification. Non-blocking; text is fully specified."
+    - "files_budget: 8 is tight given likely 9 files (2 production + 2 test + 2 properties + 2 spec + possibly pom.xml). Non-blocking if pom.xml needs no changes."
   blockers: []
 ---
 

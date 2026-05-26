@@ -1,5 +1,6 @@
 package app.zcat.infochat.core.audit;
 
+import app.zcat.infochat.core.log.Redactor;
 import app.zcat.infochat.core.schema.PostgresSchemaTestBase;
 import org.junit.jupiter.api.Test;
 
@@ -84,7 +85,7 @@ class AuditLogWriterIT extends PostgresSchemaTestBase {
             String stored = rs.getString(1);
             assertFalse(stored.contains(openaiKey),
                     "raw API key reached the database: " + stored);
-            assertTrue(stored.contains(DefaultRedactionHook.REDACTED_PLACEHOLDER),
+            assertTrue(stored.contains(Redactor.REDACTED),
                     "redaction placeholder missing: " + stored);
         }
     }
@@ -222,7 +223,7 @@ class AuditLogWriterIT extends PostgresSchemaTestBase {
                     "raw secret value reached the database: " + stored);
             assertTrue(stored.contains("\"token\""),
                     "keyword was consumed by redaction: " + stored);
-            assertTrue(stored.contains(DefaultRedactionHook.REDACTED_PLACEHOLDER),
+            assertTrue(stored.contains(Redactor.REDACTED),
                     "redaction placeholder missing: " + stored);
         }
     }

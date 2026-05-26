@@ -14,8 +14,8 @@
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 108 |
-| deferred | 6 |
+| done | 109 |
+| deferred | 5 |
 | **total** | **121** |
 
 ---
@@ -86,8 +86,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 ### decomposed (1)
 - M1-034 → M1-034a
 
-### post-mvp-hardening (4)
-- M1-019 → M1-033
+### post-mvp-hardening (3)
 - M1-020 → M1-038
 - M1-031 → unspecified
 - M1-042 → unspecified
@@ -111,8 +110,6 @@ M1-001 (done)
   │     │     │     │     ├── M1-028 (done)
   │     │     │     │     │     └── M1-032 (done)
   │     │     │     │     │           └── M1-033 (done)
-  │     │     │     │     │                 ├── M1-019 (deferred)
-  │     │     │     │     │                 │     └── M1-020 (deferred)
   │     │     │     │     │                 ├── M1-034 (deferred)
   │     │     │     │     │                 └── M1-034a (done)
   │     │     │     │     │                       ├── M1-034 (deferred) [see above]
@@ -171,6 +168,8 @@ M1-017 (done)
   ├── M1-008a (done) [see above]
   └── M1-008b (done) [see above]
 M1-018 (done)
+M1-019 (done)
+  └── M1-020 (deferred)
 M1-029 (done)
 M1-030 (done)
 M1-031 (deferred)

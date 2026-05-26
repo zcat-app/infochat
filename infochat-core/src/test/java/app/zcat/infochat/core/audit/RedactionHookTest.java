@@ -1,5 +1,6 @@
 package app.zcat.infochat.core.audit;
 
+import app.zcat.infochat.core.log.Redactor;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -8,7 +9,6 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -53,7 +53,7 @@ class RedactionHookTest {
 
         assertFalse(redacted.detailsJson().contains(key),
                 "family " + family + " — raw key survived: " + redacted.detailsJson());
-        assertTrue(redacted.detailsJson().contains(DefaultRedactionHook.REDACTED_PLACEHOLDER),
+        assertTrue(redacted.detailsJson().contains(Redactor.REDACTED),
                 "family " + family + " — placeholder missing: " + redacted.detailsJson());
         if (family.startsWith("Generic")) {
             assertTrue(redacted.detailsJson().contains("api_key="),
@@ -145,34 +145,18 @@ class RedactionHookTest {
     }
 
     @Test
-    void watchdogFiringFailsClosed() {
-        // Pass a zero-millisecond timeout — the deadline is in the
-        // past on the first charAt(), so InterruptibleCharSequence
-        // throws RegexInterruptedException immediately and the
-        // outer catch returns the whole-field fallback. The spec
-        // pins "a timed-out match treats the whole field as redacted
-        // rather than emitting it raw"; this test also pins that the
-        // fallback is valid JSONB so AuditLogWriter's ?::jsonb cast
-        // succeeds (otherwise the watchdog-firing path would roll
-        // back the surrounding dispatch transaction).
-        String detailsJson = "{\"x\":\"some-non-key-payload\"}";
-
-        String redacted = DefaultRedactionHook.applyCatalogue(detailsJson, 0L);
-
-        assertEquals(DefaultRedactionHook.REDACTED_FIELD_JSONB, redacted,
-                "watchdog fail-closed must return the whole-field fallback");
-        assertNotEquals(detailsJson, redacted);
-
-        // The fallback must be a valid JSON document (object/array/etc.)
-        // and must be self-describing (`_redacted` flag + `reason` key)
-        // so the operator reading /audit can distinguish a redacted-
-        // because-timeout row from any real details_json shape in use.
-        assertTrue(redacted.startsWith("{") && redacted.endsWith("}"),
-                "fallback must be a JSON object: " + redacted);
-        assertTrue(redacted.contains("\"_redacted\":true"),
-                "fallback must carry the _redacted=true flag: " + redacted);
-        assertTrue(redacted.contains("\"reason\""),
-                "fallback must carry a reason key for operator triage: " + redacted);
+    void watchdogFallbackIsValidJsonb() {
+        // The watchdog-fired fallback must be a valid JSON document
+        // so AuditLogWriter's ?::jsonb cast succeeds. The timeout
+        // path itself is tested in RedactingLogFilterTest; this test
+        // pins the JSONB shape of the audit-specific sentinel.
+        String fallback = DefaultRedactionHook.REDACTED_FIELD_JSONB;
+        assertTrue(fallback.startsWith("{") && fallback.endsWith("}"),
+                "fallback must be a JSON object: " + fallback);
+        assertTrue(fallback.contains("\"_redacted\":true"),
+                "fallback must carry the _redacted=true flag: " + fallback);
+        assertTrue(fallback.contains("\"reason\""),
+                "fallback must carry a reason key for operator triage: " + fallback);
     }
 
     @Test

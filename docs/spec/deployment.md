@@ -328,6 +328,8 @@ Spec-level commitments:
   operator level, decision D34).
 - LLM API keys come from environment variables, not the DB.
 - Audit-log write hook redacts API-key-shaped strings.
+- Stdout log redaction hook redacts API-key-shaped strings before any
+  console output (fail-closed on regex timeout).
 - Contact ids appear redacted in logs outside the audit log.
 
 Specific backup tooling, retention policies, and key rotation                                                                                                                                                                                         
