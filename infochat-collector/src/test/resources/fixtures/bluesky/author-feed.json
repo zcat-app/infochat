@@ -1,0 +1,62 @@
+{
+  "cursor": "next-page-cursor-token",
+  "feed": [
+    {
+      "post": {
+        "uri": "at://did:plc:abc111/app.bsky.feed.post/post001",
+        "cid": "bafyreiabc111",
+        "author": {
+          "did": "did:plc:abc111",
+          "handle": "alice.bsky.social",
+          "displayName": "Alice Example"
+        },
+        "record": {
+          "$type": "app.bsky.feed.post",
+          "text": "Hello from Bluesky! This is a test post.",
+          "createdAt": "2026-01-15T10:30:00.000Z"
+        },
+        "likeCount": 42,
+        "repostCount": 7,
+        "indexedAt": "2026-01-15T10:30:01.000Z"
+      }
+    },
+    {
+      "post": {
+        "uri": "at://did:plc:abc111/app.bsky.feed.post/post002",
+        "cid": "bafyreiabc222",
+        "author": {
+          "did": "did:plc:abc111",
+          "handle": "alice.bsky.social",
+          "displayName": "Alice Example"
+        },
+        "record": {
+          "$type": "app.bsky.feed.post",
+          "text": "Second post with some content.",
+          "createdAt": "2026-01-15T09:15:00.000Z"
+        },
+        "likeCount": 5,
+        "repostCount": 0,
+        "indexedAt": "2026-01-15T09:15:02.000Z"
+      }
+    },
+    {
+      "post": {
+        "uri": "at://did:plc:abc111/app.bsky.feed.post/post003",
+        "cid": "bafyreiabc333",
+        "author": {
+          "did": "did:plc:abc111",
+          "handle": "alice.bsky.social",
+          "displayName": "Alice Example"
+        },
+        "record": {
+          "$type": "app.bsky.feed.post",
+          "text": "Third post for testing.",
+          "createdAt": "2026-01-14T20:00:00.000Z"
+        },
+        "likeCount": 0,
+        "repostCount": 1,
+        "indexedAt": "2026-01-14T20:00:03.000Z"
+      }
+    }
+  ]
+}

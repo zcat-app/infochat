@@ -1,9 +1,14 @@
 ---
 id: M1-087
 title: "BlueskyFetcher — AT Protocol polled feed"
-status: pending
+status: done
 created: 2026-05-26
 last_updated: 2026-05-26
+clarity_check:
+  date: 2026-05-26
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by:
   - M1-086
 files_budget: 6
@@ -12,11 +17,27 @@ files_scope:
   - infochat-collector/src/main/java/app/zcat/infochat/collector/fetcher/bluesky/BlueskyResponseParser.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/bluesky/BlueskyFetcherTest.java
   - infochat-collector/src/main/resources/application.properties
+  - infochat-collector/src/test/resources/fixtures/bluesky/**
 complexity: low
 risk: low
 round_cap: 2
 security_relevant: false
 migration_touch: false
+revisions:
+  - date: 2026-05-26
+    reason: clarity-fail refine — added test fixture glob to files_scope
+    prior_files_scope:
+      - infochat-collector/src/main/java/app/zcat/infochat/collector/fetcher/bluesky/BlueskyFetcher.java
+      - infochat-collector/src/main/java/app/zcat/infochat/collector/fetcher/bluesky/BlueskyResponseParser.java
+      - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/bluesky/BlueskyFetcherTest.java
+      - infochat-collector/src/main/resources/application.properties
+escalations:
+  - date: 2026-05-26
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      FILES-BUDGET-PLAUSIBLE: FAIL — files_scope lists only 4 paths and omits the test fixture
+      file (src/test/resources/fixtures/bluesky/<fixture>.json) that the Notes section and
+      acceptance criteria clearly require.
 out_of_scope:
   - infochat-core/** — no SPI changes
   - infochat-collector/src/main/java/app/zcat/infochat/collector/fetcher/rss/** — not modified
@@ -49,6 +70,33 @@ spec_refs:
   - docs/spec/security.md §SSRF and outbound connections
 decision_refs:
   - D38
+reviews:
+  - round: 1
+    date: 2026-05-26
+    verdict: REWORK
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 611
+      removed: 7
+  - round: 2
+    date: 2026-05-26
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 633
+      removed: 7
 ---
 
 # M1-087: BlueskyFetcher — AT Protocol polled feed
@@ -119,3 +167,11 @@ scheduler dispatch).
 - **Design reference:** `docs/design/01-architecture.md` §1.3.1
   (polled Fetcher flow), §1.6 (pagination cap: 5 on
   laptop/vps/remote-llm, 2 on pi).
+
+## Round 1 rework
+
+1. Add `@NonNull` annotations to all reference-type parameters on the 4
+   new exception constructors: `BlueskyFetchException(String, Throwable)`
+   and `BlueskyParseException(String, Throwable)`. Each `String` and
+   `Throwable` parameter needs `@NonNull` (6 parameter annotations total
+   across 4 constructors).
