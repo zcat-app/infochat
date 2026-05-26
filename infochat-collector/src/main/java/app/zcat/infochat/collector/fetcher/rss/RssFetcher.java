@@ -1,5 +1,6 @@
 package app.zcat.infochat.collector.fetcher.rss;
 
+import app.zcat.infochat.collector.fetch.FetcherKind;
 import app.zcat.infochat.core.ingest.Fetcher;
 import app.zcat.infochat.core.ingest.NormalizedPost;
 import app.zcat.infochat.ssrf.SsrfGuardedHttpClient;
@@ -41,6 +42,7 @@ import java.util.List;
  * identifier, never the raw value — feed URLs may carry credentials or
  * query-string tokens that must not reach exception traces.
  */
+@FetcherKind("rss")
 @ApplicationScoped
 public class RssFetcher implements Fetcher {
 

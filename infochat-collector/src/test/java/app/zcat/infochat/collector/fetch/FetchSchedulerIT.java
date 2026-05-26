@@ -98,7 +98,8 @@ class FetchSchedulerIT {
         // QuarkusMock.installMockForType wires the substitute through
         // the same CDI client proxy that FetchScheduler holds, so
         // fetchScheduler.rssFetcher.fetch(...) dispatches here.
-        QuarkusMock.installMockForType(new TestRssFetcher(), RssFetcher.class);
+        QuarkusMock.installMockForType(new TestRssFetcher(), RssFetcher.class,
+            new FetcherKind.Literal("rss"));
 
         // Drain anything other ITs left on the channel.
         consumer.drain();
@@ -125,7 +126,8 @@ class FetchSchedulerIT {
         FetchScheduler.SourceRow row = new FetchScheduler.SourceRow(
             sourceUuid,
             "http://127.0.0.1:" + port + "/feed.xml",
-            42L); // dispatch key — opaque to the Fetcher
+            42L, // dispatch key — opaque to the Fetcher
+            "rss");
         fetchScheduler.tickOnce(row);
 
         // The fixture has 2 <item> elements; expect 2 new RAW rows.
@@ -170,6 +172,52 @@ class FetchSchedulerIT {
         }
     }
 
+    @Test
+    void tickDispatchesSourceToFetcherMatchingKind() throws Exception {
+        UUID sourceUuid = seedRssSource(
+            "http://127.0.0.1:" + port + "/feed.xml",
+            "kind-dispatch IT source");
+
+        long preCount = countPostsForSource(sourceUuid);
+
+        FetchScheduler.SourceRow row = new FetchScheduler.SourceRow(
+            sourceUuid,
+            "http://127.0.0.1:" + port + "/feed.xml",
+            99L,
+            "rss");
+        fetchScheduler.tickOnce(row);
+
+        long postCount = countPostsForSource(sourceUuid);
+        assertEquals(preCount + 2, postCount,
+            "tickOnce must dispatch an rss-kind source to the registered RssFetcher");
+
+        awaitConsumerSize(2);
+        List<PostPersister.PersistedPostKey> received = consumer.drain();
+        assertEquals(2, received.size(),
+            "eval-queue must receive one key per persisted post from kind-dispatched tick");
+    }
+
+    @Test
+    void tickSkipsSourceWithUnregisteredKind() throws Exception {
+        UUID sourceUuid = seedSourceWithKind(
+            "fake",
+            "fake://no-fetcher-registered",
+            "unregistered kind IT source");
+
+        FetchScheduler.SourceRow row = new FetchScheduler.SourceRow(
+            sourceUuid,
+            "fake://no-fetcher-registered",
+            100L,
+            "fake");
+        fetchScheduler.tickOnce(row);
+
+        long postCount = countPostsForSource(sourceUuid);
+        assertEquals(0, postCount,
+            "tickOnce must skip a source whose kind has no registered Fetcher");
+        assertEquals(0, consumer.size(),
+            "eval-queue must not receive keys when Fetcher is missing for kind");
+    }
+
     private UUID seedRssSource(String identifier, String displayName) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
@@ -178,6 +226,23 @@ class FetchSchedulerIT {
                  + "RETURNING id")) {
             ps.setString(1, identifier);
             ps.setString(2, displayName);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return (UUID) rs.getObject(1);
+            }
+        }
+    }
+
+    private UUID seedSourceWithKind(String kind, String identifier, String displayName)
+            throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "INSERT INTO source (kind, identifier, display_name, category, bootstrap_tags) "
+                 + "VALUES (?, ?, ?, 'news', '{}') "
+                 + "RETURNING id")) {
+            ps.setString(1, kind);
+            ps.setString(2, identifier);
+            ps.setString(3, displayName);
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return (UUID) rs.getObject(1);

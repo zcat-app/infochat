@@ -1,14 +1,21 @@
 ---
 id: M1-086
 title: "FetchScheduler polymorphic per-kind dispatch"
-status: pending
+status: done
 created: 2026-05-26
 last_updated: 2026-05-26
+clarity_check:
+  date: 2026-05-26
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
 files_budget: 6
 files_scope:
   - infochat-collector/src/main/java/app/zcat/infochat/collector/fetch/FetchScheduler.java
+  - infochat-collector/src/main/java/app/zcat/infochat/collector/fetch/FetcherKind.java
   - infochat-collector/src/main/java/app/zcat/infochat/collector/fetcher/rss/RssFetcher.java
+  - infochat-collector/src/main/resources/application.properties
   - infochat-collector/src/test/java/app/zcat/infochat/collector/fetch/FetchSchedulerIT.java
 complexity: medium
 risk: medium
@@ -45,6 +52,33 @@ spec_refs:
   - docs/spec/architecture.md §Ingest SPIs
 decision_refs:
   - D38
+reviews:
+  - round: 1
+    date: 2026-05-26
+    verdict: REWORK
+    checks:
+      scope_drift: FAIL
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 274
+      removed: 73
+  - round: 2
+    date: 2026-05-26
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 300
+      removed: 73
 ---
 
 # M1-086: FetchScheduler polymorphic per-kind dispatch
@@ -127,3 +161,12 @@ through M1-091) can register via CDI and tick automatically.
 - **Existing FetchSchedulerIT** tests RSS-only via QuarkusMock. New
   test methods can register a test-only Fetcher (inner class or
   `@Alternative`) for a non-RSS kind and seed a matching source row.
+
+## Round 1 rework
+
+1. **SCOPE-DRIFT-CHECK fix:** Add the two missing paths to `files_scope`
+   in the ticket frontmatter: `FetcherKind.java` (new annotation file)
+   and `application.properties` (heartbeat interval key). Ticket-authoring
+   gap — the Notes section anticipated the annotation file.
+2. **PARAMETER-CONTRACT-CHECK fix:** Add `@NonNull` to the `String`
+   parameter of `FetcherKind.Literal(String value)`.

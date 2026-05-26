@@ -1,14 +1,18 @@
 package app.zcat.infochat.collector.fetch;
 
-import app.zcat.infochat.collector.fetcher.rss.RssFetcher;
 import app.zcat.infochat.collector.outbox.EvalQueueProducer;
 import app.zcat.infochat.collector.outbox.PostPersister;
+import app.zcat.infochat.core.ingest.Fetcher;
 import app.zcat.infochat.core.ingest.NormalizedPost;
+import io.quarkus.arc.All;
+import io.quarkus.arc.InstanceHandle;
 import io.quarkus.runtime.Startup;
 import io.quarkus.scheduler.Scheduled;
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Priority;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.Config;
 import org.jboss.logging.Logger;
 
 import javax.sql.DataSource;
@@ -16,36 +20,45 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import org.jspecify.annotations.NonNull;
 
 /**
- * Drives the per-source fetch loop for {@code kind='rss'} sources.
+ * Drives the per-source fetch loop for all polled source kinds.
+ *
+ * <h2>Polymorphic dispatch</h2>
+ * <p>At startup, discovers all {@link Fetcher} CDI beans annotated with
+ * {@link FetcherKind} and builds a kind&rarr;Fetcher dispatch map. A
+ * periodic heartbeat enumerates all active sources and dispatches each
+ * to the Fetcher registered for its kind. Sources whose kind has no
+ * registered Fetcher are skipped with a WARN log (once per kind per
+ * scheduler lifecycle).
+ *
+ * <h2>Per-kind intervals</h2>
+ * <p>Each source kind ticks at its own configured interval via
+ * {@code infochat.fetch.<kind>.interval}. A kind whose interval has
+ * not elapsed since its last tick is skipped until the next heartbeat.
  *
  * <h2>Outbox discipline</h2>
- * <p>Per tick, for each enabled {@code kind='rss'} source: invoke
- * {@link RssFetcher#fetch}, then for each {@link NormalizedPost}
- * call {@link PostPersister#persist} BEFORE
- * {@link EvalQueueProducer#emit}. Persist-then-enqueue is the outbox
- * discipline per {@code docs/spec/architecture.md} §Pipelines and
- * §Architectural principles 2 — a crash between the two leaves the
- * post recoverable via {@link app.zcat.infochat.collector.outbox.OutboxRehydrator}
- * on next startup. When the persist returns a no-op (ON CONFLICT
- * dedup hit), the enqueue is skipped — the post has already been
- * emitted on a prior tick and the downstream eval state is the
- * source of truth.
- *
- * <h2>Scheduling shape</h2>
- * <p>One {@code @Scheduled} tick at the global RSS interval
- * ({@code infochat.fetch.rss.interval}, default {@code 5m}) iterates
- * every enabled {@code kind='rss'} row. Per-source cadence overrides
- * are out-of-scope per {@code docs/design/01-architecture.md} §1.6.
- * The single-tick / iterate design is observably equivalent to
- * per-source jobs under a uniform interval (every source fetches
- * once per interval); it is simpler to test (the
- * {@link #tickOnce(SourceRow)} method is directly callable by the IT).
+ * <p>Per tick, for each enabled source: invoke the matching Fetcher,
+ * then for each {@link NormalizedPost} call {@link PostPersister#persist}
+ * BEFORE {@link EvalQueueProducer#emit}. Persist-then-enqueue is the
+ * outbox discipline per {@code docs/spec/architecture.md} §Pipelines
+ * and §Architectural principles 2 — a crash between the two leaves the
+ * post recoverable via
+ * {@link app.zcat.infochat.collector.outbox.OutboxRehydrator}
+ * on next startup. When the persist returns a no-op (ON CONFLICT dedup
+ * hit), the enqueue is skipped.
  *
  * <h2>Startup ordering</h2>
  * <p>{@code @Priority(400)} per
@@ -72,6 +85,8 @@ public class FetchScheduler {
 
     private static final Logger LOG = Logger.getLogger(FetchScheduler.class);
 
+    private static final Duration DEFAULT_KIND_INTERVAL = Duration.ofMinutes(5);
+
     @Inject
     DataSource dataSource;
 
@@ -81,35 +96,83 @@ public class FetchScheduler {
     @Inject
     EvalQueueProducer evalQueueProducer;
 
-    // RssFetcher is @ApplicationScoped; CDI hands FetchScheduler a
-    // client proxy. Tests substitute the bean via
-    // QuarkusMock.installMockForType (the Quarkus-idiomatic CDI
-    // replacement) so the test-mode Fetcher reaches the scheduler
-    // through the same proxy. No field/setter test seam — the proxy
-    // does not propagate raw field writes.
     @Inject
-    RssFetcher rssFetcher;
+    Config config;
+
+    @Inject
+    @All
+    List<InstanceHandle<Fetcher>> fetcherHandles;
+
+    private final Map<String, Fetcher> fetchersByKind = new HashMap<>();
+
+    // Per-kind last-tick tracking for interval gating.
+    private final Map<String, Instant> lastTickByKind = new ConcurrentHashMap<>();
+
+    // Tracks kinds already warned about (no registered Fetcher) to
+    // avoid WARN-per-heartbeat noise for expected orphan kinds
+    // (bootstrap-sources.json ships bluesky/nostr before their
+    // Fetcher implementations land).
+    private final Set<String> warnedOrphanKinds = ConcurrentHashMap.newKeySet();
+
+    @PostConstruct
+    void discoverFetchers() {
+        for (InstanceHandle<Fetcher> handle : fetcherHandles) {
+            FetcherKind kind = handle.getBean().getBeanClass().getAnnotation(FetcherKind.class);
+            if (kind == null) {
+                continue;
+            }
+            Fetcher prev = fetchersByKind.put(kind.value(), handle.get());
+            if (prev != null) {
+                throw new IllegalStateException(
+                    "Duplicate Fetcher for kind '" + kind.value() + "': "
+                    + prev.getClass().getSimpleName() + " and "
+                    + handle.getBean().getBeanClass().getSimpleName());
+            }
+            LOG.infof("Registered fetcher for kind '%s': %s",
+                kind.value(), handle.getBean().getBeanClass().getSimpleName());
+        }
+    }
 
     /**
-     * Scheduled tick at the global RSS interval. The
-     * {@code every = "{infochat.fetch.rss.interval}"} expression
-     * resolves the property at deployment time; the default value
-     * lives in {@code application.properties} alongside the other
-     * Quarkus config defaults (Quarkus convention), not as an inline
-     * fallback in this annotation or a {@code static final} constant
-     * in source.
+     * Heartbeat tick that drives per-kind dispatch. Fires at a base
+     * interval; each registered kind is gated by its own configured
+     * interval ({@code infochat.fetch.<kind>.interval}).
      */
-    @Scheduled(every = "{infochat.fetch.rss.interval}")
+    @Scheduled(every = "{infochat.fetch.heartbeat-interval}")
     void onTick() {
+        Instant now = Instant.now();
+
+        Set<String> kindsToTick = new HashSet<>();
+        for (String kind : fetchersByKind.keySet()) {
+            if (shouldTick(kind, now)) {
+                kindsToTick.add(kind);
+            }
+        }
+        if (kindsToTick.isEmpty()) {
+            return;
+        }
+
         List<SourceRow> rows;
         try {
-            rows = enumerateActiveRssSources();
+            rows = enumerateActiveSources();
         } catch (SQLException e) {
-            LOG.warn("FetchScheduler: failed to enumerate rss sources; skipping tick", e);
+            LOG.warn("FetchScheduler: failed to enumerate sources; skipping tick", e);
             return;
         }
         for (SourceRow row : rows) {
+            if (!kindsToTick.contains(row.kind())) {
+                if (!fetchersByKind.containsKey(row.kind())
+                        && warnedOrphanKinds.add(row.kind())) {
+                    LOG.warnf("No fetcher registered for source kind '%s', skipping",
+                        row.kind());
+                }
+                continue;
+            }
             tickOnce(row);
+        }
+
+        for (String kind : kindsToTick) {
+            lastTickByKind.put(kind, now);
         }
     }
 
@@ -120,12 +183,19 @@ public class FetchScheduler {
      * deterministically without waiting on the scheduler clock.
      *
      * @param row the source row to tick (already enumerated as
-     *            {@code kind='rss' AND status='active' AND
-     *            deleted_at IS NULL}).
+     *            {@code status='active' AND deleted_at IS NULL}).
      */
-    public void tickOnce(SourceRow row) {
+    public void tickOnce(@NonNull SourceRow row) {
+        Fetcher fetcher = fetchersByKind.get(row.kind());
+        if (fetcher == null) {
+            if (warnedOrphanKinds.add(row.kind())) {
+                LOG.warnf("No fetcher registered for source kind '%s', skipping",
+                    row.kind());
+            }
+            return;
+        }
         try {
-            List<NormalizedPost> posts = rssFetcher.fetch(row.dispatchKey(), row.identifier());
+            List<NormalizedPost> posts = fetcher.fetch(row.dispatchKey(), row.identifier());
             for (NormalizedPost post : posts) {
                 Optional<PostPersister.PersistedPostKey> key =
                     postPersister.persist(row.uuid(), post);
@@ -147,18 +217,16 @@ public class FetchScheduler {
     }
 
     /**
-     * Reads all enabled {@code kind='rss'} rows from {@code source}.
-     * Public so the IT can re-invoke after seeding test sources
-     * mid-test.
+     * Reads all active source rows regardless of kind. Public so the
+     * IT can re-invoke after seeding test sources mid-test.
      *
      * <p>Soft-deleted rows ({@code deleted_at IS NOT NULL}) and
      * non-active rows ({@code status != 'active'}) are skipped.
      */
-    public List<SourceRow> enumerateActiveRssSources() throws SQLException {
+    public List<SourceRow> enumerateActiveSources() throws SQLException {
         final String sql =
-            "SELECT id, identifier FROM source "
-                + "WHERE kind = 'rss' "
-                + "  AND status = 'active' "
+            "SELECT id, identifier, kind FROM source "
+                + "WHERE status = 'active' "
                 + "  AND deleted_at IS NULL "
                 + "ORDER BY added_at, id";
 
@@ -170,10 +238,25 @@ public class FetchScheduler {
             while (rs.next()) {
                 UUID id = (UUID) rs.getObject(1);
                 String identifier = rs.getString(2);
-                rows.add(new SourceRow(id, identifier, dispatch++));
+                String kind = rs.getString(3);
+                rows.add(new SourceRow(id, identifier, dispatch++, kind));
             }
         }
         return rows;
+    }
+
+    private boolean shouldTick(String kind, Instant now) {
+        Instant lastTick = lastTickByKind.get(kind);
+        if (lastTick == null) {
+            return true;
+        }
+        Duration interval = getKindInterval(kind);
+        return Duration.between(lastTick, now).compareTo(interval) >= 0;
+    }
+
+    private Duration getKindInterval(String kind) {
+        return config.getOptionalValue("infochat.fetch." + kind + ".interval", Duration.class)
+            .orElse(DEFAULT_KIND_INTERVAL);
     }
 
     /**
@@ -182,6 +265,7 @@ public class FetchScheduler {
      * SPI's {@code long sourceId} parameter; it is NOT the
      * {@code source.id} UUID and is opaque to the Fetcher.
      */
-    public record SourceRow(UUID uuid, String identifier, long dispatchKey) {
+    public record SourceRow(@NonNull UUID uuid, @NonNull String identifier, long dispatchKey,
+                               @NonNull String kind) {
     }
 }
