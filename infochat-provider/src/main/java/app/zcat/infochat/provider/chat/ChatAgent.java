@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.chat;
 
+import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
@@ -124,7 +125,7 @@ public class ChatAgent {
             // LLM unreachable or any other failure → friendly error.
             // No session advance, no memory write, no tool invocation
             // beyond what already ran before the failure.
-            log.error("ChatAgent.handle failed for userId={}", userId, e);
+            SafeLog.error(log, "ChatAgent.handle failed for userId=" + userId, e);
             return bundleLoader.get(BundleKeys.ERROR_CHAT_UNAVAILABLE);
         } finally {
             inFlightTracker.release(userId, scopeKind, scopeId);

@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.messaging;
 
+import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.messaging.MessagingAdapter;
 import io.quarkus.runtime.Startup;
 import jakarta.annotation.PostConstruct;
@@ -58,8 +59,10 @@ public class MessagingStartup {
                 // without re-shaping the startup ordering.
                 log.info("starting adapter transport: {}", adapter.name());
             } catch (RuntimeException e) {
-                log.error("Adapter {} failed to start; continuing with the remaining adapters",
-                        adapter.name(), e);
+                SafeLog.error(log,
+                        "Adapter " + adapter.name()
+                                + " failed to start; continuing with the remaining adapters",
+                        e);
             }
         }
     }

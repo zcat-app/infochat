@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.messaging;
 
 import app.zcat.infochat.core.log.ContactIds;
+import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.messaging.InboundMessage;
 import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.MessagingException;
@@ -529,8 +530,10 @@ public class InboundRouter {
                 }
             }
         } catch (RuntimeException e) {
-            log.error("InboundRouter dispatch failed for scope={}",
-                    ContactIds.redact(scopeIdOf(msg.scope())), e);
+            SafeLog.error(log,
+                    "InboundRouter dispatch failed for scope="
+                            + ContactIds.redact(scopeIdOf(msg.scope())),
+                    e);
             body = INTERNAL_ERROR_REPLY;
         }
 
@@ -607,8 +610,10 @@ public class InboundRouter {
         } catch (MessagingException e) {
             // Outbound failure on the reply itself is not recoverable
             // on this code path — surface it in the log and move on.
-            log.error("InboundRouter reply send failed for adapter={} scope={}",
-                    target.name(), ContactIds.redact(scopeIdOf(scope)), e);
+            SafeLog.error(log,
+                    "InboundRouter reply send failed for adapter=" + target.name()
+                            + " scope=" + ContactIds.redact(scopeIdOf(scope)),
+                    e);
         }
     }
 

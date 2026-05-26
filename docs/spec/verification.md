@@ -413,6 +413,15 @@ or `deployment.md`. Each one corresponds to at least one named test.
   events, request IDs, scope IDs, and counts are present (positive
   assertion). The audit log records command intent only; user-authored
   prose is not in audit rows either.
+  - Exception-path scenarios (SafeLog): (a) an inbound JSON parse
+    failure whose exception message carries a synthetic chat body
+    produces no log line containing that body; (b) a JDBC
+    PreparedStatement bind-parameter exception whose message carries a
+    synthetic `chat_memory.content` value produces no log line
+    containing that value; (c) an HTTP fetch failure whose exception
+    message carries a synthetic API key produces no log line containing
+    that key. Each scenario asserts that the exception class name IS
+    present (positive assertion that SafeLog emits diagnostic context).
 
 ### LLM and embeddings
 

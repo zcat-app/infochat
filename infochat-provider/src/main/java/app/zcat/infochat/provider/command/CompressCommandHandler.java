@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.command;
 
+import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.llm.LlmProvider;
 import app.zcat.infochat.llm.LlmResponse;
 import app.zcat.infochat.llm.ModelTask;
@@ -160,7 +161,7 @@ public class CompressCommandHandler implements CommandHandler {
                             conversationText.toString());
                     parsed = parseCompression(response.text());
                 } catch (Exception e) {
-                    log.warn("Compression LLM call failed for userId={}", userId, e);
+                    SafeLog.warn(log, "Compression LLM call failed for userId=" + userId, e);
                     conn.rollback();
                     return new CompressResult.Failure();
                 }

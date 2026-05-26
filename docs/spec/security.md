@@ -1033,6 +1033,36 @@ sources). Application code uses the soft-delete column.
   itself is not. The audit log records *intent* (command name, actor,
   scope, target), not user-authored prose.
 
+### User content in exceptions
+
+Exception messages and stack traces emitted via the application logger
+MUST NOT contain user-authored prose (chat-mode message bodies, post
+bodies, saved-post annotations, command arguments). The application
+provides a `SafeLog` utility that drops the exception message body,
+retains only the exception class name, and truncates the cause chain
+to class names (depth-capped at 5). The original `Throwable` is never
+passed to the underlying SLF4J logger.
+
+`SafeLog` also applies the closed API-key catalogue redactor to the
+caller-supplied message so an API key embedded in the log message is
+caught by the same mechanism as regular log lines.
+
+**Known framework-level logging risks not closed by this mechanism.**
+The following framework-level logging paths can emit user content or
+secrets if their log level is raised above the production baseline:
+
+- **Hibernate parameter trace** (`org.hibernate.SQL` and
+  `org.hibernate.type` at DEBUG/TRACE): emits SQL bind parameters
+  including `chat_memory.content` values.
+- **HTTP client body trace** (RESTEasy / Vert.x client logging at
+  TRACE): emits request and response bodies which may carry API keys
+  or user content.
+
+These are operator-side risks. The production logger-level baseline
+MUST keep these categories at WARN or above. Operators who lower
+them for debugging accept the risk of user-content exposure in the
+log stream.
+
 ## Source URL visibility
 
 Source rows are global state (decision D7) — there is no per-user

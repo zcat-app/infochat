@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.group;
 
+import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
@@ -121,7 +122,7 @@ public class MembershipEventHandler {
         } catch (SQLException e) {
             // Audit failure must not block the membership state mutation
             // that already succeeded — log and continue.
-            log.error("failed to write audit row action={} scope={}", action, scopeId, e);
+            SafeLog.error(log, "failed to write audit row action=" + action + " scope=" + scopeId, e);
         }
     }
 
