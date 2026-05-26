@@ -8,10 +8,10 @@ blocked_by:
   - M1-103
 files_budget: 6
 files_scope:
-  - infochat-provider/src/main/java/app/zcat/infochat/provider/adapter/AdapterRegistry.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/AdapterRegistry.java
   - infochat-provider/src/main/resources/application.properties
-  - infochat-provider/src/test/java/app/zcat/infochat/provider/adapter/MultiAdapterIsolationIT.java
-  - infochat-provider/src/test/java/app/zcat/infochat/provider/adapter/AdapterRegistryTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/MultiAdapterIsolationIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/AdapterRegistryTest.java
 complexity: medium
 risk: low
 round_cap: 2
@@ -39,8 +39,8 @@ acceptance:
   - "mvn -B clean verify from the repo root exits 0"
 test_plan:
   adds:
-    - infochat-provider/src/test/java/app/zcat/infochat/provider/adapter/MultiAdapterIsolationIT.java
-    - infochat-provider/src/test/java/app/zcat/infochat/provider/adapter/AdapterRegistryTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/MultiAdapterIsolationIT.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/AdapterRegistryTest.java
   preserves:
     - all tests currently green on main
 spec_refs:

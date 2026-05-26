@@ -9,7 +9,7 @@ blocked_by:
   - M1-105
 files_budget: 4
 files_scope:
-  - infochat-provider/src/test/java/app/zcat/infochat/provider/adapter/MultiAdapterProductionIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/MultiAdapterProductionIT.java
   - infochat-provider/src/test/resources/application.properties
 complexity: medium
 risk: low
@@ -37,7 +37,7 @@ acceptance:
   - "mvn -B clean verify from the repo root exits 0"
 test_plan:
   adds:
-    - infochat-provider/src/test/java/app/zcat/infochat/provider/adapter/MultiAdapterProductionIT.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/MultiAdapterProductionIT.java
   preserves:
     - all tests currently green on main
     - MultiAdapterIsolationIT from M1-105 passes unchanged

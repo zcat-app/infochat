@@ -6,6 +6,7 @@ created: 2026-05-26
 last_updated: 2026-05-26
 blocked_by:
   - M1-096
+  - M1-097
 files_budget: 4
 files_scope:
   - infochat-collector/src/main/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSource.java

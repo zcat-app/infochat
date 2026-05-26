@@ -78,12 +78,8 @@ See frontmatter.
 
 ## Notes
 
-- **Link type.** The post_reference CHECK constraint (M1-093) defines
-  `link_type IN ('entity','semantic')`. Kind-6 linking needs a third
-  type: `'repost'`. Either M1-093's V27 migration should include
-  `'repost'` in the CHECK constraint, or this ticket amends the
-  constraint. The simpler path is for M1-093 to include `'repost'`
-  anticipating this ticket — note this dependency at M1-093 start time.
+- **Link type.** M1-093's V27 CHECK constraint includes `'repost'`
+  alongside `'entity'` and `'semantic'`. No schema amendment needed.
 - **Original event id extraction.** NIP-01 kind-6 reposts carry the
   original event id in the `tags` array as `["e", event_id, ...]`.
   The handler extracts this tag.

@@ -5,12 +5,11 @@ status: pending
 created: 2026-05-26
 last_updated: 2026-05-26
 blocked_by: []
-files_budget: 8
+files_budget: 7
 files_scope:
   - infochat-collector/src/main/java/app/zcat/infochat/collector/fetch/FetchScheduler.java
   - infochat-collector/src/main/java/app/zcat/infochat/collector/fetch/SourceRepository.java
   - infochat-collector/src/main/resources/application.properties
-  - infochat-provider/src/main/java/app/zcat/infochat/provider/command/SourceEnableCommandHandler.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/fetch/FetchSchedulerFailureLadderIT.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/fetch/FetchSchedulerFailureLadderTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SourceEnableCommandHandlerTest.java
@@ -28,7 +27,8 @@ out_of_scope:
   - any change to FetchSchedulerIT.java — existing tests pass unchanged; new failure-ladder tests go in the new IT file
   - any change to StreamSource or StreamSourceSupervisor — D42 is the Fetcher mirror; D38 per-relay degradation is M3 scope
   - any modification to EmbeddingWorker, TaggerWorker, Stage1Worker, Stage2Worker, or any test in infochat-collector/src/test/java outside the fetch/ package
-  - any change to SourceDisableCommandHandler — /source-disable already works; only /source-enable needs the counter reset
+  - any change to SourceEnableCommandHandler — the counter-reset on re-enable is pre-existing; only the test file is modified to add coverage
+  - any change to SourceDisableCommandHandler — /source-disable already works independently of the failure ladder
 acceptance:
   - "FetchScheduler.tickOnce increments source.consecutive_failures on a Fetcher exception and resets it to 0 on success"
   - "FetchScheduler.tickOnce updates source.last_fetch_at on every tick (success or failure) and source.last_success_at on success only"
@@ -36,7 +36,7 @@ acceptance:
   - "A source with status='failed' is excluded from the scheduler's active-source enumeration — the scheduler does not attempt to fetch it"
   - "On threshold crossing, a throttled admin notification fires via ThrottledAdminNotifier with the error class, source id, and consecutive failure count"
   - "No immediate same-tick retry — a failure increments the counter and the source is skipped until the next scheduled tick for its kind"
-  - "SourceEnableCommandHandler resets source.consecutive_failures to 0 when transitioning a source from 'failed' to 'active'"
+  - "SourceEnableCommandHandler already resets source.consecutive_failures to 0 when transitioning a source from 'failed' to 'active' (pre-existing behavior in the UPDATE statement; no code change needed — this acceptance item documents the contract, the test below adds coverage)"
   - "FetchSchedulerFailureLadderIT.consecutiveFailures_transitionsToFailed passes — seeds an active source, forces N consecutive Fetcher failures via a test double, asserts source.status='failed' and consecutive_failures=N after the Nth tick"
   - "FetchSchedulerFailureLadderIT.failedSourceSkippedByScheduler passes — a source with status='failed' is not in the active-source enumeration; the test Fetcher is never called for it"
   - "FetchSchedulerFailureLadderIT.successResetsCounter passes — a source with consecutive_failures=3 (below threshold) succeeds on the next tick; consecutive_failures resets to 0"
@@ -51,7 +51,7 @@ test_plan:
     - infochat-collector/src/test/java/app/zcat/infochat/collector/fetch/FetchSchedulerFailureLadderIT.java
     - infochat-collector/src/test/java/app/zcat/infochat/collector/fetch/FetchSchedulerFailureLadderTest.java
   modifies:
-    - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SourceEnableCommandHandlerTest.java (add reEnableResetsFailureCounter test; authorization: counter-reset is new behavior on /source-enable)
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SourceEnableCommandHandlerTest.java (add reEnableResetsFailureCounter test; authorization: adds coverage for pre-existing counter-reset behavior exercised by the failure ladder)
   preserves:
     - all tests currently green on main
     - FetchSchedulerIT existing tests pass unchanged
@@ -110,10 +110,12 @@ skipped until the next tick, and once failed, skipped indefinitely.
 `status = 'active'` AND `deleted_at IS NULL`"). A failed source is
 mechanically excluded.
 
-**Admin recovery.** `/source-enable` (M1-053) resets
+**Admin recovery.** `/source-enable` (M1-053) already resets
 `consecutive_failures` to 0 when transitioning a source from
-`failed` to `active`. This prevents the source from immediately
-re-tripping the threshold on the next failure.
+`failed` to `active` (pre-existing behavior). This prevents the
+source from immediately re-tripping the threshold on the next
+failure. No code change to `SourceEnableCommandHandler` is needed;
+M1-094 adds test coverage for this behavior.
 
 ## Out-of-scope
 

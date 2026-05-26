@@ -30,12 +30,12 @@ out_of_scope:
   - any change to Stage1Worker, Stage2Worker, TaggerWorker — upstream pipeline stages are not modified
   - any change to ReadyPromoter — M1-092's entity_done gate is frozen
   - any change to the post_entity DDL (V26) — M1-092 is frozen
-  - Nostr kind-6 cross-source linking via upstream_identifier — M3 scope (M3-006); LinkingJob processes only entity-match and cosine-similarity link types in this ticket
+  - Nostr kind-6 cross-source linking via upstream_identifier — M1-100; LinkingJob processes only entity-match and cosine-similarity link types in this ticket
   - any modification to EmbeddingWorkerTest, EmbeddingWorkerIT, ReadyPromoterIT, or any other pre-existing test
   - StreamSource or Nostr relay infrastructure — M3 scope
 acceptance:
   - "Flyway migration V27__post_reference.sql applies cleanly on a fresh DB and on a DB with V1–V26 already applied"
-  - "V27 creates the post_reference table partitioned by created_at with columns (from_post UUID NOT NULL, to_post UUID NOT NULL, link_type TEXT NOT NULL CHECK (link_type IN ('entity','semantic')), score REAL NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now()) and PRIMARY KEY (from_post, to_post, link_type, created_at)"
+  - "V27 creates the post_reference table partitioned by created_at with columns (from_post UUID NOT NULL, to_post UUID NOT NULL, link_type TEXT NOT NULL CHECK (link_type IN ('entity','semantic','repost')), score REAL NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now()) and PRIMARY KEY (from_post, to_post, link_type, created_at)"
   - "V27 creates index idx_post_ref_from ON post_reference(from_post, link_type) and idx_post_ref_to ON post_reference(to_post)"
   - "V27 GRANTs INSERT, SELECT on post_reference to infochat_collector; GRANTs SELECT on post_reference to infochat_provider"
   - "LinkingJob is a scheduled CDI bean in collector/linking/ that runs on a configurable interval (infochat.linking.interval, profile-driven)"
@@ -104,7 +104,7 @@ rows to exist.
 
 **V27 migration.** Creates the `post_reference` table partitioned by
 `created_at` per design notes §2.4.3. Bidirectional edges
-(`from_post`, `to_post`) with `link_type ∈ {'entity','semantic'}` and
+(`from_post`, `to_post`) with `link_type ∈ {'entity','semantic','repost'}` and
 a `score` column. Indexes on `(from_post, link_type)` and `(to_post)`.
 Collector gets INSERT/SELECT; Provider gets SELECT.
 
@@ -134,7 +134,7 @@ singleton clusters.
 - **EntityExtractorWorker** (M1-092) — frozen.
 - **EmbeddingWorker / ReadyPromoter** — unchanged.
 - **Nostr kind-6 cross-source linking** via `upstream_identifier` —
-  M3 scope (M3-006). LinkingJob in this ticket processes only
+  M1-100. LinkingJob in this ticket processes only
   `entity` and `semantic` link types.
 - **Partition lifecycle job updates** — the design notes commit to
   the pruner managing `post_reference` partitions; the pruner

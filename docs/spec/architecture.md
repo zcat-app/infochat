@@ -320,10 +320,15 @@ Two pipelines must be reasoned about end-to-end:
 
 - **Ingest** (Collector) — Source → Fetcher *or* StreamSource → persist
   as `RAW` → enqueue → Stage 1 → (Stage 2 only on hits) → tagger →
-  entity extraction → embedding → mark `READY` → NOTIFY. Each stage
-  has its own failure policy (see `security.md` and decision D22). The
-  persist-before-enqueue step is the outbox: a startup rehydrator
-  re-enqueues anything left in `RAW` after a crash.
+  {entity extraction, embedding} → mark `READY` → NOTIFY. Entity
+  extraction and embedding run **in parallel** after tagger completes —
+  they read the post body independently and write to separate tables
+  (`post_entity` vs `post_embedding`); neither depends on the other's
+  output (D6 treats named-entity match and cosine similarity as
+  orthogonal signals). `READY` promotion waits for both to finish.
+  Each stage has its own failure policy (see `security.md` and
+  decision D22). The persist-before-enqueue step is the outbox: a
+  startup rehydrator re-enqueues anything left in `RAW` after a crash.
 - **User request** (Provider) — Adapter → identity resolution → ban check →
   parse → permission check → execute. Slash commands run deterministic SQL
   (and may invoke the summarizer LLM). Chat-mode messages run the chat agent
