@@ -1,9 +1,14 @@
 ---
 id: M1-090
 title: "YouTubeFetcher — channel Atom feed"
-status: pending
+status: done
 created: 2026-05-26
 last_updated: 2026-05-26
+clarity_check:
+  date: 2026-05-26
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by:
   - M1-086
 files_budget: 5
@@ -11,6 +16,7 @@ files_scope:
   - infochat-collector/src/main/java/app/zcat/infochat/collector/fetcher/youtube/YouTubeFetcher.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/youtube/YouTubeFetcherTest.java
   - infochat-collector/src/main/resources/application.properties
+  - infochat-collector/src/test/resources/fixtures/youtube/youtube-atom-sample.xml
 complexity: low
 risk: low
 round_cap: 2
@@ -45,6 +51,33 @@ spec_refs:
   - docs/spec/security.md §SSRF and outbound connections
 decision_refs:
   - D38
+reviews:
+  - round: 1
+    date: 2026-05-26
+    verdict: REWORK
+    checks:
+      scope_drift: FAIL
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 321
+      removed: 7
+  - round: 2
+    date: 2026-05-26
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 341
+      removed: 7
 ---
 
 # M1-090: YouTubeFetcher — channel Atom feed
@@ -99,3 +132,8 @@ Atom 1.0, this fetcher delegates parsing directly. Depends on M1-086
   OdyseeFetcher all follow the same GET → RssFeedParser.parse()
   pattern. Keep each standalone; the duplication is ~30 lines per
   fetcher, well below the abstraction threshold.
+
+## Round 1 rework
+
+1. **SCOPE-DRIFT**: Test fixture `youtube-atom-sample.xml` was outside `files_scope`. Added fixture path to `files_scope` frontmatter (reviewer-directed correction; the ticket body already anticipated this fixture).
+2. **PARAMETER-CONTRACT**: Add `@NonNull` annotations to `YouTubeFetchException` constructor parameters (`message`, `cause`).

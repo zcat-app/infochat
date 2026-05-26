@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015"
+      xmlns:media="http://search.yahoo.com/mrss/"
+      xmlns="http://www.w3.org/2005/Atom">
+  <link rel="self" href="https://www.youtube.com/feeds/videos.xml?channel_id=UCexample123"/>
+  <id>yt:channel:UCexample123</id>
+  <title>Example Tech Channel</title>
+  <link rel="alternate" href="https://www.youtube.com/channel/UCexample123"/>
+  <author>
+    <name>Example Tech Channel</name>
+    <uri>https://www.youtube.com/channel/UCexample123</uri>
+  </author>
+  <published>2024-06-01T00:00:00+00:00</published>
+
+  <entry>
+    <id>yt:video:dQw4w9WgXcQ</id>
+    <yt:videoId>dQw4w9WgXcQ</yt:videoId>
+    <yt:channelId>UCexample123</yt:channelId>
+    <title>Understanding Quarkus Reactive Messaging</title>
+    <link rel="alternate" href="https://www.youtube.com/watch?v=dQw4w9WgXcQ"/>
+    <author>
+      <name>Example Tech Channel</name>
+      <uri>https://www.youtube.com/channel/UCexample123</uri>
+    </author>
+    <published>2026-05-20T14:30:00+00:00</published>
+    <updated>2026-05-20T15:00:00+00:00</updated>
+    <media:group>
+      <media:title>Understanding Quarkus Reactive Messaging</media:title>
+      <media:content url="https://www.youtube.com/v/dQw4w9WgXcQ?version=3" type="application/x-shockwave-flash" width="640" height="390"/>
+      <media:thumbnail url="https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg" width="480" height="360"/>
+      <media:description>A deep dive into SmallRye Reactive Messaging with Quarkus. Covers channels, connectors, and real-world patterns.</media:description>
+    </media:group>
+    <content type="html">A deep dive into SmallRye Reactive Messaging with Quarkus. Covers channels, connectors, and real-world patterns.</content>
+  </entry>
+
+  <entry>
+    <id>yt:video:abc123XYZ00</id>
+    <yt:videoId>abc123XYZ00</yt:videoId>
+    <yt:channelId>UCexample123</yt:channelId>
+    <title>PostgreSQL pgvector Tutorial</title>
+    <link rel="alternate" href="https://www.youtube.com/watch?v=abc123XYZ00"/>
+    <author>
+      <name>Example Tech Channel</name>
+      <uri>https://www.youtube.com/channel/UCexample123</uri>
+    </author>
+    <published>2026-05-18T09:00:00+00:00</published>
+    <updated>2026-05-18T10:00:00+00:00</updated>
+    <media:group>
+      <media:title>PostgreSQL pgvector Tutorial</media:title>
+      <media:content url="https://www.youtube.com/v/abc123XYZ00?version=3" type="application/x-shockwave-flash" width="640" height="390"/>
+      <media:thumbnail url="https://i.ytimg.com/vi/abc123XYZ00/hqdefault.jpg" width="480" height="360"/>
+      <media:description>Getting started with pgvector for semantic search in PostgreSQL.</media:description>
+    </media:group>
+    <content type="html">Getting started with pgvector for semantic search in PostgreSQL.</content>
+  </entry>
+
+  <entry>
+    <id>yt:video:zzz999AAA11</id>
+    <yt:videoId>zzz999AAA11</yt:videoId>
+    <yt:channelId>UCexample123</yt:channelId>
+    <title>Java 25 Virtual Threads in Practice</title>
+    <link rel="alternate" href="https://www.youtube.com/watch?v=zzz999AAA11"/>
+    <author>
+      <name>Example Tech Channel</name>
+      <uri>https://www.youtube.com/channel/UCexample123</uri>
+    </author>
+    <published>2026-05-15T16:45:00+00:00</published>
+    <updated>2026-05-15T17:00:00+00:00</updated>
+    <media:group>
+      <media:title>Java 25 Virtual Threads in Practice</media:title>
+      <media:content url="https://www.youtube.com/v/zzz999AAA11?version=3" type="application/x-shockwave-flash" width="640" height="390"/>
+      <media:thumbnail url="https://i.ytimg.com/vi/zzz999AAA11/hqdefault.jpg" width="480" height="360"/>
+      <media:description>Practical patterns for virtual threads in Java 25, with benchmarks and migration tips.</media:description>
+    </media:group>
+    <content type="html">Practical patterns for virtual threads in Java 25, with benchmarks and migration tips.</content>
+  </entry>
+</feed>
