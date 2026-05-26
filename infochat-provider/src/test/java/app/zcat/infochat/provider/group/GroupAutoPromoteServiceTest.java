@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.group;
 
+import app.zcat.infochat.core.audit.AuditAction;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
@@ -14,6 +15,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -25,6 +27,7 @@ class GroupAutoPromoteServiceTest {
 
     @Inject DataSource dataSource;
     @Inject GroupRepository groupRepository;
+    @Inject GroupMembershipRepository membershipRepository;
     @Inject GroupAutoPromoteService service;
 
     private UUID groupId;
@@ -106,6 +109,47 @@ class GroupAutoPromoteServiceTest {
 
         assertFalse(result);
         assertFalse(isGroupAdmin(groupId, probationUserId));
+    }
+
+    @Test
+    void tryAutoPromote_rePromotesExistingNonAdminMember() {
+        // Seed an existing membership row with is_group_admin=false
+        membershipRepository.addMember(groupId, eligibleUserId);
+
+        boolean result = service.tryAutoPromote(groupId, eligibleUserId, TEST_ADAPTER,
+                "autopromote-eligible-" + eligibleUserId);
+
+        assertTrue(result);
+        assertTrue(isGroupAdmin(groupId, eligibleUserId));
+        assertTrue(hasAuditEntry(groupId, eligibleUserId, AuditAction.PROMOTE_GROUP_ADMIN));
+    }
+
+    @Test
+    void tryAutoPromote_returnsFalseForRemovedMember() {
+        // Seed membership then mark removed
+        membershipRepository.addMember(groupId, eligibleUserId);
+        membershipRepository.markMemberRemoved(groupId, eligibleUserId);
+
+        boolean result = service.tryAutoPromote(groupId, eligibleUserId, TEST_ADAPTER,
+                "autopromote-eligible-" + eligibleUserId);
+
+        assertFalse(result);
+    }
+
+    private boolean hasAuditEntry(UUID gId, UUID uId, AuditAction action) {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT 1 FROM audit_log "
+                             + "WHERE scope_id = ? AND target_id = ? AND action = ?")) {
+            ps.setObject(1, gId);
+            ps.setString(2, uId.toString());
+            ps.setString(3, action.name());
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     private boolean isGroupAdmin(UUID gId, UUID uId) {

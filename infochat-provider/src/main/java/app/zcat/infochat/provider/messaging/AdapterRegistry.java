@@ -4,6 +4,7 @@ import app.zcat.infochat.messaging.AdapterTrustLevel;
 import app.zcat.infochat.messaging.CapabilityFlags;
 import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
+import app.zcat.infochat.provider.group.MembershipEventHandler;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Any;
 import jakarta.enterprise.inject.Instance;
@@ -90,6 +91,9 @@ public class AdapterRegistry {
 
     @Inject
     InboundRouter inboundRouter;
+
+    @Inject
+    MembershipEventHandler membershipEventHandler;
 
     private final List<MessagingAdapter> activatedAdapters = new ArrayList<>();
 
@@ -214,6 +218,7 @@ public class AdapterRegistry {
             inboundRouter.setReplyTarget(adapter);
             String adapterName = adapter.name();
             adapter.setInboundHandler(msg -> inboundRouter.onMessage(msg, adapterName));
+            adapter.setMembershipEventHandler(event -> membershipEventHandler.handle(event, adapterName));
             log.info("activating adapter: {} (trust={}{})",
                     adapterName,
                     adapter.trustLevel(),

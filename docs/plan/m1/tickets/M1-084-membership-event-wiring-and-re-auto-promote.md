@@ -1,7 +1,7 @@
 ---
 id: M1-084
 title: "MembershipEvent wiring + tryAutoPromote re-promote path"
-status: pending
+status: done
 created: 2026-05-26
 last_updated: 2026-05-26
 blocked_by: []
@@ -40,12 +40,9 @@ spec_refs: []
 decision_refs: []
 clarity_check:
   date: 2026-05-26
-  verdict: FAIL
+  verdict: WARN
   warnings:
-    - "files_budget: 8 cannot be validated without acceptance criteria"
-  blockers:
-    - "acceptance: [] is empty — no runnable/testable acceptance items"
-    - "out_of_scope: [] is empty — no explicit boundaries defined"
+    - "Acceptance items (a) and (b) assert code structure without naming a test method that directly verifies them — exercised indirectly by (c)/(d) handler tests"
 escalations:
   - date: 2026-05-26
     reason: clarity-fail
@@ -60,6 +57,51 @@ revisions:
       acceptance: []
       out_of_scope: []
       test_plan.adds: []
+reviews:
+  - round: 1
+    date: 2026-05-26
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 9
+      added: 378
+      removed: 25
+redteam_findings:
+  - date: 2026-05-26
+    category: INFO-LEAK
+    severity: medium
+    promise: |
+      Contact IDs are logged in redacted form (prefix + ellipsis + suffix) outside the audit log.
+    gap: |
+      MembershipEventHandler.java:69 logs the full unredacted contact ID via log.warn for unknown-user UserLeft events.
+    repro: |
+      Adapter fires UserLeft for unknown contactId; handler logs raw ID at WARN level in application logs.
+    suggested_fix_class: input-sanitization
+  - date: 2026-05-26
+    category: AUDIT-EVASION
+    severity: high
+    promise: |
+      Authorization evaluation order: audit-log the intent before execute. PROMOTE_GROUP_ADMIN and DEMOTE_GROUP_ADMIN are audited for explicit admin changes.
+    gap: |
+      MembershipEventHandler performs privilege-affecting mutations (UserLeft clears group admin via V5 trigger, BotRemoved disables group) with zero audit rows written.
+    repro: |
+      UserLeft fires for group admin -> markMemberRemoved -> V5 trigger clears is_group_admin -> no DEMOTE audit row. BotRemoved -> markRemoved -> group disabled -> no audit row. Causal chain invisible to /audit.
+    suggested_fix_class: audit-log-coverage
+redteam_audits:
+  - date: 2026-05-26
+    verdict: FINDINGS
+    base: main
+    head: m1/M1-084-membership-event-wiring-and-re-auto-promote
+    verdict_file: docs/plan/m1/redteam/M1-084-2026-05-26.md
+    findings_count: 2
+    out_of_model_count: 1
+    note: |
+      Two findings: (1) high — audit-evasion on membership events (UserLeft/BotRemoved perform privilege-affecting mutations with no audit trail); (2) medium — info-leak on unredacted contact ID in warn log. Done commit is immutable; fixes land as a new remediation ticket. Out-of-model: GroupDeleted events silently ignored (explicitly out of ticket scope).
 ---
 
 # M1-084: MembershipEvent wiring + tryAutoPromote re-promote path

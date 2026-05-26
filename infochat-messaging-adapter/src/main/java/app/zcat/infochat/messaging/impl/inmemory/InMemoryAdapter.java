@@ -84,6 +84,7 @@ public final class InMemoryAdapter implements MessagingAdapter {
     private final List<MembershipEvent> membershipEvents = new CopyOnWriteArrayList<>();
 
     private volatile InboundHandler handler;
+    private volatile MembershipHandler membershipHandler;
 
     /** Production-and-default constructor — declares LOW trust. */
     public InMemoryAdapter() {
@@ -157,6 +158,19 @@ public final class InMemoryAdapter implements MessagingAdapter {
     @Override
     public void setInboundHandler(@NonNull InboundHandler handler) {
         this.handler = handler;
+    }
+
+    @Override
+    public void setMembershipEventHandler(@NonNull MembershipHandler handler) {
+        this.membershipHandler = handler;
+    }
+
+    @Override
+    public void onMembershipEvent(@NonNull MembershipEvent event) {
+        MembershipHandler current = membershipHandler;
+        if (current != null) {
+            current.onEvent(event);
+        }
     }
 
     /**

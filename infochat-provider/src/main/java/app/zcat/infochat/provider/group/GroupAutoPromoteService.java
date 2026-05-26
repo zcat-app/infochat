@@ -21,21 +21,32 @@ import java.util.UUID;
  * {@code docs/spec/security.md} §Authorization model: when a group has
  * zero active admins, the next non-banned, non-probation sender is
  * promoted to group admin via INSERT into group_membership with
- * {@code is_group_admin=true}. ON CONFLICT DO NOTHING handles the
- * race-safe case where two concurrent messages compete for the slot.
+ * {@code is_group_admin=true}. ON CONFLICT (group_id, user_id) DO
+ * UPDATE handles re-promotion of existing members whose admin flag was
+ * cleared (e.g. after a user-left event); the partial unique index
+ * {@code one_admin_per_group} enforces at-most-one active admin.
  */
 @ApplicationScoped
 public class GroupAutoPromoteService {
 
+    // PostgreSQL SQLSTATE for unique_violation — returned when the
+    // one_admin_per_group partial unique index rejects a second admin.
+    private static final String PG_UNIQUE_VIOLATION = "23505";
+
     private static final String CHECK_ELIGIBILITY_SQL =
             "SELECT is_banned, probation_until FROM users WHERE id = ?";
 
-    // ON CONFLICT DO NOTHING catches both the (group_id, user_id) PK
-    // conflict (user already has a membership row) and the partial
-    // unique index one_admin_per_group (another user is already admin).
+    // ON CONFLICT handles two cases:
+    // 1. Existing member (PK conflict on group_id, user_id): UPDATE sets
+    //    is_group_admin=true only for active (non-removed) members.
+    // 2. Partial unique index one_admin_per_group rejects the UPDATE if
+    //    another user already holds the admin slot — executeUpdate returns 0.
     private static final String AUTO_PROMOTE_SQL =
             "INSERT INTO group_membership (group_id, user_id, is_group_admin) "
-                    + "VALUES (?, ?, true) ON CONFLICT DO NOTHING";
+                    + "VALUES (?, ?, true) "
+                    + "ON CONFLICT (group_id, user_id) DO UPDATE "
+                    + "SET is_group_admin = true "
+                    + "WHERE group_membership.removed_at IS NULL";
 
     private final DataSource dataSource;
     private final AuditLogWriter auditLogWriter;
@@ -49,10 +60,11 @@ public class GroupAutoPromoteService {
 
     /**
      * Attempt to auto-promote the user to group admin. Skips banned
-     * and probation users. Returns true if the INSERT succeeded (user
-     * is now group admin), false if the slot was already occupied or
-     * the user was ineligible. Writes a PROMOTE_GROUP_ADMIN audit row
-     * on success within the same transaction.
+     * and probation users. Returns true if the INSERT or re-promote
+     * UPDATE succeeded (user is now group admin), false if the slot
+     * was already occupied, the user was ineligible, or the member
+     * was removed. Writes a PROMOTE_GROUP_ADMIN audit row on success
+     * within the same transaction.
      */
     public boolean tryAutoPromote(@NonNull UUID groupId, @NonNull UUID userId,
                                   @NonNull String adapter, @NonNull String contactId) {
@@ -70,7 +82,6 @@ public class GroupAutoPromoteService {
                         return false;
                     }
                 }
-                // Audit after confirming the INSERT succeeded but before commit
                 RedactionHook.AuditRow auditRow = RedactionHook.AuditRow.builder()
                         .actorUserId(userId)
                         .actorContactId(contactId)
@@ -87,6 +98,12 @@ public class GroupAutoPromoteService {
                 return true;
             } catch (SQLException e) {
                 conn.rollback();
+                // 23505 = unique_violation from one_admin_per_group partial
+                // index: another user already holds the admin slot (race loser
+                // for new members where the PK conflict path doesn't fire).
+                if (PG_UNIQUE_VIOLATION.equals(e.getSQLState())) {
+                    return false;
+                }
                 throw e;
             }
         } catch (SQLException e) {
