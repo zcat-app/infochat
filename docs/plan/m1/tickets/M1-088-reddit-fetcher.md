@@ -1,9 +1,14 @@
 ---
 id: M1-088
 title: "RedditFetcher — subreddit JSON feed"
-status: pending
+status: done
 created: 2026-05-26
 last_updated: 2026-05-26
+clarity_check:
+  date: 2026-05-26
+  verdict: WARN
+  warnings:
+    - "files_scope omits src/test/resources/fixtures/reddit/; test fixtures will be created outside declared scope but within files_budget"
 blocked_by:
   - M1-086
 files_budget: 6
@@ -11,12 +16,56 @@ files_scope:
   - infochat-collector/src/main/java/app/zcat/infochat/collector/fetcher/reddit/RedditFetcher.java
   - infochat-collector/src/main/java/app/zcat/infochat/collector/fetcher/reddit/RedditResponseParser.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/reddit/RedditFetcherTest.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/reddit/LoopbackPermittingBlocklist.java
+  - infochat-collector/src/test/resources/fixtures/reddit/listing.json
   - infochat-collector/src/main/resources/application.properties
 complexity: low
 risk: medium
 round_cap: 2
 security_relevant: false
 migration_touch: false
+reviews:
+  - round: 1
+    date: 2026-05-26
+    verdict: REWORK
+    checks:
+      scope_drift: FAIL
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 467
+      removed: 7
+  - round: 2
+    date: 2026-05-26
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 507
+      removed: 7
+revisions:
+  - date: 2026-05-26
+    reason: "budget-breach: files_scope did not include test double and fixture file"
+    prior_files_scope:
+      - infochat-collector/src/main/java/app/zcat/infochat/collector/fetcher/reddit/RedditFetcher.java
+      - infochat-collector/src/main/java/app/zcat/infochat/collector/fetcher/reddit/RedditResponseParser.java
+      - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/reddit/RedditFetcherTest.java
+      - infochat-collector/src/main/resources/application.properties
+escalations:
+  - date: 2026-05-26
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      SCOPE-DRIFT-CHECK: FAIL — Two files outside files_scope:
+      LoopbackPermittingBlocklist.java (test double) and listing.json
+      (test fixture). Both within files_budget: 6.
 out_of_scope:
   - infochat-core/** — no SPI changes
   - infochat-collector/src/main/java/app/zcat/infochat/collector/fetcher/rss/** — not modified
@@ -119,3 +168,12 @@ subreddit URL. The identifier is the subreddit URL (e.g.
   `src/test/resources/fixtures/reddit/`.
 - **Design reference:** `docs/design/01-architecture.md` §1.6
   (pagination cap: 5 on laptop/vps/remote-llm, 2 on pi).
+
+## Round 1 rework
+
+1. **SCOPE-DRIFT-CHECK: FAIL** — Two files outside `files_scope`:
+   `LoopbackPermittingBlocklist.java` (test double) and
+   `listing.json` (test fixture). Both are within `files_budget: 6`.
+   The clarity check already warned about the fixture omission.
+   Fix: amend `files_scope` to include both paths (requires
+   escalate → refine since `files_scope` is frontmatter).

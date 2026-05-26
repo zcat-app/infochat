@@ -1,0 +1,36 @@
+{
+  "kind": "Listing",
+  "data": {
+    "after": "t3_after123",
+    "children": [
+      {
+        "kind": "t3",
+        "data": {
+          "name": "t3_abc001",
+          "title": "First Post Title",
+          "selftext": "Body of the first post",
+          "permalink": "/r/testsub/comments/abc001/first_post_title/",
+          "created_utc": 1700000000.0,
+          "author": "user1",
+          "score": 42,
+          "num_comments": 10,
+          "subreddit": "testsub"
+        }
+      },
+      {
+        "kind": "t3",
+        "data": {
+          "name": "t3_abc002",
+          "title": "Second Post Title",
+          "selftext": "",
+          "permalink": "/r/testsub/comments/abc002/second_post_title/",
+          "created_utc": 1700001000.0,
+          "author": "user2",
+          "score": 7,
+          "num_comments": 3,
+          "subreddit": "testsub"
+        }
+      }
+    ]
+  }
+}
