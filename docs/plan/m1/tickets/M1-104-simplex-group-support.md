@@ -99,3 +99,11 @@ See frontmatter.
 - **Group id.** SimpleX groups have an internal id in the simplex-chat
   API. The adapter surfaces this as the stable group_id. The format
   is adapter-specific and opaque to the Provider.
+- **D47 downstream impact.** The adapter delivers group messages to
+  Provider unchanged; the D47 group authorization gate
+  (approval_status check, per-group rate cap) runs inside Provider's
+  InboundRouter at step 3.5, not in the adapter. This ticket's
+  acceptance criteria are unaffected by D47. However, ITs that send
+  group @mentions through InboundRouter after D47 lands will need
+  to pre-approve the test group (set approval_status='approved') in
+  test setup.

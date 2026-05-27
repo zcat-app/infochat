@@ -94,3 +94,9 @@ See frontmatter.
 - **Membership events.** signal-cli surfaces `memberJoined` and
   `memberLeft` in group update events. These map directly to
   `user_joined_group` and `user_left_group` on the MembershipHandler.
+- **D47 downstream impact.** Same as M1-104: the adapter delivers
+  group messages to Provider unchanged; the D47 group authorization
+  gate runs inside Provider's InboundRouter at step 3.5. This
+  ticket's acceptance criteria are unaffected. ITs that send group
+  @mentions through InboundRouter after D47 lands will need to
+  pre-approve the test group in setup.

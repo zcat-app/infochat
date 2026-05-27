@@ -90,3 +90,11 @@ changes.
 - **Adjacent code:** M1-105's MultiAdapterIsolationIT tests
   SimpleX + InMemory. This IT tests SimpleX + Signal — the
   production deployment shape.
+- **D47 impact.** If D47 tickets (M1-110..M1-114) have landed before
+  this ticket runs, group @mentions routed through InboundRouter hit
+  the approval gate at step 3.5. The IT must pre-approve any test
+  groups (INSERT a groups row with approval_status='approved') in
+  test setup so the blast-radius and isolation tests reach command
+  dispatch. The acceptance criteria themselves are unchanged — they
+  test cross-adapter blast radius, identity isolation, and last-admin
+  protection, none of which are affected by D47.
