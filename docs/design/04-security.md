@@ -213,7 +213,7 @@ Every tool argument is type-checked and bound to enums, validated ranges, or len
 | Tier | Field | Scope | Granted by |                                                                                                                                                                                                                 
 |---|---|---|---|
 | Bot admin | `users.is_admin` | Global | Bootstrap from config; `/grant-admin` by another bot admin |                                                                                                                                                
-| Group admin | `group_membership.is_group_admin` | One group only | First `@mention` in a new group (auto-promote); `/promote` by bot admin |                                                                                                        
+| Group admin | `group_membership.is_group_admin` | One group only | `activated_by` priority in approved group (D47); first eligible registered, non-probation `@mention` otherwise; `/promote` by bot admin |
                                                                                                                                                                                                                                                       
 ### Bot-admin bootstrap                                                                                                                                                                                                                               
                                                                                                                                                                                                                                                       
@@ -230,18 +230,25 @@ On startup:
 
 If the configured contact has never messaged the bot, the user row is created proactively so the flag exists when they do appear.                                                                                                                     
                                                                                                                                                                                                                                                       
-### Group-admin bootstrap
-                                                                                                                                                                                                                                                      
-When the bot first sees a `@mention` from any user in a previously-unknown `adapter_group_id`:                                                                                                                                                        
+### Group-admin bootstrap (D47)
 
-on first @mention in group G by user U:                                                                                                                                                                                                               
-  groups.upsert(adapter_group_id=G, ...)                                         
-  group_membership.upsert(group=G, user=U)                                                                                                                                                                                                            
-  if no group_membership has is_group_admin=true for G:                          
-    group_membership[G,U].is_group_admin = true                                                                                                                                                                                                       
-    audit_log("AUTO_PROMOTE_GROUP_ADMIN", target=U, scope=G)                                                                                                                                                                                          
-    notify(U, "You're the admin for this group's bot interactions.")                                                                                                                                                                                  
-                                                                                                                                                                                                                                                      
+Under D47, a `groups` row is created when the first registered user
+(`registration_state IN ('invited', 'vouched')`) @mentions the bot in
+a previously-unknown group. The row starts with
+`approval_status = 'pending'` and `activated_by = U.id`. The bot
+sends a fixed "pending admin approval" reply and notifies bot admins.
+Auto-promote fires only after the group is approved:
+
+on first @mention in approved group G by registered user U:
+  group_membership.upsert(group=G, user=U)
+  if no group_membership has is_group_admin=true for G:
+    // activated_by priority: if U == groups[G].activated_by
+    // AND U is non-probation AND non-banned, U wins
+    candidate = (groups[G].activated_by == U && eligible(U)) ? U : U
+    group_membership[G, candidate].is_group_admin = true
+    audit_log("AUTO_PROMOTE_GROUP_ADMIN", target=candidate, scope=G)
+    notify(candidate, "You're the admin for this group's bot interactions.")
+
 Bot admins can override with `/promote <contact>` and `/demote <contact>` from inside the group.
 
 **Race protection.** Two simultaneous `@mention` messages in a brand-new group could both pass the "no admin yet" check before either INSERT lands, producing two group admins. This is closed by the partial unique index `one_admin_per_group ON group_membership(group_id) WHERE is_group_admin = true` (see [02-schema.md §2.1](02-schema.md)). The bootstrap path becomes `INSERT … ON CONFLICT DO NOTHING`: whichever transaction commits first wins; the loser silently no-ops. `/promote` performs a `/demote` of the existing admin in the same transaction so the partial unique index continues to hold.
@@ -262,7 +269,7 @@ The match set is **derived from the closed privileged-tier list at spec level** 
 
 The build-time generator emits the regex from the closed list. With the current closed list the regex is:
 
-    OUTBOUND_ADMIN_CMD = (^|\s)/(grant-admin|revoke-admin|promote|demote|ban|unban|vouch|invite|quarantine|audit|remove-source|source-enable|source-disable|list-sources|add-source|unfollow-source|follow-tag|unfollow-tag|lang|group-timezone)\b
+    OUTBOUND_ADMIN_CMD = (^|\s)/(grant-admin|revoke-admin|promote|demote|ban|unban|vouch|invite|quarantine|audit|remove-source|source-enable|source-disable|list-sources|add-source|unfollow-source|follow-tag|unfollow-tag|lang|group-timezone|approve-group|reject-group|list-groups)\b
 
 The CI check that asserts equivalence is described in [08-verification.md](08-verification.md). A future change to [03-commands.md §3.2](03-commands.md) that adds, removes, or renames a privileged-tier command without regenerating this regex MUST fail CI before the diff merges.
 
@@ -298,7 +305,16 @@ For every incoming message — this implements the spec evaluation order in [../
    - Treat the full normalized message body as a candidate invite code. Look up `invite_code` for `(contact_id, adapter, code, status='PENDING', expires_at > now())` (strict invite) OR `(adapter, code, status='PENDING', expires_at > now())` with no contact binding (open invite). The per-`(adapter, contact_id)` brute-force rate limit applies — see §4.5 "Invite-code registration" for the counter, threshold, and window; over the cap, reject without checking the code and emit the audit row for the breach.
    - **Valid match**: race-safe consume via the conditional UPDATE in [02-schema.md §2.1.5](02-schema.md), create `users` row with `registration_state='invited'` and `probation_until = now() + slow_start_window`, audit-log `INVITE_CONSUME`, send welcome. Stop processing this message (do NOT continue to ban check or command parser; the welcome IS the response).
    - **Invalid / expired / absent**: send fixed `Access requires an invitation.` reply, increment `invite_drop_total` counter, drop. **No `users` row is created**, no LLM, no DB write beyond the counter and rate-limiter state.
-3. **Group, unknown contact.** If no row exists AND the inbound is a group `@mention`: auto-register (insert `users` row with `registration_state='group_only'` and `probation_until = now() + slow_start_window`), insert `group_membership` row, run group-admin bootstrap if applicable. **The auto-promote slot is NOT consumed by this message** — the auto-promote check requires a non-banned, non-probation user; a user registered in this step is immediately in probation and therefore ineligible. Continue to step 4.
+3. **Group — unregistered or unknown contact (D47).** If the inbound is a group `@mention`:
+   - If no user row exists for this `(contact_id, adapter)`, or the row's `registration_state` is `'preban'`: **silent drop** — no reply, no registration, no DB write. The bot is invisible to unregistered contacts in groups. The auto-registration path is removed by D47.
+   - If a user row exists with `registration_state IN ('invited', 'vouched')`: proceed to step 3.5.
+3.5. **Group — approval check + per-group rate cap (D47).** Look up the `groups` row by `(adapter, upstream_group_id)`.
+   - **Per-group reply rate cap.** Before sending any reply (fixed or command), check the per-group reply rate bucket (§4.9). If the bucket is exhausted, **silently drop**. This bounds outbound cost for ALL group states (pending, approved, rejected). The per-user transport cap (step 1.5) fires before this step; the per-group cap is the aggregate backstop.
+   - Then check `approval_status`:
+     - **No row exists:** create with `approval_status = 'pending'`, `activated_by = current_user.id` via `INSERT ... ON CONFLICT (adapter, upstream_group_id) DO NOTHING`. Enforce per-user activation cap and global max-groups cap (§4.9). If either cap is exceeded, send fixed "group activation limit reached" reply and stop. Otherwise send fixed "pending admin approval" reply and stop. Send throttled admin notification (one per group creation) with copy-pasteable `/approve-group <uuid>`.
+     - **`approval_status = 'pending'`:** send fixed "pending admin approval" reply and stop. No re-notification.
+     - **`approval_status = 'rejected'`:** send fixed "group was rejected" reply and stop.
+     - **`approval_status = 'approved'`:** proceed to step 4.
 4. **Ban check.** If `users.is_banned` → reply with fixed string, drop message (no parser, no DB queries past the ban check, no LLM). The transport-level rate cap (step 1.5) fires before this check, so a banned user driving an inbound flood receives no reply at all once the cap trips, until it resets.
 5. *(reserved — body normalization moved to step 1.7 so the invite-code consume in step 2 sees the normalized form. Step number preserved for cross-reference stability.)*
 6. **Parse command** (or fall to chat-mode).
@@ -307,8 +323,8 @@ For every incoming message — this implements the spec evaluation order in [../
   - For group: load `group_membership.is_group_admin`.
   - For both: load `users.is_admin`.
   - **Probation gate** (D45): if `probation_until IS NOT NULL AND probation_until > now()`, the command must be in the probation-allowed set ([03-commands.md §3.3](03-commands.md) and the matrix's Probation column) or the call is rejected with the friendly "probation period" reply.
-  - **Group-registered DM gate** (D44): if the inbound is a DM AND `users.registration_state = 'group_only'`, the call is rejected with the same `Access requires an invitation.` reply as step 2's invalid path. The user remains registered (their group state is unaffected); they cannot initiate DM interaction without a `/invite create --contact` from a bot admin or a `/vouch`. See [../spec/security.md](../spec/security.md) §Invite-code registration for the rationale.
   - **Denied:** friendly error citing what permission is required.
+  *(The pre-D47 "group-registered DM gate" for `registration_state = 'group_only'` is removed — D47 eliminates the `group_only` state entirely; the DM invite gate at step 2 is the universal registration path.)*
 8. **Audit-log the intent** (audit-before-effect, Invariant 7 — admin actions are audit-logged before any side-effect).
 9. **Execute** the command.
 10. **LLM only enters the picture** for chat-mode replies, summary prose, and the eval pipeline.
@@ -318,9 +334,10 @@ The LLM never participates in steps 1–9. This is the determinism boundary that
 **`users.registration_state` enum** (the closed set in [02-schema.md §2.1.1](02-schema.md); transitions are also closed):
 
 - `'preban'` — row created by `/ban <contact>` against an unknown contact (§4.5). On `/unban`, the row is **deleted** via the `delete_preban_user` stored procedure ([02-schema.md §2.1.6](02-schema.md)) rather than flipping `is_banned=false`, so the next inbound message routes through step 2 (DM) or step 3 (group) and the contact must present a valid invite. See [../spec/security.md](../spec/security.md) §User ban for the full rule and rationale.
-- `'group_only'` — auto-registered via group `@mention` (step 3). Subject to the DM gate above.
-- `'invited'` — registered via DM invite-code consume (step 2), OR a `'group_only'` row advanced by `/invite create --contact` followed by user consume. Full DM access (subject to probation + ban + permission matrix).
-- `'vouched'` — `'group_only'` advanced by `/vouch <contact>` (D45 — `/vouch` clears probation **and** lifts the DM gate in one transaction), OR the bootstrap-seeded admin row (`@Startup` admin bootstrap, never subject to invite gate).
+- `'invited'` — registered via DM invite-code consume (step 2). Full DM access (subject to probation + ban + permission matrix).
+- `'vouched'` — the bootstrap-seeded admin row (`@Startup` admin bootstrap, never subject to invite gate). Semantically equivalent to `'invited'` for permission purposes but distinct in the audit trail (bootstrap vs. invite-consume origin). Post-D47, `/vouch` clears `probation_until` but no longer changes `registration_state`.
+
+**Migration (D47):** existing `users` rows with `registration_state = 'group_only'` are transitioned to `'invited'` before the CHECK constraint is altered; an `audit_log` entry records the bulk transition.
 
 The state is also written into the audit row at creation time so the registration path is reconstructible from the audit log alone.
 
@@ -612,6 +629,51 @@ Notes on the LLM-triggering caps:
 - Tool-call results are cached **within a single conversation turn**: if the agent calls `getPost(p-a91)` twice in the same turn, the second call returns the cached result instead of re-querying. The cache scope is one (user, scope, turn_id); the next user message starts a fresh cache.
 - `infochat.ratelimit.llm-ops-per-minute` and `infochat.ratelimit.tool-calls-per-turn` are configurable but capped at the profile defaults — operators can lower, not raise.                                                                                                                                                                        
                                                                                                                                                                                                                                                       
+### Per-group rate caps (D47)
+
+Per-group buckets bound outbound cost from groups in any approval
+state. The per-user transport cap (step 1.5) fires before these;
+the per-group caps are the aggregate backstop.
+
+| Surface | laptop | vps | pi | remote-llm | Action on overflow |
+|---|---|---|---|---|---|
+| **Per-group reply rate** (all approval states) | 10/15min | 20/15min | 5/15min | 20/15min | Silent drop — no reply, no processing |
+| **Per-group command rate** (approved only) | 20/15min | 40/15min | 10/15min | 40/15min | Fixed "group command rate limit" reply |
+| **Per-group LLM rate** (approved only) | 5/15min | 10/15min | 3/15min | 10/15min | Fixed "group LLM rate limit" reply |
+
+Notes:
+
+- The **reply rate** bucket is shared across approval states for the
+  same `groups` row. After the first few fixed replies per window in a
+  pending/rejected group, subsequent @mentions are silently dropped.
+  This bounds outbound adapter-send cost regardless of approval state.
+- The **command rate** and **LLM rate** only matter for approved groups
+  (pending/rejected groups never reach command dispatch).
+- Periodic digests do NOT count against the per-group LLM budget
+  (they are system-initiated; the aggregate system LLM budget is
+  the backstop for digest cost).
+- All per-group caps are operator-overridable via
+  `infochat.ratelimit.group-reply-per-15min`,
+  `infochat.ratelimit.group-commands-per-15min`,
+  `infochat.ratelimit.group-llm-per-15min`.
+
+### Per-user group activation cap and global max-groups (D47)
+
+| Cap | laptop | vps | pi | remote-llm |
+|---|---|---|---|---|
+| **Per-user group activation** | 3 | 5 | 3 | 10 |
+| **Global max-groups** | 10 | 50 | 5 | 100 |
+
+- The per-user cap counts ALL approval states (`pending`, `approved`,
+  `rejected`); only groups with `removed_at IS NOT NULL` are excluded.
+  This prevents activate-reject-reactivate cycling.
+- The global cap counts groups where `removed_at IS NULL AND
+  approval_status IN ('pending', 'approved')`. Rejected groups do not
+  count (they impose no ongoing cost).
+- Both caps are operator-overridable via
+  `infochat.groups.per-user-activation-cap` and
+  `infochat.groups.global-max-groups`.
+
 All rate-limit rejections are logged at INFO. Persistent overflow from one user logs at WARN with their `contact_id_redacted`.                                                                                                                        
                                                                                                                                                                                                                                                       
 ---                                                                                                                                                                                                                                                   
@@ -672,7 +734,13 @@ A SQL-injection bug in the Provider cannot:
 - **Two-factor confirmation for ban** — single-step confirm-within-30s is enough for v1.                                                                                                                                                              
 - **CAPTCHAs / human-verification on registration** — relies on adapter-level identity (SimpleX requires invite link, which is friction enough).                                                                                                      
 - **Anomaly detection on user behavior** — no heuristic banning. Admin acts manually.
-- **Identity farming / Sybil resistance** — SimpleX exposes no fingerprinting or correlation hooks: an attacker can mint fresh contact IDs at will, accept invites, and re-register from a single host with no bot-side signal that two contacts share an underlying actor. Bot-side defenses would need adapter-level information SimpleX does not surface (no IP, no device fingerprint, no recoverable account history). The v1 levers are: (a) `/ban <contact>` removes one identity at a time, (b) per-`(user, scope)` rate limits in [§4.9](#49-rate-limiting) bound the damage any single identity can do, and (c) operator-controlled invite distribution gates initial entry. A determined Sybil attacker is **not** mitigated in v1 — operators should keep invite links closely held. Deferred to v2; effective mitigation likely requires either a new SimpleX feature (per-identity proof-of-work or invite chains) or an external trust anchor (e.g., operator-curated allowlist of vouched-for invite recipients).                                                                                                                                                                 
+- **Group auto-registration.** Removed by D47. The v1-pre-D47 spec
+  auto-registered unknown users on group @mention under
+  `registration_state='group_only'`. D47 replaces this with
+  registered-only interaction: only users who passed the DM invite
+  gate can interact in groups. This is a hardening decision, not a
+  deferral — the auto-registration path is permanently closed.
+- **Identity farming / Sybil resistance** — SimpleX exposes no fingerprinting or correlation hooks: an attacker can mint fresh contact IDs at will, accept invites, and re-register from a single host with no bot-side signal that two contacts share an underlying actor. Bot-side defenses would need adapter-level information SimpleX does not surface (no IP, no device fingerprint, no recoverable account history). The v1 levers are: (a) `/ban <contact>` removes one identity at a time, (b) per-`(user, scope)` rate limits in [§4.9](#49-rate-limiting) bound the damage any single identity can do, (c) operator-controlled invite distribution gates initial entry, and (d) the group authorization gate (D47 — admin approval per group, per-user activation cap, registered-only interaction). A determined Sybil attacker is **not** mitigated in v1 — operators should keep invite links closely held. Deferred to v2; effective mitigation likely requires either a new SimpleX feature (per-identity proof-of-work or invite chains) or an external trust anchor (e.g., operator-curated allowlist of vouched-for invite recipients).                                                                                                                                                                 
                                                                                                                                                                                                                                                       
 ---                                                                                                                                                                                                                                                   
                                                                                                                                                                                                                                                       
@@ -684,6 +752,7 @@ A SQL-injection bug in the Provider cannot:
 - Last-admin protection: trigger test asserts both UPDATE and DELETE paths.                                                                                                                                                                           
 - Banned-user intake: integration test asserts no DB query past ban check, no LLM call.                                                                                                                                                               
 - Confirmation timeout: integration test asserts 31-second delayed confirm is rejected.                                                                                                                                                               
-- Permission matrix: table-driven test, every command × every actor type, asserts allow/deny.                                                                                                                                                         
+- Permission matrix: table-driven test, every command × every actor type, asserts allow/deny.
+- Group authorization gate (D47): unregistered group @mention → silent drop; pending/rejected group → fixed reply; per-group rate cap exhausted → silent drop; per-user activation cap → fixed error; global max-groups cap → fixed error; `/approve-group` → approval_status transitions; `/reject-group` → rejection + digest stop; admin notification on group creation.                                                                                                                                                         
                                                                                                                                                                                                                                                       
 ---  
