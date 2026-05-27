@@ -227,9 +227,16 @@ production.
 
 - Inbound message → adapter resolves to `(contact_id, scope)`. DM scope                                                                                                                                                                               
   is just the user; group scope is `(group_id, user_id)`.
-- The adapter is responsible for surfacing a stable per-group id                 
-  (cryptographic where possible). On first sight the Provider creates a
-  `groups` row.
+- The adapter is responsible for surfacing a stable per-group id
+  (cryptographic where possible). The Provider creates a `groups` row
+  on the first @mention from a registered user
+  (`registration_state IN ('invited', 'vouched')`) per D47. The row
+  is created with `approval_status = 'pending'` and `activated_by` =
+  the registered user's id. The bot does not create a `groups` row on
+  "first sight" — only on first registered-user interaction. Concurrent
+  first-@mentions in the same group are handled via
+  `INSERT ... ON CONFLICT (adapter, upstream_group_id) DO NOTHING`;
+  the loser re-reads the row.
 - Groups behave per `commands.md` and decision D16: bot replies only on
   `@mention`; group destructive ops require group admin; periodic
   summaries fire on per-group local time.

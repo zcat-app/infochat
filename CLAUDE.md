@@ -71,12 +71,12 @@ The shape, not the phrasing, is the trigger: any sentence in which you propose a
 ## Bootstrap admin & sources
 
 - **Bot admin**: configured **per enabled adapter** in `application.properties` (one bootstrap admin contact id per adapter; the property is keyed by adapter — concrete keys in design notes — and is **optional per adapter** as long as the union across enabled adapters is non-empty). Each value is parsed by its own adapter (SimpleX queue address, Signal ACI, etc.). On startup, an `@Startup` bean ensures, for every adapter that has a configured admin, that the contact exists with `is_admin=true` (creating the user if needed). Audit log records each bootstrap. `/grant-admin` and `/revoke-admin` are scoped to the inbound adapter; last-admin protection counts `is_admin=true` rows globally across adapters (cannot leave the deployment with zero admins; cannot ban self or last admin). See `docs/spec/security.md` §Per-adapter admin threat profile for the SimpleX-vs-Signal threat surface and operator-side mitigations.
-- **Group admin**: first user to `@mention` the bot in a new group is auto-promoted; bot admins can override with `/promote` and `/demote`.
+- **Group admin**: the `activated_by` user has auto-promote priority in an approved group; otherwise the first registered, non-probation, non-banned `@mention` wins. Bot admins can override with `/promote` and `/demote`.
 - **Sources**: seeded from `bootstrap-sources.json` (path configurable via `infochat.bootstrap.sources-file`). Loader is idempotent: upsert by `(kind, identifier)` — `kind` is the source type (`rss`, `bluesky`, `nostr`, etc.), `identifier` is the URL for HTTP-shaped sources or the filter spec for stream sources (decision D38). The union of `tags` across all bootstrap entries seeds the controlled vocabulary. `/add-source` requires `--tags` (≥1 tag) so every source has a deterministic fallback when LLM tagging fails.
 
 ## User registration & ban
 
-- DM access requires an invite code issued by a bot admin (D44). Group access registers on first non-banned `@mention`. All newly registered users start in slow-start probation (D45).
+- DM access requires an invite code issued by a bot admin (D44). Group interaction requires prior DM registration and admin-approved group status (D47). All newly registered users start in slow-start probation (D45).
 - Bot admin can `/ban <contact>` / `/unban <contact>`. Banned users are blocked at message intake; they receive one fixed response and never reach the LLM or any DB query beyond the ban check.
 
 ## Build / run quick reference

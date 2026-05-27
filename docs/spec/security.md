@@ -326,17 +326,22 @@ Invariants (also enforced in `schema.md`):
   demoted group admin is not auto-replaced; the next bot-admin
   `/promote` or first-mention path refills the slot).
 - **One group admin per group at any time.** Enforced by partial unique
-  index. The "first non-banned, non-probation `@mention` wins"
-  auto-promote path applies whenever the group has **zero**
-  `is_group_admin` rows — covering both newly-created groups and
-  groups left without an admin due to demotion or ban. Banned and
-  probation users are ineligible (probation users cannot run admin
-  commands by D45; promoting one would be a footgun). The promote
-  is `INSERT … ON CONFLICT DO NOTHING` against the partial unique
-  index; the row that loses a race produces no error and no admin
-  row — the user receives the standard non-admin response for
-  whatever command they sent. `/promote` demotes the existing group
-  admin in the same transaction.
+  index. The auto-promote path applies whenever the group has **zero**
+  `is_group_admin` rows — covering both newly-approved groups and
+  groups left without an admin due to demotion or ban. The
+  `activated_by` user has priority: if they are the @mentioning
+  user AND they are non-probation AND non-banned, they win the
+  slot. If the `activated_by` user is ineligible (in probation,
+  banned, or not the current sender), the standard "first
+  registered, non-probation, non-banned `@mention` wins" rule
+  applies. Banned and probation users are ineligible (probation
+  users cannot run admin commands by D45; promoting one would be a
+  footgun). The promote is `INSERT … ON CONFLICT DO NOTHING`
+  against the partial unique index; the row that loses a race
+  produces no error and no admin row — the user receives the
+  standard non-admin response for whatever command they sent.
+  `/promote` demotes the existing group admin in the same
+  transaction.
 - **Banned-admin lockout escape hatch.** If the existing group admin is
   banned (their `is_group_admin` row remains but is unreachable per §User
   ban), a bot admin can `/promote` a different group member; the demote
@@ -373,8 +378,8 @@ Authorization evaluation order on every inbound message:
    only — ingest applies unconditionally). Normalization runs
    after the rate cap (so over-cap inbound is dropped without
    spending normalization cost on adversarial bodies) and before
-   the invite-code check (step 2), the auto-register check (step 3),
-   and parse (step 6). The ban check (step 4) reads the
+   the invite-code check (step 2), the group authorization check
+   (step 3/3.5, D47), and parse (step 6). The ban check (step 4) reads the
    cryptographic contact id, not the body, so its position
    relative to normalization is immaterial. **The normalized body
    replaces the raw body for all downstream processing**: the
@@ -390,15 +395,54 @@ Authorization evaluation order on every inbound message:
      stop. No further processing of this message.
    - Invalid / expired / absent: fixed "access requires an invitation" reply,
      drop. No registration, no LLM, no DB write beyond the drop counter.
-3. **Group — unknown contact.** If no user row exists and this is a group
-   `@mention`, auto-register (start probation per D45). **The
-   auto-promote slot is NOT consumed by this message.** Auto-registration
-   places the user in probation, and the auto-promote check (step below)
-   requires a non-banned, non-probation user; a user registered in this
-   step is immediately in probation and therefore ineligible for
-   auto-promote on the same message. The auto-promote slot remains empty
-   until a future `@mention` from a registered, non-probation,
-   non-banned user arrives.
+3. **Group — unregistered or unknown contact (D47).** If the inbound is
+   a group `@mention`:
+   - If no user row exists for this (contact\_id, adapter), or the
+     row's `registration_state` is `'preban'`: **silent drop** — no
+     reply, no registration, no DB write. The bot is invisible to
+     unregistered contacts in groups. The auto-registration path
+     is removed by D47.
+   - If a user row exists with `registration_state IN ('invited',
+     'vouched')`: proceed to step 3.5.
+3.5. **Group — approval check + per-group rate cap (D47).** Look
+   up the `groups` row by `(adapter, upstream_group_id)`.
+
+   **Per-group reply rate cap.** Before sending any reply (fixed or
+   command), check the per-group reply rate bucket. If the bucket
+   is exhausted, **silently drop** — no reply, no further
+   processing. This bounds outbound adapter-send cost for ALL
+   group states (pending, approved, rejected). The bucket is
+   shared across approval states for the same group row. The
+   per-user transport cap (step 1.5) fires before this step; the
+   per-group cap is the aggregate backstop. Profile-driven values
+   in design notes.
+
+   Then check `approval_status`:
+   - If no row exists: create one with `approval_status = 'pending'`
+     and `activated_by` = the current user's id. The creation uses
+     `INSERT ... ON CONFLICT (adapter, upstream_group_id) DO NOTHING`;
+     a concurrent race produces at most one row (the loser re-reads
+     the existing row's `approval_status` via a follow-up SELECT and
+     proceeds to the pending branch below). Only the winning INSERT
+     sets `activated_by`. Enforce the per-user group activation cap
+     and the global max-groups cap (both profile-driven; values in
+     design notes). If either cap is exceeded, send a fixed "group
+     activation limit reached" reply and stop. Otherwise send the
+     fixed "this group is pending admin approval — your command was
+     not processed, please resend after approval" reply and stop.
+     Send a **throttled admin notification** (one per group
+     creation, not per subsequent @mention) to every bot admin with
+     the group's adapter, upstream\_group\_id, activating user's
+     contact id (redacted per §Secrets handling), and a
+     copy-pasteable `/approve-group <uuid>` command string.
+   - If the row exists and `approval_status = 'pending'`: send the
+     fixed "this group is pending admin approval" reply and stop.
+     No admin re-notification (throttled: fires only on row
+     creation).
+   - If the row exists and `approval_status = 'rejected'`: send the
+     fixed "this group was rejected by an admin" reply and stop.
+   - If the row exists and `approval_status = 'approved'`: proceed
+     to step 4.
 4. **Ban check.** If `is_banned=true`: fixed reply, stop. No parser, no DB
    query past the ban check, no LLM.
 5. (reserved — body normalization moved to step 1.7 so the
@@ -560,24 +604,13 @@ DM access, applied uniformly across all adapters:
   used on another.
 - **Bot admin and bootstrap-seeded users are exempt** from the invite
   requirement; they are created directly by config at startup.
-- **Group-registered users do not get free DM access.** A user
-  auto-registered via the group `@mention` path (authorization step 3)
-  has a `users` row with `registration_state = 'group_only'` (see §User
-  ban for the enum) and is **subject to the DM invite gate** on first
-  DM interaction. The intake check is layered: step 2 fires only for
-  contacts with no `users` row, but the permission step (step 7) adds
-  a DM-only gate that rejects any DM from a `group_only` user with the
-  same fixed `Access requires an invitation.` reply as step 2's
-  invalid path. The user remains a registered group member; only DM
-  initiation is blocked. The two paths to lift the gate are: (a) a
-  bot admin issues `/invite create --contact <id>`, the user accepts
-  it, and the row's `registration_state` advances to `'invited'`; or
-  (b) a bot admin `/vouch <contact>` clears probation **and** lifts
-  the DM gate (the vouch is the explicit "I trust this contact"
-  signal, with audit). Without this rule the DM invite gate would be
-  trivially bypassable: any contact reachable in any group the bot
-  serves could pivot to DM at will, since group membership is
-  typically less tightly controlled than DM access.
+- **Group interaction requires prior DM registration (D47).** A user
+  must have `registration_state IN ('invited', 'vouched')` to
+  interact with the bot in any group. Unknown contacts in groups
+  are invisible to the bot (silent drop at authorization step 3).
+  The DM invite gate is the universal registration path — there is
+  no group-side registration bypass. No DM-gate carve-out remains
+  (the pre-D47 step 4.7 is reserved).
 - **Pre-ban still works.** `/ban <contact>` against an unknown contact creates
   the user row with `is_banned=true` without requiring an invite. The ban check
   (step 4) fires before any command could succeed even if the contact later
@@ -949,6 +982,27 @@ share a cost profile share a bucket:
 - **Tool calls per chat turn** — fixed cap. Tool results are cached
   within a single turn so identical calls don't re-query.
 - **`/quarantine approve`** — per-admin bucket.
+- **Per-group reply rate (D47)** — a single bucket per `groups` row
+  bounding total outbound replies (fixed or command) within a
+  sliding window. Applies to ALL approval states (pending,
+  approved, rejected) so outbound cost is bounded even for
+  unapproved groups. The per-user transport cap (step 1.5)
+  fires before this; the per-group cap is the aggregate
+  backstop. Profile-driven (values in design notes).
+- **Per-group command rate (D47)** — a sub-bucket per approved group
+  bounding total command volume from all members within a
+  sliding window. Only meaningful for approved groups (pending/
+  rejected groups never reach command dispatch). When the cap
+  fires, the reply is a fixed "this group has reached its
+  command rate limit" message. Profile-driven.
+- **Per-group LLM rate (D47)** — a separate sub-bucket per approved
+  group bounding LLM-triggering operations (chat replies +
+  on-demand `/summary` + `/retry` re-rolls) across all group
+  members. The per-user LLM cap fires first; the per-group cap
+  is the backstop for groups with many active members. Profile-
+  driven. Periodic digests do NOT count against user-initiated
+  per-group LLM budget (they are system-initiated; the aggregate
+  system LLM budget is the backstop for digest cost).
 
 Exact numbers are profile-driven (decision D27) and live in
 `docs/design/04-security.md` §4.9.
@@ -1100,11 +1154,20 @@ operational complexity; v1 commits to global source rows.
 - CAPTCHAs / human verification — invite-code registration and the slow-start
   tier are the v1 gates; CAPTCHA-style puzzles are not added on top.
 - Heuristic/anomaly-based banning — admin acts manually.
+- **Group auto-registration.** Removed by D47. The v1-pre-D47
+  spec auto-registered unknown users on group @mention under
+  `registration_state='group_only'`. D47 replaces this with
+  registered-only interaction: only users who passed the DM
+  invite gate can interact in groups. This is a hardening
+  decision, not a deferral — the auto-registration path is
+  permanently closed.
 - **Sybil resistance across adapters.** A user banned on one adapter can
   present a fresh identity on another adapter; the bot has no cross-adapter
   correlation signal. The v1 levers are: invite codes (every new identity on
   every adapter needs its own admin-issued invite), the slow-start tier (bounds
-  early resource damage per identity), and manual `/ban`. Full Sybil
+  early resource damage per identity), the group authorization gate (D47 —
+  admin approval per group, per-user activation cap, registered-only
+  interaction), and manual `/ban`. Full Sybil
   resistance is deferred to v2.
 - **Nostr publishing / signing.** Forever out of scope for v1 (decision
   D38). The Collector is read-only at the Nostr protocol layer: no key

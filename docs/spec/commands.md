@@ -129,7 +129,10 @@ text, and output structure are in `docs/design/03-commands.md`.
   exist. This commitment fixes the bundle structure so adding a
   third language is a deterministic drop-in.
 - `/status` — runtime status (active profile, uptime, scope-specific
-  counts; admin sees more). DM and group; any non-banned user.
+  counts; admin sees more). DM and group; any non-banned user. Bot
+  admin view includes a count of pending groups
+  (`approval_status = 'pending'`) so the admin has passive discovery
+  of groups awaiting approval without running `/list-groups`.
 - `/get-tags` — controlled vocabulary, marking the scope's followed
   tags. DM and group; any non-banned user (read-only, scope-filtered).
 - `/get-sources` — alias of `/list-sources` accepting the same
@@ -903,24 +906,40 @@ contacts and contradict the registration-state model
 - `/invite revoke <code>` — immediately transition a PENDING code to REVOKED.
   Requires confirm.
 - `/vouch <contact>` — immediately graduate a user from the slow-start
-  probation tier to full access (decision D45) **and** lift the DM
-  invite gate for `group_only` users. The single command performs
-  both effects in one transaction: `probation_until = NULL` and, if
-  the row's prior `registration_state = 'group_only'`, advance
-  `registration_state = 'vouched'` so the next DM is no longer
-  rejected by the permission step (security.md §Invite-code
-  registration — "Group-registered users do not get free DM
-  access"). For a row already in `invited` or `vouched` state the
-  registration_state is left unchanged. **Scoped to the inbound
-  adapter** (same convention as `/grant-admin`): the targeted row
-  is `(inbound_adapter, contact_id)`. Vouching the same human on a
+  probation tier to full access (decision D45). Sets
+  `probation_until = NULL`. No-op with a friendly reply if the user
+  is already past probation. **Scoped to the inbound adapter**
+  (same convention as `/grant-admin`): the targeted row is
+  `(inbound_adapter, contact_id)`. Vouching the same human on a
   second adapter requires running `/vouch` from that adapter.
-  Audit-logged (the row carries both transitions under
-  `details_json`). No-op with a friendly reply if the user is
-  already past probation **and** the row is not `group_only`; a
-  `group_only` user past probation but still DM-gated is a valid
-  `/vouch` target (the command's purpose there is to lift the
-  gate, not to clear probation).
+  Audit-logged.
+- `/approve-group <group_id>` — approve a pending group for bot
+  interaction (D47). The `<group_id>` is the internal UUID shown in
+  the pending-group notification the admin receives (or in
+  `/list-groups` output). On approval: `approval_status` transitions
+  from `'pending'` (or `'rejected'`) to `'approved'`. The bot sends a
+  one-time "group approved" message to the group. Periodic digests
+  begin scheduling for this group. Auto-promote fires for the
+  first eligible registered, non-probation member on the next
+  @mention (with `activated_by` priority per security.md §step 3.5).
+  Audit-logged. Approving an already-approved group is a no-op
+  with a friendly reply. No confirm required (constructive action).
+  Bot-admin only; DM or group context (the admin need not be a
+  member of the target group).
+- `/reject-group <group_id>` — reject a pending (or approved)
+  group (D47). On rejection: `approval_status` transitions to
+  `'rejected'`. The bot sends a one-time "group rejected by admin"
+  message to the group. Periodic digests stop for this group (if
+  they were active). Members can still see the bot in the group
+  but @mentions from registered users receive the fixed "rejected"
+  reply. Audit-logged. **Requires confirm** (destructive — stops
+  digests, blocks interaction). Rejecting an already-rejected
+  group is a no-op with a friendly reply. Bot-admin only; DM or
+  group context.
+- `/list-groups [--page N]` — list all groups the bot is aware
+  of, with `approval_status`, `activated_by` (redacted contact id),
+  member count, and timezone. Bot-admin only. Useful for auditing
+  which groups are pending/approved/rejected.
 - `/quarantine list [-w …] [--all] [--page N]` — bot-admin only
   (closed list below; the whole command is privileged, so `--all`
   is not a tier-changing flag — it changes the row filter, not
@@ -998,7 +1017,8 @@ cannot silently shrink across versions.
   `/invite list`, `/invite revoke`, `/quarantine list`,
   `/quarantine approve`, `/quarantine reject`, `/audit`,
   `/remove-source`, `/source-enable`, `/source-disable`,
-  `/list-sources --all`, `/list-sources --include-deleted`.
+  `/list-sources --all`, `/list-sources --include-deleted`,
+  `/approve-group`, `/reject-group`, `/list-groups`.
 - **Group-admin (or bot admin acting in the group):**
   `/add-source` in groups, `/unfollow-source` in groups,
   `/lang` in groups, `/group-timezone`, `/follow-tag` in groups,
@@ -1032,13 +1052,16 @@ if it matches a PENDING code bound to that (contact\_id, adapter), the user is
 registered and the welcome message is sent; otherwise a fixed "access requires
 an invitation" reply is returned and no registration occurs.
 
-Once registered (via invite or group @mention), the user enters the slow-start
+Once registered (via DM invite), the user enters the slow-start
 probation tier (decision D45). The welcome message informs the user of the
 probation window and the reduced command set available until it elapses.
 
-The welcome message branches on three modes (DM-fresh, DM-returning,
-group-first-mention) so the user is steered toward an action that will not be
-empty (decision D23). Exact wording in design notes.
+The welcome message branches on two modes (DM-fresh, DM-returning)
+so the user is steered toward an action that will not be empty (decision D23).
+The pre-D47 'group-first-mention' branch is removed — under D47, a user's
+first group interaction is not an onboarding event (they were already
+registered via DM). No group-side welcome message is sent; the user's DM
+welcome covered the onboarding. Exact wording in design notes.
 
 **Previously-banned, now-unbanned users.** When a banned user is
 `/unban`ed, the bot does **not** proactively send a "you were
@@ -1046,32 +1069,34 @@ unbanned" message — proactive contact would surface the existence of
 the ban to a user who has not chosen to interact again, and would
 also ping a user who never knew they were banned in the first place.
 The next inbound message from the unbanned user is treated as the
-DM-returning case (or the group-first-mention case if it arrives in a
-group), reusing the existing welcome branch. The `/unban` action
+DM-returning case. Since D47 removed group auto-registration, the
+unbanned user's next group @mention is a normal group interaction
+(no welcome branch fires in group context). The `/unban` action
 itself is audit-logged as always; surfacing it to the affected user
 is deferred to v2 if it surfaces at all.
 
 ## Operator note: group-admin race
 
-Operators adding the bot to large or public groups should
-`/promote` the intended admin immediately to avoid a first-mention
-race winner who is not the intended owner. The "first non-banned,
-non-probation `@mention` wins" rule (`security.md` §Authorization
-model) is correct for the common case but an attentive operator
-gives the rule no chance to fire on the wrong user.
-
-**Fresh group of unregistered users.** In a freshly-added group
-where every member is unregistered with the bot, **no
-first-mention auto-promote will fire** — every first-mention
-triggers a registration into the slow-start probation tier (D45),
-and probation users are ineligible for the auto-promote
-(`security.md` §Authorization model). The bot admin must
-`/promote` an intended group admin in this case. The
-auto-promote path is reserved for groups that already contain at
-least one registered, non-probation user who can win the
-first-mention race.
+Under D47, only registered users (`registration_state IN
+('invited', 'vouched')`) can interact with the bot in groups.
+The `activated_by` user has auto-promote priority in an approved
+group (if eligible: registered, non-probation, non-banned);
+otherwise the first eligible @mention wins the slot. In a group
+where no member is registered with the bot, the bot is
+invisible — no auto-promote race is possible. The operator must
+ensure at least one group member is registered (via DM invite)
+before the group can be activated.
 
 ## Periodic group digests
+
+The digest scheduler selects groups where
+`approval_status = 'approved' AND removed_at IS NULL` (D47).
+A group whose `approval_status` transitions away from `'approved'`
+(via `/reject-group`) is excluded from the next scheduling pass;
+no catch-up digest is emitted when a group transitions to
+`'approved'` (same skip-not-catch-up rule as missed-slot
+behavior). Pending and rejected groups never receive periodic
+digests.
 
 Groups receive a morning and evening digest at per-group local times
 (decision D16). The digest **slot hours** are

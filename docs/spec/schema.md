@@ -25,10 +25,10 @@ connect with (see decision D34 and `security.md`).
   - `probation_until` — timestamp; null means full access, non-null
     means the user is in the slow-start tier until that instant
     (decision D45).
-  - `registration_state ∈ {preban, group_only, invited, vouched}` —
+  - `registration_state ∈ {preban, invited, vouched}` —
     the structural marker for how the row entered the system and
-    what gate it has cleared. The DM-side intake (security.md
-    §Authorization model step 7, §Invite-code registration) and
+    what gate it has cleared. The intake (security.md
+    §Authorization model steps 2–3, §Invite-code registration) and
     `/unban` (security.md §User ban) read this column. **Enum
     values:**
     - `preban` — minted by `/ban <contact>` against an unknown
@@ -37,44 +37,37 @@ connect with (see decision D34 and `security.md`).
       invariant 2 above) so the next inbound DM routes through
       the invite gate. Bootstrap-seeded admin rows are NEVER
       `preban` (deployment.md §Bootstrap behavior).
-    - `group_only` — auto-registered via the group `@mention` path
-      (auth step 3). Subject to the DM invite gate: a DM from a
-      `group_only` user is rejected with the same fixed reply as
-      step 2's invalid path until the row advances.
     - `invited` — registered via consumed invite code (auth
-      step 2 success) **or** advanced from `group_only` by a bot
-      admin minting `/invite create --contact <id>` and the user
-      consuming it. DM access permitted.
-    - `vouched` — `group_only` row advanced by bot admin
-      `/vouch <contact>`, **or** the registration_state of every
-      bootstrap-seeded admin row at startup (deployment.md
-      §Bootstrap behavior). DM access permitted; semantically
-      equivalent to `invited` for permission purposes but
-      distinct in the audit trail.
+      step 2 success). DM access permitted.
+    - `vouched` — the registration\_state of every bootstrap-seeded
+      admin row at startup (deployment.md §Bootstrap behavior).
+      DM access permitted. Semantically equivalent to `invited`
+      for permission purposes but distinct in the audit trail
+      (bootstrap vs. invite-consume origin). Post-D47, the only
+      runtime path that creates a `vouched` row is bootstrap;
+      `/vouch` clears `probation_until` but no longer changes
+      `registration_state`.
   - Informational metadata (display name, last-seen, save count).
   **Registration-state transitions** (the closed set of v1 paths):
   - `(none)` → `preban`: `/ban <contact>` against an unknown
     contact (security.md §User ban).
-  - `(none)` → `group_only`: first non-banned `@mention` in any
-    group (auth step 3).
   - `(none)` → `invited`: invite-code consume (auth step 2
     success).
   - `(none)` → `vouched`: bootstrap-seeded admin at Provider
     startup (deployment.md §Bootstrap behavior).
-  - `group_only` → `invited`: bot admin issues `/invite create
-    --contact <id>` and the user consumes it.
-  - `group_only` → `vouched`: bot admin issues `/vouch <contact>`
-    (commands.md §Admin, decision D45). The same command also
-    clears `probation_until`.
   - `preban` → `(deleted)`: `/unban` against a `preban` row
     (carve-out to invariant 2).
   No other transitions exist in v1; in particular,
   `invited` ↔ `vouched` is not a v1 path (both states permit DM
   access; collapsing them would lose the audit distinction
-  between "user accepted an invite" and "admin manually vouched"),
-  and there is no demotion path from `invited` / `vouched` back
-  to `group_only` (a regression would require a `/revoke-invite`
-  primitive that v1 does not surface).
+  between "user accepted an invite" and "admin bootstrapped").
+  **Migration (D47):** existing `users` rows with
+  `registration_state = 'group_only'` are transitioned to
+  `'invited'` before the CHECK constraint is altered. These users
+  were auto-registered under the pre-D47 model; transitioning to
+  `'invited'` preserves their access. The data migration precedes
+  the CHECK constraint alteration in the same migration script.
+  An `audit_log` entry records the bulk transition.
 - **Group.** A messaging-adapter group the bot is a member of.
   Spec-level columns: `id` (PK), `(adapter, upstream_group_id)`
   natural unique key (the `adapter` matches `users.adapter`
@@ -88,6 +81,38 @@ connect with (see decision D34 and `security.md`).
   exact columns). Group state (subscriptions, `scope_tag`,
   `chat_memory`, `chat_session`, members' saves) is preserved
   across remove/re-add cycles.
+  - `approval_status ∈ {pending, approved, rejected}` — the
+    admin approval gate per D47. Default: `'pending'`. Mutated by
+    `/approve-group` (→ `'approved'`) and `/reject-group`
+    (→ `'rejected'`). Periodic digests fire only for `'approved'`
+    groups. The intake check (auth step 3.5) reads this column on
+    every group-scope inbound. The digest scheduler selects groups
+    where `approval_status = 'approved' AND removed_at IS NULL`.
+  - `activated_by` (FK → `users.id`, nullable) — the registered
+    user whose first @mention created this `groups` row (D47
+    accountability). Post-migration, every `groups` row created at
+    runtime has a non-null `activated_by`; the nullable FK is
+    solely for the migration backfill of pre-D47 rows (set to NULL
+    because the information is not recoverable). The per-user
+    group activation cap counts rows where `activated_by` = this
+    user's id AND `approval_status IN ('pending', 'approved',
+    'rejected')` — rejected groups count toward the cap to prevent
+    activate-reject-reactivate cycling.
+
+  **Per-user group activation cap (D47).** A user can be the
+  `activated_by` of at most K groups (profile-driven). The count
+  includes ALL approval states (`'pending'`, `'approved'`,
+  `'rejected'`) so a user cannot circumvent the cap by having
+  groups rejected and then activating new ones. Groups with
+  `removed_at IS NOT NULL` are excluded from the count (the bot is
+  no longer present; the group is inert).
+
+  **Global max-groups cap (D47).** The total count of `groups` rows
+  where `removed_at IS NULL AND approval_status IN ('pending',
+  'approved')` must not exceed the global ceiling (profile-driven).
+  Rejected groups do not count toward the global cap (they impose
+  no ongoing cost — no digests, no command processing). An attempt
+  to create a group past the ceiling returns a fixed error.
 - **Group membership.** The (user, group) join, with a per-group
   admin flag. Schema must enforce *at most one* group admin per
   group at any time (decision D9).
@@ -582,7 +607,7 @@ them together. They are tested in CI (see `verification.md`).
    removing it would break ban continuity and last-admin counting.
    **No application path issues `DELETE` against a `users` row that
    has ever held a registered identity** (i.e., a row with
-   `registration_state ∈ {invited, group_only, vouched}`); the only
+   `registration_state ∈ {invited, vouched}`); the only
    DELETE source for such rows is an operator running raw SQL under
    the Admin role.
    **Carve-out: `registration_state = 'preban'` rows are

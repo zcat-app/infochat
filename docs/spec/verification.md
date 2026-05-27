@@ -131,8 +131,9 @@ or `deployment.md`. Each one corresponds to at least one named test.
   number.)
 - Slash-prefix exclusivity: a message starting with anything other than                                                                                                                                                                               
   `/` always reaches the chat agent, never the command router.
-- Onboarding modes: DM-fresh, DM-returning, group-first-mention each
-  produce the expected branch. **Invite-code lifecycle:** create
+- Onboarding modes: DM-fresh and DM-returning each produce the
+  expected branch. The pre-D47 group-first-mention mode is removed
+  (D47 removes group auto-registration). **Invite-code lifecycle:** create
   CONTACT_BOUND → wrong-contact reject → matching-contact accept;
   create OPEN_ADAPTER → cross-adapter reject → first-unknown-contact
   accept; expired code reject; revoked code reject; replayed USED
