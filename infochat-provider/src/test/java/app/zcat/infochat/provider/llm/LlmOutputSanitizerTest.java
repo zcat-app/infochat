@@ -153,6 +153,21 @@ class LlmOutputSanitizerTest {
     }
 
     @Test
+    void approveGroupTokenIsStripped() {
+        assertStripped("/approve-group");
+    }
+
+    @Test
+    void rejectGroupTokenIsStripped() {
+        assertStripped("/reject-group");
+    }
+
+    @Test
+    void listGroupsTokenIsStripped() {
+        assertStripped("/list-groups");
+    }
+
+    @Test
     void addSourceTokenIsStripped() {
         assertStripped("/add-source");
     }

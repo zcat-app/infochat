@@ -1,7 +1,7 @@
 ---
 id: M1-115
 title: "Sync LlmOutputSanitizer.CLOSED_LIST with commands.md bot-admin set"
-status: pending
+status: done
 created: 2026-05-28
 last_updated: 2026-05-28
 blocked_by: []
@@ -39,12 +39,44 @@ spec_refs:
   - docs/spec/security.md §LLM output sanitizer
 decision_refs:
   - D47
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-05-28
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 79
+      removed: 10
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-05-28
+    verdict: CLEAN
+    base: f14503a^
+    head: f14503a
+    verdict_file: docs/plan/m1/redteam/M1-115-2026-05-28.md
+    out_of_model_count: 1
+    note: |
+      Additive CLOSED_LIST sync. Adversary confirmed the runtime set now
+      mirrors the spec's 28-token closed privileged-tier list in both
+      directions and the matchSetEqualsSpecClosedList CI check genuinely
+      enforces it. Closes a prior gap (3 group-admin commands were
+      leakable through LLM output); introduces none. One OUT-OF-MODEL
+      advisory on obfuscated/split-token matching — consistent with spec
+      intent, no remediation ticket filed.
+clarity_check:
+  date: 2026-05-28
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-115: Sync LlmOutputSanitizer.CLOSED_LIST with commands.md bot-admin set

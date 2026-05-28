@@ -105,6 +105,9 @@ public class LlmOutputSanitizer {
             "/source-disable",
             "/list-sources --all",
             "/list-sources --include-deleted",
+            "/approve-group",
+            "/reject-group",
+            "/list-groups",
             // Group-admin (or bot admin acting in the group):
             "/add-source",
             "/unfollow-source",
