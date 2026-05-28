@@ -1,7 +1,7 @@
 ---
 id: M1-110
 title: "D47 migration — groups.approval_status + activated_by (additive)"
-status: pending
+status: done
 created: 2026-05-27
 last_updated: 2026-05-28
 blocked_by: []
@@ -37,12 +37,46 @@ spec_refs:
   - docs/spec/security.md §Authorization model
 decision_refs:
   - D47
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-05-28
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 167
+      removed: 9
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-05-28
+    verdict: CLEAN
+    base: 5eca90c^
+    head: 5eca90c
+    verdict_file: docs/plan/m1/redteam/M1-110-2026-05-28.md
+    out_of_model_count: 2
+    note: |
+      Additive D47 migration. No enforcement logic in the diff (the
+      authorization gate reading approval_status is deferred to M1-112),
+      so no auth/ban/audit/input surface to fail a promise against —
+      CLEAN. Two OUT-OF-MODEL advisories carry forward to the M1-112
+      audit: (1) confirm the greenfield assumption holds (no seeded /
+      staging groups rows) before the grandfather-to-approved UPDATE
+      matters; (2) the gate's own correctness must be audited against the
+      M1-112 diff, not inferred from this migration. No remediation
+      ticket filed.
+clarity_check:
+  date: 2026-05-28
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-110: D47 migration — groups.approval_status + activated_by (additive)
