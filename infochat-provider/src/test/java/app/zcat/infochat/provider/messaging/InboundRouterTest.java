@@ -54,12 +54,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * the deterministic UNKNOWN / CHAT_MODE / INTERNAL_ERROR replies the
  * five M1-035b methods assert only fire when the dispatch reaches
  * {@code handleSlash}. Pre-seeding the contact as a known
- * {@code 'vouched'} user makes step 2 skip and step 7 not gate.</p>
+ * {@code 'vouched'} user makes step 2 (DM unknown) skip.</p>
  *
  * <p>M1-035d's three first-DM auto-register tests were REMOVED by
  * M1-044b: their premise (a DM from an unknown contact auto-creates
- * a users row via {@code AutoRegisterService.resolveOrRegister}) is
- * spec-invalidated by the splice. Replacement coverage lives in
+ * a users row) is spec-invalidated by the splice. Replacement
+ * coverage lives in
  * {@link InboundRouterIntakeOrderingTest} scenarios (d) DM unknown +
  * valid invite → welcome and (e) DM unknown + invalid invite →
  * invite-required.</p>
@@ -88,8 +88,6 @@ class InboundRouterTest {
         // M1-044b splice's step 2 (DM unknown → invite gate) does not
         // short-circuit the deterministic UNKNOWN / CHAT_MODE /
         // INTERNAL_ERROR reply assertions in the M1-035b methods.
-        // registration_state='vouched' also keeps step 7 DM-gate
-        // (group_only-only) from firing.
         // Clean chat_session rows first (FK from chat_session → users
         // blocks DELETE FROM users when chat-mode dispatch has persisted
         // session rows for these contacts).

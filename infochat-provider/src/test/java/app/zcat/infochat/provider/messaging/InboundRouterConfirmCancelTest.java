@@ -142,9 +142,8 @@ class InboundRouterConfirmCancelTest {
      * Construct an {@link InboundRouter} with all M1-044b + M1-051
      * collaborators replaced by no-op / recording fakes.
      * {@link InboundRouter#lookupUser} is overridden to return a
-     * fixed "vouched" snapshot so step 2 (DM unknown) is skipped and
-     * step 7 DM-gate (group_only-only) does not fire — the sweep at
-     * step 4.5 IS the focus of these scenarios.
+     * fixed "vouched" snapshot so step 2 (DM unknown) is skipped —
+     * the sweep at step 4.5 IS the focus of these scenarios.
      */
     private InboundRouter newRouter(FakeConfirmStateService confirmState, CapturingAdapter target) {
         InboundRouter router = new InboundRouter() {
@@ -154,7 +153,6 @@ class InboundRouterConfirmCancelTest {
             }
         };
         router.commandHandlers = new SingletonInstance<>();
-        router.autoRegisterService = new NoopAutoRegisterService();
         router.inboundContext = new InboundContext();
         router.rateCapBucket = new NoopRateCapBucket();
         router.inviteCodeConsumer = new NoopInviteCodeConsumer();
@@ -250,14 +248,6 @@ class InboundRouterConfirmCancelTest {
         @Override
         public boolean isBanned(String adapter, String contactId) {
             return false;
-        }
-    }
-
-    /** No-op auto-register — never invoked (DM scope). */
-    private static final class NoopAutoRegisterService extends AutoRegisterService {
-        @Override
-        public java.util.UUID resolveOrRegisterGroup(Identity identity, String adapter) {
-            throw new UnsupportedOperationException("not exercised in DM-scope tests");
         }
     }
 

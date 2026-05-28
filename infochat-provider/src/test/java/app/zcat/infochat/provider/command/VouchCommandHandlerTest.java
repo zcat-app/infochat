@@ -29,8 +29,13 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
  * Integration tests for {@link VouchCommandHandler} against the
- * DevServices Postgres container. One {@code @Test} per acceptance
- * scenario (a)..(h) in M1-045.
+ * DevServices Postgres container. Covers the D47 /vouch contract
+ * (M1-111): the command clears {@code probation_until} but no longer
+ * advances {@code registration_state}. Scenarios: non-admin →
+ * admin_only; unknown contact → contact_not_registered; registered
+ * user in probation → probation cleared + success; past-probation
+ * user → no-op; banned target → banned_target; happy path runs in
+ * one transaction.
  *
  * <p>Test isolation: each {@code @Test} uses a unique sub-prefix
  * within the class-wide {@code PREFIX} ({@code m1-045-vouch-});
@@ -90,14 +95,14 @@ class VouchCommandHandlerTest {
         String actor = PREFIX + "nonAdmin-actor";
         String target = PREFIX + "nonAdmin-target";
         seedUser(actor, /* isAdmin */ false, "invited", Instant.now().plus(1, ChronoUnit.HOURS));
-        UUID targetId = seedUser(target, /* isAdmin */ false, "group_only",
+        UUID targetId = seedUser(target, /* isAdmin */ false, "invited",
                 Instant.now().plus(2, ChronoUnit.HOURS));
 
         OutboundMessage reply = handler.handle(new ScopeRef.Dm(actor), "/vouch " + target);
 
         assertEquals(bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY), reply.text());
         // No DB write: target untouched.
-        assertEquals("group_only", readRegistrationState(targetId));
+        assertEquals("invited", readRegistrationState(targetId));
         assertNotNull(readProbationUntil(targetId),
                 "non-admin /vouch must not null probation_until");
         assertEquals(0L, countVouchAuditRows(targetId),
@@ -119,63 +124,12 @@ class VouchCommandHandlerTest {
         assertNull(userId(absent), "/vouch must not synthesize a users row for unknown contact");
     }
 
-    // ----- (c) group_only in probation → both transitions + audit row -------
+    // ----- (c) registered user in probation → probation clears, state kept --
 
     @Test
-    void vouchGroupOnlyInProbationAdvancesStateAndClearsProbation() throws Exception {
-        String actor = PREFIX + "groupOnlyInProb-actor";
-        String target = PREFIX + "groupOnlyInProb-target";
-        seedUser(actor, /* isAdmin */ true, "vouched", null);
-        UUID targetId = seedUser(target, /* isAdmin */ false, "group_only",
-                Instant.now().plus(1, ChronoUnit.HOURS));
-
-        OutboundMessage reply = handler.handle(new ScopeRef.Dm(actor), "/vouch " + target);
-
-        assertEquals(bundleLoader.get(BundleKeys.REPLY_VOUCH_SUCCESS), reply.text());
-        // Both transitions applied.
-        assertEquals("vouched", readRegistrationState(targetId),
-                "group_only → vouched per CASE expression");
-        assertNull(readProbationUntil(targetId),
-                "probation_until must be NULL after happy-path /vouch");
-        // Exactly one VOUCH audit row carrying both transitions in details_json.
-        assertEquals(1L, countVouchAuditRows(targetId));
-        VouchDetails details = readVouchDetails(targetId);
-        assertNotNull(details, "VOUCH audit row must exist");
-        assertEquals("true", details.probationCleared(),
-                "details_json must carry probation_cleared=true");
-        assertEquals("group_only", details.fromState(),
-                "details_json must carry registration_state_from=group_only");
-        assertEquals("vouched", details.toState(),
-                "details_json must carry registration_state_to=vouched");
-    }
-
-    // ----- (d) group_only past probation → state advances, no probation chg
-
-    @Test
-    void vouchGroupOnlyPastProbationStillAdvancesState() throws Exception {
-        String actor = PREFIX + "groupOnlyPast-actor";
-        String target = PREFIX + "groupOnlyPast-target";
-        seedUser(actor, /* isAdmin */ true, "vouched", null);
-        // probation_until is NULL — already past probation, but still group_only.
-        UUID targetId = seedUser(target, /* isAdmin */ false, "group_only", null);
-
-        OutboundMessage reply = handler.handle(new ScopeRef.Dm(actor), "/vouch " + target);
-
-        assertEquals(bundleLoader.get(BundleKeys.REPLY_VOUCH_SUCCESS), reply.text(),
-                "group_only with NULL probation_until is still a valid /vouch target — state advances");
-        assertEquals("vouched", readRegistrationState(targetId));
-        assertNull(readProbationUntil(targetId),
-                "probation_until remains NULL after /vouch (UPDATE writes NULL to a NULL column)");
-        assertEquals(1L, countVouchAuditRows(targetId),
-                "valid /vouch must write one VOUCH audit row even when probation_until was already NULL");
-    }
-
-    // ----- (e) invited in probation → only probation clears -----------------
-
-    @Test
-    void vouchInvitedInProbationClearsOnlyProbation() throws Exception {
-        String actor = PREFIX + "invitedInProb-actor";
-        String target = PREFIX + "invitedInProb-target";
+    void vouchInProbationClearsProbationAndKeepsState() throws Exception {
+        String actor = PREFIX + "inProb-actor";
+        String target = PREFIX + "inProb-target";
         seedUser(actor, /* isAdmin */ true, "vouched", null);
         UUID targetId = seedUser(target, /* isAdmin */ false, "invited",
                 Instant.now().plus(1, ChronoUnit.HOURS));
@@ -183,17 +137,16 @@ class VouchCommandHandlerTest {
         OutboundMessage reply = handler.handle(new ScopeRef.Dm(actor), "/vouch " + target);
 
         assertEquals(bundleLoader.get(BundleKeys.REPLY_VOUCH_SUCCESS), reply.text());
+        // Per D47 /vouch clears probation only; registration_state is unchanged.
         assertEquals("invited", readRegistrationState(targetId),
-                "invited stays invited per the CASE expression — only group_only advances to vouched");
+                "registration_state must be unchanged — D47 removed the /vouch state advance");
         assertNull(readProbationUntil(targetId),
                 "probation_until must be NULL after happy-path /vouch");
         assertEquals(1L, countVouchAuditRows(targetId));
         VouchDetails details = readVouchDetails(targetId);
         assertNotNull(details, "VOUCH audit row must exist");
-        assertEquals("invited", details.fromState(),
-                "details_json must record registration_state_from=invited");
-        assertEquals("invited", details.toState(),
-                "details_json must record registration_state_to=invited");
+        assertEquals("true", details.probationCleared(),
+                "details_json must carry probation_cleared=true");
     }
 
     // ----- (f) invited past probation → no-op, no audit row -----------------
@@ -270,14 +223,14 @@ class VouchCommandHandlerTest {
         String target = PREFIX + "bannedTarget-target";
         Instant originalProbation = Instant.now().plus(1, ChronoUnit.HOURS);
         seedUser(actor, /* isAdmin */ true, "vouched", null);
-        UUID targetId = seedBannedUser(target, "group_only", originalProbation);
+        UUID targetId = seedBannedUser(target, "invited", originalProbation);
 
         OutboundMessage reply = handler.handle(new ScopeRef.Dm(actor), "/vouch " + target);
 
         assertEquals(bundleLoader.get(BundleKeys.ERROR_VOUCH_BANNED_TARGET), reply.text());
         // No DB write: target row preserved.
-        assertEquals("group_only", readRegistrationState(targetId),
-                "banned-target /vouch must NOT advance registration_state");
+        assertEquals("invited", readRegistrationState(targetId),
+                "banned-target /vouch must NOT change registration_state or clear probation");
         assertNotNull(readProbationUntil(targetId),
                 "banned-target /vouch must NOT null probation_until");
         assertEquals(0L, countVouchAuditRows(targetId),
@@ -291,7 +244,7 @@ class VouchCommandHandlerTest {
         String actor = PREFIX + "tx-actor";
         String target = PREFIX + "tx-target";
         seedUser(actor, /* isAdmin */ true, "vouched", null);
-        seedUser(target, /* isAdmin */ false, "group_only",
+        seedUser(target, /* isAdmin */ false, "invited",
                 Instant.now().plus(1, ChronoUnit.HOURS));
 
         // Wrap the handler's DataSource to record BEGIN/COMMIT/ROLLBACK
@@ -442,19 +395,17 @@ class VouchCommandHandlerTest {
      * assertion would flake on the same row that {@code ->>'k' = 'v'}
      * pins deterministically.
      */
-    private record VouchDetails(String probationCleared, String fromState, String toState) {}
+    private record VouchDetails(String probationCleared) {}
 
     private VouchDetails readVouchDetails(UUID targetId) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                     "SELECT details_json->>'probation_cleared' AS pc, "
-                             + "details_json->>'registration_state_from' AS fs, "
-                             + "details_json->>'registration_state_to' AS ts "
+                     "SELECT details_json->>'probation_cleared' AS pc "
                              + "FROM audit_log WHERE action = 'VOUCH' AND target_id = ?")) {
             ps.setString(1, targetId.toString());
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) return null;
-                return new VouchDetails(rs.getString("pc"), rs.getString("fs"), rs.getString("ts"));
+                return new VouchDetails(rs.getString("pc"));
             }
         }
     }

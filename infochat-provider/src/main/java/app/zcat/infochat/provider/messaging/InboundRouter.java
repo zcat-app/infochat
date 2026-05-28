@@ -69,26 +69,15 @@ import java.util.concurrent.atomic.AtomicLong;
  *       send the fixed {@code error.invite.required} reply per spec
  *       (the rate-limit state does not change the per-failure reply)
  *       and stop;</li>
- *   <li>3 Group unknown contact → {@link AutoRegisterService#resolveOrRegisterGroup}
- *       inserts a {@code registration_state='group_only'} row, then
- *       {@link #lookupUser} is RE-FETCHED so {@code snapshot} carries
- *       the just-inserted row's {@code (id, registration_state,
- *       probation_until)} for the downstream steps (M1-045 redteam-fix:
- *       closes AUTH-BYPASS on the first-message probation gate);</li>
+ *   <li>3 Group message from an unregistered or pre-banned contact
+ *       (no {@code users} row, or {@code registration_state} is
+ *       {@code preban}) → silent drop: no reply, no DB write, no
+ *       registration (D47 gate #1, spec §Authorization model). A
+ *       registered ({@code invited}/{@code vouched}) group sender
+ *       falls through carrying the snapshot resolved at step 1;</li>
  *   <li>4 ban check via {@link BanCheck#isBanned}; a banned user
  *       receives the fixed {@code error.ban.fixed} reply and stops
  *       (spec §User ban: "one fixed reply per inbound message");</li>
- *   <li>4.7 DM-gate carve-out: when the inbound is a DM scope AND
- *       the resolved user's {@code registration_state = 'group_only'},
- *       the router emits the fixed {@code error.invite.required}
- *       reply and stops BEFORE the probation gate (spec §Invite-code
- *       registration: "rejected with the same fixed reply as step
- *       2's invalid path"; §Authorization model: "blocked commands
- *       never reach execution"). M1-045 redteam-fix INFO-LEAK:
- *       moved from post-step-5 to pre-step-5 so a {@code group_only}
- *       user DMing during probation receives the spec-mandated fixed
- *       reply instead of {@code error.probation.blocked}'s allowed-set
- *       enumeration (the reply-text divergence was a probe surface);</li>
  *   <li>5 slow-start probation gate (M1-045): if {@link ProbationCheck}
  *       reports {@code inProbation == true} AND the command is NOT in
  *       {@link CommandPermissions}'s allowed-during-probation set, the
@@ -108,19 +97,13 @@ import java.util.concurrent.atomic.AtomicLong;
  *       fallback).</li>
  * </ol>
  *
- * <p><b>Users-row SELECT count per dispatch.</b> The dispatch path
- * is one users-row SELECT per inbound on every code path EXCEPT the
- * group-auto-register first-message path: there, step 3 inserts the
- * row and a second SELECT re-fetches the just-written snapshot so
- * steps 4.7 (DM-gate) and 5 (probation gate) see the actor's actual
- * {@code registration_state} and {@code probation_until}. Steps 2
- * (DM-emptiness), 3 (group-emptiness), 4.7 (DM-gate), and 5
- * (probation gate) all consume the SAME {@link UserSnapshot} (the
- * post-step-3 snapshot on the auto-register path; the initial step-1
- * snapshot otherwise). The step 4 ban predicate consults
- * {@link BanCheck#isBanned} directly per spec (a separate query that
- * sees the freshest {@code is_banned} state for a banned-mid-dispatch
- * race).</p>
+ * <p><b>Users-row SELECT count per dispatch.</b> The dispatch path is
+ * exactly one users-row SELECT per inbound. Steps 2 (DM emptiness),
+ * 3 (group unregistered/preban drop), and 5 (probation gate) all
+ * consume the SAME {@link UserSnapshot} resolved at step 1. The step 4
+ * ban predicate consults {@link BanCheck#isBanned} directly per spec
+ * (a separate query that sees the freshest {@code is_banned} state for
+ * a banned-mid-dispatch race).</p>
  *
  * <p><b>Body-size cap (defense in depth, preserved from M1-038).</b>
  * After the rate-cap check, {@link #onMessage} drops any inbound
@@ -196,18 +179,10 @@ public class InboundRouter {
      */
     static final AtomicLong NORMALIZE_INVOCATIONS = new AtomicLong();
 
-    /**
-     * The {@code registration_state} string that causes the step 7
-     * DM-gate carve-out to fire — a user auto-registered via group
-     * {@code @mention} (M1-044a {@code AutoRegisterService}) is barred
-     * from initiating a DM until a bot admin issues
-     * {@code /invite create --contact} or {@code /vouch}. Other
-     * states ({@code 'invited'}, {@code 'vouched'}, {@code 'preban'})
-     * pass through.
-     */
-    private static final String REGISTRATION_STATE_GROUP_ONLY = "group_only";
+    /** The pre-banned registration state: a group message from such a contact is silently dropped at step 3. */
+    private static final String REGISTRATION_STATE_PREBAN = "preban";
 
-    /** Single users-row lookup feeding steps 2, 3, and 7 from one SELECT. */
+    /** Single users-row lookup feeding steps 2, 3, and 5 from one SELECT. */
     private static final String USER_SNAPSHOT_SQL =
             "SELECT id, is_banned, registration_state FROM users "
                     + "WHERE adapter = ? AND contact_id = ?";
@@ -222,9 +197,6 @@ public class InboundRouter {
 
     @Inject
     Instance<CommandHandler> commandHandlers;
-
-    @Inject
-    AutoRegisterService autoRegisterService;
 
     @Inject
     InboundContext inboundContext;
@@ -346,8 +318,8 @@ public class InboundRouter {
             return;
         }
 
-        // Single users-row SELECT feeds steps 2 (emptiness), 3
-        // (emptiness), and 7 (DM-gate registration_state predicate).
+        // Single users-row SELECT feeds steps 2 (DM emptiness), 3
+        // (group unregistered/preban drop), and 5 (probation gate).
         // Step 4 consults BanCheck.isBanned directly per spec — see
         // class-level Javadoc.
         Optional<UserSnapshot> snapshot = lookupUser(adapterName, contactId);
@@ -375,21 +347,19 @@ public class InboundRouter {
             return;
         }
 
-        // Step 3 — Group unknown contact + auto-register. Per spec
-        // §Authorization model step 3: insert a row under
-        // registration_state='group_only' with probation_until = NOW()
-        // + slow_start_window, then continue to step 4.
-        //
-        // M1-045 redteam-fix (AUTH-BYPASS): re-fetch snapshot after
-        // the insert so step 5's probation gate sees the just-written
-        // row's probation_until. Without the re-fetch, the snapshot
-        // captured at the top of dispatch would remain empty and the
-        // step-5 gate would skip enforcement on the user's very first
-        // message — silently widening to any future group-scope
-        // handler that adds side effects.
-        if (msg.scope() instanceof ScopeRef.Group && snapshot.isEmpty()) {
-            autoRegisterService.resolveOrRegisterGroup(msg.sender(), adapterName);
-            snapshot = lookupUser(adapterName, contactId);
+        // Step 3 — Group message from an unregistered or pre-banned
+        // contact → silent drop (D47 gate #1). Per spec §Authorization
+        // model: a group @mention from a contact with no users row, or
+        // whose registration_state is 'preban', produces NO reply, NO
+        // DB write, NO registration. D47 removed the group
+        // auto-registration path entirely; group interaction now
+        // requires prior DM registration. The drop returns BEFORE any
+        // snapshot.get() downstream, so a registered (invited/vouched)
+        // group sender — guaranteed present here — falls through safely.
+        if (msg.scope() instanceof ScopeRef.Group
+                && (snapshot.isEmpty()
+                        || REGISTRATION_STATE_PREBAN.equals(snapshot.get().registrationState()))) {
+            return;
         }
 
         // Step 4 — ban check per spec §User ban + §Authorization model
@@ -417,24 +387,6 @@ public class InboundRouter {
             ensureGroupMembership(groupId, senderId);
         }
 
-        // Step 4.7 — DM-gate carve-out (M1-045 redteam-fix INFO-LEAK).
-        // Per spec §Invite-code registration: "rejected with the same
-        // fixed reply as step 2's invalid path." Moved BEFORE step 5
-        // so a group_only user DMing in probation receives the spec-
-        // mandated fixed `error.invite.required` reply rather than
-        // the longer `error.probation.blocked` text (which would
-        // enumerate the allowed-set and create a reply-content
-        // distinction between unknown vs registered-but-DM-blocked
-        // contacts — a probe surface). Group scope and non-group_only
-        // DM scope pass through. Snapshot is always present by this
-        // point (DM-empty short-circuited at step 2; Group-empty was
-        // auto-registered and re-fetched at step 3).
-        if (msg.scope() instanceof ScopeRef.Dm
-                && REGISTRATION_STATE_GROUP_ONLY.equals(snapshot.get().registrationState())) {
-            sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_INVITE_REQUIRED));
-            return;
-        }
-
         // Step 5 — slow-start probation gate (M1-045) per spec
         // §Slow-start tier + §Authorization model step 5. A probation
         // user invoking a non-allowed command receives the
@@ -444,10 +396,10 @@ public class InboundRouter {
         // rest of the pipeline; a non-probation user gets the
         // opportunistic clearIfPromoted (the lazy clear) on the way.
         //
-        // Invariant: snapshot is always present by step 4 — DM-empty
-        // short-circuited at step 2's invite-consume; Group-empty
-        // was auto-registered and re-fetched at step 3. The defensive
-        // isPresent guard removed by M1-045 redteam-fix.
+        // Invariant: snapshot is always present here — DM-empty
+        // short-circuited at step 2's invite-consume; group senders
+        // with no row (or 'preban') were silently dropped at step 3.
+        // The defensive isPresent guard removed by M1-045 redteam-fix.
         UUID probationActorId = snapshot.get().id();
         String commandName = commandNameOf(normalized);
         if (probationCheck.inProbation(probationActorId)) {
@@ -472,7 +424,7 @@ public class InboundRouter {
         // current inbound's confirm-shape is drained AND the user
         // receives a cancellation acknowledgement BEFORE the
         // intended-next-command dispatches. Snapshot is guaranteed
-        // present here by the step-4 invariant (M1-045 redteam-fix).
+        // present here by the step-3 invariant.
         UUID confirmActorId = snapshot.get().id();
         Optional<ConfirmStateService.PendingConfirm> pending =
                 confirmStateService.peek(confirmActorId, msg.scope());
@@ -501,11 +453,8 @@ public class InboundRouter {
             summaryAnchorRepository.clear(anchorActorId, anchorScopeId);
         }
 
-        // Step 6 — Parse + dispatch. The DM-gate (group_only + DM →
-        // error.invite.required) moved to step 4.7 above so blocked
-        // DMs short-circuit BEFORE the probation gate would otherwise
-        // emit the probation-blocked reply for a group_only user.
-        // See the step 4.7 comment block for the spec rationale.
+        // Step 6 — Parse + dispatch (slash-command resolver or
+        // chat-mode fallback).
         String body;
         try {
             if (normalized.startsWith("/")) {
@@ -543,10 +492,9 @@ public class InboundRouter {
     /**
      * Resolve a {@link UserSnapshot} for {@code (adapter, contactId)} —
      * the V5 UNIQUE (adapter, contact_id) constraint guarantees
-     * zero-or-one result. Used by steps 2 (DM emptiness), 3 (Group
-     * emptiness + post-insert re-fetch), 4.7 (DM-gate
-     * {@code registration_state} predicate), and 5 (probation gate's
-     * actor.id read).
+     * zero-or-one result. Used by steps 2 (DM emptiness), 3 (group
+     * unregistered/preban drop, reading {@code registration_state}),
+     * and 5 (probation gate's actor.id read).
      *
      * <p>Package-private + non-final so plain-JUnit test helpers
      * (InboundRouterNormalizeTest, InboundRouterContactIdRedactionTest,
@@ -583,9 +531,9 @@ public class InboundRouter {
      * the columns the splice needs: {@code id} (for downstream audit
      * hooks if any), {@code is_banned} (TOCTOU-paired with
      * {@link BanCheck#isBanned} at step 4), and
-     * {@code registration_state} (step 7 DM-gate predicate).
-     * Package-private so test subclasses can construct instances when
-     * overriding {@link #lookupUser}.
+     * {@code registration_state} (step 3 group unregistered/preban
+     * drop predicate). Package-private so test subclasses can
+     * construct instances when overriding {@link #lookupUser}.
      */
     record UserSnapshot(UUID id, boolean isBanned, String registrationState) {}
 
@@ -714,9 +662,9 @@ public class InboundRouter {
     }
 
     // DM scope → actorId; group scope → group UUID from the groups table.
-    // By step 6, the group row is guaranteed to exist: step 3's
-    // AutoRegisterService.resolveOrRegisterGroup created it on the first
-    // group-scope message from any contact in this group.
+    // For a group sender, step 4.1 already called lookupGroupId (which
+    // throws if the group row is absent), so the row is guaranteed to
+    // exist by the time chat-mode scope resolution reaches here.
     private UUID resolveChatScopeId(@NonNull ScopeRef scope,
                                     @NonNull UUID actorId,
                                     @NonNull String adapterName) {

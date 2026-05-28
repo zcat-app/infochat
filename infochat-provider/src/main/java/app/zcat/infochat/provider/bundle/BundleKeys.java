@@ -142,13 +142,11 @@ public final class BundleKeys {
     // Per docs/spec/security.md §Authorization model + §User ban +
     // §Invite-code registration, and docs/design/03-commands.md §3.11
     // Welcome messages. These keys are looked up by InboundRouter at the
-    // step 2 / step 4 / step 7-DM-gate branches of the intake splice.
+    // step 2 / step 4 branches of the intake splice.
 
     /**
      * Fixed reply for a DM that fails the step 2 invite-code consume
-     * (Rejected or BruteForceThresholdBreached outcome), and for the
-     * step 7 DM-gate override that rewrites a {@code group_only} user's
-     * slash-command reply to the same literal. Per spec
+     * (Rejected or BruteForceThresholdBreached outcome). Per spec
      * §Invite-code registration: "rejected with the same fixed reply
      * as step 2's invalid path."
      */
@@ -329,19 +327,18 @@ public final class BundleKeys {
 
     /**
      * {@code /vouch} success reply. Sent on the happy path where
-     * the handler performed the two transitions
-     * ({@code probation_until = NULL} and, when prior state was
-     * {@code group_only}, {@code registration_state = 'vouched'})
-     * in one transaction with one VOUCH audit row.
+     * the handler cleared probation ({@code probation_until = NULL})
+     * in one transaction with one VOUCH audit row. Per D47 the
+     * command no longer advances {@code registration_state}.
      */
     public static final String REPLY_VOUCH_SUCCESS = "reply.vouch.success";
 
     /**
      * {@code /vouch} no-op reply. Sent when the target row is
-     * already past probation AND not {@code group_only} — the
-     * UPDATE would change nothing. The handler short-circuits
-     * BEFORE running the SQL and writes no audit row, matching
-     * the M1-036 / {@code /unban} pattern for in-effect no-ops.
+     * already past probation — the UPDATE would change nothing. The
+     * handler short-circuits BEFORE running the SQL and writes no
+     * audit row, matching the M1-036 / {@code /unban} pattern for
+     * in-effect no-ops.
      */
     public static final String REPLY_VOUCH_NOOP = "reply.vouch.noop";
 

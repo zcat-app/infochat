@@ -1,14 +1,14 @@
 ---
 id: M1-111
-title: "Remove group_only registration path + simplify /vouch + V28 migration"
-status: pending
+title: "Remove group_only registration path + simplify /vouch + V27 migration"
+status: done
 created: 2026-05-27
 last_updated: 2026-05-28
 blocked_by:
   - M1-110
 files_budget: 17
 files_scope:
-  - infochat-core/src/main/resources/db/migration/V28__d47_remove_group_only.sql
+  - infochat-core/src/main/resources/db/migration/V27__d47_remove_group_only.sql
   - infochat-core/src/main/resources/db/migration/V5__identity_audit.sql
   - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/InboundRouter.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/AutoRegisterService.java
@@ -74,7 +74,21 @@ decision_refs:
   - D44
   - D45
   - D47
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-05-28
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 14
+      added: 298
+      removed: 870
+outline_file: target/m1-tick-outline-M1-111.md
 escalations:
   - date: 2026-05-28
     reason: outline-fail
@@ -105,11 +119,73 @@ revisions:
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
-clarity_check: {}
+redteam_findings:
+  - date: 2026-05-29
+    category: AUTH-BYPASS
+    severity: high
+    promise: |
+      §Invite-code registration / §"What's intentionally NOT in v1": "Group
+      interaction requires prior DM registration (D47). A user must have
+      registration_state IN ('invited', 'vouched') to interact with the bot
+      in any group... The DM invite gate is the universal registration path
+      — there is no group-side registration bypass." And: "Group
+      auto-registration. Removed by D47... only users who passed the DM
+      invite gate can interact in groups... the auto-registration path is
+      permanently closed."
+    gap: |
+      V27__d47_remove_group_only.sql:21-25 runs
+      `UPDATE users SET registration_state = 'invited' WHERE
+      registration_state = 'group_only'`. Every legacy row minted by the
+      now-removed group auto-registration path for an untrusted contact
+      (auto-created on a group @mention, never presented an admin-issued
+      invite) is promoted to 'invited' — the state that signifies "passed
+      the DM invite gate." Downstream, InboundRouter step 3 drops a group
+      sender only when snapshot.isEmpty() || preban; 'invited' passes. The
+      old step-4.7 DM-gate (error.invite.required for group_only DM
+      contacts) is deleted. Step 2 (DM invite gate) fires only when no
+      users row exists, and these rows exist. Net: a contact who never
+      received an invite gains full DM + group access once probation
+      elapses.
+    repro: |
+      1) Pre-D47 deployment: attacker @mentions the bot in a group → old
+      auto-register path mints a users row with
+      registration_state='group_only', no invite required. 2) Operator
+      upgrades, V27 flips the row to 'invited'. 3) Attacker DMs the bot:
+      step 2 finds an existing row (skips invite gate), no DM-gate
+      carve-out remains, ban/probation pass once probation elapses, and the
+      attacker reaches command dispatch + chat mode as a fully registered
+      user, and interacts freely in groups. Safe migration would delete
+      group_only rows (forcing re-entry through the invite gate) or move
+      them to a non-interacting state rather than promote to 'invited'.
+    suggested_fix_class: trust-boundary-tightening
+redteam_audits:
+  - date: 2026-05-29
+    verdict: FINDINGS
+    base: b79efa3
+    head: 7c3e16a
+    verdict_file: docs/plan/m1/redteam/M1-111-2026-05-29.md
+    findings_count: 1
+    out_of_model_count: 0
+    note: |
+      Audited the unmerged implementation diff (b79efa3..7c3e16a) — the
+      M1-111 impl commit is on the branch, not yet on main. One AUTH-BYPASS
+      finding (high) on the V27 migration mapping legacy group_only rows to
+      'invited' instead of deleting them / moving to a non-interacting
+      state. Greenfield (no prior deployment + Flyway runs all migrations
+      before traffic) means the UPDATE affects zero rows on a fresh install,
+      lowering practical exploitability below high; but the migration
+      encodes a security decision worth fixing before merge. Branch is
+      unmerged, so the fix can land on the same branch rather than as a
+      separate remediation ticket. See verdict_file disposition.
+clarity_check:
+  date: 2026-05-28
+  verdict: PASS
+  warnings:
+    - "Acceptance item 8 grep pattern includes 'registration_state', which may legitimately appear as a SQL column reference or log string that should remain; intent is ZERO matches for group_only and vouched state transitions only. Reviewer should not count column-name occurrences of 'registration_state' as failures."
+  blockers: []
 ---
 
-# M1-111: Remove group_only registration path + simplify /vouch + V28 migration
+# M1-111: Remove group_only registration path + simplify /vouch + V27 migration
 
 ## Context
 

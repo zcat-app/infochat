@@ -150,11 +150,10 @@ class InboundRouterContactIdRedactionTest {
         // router by hand (no Quarkus boot), so the helper wires no-op
         // fakes for the 4 collaborators and overrides lookupUser to
         // return a fixed "vouched" snapshot. The vouched state makes
-        // step 2 (DM unknown) skip and step 7 DM-gate (group_only-only)
-        // not fire — the redaction log sites at dispatch-exception /
-        // no-replyTarget / reply-send-failed still fire because the
-        // dispatch reaches handleSlash. The DataSource field stays
-        // null — lookupUser override bypasses it.
+        // step 2 (DM unknown) skip — the redaction log sites at
+        // dispatch-exception / no-replyTarget / reply-send-failed
+        // still fire because the dispatch reaches handleSlash. The
+        // DataSource field stays null — lookupUser override bypasses it.
         InboundRouter router = new InboundRouter() {
             @Override
             Optional<UserSnapshot> lookupUser(String adapter, String contactId) {
@@ -162,7 +161,6 @@ class InboundRouterContactIdRedactionTest {
             }
         };
         router.commandHandlers = new SingletonInstance<>();
-        router.autoRegisterService = new NoopAutoRegisterService();
         // M1-040 wired a @RequestScoped InboundContext into onMessage.
         // Outside Quarkus boot, instantiate the bean directly — its
         // @RequestScoped marker only matters when ARC proxies it.
@@ -396,14 +394,6 @@ class InboundRouterContactIdRedactionTest {
         @Override
         public void setInboundHandler(InboundHandler handler) {
             throw new UnsupportedOperationException();
-        }
-    }
-
-    /** Noop AutoRegisterService — the redaction tests are not about DB writes. */
-    private static final class NoopAutoRegisterService extends AutoRegisterService {
-        @Override
-        public UUID resolveOrRegister(Identity sender, String adapterName) {
-            return UUID.randomUUID();
         }
     }
 

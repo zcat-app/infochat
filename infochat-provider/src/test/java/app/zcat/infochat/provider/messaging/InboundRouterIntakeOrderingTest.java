@@ -58,14 +58,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   <li>(f) {@code knownBannedDmStops} — DM, known is_banned=true
  *       contact; flow runs rateCap → normalize → users lookup
  *       → banCheck (true) → ban-fixed reply. No {@code handleSlash}.</li>
- *   <li>(g) {@code groupOnlyDmGateShortCircuitsBeforeDispatch} — DM,
- *       known registration_state='group_only' contact, body
- *       {@code /help}; flow runs rateCap → normalize → banCheck
- *       (false) → DM-gate short-circuit → invite-required reply.
- *       {@code handleSlash} MUST NOT run (closes AUTH-BYPASS surface).</li>
- *   <li>(h) {@code groupMentionAutoRegisters} — Group, unknown
- *       contact; flow runs rateCap → normalize → autoRegisterService
- *       → banCheck → handleSlash → dispatch reply.</li>
+ *   <li>(g) {@code unregisteredGroupSenderIsSilentlyDropped} — Group,
+ *       unknown contact (no users row), body {@code /help}; flow runs
+ *       rateCap → normalize → users lookup → D47 step-3 silent drop.
+ *       No outbound, no {@code banCheck}, no {@code handleSlash}
+ *       (D47 gate #1).</li>
+ *   <li>(h) {@code registeredGroupSenderDispatchesNormally} — Group,
+ *       known {@code vouched} contact; flow runs rateCap → normalize
+ *       → users lookup → banCheck (false) → handleSlash → dispatch
+ *       reply (the step-3 drop does not over-fire for registered
+ *       senders).</li>
  * </ol>
  *
  * <p>The test is plain JUnit (no {@code @QuarkusTest}) — every
@@ -277,44 +279,39 @@ class InboundRouterIntakeOrderingTest {
                         + "handleSlash NOT consulted; got: " + log.calls);
     }
 
-    // ----- (g) DM from known group_only contact + /help → DM-gate fires -----
+    // ----- (g) Group from unregistered contact + /help → D47 silent drop -----
 
     @Test
-    void groupOnlyDmGateShortCircuitsBeforeDispatch() {
+    void unregisteredGroupSenderIsSilentlyDropped() {
         CallLog log = new CallLog();
-        InboundRouter router = newRouterWithLog(log,
-                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), false, "group_only")));
+        InboundRouter router = newRouterWithLog(log, Optional.empty());
         // RecordingCommandHandler is wired but MUST NOT be invoked — the
-        // M1-044e DM-gate fires BEFORE dispatch.
+        // D47 step-3 silent drop fires BEFORE dispatch.
         router.commandHandlers = new SingletonInstance<>(new RecordingCommandHandler(log, "help"));
         CapturingAdapter target = new CapturingAdapter();
         router.setReplyTarget(target);
 
-        router.onMessage(dmInbound(DM_CONTACT, "/help"), ADAPTER);
+        router.onMessage(groupInbound(GROUP_ID, GROUP_CONTACT, "/help"), ADAPTER);
 
-        assertEquals(1, target.captured.size(),
-                "group_only DM path must produce exactly one reply; got: " + target.captured);
-        assertEquals(FakeBundleLoader.stubFor(BundleKeys.ERROR_INVITE_REQUIRED),
-                target.captured.get(0).text(),
-                "the pre-dispatch DM-gate emits the error.invite.required bundle entry");
+        assertEquals(0, target.captured.size(),
+                "unregistered group sender must receive NO reply (D47 silent drop); got: " + target.captured);
         assertEquals(
                 List.of(
                         "setAdapterName",
                         "rateCapBucket.tryAcquire",
-                        "lookupUser",
-                        "banCheck.isBanned",
-                        "bundleLoader.get(error.invite.required)"),
+                        "lookupUser"),
                 log.calls,
-                "DM-gate path must short-circuit BEFORE dispatch — handler.handle MUST NOT appear; got: "
+                "D47 silent drop must return at step 3 — banCheck and handler.handle MUST NOT appear; got: "
                         + log.calls);
     }
 
-    // ----- (h) Group @mention from unknown contact → auto-register + dispatch
+    // ----- (h) Group @mention from registered contact → dispatch normally ----
 
     @Test
-    void groupMentionAutoRegistersAndDispatchesNormally() {
+    void registeredGroupSenderDispatchesNormally() {
         CallLog log = new CallLog();
-        InboundRouter router = newRouterWithLog(log, Optional.empty());
+        InboundRouter router = newRouterWithLog(log,
+                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), false, "vouched")));
         router.commandHandlers = new SingletonInstance<>(new RecordingCommandHandler(log, "help"));
         CapturingAdapter target = new CapturingAdapter();
         router.setReplyTarget(target);
@@ -322,22 +319,18 @@ class InboundRouterIntakeOrderingTest {
         router.onMessage(groupInbound(GROUP_ID, GROUP_CONTACT, "/help"), ADAPTER);
 
         assertEquals(1, target.captured.size(),
-                "group dispatch must produce exactly one outbound; got: " + target.captured);
+                "registered group dispatch must produce exactly one outbound; got: " + target.captured);
         assertEquals("handler-reply:help", target.captured.get(0).text(),
-                "the dispatch reply is the RecordingCommandHandler's output, not the DM-gate literal");
+                "the dispatch reply is the RecordingCommandHandler's output");
         assertEquals(
                 List.of(
                         "setAdapterName",
                         "rateCapBucket.tryAcquire",
                         "lookupUser",
-                        "autoRegisterService.resolveOrRegisterGroup",
-                        "lookupUser",
                         "banCheck.isBanned",
                         "handler.handle(help)"),
                 log.calls,
-                "group-mention path must call exactly these collaborators in order — the second "
-                        + "lookupUser is the M1-045 redteam-fix re-fetch after auto-register inserts; got: "
-                        + log.calls);
+                "registered group sender falls through step 3 to dispatch; got: " + log.calls);
     }
 
     // ----- helpers + fakes ------------------------------------------------
@@ -345,37 +338,19 @@ class InboundRouterIntakeOrderingTest {
     /**
      * Build a router with all M1-044b collaborators replaced by
      * recording fakes. {@code snapshot} controls the
-     * {@link InboundRouter#lookupUser} override's INITIAL return —
-     * empty means "DM unknown contact" / "group unknown contact",
-     * non-empty means "user known with this
-     * {@link InboundRouter.UserSnapshot} state."
-     *
-     * <p><b>M1-045 redteam-fix re-fetch.</b> Fix 1 added a re-fetch
-     * of {@code lookupUser} after step 3's
-     * {@code autoRegisterService.resolveOrRegisterGroup} insert.
-     * The override is therefore stateful: the FIRST call returns
-     * the {@code snapshot} the test seeded; subsequent calls
-     * synthesize a present snapshot from V5 auto-register defaults
-     * ({@code is_banned=false}, {@code registration_state='group_only'})
-     * so the now-guard-less {@code snapshot.get().id()} at step 5 does
-     * not NPE. Scenario (h)
-     * {@code groupMentionAutoRegistersAndDispatchesNormally} relies
-     * on the synthesized re-fetch result; every other scenario in
-     * this file uses the initial snapshot only (auto-register does
-     * not fire on DM scope or when the initial snapshot is present).
+     * {@link InboundRouter#lookupUser} override's return — empty means
+     * "DM unknown contact" / "group unknown contact", non-empty means
+     * "user known with this {@link InboundRouter.UserSnapshot} state."
+     * Under D47 the dispatch path issues exactly one users-row lookup
+     * (the group auto-register re-fetch was removed), so the override
+     * is stateless.
      */
     private InboundRouter newRouterWithLog(CallLog log, Optional<InboundRouter.UserSnapshot> snapshot) {
-        java.util.concurrent.atomic.AtomicInteger lookupCallCount =
-                new java.util.concurrent.atomic.AtomicInteger();
         InboundRouter router = new InboundRouter() {
             @Override
             Optional<UserSnapshot> lookupUser(String adapter, String contactId) {
                 log.calls.add("lookupUser");
-                if (lookupCallCount.incrementAndGet() == 1) {
-                    return snapshot;
-                }
-                return Optional.of(new UserSnapshot(
-                        UUID.randomUUID(), false, "group_only"));
+                return snapshot;
             }
 
             @Override
@@ -384,7 +359,6 @@ class InboundRouterIntakeOrderingTest {
             }
         };
         router.commandHandlers = new SingletonInstance<>();
-        router.autoRegisterService = new RecordingAutoRegisterService(log);
         router.inboundContext = new RecordingInboundContext(log);
         router.rateCapBucket = new CountingRateCapBucket(log);
         router.inviteCodeConsumer = new FakeInviteCodeConsumer(log);
@@ -394,10 +368,10 @@ class InboundRouterIntakeOrderingTest {
         // a null @Inject field. The Noop returns Optional.empty() AND
         // — critically — does NOT log into the CallLog. The per-step
         // call-order assertions of scenarios (g) and (h)
-        // (groupOnlyDmGateShortCircuitsBeforeDispatch + groupMention
-        // AutoRegistersAndDispatchesNormally) pin precise sequences
-        // that must remain unchanged: an extra "confirmStateService.peek"
-        // log entry would break those assertions, so this Noop is
+        // (unregisteredGroupSenderIsSilentlyDropped + registeredGroup
+        // SenderDispatchesNormally) pin precise sequences that must
+        // remain unchanged: an extra "confirmStateService.peek" log
+        // entry would break those assertions, so this Noop is
         // deliberately log-silent.
         router.confirmStateService = new NoopConfirmStateService();
         // M1-045: step 5 probation gate would NPE on null @Inject
@@ -507,32 +481,6 @@ class InboundRouterIntakeOrderingTest {
         public boolean isBanned(String adapter, String contactId) {
             log.calls.add("banCheck.isBanned");
             return banned;
-        }
-    }
-
-    /**
-     * Records {@code autoRegisterService.resolveOrRegisterGroup};
-     * returns a fresh UUID without touching a database. The
-     * deprecated {@code resolveOrRegister} is overridden too because
-     * the parent's body still calls the SQL upsert.
-     */
-    private static final class RecordingAutoRegisterService extends AutoRegisterService {
-        private final CallLog log;
-
-        RecordingAutoRegisterService(CallLog log) {
-            this.log = log;
-        }
-
-        @Override
-        public UUID resolveOrRegisterGroup(Identity sender, String adapterName) {
-            log.calls.add("autoRegisterService.resolveOrRegisterGroup");
-            return UUID.randomUUID();
-        }
-
-        @Override
-        public UUID resolveOrRegister(Identity sender, String adapterName) {
-            log.calls.add("autoRegisterService.resolveOrRegister");
-            return UUID.randomUUID();
         }
     }
 

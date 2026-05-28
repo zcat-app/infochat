@@ -29,33 +29,30 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Umbrella integration test for MVP exit criterion §3 per
- * {@code docs/design/00-mvp.md} §6: a non-admin user, sending their
- * first DM via {@code InMemoryAdapter}, is auto-registered and
- * receives the {@code /help} reply. M1-035a's per-class adapter
- * test, M1-035b's per-class registry/router/startup-gate tests,
- * and M1-035c's per-class handler/auto-register/bundle tests each
- * verify their own slice in isolation. The full chain — adapter →
- * registry → router → AutoRegisterService → CommandHandler lookup
- * → HelpCommandHandler → BundleLoader → OutboundMessage → adapter
- * outbound queue — is asserted here for the first time, against the
- * production CDI graph.
+ * {@code docs/design/00-mvp.md} §6: a non-admin, invite-registered
+ * user sending a DM via {@code InMemoryAdapter} reaches the
+ * {@code /help} handler and receives its reply. M1-035a's per-class
+ * adapter test, M1-035b's per-class registry/router/startup-gate
+ * tests, and M1-035c's per-class handler/bundle tests each verify
+ * their own slice in isolation. The full chain — adapter → registry
+ * → router → CommandHandler lookup → HelpCommandHandler →
+ * BundleLoader → OutboundMessage → adapter outbound queue — is
+ * asserted here against the production CDI graph. The {@code users}
+ * row is pre-seeded {@code 'invited'} in {@code @BeforeEach}
+ * (mirroring the post-step-2 successful-invite state, D44), so the
+ * DM dispatch reaches the handler rather than the invite gate.
  *
  * <p>The asserted invariants:</p>
  * <ol>
- *   <li>First-DM auto-register + /help reply: a fresh contact id
- *       sending {@code /help} causes exactly one users row insert
- *       with the spec-required defaults ({@code is_admin=FALSE},
- *       {@code registration_state='group_only'},
- *       {@code probation_until ≈ NOW() + 24h}) and produces exactly
- *       one outbound message whose body equals the bundle-composed
- *       /help reply. (Pre-M1-044a, the upsert wrote
- *       {@code 'invited'} with a NULL probation column; M1-044a
- *       narrows {@code AutoRegisterService} to the group-only path
- *       per spec D44 §Invite-code registration — the DM-unknown
- *       contact route is M1-044b's invite gate.)</li>
- *   <li>Auto-register idempotency: a second {@code /help} from the
- *       same contact id does NOT insert a second users row but DOES
- *       produce a second outbound /help reply.</li>
+ *   <li>DM /help reply: a registered ({@code 'invited'}) contact
+ *       sending {@code /help} produces exactly one outbound message
+ *       whose body equals the bundle-composed /help reply, with the
+ *       pre-seeded row intact ({@code is_admin=FALSE},
+ *       {@code registration_state='invited'},
+ *       {@code probation_until ≈ NOW() + 24h}).</li>
+ *   <li>Idempotency: a second {@code /help} from the same contact id
+ *       does NOT insert a second users row but DOES produce a second
+ *       outbound /help reply.</li>
  *   <li>Unknown-command friendly reply: an unrecognised slash
  *       command produces exactly one outbound message whose body
  *       equals the bundle value for {@code error.unknown_command} —
@@ -100,9 +97,8 @@ class AdapterRouterIT {
         // with registration_state='invited' — the post-step-2 successful-
         // invite state, mirroring what InviteCodeConsumer.Accepted would
         // have written — so step 2 (DM unknown) skips and dispatch reaches
-        // the handler. The 'invited' state also makes step 7 DM-gate
-        // (group_only-only) not fire. probation_until is set to NOW()+24h
-        // to satisfy assertUsersRowMatchesMvpDefaults's ±30s window check.
+        // the handler. probation_until is set to NOW()+24h to satisfy
+        // assertUsersRowMatchesMvpDefaults's ±30s window check.
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "INSERT INTO users (adapter, contact_id, is_admin, "
@@ -143,7 +139,7 @@ class AdapterRouterIT {
 
         assertEquals(1L, countUsersRows("mvp-user-1"),
                 "second /help from the same contact must NOT insert a second users row "
-                        + "(ON CONFLICT DO NOTHING in AutoRegisterService.UPSERT_SQL)");
+                        + "(the @BeforeEach seed is the only insert; DM dispatch writes no users row)");
         assertEquals(2, adapter.sentMessages().size(),
                 "second /help must still produce its own outbound reply");
     }
@@ -197,11 +193,10 @@ class AdapterRouterIT {
                 assertFalse(rs.getBoolean("is_admin"),
                         "is_admin must be FALSE for invite-registered users");
                 assertEquals("invited", rs.getString("registration_state"),
-                        "registration_state must be 'invited' — post-M1-044b the @BeforeEach "
-                                + "pre-seeds the row in the post-step-2 successful-invite state, "
-                                + "mirroring what InviteCodeConsumer.Accepted would have written; "
-                                + "the auto-register path (which writes 'group_only') no longer "
-                                + "fires from a DM inbound");
+                        "registration_state must be 'invited' — the @BeforeEach pre-seeds the "
+                                + "row in the post-step-2 successful-invite state, mirroring what "
+                                + "InviteCodeConsumer.Accepted would have written; a DM inbound "
+                                + "performs no registration write");
                 Timestamp probation = rs.getTimestamp("probation_until");
                 assertNotNull(probation,
                         "probation_until must be populated to NOW() + slow_start_window "

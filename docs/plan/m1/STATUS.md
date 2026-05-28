@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 22 |
+| pending | 21 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 121 |
+| done | 122 |
 | deferred | 4 |
 | **total** | **147** |
 
@@ -29,7 +29,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-095 — StreamSourceSupervisor lifecycle and drain framework (complexity: medium, risk: medium)
 - M1-102 — SimpleX adapter skeleton — capabilities and config (complexity: medium, risk: medium)
 - M1-106 — Signal adapter skeleton — capabilities and ACI (complexity: medium, risk: medium)
-- M1-111 — Remove group_only registration path + simplify /vouch + V28 migration (complexity: high, risk: medium)
+- M1-112 — GroupApprovalService + per-group rate cap + step 3.5 (complexity: high, risk: medium)
 
 ---
 
@@ -59,7 +59,6 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 - M1-107 — blocked_by: M1-106 (pending)
 - M1-108 — blocked_by: M1-107 (pending)
 - M1-109 — blocked_by: M1-108 (pending), M1-105 (pending)
-- M1-112 — blocked_by: M1-111 (pending)
 - M1-113 — blocked_by: M1-112 (pending)
 - M1-114 — blocked_by: M1-113 (pending)
 
@@ -82,6 +81,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 |---|---|---|---|
 | M1-117 | Amend docs/spec/schema.md §Identity and access | 2026-05-29 | round 1 APPROVE |
 | M1-115 | Sync LlmOutputSanitizer.CLOSED_LIST with commands.md bot-admin set | 2026-05-28 | round 1 APPROVE |
+| M1-111 | Remove group_only registration path + simplify /vouch + V27 migration | 2026-05-28 | round 1 APPROVE |
 | M1-110 | D47 migration — groups.approval_status + activated_by (additive) | 2026-05-28 | round 1 APPROVE |
 | M1-091 | OdyseeFetcher — Odysee/LBRY RSS feed | 2026-05-26 | round 1 APPROVE |
 | M1-090 | YouTubeFetcher — channel Atom feed | 2026-05-26 | round 2 APPROVE |
@@ -89,7 +89,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-088 | RedditFetcher — subreddit JSON feed | 2026-05-26 | round 2 APPROVE |
 | M1-087 | BlueskyFetcher — AT Protocol polled feed | 2026-05-26 | round 2 APPROVE |
 | M1-086 | FetchScheduler polymorphic per-kind dispatch | 2026-05-26 | round 2 APPROVE |
-| M1-085 | AnthropicProvider — native Messages API with prompt caching | 2026-05-26 | round 2 APPROVE |
 
 ---
 
@@ -301,8 +300,8 @@ M1-106 (pending) ← runnable
         └── M1-108 (pending)
               └── M1-109 (pending) [see above]
 M1-110 (done)
-  └── M1-111 (pending) ← runnable
-        ├── M1-112 (pending)
+  └── M1-111 (done)
+        ├── M1-112 (pending) ← runnable
         │     └── M1-113 (pending)
         │           └── M1-114 (pending)
         └── M1-116 (deferred)

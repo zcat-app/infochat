@@ -31,10 +31,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Pin the step 5 slow-start probation gate's position relative to
- * steps 4 (ban) and 6 (parse + dispatch) in
+ * steps 3 (D47 group drop), 4 (ban) and 6 (parse + dispatch) in
  * {@link InboundRouter#onMessage} per
  * {@code docs/spec/security.md} §Slow-start tier +
- * §Authorization model. Four scenarios cover the runnable shape:
+ * §Authorization model. Scenarios cover the runnable shape:
  *
  * <ol>
  *   <li>(a) Registered, non-banned, in-probation user sending
@@ -50,6 +50,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *       short-circuits with {@code error.ban.fixed} BEFORE step 5
  *       consults probation; {@code probationCheck.inProbation} NOT
  *       called.</li>
+ *   <li>(e) D47 gate #1: an unregistered group sender (no users row)
+ *       is silently dropped at step 3 — no reply, dispatch returns
+ *       before the ban check.</li>
+ *   <li>(f) D47 gate #1: a {@code preban} group sender is silently
+ *       dropped the same way.</li>
+ *   <li>(g) The drop does NOT over-fire — a registered group sender
+ *       in probation still reaches the step 5 probation gate.</li>
  * </ol>
  *
  * <p>Plain JUnit (no DevServices Postgres) — every collaborator is
@@ -163,26 +170,72 @@ class InboundRouterProbationOrderingTest {
                 "past-probation path must call clearIfPromoted on the way to dispatch; got: " + log.calls);
     }
 
-    // ----- (e) group auto-register first message → step 5 still fires --------
+    // ----- (e) D47: unregistered group sender → silent drop at step 3 --------
 
     @Test
-    void groupAutoRegisterFirstMessageBlocksProbationCommand() {
-        // M1-045 redteam-fix AUTH-BYPASS: a group @mention from an
-        // unregistered contact must hit step 5's probation gate on
-        // the SAME message. Before the fix, snapshot was empty at
-        // step 5 (captured BEFORE step 3's auto-register insert) and
-        // the gate was skipped. With Fix 1's re-fetch, snapshot
-        // carries the just-inserted row's (id, registration_state,
-        // probation_until) and the gate enforces /add-source as
-        // blocked-during-probation.
+    void unregisteredGroupSenderIsSilentlyDropped() {
+        // D47 gate #1: a group @mention from a contact with no users
+        // row produces NO reply, NO DB write, NO registration. Dispatch
+        // returns at step 3 BEFORE the ban check, probation gate, and
+        // any handler.
         CallLog log = new CallLog();
+        InboundRouter router = newRouterEmptySnapshot(log);
+        router.commandHandlers = new SingletonInstance<>(new RecordingCommandHandler(log, "help"));
+        CapturingAdapter target = new CapturingAdapter();
+        router.setReplyTarget(target);
+
+        router.onMessage(groupInbound("/help"), ADAPTER);
+
+        assertEquals(0, target.captured.size(),
+                "unregistered group sender must receive NO reply (silent drop); got: " + target.captured);
+        assertEquals(
+                List.of(
+                        "setAdapterName",
+                        "rateCapBucket.tryAcquire",
+                        "lookupUser"),
+                log.calls,
+                "D47 silent drop must return at step 3 BEFORE banCheck / probation / dispatch; got: "
+                        + log.calls);
+    }
+
+    // ----- (f) D47: preban group sender → silent drop at step 3 --------------
+
+    @Test
+    void prebanGroupSenderIsSilentlyDropped() {
+        // D47 gate #1: a group @mention from a 'preban' contact is
+        // dropped the same way as an unregistered one.
+        CallLog log = new CallLog();
+        UserSnapshotSeed snapshot = new UserSnapshotSeed(UUID.randomUUID(), false, "preban");
+        InboundRouter router = newRouter(log, snapshot, false, false, null, true);
+        router.commandHandlers = new SingletonInstance<>(new RecordingCommandHandler(log, "help"));
+        CapturingAdapter target = new CapturingAdapter();
+        router.setReplyTarget(target);
+
+        router.onMessage(groupInbound("/help"), ADAPTER);
+
+        assertEquals(0, target.captured.size(),
+                "preban group sender must receive NO reply (silent drop); got: " + target.captured);
+        assertEquals(
+                List.of(
+                        "setAdapterName",
+                        "rateCapBucket.tryAcquire",
+                        "lookupUser"),
+                log.calls,
+                "D47 silent drop for preban must return at step 3; got: " + log.calls);
+    }
+
+    // ----- (g) D47: registered group sender in probation is still gated ------
+
+    @Test
+    void registeredGroupSenderInProbationStillHitsProbationGate() {
+        // The silent drop must NOT over-fire: a registered (invited/
+        // vouched) group sender in probation sending a blocked command
+        // still receives error.probation.blocked — proving the step-3
+        // drop is scoped to unregistered / preban contacts only.
+        CallLog log = new CallLog();
+        UserSnapshotSeed snapshot = new UserSnapshotSeed(UUID.randomUUID(), false, "invited");
         Instant expiry = Instant.now().plus(2, ChronoUnit.HOURS);
-        InboundRouter router = newRouterForGroupAutoRegister(
-                log,
-                /* banned */ false,
-                /* inProbation */ true,
-                /* probationExpiry */ expiry,
-                /* allowedDuringProbation */ false);
+        InboundRouter router = newRouter(log, snapshot, false, true, expiry, false);
         router.commandHandlers = new SingletonInstance<>(new RecordingCommandHandler(log, "add-source"));
         CapturingAdapter target = new CapturingAdapter();
         router.setReplyTarget(target);
@@ -190,19 +243,16 @@ class InboundRouterProbationOrderingTest {
         router.onMessage(groupInbound("/add-source https://example.org/feed --tags x"), ADAPTER);
 
         assertEquals(1, target.captured.size(),
-                "group auto-register + blocked-during-probation must produce exactly one reply; got: "
+                "registered group sender + blocked command must produce exactly one reply; got: "
                         + target.captured);
         assertTrue(target.captured.get(0).text()
                         .startsWith(FakeBundleLoader.stubFor(BundleKeys.ERROR_PROBATION_BLOCKED)),
-                "group auto-register first message + blocked command must surface "
-                        + "error.probation.blocked, NOT short-circuit past step 5; got: "
+                "registered group sender must be gated by probation, not silently dropped; got: "
                         + target.captured.get(0).text());
         assertEquals(
                 List.of(
                         "setAdapterName",
                         "rateCapBucket.tryAcquire",
-                        "lookupUser",
-                        "autoRegisterService.resolveOrRegisterGroup",
                         "lookupUser",
                         "banCheck.isBanned",
                         "probationCheck.inProbation",
@@ -210,47 +260,7 @@ class InboundRouterProbationOrderingTest {
                         "probationCheck.probationExpiry",
                         "bundleLoader.get(error.probation.blocked)"),
                 log.calls,
-                "AUTH-BYPASS fix: snapshot re-fetched after step-3 auto-register; step 5 "
-                        + "probation gate fires on the FIRST message; got: " + log.calls);
-    }
-
-    // ----- (f) group_only DM in probation → DM-gate (step 4.7) wins ----------
-
-    @Test
-    void groupOnlyDmInProbationReceivesInviteRequiredNotProbationBlocked() {
-        // M1-045 redteam-fix INFO-LEAK: a group_only user (registered
-        // via group @mention) DMing the bot while still in probation
-        // must receive the fixed error.invite.required reply, not the
-        // probation-blocked reply with its allowed-set enumeration.
-        // Step 4.7 (DM-gate) now fires BEFORE step 5 (probation), so
-        // probationCheck.inProbation MUST NOT appear in the call list.
-        CallLog log = new CallLog();
-        UserSnapshotSeed snapshot = new UserSnapshotSeed(UUID.randomUUID(), false, "group_only");
-        Instant expiry = Instant.now().plus(2, ChronoUnit.HOURS);
-        InboundRouter router = newRouter(log, snapshot, false, true, expiry, false);
-        router.commandHandlers = new SingletonInstance<>(new RecordingCommandHandler(log, "help"));
-        CapturingAdapter target = new CapturingAdapter();
-        router.setReplyTarget(target);
-
-        router.onMessage(dmInbound("/help"), ADAPTER);
-
-        assertEquals(1, target.captured.size(),
-                "group_only DM in probation must produce exactly one reply; got: " + target.captured);
-        assertEquals(FakeBundleLoader.stubFor(BundleKeys.ERROR_INVITE_REQUIRED),
-                target.captured.get(0).text(),
-                "INFO-LEAK fix: step 4.7 DM-gate emits error.invite.required (the fixed spec "
-                        + "reply), NOT error.probation.blocked (which would enumerate the "
-                        + "allowed-set, a probe surface)");
-        assertEquals(
-                List.of(
-                        "setAdapterName",
-                        "rateCapBucket.tryAcquire",
-                        "lookupUser",
-                        "banCheck.isBanned",
-                        "bundleLoader.get(error.invite.required)"),
-                log.calls,
-                "INFO-LEAK fix: step 4.7 DM-gate fires BEFORE step 5 probation — "
-                        + "probationCheck.inProbation MUST NOT appear; got: " + log.calls);
+                "registered group sender falls through step 3 to the probation gate; got: " + log.calls);
     }
 
     // ----- (d) banned user in probation → step 4 short-circuits before step 5
@@ -306,7 +316,6 @@ class InboundRouterProbationOrderingTest {
             }
         };
         router.commandHandlers = new SingletonInstance<>();
-        router.autoRegisterService = new RecordingAutoRegisterService(log);
         router.inboundContext = new RecordingInboundContext(log);
         router.rateCapBucket = new CountingRateCapBucket(log);
         router.inviteCodeConsumer = new FakeInviteCodeConsumer(log);
@@ -341,43 +350,28 @@ class InboundRouterProbationOrderingTest {
     }
 
     /**
-     * Build a router whose {@code lookupUser} returns empty on the
-     * FIRST call and a present in-probation snapshot on every
-     * subsequent call. Exercises the M1-045 redteam-fix Fix 1 path:
-     * step 1's snapshot is empty (unknown contact); step 3 fires the
-     * RecordingAutoRegisterService and the post-step-3 re-fetch
-     * returns the synthesized in-probation snapshot. Used by
-     * scenario (e) only.
+     * Build a router whose {@code lookupUser} always returns empty —
+     * the unregistered-contact case. Used by the D47 silent-drop
+     * scenario (e): a group {@code @mention} from an unknown contact
+     * returns at step 3 with no outbound and no DB write.
      */
-    private InboundRouter newRouterForGroupAutoRegister(
-            CallLog log,
-            boolean banned,
-            boolean inProbation,
-            Instant probationExpiry,
-            boolean allowedDuringProbation) {
-        java.util.concurrent.atomic.AtomicInteger lookupCallCount =
-                new java.util.concurrent.atomic.AtomicInteger();
-        UUID autoRegId = UUID.randomUUID();
+    private InboundRouter newRouterEmptySnapshot(CallLog log) {
         InboundRouter router = new InboundRouter() {
             @Override
             Optional<UserSnapshot> lookupUser(String adapter, String contactId) {
                 log.calls.add("lookupUser");
-                if (lookupCallCount.incrementAndGet() == 1) {
-                    return Optional.empty();
-                }
-                return Optional.of(new UserSnapshot(autoRegId, false, "group_only"));
+                return Optional.empty();
             }
         };
         router.commandHandlers = new SingletonInstance<>();
-        router.autoRegisterService = new RecordingAutoRegisterService(log);
         router.inboundContext = new RecordingInboundContext(log);
         router.rateCapBucket = new CountingRateCapBucket(log);
         router.inviteCodeConsumer = new FakeInviteCodeConsumer(log);
-        router.banCheck = new FakeBanCheck(log, banned);
+        router.banCheck = new FakeBanCheck(log, false);
         router.bundleLoader = new FakeBundleLoader(log);
         router.confirmStateService = new NoopConfirmStateService();
-        router.commandPermissions = new RecordingCommandPermissions(log, allowedDuringProbation);
-        router.probationCheck = new RecordingProbationCheck(log, inProbation, probationExpiry);
+        router.commandPermissions = new RecordingCommandPermissions(log, true);
+        router.probationCheck = new RecordingProbationCheck(log, false, null);
         router.summaryAnchorRepository = new SummaryAnchorRepository() {
             @Override public void clear(UUID userId, UUID scopeId) {}
         };
@@ -427,21 +421,6 @@ class InboundRouterProbationOrderingTest {
         public boolean isBanned(String adapter, String contactId) {
             log.calls.add("banCheck.isBanned");
             return banned;
-        }
-    }
-
-    private static final class RecordingAutoRegisterService extends AutoRegisterService {
-        private final CallLog log;
-        RecordingAutoRegisterService(CallLog log) { this.log = log; }
-        @Override
-        public UUID resolveOrRegisterGroup(Identity sender, String adapterName) {
-            log.calls.add("autoRegisterService.resolveOrRegisterGroup");
-            return UUID.randomUUID();
-        }
-        @Override
-        public UUID resolveOrRegister(Identity sender, String adapterName) {
-            log.calls.add("autoRegisterService.resolveOrRegister");
-            return UUID.randomUUID();
         }
     }
 

@@ -68,28 +68,22 @@ import java.util.UUID;
  *       the operator's later {@code /unban} pass.</li>
  *   <li>No-op detection — when the target row is already past
  *       probation ({@code probation_until IS NULL OR
- *       probation_until <= NOW()}) AND not {@code group_only},
- *       the UPDATE would change nothing. ROLLBACK + reply
- *       {@code reply.vouch.noop}, write no audit row, matching the
- *       M1-036 / {@code /unban} pattern for in-effect no-ops.</li>
+ *       probation_until <= NOW()}), the UPDATE would change nothing.
+ *       ROLLBACK + reply {@code reply.vouch.noop}, write no audit
+ *       row, matching the M1-036 / {@code /unban} pattern for
+ *       in-effect no-ops.</li>
  *   <li>Happy path — PRE-WRITE the VOUCH audit row INSIDE the same
  *       transaction BEFORE the UPDATE (audit-before-effect,
  *       Invariant 7); the audit row's {@code details_json} carries
- *       both transitions ({@code probation_cleared},
- *       {@code registration_state_from},
- *       {@code registration_state_to}). Run the spec's
- *       two-transitions-in-one-statement UPDATE
- *       ({@code SET probation_until = NULL, registration_state = CASE
- *       WHEN registration_state = 'group_only' THEN 'vouched'
- *       ELSE registration_state END}). COMMIT. Reply
+ *       {@code probation_cleared}. Run the UPDATE
+ *       ({@code SET probation_until = NULL}). COMMIT. Reply
  *       {@code reply.vouch.success}.</li>
  * </ol>
  *
- * <p>The CASE expression conditional on {@code registration_state =
- * 'group_only'} is the spec rule "the registration_state advance
- * only fires when the prior state was 'group_only'"; an
- * {@code 'invited'} or {@code 'vouched'} row's
- * registration_state is left unchanged.
+ * <p>Per D47 (schema §Identity and access) {@code /vouch} clears the
+ * target's {@code probation_until} but no longer changes
+ * {@code registration_state}: the UPDATE is a single-column probation
+ * clear.
  */
 @ApplicationScoped
 public class VouchCommandHandler implements CommandHandler {
@@ -105,20 +99,14 @@ public class VouchCommandHandler implements CommandHandler {
                     + "WHERE adapter = ? AND contact_id = ? FOR UPDATE";
 
     private static final String SELECT_TARGET_SQL =
-            "SELECT id, contact_id, registration_state, probation_until, is_banned "
+            "SELECT id, contact_id, probation_until, is_banned "
                     + "FROM users WHERE adapter = ? AND contact_id = ?";
 
-    // Two transitions in one statement per spec §Slow-start tier
-    // /vouch <contact>:
-    // - probation_until → NULL (always, when the UPDATE fires)
-    // - registration_state → 'vouched' iff prior was 'group_only',
-    //   else unchanged (the CASE expression).
+    // Single-column probation clear per spec §Slow-start tier
+    // /vouch <contact>: probation_until → NULL. Per D47 the command
+    // no longer advances registration_state.
     private static final String UPDATE_VOUCH_SQL =
-            "UPDATE users SET probation_until = NULL, "
-                    + "registration_state = CASE "
-                    + "WHEN registration_state = 'group_only' THEN 'vouched' "
-                    + "ELSE registration_state END "
-                    + "WHERE id = ?";
+            "UPDATE users SET probation_until = NULL WHERE id = ?";
 
     @Inject
     BundleLoader bundleLoader;
@@ -194,17 +182,13 @@ public class VouchCommandHandler implements CommandHandler {
                     return reply(scope, bundleLoader.get(BundleKeys.ERROR_VOUCH_BANNED_TARGET));
                 }
 
-                if (isAlreadyPastProbation(target)
-                        && !"group_only".equals(target.registrationState)) {
+                if (isAlreadyPastProbation(target)) {
                     conn.rollback();
                     return reply(scope, bundleLoader.get(BundleKeys.REPLY_VOUCH_NOOP));
                 }
 
-                String fromState = target.registrationState;
-                String toState = "group_only".equals(fromState) ? "vouched" : fromState;
-
                 insertVouchAudit(conn, actor, adapter, target.id, targetContactId,
-                        requestId, vouchDetailsJson(fromState, toState));
+                        requestId, vouchDetailsJson());
 
                 updateUserVouched(conn, target.id);
 
@@ -270,12 +254,11 @@ public class VouchCommandHandler implements CommandHandler {
                 }
                 UUID id = (UUID) rs.getObject("id");
                 String resolvedContactId = rs.getString("contact_id");
-                String registrationState = rs.getString("registration_state");
                 Timestamp ts = rs.getTimestamp("probation_until");
                 Instant probationUntil = ts == null ? null : ts.toInstant();
                 boolean isBanned = rs.getBoolean("is_banned");
                 return Optional.of(new TargetRow(id, resolvedContactId,
-                        registrationState, probationUntil, isBanned));
+                        probationUntil, isBanned));
             }
         }
     }
@@ -317,21 +300,18 @@ public class VouchCommandHandler implements CommandHandler {
     }
 
     /**
-     * Build the VOUCH audit row's {@code details_json}. Carries both
-     * transitions per acceptance item 9 sub-step (5): the boolean
-     * {@code probation_cleared} (always true on the happy path —
-     * the UPDATE nulls probation_until) plus the
-     * {@code registration_state_from}/{@code _to} pair (equal for
-     * {@code invited}/{@code vouched} priors; differ for
-     * {@code group_only} → {@code vouched}).
+     * Build the VOUCH audit row's {@code details_json}. Carries the
+     * boolean {@code probation_cleared} (always true on the happy
+     * path — the UPDATE nulls probation_until). Per D47 the command
+     * no longer advances registration_state, so no state-transition
+     * fields are recorded.
      */
-    private static String vouchDetailsJson(String fromState, String toState) {
-        return "{\"probation_cleared\":true,\"registration_state_from\":\""
-                + fromState + "\",\"registration_state_to\":\"" + toState + "\"}";
+    private static String vouchDetailsJson() {
+        return "{\"probation_cleared\":true}";
     }
 
     /** Target row state read INSIDE the transaction. */
-    private record TargetRow(UUID id, String contactId, String registrationState,
+    private record TargetRow(UUID id, String contactId,
                              Instant probationUntil, boolean isBanned) {}
 
     /** Actor row state read INSIDE the transaction via SELECT FOR UPDATE. */

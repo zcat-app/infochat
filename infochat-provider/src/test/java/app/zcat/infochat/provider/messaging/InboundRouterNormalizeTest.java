@@ -161,7 +161,6 @@ class InboundRouterNormalizeTest {
         InboundRouter router = new InboundRouter();
         router.maxInboundBodyBytes = 16; // tiny cap so a short ASCII body overflows
         router.commandHandlers = new EmptyHandlerInstance();
-        router.autoRegisterService = new ThrowingAutoRegisterService();
         // M1-040: InboundContext is set at the top of onMessage and
         // must be non-null even when the size-cap path returns early.
         router.inboundContext = new InboundContext();
@@ -201,9 +200,6 @@ class InboundRouterNormalizeTest {
                 "the oversize reply must be the fixed too-large literal");
         assertEquals(invocationsBefore, InboundRouter.NORMALIZE_INVOCATIONS.get(),
                 "normalize() must NOT be invoked on an oversize body; counter must not advance");
-        assertEquals(0, ThrowingAutoRegisterService.callCount,
-                "auto-register must NOT run on the oversize path either — we drop fast "
-                        + "without DB work");
     }
 
     /**
@@ -215,7 +211,6 @@ class InboundRouterNormalizeTest {
         InboundRouter router = newRouterWithKnownVouchedUser();
         router.maxInboundBodyBytes = 16;
         router.commandHandlers = new EmptyHandlerInstance();
-        router.autoRegisterService = new ThrowingAutoRegisterService();
         router.inboundContext = new InboundContext();
         CapturingAdapter target = new CapturingAdapter();
         router.setReplyTarget(target);
@@ -306,21 +301,6 @@ class InboundRouterNormalizeTest {
         }
     }
 
-    /**
-     * Pinned stub: every call increments {@link #callCount}. The
-     * oversize-path test asserts callCount stays 0 (no DB work on the
-     * drop-fast path); the at-cap test does not assert on it.
-     */
-    private static final class ThrowingAutoRegisterService extends AutoRegisterService {
-        static int callCount;
-
-        @Override
-        public java.util.UUID resolveOrRegister(Identity sender, String adapterName) {
-            callCount++;
-            return java.util.UUID.randomUUID();
-        }
-    }
-
     /** Captures outbound messages the router sends. */
     private static final class CapturingAdapter implements MessagingAdapter {
         final List<OutboundMessage> captured = new ArrayList<>();
@@ -381,9 +361,9 @@ class InboundRouterNormalizeTest {
      * plus a {@link javax.sql.DataSource} used by the new
      * {@code lookupUser} method. The helper returns a router whose
      * {@code lookupUser} is overridden to return a fixed "vouched"
-     * snapshot — that skips step 2 (DM unknown), keeps step 7 DM-gate
-     * from firing, and lets the at-cap chat-mode body flow into the
-     * chat-mode-not-in-MVP reply path. The four new collaborator
+     * snapshot — that skips step 2 (DM unknown) and lets the at-cap
+     * chat-mode body flow into the chat-mode-not-in-MVP reply path.
+     * The four new collaborator
      * fields receive no-op fakes (the per-method assertion is purely
      * about the normalize-invocation counter, not about which fakes
      * were consulted, so the fakes just need to not NPE).
