@@ -6,7 +6,7 @@ created: 2026-05-27
 last_updated: 2026-05-28
 blocked_by:
   - M1-110
-files_budget: 14
+files_budget: 17
 files_scope:
   - infochat-core/src/main/resources/db/migration/V28__d47_remove_group_only.sql
   - infochat-core/src/main/resources/db/migration/V5__identity_audit.sql
@@ -19,6 +19,9 @@ files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterIntakeOrderingTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterNormalizeTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterProbationOrderingTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterConfirmCancelTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterContactIdRedactionTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/AdapterRouterIT.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/VouchCommandHandlerTest.java
 complexity: high
@@ -41,13 +44,13 @@ acceptance:
   - "If M1-093 has already taken V27 in main when this ticket lands, V28 is the correct slot. If M1-093 has not landed, the migration is V27 and the file path in files_scope is adjusted accordingly. The reviewer accepts either V27 or V28 provided the file is the immediate successor to the highest existing migration on main"
   - "InboundRouter step 3 is replaced: a group @mention from an unregistered contact (no users row, or registration_state='preban') produces a silent drop — no reply, no DB write, no registration. Verify: grep -E 'resolveOrRegisterGroup|REGISTRATION_STATE_GROUP_ONLY' InboundRouter.java returns ZERO matches"
   - "InboundRouter step 4.7 / the DM-gate carve-out for group_only is removed. Verify: grep -iE 'group.only.*dm|dm.*gate.*group' InboundRouter.java returns ZERO matches"
-  - "AutoRegisterService.resolveOrRegisterGroup is removed or the entire class is deleted. If the class is retained for the DM-side resolveOrRegister call (compatibility), the group path is gone. Verify: grep -E 'resolveOrRegisterGroup' AutoRegisterService.java returns ZERO matches (or the file does not exist)"
+  - "AutoRegisterService is deleted entirely. After InboundRouter's step-3 group auto-register call is removed it has ZERO remaining production callers: the only caller of resolveOrRegisterGroup is InboundRouter, and the @deprecated DM-side resolveOrRegister pass-through merely delegates to resolveOrRegisterGroup and has no callers of its own. Verify: the file infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/AutoRegisterService.java does not exist. Consequence (authorized test changes): every test double that `extends AutoRegisterService` — InboundRouterProbationOrderingTest, InboundRouterConfirmCancelTest, InboundRouterContactIdRedactionTest, InboundRouterIntakeOrderingTest, InboundRouterNormalizeTest — must drop that supertype (replace with a local stub or inline fake) so the test module compiles"
   - "VouchCommandHandler no longer changes registration_state. The UPDATE sets only probation_until=NULL. Verify: grep -E 'group_only|vouched|registration_state' VouchCommandHandler.java returns ZERO matches for group_only and vouched state transitions"
   - "VouchCommandHandler is a no-op with friendly reply when the user is already past probation (probation_until IS NULL OR probation_until < NOW())"
   - "VouchCommandHandlerTest covers: (a) non-admin → error.admin_only; (b) unknown contact → error.contact_not_registered; (c) user in probation → probation_until cleared, reply.vouch.success; (d) user already past probation → no-op reply.vouch.noop; grep -E '@Test' VouchCommandHandlerTest.java returns ≥4 matches"
   - "InboundRouterIntakeOrderingTest: scenario (g) for DM-gate-for-group_only is removed or replaced with the D47 silent-drop scenario for unregistered group contacts. grep -iE 'groupOnlyDmGate|group_only' InboundRouterIntakeOrderingTest.java returns ZERO matches"
   - "All test files that previously seeded registration_state='group_only' are updated to use 'invited' or to test the new silent-drop behavior instead. The CHECK constraint after V28 will reject 'group_only' at INSERT, so any remaining fixture that seeds it will fail with a SQL CHECK violation — this is the implicit verification that the migration was applied"
-  - "No remaining production-code references to 'group_only' as a literal string or as a constant. Verify: grep -rE \"'group_only'|GROUP_ONLY\" infochat-provider/src/main/ returns ZERO matches"
+  - "No remaining production-code references to the registration-state 'group_only' as a literal string or as a constant. Verify: grep -rE \"'group_only'|REGISTRATION_STATE_GROUP_ONLY\" infochat-provider/src/main/ returns ZERO matches. NOTE: the unrelated bundle key BundleKeys.ERROR_RETRY_DIGEST_GROUP_ONLY (value \"error.retry.digest_group_only\" — a digest-command scope error meaning \"digest retry only works in a group\", NOT the registration state) and its sole use in RetryCommandHandler.handleDigestRetry are out of scope and MUST NOT be renamed. The grep pattern is deliberately narrowed to REGISTRATION_STATE_GROUP_ONLY so it does not false-match the DIGEST_GROUP_ONLY constant"
   - "mvn -B clean verify from the repo root exits 0"
 test_plan:
   modifies:
@@ -55,6 +58,9 @@ test_plan:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterIntakeOrderingTest.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterNormalizeTest.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterProbationOrderingTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterConfirmCancelTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterContactIdRedactionTest.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/AdapterRouterIT.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/command/VouchCommandHandlerTest.java
   preserves:
@@ -69,6 +75,33 @@ decision_refs:
   - D45
   - D47
 reviews: {}
+escalations:
+  - date: 2026-05-28
+    reason: outline-fail
+    reviewer_verdict_excerpt: |
+      OUTLINE FAILED — plan-writer: pre-existing green test
+      InboundRouterProbationOrderingTest.java hard-depends on the two behaviors
+      this ticket removes (the resolveOrRegisterGroup step-3 call-list assertion
+      at line 205 and the step-4.7 group_only DM-gate scenario (f) at lines
+      217-254; group_only seeds at lines 228, 368). The file is absent from
+      files_scope, test_plan.modifies, and files_budget — modifying it is
+      unauthorized and pushes the file count past files_budget: 14. No
+      implementable outline exists within the ticket as written.
+revisions:
+  - date: 2026-05-28
+    reason: outline-fail rework — add 3 AutoRegisterService-subclass test doubles to files_scope + test_plan.modifies, raise files_budget, narrow acceptance item 13 grep (false-matched unrelated DIGEST_GROUP_ONLY), resolve acceptance item 7 to delete-entirely
+    prior_values: |
+      files_budget: 14
+      files_scope: (did not list InboundRouterProbationOrderingTest,
+        InboundRouterConfirmCancelTest, InboundRouterContactIdRedactionTest)
+      acceptance[7]: "AutoRegisterService.resolveOrRegisterGroup is removed or the
+        entire class is deleted. If the class is retained for the DM-side
+        resolveOrRegister call (compatibility), the group path is gone. Verify:
+        grep -E 'resolveOrRegisterGroup' AutoRegisterService.java returns ZERO
+        matches (or the file does not exist)"
+      acceptance[13]: "No remaining production-code references to 'group_only' as a
+        literal string or as a constant. Verify: grep -rE \"'group_only'|GROUP_ONLY\"
+        infochat-provider/src/main/ returns ZERO matches"
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -100,7 +133,7 @@ landing (2)+(3) without the migration leaves the schema accepting
 a value no code writes. M1-110 owns the additive `groups`-table
 columns separately because that work is genuinely independent.
 
-`complexity: high` because 14 files are affected, the InboundRouter
+`complexity: high` because 17 files are affected, the InboundRouter
 step 3 replacement must maintain the silent-drop invariant, and the
 migration + test-fixture coordination spans modules. `round_cap: 3`
 for margin.
@@ -145,12 +178,17 @@ See frontmatter.
    ... SELECT ... FROM updated HAVING COUNT(*) > 0` — exact SQL
   shape is the implementer's call, but no audit row on zero-effect
   is the spec promise.
-- **AutoRegisterService fate.** The class has two paths:
-  `resolveOrRegisterGroup` (removed by D47) and a DM-side
-  `resolveOrRegister` pass-through used by InboundRouter for the
-  invite-code consumer compatibility seam. If the DM-side path has
-  callers, the class is retained but the group method is deleted.
-  If no callers remain, the class can be deleted entirely.
+- **AutoRegisterService fate (resolved at refine).** Ground truth:
+  the only production caller of `resolveOrRegisterGroup` is
+  InboundRouter step 3, and the `@deprecated` DM-side
+  `resolveOrRegister` only delegates to `resolveOrRegisterGroup`
+  with no callers of its own. Once step 3 is removed the whole
+  class is dead, so it is deleted entirely (acceptance item 7).
+  Five existing test doubles `extends AutoRegisterService`
+  (InboundRouterProbationOrderingTest, InboundRouterConfirmCancelTest,
+  InboundRouterContactIdRedactionTest, InboundRouterIntakeOrderingTest,
+  InboundRouterNormalizeTest); each must drop that supertype so the
+  test module compiles. All five are in files_scope.
 - **Test fixture migration.** Many existing tests seed users with
   `registration_state='group_only'`. After V28 removes the CHECK
   value, these fixtures must change to 'invited'. The tests
