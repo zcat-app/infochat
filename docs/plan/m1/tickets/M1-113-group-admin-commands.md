@@ -95,7 +95,12 @@ See frontmatter.
   one-time messages are sent to the group via the adapter. The admin
   need not be a member of the target group — the Provider sends
   the message using the group's adapter and upstream_group_id.
-- **LLM output sanitizer.** The sanitizer regex was already updated
-  in the D47 spec amendment to include approve-group, reject-group,
-  list-groups. The CI check (closed-list vs. regex parity) should
-  pass once the commands are registered.
+- **LLM output sanitizer.** `LlmOutputSanitizer.CLOSED_LIST` was
+  synced with `commands.md` to include `/approve-group`,
+  `/reject-group`, `/list-groups` by M1-115 (separate ticket,
+  merged 2026-05-28) — the original D47 spec commit `8b22ee1`
+  added the tokens to the spec only and touched no Java/SQL.
+  M1-113 itself does NOT modify `LlmOutputSanitizer`: the
+  sanitizer parses `commands.md` at test tier, so the closed-list
+  vs. spec parity check is independent of whether the command
+  handlers are registered.
