@@ -60,10 +60,10 @@ test_plan:
   preserves:
     - all tests currently green on main (after adapting group_only references)
 spec_refs:
-  - docs/spec/security.md §Authorization model step 3
+  - docs/spec/security.md §Authorization model
   - docs/spec/security.md §Invite-code registration
-  - docs/spec/commands.md §Admin /vouch
-  - docs/spec/schema.md §Identity and access — User entity
+  - docs/spec/commands.md §Admin (bot admin)
+  - docs/spec/schema.md §Identity and access
 decision_refs:
   - D44
   - D45

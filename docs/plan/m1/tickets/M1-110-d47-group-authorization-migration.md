@@ -33,9 +33,8 @@ test_plan:
   preserves:
     - all tests currently green on main
 spec_refs:
-  - docs/spec/schema.md §Identity and access — User entity
-  - docs/spec/schema.md §Identity and access — Group entity
-  - docs/spec/security.md §Authorization model step 3
+  - docs/spec/schema.md §Identity and access
+  - docs/spec/security.md §Authorization model
 decision_refs:
   - D47
 reviews: {}
