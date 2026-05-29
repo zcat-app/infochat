@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 23 |
+| pending | 22 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 120 |
+| done | 121 |
 | deferred | 4 |
 | **total** | **147** |
 
@@ -30,7 +30,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-102 — SimpleX adapter skeleton — capabilities and config (complexity: medium, risk: medium)
 - M1-106 — Signal adapter skeleton — capabilities and ACI (complexity: medium, risk: medium)
 - M1-111 — Remove group_only registration path + simplify /vouch + V28 migration (complexity: high, risk: medium)
-- M1-117 — Amend docs/spec/schema.md §Identity and access (complexity: low, risk: low)
 
 ---
 
@@ -81,6 +80,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-117 | Amend docs/spec/schema.md §Identity and access | 2026-05-29 | round 1 APPROVE |
 | M1-115 | Sync LlmOutputSanitizer.CLOSED_LIST with commands.md bot-admin set | 2026-05-28 | round 1 APPROVE |
 | M1-110 | D47 migration — groups.approval_status + activated_by (additive) | 2026-05-28 | round 1 APPROVE |
 | M1-091 | OdyseeFetcher — Odysee/LBRY RSS feed | 2026-05-26 | round 1 APPROVE |
@@ -90,7 +90,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-087 | BlueskyFetcher — AT Protocol polled feed | 2026-05-26 | round 2 APPROVE |
 | M1-086 | FetchScheduler polymorphic per-kind dispatch | 2026-05-26 | round 2 APPROVE |
 | M1-085 | AnthropicProvider — native Messages API with prompt caching | 2026-05-26 | round 2 APPROVE |
-| M1-084 | MembershipEvent wiring + tryAutoPromote re-promote path | 2026-05-26 | round 1 APPROVE |
 
 ---
 
@@ -308,6 +307,6 @@ M1-110 (done)
         │           └── M1-114 (pending)
         └── M1-116 (deferred)
 M1-115 (done)
-M1-117 (pending) ← runnable
+M1-117 (done)
   └── M1-116 (deferred) [see above]
 ```

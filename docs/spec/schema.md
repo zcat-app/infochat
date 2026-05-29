@@ -63,11 +63,22 @@ connect with (see decision D34 and `security.md`).
   between "user accepted an invite" and "admin bootstrapped").
   **Migration (D47):** existing `users` rows with
   `registration_state = 'group_only'` are transitioned to
-  `'invited'` before the CHECK constraint is altered. These users
-  were auto-registered under the pre-D47 model; transitioning to
-  `'invited'` preserves their access. The data migration precedes
-  the CHECK constraint alteration in the same migration script.
-  An `audit_log` entry records the bulk transition.
+  `'preban'` with `is_banned = TRUE` — the canonical pre-ban shape,
+  equivalent to a `/ban`-minted row — before the CHECK constraint
+  is altered, in the same migration script. These users were
+  auto-registered under the pre-D47 group-`@mention` path **without
+  ever passing the DM invite gate** (the removed step-4.7
+  invite-required gate), and held group-scope access only — DM was
+  explicitly denied. Transitioning them to `'invited'` would grant
+  DM access they never held and would constitute a group-side
+  registration bypass, which security.md §Invite-code registration
+  forbids ("there is no group-side registration bypass"). The
+  pre-ban disposition blocks them at intake in both DM and group
+  scope; an admin re-admits a contact via `/unban` — which deletes
+  the pre-ban row, per the `preban` → `(deleted)` transition above —
+  followed by a fresh invite. The data migration precedes the CHECK
+  constraint alteration in the same script. An `audit_log` entry
+  records the bulk transition.
 - **Group.** A messaging-adapter group the bot is a member of.
   Spec-level columns: `id` (PK), `(adapter, upstream_group_id)`
   natural unique key (the `adapter` matches `users.adapter`
