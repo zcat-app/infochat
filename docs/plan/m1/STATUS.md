@@ -10,12 +10,12 @@
 
 | Status | Count |
 |---|---|
-| pending | 21 |
+| pending | 22 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 122 |
-| deferred | 4 |
+| deferred | 3 |
 | **total** | **147** |
 
 ---
@@ -30,6 +30,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-102 — SimpleX adapter skeleton — capabilities and config (complexity: medium, risk: medium)
 - M1-106 — Signal adapter skeleton — capabilities and ACI (complexity: medium, risk: medium)
 - M1-112 — GroupApprovalService + per-group rate cap + step 3.5 (complexity: high, risk: medium)
+- M1-116 — Remediate D47 migration: map legacy group_only rows to preban, not invited (complexity: low, risk: medium)
 
 ---
 
@@ -100,9 +101,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 ### post-mvp-hardening (2)
 - M1-031 → unspecified
 - M1-042 → unspecified
-
-### spec-amend (1)
-- M1-116 → M1-117
 
 ---
 
@@ -304,8 +302,7 @@ M1-110 (done)
         ├── M1-112 (pending) ← runnable
         │     └── M1-113 (pending)
         │           └── M1-114 (pending)
-        └── M1-116 (deferred)
+        └── M1-116 (pending) ← runnable
 M1-115 (done)
 M1-117 (done)
-  └── M1-116 (deferred) [see above]
 ```

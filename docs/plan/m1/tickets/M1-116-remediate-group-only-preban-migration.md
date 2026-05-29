@@ -1,11 +1,9 @@
 ---
 id: M1-116
 title: "Remediate D47 migration: map legacy group_only rows to preban, not invited"
-status: deferred
+status: pending
 created: 2026-05-29
 last_updated: 2026-05-29
-deferred_on: M1-117
-deferred_reason: spec-amend
 remediates: M1-111
 blocked_by:
   - M1-111
@@ -32,7 +30,7 @@ acceptance:
   - "The conditional audit_log row is preserved: a CTE feeds an INSERT guarded by `HAVING count(*) > 0`, so a fresh DB (zero affected rows) writes NO audit row. The row's `action` reflects the preban conversion (not 'consolidation'); `target_kind='system'` (the only closed-set value per the V5 audit_log CHECK that fits a schema-wide migration); `details_json` carries the affected-row count. Verify: grep shows `HAVING count(*) > 0` present and the action string changed from `D47_REGISTRATION_STATE_CONSOLIDATION`."
   - "The CHECK constraint is altered to `registration_state IN ('preban','invited','vouched')` — unchanged from M1-111. Verify: the two `ALTER TABLE users ... CONSTRAINT users_registration_state_chk` statements are present and the new value set omits 'group_only'."
   - "`banned_by` is NOT set by the UPDATE (left NULL — a system migration has no admin actor; the column is nullable per V5). `ban_reason` is a non-punitive string naming the D47 cause. Verify: the UPDATE SET clause does not reference `banned_by`."
-  - "Migration-only change: M1-116 modifies no production Java or test file of its own. Because this branch forks from the unmerged M1-111 tip (7c3e16a), isolate M1-116's delta against THAT base, not main (main...HEAD would also show M1-111's inherited .java/test changes). Verify: `git diff --name-only 7c3e16a..HEAD` contains exactly ONE production file — the V27 migration — and NO path ending in `.java`. The remaining entries are lifecycle/doc byproducts folded into this commit: this ticket file; M1-111's redteam_findings/redteam_audits frontmatter and the docs/plan/m1/redteam/M1-111-2026-05-29.md verdict file (the audit record motivating this remediation); and STATUS.md."
+  - "Migration-only change: M1-116 modifies no production Java or test file of its own — only the existing V27 migration. M1-111 is now merged on main (commit 19c7b6d), so this ticket forks from main and its delta is isolated against main. Verify: `git diff --name-only main..HEAD` contains exactly ONE production file — the V27 migration — and NO path ending in `.java`. The remaining entries are lifecycle byproducts: this ticket file and STATUS.md (M1-111's redteam audit record landed on main with the M1-111 merge and is NOT part of this diff)."
   - "mvn -B clean verify from the repo root exits 0."
 test_plan:
   modifies: []
@@ -91,13 +89,28 @@ clarity_check:
   verdict: PASS
   warnings: []
   blockers: []
+reopens:
+  - date: 2026-05-29
+    prior_deferred_reason: spec-amend
+    prior_deferred_on: M1-117
+    reason: >-
+      M1-117 schema.md amendment merged (ce0ca7f) and M1-111 merged (19c7b6d)
+      taking V27 — the deferral blocker is resolved and V27 now exists on main
+      to remediate. spec_refs confirmed unchanged (already cite schema.md
+      §Identity and access alongside the security.md anchors). Corrected two
+      merge-induced stale references in the reopen window: acceptance item 6
+      (base retargeted from the now-deleted unmerged M1-111 tip 7c3e16a to
+      main; dropped the M1-111-redteam-artifact byproduct clause, since that
+      file landed on main with the M1-111 merge) and the body Context
+      parenthetical (M1-111 now merged, not unmerged). files_budget/files_scope
+      unchanged.
 ---
 
 # M1-116: Remediate D47 migration — map legacy group_only rows to preban, not invited
 
 ## Context
 
-This remediates **M1-111** (done, unmerged on its branch). M1-111's
+This remediates **M1-111** (done, merged on main at commit 19c7b6d). M1-111's
 `/redteam` audit (2026-05-29, see
 `docs/plan/m1/redteam/M1-111-2026-05-29.md`) found one AUTH-BYPASS
 finding (high): V27's data step
