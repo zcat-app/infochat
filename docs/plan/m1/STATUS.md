@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 22 |
+| pending | 21 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 122 |
+| done | 123 |
 | deferred | 3 |
 | **total** | **147** |
 
@@ -30,7 +30,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-102 — SimpleX adapter skeleton — capabilities and config (complexity: medium, risk: medium)
 - M1-106 — Signal adapter skeleton — capabilities and ACI (complexity: medium, risk: medium)
 - M1-112 — GroupApprovalService + per-group rate cap + step 3.5 (complexity: high, risk: medium)
-- M1-116 — Remediate D47 migration: map legacy group_only rows to preban, not invited (complexity: low, risk: medium)
 
 ---
 
@@ -81,6 +80,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-117 | Amend docs/spec/schema.md §Identity and access | 2026-05-29 | round 1 APPROVE |
+| M1-116 | Remediate D47 migration: map legacy group_only rows to preban, not invited | 2026-05-29 | round 2 APPROVE |
 | M1-115 | Sync LlmOutputSanitizer.CLOSED_LIST with commands.md bot-admin set | 2026-05-28 | round 1 APPROVE |
 | M1-111 | Remove group_only registration path + simplify /vouch + V27 migration | 2026-05-28 | round 1 APPROVE |
 | M1-110 | D47 migration — groups.approval_status + activated_by (additive) | 2026-05-28 | round 1 APPROVE |
@@ -89,7 +89,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-089 | NitterFetcher — Nitter instance RSS feed | 2026-05-26 | round 2 APPROVE |
 | M1-088 | RedditFetcher — subreddit JSON feed | 2026-05-26 | round 2 APPROVE |
 | M1-087 | BlueskyFetcher — AT Protocol polled feed | 2026-05-26 | round 2 APPROVE |
-| M1-086 | FetchScheduler polymorphic per-kind dispatch | 2026-05-26 | round 2 APPROVE |
 
 ---
 
@@ -302,7 +301,7 @@ M1-110 (done)
         ├── M1-112 (pending) ← runnable
         │     └── M1-113 (pending)
         │           └── M1-114 (pending)
-        └── M1-116 (pending) ← runnable
+        └── M1-116 (done)
 M1-115 (done)
 M1-117 (done)
 ```

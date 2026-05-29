@@ -1,7 +1,7 @@
 ---
 id: M1-116
 title: "Remediate D47 migration: map legacy group_only rows to preban, not invited"
-status: pending
+status: done
 created: 2026-05-29
 last_updated: 2026-05-29
 remediates: M1-111
@@ -47,6 +47,22 @@ decision_refs:
   - D45
   - D47
 redteam_findings: []
+redteam_audits:
+  - date: 2026-05-29
+    verdict: CLEAN
+    base: main
+    head: 8e485c2
+    verdict_file: docs/plan/m1/redteam/M1-116-2026-05-29.md
+    out_of_model_count: 1
+    note: |
+      Remediation audit for the M1-111 AUTH-BYPASS (high) finding. The
+      threat-actor confirmed V27's group_only→preban+banned disposition
+      closes the group-side registration bypass (no DM-access grant to
+      contacts that never passed the invite gate) and found no new
+      promise-vs-delivery gap. Audited at the branch tip pre-merge; the
+      merged-form diff resolution misfired on a body-line false match, so
+      the user opted into the branch-tip audit (base=main, head=8e485c2).
+      One advisory OUT-OF-MODEL note (operator pre-migration DB tampering).
 reviews:
   - round: 1
     date: 2026-05-29
@@ -74,6 +90,19 @@ reviews:
       adding the group_only→preban one-time migration transition to the
       closed transition set). Routed to MANUAL for user adjudication. Verdict
       file: target/m1-tick-review-M1-116-r1.txt.
+  - round: 2
+    date: 2026-05-29
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 3
+      added: 33
+      removed: 11
 escalations:
   - date: 2026-05-29
     reason: manual-verdict
