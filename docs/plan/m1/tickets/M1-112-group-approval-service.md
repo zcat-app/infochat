@@ -6,7 +6,7 @@ created: 2026-05-27
 last_updated: 2026-05-30
 blocked_by:
   - M1-111
-files_budget: 12
+files_budget: 17
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/group/GroupApprovalService.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/group/GroupApprovalCheck.java
@@ -19,8 +19,14 @@ files_scope:
   - infochat-provider/src/main/resources/application.properties
   - infochat-provider/src/test/java/app/zcat/infochat/provider/group/GroupApprovalServiceTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/group/GroupApprovalCheckTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/NoopGroupApprovalCheck.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterChatModeIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterIntakeOrderingTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterProbationOrderingTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/group/GroupLifecycleIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRoundtripIT.java
 complexity: high
-risk: medium
+risk: high
 round_cap: 3
 security_relevant: true
 migration_touch: false
@@ -49,8 +55,15 @@ test_plan:
   adds:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/group/GroupApprovalServiceTest.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/group/GroupApprovalCheckTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/NoopGroupApprovalCheck.java
+  modifies:
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterChatModeIT.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterIntakeOrderingTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterProbationOrderingTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/group/GroupLifecycleIT.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRoundtripIT.java
   preserves:
-    - all tests currently green on main
+    - all tests currently green on main except those listed in modifies
 spec_refs:
   - docs/spec/security.md §Authorization model
   - docs/spec/security.md §Rate limiting
@@ -73,6 +86,58 @@ escalations:
         3. `docs/spec/schema.md §Identity and access — Group entity` — heading
            is `### Identity and access` (line 13); Group entity is a bullet
            under that section, not a sub-heading.
+  - date: 2026-05-30
+    reason: outline-fail
+    reviewer_verdict_excerpt: |
+      ## OUTLINE FAILED — escalation recommended
+
+      REASON: The ticket's acceptance item 3 mandates inserting a new step 3.5
+      (GroupApprovalCheck → GroupApprovalService) between step 3 (registered-user
+      check) and step 4 (ban check) in InboundRouter.onMessage, but this change
+      breaks pre-existing tests that are NOT authorized for modification in
+      out_of_scope, Notes, or test_plan.modifies. The plan-writer named 4 tests
+      (InboundRouterChatModeIT, GroupLifecycleIT, InboundRouterIntakeOrderingTest,
+      InboundRouterProbationOrderingTest); a follow-up ground-truth pass found
+      a fifth: DigestRoundtripIT line 199 calls
+      `adapter.deliverGroupMention(UPSTREAM_G1, ADMIN_CONTACT, "/retry --digest")`
+      and its seedGroup at lines 321-332 INSERTs without `approval_status`,
+      so the V26 default 'pending' triggers the same step-3.5 short-circuit.
+      The ticket's `files_budget: 12` and `files_scope` enumeration of 11 paths
+      cannot absorb the 5 collateral test modifications plus a top-level
+      NoopGroupApprovalCheck fake (corpus pattern per NoopProbationCheck.java).
+      "preserves: all tests currently green on main" is unsatisfiable as written.
+
+      SUGGESTED ESCALATION: refine
+
+      EVIDENCE:
+        - Ticket acceptance item 3 (InboundRouter step 3.5 wiring mandate).
+        - V26 default 'pending' at
+          infochat-core/src/main/resources/db/migration/V26__d47_group_authorization.sql
+          line 16.
+        - seedGroup helpers without approval_status at
+          infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterChatModeIT.java
+          lines 277-293,
+          infochat-provider/src/test/java/app/zcat/infochat/provider/group/GroupLifecycleIT.java
+          lines 210-224, and
+          infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRoundtripIT.java
+          lines 321-332.
+        - Call-order pins at
+          infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterIntakeOrderingTest.java
+          lines 325-333 and
+          infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterProbationOrderingTest.java
+          lines 252-263.
+        - Top-level Noop fake corpus pattern at
+          infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/NoopProbationCheck.java.
+
+      REFINE APPLIED:
+        - files_budget 12 → 17 (11 production-side files unchanged + 5 modified
+          tests + 1 new NoopGroupApprovalCheck.java fake).
+        - test_plan.modifies enumerates the 5 collateral test files.
+        - test_plan.adds gains NoopGroupApprovalCheck.java.
+        - §Notes "Authorized test changes" block enumerates per-file rationale.
+        - risk: medium → risk: high (already flagged by clarity-WARN; the
+          InboundRouter step-3.5 wiring is on the authorization-evaluation
+          path, which the team's calibration convention treats as risk: high).
 revisions:
   - date: 2026-05-30
     reason: clarity-fail rework — fix non-existent spec_refs headings
@@ -94,6 +159,30 @@ revisions:
       grepping for `step 3\.5|approv|group` / `per-group|bucket` /
       `approval_status|activated_by` under the parent headings; all hits
       land within the parent section's body.
+  - date: 2026-05-30
+    reason: outline-fail rework — authorize collateral test modifications + raise risk
+    prior_values: |
+      files_budget: 12 → 17 (room for 5 modified tests + 1 new fake).
+      files_scope: appended 6 entries:
+        - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/NoopGroupApprovalCheck.java (NEW)
+        - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterChatModeIT.java (MODIFY)
+        - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterIntakeOrderingTest.java (MODIFY)
+        - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterProbationOrderingTest.java (MODIFY)
+        - infochat-provider/src/test/java/app/zcat/infochat/provider/group/GroupLifecycleIT.java (MODIFY)
+        - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRoundtripIT.java (MODIFY)
+      test_plan: gained `modifies:` field listing the 5 collateral tests; `adds:` gained NoopGroupApprovalCheck.java.
+      risk: medium → high (clarity-WARN flagged InboundRouter step-3.5 wiring as authorization-path; refine consolidates the calibration with the test-scope expansion).
+      §Notes: appended "Authorized test changes" block with per-file rationale.
+
+      Tests verified NOT affected (search-completeness audit, recorded here
+      so the next reviewer can confirm the scope is exhaustive):
+        - DM-only onMessage callers: InboundRouterContactIdRedactionTest,
+          InboundRouterNormalizeTest, InboundRouterConfirmCancelTest.
+        - INSERT INTO groups without router invocation: SummaryCacheRepositoryTest,
+          DigestSchedulerTest, DigestSchedulerMissedSlotTest (digest scheduler
+          path bypasses InboundRouter, not affected by step 3.5).
+        - Schema-level: GroupAdminUniqueIndexTest, PerScopeIsolationIT
+          (core/schema; no InboundRouter dependency).
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -145,3 +234,49 @@ See frontmatter.
   `infochat.ratelimit.group-reply-per-15min`,
   `infochat.groups.per-user-activation-cap`,
   `infochat.groups.global-max-groups`.
+
+## Authorized test changes
+
+The step 3.5 wiring (acceptance item 3) inserts a new check between step 3
+(registered-user check) and step 4 (ban check) in `InboundRouter.onMessage`.
+The following 5 pre-existing tests are authorized for the listed
+minimum-viable modifications; no scenario additions, no removed assertions
+beyond those the wiring strictly invalidates.
+
+- **`InboundRouterChatModeIT.java`** — `seedGroup(...)` (lines 277-293)
+  INSERTs without `approval_status` so V26 default `'pending'` would
+  short-circuit the chat-mode tests at step 3.5. Add `approval_status`
+  column with value `'approved'` to the INSERT (and the `ON CONFLICT DO
+  UPDATE` clause if needed). No test-method changes.
+- **`InboundRouterIntakeOrderingTest.java`** — the `registeredGroupSenderDispatchesNormally`
+  call-order pin (lines 325-333) must gain a new entry (e.g.
+  `"groupApprovalCheck.check"`) between `"lookupUser"` and
+  `"banCheck.isBanned"`. The test helper that builds the router must
+  also set `router.groupApprovalCheck = new NoopGroupApprovalCheck()`
+  (or equivalent recording fake that returns "approved").
+- **`InboundRouterProbationOrderingTest.java`** — same pattern as the
+  intake-ordering test: pin (lines 252-263) gains a step-3.5 entry; helper
+  sets the new field. Probation-gate assertions remain intact.
+- **`GroupLifecycleIT.java`** — `seedGroup(...)` (lines 210-224) INSERTs
+  without `approval_status`; the lifecycle test exercises
+  `deliverGroupMention(...)` ~10 times across auto-promote / admin-gate /
+  `/promote` / `/group-timezone` paths, all of which would short-circuit
+  at step 3.5. Add `approval_status='approved'` to the INSERT. No
+  test-method changes.
+- **`DigestRoundtripIT.java`** — `seedGroup` (lines 321-332) INSERTs
+  without `approval_status`; line 199 calls
+  `adapter.deliverGroupMention(UPSTREAM_G1, ADMIN_CONTACT, "/retry --digest")`
+  which would short-circuit at step 3.5. Add `approval_status='approved'`
+  to the INSERT for both `GROUP_1` and `GROUP_2`.
+
+### `NoopGroupApprovalCheck` placement
+
+A top-level package-private (or public, if the package boundary requires
+it) test fake `NoopGroupApprovalCheck.java` is added in the
+`infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/`
+package to mirror the existing `NoopProbationCheck.java` corpus pattern.
+If the production `GroupApprovalCheck` interface lives in
+`provider/group/` and package-private visibility prevents reuse from
+`messaging/`, the implementer may relocate the fake to the matching
+production package; `files_scope` lists the messaging-package path but
+the move is permitted without re-escalation.
