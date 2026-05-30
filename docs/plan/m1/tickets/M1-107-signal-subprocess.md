@@ -1,9 +1,9 @@
 ---
 id: M1-107
 title: "Signal signal-cli JSON-RPC subprocess"
-status: pending
+status: done
 created: 2026-05-26
-last_updated: 2026-05-26
+last_updated: 2026-05-30
 blocked_by:
   - M1-106
 files_budget: 12
@@ -64,12 +64,138 @@ spec_refs:
 decision_refs:
   - D32
   - D46
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-05-30
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+      spec_conformance: PASS
+      parameter_contract: PASS
+    diff_stats:
+      files: 12
+      added: 1885
+      removed: 40
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
-clarity_check: {}
+redteam_findings:
+  - date: 2026-05-30
+    category: INFO-LEAK
+    severity: medium
+    promise: |
+      D37 — bodies of inbound chat-mode messages never appear in non-audit
+      logs, at any log level. Stdout console logs pass through the closed
+      API-key catalogue redactor.
+    gap: |
+      SignalJsonRpcClient.java:315 — LOG.warnf(e, "ignoring malformed
+      JSON-RPC line: %s", line) logs the entire raw inbound line at WARN.
+      No Redactor applied; Throwable passed to SLF4J violates §"User
+      content in exceptions" requirement to route via SafeLog.
+    repro: |
+      Local-loopback caller injects a malformed JSON-RPC envelope whose
+      payload embeds user-content or API-key-shaped substring; codec
+      decode throws; raw line logged verbatim.
+    suggested_fix_class: audit-log-coverage
+  - date: 2026-05-30
+    category: DOS
+    severity: medium
+    promise: |
+      DOS — Resource exhaustion, unbounded loops. Adapter publishes
+      maxInboundMessageBytes=16_384 as a capability (Trust boundary 1
+      owns inbound size enforcement).
+    gap: |
+      SignalAdapter.java:77 declares the cap; SignalJsonRpcClient.java:302
+      reads inbound lines via BufferedReader.readLine() with no length
+      cap. The capability is documentary; the reader does not enforce it.
+    repro: |
+      A buggy/compromised signal-cli or local-loopback peer writes a
+      single line that grows without bound; readLine() accumulates until
+      OOM, well before any app-level size check fires.
+    suggested_fix_class: input-sanitization
+  - date: 2026-05-30
+    category: DOS
+    severity: medium
+    promise: |
+      DOS — Resource exhaustion, unbounded loops. Adapter classes must
+      not retain per-message state indefinitely.
+    gap: |
+      SignalJsonRpcClient.java:84-85 — handles and finalized
+      ConcurrentHashMaps grow without bound; put on every send() /
+      finalizeHandle(); no path removes entries (no TTL, no finalize
+      eviction, no disconnect() cleanup — disconnect clears pending
+      only). Each entry retains the original OutboundMessage (incl.
+      message text).
+    repro: |
+      Long-running Provider with sustained outbound digest+chat traffic
+      accumulates one SignalMessageHandle per sent message forever;
+      heap exhaustion DoS.
+    suggested_fix_class: rate-limit
+  - date: 2026-05-30
+    category: INFO-LEAK
+    severity: low
+    promise: |
+      "Contact IDs are logged in redacted form (prefix + ellipsis +
+      suffix) outside the audit log." §"User content in exceptions"
+      — exception messages MUST NOT contain user-authored prose or
+      command arguments; SafeLog is the spec-mandated utility.
+    gap: |
+      SignalJsonRpcClient.java:264-265 builds MessagingException with
+      raw signal-cli error text ("signal-cli error " + code + ": " +
+      msg). signal-cli errors routinely embed destination contact IDs
+      / phone numbers. Adapter does not pre-redact; if upstream logs
+      e.getMessage() without SafeLog, the unredacted contact id leaks.
+    repro: |
+      /ban after a contact's Signal identity rotated → signal-cli
+      returns -32602 "identity for <ACI> revoked"; MessagingException
+      carries the full ACI; standard error logging in Provider leaks
+      it cleartext.
+    suggested_fix_class: audit-log-coverage
+  - date: 2026-05-30
+    category: INFO-LEAK
+    severity: low
+    promise: |
+      D37 — bodies of inbound chat-mode messages never appear in
+      non-audit logs, at any log level.
+    gap: |
+      SignalSubprocess.drainAndLog — LOG.debugf("signal-cli: %s",
+      line) logs the merged stdout+stderr stream of signal-cli
+      verbatim. signal-cli emits message metadata (recipient addresses,
+      timestamp echoes, body excerpts in some modes); no Redactor
+      applied. Spec says "at any log level" — DEBUG is not a defense.
+    repro: |
+      Operator enables DEBUG on app.zcat.infochat.messaging.impl.signal;
+      signal-cli's own logger emits a line referencing destination ACI;
+      wrapper passes through LOG.debugf without redaction.
+    suggested_fix_class: audit-log-coverage
+redteam_audits:
+  - date: 2026-05-30
+    verdict: FINDINGS
+    base: 3b42854^
+    head: 3b42854
+    verdict_file: docs/plan/m1/redteam/M1-107-2026-05-30.md
+    findings_count: 5
+    out_of_model_count: 2
+    note: |
+      Five findings (3 medium INFO-LEAK/DOS, 2 low INFO-LEAK), all in
+      the Signal-adapter cluster: log redaction discipline,
+      maxInboundMessageBytes capability enforcement, and unbounded
+      growth of the handles/finalized maps. M1-107 is done →
+      remediation belongs in a follow-up ticket with `remediates:
+      M1-107`. Two OUT-OF-MODEL items document the localhost-trust
+      delegation already acknowledged in SignalSubprocess Javadoc.
+outline_file: target/m1-tick-outline-M1-107.md
+clarity_check:
+  date: 2026-05-30
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE / SELF-CONTAINED-CHECK: Acceptance item 12 partially delegates the implementation-specific error→category mapping to messaging.md §Failure handling rather than inlining the Signal-specific examples."
+    - "FILES-BUDGET / files_scope: §Notes mentions optionally extracting a shared SubprocessManager; if extracted, the implementer will exceed the 10 files in files_scope but stay within the 12-file budget."
+  blockers: []
 ---
 
 # M1-107: Signal signal-cli JSON-RPC subprocess

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 16 |
+| pending | 15 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 128 |
+| done | 129 |
 | deferred | 3 |
 | **total** | **147** |
 
@@ -30,7 +30,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-099 — Nostr per-relay degradation + cycle cap (complexity: medium, risk: medium)
 - M1-101 — SSRF guard for wss:// relay connections (complexity: low, risk: low)
 - M1-103 — SimpleX subprocess + WebSocket messaging (complexity: high, risk: high)
-- M1-107 — Signal signal-cli JSON-RPC subprocess (complexity: high, risk: high)
+- M1-108 — Signal mention recognition + group support (complexity: medium, risk: medium)
 - M1-112 — GroupApprovalService + per-group rate cap + step 3.5 (complexity: high, risk: high)
 
 ---
@@ -52,7 +52,6 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 - M1-100 — blocked_by: M1-098 (pending), M1-093 (pending)
 - M1-104 — blocked_by: M1-103 (pending)
 - M1-105 — blocked_by: M1-103 (pending)
-- M1-108 — blocked_by: M1-107 (pending)
 - M1-109 — blocked_by: M1-108 (pending), M1-105 (pending)
 - M1-113 — blocked_by: M1-112 (pending)
 - M1-114 — blocked_by: M1-113 (pending)
@@ -74,6 +73,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-107 | Signal signal-cli JSON-RPC subprocess | 2026-05-30 | round 1 APPROVE |
 | M1-106 | Signal adapter skeleton — capabilities and ACI | 2026-05-30 | round 2 APPROVE |
 | M1-102 | SimpleX adapter skeleton — capabilities and config | 2026-05-30 | round 2 APPROVE |
 | M1-096 | NostrStreamSource — JDK WebSocket relay pool | 2026-05-30 | round 1 APPROVE |
@@ -83,7 +83,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-116 | Remediate D47 migration: map legacy group_only rows to preban, not invited | 2026-05-29 | round 2 APPROVE |
 | M1-115 | Sync LlmOutputSanitizer.CLOSED_LIST with commands.md bot-admin set | 2026-05-28 | round 1 APPROVE |
 | M1-111 | Remove group_only registration path + simplify /vouch + V27 migration | 2026-05-28 | round 1 APPROVE |
-| M1-110 | D47 migration — groups.approval_status + activated_by (additive) | 2026-05-28 | round 1 APPROVE |
 
 ---
 
@@ -288,8 +287,8 @@ M1-102 (done)
         └── M1-105 (pending)
               └── M1-109 (pending)
 M1-106 (done)
-  └── M1-107 (pending) ← runnable
-        └── M1-108 (pending)
+  └── M1-107 (done)
+        └── M1-108 (pending) ← runnable
               └── M1-109 (pending) [see above]
 M1-110 (done)
   └── M1-111 (done)
