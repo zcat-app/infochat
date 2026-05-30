@@ -3,7 +3,7 @@ id: M1-099
 title: "Nostr per-relay degradation + cycle cap"
 status: pending
 created: 2026-05-26
-last_updated: 2026-05-26
+last_updated: 2026-05-30
 blocked_by:
   - M1-096
 files_budget: 6
@@ -53,7 +53,18 @@ decision_refs:
   - D38
 reviews: {}
 overrides: []
-aborted_attempts: []
+aborted_attempts:
+  - date: 2026-05-30
+    prior_status: in-progress
+    reviews_at_abort: {}
+    clarity_check_at_abort:
+      date: 2026-05-30
+      verdict: WARN
+      warnings:
+        - "TEST-CHANGES-AUTHORIZED: Existing tests NostrStreamSourceIT.java, NostrStreamSourceTest.java, NostrRelayConnectionTest.java exercise NostrStreamSource. Ticket has no test_plan.modifies. If implementation finds these need updates (e.g., to inject RelayHealthTracker or accommodate changed reconnect behavior), authorize before modification."
+      blockers: []
+    revisions_at_abort: []
+    reason: no reason given
 reopens: []
 redteam_findings: []
 clarity_check: {}
