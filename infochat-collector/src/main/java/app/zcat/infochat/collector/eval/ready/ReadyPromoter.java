@@ -26,7 +26,10 @@ import java.util.UUID;
  *
  * <p>{@code status='RAW' AND stage1_done=TRUE AND
  * (stage1_flagged=FALSE OR stage2_done=TRUE) AND tagger_done=TRUE AND
- * embedding_done=TRUE}. The {@code status='RAW'} filter mechanically
+ * entity_done=TRUE AND embedding_done=TRUE}. Entity extraction and
+ * embedding are independent parallel stages after the Tagger; this
+ * promoter is the synchronization point that waits for BOTH to
+ * complete. The {@code status='RAW'} filter mechanically
  * excludes quarantined posts — this class NEVER promotes a
  * QUARANTINED post to READY (Stage 2 INJ/MAL/UNK and Stage 1
  * watchdog fail-closed are the writers that move a post into the
@@ -190,9 +193,10 @@ public class ReadyPromoter {
 
     /**
      * Enumerate the next batch of posts ready for the Stage-5
-     * promotion. All four per-stage gates must be passed:
+     * promotion. All per-stage gates must be passed:
      * {@code stage1_done}, the Stage-2-only-if-flagged conjunction,
-     * {@code tagger_done}, {@code embedding_done}. The
+     * {@code tagger_done}, and the two independent parallel stages
+     * {@code entity_done} and {@code embedding_done}. The
      * {@code status='RAW'} filter excludes quarantined posts.
      */
     List<PromotionCandidate> enumeratePending(int limit) throws SQLException {
@@ -203,6 +207,7 @@ public class ReadyPromoter {
                 + "   AND stage1_done = TRUE "
                 + "   AND (stage1_flagged = FALSE OR stage2_done = TRUE) "
                 + "   AND tagger_done = TRUE "
+                + "   AND entity_done = TRUE "
                 + "   AND embedding_done = TRUE "
                 + " ORDER BY fetched_at, id "
                 + " LIMIT ?";

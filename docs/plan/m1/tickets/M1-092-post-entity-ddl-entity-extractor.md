@@ -1,19 +1,20 @@
 ---
 id: M1-092
 title: "post_entity DDL + EntityExtractor pipeline stage"
-status: pending
+status: done
 created: 2026-05-26
-last_updated: 2026-05-26
+last_updated: 2026-05-30
 blocked_by: []
 files_budget: 10
 files_scope:
-  - infochat-core/src/main/resources/db/migration/V26__post_entity.sql
+  - infochat-core/src/main/resources/db/migration/V28__post_entity.sql
   - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/entity/EntityExtractorWorker.java
   - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/entity/EntityExtractionResult.java
   - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/ready/ReadyPromoter.java
   - infochat-collector/src/main/resources/application.properties
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/entity/EntityExtractorWorkerTest.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/entity/EntityExtractorWorkerIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/ready/ReadyPromoterIT.java
   - infochat-collector/src/test/resources/application.properties
 complexity: high
 risk: medium
@@ -33,12 +34,12 @@ out_of_scope:
   - D42 fetcher failure wiring — M1-094
   - Nostr kind-6 linking — M3 scope
 acceptance:
-  - "Flyway migration V26__post_entity.sql applies cleanly on a fresh DB and on a DB with V1–V25 already applied"
-  - "V26 ALTERs the post table to add column entity_done BOOLEAN NOT NULL DEFAULT FALSE"
-  - "V26 updates all existing rows: UPDATE post SET entity_done = TRUE WHERE tagger_done = TRUE — any post that has already passed tagger has implicitly passed entity extraction (no entities extracted, same as a failure-release)"
-  - "V26 creates the post_entity table partitioned by fetched_at with columns (post_id UUID NOT NULL, entity_text TEXT NOT NULL, entity_type TEXT NOT NULL CHECK (entity_type IN ('cve','product','org','person','location','project')), fetched_at TIMESTAMPTZ NOT NULL) and PRIMARY KEY (post_id, entity_text, entity_type, fetched_at)"
-  - "V26 creates index idx_post_entity_text ON post_entity(entity_text, entity_type)"
-  - "V26 GRANTs INSERT, SELECT on post_entity to infochat_collector; GRANTs SELECT on post_entity to infochat_provider"
+  - "Flyway migration V28__post_entity.sql applies cleanly on a fresh DB and on a DB with V1–V27 already applied"
+  - "V28 ALTERs the post table to add column entity_done BOOLEAN NOT NULL DEFAULT FALSE"
+  - "V28 updates all existing rows: UPDATE post SET entity_done = TRUE WHERE tagger_done = TRUE — any post that has already passed tagger has implicitly passed entity extraction (no entities extracted, same as a failure-release)"
+  - "V28 creates the post_entity table partitioned by fetched_at with columns (post_id UUID NOT NULL, entity_text TEXT NOT NULL, entity_type TEXT NOT NULL CHECK (entity_type IN ('cve','product','org','person','location','project')), fetched_at TIMESTAMPTZ NOT NULL) and PRIMARY KEY (post_id, entity_text, entity_type, fetched_at)"
+  - "V28 creates index idx_post_entity_text ON post_entity(entity_text, entity_type)"
+  - "V28 GRANTs INSERT, SELECT on post_entity to infochat_collector; GRANTs SELECT on post_entity to infochat_provider"
   - "EntityExtractorWorker is a scheduled CDI bean in collector/eval/entity/ that picks up posts matching status='RAW' AND tagger_done=TRUE AND entity_done=FALSE"
   - "EntityExtractorWorker calls LlmRouter.forTask(ModelTask.ENTITY, ...) to obtain the LLM provider, sends the post body, and parses the structured response into (entity_text, entity_type) pairs"
   - "EntityExtractorWorker normalizes entity_text (lower-cased, stripped) before INSERT into post_entity"
@@ -70,12 +71,90 @@ spec_refs:
 decision_refs:
   - D6
   - D22
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-05-30
+    verdict: REWORK
+    checks:
+      scope_drift: FAIL
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 1031
+      removed: 29
+  - round: 2
+    date: 2026-05-30
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 1084
+      removed: 30
+escalations:
+  - date: 2026-05-30
+    reason: premise-fail
+    reviewer_verdict_excerpt: |
+      N/A — premise-fail caught at start before implementation. The ticket's
+      files_scope and acceptance items 1-6 pin V26__post_entity.sql, but
+      V26__d47_group_authorization.sql and V27__d47_remove_group_only.sql
+      already exist (landed via M1-111/M1-116/M1-117 after this ticket was
+      authored 2026-05-26). Flyway rejects duplicate versions with a fatal
+      DuplicateMigrationVersion error. Next free slot is V28; the "V1-V25
+      already applied" floor in acceptance item 1 is also stale (now V27).
+  - date: 2026-05-30
+    reason: round-cap
+    reviewer_verdict_excerpt: |
+      Round 1 verdict: REWORK. SCOPE-DRIFT-CHECK: FAIL — files_budget
+      satisfied (8 implementation files vs files_budget: 10), but the
+      files_scope membership check fails: files_scope (8 entries) does NOT
+      list infochat-collector/src/test/java/app/zcat/infochat/collector/
+      eval/ready/ReadyPromoterIT.java, yet the diff modifies that file
+      (threading the entity_done seed parameter) under the out_of_scope +
+      test_plan.modifies authorization. A diffed file outside files_scope
+      is automatic SCOPE-DRIFT-CHECK FAIL. Reviewer: "No code change is
+      required — only the files_scope declaration must be corrected." All
+      other checks (TEST-INTEGRITY, OUT-OF-SCOPE, NEGATIVE-SPACE,
+      ACCEPTANCE, SPEC-CONFORMANCE, PARAMETER-CONTRACT) PASS.
+revisions:
+  - date: 2026-05-30
+    reason: premise-fail-refine
+    snapshot: |
+      Pre-refine values (corrected V26 -> V28 to resolve the Flyway
+      duplicate-version collision; column/CHECK/index/grants/backfill
+      contract unchanged):
+        files_scope entry:
+          infochat-core/src/main/resources/db/migration/V26__post_entity.sql
+        acceptance items 1-6 referred to "V26" / "V26__post_entity.sql"
+        acceptance item 1 floor: "V1-V25 already applied"
+        body §Acceptance heading: "**V26 migration.**"
+  - date: 2026-05-30
+    reason: round-cap-refine
+    snapshot: |
+      Pre-refine files_scope (8 entries) omitted the ReadyPromoterIT.java
+      path that the diff legitimately modifies under the out_of_scope +
+      test_plan.modifies authorization, causing the round-1 SCOPE-DRIFT-CHECK
+      membership FAIL. Added:
+        infochat-collector/src/test/java/app/zcat/infochat/collector/eval/ready/ReadyPromoterIT.java
+      files_budget (10) unchanged — already accommodates the 8 implementation
+      files. No code change; the implementation diff is unaffected.
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-05-30
+  verdict: PASS
+  warnings: []
+  blockers: []
+outline_file: target/m1-tick-outline-M1-092.md
 ---
 
 # M1-092: post_entity DDL + EntityExtractor pipeline stage
@@ -97,7 +176,7 @@ the extracted entities.
 
 ## Acceptance
 
-**V26 migration.** Adds `entity_done BOOLEAN NOT NULL DEFAULT FALSE`
+**V28 migration.** Adds `entity_done BOOLEAN NOT NULL DEFAULT FALSE`
 to the `post` table. Backfills existing rows: any post with
 `tagger_done=TRUE` gets `entity_done=TRUE` (these posts have already
 passed through the pipeline and should not re-enter entity extraction).
@@ -174,3 +253,17 @@ other's pickup. ReadyPromoter checks both flags.
 - **Design reference:** `docs/design/01-architecture.md` §1.3.4
   (entity extraction step), `docs/design/02-schema.md` §2.4.1
   (post_entity DDL).
+
+## Round 1 rework
+
+Reviewer verdict (round 1): REWORK — SCOPE-DRIFT-CHECK FAIL. One item:
+
+1. `infochat-collector/src/test/java/app/zcat/infochat/collector/eval/ready/ReadyPromoterIT.java`
+   is modified by the diff (threading the `entity_done` seed parameter)
+   under the `out_of_scope` + `test_plan.modifies` authorization, but the
+   path is absent from `files_scope`. The membership rule reads a diffed
+   file outside `files_scope` as automatic SCOPE-DRIFT-CHECK FAIL. No code
+   change is required — only the `files_scope` declaration must add this
+   path. Because `files_scope` is frontmatter, the correction goes through
+   `escalate → refine` per the §"Never silently expand … files_scope" rule,
+   not a direct rework edit.

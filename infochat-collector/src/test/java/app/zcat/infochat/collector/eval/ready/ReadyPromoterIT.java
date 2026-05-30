@@ -257,24 +257,25 @@ class ReadyPromoterIT {
     private SeededPost seedPickupReadyPost(String slug) throws Exception {
         return seedPost(slug, "RAW", /* stage1Done */ true, /* stage1Flagged */ false,
             /* stage2Done */ false, /* stage2Failed */ false,
-            /* taggerDone */ true, /* embeddingDone */ true);
+            /* taggerDone */ true, /* entityDone */ true, /* embeddingDone */ true);
     }
 
     private SeededPost seedQuarantinedPost(String slug) throws Exception {
-        return seedPost(slug, "QUARANTINED", true, true, true, false, true, true);
+        return seedPost(slug, "QUARANTINED", true, true, true, false, true, true, true);
     }
 
     private SeededPost seedStage2FailedReleasePost(String slug) throws Exception {
         // The release-on-stage2-failure=true path leaves the post
         // status='RAW' with stage2_failed=true so it flows through
         // the rest of the pipeline like a BENIGN post.
-        return seedPost(slug, "RAW", true, true, false, true, true, true);
+        return seedPost(slug, "RAW", true, true, false, true, true, true, true);
     }
 
     private SeededPost seedPost(String slug, String status,
                                  boolean stage1Done, boolean stage1Flagged,
                                  boolean stage2Done, boolean stage2Failed,
-                                 boolean taggerDone, boolean embeddingDone) throws Exception {
+                                 boolean taggerDone, boolean entityDone,
+                                 boolean embeddingDone) throws Exception {
         UUID sourceId = seedRssSource(slug);
         String uid = UID_PREFIX + slug;
         try (Connection conn = dataSource.getConnection();
@@ -283,11 +284,11 @@ class ReadyPromoterIT {
                      + "  id, uid, source_id, upstream_identifier, title, body, "
                      + "  fetched_at, status, "
                      + "  stage1_done, stage1_flagged, stage2_done, stage2_failed, "
-                     + "  tagger_done, embedding_done, tagger_fallback, tags"
+                     + "  tagger_done, entity_done, embedding_done, tagger_fallback, tags"
                      + ") VALUES ("
                      + "  gen_random_uuid(), ?, ?, ?, ?, ?, ?, ?, "
                      + "  ?, ?, ?, ?, "
-                     + "  ?, ?, FALSE, '{}'"
+                     + "  ?, ?, ?, FALSE, '{}'"
                      + ") RETURNING id, fetched_at")) {
             ps.setString(1, uid);
             ps.setObject(2, sourceId);
@@ -301,7 +302,8 @@ class ReadyPromoterIT {
             ps.setBoolean(10, stage2Done);
             ps.setBoolean(11, stage2Failed);
             ps.setBoolean(12, taggerDone);
-            ps.setBoolean(13, embeddingDone);
+            ps.setBoolean(13, entityDone);
+            ps.setBoolean(14, embeddingDone);
             try (ResultSet rs = ps.executeQuery()) {
                 assertTrue(rs.next(), "INSERT must yield an id");
                 UUID id = (UUID) rs.getObject(1);
