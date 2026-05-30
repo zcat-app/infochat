@@ -1,9 +1,9 @@
 ---
 id: M1-095
 title: "StreamSourceSupervisor lifecycle and drain framework"
-status: pending
+status: done
 created: 2026-05-26
-last_updated: 2026-05-26
+last_updated: 2026-05-30
 blocked_by: []
 files_budget: 8
 files_scope:
@@ -49,12 +49,29 @@ spec_refs:
   - docs/spec/architecture.md §Ingest SPIs
 decision_refs:
   - D38
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-05-30
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 613
+      removed: 10
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-05-30
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-095: StreamSourceSupervisor lifecycle and drain framework
