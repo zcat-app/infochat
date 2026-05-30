@@ -31,10 +31,10 @@ out_of_scope:
 acceptance:
   - "SimpleXAdapter implements MessagingAdapter with name()='simplex' and trustLevel()=HIGH"
   - "SimpleXAdapter.capabilities() returns CapabilityFlags with supportsMarkdownLinks=false, supportsMentionByContactId=true, supportsMessageEdit=true (SimpleX supports edits), supportsTypingIndicator=true, supportsMembershipEvents=TBD (researched in M1-104)"
-  - "SimpleXConfig reads operator properties: infochat.adapters.simplex.binary (path to simplex-chat binary), infochat.adapters.simplex.data-dir (identity material directory), infochat.adapters.simplex.ws-port (WebSocket API port)"
-  - "SimpleXConfig validates at startup: binary path exists and is executable, data-dir exists and is writable, ws-port is in valid range"
-  - "SimpleXConfig validation failure causes startup to fail with a descriptive error naming the offending property"
-  - "SimpleXIdentity resolves the bot's contact id (queue address) from the simplex-chat data directory at startup"
+  - "SimpleXConfig is a plain value object carrying the operator-config values and defines the keys infochat.adapters.simplex.binary (path to simplex-chat binary), infochat.adapters.simplex.data-dir (identity material directory), infochat.adapters.simplex.ws-port (WebSocket API port) as constants; binding these Quarkus config keys to a SimpleXConfig instance is performed by Provider's adapter wiring (M1-035b/M1-105), not this Quarkus-free module"
+  - "SimpleXConfig.validate() enforces: binary path exists and is executable, data-dir exists and is writable, ws-port is in valid range"
+  - "SimpleXConfig.validate() throws a descriptive exception naming the offending property on any failed check; Provider invokes validate() during its startup gates so a bad config fails Provider startup"
+  - "SimpleXIdentity resolves the bot's contact id (queue address) from the simplex-chat data directory as a pure function over that directory; the startup-time invocation is performed by Provider wiring (M1-035b/M1-105)"
   - "SimpleXAdapter.start() and close() are no-ops in this skeleton — subprocess and connection are M1-103"
   - "SimpleXAdapter.send(), update(), finalize(), setTyping() throw UnsupportedOperationException in this skeleton — wiring is M1-103"
   - "SimpleXAdapterSkeletonTest.capabilitiesAreCorrect passes — verifies trustLevel, name, and all capability flags"
@@ -56,6 +56,21 @@ decision_refs:
   - D32
   - D46
 reviews: {}
+revisions:
+  - date: 2026-05-30
+    reason: pre-start reword — config-binding and startup-failure are Provider responsibilities (M1-035b/M1-105), not this Quarkus-free adapter module; no files_scope/files_budget change
+    prior_values: |
+      acceptance items 3–6 (pre-refine):
+        - "SimpleXConfig reads operator properties: infochat.adapters.simplex.binary (path to simplex-chat binary), infochat.adapters.simplex.data-dir (identity material directory), infochat.adapters.simplex.ws-port (WebSocket API port)"
+        - "SimpleXConfig validates at startup: binary path exists and is executable, data-dir exists and is writable, ws-port is in valid range"
+        - "SimpleXConfig validation failure causes startup to fail with a descriptive error naming the offending property"
+        - "SimpleXIdentity resolves the bot's contact id (queue address) from the simplex-chat data directory at startup"
+      (Items 3 and 5 assumed Quarkus config + a startup hook available in
+       infochat-messaging-adapter. The module is a plain library jar with NO
+       Quarkus extensions; pom.xml is outside files_scope. Provider's
+       AdapterRegistry (M1-035b/M1-105) is what reads infochat.adapters.* and
+       runs startup gates. Refine makes SimpleXConfig a plain value object +
+       validate() logic; the binding and startup-invocation stay Provider-side.)
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -109,3 +124,19 @@ until M1-103 wires the connection.
   matches InMemoryAdapter's activation pattern.
 - **Adjacent code:** InMemoryAdapter for the SPI implementation
   pattern. CapabilityFlags for the flag record shape.
+- **Plain value object; Provider does the binding.** This module is
+  deliberately Quarkus-free (see its pom: "NO Quarkus extensions in
+  production scope"). `SimpleXConfig` is a plain value object holding the
+  three operator values plus a `validate()` method enforcing the
+  binary/data-dir/ws-port rules. Reading `infochat.adapters.simplex.*`
+  from Quarkus config and invoking `validate()` at startup are Provider
+  responsibilities (the `AdapterRegistry` adapter wiring, M1-035b/M1-105),
+  mirroring how `InMemoryAdapter` carries no CDI annotations until the
+  Provider-side producer is authored.
+- **Open planning gap (flag, do not fix here).** No ticket yet owns the
+  Provider-side invocation of `SimpleXConfig.validate()` / binding of
+  `infochat.adapters.simplex.*` — M1-035b/M1-105's startup gates are
+  generic (`infochat.adapters` enable-list, `supportsMarkdownLinks`,
+  trust) and do not read the simplex-chat binary/data-dir/ws-port keys.
+  The "bad SimpleX config fails startup" promise needs a home in M1-105
+  (Provider wiring) or an M1-103 scope extension.
