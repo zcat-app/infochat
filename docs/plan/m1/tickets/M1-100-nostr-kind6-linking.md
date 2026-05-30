@@ -78,7 +78,7 @@ See frontmatter.
 
 ## Notes
 
-- **Link type.** M1-093's V27 CHECK constraint includes `'repost'`
+- **Link type.** M1-093's V29 CHECK constraint includes `'repost'`
   alongside `'entity'` and `'semantic'`. No schema amendment needed.
 - **Original event id extraction.** NIP-01 kind-6 reposts carry the
   original event id in the `tags` array as `["e", event_id, ...]`.
