@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 15 |
+| pending | 14 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 129 |
+| done | 130 |
 | deferred | 3 |
 | **total** | **147** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-093 — post_reference DDL + LinkingJob + tool wiring (complexity: high, risk: medium)
 - M1-094 — Fetcher failure ladder (D42) (complexity: medium, risk: low)
 - M1-097 — Nostr event verification + kind filter (complexity: medium, risk: medium)
 - M1-099 — Nostr per-relay degradation + cycle cap (complexity: medium, risk: medium)
@@ -49,7 +48,7 @@ _(none)_
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
 - M1-098 — blocked_by: M1-096 (done), M1-097 (pending)
-- M1-100 — blocked_by: M1-098 (pending), M1-093 (pending)
+- M1-100 — blocked_by: M1-098 (pending), M1-093 (done)
 - M1-104 — blocked_by: M1-103 (pending)
 - M1-105 — blocked_by: M1-103 (pending)
 - M1-109 — blocked_by: M1-108 (pending), M1-105 (pending)
@@ -78,11 +77,11 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-102 | SimpleX adapter skeleton — capabilities and config | 2026-05-30 | round 2 APPROVE |
 | M1-096 | NostrStreamSource — JDK WebSocket relay pool | 2026-05-30 | round 1 APPROVE |
 | M1-095 | StreamSourceSupervisor lifecycle and drain framework | 2026-05-30 | round 1 APPROVE |
+| M1-093 | post_reference DDL + LinkingJob + tool wiring | 2026-05-30 | round 2 APPROVE |
 | M1-092 | post_entity DDL + EntityExtractor pipeline stage | 2026-05-30 | round 2 APPROVE |
 | M1-117 | Amend docs/spec/schema.md §Identity and access | 2026-05-29 | round 1 APPROVE |
 | M1-116 | Remediate D47 migration: map legacy group_only rows to preban, not invited | 2026-05-29 | round 2 APPROVE |
 | M1-115 | Sync LlmOutputSanitizer.CLOSED_LIST with commands.md bot-admin set | 2026-05-28 | round 1 APPROVE |
-| M1-111 | Remove group_only registration path + simplify /vouch + V27 migration | 2026-05-28 | round 1 APPROVE |
 
 ---
 
@@ -270,7 +269,7 @@ M1-086 (done)
   ├── M1-090 (done)
   └── M1-091 (done)
 M1-092 (done)
-  └── M1-093 (pending) ← runnable
+  └── M1-093 (done)
         └── M1-100 (pending)
 M1-094 (pending) ← runnable
 M1-095 (done)

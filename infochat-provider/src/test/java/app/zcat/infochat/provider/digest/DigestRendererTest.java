@@ -5,6 +5,7 @@ import app.zcat.infochat.provider.summary.ClusterTraversal;
 import app.zcat.infochat.provider.summary.ClusterTraversal.Cluster;
 import app.zcat.infochat.provider.summary.EligiblePostQuery;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
+import app.zcat.infochat.provider.summary.EmptyEdgeSource;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator.ClusterProse;
 import app.zcat.infochat.provider.translation.TranslationCache;
@@ -33,7 +34,7 @@ class DigestRendererTest {
     @BeforeEach
     void setUp() throws Exception {
         renderer = new DigestRenderer();
-        renderer.clusterTraversal = new ClusterTraversal();
+        renderer.clusterTraversal = new ClusterTraversal(new EmptyEdgeSource(), 3);
         proseGenerator = new RecordingSummaryProseGenerator();
         renderer.summaryProseGenerator = proseGenerator;
         renderer.llmOutputSanitizer = new LlmOutputSanitizer();

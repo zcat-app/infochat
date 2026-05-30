@@ -11,6 +11,7 @@ import app.zcat.infochat.provider.summary.ClusterTraversal.Cluster;
 import app.zcat.infochat.provider.summary.EligiblePostQuery;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Result;
+import app.zcat.infochat.provider.summary.EmptyEdgeSource;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator.ClusterProse;
 import app.zcat.infochat.provider.translation.TranslationPipeline;
@@ -94,7 +95,7 @@ class SummaryCommandHandlerTest {
         handler.bundleLoader = bundleLoader;
         handler.dataSource = StubUserDataSource.userExists(UUID.randomUUID());
         handler.eligiblePostQuery = eligiblePostQuery;
-        handler.clusterTraversal = new ClusterTraversal();
+        handler.clusterTraversal = new ClusterTraversal(new EmptyEdgeSource(), 3);
         handler.summaryProseGenerator = proseGenerator;
         handler.llmOutputSanitizer = new LlmOutputSanitizer();
         handler.translationPipeline = newEnShortCircuitPipeline();

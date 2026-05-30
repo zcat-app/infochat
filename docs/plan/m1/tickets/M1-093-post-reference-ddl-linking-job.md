@@ -1,7 +1,7 @@
 ---
 id: M1-093
 title: "post_reference DDL + LinkingJob + tool wiring"
-status: pending
+status: done
 created: 2026-05-26
 last_updated: 2026-05-30
 blocked_by:
@@ -14,11 +14,13 @@ files_scope:
   - infochat-provider/src/main/resources/application.properties
   - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/tool/GetReferencesTool.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/summary/ClusterTraversal.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/summary/PostReferenceEdgeSource.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/linking/LinkingJobTest.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/linking/LinkingJobIT.java
   - infochat-collector/src/test/resources/application.properties
   - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/GetReferencesToolTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/summary/ClusterTraversalTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/summary/EmptyEdgeSource.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRendererTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryCommandHandlerTest.java
 complexity: high
@@ -80,7 +82,33 @@ decision_refs:
   - D6
   - D22
   - D33
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-05-30
+    verdict: REWORK
+    checks:
+      scope_drift: FAIL
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 17
+      added: 1747
+      removed: 45
+  - round: 2
+    date: 2026-05-30
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 17
+      added: 1788
+      removed: 46
 escalations:
   - date: 2026-05-30
     reason: clarity-fail
@@ -124,7 +152,13 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+outline_file: target/m1-tick-outline-M1-093.md
+clarity_check:
+  date: 2026-05-30
+  verdict: WARN
+  warnings:
+    - "SELF-CONTAINED-CHECK: §Acceptance body prose (line 167) writes \"`WHERE embedding IS NOT NULL`\" implying a column on `post`, but acceptance item [9] and the spec clarify the embedding lives in `post_embedding` and must be matched via join/EXISTS. Numbered acceptance list is the definitive authority; the body prose is a readability hazard."
+  blockers: []
 ---
 
 # M1-093: post_reference DDL + LinkingJob + GetReferencesTool wiring
@@ -275,3 +309,27 @@ modified: the `Cluster(String, List<Post>)` record shape is preserved.
 - **Design reference:** `docs/design/01-architecture.md` §1.3.5
   (LinkingJob), `docs/design/02-schema.md` §2.4.3 (post_reference
   DDL), `docs/design/02-schema.md` §2.4.4 (partition lifecycle).
+
+## Round 1 rework
+
+Reviewer returned REWORK (round 1, 2026-05-30). Two items:
+
+1. **SCOPE-DRIFT-CHECK FAIL.** Two implementation files appear in the
+   diff but are not in `files_scope`. Both are load-bearing for the
+   ClusterTraversal wiring constraint in §Notes ("acquiring
+   post_reference edges via an injected dependency that is settable
+   in tests") — the design is sound, but the scope list must
+   acknowledge them. Extend `files_scope` from 13 → 15 entries by
+   adding:
+   - `infochat-provider/src/main/java/app/zcat/infochat/provider/summary/PostReferenceEdgeSource.java`
+   - `infochat-provider/src/test/java/app/zcat/infochat/provider/summary/EmptyEdgeSource.java`
+
+   `files_budget=15` already accommodates the file count.
+
+2. **PARAMETER-CONTRACT-CHECK FAIL.** The new public
+   `ClusterTraversal` constructor at
+   `infochat-provider/src/main/java/app/zcat/infochat/provider/summary/ClusterTraversal.java:63`
+   takes a `PostReferenceEdgeSource edgeSource` reference parameter
+   without a nullability annotation. Add `@NonNull` (from
+   `org.jspecify.annotations`) to the parameter. The constructor is
+   the CDI injection point; callers always pass non-null.
