@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 18 |
+| pending | 17 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 126 |
+| done | 127 |
 | deferred | 3 |
 | **total** | **147** |
 
@@ -26,7 +26,9 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-093 — post_reference DDL + LinkingJob + tool wiring (complexity: high, risk: medium)
 - M1-094 — Fetcher failure ladder (D42) (complexity: medium, risk: low)
-- M1-096 — NostrStreamSource — JDK WebSocket relay pool (complexity: high, risk: high)
+- M1-097 — Nostr event verification + kind filter (complexity: medium, risk: medium)
+- M1-099 — Nostr per-relay degradation + cycle cap (complexity: medium, risk: medium)
+- M1-101 — SSRF guard for wss:// relay connections (complexity: low, risk: low)
 - M1-102 — SimpleX adapter skeleton — capabilities and config (complexity: medium, risk: medium)
 - M1-107 — Signal signal-cli JSON-RPC subprocess (complexity: high, risk: high)
 - M1-112 — GroupApprovalService + per-group rate cap + step 3.5 (complexity: high, risk: high)
@@ -46,11 +48,8 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-097 — blocked_by: M1-096 (pending)
-- M1-098 — blocked_by: M1-096 (pending), M1-097 (pending)
-- M1-099 — blocked_by: M1-096 (pending)
+- M1-098 — blocked_by: M1-096 (done), M1-097 (pending)
 - M1-100 — blocked_by: M1-098 (pending), M1-093 (pending)
-- M1-101 — blocked_by: M1-096 (pending)
 - M1-103 — blocked_by: M1-102 (pending)
 - M1-104 — blocked_by: M1-103 (pending)
 - M1-105 — blocked_by: M1-103 (pending)
@@ -77,6 +76,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-106 | Signal adapter skeleton — capabilities and ACI | 2026-05-30 | round 2 APPROVE |
+| M1-096 | NostrStreamSource — JDK WebSocket relay pool | 2026-05-30 | round 1 APPROVE |
 | M1-095 | StreamSourceSupervisor lifecycle and drain framework | 2026-05-30 | round 1 APPROVE |
 | M1-092 | post_entity DDL + EntityExtractor pipeline stage | 2026-05-30 | round 2 APPROVE |
 | M1-117 | Amend docs/spec/schema.md §Identity and access | 2026-05-29 | round 1 APPROVE |
@@ -85,7 +85,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-111 | Remove group_only registration path + simplify /vouch + V27 migration | 2026-05-28 | round 1 APPROVE |
 | M1-110 | D47 migration — groups.approval_status + activated_by (additive) | 2026-05-28 | round 1 APPROVE |
 | M1-091 | OdyseeFetcher — Odysee/LBRY RSS feed | 2026-05-26 | round 1 APPROVE |
-| M1-090 | YouTubeFetcher — channel Atom feed | 2026-05-26 | round 2 APPROVE |
 
 ---
 
@@ -277,13 +276,13 @@ M1-092 (done)
         └── M1-100 (pending)
 M1-094 (pending) ← runnable
 M1-095 (done)
-  └── M1-096 (pending) ← runnable
-        ├── M1-097 (pending)
+  └── M1-096 (done)
+        ├── M1-097 (pending) ← runnable
         │     └── M1-098 (pending)
         │           └── M1-100 (pending) [see above]
         ├── M1-098 (pending) [see above]
-        ├── M1-099 (pending)
-        └── M1-101 (pending)
+        ├── M1-099 (pending) ← runnable
+        └── M1-101 (pending) ← runnable
 M1-102 (pending) ← runnable
   └── M1-103 (pending)
         ├── M1-104 (pending)

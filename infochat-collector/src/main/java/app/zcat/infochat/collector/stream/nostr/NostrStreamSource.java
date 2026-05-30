@@ -1,0 +1,302 @@
+package app.zcat.infochat.collector.stream.nostr;
+
+import app.zcat.infochat.collector.outbox.EvalQueueProducer;
+import app.zcat.infochat.collector.outbox.PostPersister;
+import app.zcat.infochat.collector.stream.StreamSourceSupervisor;
+import app.zcat.infochat.core.ingest.NormalizedPost;
+import app.zcat.infochat.core.ingest.StreamSource;
+import app.zcat.infochat.core.log.SafeLog;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import io.quarkus.runtime.Startup;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.Priority;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.jspecify.annotations.NonNull;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.sql.DataSource;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.OptionalLong;
+import java.util.UUID;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
+
+/**
+ * The Nostr ingest worker: one {@link StreamSource} per {@code kind='nostr'}
+ * source. {@link #start} fans out to one {@link NostrRelayConnection} per
+ * configured relay and runs a single delivery loop that maps each received
+ * {@link NostrEvent} to a {@link NormalizedPost} and hands it to the outbox
+ * callback. {@link #stop} tears the relays down, drains the buffered events,
+ * and joins the delivery loop so no callback fires after it returns.
+ *
+ * <p>Construction is per-source and carries the relay list, the {@code since}
+ * cursor supplier, and the backoff bounds — none of which the {@link
+ * StreamSource} SPI's {@code start} parameters convey. The nested {@link
+ * Registrar} is the startup bean that reads those from each source row and
+ * registers a worker per source with the {@link StreamSourceSupervisor}.</p>
+ */
+public final class NostrStreamSource implements StreamSource {
+
+    private static final Logger LOG = LoggerFactory.getLogger(NostrStreamSource.class);
+
+    // Delivery-loop wake cadence: how often it re-checks the stop flag while
+    // the inbound queue is idle. Short enough that stop()/drain is prompt.
+    private static final Duration DELIVERY_POLL = Duration.ofMillis(100);
+
+    // Cap on parsed-but-not-yet-delivered events held in memory per source.
+    // A hostile relay can flood EVENT frames faster than PostPersister drains
+    // (~10ms/write); without a cap the queue grows unboundedly until OOM.
+    // Drop-on-overflow rather than back-pressure: the WebSocket listener
+    // thread is a shared executor slot and must not block. Dropped events
+    // replay on reconnect via the since cursor.
+    static final int INBOUND_CAPACITY = 10_000;
+
+    private final List<URI> relayUris;
+    private final Supplier<OptionalLong> sinceCursor;
+    private final Duration backoffBase;
+    private final Duration backoffMax;
+    private final HttpClient httpClient;
+
+    private final List<NostrRelayConnection> connections = new ArrayList<>();
+    private final BlockingQueue<NostrEvent> inbound = new LinkedBlockingQueue<>(INBOUND_CAPACITY);
+    private final AtomicLong droppedEvents = new AtomicLong();
+
+    private volatile boolean delivering;
+    private volatile Thread deliveryThread;
+    private long sourceId;
+    private Consumer<NormalizedPost> deliver;
+
+    NostrStreamSource(@NonNull List<URI> relayUris, @NonNull Supplier<OptionalLong> sinceCursor,
+                      @NonNull Duration backoffBase, @NonNull Duration backoffMax,
+                      @NonNull HttpClient httpClient) {
+        this.relayUris = List.copyOf(relayUris);
+        this.sinceCursor = sinceCursor;
+        this.backoffBase = backoffBase;
+        this.backoffMax = backoffMax;
+        this.httpClient = httpClient;
+    }
+
+    @Override
+    public void start(long sourceId, @NonNull String filterSpec, @NonNull Consumer<NormalizedPost> deliver) {
+        this.sourceId = sourceId;
+        this.deliver = deliver;
+        this.delivering = true;
+        this.deliveryThread = Thread.ofVirtual()
+                .name("nostr-deliver-" + sourceId)
+                .start(this::deliveryLoop);
+        for (URI relayUri : relayUris) {
+            NostrRelayConnection connection = new NostrRelayConnection(
+                    relayUri, filterSpec, sinceCursor, this::enqueueInbound, backoffBase, backoffMax, httpClient);
+            connections.add(connection);
+            connection.start();
+        }
+    }
+
+    private boolean enqueueInbound(NostrEvent event) {
+        boolean accepted = inbound.offer(event);
+        if (!accepted) {
+            long total = droppedEvents.incrementAndGet();
+            // Log first drop and every 100th thereafter so a flood doesn't
+            // drown operator logs. No SafeLog: msg is operator-authored.
+            if (total == 1 || total % 100 == 0) {
+                LOG.warn("Nostr inbound queue full (cap={}); dropped {} event(s) cumulative for source {}",
+                        INBOUND_CAPACITY, total, sourceId);
+            }
+        }
+        return accepted;
+    }
+
+    @Override
+    public void stop() {
+        // Stop the relays first so no further events are enqueued, then let
+        // the delivery loop drain what is already buffered and exit.
+        for (NostrRelayConnection connection : connections) {
+            connection.stop();
+        }
+        delivering = false;
+        Thread thread = deliveryThread;
+        if (thread != null) {
+            try {
+                thread.join();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    private void deliveryLoop() {
+        try {
+            while (delivering || !inbound.isEmpty()) {
+                NostrEvent event = inbound.poll(DELIVERY_POLL.toMillis(), TimeUnit.MILLISECONDS);
+                if (event != null) {
+                    deliverOne(event);
+                }
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private void deliverOne(NostrEvent event) {
+        try {
+            deliver.accept(event.toNormalizedPost(sourceId, Instant.now()));
+        } catch (RuntimeException e) {
+            // A failed outbox write (e.g. JDBC down) must not kill the stream;
+            // the post reappears on reconnect via the since cursor. Mirrors
+            // FetchScheduler.tickOnce's per-source failure isolation. SafeLog
+            // because the underlying SQLException can echo bound parameters
+            // (relay-supplied content) per security.md §Secrets handling.
+            SafeLog.warn(LOG, "Nostr outbox delivery failed for event " + event.id(), e);
+        }
+    }
+
+    /**
+     * Startup wiring: enumerate every active {@code kind='nostr'} source,
+     * build a per-source {@link NostrStreamSource} from its {@code config.relays}
+     * and filter {@code identifier}, and register it with the supervisor.
+     *
+     * <p>Runs at {@code @Priority(460)} — after the {@link StreamSourceSupervisor}
+     * ({@code 450}) is initialized and after BootstrapLoader ({@code 200}) has
+     * seeded the {@code source} rows. Registration is async (the supervisor
+     * submits each {@code start()} to a virtual thread), so a relay unreachable
+     * at boot never blocks Collector startup.</p>
+     */
+    @Startup
+    @Priority(460)
+    @ApplicationScoped
+    static class Registrar {
+
+        @Inject
+        StreamSourceSupervisor supervisor;
+
+        @Inject
+        DataSource dataSource;
+
+        @Inject
+        PostPersister postPersister;
+
+        @Inject
+        EvalQueueProducer evalQueueProducer;
+
+        @ConfigProperty(name = "infochat.stream.nostr.reconnect-base-delay")
+        Duration backoffBase;
+
+        @ConfigProperty(name = "infochat.stream.nostr.reconnect-max-delay")
+        Duration backoffMax;
+
+        // One shared client (and its executor) across every relay of every
+        // nostr source; relay connections only subscribe and read.
+        private final HttpClient httpClient = HttpClient.newHttpClient();
+
+        @PostConstruct
+        void registerNostrSources() {
+            List<NostrSourceRow> rows;
+            try {
+                rows = enumerateNostrSources();
+            } catch (SQLException e) {
+                SafeLog.error(LOG, "Failed to enumerate nostr sources; none registered", e);
+                return;
+            }
+            long dispatchKey = 1L;
+            for (NostrSourceRow row : rows) {
+                List<URI> relays = parseRelays(row);
+                if (relays.isEmpty()) {
+                    LOG.warn("Nostr source {} has no relays in config; skipping registration", row.id());
+                    continue;
+                }
+                Supplier<OptionalLong> since = () -> latestPublishedAtEpochSeconds(row.id());
+                NostrStreamSource worker =
+                        new NostrStreamSource(relays, since, backoffBase, backoffMax, httpClient);
+                UUID sourceUuid = row.id();
+                Consumer<NormalizedPost> deliver =
+                        post -> postPersister.persist(sourceUuid, post).ifPresent(evalQueueProducer::emit);
+                supervisor.register(dispatchKey++, row.identifier(), worker, deliver);
+                LOG.info("Registered NostrStreamSource for source {} across {} relay(s)",
+                        sourceUuid, relays.size());
+            }
+        }
+
+        private List<NostrSourceRow> enumerateNostrSources() throws SQLException {
+            final String sql =
+                    "SELECT id, identifier, config FROM source "
+                            + "WHERE kind = 'nostr' "
+                            + "  AND status = 'active' "
+                            + "  AND deleted_at IS NULL "
+                            + "ORDER BY added_at, id";
+            List<NostrSourceRow> rows = new ArrayList<>();
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement ps = conn.prepareStatement(sql);
+                 ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    rows.add(new NostrSourceRow(
+                            (UUID) rs.getObject(1), rs.getString(2), rs.getString(3)));
+                }
+            }
+            return rows;
+        }
+
+        private List<URI> parseRelays(NostrSourceRow row) {
+            List<URI> relays = new ArrayList<>();
+            try {
+                JsonNode config = NostrMessage.MAPPER.readTree(row.config());
+                JsonNode relayArray = config.get("relays");
+                if (relayArray == null || !relayArray.isArray()) {
+                    return relays;
+                }
+                for (JsonNode relay : relayArray) {
+                    relays.add(URI.create(relay.asText()));
+                }
+            } catch (RuntimeException | JsonProcessingException e) {
+                // config is JSONB deserialized from the DB — a system boundary.
+                // A malformed relay list disables this one source rather than
+                // failing Collector startup.
+                SafeLog.warn(LOG, "Nostr source " + row.id() + " has an unparseable config.relays; skipping", e);
+                return List.of();
+            }
+            return relays;
+        }
+
+        private OptionalLong latestPublishedAtEpochSeconds(UUID sourceUuid) {
+            final String sql = "SELECT MAX(published_at) FROM post WHERE source_id = ?";
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setObject(1, sourceUuid);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        Timestamp maxPublished = rs.getTimestamp(1);
+                        if (maxPublished != null) {
+                            return OptionalLong.of(maxPublished.toInstant().getEpochSecond());
+                        }
+                    }
+                }
+            } catch (SQLException e) {
+                // No cursor on failure: the reconnect omits `since` and the
+                // relay replays from its own default window.
+                SafeLog.warn(LOG, "Failed to read since cursor for nostr source " + sourceUuid, e);
+            }
+            return OptionalLong.empty();
+        }
+    }
+
+    /** One enumerated {@code kind='nostr'} source row: id, filter spec, raw config JSON. */
+    record NostrSourceRow(@NonNull UUID id, @NonNull String identifier, @NonNull String config) {
+    }
+}
