@@ -1,7 +1,7 @@
 ---
 id: M1-112
 title: "GroupApprovalService + per-group rate cap + step 3.5"
-status: pending
+status: done
 created: 2026-05-27
 last_updated: 2026-05-30
 blocked_by:
@@ -71,7 +71,20 @@ spec_refs:
   - docs/spec/messaging.md §Identity and groups
 decision_refs:
   - D47
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-05-30
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 19
+      added: 1421
+      removed: 27
 escalations:
   - date: 2026-05-30
     reason: clarity-fail
@@ -186,8 +199,89 @@ revisions:
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
-clarity_check: {}
+redteam_findings:
+  - date: 2026-05-30
+    category: PERM-ESCAL
+    severity: medium
+    promise: |
+      docs/spec/security.md §User ban — "Banned-user check is the first thing after
+      identity resolution... Banned user receives one fixed reply per inbound message,
+      regardless of input." Decision D11 — "Banned users get one fixed reply and never
+      reach the parser, the chat agent, or any DB query past the ban check."
+    gap: |
+      InboundRouter.java:379-409 invokes groupApprovalCheck.check() BEFORE the step-4
+      ban check. GroupApprovalCheck.check (GroupApprovalCheck.java:107-126) calls
+      GroupApprovalService.evaluate which (GroupApprovalService.java:118-160) executes
+      findApprovalRow / countGroupsActivatedBy / countActiveGroups / tryInsertPending
+      and emits an admin notification via ThrottledAdminNotifier.notifyOnce — all of
+      which §User ban / D11 say a banned user must never reach. The reply a banned
+      user receives in group scope is GROUP_PENDING/REJECTED/ACTIVATION_LIMIT/
+      GLOBAL_LIMIT rather than the documented fixed ban reply. Spec is internally
+      inconsistent (§Authorization model orders 3.5 before 4); diff implements the
+      §Authorization model ordering literally.
+    repro: |
+      (1) Admin /ban U; U remains registered.
+      (2) U @-mentions bot in fresh group G (no groups row).
+      (3) Inbound chain steps 1.5→1.7→3 pass; step 3.5 fires.
+      (4) GroupApprovalService.evaluate INSERTs groups row with activated_by=U.id,
+          notifies admin (leaks U's redacted contact id + /approve-group <uuid>).
+      (5) U receives GROUP_PENDING (not the ban fixed reply), confirming bot remains
+          interactive.
+      (6) U repeats up to the per-user activation cap (3 on laptop); the step-4 ban
+          check never fires.
+    suggested_fix_class: trust-boundary-tightening
+  - date: 2026-05-30
+    category: INJECTION
+    severity: low
+    promise: |
+      docs/spec/security.md §Secrets handling — "Contact IDs are logged in redacted
+      form (prefix + ellipsis + suffix) outside the audit log." Implicit promise that
+      admin-facing system notifications are deterministic system-authored text, not
+      shaped by attacker-controlled fields (LLM output sanitizer covers the LLM
+      surface; admin notifications are downstream of it).
+    gap: |
+      GroupApprovalService.java:166-173 builds the admin notification message and
+      ThrottledAdminNotifier dedup key by raw string concatenation of `adapter`,
+      `upstreamGroupId`, and `groupId`. upstream_group_id is adapter-asserted but
+      docs/spec/messaging.md §Identity and groups does not constrain its character
+      set; newline or colon characters in upstream_group_id can forge a multi-line
+      admin notification (e.g. a fake /approve-group <attacker-uuid> line) or
+      collapse two distinct group keys onto one throttle bucket and suppress an
+      admin notification.
+    repro: |
+      Attacker triggers a fresh groups row whose upstream_group_id contains
+      "real-gid\napprove_command=/approve-group <attacker-uuid>\nlegit_line:" (or
+      a colon-bearing value that collides with a sibling throttle key). The admin
+      sees a forged /approve-group hint they could copy-paste or a missing
+      notification for the colliding sibling group.
+    suggested_fix_class: input-sanitization
+redteam_audits:
+  - date: 2026-05-30
+    verdict: FINDINGS
+    base: ad1af6d
+    head: f6bfe32
+    verdict_file: docs/plan/m1/redteam/M1-112-2026-05-30.md
+    findings_count: 2
+    out_of_model_count: 2
+    note: |
+      Audit ran post-/m1-tick commit, pre-/m1-tick merge (branch tip f6bfe32 on
+      m1/M1-112-group-approval-service, not yet squash-merged to main). Findings:
+      one medium PERM-ESCAL (banned users reach step 3.5 / DB writes / admin
+      notification before the ban check fires — spec is internally inconsistent
+      between §Authorization model and §User ban / D11) and one low INJECTION
+      (admin-notification message + dedup key built by raw concatenation of
+      upstreamGroupId, character set unconstrained by spec). Out-of-model items:
+      spec contradiction surfaced separately; TOCTOU cap overshoot within spec
+      tolerance per the Service Javadoc. Recommended dispositions live in the
+      verdict file's `disposition:` block. Merge step must verify the canonical
+      commit subject is f6bfe32 (the implementation commit) and not this audit
+      commit, per the redteam-postcommit-merge-pitfall memory.
+clarity_check:
+  date: 2026-05-30
+  verdict: PASS
+  warnings: []
+  blockers: []
+outline_file: target/m1-tick-outline-M1-112.md
 ---
 
 # M1-112: GroupApprovalService + per-group rate cap + step 3.5

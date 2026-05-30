@@ -3,10 +3,12 @@ package app.zcat.infochat.provider.messaging;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.jspecify.annotations.NonNull;
 
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -59,25 +61,59 @@ public class RateCapBucket {
     @ConfigProperty(name = "infochat.rate-cap.eviction-threshold", defaultValue = "PT10M")
     Duration evictionThreshold;
 
+    // D47 step 3.5 (M1-112). Per-group reply bucket shared across
+    // approval states — bounds outbound adapter-send cost on pending /
+    // rejected / approved groups alike. Window is fixed at 15 minutes
+    // by the property name; the refill-window key is declared with a
+    // default so tests can construct against a controllable clock.
+    @ConfigProperty(name = "infochat.ratelimit.group-reply-per-15min", defaultValue = "10")
+    int groupReplyCap;
+
+    @ConfigProperty(name = "infochat.ratelimit.group-reply-refill-window", defaultValue = "PT15M")
+    Duration groupReplyRefillWindow;
+
     private Clock clock = Clock.systemUTC();
 
     private final ConcurrentHashMap<Key, Bucket> buckets = new ConcurrentHashMap<>();
+
+    // D47 per-group bucket map. Eviction shares the contact-bucket
+    // sweep below; the predicate (idle past evictionThreshold) is
+    // key-shape-independent.
+    private final ConcurrentHashMap<UUID, Bucket> groupBuckets = new ConcurrentHashMap<>();
 
     public RateCapBucket() {
         // CDI no-arg constructor; @ConfigProperty fields populated post-construction.
     }
 
     /**
-     * Test seam. Plain-JUnit tests bypass CDI and instantiate the
-     * bean with a controllable {@link Clock} and explicit
-     * cap/window/eviction values. Package-private — the rest of the
-     * provider tree consumes the bean via CDI.
+     * Test seam (contact bucket only). Plain-JUnit tests bypass CDI and
+     * instantiate the bean with a controllable {@link Clock} and
+     * explicit cap/window/eviction values. Group-bucket defaults match
+     * the application-properties laptop values so tests that don't care
+     * about group buckets still construct cleanly. Package-private —
+     * the rest of the provider tree consumes the bean via CDI.
      */
     RateCapBucket(Clock clock, int inboundPerMinute, Duration refillWindow, Duration evictionThreshold) {
+        this(clock, inboundPerMinute, refillWindow, evictionThreshold, 10, Duration.ofMinutes(15));
+    }
+
+    /**
+     * Test seam (contact + group buckets). New for M1-112 so
+     * {@code GroupApprovalCheckTest} can drive the bucket-exhausted
+     * scenario with a small cap against a controllable clock.
+     */
+    RateCapBucket(Clock clock,
+                  int inboundPerMinute,
+                  Duration refillWindow,
+                  Duration evictionThreshold,
+                  int groupReplyCap,
+                  Duration groupReplyRefillWindow) {
         this.clock = clock;
         this.inboundPerMinute = inboundPerMinute;
         this.refillWindow = refillWindow;
         this.evictionThreshold = evictionThreshold;
+        this.groupReplyCap = groupReplyCap;
+        this.groupReplyRefillWindow = groupReplyRefillWindow;
     }
 
     /**
@@ -112,6 +148,38 @@ public class RateCapBucket {
     }
 
     /**
+     * D47 step 3.5 (M1-112). Per-group reply bucket — token-bucket
+     * keyed on {@code groups.id}. The bucket is shared across approval
+     * states so a pending or rejected group's fixed-reply outputs
+     * count against the same budget as approved-group processing.
+     * Exhaustion returns {@code false}; the caller silently drops the
+     * @-mention with no reply per spec §Rate limiting per-group reply.
+     *
+     * <p>Refill cadence and cap are independent of the contact bucket
+     * — the group cap is per-15-minutes by design, the contact cap is
+     * per-minute. The two maps share the eviction sweep below.</p>
+     */
+    public boolean tryAcquireGroupReply(@NonNull UUID groupId) {
+        Bucket bucket = groupBuckets.computeIfAbsent(
+                groupId, k -> new Bucket(groupReplyCap, clock.millis()));
+        synchronized (bucket) {
+            long now = clock.millis();
+            long elapsed = Math.max(0L, now - bucket.lastRefillEpochMillis);
+            long windowMs = groupReplyRefillWindow.toMillis();
+            long refillCount = elapsed * (long) groupReplyCap / windowMs;
+            if (refillCount > 0) {
+                bucket.tokens = (int) Math.min((long) groupReplyCap, (long) bucket.tokens + refillCount);
+                bucket.lastRefillEpochMillis += refillCount * windowMs / (long) groupReplyCap;
+            }
+            if (bucket.tokens > 0) {
+                bucket.tokens--;
+                return true;
+            }
+            return false;
+        }
+    }
+
+    /**
      * Periodically evict idle buckets to bound memory. Quarkus runtime
      * invokes this method on the scheduler thread; plain-JUnit tests
      * never see it fire (no scheduler runtime).
@@ -129,11 +197,20 @@ public class RateCapBucket {
      * restart would produce. See the /redteam M1-044a DOS finding
      * (docs/plan/m1/redteam/M1-044a-2026-05-21.md) and M1-044b's
      * Implementation notes §"Rate-cap eviction-predicate fix".</p>
+     *
+     * <p>Sweeps both the contact map and the group map under the same
+     * threshold — the predicate is key-shape independent.</p>
      */
     @Scheduled(every = "{infochat.rate-cap.sweep-interval:5m}")
     void evictIdleBuckets() {
         long thresholdEpochMillis = clock.millis() - evictionThreshold.toMillis();
         buckets.entrySet().removeIf(entry -> {
+            Bucket bucket = entry.getValue();
+            synchronized (bucket) {
+                return bucket.lastRefillEpochMillis < thresholdEpochMillis;
+            }
+        });
+        groupBuckets.entrySet().removeIf(entry -> {
             Bucket bucket = entry.getValue();
             synchronized (bucket) {
                 return bucket.lastRefillEpochMillis < thresholdEpochMillis;

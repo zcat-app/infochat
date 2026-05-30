@@ -349,7 +349,16 @@ Invariants (also enforced in `schema.md`):
   transaction. This avoids a permanent group-admin lockout when the
   current admin is banned and `/unban` is not desired.
 
-Authorization evaluation order on every inbound message:
+Authorization evaluation order on every inbound message.
+
+**Step labels are stable cross-reference identifiers, not execution-order
+indices.** Steps below are numbered for downstream references (code
+comments, ticket bodies, design notes); the numeric order matches
+execution order EXCEPT that **step 4 (ban check) executes after step 3
+and before step 3.5** — a banned user reaching the group `@mention` path
+short-circuits at step 4 with the fixed ban reply, before any group
+approval check, per-group rate-cap consumption, or group-related DB
+write. All other steps execute in numeric order.
 
 1. Resolve identity from the adapter.
 1.5. **Transport-level rate cap.** Apply the per-`(adapter,
@@ -403,9 +412,20 @@ Authorization evaluation order on every inbound message:
      unregistered contacts in groups. The auto-registration path
      is removed by D47.
    - If a user row exists with `registration_state IN ('invited',
-     'vouched')`: proceed to step 3.5.
-3.5. **Group — approval check + per-group rate cap (D47).** Look
-   up the `groups` row by `(adapter, upstream_group_id)`.
+     'vouched')`: proceed to step 4 (ban check) before step 3.5.
+4. **Ban check.** If `is_banned=true`: fixed reply, stop. No parser, no DB
+   query past the ban check, no LLM. **Execution position:** step 4
+   fires after step 3 (registered/preban filter) and BEFORE step 3.5
+   (group approval); the numeric label is retained as a stable
+   cross-reference identifier — see the execution-order note at the
+   top of this section. DM-scope and group-scope inbound both reach
+   this step before any group approval check or group-related DB
+   write.
+3.5. **Group — approval check + per-group rate cap (D47).** A banned
+   user has already short-circuited at step 4 with the fixed ban
+   reply; this step only fires for non-banned, registered users in
+   group scope. Look up the `groups` row by
+   `(adapter, upstream_group_id)`.
 
    **Per-group reply rate cap.** Before sending any reply (fixed or
    command), check the per-group reply rate bucket. If the bucket
@@ -442,9 +462,7 @@ Authorization evaluation order on every inbound message:
    - If the row exists and `approval_status = 'rejected'`: send the
      fixed "this group was rejected by an admin" reply and stop.
    - If the row exists and `approval_status = 'approved'`: proceed
-     to step 4.
-4. **Ban check.** If `is_banned=true`: fixed reply, stop. No parser, no DB
-   query past the ban check, no LLM.
+     to step 4.1 (auto-promote / membership) and on to step 5+.
 5. (reserved — body normalization moved to step 1.7 so the
    invite-code consume in step 2 sees the normalized form. Step
    numbering preserved for cross-reference stability.)

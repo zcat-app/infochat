@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 13 |
+| pending | 12 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 131 |
+| done | 132 |
 | deferred | 3 |
 | **total** | **147** |
 
@@ -29,7 +29,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-101 — SSRF guard for wss:// relay connections (complexity: low, risk: low)
 - M1-103 — SimpleX subprocess + WebSocket messaging (complexity: high, risk: high)
 - M1-108 — Signal mention recognition + group support (complexity: medium, risk: medium)
-- M1-112 — GroupApprovalService + per-group rate cap + step 3.5 (complexity: high, risk: high)
+- M1-113 — D47 admin commands — approve-group, reject-group, list-groups (complexity: medium, risk: low)
 
 ---
 
@@ -51,7 +51,6 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 - M1-104 — blocked_by: M1-103 (pending)
 - M1-105 — blocked_by: M1-103 (pending)
 - M1-109 — blocked_by: M1-108 (pending), M1-105 (pending)
-- M1-113 — blocked_by: M1-112 (pending)
 - M1-114 — blocked_by: M1-113 (pending)
 
 ---
@@ -72,6 +71,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-094 | Fetcher failure ladder (D42) | 2026-05-31 | round 1 APPROVE |
+| M1-112 | GroupApprovalService + per-group rate cap + step 3.5 | 2026-05-30 | round 1 APPROVE |
 | M1-107 | Signal signal-cli JSON-RPC subprocess | 2026-05-30 | round 1 APPROVE |
 | M1-106 | Signal adapter skeleton — capabilities and ACI | 2026-05-30 | round 2 APPROVE |
 | M1-102 | SimpleX adapter skeleton — capabilities and config | 2026-05-30 | round 2 APPROVE |
@@ -80,7 +80,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-093 | post_reference DDL + LinkingJob + tool wiring | 2026-05-30 | round 2 APPROVE |
 | M1-092 | post_entity DDL + EntityExtractor pipeline stage | 2026-05-30 | round 2 APPROVE |
 | M1-117 | Amend docs/spec/schema.md §Identity and access | 2026-05-29 | round 1 APPROVE |
-| M1-116 | Remediate D47 migration: map legacy group_only rows to preban, not invited | 2026-05-29 | round 2 APPROVE |
 
 ---
 
@@ -290,8 +289,8 @@ M1-106 (done)
               └── M1-109 (pending) [see above]
 M1-110 (done)
   └── M1-111 (done)
-        ├── M1-112 (pending) ← runnable
-        │     └── M1-113 (pending)
+        ├── M1-112 (done)
+        │     └── M1-113 (pending) ← runnable
         │           └── M1-114 (pending)
         └── M1-116 (done)
 M1-115 (done)

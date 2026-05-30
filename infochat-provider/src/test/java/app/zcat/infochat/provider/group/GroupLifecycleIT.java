@@ -208,11 +208,15 @@ class GroupLifecycleIT {
     }
 
     private UUID seedGroup(Connection conn) throws Exception {
+        // approval_status='approved' (M1-112): bypass the D47 step-3.5
+        // gate so lifecycle scenarios reach step 4.1 auto-promote and
+        // beyond. ON CONFLICT overwrites the column so a row carried
+        // over from a prior test run is also normalized to approved.
         try (PreparedStatement ps = conn.prepareStatement(
-                "INSERT INTO groups (adapter, upstream_group_id, display_name) "
-              + "VALUES (?, ?, 'lifecycle-test') "
+                "INSERT INTO groups (adapter, upstream_group_id, display_name, approval_status) "
+              + "VALUES (?, ?, 'lifecycle-test', 'approved') "
               + "ON CONFLICT (adapter, upstream_group_id) DO UPDATE "
-              + "  SET removed_at = NULL "
+              + "  SET removed_at = NULL, approval_status = 'approved' "
               + "RETURNING id")) {
             ps.setString(1, ADAPTER);
             ps.setString(2, GROUP_UPSTREAM_ID);

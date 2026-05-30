@@ -940,6 +940,26 @@ public final class BundleKeys {
     /** {@code /audit} with zero matching rows. */
     public static final String REPLY_AUDIT_EMPTY = "reply.audit.empty";
 
+    // ----- D47 group approval gate (M1-112) ----------------------------------
+    // Per docs/spec/security.md §Authorization model step 3.5 +
+    // docs/spec/messaging.md §Identity and groups + docs/design/04-security.md
+    // §4.9 (per-user activation cap + global max-groups). The four keys back
+    // the InboundRouter step-3.5 short-circuits + GroupApprovalService cap
+    // rejections. Plain text only — single backticks for inline literals
+    // (e.g. the redacted contact id), no markdown link syntax.
+
+    /** Fixed reply when a group-scope @mention lands in a {@code approval_status='pending'} group (creation + subsequent @mentions until approval). */
+    public static final String GROUP_PENDING = "group.pending";
+
+    /** Fixed reply when a group-scope @mention lands in a {@code approval_status='rejected'} group. */
+    public static final String GROUP_REJECTED = "group.rejected";
+
+    /** Fixed reply when first @mention would exceed the per-user activation cap ({@code infochat.groups.per-user-activation-cap}). */
+    public static final String GROUP_ACTIVATION_LIMIT = "group.activation_limit";
+
+    /** Fixed reply when first @mention would exceed the global max-groups cap ({@code infochat.groups.global-max-groups}). */
+    public static final String GROUP_GLOBAL_LIMIT = "group.global_limit";
+
     private BundleKeys() {
         throw new AssertionError("BundleKeys is a constant holder and must not be instantiated");
     }

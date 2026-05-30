@@ -11,6 +11,7 @@ import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import app.zcat.infochat.provider.command.ConfirmStateService;
+import app.zcat.infochat.provider.group.GroupApprovalCheck;
 import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.util.TypeLiteral;
 import org.junit.jupiter.api.Test;
@@ -29,9 +30,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Pin the intake-step order of {@link InboundRouter#onMessage}
  * against the spec at {@code docs/spec/security.md} §Authorization
- * model. Nine scenarios cover the runnable shape of the splice
+ * model. Ten scenarios cover the runnable shape of the splice
  * (originally M1-044b acceptance item 12; updated by M1-044e for the
- * rate-cap-first and DM-gate-pre-dispatch reorderings):
+ * rate-cap-first and DM-gate-pre-dispatch reorderings; M1-112-redteam
+ * Finding 1 added scenario (i) for the step-4 → step-3.5 ordering
+ * swap that closes the banned-user-in-group PERM-ESCAL gap):
  *
  * <ol>
  *   <li>(a) {@code overSizeCapDropsAfterRateCapPasses} — body exceeds
@@ -65,9 +68,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *       (D47 gate #1).</li>
  *   <li>(h) {@code registeredGroupSenderDispatchesNormally} — Group,
  *       known {@code vouched} contact; flow runs rateCap → normalize
- *       → users lookup → banCheck (false) → handleSlash → dispatch
- *       reply (the step-3 drop does not over-fire for registered
- *       senders).</li>
+ *       → users lookup → banCheck (false) → groupApprovalCheck →
+ *       handleSlash → dispatch reply (the step-3 drop does not over-
+ *       fire for registered senders; step 4 fires BEFORE step 3.5
+ *       per the M1-112-redteam ordering swap).</li>
+ *   <li>(i) {@code bannedRegisteredGroupSenderShortCircuitsAtBanCheckBeforeStep35}
+ *       — Group, registered but banned contact; flow runs rateCap →
+ *       normalize → users lookup → banCheck (true) → ban-fixed reply.
+ *       {@code groupApprovalCheck.check} MUST NOT appear — step 4
+ *       short-circuits before step 3.5, closing the M1-112-redteam
+ *       PERM-ESCAL surface where banned users could trigger group
+ *       row INSERTs and admin notifications before the ban check.</li>
  * </ol>
  *
  * <p>The test is plain JUnit (no {@code @QuarkusTest}) — every
@@ -328,9 +339,55 @@ class InboundRouterIntakeOrderingTest {
                         "rateCapBucket.tryAcquire",
                         "lookupUser",
                         "banCheck.isBanned",
+                        "groupApprovalCheck.check",
                         "handler.handle(help)"),
                 log.calls,
-                "registered group sender falls through step 3 to dispatch; got: " + log.calls);
+                "registered group sender falls through step 3 to dispatch; step 4 (ban) "
+                        + "fires BEFORE step 3.5 (group approval) per spec §Authorization model "
+                        + "execution-order note; got: " + log.calls);
+    }
+
+    // ----- (i) Group @mention from banned, registered contact → ban reply --
+    //
+    // Per spec §Authorization model execution-order note: step 4 (ban
+    // check) fires AFTER step 3 (registered/preban filter) and BEFORE
+    // step 3.5 (group approval). A banned, registered user @-mentioning
+    // in a group short-circuits at step 4 with the fixed ban reply;
+    // GroupApprovalCheck.check MUST NOT be invoked, and no group-related
+    // DB write (groups row INSERT, admin notification, per-group rate-
+    // cap consumption) may fire. This closes the redteam Finding 1
+    // (PERM-ESCAL/medium) gap on M1-112.
+
+    @Test
+    void bannedRegisteredGroupSenderShortCircuitsAtBanCheckBeforeStep35() {
+        CallLog log = new CallLog();
+        InboundRouter router = newRouterWithLog(log,
+                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), true, "vouched")));
+        // BanCheck consults the live row per spec; align the fake with
+        // the snapshot column so the production code's step 4 returns
+        // is_banned=true.
+        ((FakeBanCheck) router.banCheck).banned = true;
+        router.commandHandlers = new SingletonInstance<>(new RecordingCommandHandler(log, "help"));
+        CapturingAdapter target = new CapturingAdapter();
+        router.setReplyTarget(target);
+
+        router.onMessage(groupInbound(GROUP_ID, GROUP_CONTACT, "/help"), ADAPTER);
+
+        assertEquals(1, target.captured.size(),
+                "banned-in-group path must produce exactly one ban-fixed reply; got: " + target.captured);
+        assertEquals(FakeBundleLoader.stubFor(BundleKeys.ERROR_BAN_FIXED),
+                target.captured.get(0).text(),
+                "banned-in-group reply must equal the error.ban.fixed bundle entry — step 4 wins");
+        assertEquals(
+                List.of(
+                        "setAdapterName",
+                        "rateCapBucket.tryAcquire",
+                        "lookupUser",
+                        "banCheck.isBanned",
+                        "bundleLoader.get(error.ban.fixed)"),
+                log.calls,
+                "banned group sender must short-circuit at step 4 BEFORE step 3.5 — "
+                        + "groupApprovalCheck.check and handler.handle MUST NOT appear; got: " + log.calls);
     }
 
     // ----- helpers + fakes ------------------------------------------------
@@ -382,6 +439,13 @@ class InboundRouterIntakeOrderingTest {
         // NoopConfirmStateService above).
         router.commandPermissions = new NoopCommandPermissions();
         router.probationCheck = new NoopProbationCheck();
+        // M1-112: step 3.5 D47 approval gate. The recording fake logs
+        // "groupApprovalCheck.check" into the CallLog ONLY when the
+        // router's step-3.5 branch actually fires (group scope +
+        // snapshot present). DM scenarios and unregistered-group
+        // scenarios bypass step 3.5 entirely, so this fake emits no
+        // log entry in those cases.
+        router.groupApprovalCheck = new RecordingGroupApprovalCheck(log);
         router.summaryAnchorRepository = new SummaryAnchorRepository() {
             @Override public void clear(UUID userId, UUID scopeId) {}
         };
@@ -481,6 +545,30 @@ class InboundRouterIntakeOrderingTest {
         public boolean isBanned(String adapter, String contactId) {
             log.calls.add("banCheck.isBanned");
             return banned;
+        }
+    }
+
+    /**
+     * Records {@code groupApprovalCheck.check} (M1-112). Returns
+     * {@link GroupApprovalCheck.Outcome.Approved} so the dispatch falls
+     * through to step 4. The recording variant lives here because the
+     * package-level {@link NoopGroupApprovalCheck} is deliberately
+     * log-silent — the per-step call-order assertions in scenario (h)
+     * (registeredGroupSenderDispatchesNormally) pin the precise
+     * sequence including the new step-3.5 entry.
+     */
+    private static final class RecordingGroupApprovalCheck extends GroupApprovalCheck {
+        private final CallLog log;
+
+        RecordingGroupApprovalCheck(CallLog log) {
+            this.log = log;
+        }
+
+        @Override
+        public Outcome check(String adapter, String upstreamGroupId,
+                             UUID activatorUserId, String activatorRedactedContactId) {
+            log.calls.add("groupApprovalCheck.check");
+            return new Outcome.Approved();
         }
     }
 

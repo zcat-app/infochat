@@ -13,6 +13,7 @@ import app.zcat.infochat.provider.command.AssetCommandFamilyOracle;
 import app.zcat.infochat.provider.command.CommandPermissions;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import app.zcat.infochat.provider.command.ConfirmStateService;
+import app.zcat.infochat.provider.group.GroupApprovalCheck;
 import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.util.TypeLiteral;
 import org.junit.jupiter.api.Test;
@@ -255,6 +256,7 @@ class InboundRouterProbationOrderingTest {
                         "rateCapBucket.tryAcquire",
                         "lookupUser",
                         "banCheck.isBanned",
+                        "groupApprovalCheck.check",
                         "probationCheck.inProbation",
                         "commandPermissions.allowedDuringProbation(add-source)",
                         "probationCheck.probationExpiry",
@@ -324,6 +326,12 @@ class InboundRouterProbationOrderingTest {
         router.confirmStateService = new NoopConfirmStateService();
         router.commandPermissions = new RecordingCommandPermissions(log, allowedDuringProbation);
         router.probationCheck = new RecordingProbationCheck(log, inProbation, probationExpiry);
+        // M1-112: step 3.5 D47 approval gate. The recording fake logs
+        // "groupApprovalCheck.check" into the CallLog ONLY when the
+        // router's step-3.5 branch actually fires (group scope +
+        // snapshot present). DM scenarios and unregistered-group
+        // scenarios bypass step 3.5, so no spurious log entry appears.
+        router.groupApprovalCheck = new RecordingGroupApprovalCheck(log);
         router.summaryAnchorRepository = new SummaryAnchorRepository() {
             @Override public void clear(UUID userId, UUID scopeId) {}
         };
@@ -372,6 +380,12 @@ class InboundRouterProbationOrderingTest {
         router.confirmStateService = new NoopConfirmStateService();
         router.commandPermissions = new RecordingCommandPermissions(log, true);
         router.probationCheck = new RecordingProbationCheck(log, false, null);
+        // M1-112: step 3.5 D47 approval gate. The recording fake logs
+        // "groupApprovalCheck.check" into the CallLog ONLY when the
+        // router's step-3.5 branch actually fires (group scope +
+        // snapshot present). DM scenarios and unregistered-group
+        // scenarios bypass step 3.5, so no spurious log entry appears.
+        router.groupApprovalCheck = new RecordingGroupApprovalCheck(log);
         router.summaryAnchorRepository = new SummaryAnchorRepository() {
             @Override public void clear(UUID userId, UUID scopeId) {}
         };
@@ -421,6 +435,30 @@ class InboundRouterProbationOrderingTest {
         public boolean isBanned(String adapter, String contactId) {
             log.calls.add("banCheck.isBanned");
             return banned;
+        }
+    }
+
+    /**
+     * Records {@code groupApprovalCheck.check} (M1-112). Returns
+     * {@link GroupApprovalCheck.Outcome.Approved} so dispatch falls
+     * through to step 4. The recording variant lives here because the
+     * package-level {@link NoopGroupApprovalCheck} is deliberately
+     * log-silent — scenario (g)
+     * (registeredGroupSenderInProbationStillHitsProbationGate) pins
+     * the precise sequence including the new step-3.5 entry.
+     */
+    private static final class RecordingGroupApprovalCheck extends GroupApprovalCheck {
+        private final CallLog log;
+
+        RecordingGroupApprovalCheck(CallLog log) {
+            this.log = log;
+        }
+
+        @Override
+        public Outcome check(String adapter, String upstreamGroupId,
+                             UUID activatorUserId, String activatorRedactedContactId) {
+            log.calls.add("groupApprovalCheck.check");
+            return new Outcome.Approved();
         }
     }
 

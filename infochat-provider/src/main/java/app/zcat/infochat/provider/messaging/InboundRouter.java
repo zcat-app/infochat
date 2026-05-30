@@ -12,6 +12,7 @@ import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import app.zcat.infochat.provider.command.CommandPermissions;
 import app.zcat.infochat.provider.command.ConfirmStateService;
+import app.zcat.infochat.provider.group.GroupApprovalCheck;
 import app.zcat.infochat.provider.group.GroupAutoPromoteService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.context.control.ActivateRequestContext;
@@ -77,7 +78,28 @@ import java.util.concurrent.atomic.AtomicLong;
  *       falls through carrying the snapshot resolved at step 1;</li>
  *   <li>4 ban check via {@link BanCheck#isBanned}; a banned user
  *       receives the fixed {@code error.ban.fixed} reply and stops
- *       (spec §User ban: "one fixed reply per inbound message");</li>
+ *       (spec §User ban: "one fixed reply per inbound message").
+ *       <b>Execution position:</b> step 4 fires after step 3 and
+ *       BEFORE step 3.5 per spec §Authorization model — a banned
+ *       user in group scope short-circuits here without reaching
+ *       the group approval check or any group-related DB write.
+ *       Step numbers in this list are stable cross-reference labels;
+ *       execution order is the list order;</li>
+ *   <li>3.5 D47 approval gate (M1-112): only reached by non-banned,
+ *       registered users in group scope (step 4 already filtered
+ *       banned). {@link GroupApprovalCheck#check} resolves the
+ *       {@code (adapter, upstream_group_id)} {@code groups} row,
+ *       consults the per-group reply rate bucket, and dispatches on
+ *       {@code approval_status}. {@code approved} falls through to
+ *       step 4.1 (auto-promote); {@code pending}/{@code rejected}
+ *       emit the corresponding fixed bundle reply and stop; bucket
+ *       exhaustion silently drops the @-mention (no reply); a
+ *       missing row triggers cap-checks + race-safe INSERT +
+ *       throttled admin notification inside
+ *       {@link app.zcat.infochat.provider.group.GroupApprovalService}.
+ *       Pending/rejected groups never reach step 4.1 auto-promote — the
+ *       gate is the boundary between "is this a group the bot processes"
+ *       and "what does the bot do with this message";</li>
  *   <li>5 slow-start probation gate (M1-045): if {@link ProbationCheck}
  *       reports {@code inProbation == true} AND the command is NOT in
  *       {@link CommandPermissions}'s allowed-during-probation set, the
@@ -223,6 +245,9 @@ public class InboundRouter {
     GroupAutoPromoteService groupAutoPromoteService;
 
     @Inject
+    GroupApprovalCheck groupApprovalCheck;
+
+    @Inject
     CommandPermissions commandPermissions;
 
     @Inject
@@ -364,11 +389,49 @@ public class InboundRouter {
 
         // Step 4 — ban check per spec §User ban + §Authorization model
         // step 4. The fixed error.ban.fixed reply is sent and dispatch
-        // stops. Fires BEFORE auto-promote/membership so banned users
-        // never trigger application-level DB writes.
+        // stops. Fires AFTER step 3 (registered/preban filter) and
+        // BEFORE step 3.5 (group approval) so a banned user in group
+        // scope short-circuits here without triggering any group-
+        // related DB write (groups row INSERT, admin notification, or
+        // per-group rate-cap consumption). Step numbers are stable
+        // cross-reference labels per spec §Authorization model
+        // "Step labels are stable cross-reference identifiers, not
+        // execution-order indices"; execution order is the source-
+        // code order in this method.
         if (banCheck.isBanned(adapterName, contactId)) {
             sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_BAN_FIXED));
             return;
+        }
+
+        // Step 3.5 — D47 approval gate (M1-112). Group-scope inbound
+        // from a registered (not preban), non-banned user routes
+        // through GroupApprovalCheck.check, which consults the per-
+        // group reply rate bucket then dispatches on approval_status.
+        // Pending / rejected short-circuit with a fixed reply BEFORE
+        // step 4.1 (auto-promote); approved falls through. Banned
+        // users are already filtered at step 4 above and never reach
+        // this block. The null check mirrors the step-4.1 pattern:
+        // plain-JUnit test subclasses that bypass CDI may leave the
+        // field null.
+        if (msg.scope() instanceof ScopeRef.Group group && snapshot.isPresent()
+                && groupApprovalCheck != null) {
+            GroupApprovalCheck.Outcome outcome = groupApprovalCheck.check(
+                    adapterName,
+                    group.adapterGroupId(),
+                    snapshot.get().id(),
+                    ContactIds.redact(contactId));
+            switch (outcome) {
+                case GroupApprovalCheck.Outcome.Approved a -> {
+                    // Fall through to step 4.1 (auto-promote).
+                }
+                case GroupApprovalCheck.Outcome.FixedReply f -> {
+                    sendReply(msg.scope(), bundleLoader.get(f.bundleKey()));
+                    return;
+                }
+                case GroupApprovalCheck.Outcome.SilentDrop s -> {
+                    return;
+                }
+            }
         }
 
         // Step 4.1 — Group membership + auto-promote (M1-079c).

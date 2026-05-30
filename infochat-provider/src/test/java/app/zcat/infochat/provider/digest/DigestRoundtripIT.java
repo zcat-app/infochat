@@ -318,17 +318,21 @@ class DigestRoundtripIT {
                         + " DO UPDATE SET id = EXCLUDED.id, is_admin = TRUE, is_banned = FALSE",
                 USER_1, ADMIN_CONTACT);
 
+        // approval_status='approved' (M1-112): bypass the D47 step-3.5
+        // gate so /retry --digest reaches dispatch. ON CONFLICT
+        // overwrites the column so a row carried over from a prior
+        // test run is also normalized to approved.
         exec(conn,
-                "INSERT INTO groups (id, adapter, upstream_group_id, display_name, timezone)"
-                        + " VALUES (?, 'inmemory', ?, 'Digest IT Group 1', 'UTC')"
+                "INSERT INTO groups (id, adapter, upstream_group_id, display_name, timezone, approval_status)"
+                        + " VALUES (?, 'inmemory', ?, 'Digest IT Group 1', 'UTC', 'approved')"
                         + " ON CONFLICT (adapter, upstream_group_id)"
-                        + " DO UPDATE SET id = EXCLUDED.id, removed_at = NULL",
+                        + " DO UPDATE SET id = EXCLUDED.id, removed_at = NULL, approval_status = 'approved'",
                 GROUP_1, UPSTREAM_G1);
         exec(conn,
-                "INSERT INTO groups (id, adapter, upstream_group_id, display_name, timezone)"
-                        + " VALUES (?, 'inmemory', ?, 'Digest IT Group 2', 'UTC')"
+                "INSERT INTO groups (id, adapter, upstream_group_id, display_name, timezone, approval_status)"
+                        + " VALUES (?, 'inmemory', ?, 'Digest IT Group 2', 'UTC', 'approved')"
                         + " ON CONFLICT (adapter, upstream_group_id)"
-                        + " DO UPDATE SET id = EXCLUDED.id, removed_at = NULL",
+                        + " DO UPDATE SET id = EXCLUDED.id, removed_at = NULL, approval_status = 'approved'",
                 GROUP_2, UPSTREAM_G2);
 
         exec(conn,
