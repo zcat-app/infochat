@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 19 |
+| pending | 18 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 125 |
+| done | 126 |
 | deferred | 3 |
 | **total** | **147** |
 
@@ -28,7 +28,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-094 — Fetcher failure ladder (D42) (complexity: medium, risk: low)
 - M1-096 — NostrStreamSource — JDK WebSocket relay pool (complexity: high, risk: high)
 - M1-102 — SimpleX adapter skeleton — capabilities and config (complexity: medium, risk: medium)
-- M1-106 — Signal adapter skeleton — capabilities and ACI (complexity: medium, risk: medium)
+- M1-107 — Signal signal-cli JSON-RPC subprocess (complexity: high, risk: high)
 - M1-112 — GroupApprovalService + per-group rate cap + step 3.5 (complexity: high, risk: medium)
 
 ---
@@ -54,7 +54,6 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 - M1-103 — blocked_by: M1-102 (pending)
 - M1-104 — blocked_by: M1-103 (pending)
 - M1-105 — blocked_by: M1-103 (pending)
-- M1-107 — blocked_by: M1-106 (pending)
 - M1-108 — blocked_by: M1-107 (pending)
 - M1-109 — blocked_by: M1-108 (pending), M1-105 (pending)
 - M1-113 — blocked_by: M1-112 (pending)
@@ -77,6 +76,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-106 | Signal adapter skeleton — capabilities and ACI | 2026-05-30 | round 2 APPROVE |
 | M1-095 | StreamSourceSupervisor lifecycle and drain framework | 2026-05-30 | round 1 APPROVE |
 | M1-092 | post_entity DDL + EntityExtractor pipeline stage | 2026-05-30 | round 2 APPROVE |
 | M1-117 | Amend docs/spec/schema.md §Identity and access | 2026-05-29 | round 1 APPROVE |
@@ -86,7 +86,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-110 | D47 migration — groups.approval_status + activated_by (additive) | 2026-05-28 | round 1 APPROVE |
 | M1-091 | OdyseeFetcher — Odysee/LBRY RSS feed | 2026-05-26 | round 1 APPROVE |
 | M1-090 | YouTubeFetcher — channel Atom feed | 2026-05-26 | round 2 APPROVE |
-| M1-089 | NitterFetcher — Nitter instance RSS feed | 2026-05-26 | round 2 APPROVE |
 
 ---
 
@@ -290,8 +289,8 @@ M1-102 (pending) ← runnable
         ├── M1-104 (pending)
         └── M1-105 (pending)
               └── M1-109 (pending)
-M1-106 (pending) ← runnable
-  └── M1-107 (pending)
+M1-106 (done)
+  └── M1-107 (pending) ← runnable
         └── M1-108 (pending)
               └── M1-109 (pending) [see above]
 M1-110 (done)

@@ -14,20 +14,26 @@
     <packaging>jar</packaging>
 
     <!--
-         infochat-messaging-adapter is a plain library jar: Provider-side
-         presentation-layer SPI types only (MessagingAdapter,
-         TranslationProvider, ProgressNotifier) plus the supporting enum
-         and records. NO Quarkus extensions in production scope so the SPI
-         surface stays transport-agnostic and the concrete adapters
-         (SimpleX, Signal, InMemory — each in its own Tier-3 ticket) layer
-         the extension they need without forcing every consumer to inherit
-         it. Collector intentionally does NOT depend on this module per
-         docs/design/01-architecture.md §1.2 — only Provider talks to
-         messaging backends. JUnit is BOM-managed via the parent's
-         quarkus-bom import; no <version> appears on dependencies in this
-         POM (M1-001 invariant).
+         infochat-messaging-adapter is a Provider-side library jar: the
+         presentation-layer SPI types (MessagingAdapter, TranslationProvider,
+         ProgressNotifier) plus the supporting enum and records, and the
+         concrete adapters (SimpleX, Signal, InMemory — each in its own
+         Tier-3 ticket). The SPI surface itself stays transport-agnostic; a
+         concrete adapter layers only the dependency it needs. quarkus-arc
+         is present so a config-bearing adapter (SignalConfig: an
+         @ApplicationScoped @Startup bean reading infochat.adapters.signal.*)
+         can self-validate at Provider boot — CDI bean discovery from this
+         jar is Provider-side wiring (M1-035b/M1-105). Collector intentionally
+         does NOT depend on this module per docs/design/01-architecture.md
+         §1.2 — only Provider talks to messaging backends. All versions are
+         BOM-managed via the parent's quarkus-bom import; no <version>
+         appears on dependencies in this POM (M1-001 invariant).
     -->
     <dependencies>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-arc</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
