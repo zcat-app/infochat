@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 12 |
+| pending | 11 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 132 |
+| done | 133 |
 | deferred | 3 |
 | **total** | **147** |
 
@@ -28,7 +28,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-099 — Nostr per-relay degradation + cycle cap (complexity: medium, risk: medium)
 - M1-101 — SSRF guard for wss:// relay connections (complexity: low, risk: low)
 - M1-103 — SimpleX subprocess + WebSocket messaging (complexity: high, risk: high)
-- M1-108 — Signal mention recognition + group support (complexity: medium, risk: medium)
 - M1-113 — D47 admin commands — approve-group, reject-group, list-groups (complexity: medium, risk: low)
 
 ---
@@ -50,7 +49,7 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 - M1-100 — blocked_by: M1-098 (pending), M1-093 (done)
 - M1-104 — blocked_by: M1-103 (pending)
 - M1-105 — blocked_by: M1-103 (pending)
-- M1-109 — blocked_by: M1-108 (pending), M1-105 (pending)
+- M1-109 — blocked_by: M1-108 (done), M1-105 (pending)
 - M1-114 — blocked_by: M1-113 (pending)
 
 ---
@@ -70,6 +69,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-108 | Signal mention recognition + group support | 2026-05-31 | round 1 APPROVE |
 | M1-094 | Fetcher failure ladder (D42) | 2026-05-31 | round 1 APPROVE |
 | M1-112 | GroupApprovalService + per-group rate cap + step 3.5 | 2026-05-30 | round 1 APPROVE |
 | M1-107 | Signal signal-cli JSON-RPC subprocess | 2026-05-30 | round 1 APPROVE |
@@ -79,7 +79,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-095 | StreamSourceSupervisor lifecycle and drain framework | 2026-05-30 | round 1 APPROVE |
 | M1-093 | post_reference DDL + LinkingJob + tool wiring | 2026-05-30 | round 2 APPROVE |
 | M1-092 | post_entity DDL + EntityExtractor pipeline stage | 2026-05-30 | round 2 APPROVE |
-| M1-117 | Amend docs/spec/schema.md §Identity and access | 2026-05-29 | round 1 APPROVE |
 
 ---
 
@@ -285,7 +284,7 @@ M1-102 (done)
               └── M1-109 (pending)
 M1-106 (done)
   └── M1-107 (done)
-        └── M1-108 (pending) ← runnable
+        └── M1-108 (done)
               └── M1-109 (pending) [see above]
 M1-110 (done)
   └── M1-111 (done)

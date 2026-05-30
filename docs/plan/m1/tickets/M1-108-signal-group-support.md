@@ -1,9 +1,9 @@
 ---
 id: M1-108
 title: "Signal mention recognition + group support"
-status: pending
+status: done
 created: 2026-05-26
-last_updated: 2026-05-26
+last_updated: 2026-05-31
 blocked_by:
   - M1-107
 files_budget: 6
@@ -52,12 +52,46 @@ spec_refs:
 decision_refs:
   - D10
   - D46
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-05-31
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 750
+      removed: 13
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-05-31
+    verdict: CLEAN
+    base: 87a72c03^
+    head: 87a72c03
+    verdict_file: docs/plan/m1/redteam/M1-108-2026-05-31.md
+    out_of_model_count: 3
+    note: |
+      CLEAN against the documented threat model. Three OUT-OF-MODEL
+      observations recorded in the verdict file: (1) no UUID-shape
+      validation on signal-cli membership-event ACIs (trusted-side
+      surface), (2) defensive NPE on an envelope missing both
+      timestamps (structurally unreachable from well-formed
+      signal-cli), (3) @mention token not stripped in the adapter
+      (Provider intake handles it per spec).
+clarity_check:
+  date: 2026-05-30
+  verdict: WARN
+  warnings:
+    - "Acceptance item 3 (stable per-group id from Signal's group v2 id) has no dedicated named test method in items 6-11; reviewer must confirm by code read."
+    - "Acceptance item 5 (supportsMembershipEvents is true) is a capability-flag assertion with no named test; confirmed only by reading the capabilities declaration."
+  blockers: []
 ---
 
 # M1-108: Signal mention recognition + group support

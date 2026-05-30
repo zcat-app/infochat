@@ -15,6 +15,8 @@ import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 
+import java.util.Locale;
+
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Socket;
@@ -89,11 +91,13 @@ public final class SignalAdapter implements MessagingAdapter {
     @Nullable private final String binary;
     @Nullable private final String dataDir;
     @Nullable private final String account;
+    @Nullable private final String botAci;
     @Nullable private final InetSocketAddress daemonEndpoint;
 
     @Nullable private volatile SignalSubprocess subprocess;
     @Nullable private volatile SignalJsonRpcClient client;
     @Nullable private volatile InboundHandler handler;
+    @Nullable private volatile MembershipHandler membershipHandler;
 
     /**
      * Capability-introspection constructor used by tests that only
@@ -102,7 +106,11 @@ public final class SignalAdapter implements MessagingAdapter {
      * built with this constructor throws {@link IllegalStateException}.
      */
     public SignalAdapter() {
-        this(null, null, null, null);
+        this.binary = null;
+        this.dataDir = null;
+        this.account = null;
+        this.botAci = null;
+        this.daemonEndpoint = null;
     }
 
     /**
@@ -116,6 +124,11 @@ public final class SignalAdapter implements MessagingAdapter {
      * @param binary         the signal-cli executable path.
      * @param dataDir        the signal-cli data directory.
      * @param account        the signal-cli account identifier (E.164 phone or ACI).
+     * @param botAci         the bot's per-adapter ACI (UUID) — the D10
+     *                       trust anchor for group-mode mention
+     *                       recognition. Resolved by Provider-side
+     *                       wiring (M1-035b/M1-105) via
+     *                       {@link SignalIdentity#resolve}.
      * @param daemonEndpoint the local TCP endpoint signal-cli's
      *                       {@code daemon --tcp host:port} will bind
      *                       and the JSON-RPC client will connect to.
@@ -123,10 +136,16 @@ public final class SignalAdapter implements MessagingAdapter {
     public SignalAdapter(@NonNull String binary,
                          @NonNull String dataDir,
                          @NonNull String account,
+                         @NonNull String botAci,
                          @NonNull InetSocketAddress daemonEndpoint) {
         this.binary = binary;
         this.dataDir = dataDir;
         this.account = account;
+        // Canonicalize at construction so the cross-adapter
+        // (adapter, contact_id) join key from messaging.md §Per-adapter
+        // trust level cannot be broken by case-folding upstream — the
+        // group handler's mention check compares lower-cased ACIs.
+        this.botAci = botAci.toLowerCase(Locale.ROOT);
         this.daemonEndpoint = daemonEndpoint;
     }
 
@@ -153,10 +172,11 @@ public final class SignalAdapter implements MessagingAdapter {
      *         was used or if the start sequence fails.
      */
     public void start() {
-        if (binary == null || dataDir == null || account == null || daemonEndpoint == null) {
+        if (binary == null || dataDir == null || account == null
+                || botAci == null || daemonEndpoint == null) {
             throw new IllegalStateException(
                     "SignalAdapter.start() requires the production constructor "
-                            + "(binary, dataDir, account, daemonEndpoint).");
+                            + "(binary, dataDir, account, botAci, daemonEndpoint).");
         }
         ProcessBuilder pb = new ProcessBuilder(
                 binary,
@@ -256,6 +276,42 @@ public final class SignalAdapter implements MessagingAdapter {
         if (c != null) {
             c.setInboundHandler(handler);
         }
+    }
+
+    /**
+     * Capture Provider's membership-event callback. Signal exposes
+     * member-joined / member-left natively at the group v2 protocol
+     * layer (capability flag {@code supportsMembershipEvents=true}),
+     * so the adapter surfaces these events directly rather than
+     * synthesising them from delivery failures. The dispatch path is
+     * built by {@link #groupHandler()} once Provider has registered
+     * both callbacks; the upstream JSON-RPC reader wiring that drives
+     * the dispatch lands with the multi-adapter integration (M1-109).
+     */
+    @Override
+    public void setMembershipEventHandler(@NonNull MembershipHandler handler) {
+        this.membershipHandler = handler;
+    }
+
+    /**
+     * Build a {@link SignalGroupHandler} that carries the bot's ACI and
+     * the currently-registered inbound and membership callbacks. Returns
+     * a fresh handler each call so a Provider that re-registers
+     * callbacks at runtime sees the latest references; the handler is
+     * stateless so allocation is cheap.
+     *
+     * @return a SignalGroupHandler ready to translate group-scope
+     *         signal-cli notifications.
+     * @throws IllegalStateException if the capability-only constructor
+     *         was used (no botAci available).
+     */
+    SignalGroupHandler groupHandler() {
+        if (botAci == null) {
+            throw new IllegalStateException(
+                    "SignalAdapter.groupHandler() requires the production constructor "
+                            + "(botAci is needed for ACI mention recognition).");
+        }
+        return new SignalGroupHandler(botAci, handler, membershipHandler);
     }
 
     private SignalJsonRpcClient requireConnected(String op) throws MessagingException {
