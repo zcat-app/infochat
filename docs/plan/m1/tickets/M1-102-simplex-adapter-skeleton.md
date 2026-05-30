@@ -1,7 +1,7 @@
 ---
 id: M1-102
 title: "SimpleX adapter skeleton — capabilities and config"
-status: pending
+status: done
 created: 2026-05-26
 last_updated: 2026-05-30
 blocked_by: []
@@ -24,6 +24,7 @@ out_of_scope:
   - any change to MessagingAdapter SPI or CapabilityFlags — the SPI is not modified; SimpleX implements it
   - any change to InMemoryAdapter — existing test double is unchanged
   - subprocess management or WebSocket connection — M1-103
+  - parser for the simplex-chat on-disk data-directory layout that SimpleXIdentity.resolve(Path) will eventually consume — M1-103 (rides along with subprocess/WebSocket since both require a running simplex-chat to validate format)
   - group support or mention recognition — M1-104
   - multi-adapter Provider wiring — M1-105
   - Signal adapter — M1-106..M1-109
@@ -33,7 +34,7 @@ acceptance:
   - "SimpleXConfig is a plain value object carrying the operator-config values and defines the keys infochat.adapters.simplex.binary (path to simplex-chat binary), infochat.adapters.simplex.data-dir (identity material directory), infochat.adapters.simplex.ws-port (WebSocket API port) as constants; binding these Quarkus config keys to a SimpleXConfig instance is performed by Provider's adapter wiring (M1-035b/M1-105), not this Quarkus-free module"
   - "SimpleXConfig.validate() enforces: binary path exists and is executable, data-dir exists and is writable, ws-port is in valid range"
   - "SimpleXConfig.validate() throws a descriptive exception naming the offending property on any failed check; Provider invokes validate() during its startup gates so a bad config fails Provider startup"
-  - "SimpleXIdentity resolves the bot's contact id (queue address) from the simplex-chat data directory as a pure function over that directory; the startup-time invocation is performed by Provider wiring (M1-035b/M1-105)"
+  - "SimpleXIdentity declares the entry point for resolving the bot's contact id (queue address) from the simplex-chat data directory — a record carrying the queue address with a static resolve(Path) method that throws UnsupportedOperationException in this skeleton, mirroring the adapter-method deferral pattern items 7–8 use; the parser that reads simplex-chat's on-disk data-directory layout is implemented in M1-103 (which actually exercises a running simplex-chat), and the startup-time invocation is performed by Provider wiring (M1-035b/M1-105)"
   - "SimpleXAdapter.start() and close() are no-ops in this skeleton — subprocess and connection are M1-103"
   - "SimpleXAdapter.send(), update(), finalize(), setTyping() throw UnsupportedOperationException in this skeleton — wiring is M1-103"
   - "SimpleXAdapterSkeletonTest.capabilitiesAreCorrect passes — verifies trustLevel, name, and all capability flags"
@@ -54,7 +55,33 @@ spec_refs:
 decision_refs:
   - D32
   - D46
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-05-30
+    verdict: REWORK
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PARTIAL
+    diff_stats:
+      files: 7
+      added: 353
+      removed: 9
+  - round: 2
+    date: 2026-05-30
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 425
+      removed: 11
 revisions:
   - date: 2026-05-30
     reason: pre-start reword — config-binding and startup-failure are Provider responsibilities (M1-035b/M1-105), not this Quarkus-free adapter module; no files_scope/files_budget change
@@ -96,16 +123,74 @@ revisions:
        CDI annotations in production scope. Reworked acceptance commits to
        a concrete boolean and reworked Notes describe the plain-library
        design.)
+  - date: 2026-05-30
+    reason: round 1 rework — acceptance item 6 used active "resolves" verb but the skeleton ticket cannot satisfy that without M1-103's simplex-chat data-directory groundwork; refine aligns item 6 with the deferral pattern items 7–8 already use, and adds the parser to out_of_scope
+    prior_values: |
+      acceptance item 6 (pre-rework):
+        - "SimpleXIdentity resolves the bot's contact id (queue address) from
+           the simplex-chat data directory as a pure function over that
+           directory; the startup-time invocation is performed by Provider
+           wiring (M1-035b/M1-105)"
+
+      out_of_scope (pre-rework): did NOT enumerate the simplex-chat
+      data-directory parser as out of scope; the parser sat in a gray zone
+      between this skeleton (acceptance item 6 said "resolves") and M1-103
+      (subprocess + WebSocket, which actually exercises simplex-chat).
+
+      (Round 1 reviewer flagged the mismatch: SimpleXIdentity.resolve(Path)
+      throws UnsupportedOperationException citing M1-103, while item 6's
+      active verb "resolves" demanded a working pure function. Items 7-8
+      already use the in-this-skeleton-then-M1-103 deferral pattern; item 6
+      did not. Refine brings item 6 in line with that pattern and explicitly
+      lists the parser under out_of_scope so the reviewer never sees the
+      mismatch again. No files_scope/files_budget change. The clarity WARN
+      on the same day predicted exactly this resolution: "document deferral
+      to M1-103.")
 escalations:
   - date: 2026-05-30
     reason: clarity-fail
     reviewer_verdict_excerpt: |
       N/A — clarity pre-flight FAIL during /m1-tick start; see clarity_check.blockers
+  - date: 2026-05-30
+    reason: premise-fail
+    reviewer_verdict_excerpt: |
+      Round 1 reviewer REWORK item 1 (ACCEPTANCE-CHECK: PARTIAL on item 6):
+      acceptance item 6 says SimpleXIdentity "resolves" the queue address
+      as a pure function over the simplex-chat data directory, but the
+      ticket body §Notes ("operator initializes simplex-chat manually")
+      plus the items-7-8 deferral pattern make the data-directory parser
+      M1-103's responsibility. The premise that item 6 was satisfiable in
+      this skeleton is wrong; the skeleton can declare the entry point
+      but cannot resolve the queue address without M1-103's groundwork.
+      Reviewer named refine as the explicit alternative path (option b).
+      Clarity pre-flight 2026-05-30 predicted exactly this:
+        "Consider a SimpleXIdentityTest or document deferral to M1-103."
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-05-30
+    verdict: CLEAN
+    base: main
+    head: m1/M1-102-simplex-adapter-skeleton
+    verdict_file: docs/plan/m1/redteam/M1-102-2026-05-30.md
+    findings_count: 0
+    out_of_model_count: 2
+    note: |
+      Skeleton fails closed across every security-bearing surface. Two
+      OUT-OF-MODEL observations flagged for M1-103 attention: (1) Path
+      TOCTOU on SimpleXConfig.validate() vs M1-103 use-time (operator
+      config is trusted, so not a current gap); (2) AdapterTrustLevel.HIGH
+      declared before real identity verification exists — safe today
+      because assertIdentity throws, but M1-103 must implement the real
+      queue-address signature verification before wiring into Provider.
+clarity_check:
+  date: 2026-05-30
+  verdict: WARN
+  warnings:
+    - "Acceptance item 6 (SimpleXIdentity): no named test in test_plan.adds covers SimpleXIdentity; reviewer can only verify by code inspection. Consider a SimpleXIdentityTest or document deferral to M1-103."
+  blockers: []
 ---
 
 # M1-102: SimpleX adapter skeleton — capabilities and config
@@ -177,3 +262,22 @@ until M1-103 wires the connection.
   trust) and do not read the simplex-chat binary/data-dir/ws-port keys.
   The "bad SimpleX config fails startup" promise needs a home in M1-105
   (Provider wiring) or an M1-103 scope extension.
+
+## Round 1 rework
+
+Reviewer verdict 2026-05-30: REWORK (ACCEPTANCE-CHECK: PARTIAL).
+
+1. Resolve acceptance item 6's "SimpleXIdentity resolves... as a pure
+   function over that directory" mismatch with the current
+   `UnsupportedOperationException`-throwing stub in
+   `SimpleXIdentity.resolve(Path)`. Pick one path:
+   - **(a)** Implement `SimpleXIdentity.resolve(Path)` as the documented
+     pure function over the simplex-chat data dir and add a
+     `SimpleXIdentityTest` covering it (the clarity_check WARN named
+     exactly this).
+   - **(b)** Escalate → refine the ticket so acceptance item 6
+     explicitly defers `resolve()`'s implementation to M1-103 (mirroring
+     the pattern used for `start`/`close`/`send`/`update`/`finalize`/
+     `setTyping` in items 7–8) and add the M1-103 reference to the
+     ticket body §Out-of-scope alongside "Subprocess management,
+     WebSocket connection".
