@@ -29,7 +29,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-096 — NostrStreamSource — JDK WebSocket relay pool (complexity: high, risk: high)
 - M1-102 — SimpleX adapter skeleton — capabilities and config (complexity: medium, risk: medium)
 - M1-107 — Signal signal-cli JSON-RPC subprocess (complexity: high, risk: high)
-- M1-112 — GroupApprovalService + per-group rate cap + step 3.5 (complexity: high, risk: medium)
+- M1-112 — GroupApprovalService + per-group rate cap + step 3.5 (complexity: high, risk: high)
 
 ---
 

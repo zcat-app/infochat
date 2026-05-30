@@ -3,14 +3,13 @@ id: M1-102
 title: "SimpleX adapter skeleton — capabilities and config"
 status: pending
 created: 2026-05-26
-last_updated: 2026-05-26
+last_updated: 2026-05-30
 blocked_by: []
-files_budget: 8
+files_budget: 5
 files_scope:
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXAdapter.java
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXConfig.java
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXIdentity.java
-  - infochat-messaging-adapter/src/main/resources/application.properties
   - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXAdapterSkeletonTest.java
   - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXConfigTest.java
 complexity: medium
@@ -30,7 +29,7 @@ out_of_scope:
   - Signal adapter — M1-106..M1-109
 acceptance:
   - "SimpleXAdapter implements MessagingAdapter with name()='simplex' and trustLevel()=HIGH"
-  - "SimpleXAdapter.capabilities() returns CapabilityFlags with supportsMarkdownLinks=false, supportsMentionByContactId=true, supportsMessageEdit=true (SimpleX supports edits), supportsTypingIndicator=true, supportsMembershipEvents=TBD (researched in M1-104)"
+  - "SimpleXAdapter.capabilities() returns CapabilityFlags with supportsMarkdownLinks=false, supportsMentionByContactId=true, supportsMessageEdit=true (SimpleX supports edits), supportsTypingIndicator=true, supportsMembershipEvents=false — false is the safe default for a skeleton that does not yet subscribe to group-membership events; M1-104 (group support) flips this to the researched value when it adds group event handling"
   - "SimpleXConfig is a plain value object carrying the operator-config values and defines the keys infochat.adapters.simplex.binary (path to simplex-chat binary), infochat.adapters.simplex.data-dir (identity material directory), infochat.adapters.simplex.ws-port (WebSocket API port) as constants; binding these Quarkus config keys to a SimpleXConfig instance is performed by Provider's adapter wiring (M1-035b/M1-105), not this Quarkus-free module"
   - "SimpleXConfig.validate() enforces: binary path exists and is executable, data-dir exists and is writable, ws-port is in valid range"
   - "SimpleXConfig.validate() throws a descriptive exception naming the offending property on any failed check; Provider invokes validate() during its startup gates so a bad config fails Provider startup"
@@ -71,6 +70,37 @@ revisions:
        AdapterRegistry (M1-035b/M1-105) is what reads infochat.adapters.* and
        runs startup gates. Refine makes SimpleXConfig a plain value object +
        validate() logic; the binding and startup-invocation stay Provider-side.)
+  - date: 2026-05-30
+    reason: clarity-fail rework — resolve TBD capability flag value (acceptance item 2) and remove stale Notes paragraphs (§Config properties, §Conditional activation) that contradict the post-refine plain-value-object design
+    prior_values: |
+      acceptance item 2 (pre-clarity-rework):
+        - "SimpleXAdapter.capabilities() returns CapabilityFlags with supportsMarkdownLinks=false, supportsMentionByContactId=true, supportsMessageEdit=true (SimpleX supports edits), supportsTypingIndicator=true, supportsMembershipEvents=TBD (researched in M1-104)"
+
+      body Notes §Config properties (pre-clarity-rework):
+        "Config properties. The skeleton reads config via @ConfigMapping or
+         @ConfigProperty. Design notes have the concrete property keys. The
+         binary path and data dir are mandatory; the WebSocket port defaults
+         to 5225 (simplex-chat's default)."
+
+      body Notes §Conditional activation (pre-clarity-rework):
+        "Conditional activation. The adapter is only a CDI bean when
+         infochat.adapters includes simplex. Use @IfBuildProfile or runtime
+         config check — the implementer picks the mechanism that matches
+         InMemoryAdapter's activation pattern."
+
+      (Acceptance item 2 left supportsMembershipEvents as "TBD (researched in
+       M1-104)" — an unverifiable flag value. Body §Config properties and
+       §Conditional activation referenced @ConfigMapping/@ConfigProperty and
+       @IfBuildProfile/CDI activation, both of which contradict the prior
+       refine that made this a Quarkus-free plain-library module with no
+       CDI annotations in production scope. Reworked acceptance commits to
+       a concrete boolean and reworked Notes describe the plain-library
+       design.)
+escalations:
+  - date: 2026-05-30
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      N/A — clarity pre-flight FAIL during /m1-tick start; see clarity_check.blockers
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -114,25 +144,32 @@ until M1-103 wires the connection.
   first run, the operator initializes simplex-chat manually
   (`simplex-chat -d <data-dir>` creates the identity); subsequent
   runs read the existing identity.
-- **Config properties.** The skeleton reads config via
-  `@ConfigMapping` or `@ConfigProperty`. Design notes have the
-  concrete property keys. The binary path and data dir are mandatory;
-  the WebSocket port defaults to 5225 (simplex-chat's default).
-- **Conditional activation.** The adapter is only a CDI bean when
-  `infochat.adapters` includes `simplex`. Use `@IfBuildProfile` or
-  runtime config check — the implementer picks the mechanism that
-  matches InMemoryAdapter's activation pattern.
-- **Adjacent code:** InMemoryAdapter for the SPI implementation
-  pattern. CapabilityFlags for the flag record shape.
 - **Plain value object; Provider does the binding.** This module is
   deliberately Quarkus-free (see its pom: "NO Quarkus extensions in
-  production scope"). `SimpleXConfig` is a plain value object holding the
-  three operator values plus a `validate()` method enforcing the
-  binary/data-dir/ws-port rules. Reading `infochat.adapters.simplex.*`
-  from Quarkus config and invoking `validate()` at startup are Provider
-  responsibilities (the `AdapterRegistry` adapter wiring, M1-035b/M1-105),
-  mirroring how `InMemoryAdapter` carries no CDI annotations until the
-  Provider-side producer is authored.
+  production scope") and carries NO CDI/Quarkus annotations
+  (`@ConfigMapping`, `@ConfigProperty`, `@IfBuildProfile`,
+  `@ApplicationScoped`, etc.) in production scope. `SimpleXConfig` is a
+  plain value object holding the three operator values plus a
+  `validate()` method enforcing the binary/data-dir/ws-port rules.
+  `SimpleXAdapter` and `SimpleXIdentity` are likewise plain classes.
+  Reading `infochat.adapters.simplex.*` from Quarkus config,
+  constructing the `SimpleXConfig` value, invoking `validate()` at
+  startup, and registering the adapter as a CDI bean only when
+  `infochat.adapters` includes `simplex` are ALL Provider
+  responsibilities (the `AdapterRegistry` adapter wiring,
+  M1-035b/M1-105), mirroring how `InMemoryAdapter` carries no CDI
+  annotations until the Provider-side producer is authored.
+- **Config property keys (declared as constants here, bound by Provider).**
+  `SimpleXConfig` declares the three property-key names as string
+  constants: `infochat.adapters.simplex.binary` (path to simplex-chat
+  binary), `infochat.adapters.simplex.data-dir` (identity material
+  directory), `infochat.adapters.simplex.ws-port` (WebSocket API port,
+  default 5225 — simplex-chat's default). The constants live with
+  `SimpleXConfig` so the Provider-side binding (M1-035b/M1-105) and the
+  tests reference the same names. Binary path and data dir are
+  mandatory; ws-port has a default.
+- **Adjacent code:** InMemoryAdapter for the SPI implementation
+  pattern. CapabilityFlags for the flag record shape.
 - **Open planning gap (flag, do not fix here).** No ticket yet owns the
   Provider-side invocation of `SimpleXConfig.validate()` / binding of
   `infochat.adapters.simplex.*` — M1-035b/M1-105's startup gates are
