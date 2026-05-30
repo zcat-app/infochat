@@ -145,6 +145,42 @@ class SourceEnableCommandHandlerTest {
     }
 
     @Test
+    void reEnableResetsFailureCounter() throws Exception {
+        // M1-094 (D42): /source-enable on a failed source must reset
+        // consecutive_failures to 0 so the re-enabled row does not
+        // immediately re-trip the FetchScheduler's failure ladder on
+        // the next tick. Behaviour is pre-existing in the handler's
+        // UPDATE statements (UPDATE_SOURCE_REACTIVATE_SQL +
+        // UPDATE_SOURCE_REVIVE_SQL both set consecutive_failures = 0);
+        // this test pins the contract.
+        String actor = PREFIX + "reEnableResetsCounter-actor";
+        seedUser(actor, true);
+        UUID sourceId = seedSource("reEnableResetsCounter", "rss", "failed", false);
+
+        // Sanity-check: the fixture seeder pre-sets
+        // consecutive_failures=3 so the reset is observable. If the
+        // seeder ever stops pre-setting this, the assertion below
+        // catches the silent fixture drift before it masks a real
+        // counter-reset regression.
+        assertEquals(3, readConsecutiveFailures(sourceId),
+                "seed precondition: fixture must start with non-zero consecutive_failures "
+                        + "so the reset on /source-enable is observable");
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/source-enable " + sourceId);
+
+        assertTrue(reply.text().contains(PREFIX + "reEnableResetsCounter-name"),
+                "/source-enable success must name the source — got: " + reply.text());
+        assertEquals("active", readStatus(sourceId),
+                "/source-enable from failed must transition status to 'active'");
+        assertEquals(0, readConsecutiveFailures(sourceId),
+                "/source-enable from failed must reset consecutive_failures to 0 "
+                        + "(pre-existing UPDATE_SOURCE_REACTIVATE_SQL behaviour; this test "
+                        + "documents the contract M1-094's failure ladder relies on)");
+    }
+
+    @Test
     void sourceEnableFromFailedRunsProbeNoConfirm() throws Exception {
         String actor = PREFIX + "failed-actor";
         seedUser(actor, true);
@@ -398,6 +434,18 @@ class SourceEnableCommandHandlerTest {
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return rs.getString("status");
+            }
+        }
+    }
+
+    private int readConsecutiveFailures(UUID sourceId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT consecutive_failures FROM source WHERE id = ?")) {
+            ps.setObject(1, sourceId);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getInt(1);
             }
         }
     }

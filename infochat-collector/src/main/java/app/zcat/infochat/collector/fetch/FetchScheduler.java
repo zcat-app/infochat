@@ -4,6 +4,7 @@ import app.zcat.infochat.collector.outbox.EvalQueueProducer;
 import app.zcat.infochat.collector.outbox.PostPersister;
 import app.zcat.infochat.core.ingest.Fetcher;
 import app.zcat.infochat.core.ingest.NormalizedPost;
+import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import io.quarkus.arc.All;
 import io.quarkus.arc.InstanceHandle;
 import io.quarkus.runtime.Startup;
@@ -13,6 +14,7 @@ import jakarta.annotation.Priority;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.Config;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import javax.sql.DataSource;
@@ -68,15 +70,27 @@ import org.jspecify.annotations.NonNull;
  * rehydrator's older {@code fetched_at} posts drain ahead of new
  * fetches naturally.
  *
- * <h2>Failure handling</h2>
+ * <h2>Failure handling (D42)</h2>
  * <p>Per-tick exceptions are caught and logged at WARN with the
  * {@code source.id} (the UUID — never the source identifier URL,
  * which can carry embedded credentials per M1-023's redteam
- * INFO-LEAK finding). No update to
- * {@code source.consecutive_failures} / {@code last_fetch_at} /
- * {@code last_success_at} / {@code status} — that wiring is T2-B's
- * D42 work per {@code docs/design/01-architecture.md} §1.6. T1-C's
- * failure-handling contract is "log and keep ticking".
+ * INFO-LEAK finding). After the log, {@link SourceRepository#recordFailure}
+ * increments {@code source.consecutive_failures}, refreshes
+ * {@code last_fetch_at}, and flips {@code status} from
+ * {@code active} to {@code failed} when the post-increment counter
+ * reaches {@link #failureThreshold}. On the crossing tick (and only
+ * on that tick), {@link ThrottledAdminNotifier#notifyOnce} fires a
+ * coalesced admin notification keyed on the source UUID.
+ *
+ * <p>On a successful tick {@link SourceRepository#recordSuccess}
+ * zeroes the counter and refreshes both {@code last_fetch_at} and
+ * {@code last_success_at}. A failed source is mechanically excluded
+ * from {@link #enumerateActiveSources} (the SELECT filters
+ * {@code status = 'active'}); recovery is operator-driven via
+ * {@code /source-enable}, which resets the counter back to 0 (the
+ * SOURCE_ENABLE handler's UPDATE already sets
+ * {@code consecutive_failures = 0} so a re-enabled row does not
+ * immediately re-trip the threshold).
  */
 @Startup
 @Priority(400)
@@ -98,6 +112,19 @@ public class FetchScheduler {
 
     @Inject
     Config config;
+
+    @Inject
+    SourceRepository sourceRepository;
+
+    @Inject
+    ThrottledAdminNotifier throttledAdminNotifier;
+
+    // Single-global tunable (no per-profile branching), so inline
+    // defaultValue is allowed per the AssetSnapshotFetcher convention.
+    // Operator override:
+    // -Dinfochat.fetch.failure-threshold=<count>.
+    @ConfigProperty(name = "infochat.fetch.failure-threshold", defaultValue = "5")
+    int failureThreshold;
 
     @Inject
     @All
@@ -204,15 +231,50 @@ public class FetchScheduler {
                 // the post has already been emitted on a prior tick.
                 key.ifPresent(evalQueueProducer::emit);
             }
+            // D42 success path: zero the counter, refresh both
+            // timestamps. Done AFTER persist+enqueue so a mid-loop
+            // PostPersister/EvalQueueProducer throw lands on the
+            // failure path (the catch below).
+            try {
+                sourceRepository.recordSuccess(row.uuid());
+            } catch (SQLException sqlE) {
+                // The DB write itself failed; the tick's posts already
+                // landed, so this is a bookkeeping miss, not a tick
+                // failure. Log and continue — the next successful tick
+                // re-establishes the counter/timestamp state.
+                LOG.warnf(sqlE,
+                    "FetchScheduler: failed to record success for source uuid=%s",
+                    row.uuid());
+            }
         } catch (Exception e) {
-            // T1-C failure-handling: WARN-log only, no source-row
-            // update (D42 wiring lives in T2-B). Log the numeric
-            // dispatch key + UUID; NEVER the identifier URL (which
-            // can carry embedded credentials per M1-023's redteam
-            // INFO-LEAK finding).
+            // Log the numeric dispatch key + UUID; NEVER the
+            // identifier URL (which can carry embedded credentials
+            // per M1-023's redteam INFO-LEAK finding).
             LOG.warnf(e,
                 "FetchScheduler tick failed for source uuid=%s (dispatch=%d)",
                 row.uuid(), row.dispatchKey());
+            // D42 failure path: increment counter, refresh
+            // last_fetch_at, flip active→failed when threshold
+            // reached. Fire the throttled admin notification once on
+            // the crossing tick.
+            try {
+                SourceRepository.FailureOutcome outcome =
+                    sourceRepository.recordFailure(row.uuid(), failureThreshold);
+                if (outcome.crossedThreshold()) {
+                    throttledAdminNotifier.notifyOnce(
+                        "fetch_failure_ladder:" + row.uuid(),
+                        "fetch_failure_ladder",
+                        "Source uuid=" + row.uuid() + " kind=" + row.kind()
+                            + " transitioned to status='failed' after "
+                            + outcome.consecutiveFailures()
+                            + " consecutive failures; last error class="
+                            + e.getClass().getSimpleName());
+                }
+            } catch (SQLException sqlE) {
+                LOG.warnf(sqlE,
+                    "FetchScheduler: failed to record failure for source uuid=%s",
+                    row.uuid());
+            }
         }
     }
 

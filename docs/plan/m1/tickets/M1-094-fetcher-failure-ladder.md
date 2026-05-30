@@ -1,9 +1,9 @@
 ---
 id: M1-094
 title: "Fetcher failure ladder (D42)"
-status: pending
+status: done
 created: 2026-05-26
-last_updated: 2026-05-26
+last_updated: 2026-05-31
 blocked_by: []
 files_budget: 7
 files_scope:
@@ -62,12 +62,29 @@ spec_refs:
 decision_refs:
   - D42
   - D38
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-05-31
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 9
+      added: 783
+      removed: 20
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-05-30
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-094: Fetcher failure ladder (D42)
