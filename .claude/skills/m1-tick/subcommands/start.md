@@ -62,6 +62,7 @@ Steps:
 6. Branch:
    - **Sequential:** `git checkout -b m1/M1-NNN-<slug>` from `main`.
    - **Parallel:** create a worktree via `Agent(isolation: "worktree")` and run the rest of the flow inside it.
+   - **Session already inside a worktree:** if this session's own cwd is a per-ticket worktree rather than the primary checkout (`git rev-parse --show-toplevel` differs from where `main` is checked out — compare against `git worktree list`), the sequential `git checkout -b` creates the branch *in that worktree*, leaving `main` checked out in the primary. This is fine for `start`/`review`/`commit` (none of them touch `main`), but `/m1-tick merge` must then drive the squash against wherever `main` lives — it is worktree-aware for exactly this case (see [`merge.md`](merge.md) step 2).
 7. If `complexity: high`: pre-allocate the outline sidecar path at `target/m1-tick-outline-{{ID}}.md` and the substituted-prompt path at `target/m1-tick-prompt-plan-{{ID}}.txt`. Render the prompt via Bash (same pattern as step 1 — the main session never Reads `docs/process/plan-prompt.md`):
 
    ```
