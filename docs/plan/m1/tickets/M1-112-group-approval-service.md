@@ -3,7 +3,7 @@ id: M1-112
 title: "GroupApprovalService + per-group rate cap + step 3.5"
 status: pending
 created: 2026-05-27
-last_updated: 2026-05-27
+last_updated: 2026-05-30
 blocked_by:
   - M1-111
 files_budget: 12
@@ -52,13 +52,48 @@ test_plan:
   preserves:
     - all tests currently green on main
 spec_refs:
-  - docs/spec/security.md §Authorization model step 3.5
-  - docs/spec/security.md §Rate limiting — per-group buckets
-  - docs/spec/schema.md §Identity and access — Group entity
+  - docs/spec/security.md §Authorization model
+  - docs/spec/security.md §Rate limiting
+  - docs/spec/schema.md §Identity and access
   - docs/spec/messaging.md §Identity and groups
 decision_refs:
   - D47
 reviews: {}
+escalations:
+  - date: 2026-05-30
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      SPEC-REFS-VALID FAIL — three spec_refs cite headings that do not exist:
+        1. `docs/spec/security.md §Authorization model step 3.5` — heading is
+           `## Authorization model` (line 300); "step 3.5" is body text within
+           that section (numbered list item 3.5 at line 108).
+        2. `docs/spec/security.md §Rate limiting — per-group buckets` — heading
+           is `## Rate limiting` (line 959); per-group bucket content is a
+           bullet under that section, not a sub-heading.
+        3. `docs/spec/schema.md §Identity and access — Group entity` — heading
+           is `### Identity and access` (line 13); Group entity is a bullet
+           under that section, not a sub-heading.
+revisions:
+  - date: 2026-05-30
+    reason: clarity-fail rework — fix non-existent spec_refs headings
+    prior_values: |
+      spec_refs (replaced three of four entries, fourth was already valid):
+        - docs/spec/security.md §Authorization model step 3.5
+            → docs/spec/security.md §Authorization model
+            (step 3.5 is body text at line 108; the parent heading still
+             bounds the content the ticket cites)
+        - docs/spec/security.md §Rate limiting — per-group buckets
+            → docs/spec/security.md §Rate limiting
+            (per-group reply/command/LLM caps are bullets at lines
+             985–1005 under the parent heading)
+        - docs/spec/schema.md §Identity and access — Group entity
+            → docs/spec/schema.md §Identity and access
+            (Group entity columns approval_status / activated_by are
+             bullets at lines 71–110 under the parent heading)
+      Verified each replacement preserves the load-bearing reference by
+      grepping for `step 3\.5|approv|group` / `per-group|bucket` /
+      `approval_status|activated_by` under the parent headings; all hits
+      land within the parent section's body.
 overrides: []
 aborted_attempts: []
 reopens: []
