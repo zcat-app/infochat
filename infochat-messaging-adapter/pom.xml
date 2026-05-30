@@ -34,6 +34,20 @@
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-arc</artifactId>
         </dependency>
+        <!--
+             com.fasterxml.jackson.core:jackson-databind — required by
+             SimpleXMessageCodec for parsing the simplex-chat WebSocket bot
+             API's JSON envelopes (M1-103). Declared explicitly here so the
+             library jar compiles without relying on a transitive that may
+             change with future Quarkus extensions; mirrors the
+             jackson-databind declaration in infochat-llm-adapter/pom.xml.
+             Version BOM-managed via the parent's quarkus-bom import (no
+             <version/> here, per the M1-001 invariant).
+        -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
