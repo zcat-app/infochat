@@ -762,8 +762,8 @@ the absence (`LEFT JOIN` and ignore `NULL`).
 CREATE TABLE post_reference (
   from_post   UUID NOT NULL,
   to_post     UUID NOT NULL,
-  link_type   TEXT NOT NULL                            -- 'entity','semantic'
-    CHECK (link_type IN ('entity','semantic')),
+  link_type   TEXT NOT NULL                            -- 'entity','semantic','repost' ('repost' written by Nostr kind-6, M1-100)
+    CHECK (link_type IN ('entity','semantic','repost')),
   score       REAL NOT NULL,                           -- shared-entity count or cosine similarity
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (from_post, to_post, link_type, created_at)
