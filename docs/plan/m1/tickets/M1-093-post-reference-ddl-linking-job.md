@@ -3,12 +3,12 @@ id: M1-093
 title: "post_reference DDL + LinkingJob + tool wiring"
 status: pending
 created: 2026-05-26
-last_updated: 2026-05-26
+last_updated: 2026-05-30
 blocked_by:
   - M1-092
 files_budget: 12
 files_scope:
-  - infochat-core/src/main/resources/db/migration/V27__post_reference.sql
+  - infochat-core/src/main/resources/db/migration/V29__post_reference.sql
   - infochat-collector/src/main/java/app/zcat/infochat/collector/linking/LinkingJob.java
   - infochat-collector/src/main/resources/application.properties
   - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/tool/GetReferencesTool.java
@@ -29,15 +29,15 @@ out_of_scope:
   - any change to EmbeddingWorker — not modified
   - any change to Stage1Worker, Stage2Worker, TaggerWorker — upstream pipeline stages are not modified
   - any change to ReadyPromoter — M1-092's entity_done gate is frozen
-  - any change to the post_entity DDL (V26) — M1-092 is frozen
+  - any change to the post_entity DDL (V28) — M1-092 is frozen
   - Nostr kind-6 cross-source linking via upstream_identifier — M1-100; LinkingJob processes only entity-match and cosine-similarity link types in this ticket
   - any modification to EmbeddingWorkerTest, EmbeddingWorkerIT, ReadyPromoterIT, or any other pre-existing test
   - StreamSource or Nostr relay infrastructure — M3 scope
 acceptance:
-  - "Flyway migration V27__post_reference.sql applies cleanly on a fresh DB and on a DB with V1–V26 already applied"
-  - "V27 creates the post_reference table partitioned by created_at with columns (from_post UUID NOT NULL, to_post UUID NOT NULL, link_type TEXT NOT NULL CHECK (link_type IN ('entity','semantic','repost')), score REAL NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now()) and PRIMARY KEY (from_post, to_post, link_type, created_at)"
-  - "V27 creates index idx_post_ref_from ON post_reference(from_post, link_type) and idx_post_ref_to ON post_reference(to_post)"
-  - "V27 GRANTs INSERT, SELECT on post_reference to infochat_collector; GRANTs SELECT on post_reference to infochat_provider"
+  - "Flyway migration V29__post_reference.sql applies cleanly on a fresh DB and on a DB with V1–V28 already applied"
+  - "V29 creates the post_reference table partitioned by created_at with columns (from_post UUID NOT NULL, to_post UUID NOT NULL, link_type TEXT NOT NULL CHECK (link_type IN ('entity','semantic','repost')), score REAL NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now()) and PRIMARY KEY (from_post, to_post, link_type, created_at)"
+  - "V29 creates index idx_post_ref_from ON post_reference(from_post, link_type) and idx_post_ref_to ON post_reference(to_post)"
+  - "V29 GRANTs INSERT, SELECT on post_reference to infochat_collector; GRANTs SELECT on post_reference to infochat_provider"
   - "LinkingJob is a scheduled CDI bean in collector/linking/ that runs on a configurable interval (infochat.linking.interval, profile-driven)"
   - "LinkingJob driving set: READY posts where last_linked_at IS NULL OR last_linked_at < fetched_at, bounded to a configurable lookback window (infochat.linking.lookback-days, default 4 days)"
   - "For each driving post, LinkingJob finds entity-match candidates: posts sharing at least one (entity_text, entity_type) pair in post_entity within the lookback window; inserts post_reference rows with link_type='entity' and score=count of shared entities"
@@ -74,6 +74,20 @@ decision_refs:
   - D22
   - D33
 reviews: {}
+revisions:
+  - date: 2026-05-30
+    reason: "pre-start reword — migration version V27 and the V26 cross-references were stale. V27__d47_remove_group_only.sql and V28__post_entity.sql already exist on disk, so a second V27 would be a duplicate Flyway version. Renumber V27→V29 (next free version) and correct the V1–V26 / post_entity-(V26) references to V28. No files_scope membership, files_budget, complexity, or acceptance-semantics change — only the version number and two cross-references. M1-093 is pending so no escalation/status flip (mirrors the M1-102 pre-start reword)."
+    prior_values: |
+      files_scope path (pre-refine):
+        - infochat-core/src/main/resources/db/migration/V27__post_reference.sql
+      out_of_scope entry (pre-refine):
+        - "any change to the post_entity DDL (V26) — M1-092 is frozen"
+      acceptance items (pre-refine):
+        - "Flyway migration V27__post_reference.sql applies cleanly on a fresh DB and on a DB with V1–V26 already applied"
+        - "V27 creates the post_reference table partitioned by created_at ..."
+        - "V27 creates index idx_post_ref_from ... and idx_post_ref_to ..."
+        - "V27 GRANTs INSERT, SELECT on post_reference to infochat_collector; GRANTs SELECT on post_reference to infochat_provider"
+      body §Acceptance heading (pre-refine): "**V27 migration.**"
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -102,7 +116,7 @@ rows to exist.
 
 ## Acceptance
 
-**V27 migration.** Creates the `post_reference` table partitioned by
+**V29 migration.** Creates the `post_reference` table partitioned by
 `created_at` per design notes §2.4.3. Bidirectional edges
 (`from_post`, `to_post`) with `link_type ∈ {'entity','semantic','repost'}` and
 a `score` column. Indexes on `(from_post, link_type)` and `(to_post)`.
