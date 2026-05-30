@@ -6,11 +6,12 @@ created: 2026-05-26
 last_updated: 2026-05-30
 blocked_by:
   - M1-092
-files_budget: 12
+files_budget: 15
 files_scope:
   - infochat-core/src/main/resources/db/migration/V29__post_reference.sql
   - infochat-collector/src/main/java/app/zcat/infochat/collector/linking/LinkingJob.java
   - infochat-collector/src/main/resources/application.properties
+  - infochat-provider/src/main/resources/application.properties
   - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/tool/GetReferencesTool.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/summary/ClusterTraversal.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/linking/LinkingJobTest.java
@@ -18,6 +19,8 @@ files_scope:
   - infochat-collector/src/test/resources/application.properties
   - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/GetReferencesToolTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/summary/ClusterTraversalTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRendererTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryCommandHandlerTest.java
 complexity: high
 risk: medium
 round_cap: 3
@@ -31,18 +34,19 @@ out_of_scope:
   - any change to ReadyPromoter — M1-092's entity_done gate is frozen
   - any change to the post_entity DDL (V28) — M1-092 is frozen
   - Nostr kind-6 cross-source linking via upstream_identifier — M1-100; LinkingJob processes only entity-match and cosine-similarity link types in this ticket
-  - any modification to EmbeddingWorkerTest, EmbeddingWorkerIT, ReadyPromoterIT, or any other pre-existing test
+  - any modification to EmbeddingWorkerTest, EmbeddingWorkerIT, ReadyPromoterIT, or any pre-existing test other than the three authorized under §Authorized test changes (ClusterTraversalTest, DigestRendererTest, SummaryCommandHandlerTest)
   - StreamSource or Nostr relay infrastructure — M3 scope
 acceptance:
   - "Flyway migration V29__post_reference.sql applies cleanly on a fresh DB and on a DB with V1–V28 already applied"
   - "V29 creates the post_reference table partitioned by created_at with columns (from_post UUID NOT NULL, to_post UUID NOT NULL, link_type TEXT NOT NULL CHECK (link_type IN ('entity','semantic','repost')), score REAL NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now()) and PRIMARY KEY (from_post, to_post, link_type, created_at)"
   - "V29 creates index idx_post_ref_from ON post_reference(from_post, link_type) and idx_post_ref_to ON post_reference(to_post)"
   - "V29 GRANTs INSERT, SELECT on post_reference to infochat_collector; GRANTs SELECT on post_reference to infochat_provider"
+  - "V29 creates a bootstrap range partition post_reference_202605 covering created_at in 2026-05 so the table is insertable on day one (mirrors V28 post_entity_202605); ongoing partition creation/drop is the partition pruner's responsibility and is out of scope"
   - "LinkingJob is a scheduled CDI bean in collector/linking/ that runs on a configurable interval (infochat.linking.interval, profile-driven)"
   - "LinkingJob driving set: READY posts where last_linked_at IS NULL OR last_linked_at < fetched_at, bounded to a configurable lookback window (infochat.linking.lookback-days, default 4 days)"
   - "For each driving post, LinkingJob finds entity-match candidates: posts sharing at least one (entity_text, entity_type) pair in post_entity within the lookback window; inserts post_reference rows with link_type='entity' and score=count of shared entities"
   - "For each driving post with an embedding, LinkingJob finds semantic candidates: posts within a configurable time window (infochat.linking.semantic-window-hours, default 48h) whose cosine_distance < infochat.linking.semantic-threshold; inserts post_reference rows with link_type='semantic' and score=cosine similarity"
-  - "Semantic candidates filter WHERE embedding IS NOT NULL per spec (schema.md §Posts and derivatives)"
+  - "Semantic candidates are restricted to posts that have an embedding — the embedding lives in the separate post_embedding table (matched via a join/EXISTS against post_embedding), not a column on post — per spec (schema.md §Posts and derivatives)"
   - "Post references are written bidirectionally (A→B and B→A) per design notes §2.4.3"
   - "Outbound links per post are capped at infochat.linking.max-links-per-post (default 10); highest score wins when cap is exceeded"
   - "LinkingJob updates post.last_linked_at = now() for each processed driving post"
@@ -62,7 +66,10 @@ test_plan:
     - infochat-collector/src/test/java/app/zcat/infochat/collector/linking/LinkingJobTest.java
     - infochat-collector/src/test/java/app/zcat/infochat/collector/linking/LinkingJobIT.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/GetReferencesToolTest.java
+  modifies:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/summary/ClusterTraversalTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRendererTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryCommandHandlerTest.java
   preserves:
     - all tests currently green on main
 spec_refs:
@@ -74,6 +81,21 @@ decision_refs:
   - D22
   - D33
 reviews: {}
+escalations:
+  - date: 2026-05-30
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      TEST-CHANGES-AUTHORIZED FAIL: ClusterTraversalTest.java already exists on disk
+      with pre-existing tests covering singleton-cluster (stub) behavior
+      (emptyInputProducesEmptyOutput, onePostBecomesOneSingletonCluster,
+      nPostsBecomeNSingletonClustersInInputOrder, topicIdIsADeterministicFunctionOfClusterPosts,
+      topicIdDiffersForDifferentInputs, topicIdSeedIsLexicographicallySmallestUid). The ticket
+      lists this file under test_plan.adds: (treating it as NEW) instead of test_plan.modifies:.
+      Replacing the ClusterTraversal stub with real BFS/DFS graph traversal will break or
+      invalidate the existing tests — most notably nPostsBecomeNSingletonClustersInInputOrder,
+      which asserts "MVP traversal yields singleton clusters." Pre-existing test modifications
+      require explicit listing with their new expected behavior; no "Authorized test changes"
+      section exists in the ticket body.
 revisions:
   - date: 2026-05-30
     reason: "pre-start reword — migration version V27 and the V26 cross-references were stale. V27__d47_remove_group_only.sql and V28__post_entity.sql already exist on disk, so a second V27 would be a duplicate Flyway version. Renumber V27→V29 (next free version) and correct the V1–V26 / post_entity-(V26) references to V28. No files_scope membership, files_budget, complexity, or acceptance-semantics change — only the version number and two cross-references. M1-093 is pending so no escalation/status flip (mirrors the M1-102 pre-start reword)."
@@ -88,6 +110,16 @@ revisions:
         - "V27 creates index idx_post_ref_from ... and idx_post_ref_to ..."
         - "V27 GRANTs INSERT, SELECT on post_reference to infochat_collector; GRANTs SELECT on post_reference to infochat_provider"
       body §Acceptance heading (pre-refine): "**V27 migration.**"
+  - date: 2026-05-30
+    reason: "clarity-fail rework — clarity FAIL (TEST-CHANGES-AUTHORIZED) flagged ClusterTraversalTest as a pre-existing file wrongly listed under test_plan.adds. Ultrathink widened the fix: ClusterTraversal is also driven by DigestRendererTest + SummaryCommandHandlerTest (both construct it), so the wiring would break them too. Changes: (F1) ClusterTraversalTest adds→modifies; (F2) add DigestRendererTest + SummaryCommandHandlerTest to files_scope + test_plan.modifies, add an Authorized-test-changes section + a wiring constraint mandating ClusterTraversal keep its cluster(List<Post>) signature + Cluster record shape so the @Inject production callers stay out of scope; (F3) add a bootstrap-partition acceptance item (sibling tables create one inline or INSERTs fail); (F6) clarify [9] that the embedding lives in the separate post_embedding table; clarity warning → add infochat-provider application.properties for the configurable depth limit; narrow the out_of_scope pre-existing-test entry to exempt the three authorized files. files_budget 12→15, files_scope 10→13. link_type 'repost' KEPT — verified design §2.4.3 + M1-100 contract (M1-100 is migration_touch:false and states 'No schema amendment needed')."
+    prior_values: |
+      status (pre-refine, transient): escalated (clarity-fail; never committed as in-progress)
+      files_budget (pre-refine): 12
+      files_scope (pre-refine): 10 entries; infochat-provider application.properties and the two consumer tests absent
+      test_plan (pre-refine): ClusterTraversalTest under adds:; no modifies: block
+      acceptance [9] (pre-refine): "Semantic candidates filter WHERE embedding IS NOT NULL per spec (schema.md §Posts and derivatives)"
+      out_of_scope (pre-refine): "any modification to EmbeddingWorkerTest, EmbeddingWorkerIT, ReadyPromoterIT, or any other pre-existing test"
+      (no bootstrap-partition acceptance item; no Authorized-test-changes section; no ClusterTraversal wiring-constraint note)
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -156,7 +188,46 @@ singleton clusters.
   table if the partition-create pattern is generic, or may need a
   one-line addition — either way, it's mechanical and scoped to the
   pruner, not this ticket).
-- **Pre-existing tests** — all pass unchanged.
+- **Pre-existing tests** — all pass unchanged, except the three
+  authorized under §Authorized test changes below.
+
+## Authorized test changes
+
+Replacing the `ClusterTraversal` singleton stub with real
+`post_reference` graph traversal touches three pre-existing test files.
+Each is authorized here with its new expected behavior:
+
+- **ClusterTraversalTest** (`provider/summary`). The `traversal` field
+  and every case that calls `cluster(...)` with non-empty input must be
+  given a `post_reference` edge source (empty by default):
+  - `emptyInputProducesEmptyOutput` — unchanged (early return, no edge
+    query).
+  - `topicIdSeedIsLexicographicallySmallestUid` — unchanged (calls the
+    static `topicIdFor` directly).
+  - `onePostBecomesOneSingletonCluster`,
+    `topicIdIsADeterministicFunctionOfClusterPosts`,
+    `topicIdDiffersForDifferentInputs` — wired to an empty edge source;
+    a node with no edges is still its own singleton, so the assertions
+    hold.
+  - `nPostsBecomeNSingletonClustersInInputOrder` — reworked. With real
+    traversal "singleton + input order" is no longer the contract;
+    unconnected posts still yield singletons but cluster ordering is a
+    function of the traversal. The case asserts component membership
+    rather than positional order.
+  - NEW `connectedComponents` (acceptance) — seeds a two-cluster edge
+    graph and asserts two distinct component sets.
+- **DigestRendererTest** (`provider/digest`) and
+  **SummaryCommandHandlerTest** (`provider/command`). Both construct
+  `new ClusterTraversal()` and drive it through the renderer/handler.
+  Authorized change is construction/wiring only: the constructed
+  `ClusterTraversal` is given an empty edge source so the no-reference
+  fixtures keep producing singleton clusters — downstream
+  digest/summary assertions are unchanged.
+
+The four tests that only import `ClusterTraversal.Cluster`
+(`SummaryProseGeneratorTest`, `SummaryProseInjectionTest`,
+`SummaryProseRefusalDegradeTest`, `RetryCommandHandlerTest`) are NOT
+modified: the `Cluster(String, List<Post>)` record shape is preserved.
 
 ## Notes
 
@@ -184,6 +255,23 @@ singleton clusters.
   enforced either in-query (`ORDER BY score DESC LIMIT 10` per
   driving post) or post-query (truncate in Java). In-query is
   preferred for large candidate sets.
+- **ClusterTraversal wiring constraint.** `ClusterTraversal` must keep
+  its `cluster(List<Post>)` signature and the `Cluster(String,
+  List<Post>)` record shape, acquiring `post_reference` edges via an
+  injected dependency that is settable in tests. This keeps the
+  `@Inject`-based production call sites (`DigestRenderer`,
+  `SummaryCommandHandler`) unchanged — only the unit tests that
+  construct `ClusterTraversal` directly are touched. Changing the
+  signature would pull those production classes into scope.
+- **Duplicate edges across runs.** The PK
+  `(from_post, to_post, link_type, created_at)` has `created_at DEFAULT
+  now()`, so re-processing the same pair on a later tick would write a
+  second row for the same logical edge. The driving-set filter
+  (`last_linked_at < fetched_at`) prevents this on the normal path; the
+  reverse-edge / re-link path needs the INSERT to avoid duplicates
+  (e.g. skip when an equivalent `(from_post, to_post, link_type)` edge
+  already exists in the lookback window). The exact dedup shape is an
+  implementation choice; a test should pin it.
 - **Design reference:** `docs/design/01-architecture.md` §1.3.5
   (LinkingJob), `docs/design/02-schema.md` §2.4.3 (post_reference
   DDL), `docs/design/02-schema.md` §2.4.4 (partition lifecycle).
