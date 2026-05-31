@@ -1,7 +1,7 @@
 ---
 id: M1-114
 title: "D47 /status pending count + group authorization roundtrip IT"
-status: pending
+status: done
 created: 2026-05-27
 last_updated: 2026-05-31
 blocked_by:
@@ -45,7 +45,20 @@ spec_refs:
   - docs/spec/commands.md §Periodic group digests
 decision_refs:
   - D47
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-05-31
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 767
+      removed: 8
 escalations:
   - date: 2026-05-31
     reason: clarity-fail
@@ -64,7 +77,26 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-05-31
+    verdict: CLEAN
+    base: main
+    head: 089ee08
+    verdict_file: docs/plan/m1/redteam/M1-114-2026-05-31.md
+    out_of_model_count: 2
+    note: |
+      CLEAN against the documented threat model. Two out-of-model
+      hardening observations surfaced (test-only audit-trigger disable
+      pattern; lookupIsAdmin lacks defense-in-depth is_banned filter).
+      Neither is exploitable under current upstream gates; both are
+      informational and do not block merge. If acted upon, they would
+      land as separate remediation tickets — M1-114 is done and the
+      commit is immutable.
+clarity_check:
+  date: 2026-05-31
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-114: D47 /status pending count + group authorization roundtrip IT

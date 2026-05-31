@@ -1019,6 +1019,27 @@ public final class BundleKeys {
      */
     public static final String REPLY_CONFIRM_PROMPT_REJECT_GROUP = "reply.confirm.prompt.reject_group";
 
+    // ----- /status (M1-114) ---------------------------------------------------
+    // Per docs/spec/commands.md §Discovery (/status — runtime status; admin
+    // view includes a count of pending groups for passive discovery). Plain
+    // text only — bare URLs per D30, no markdown link syntax. The pending-
+    // groups line is appended ONLY when the caller resolves to is_admin=TRUE
+    // (per-adapter actor lookup); non-admin callers do not see the count.
+
+    /** {@code /status} profile line. Token {@code {0}} = the {@code infochat.profile.label} value (e.g. {@code laptop}). */
+    public static final String REPLY_STATUS_PROFILE = "reply.status.profile";
+
+    /** {@code /status} uptime line. Token {@code {0}} = human-readable uptime (e.g. {@code 3h 12m}). */
+    public static final String REPLY_STATUS_UPTIME = "reply.status.uptime";
+
+    /**
+     * {@code /status} admin-only line: count of groups with
+     * {@code approval_status='pending' AND removed_at IS NULL}.
+     * Token {@code {0}} = the count. Appended only when the caller
+     * resolves to {@code is_admin=TRUE}.
+     */
+    public static final String REPLY_STATUS_PENDING_GROUPS = "reply.status.pending_groups";
+
     private BundleKeys() {
         throw new AssertionError("BundleKeys is a constant holder and must not be instantiated");
     }

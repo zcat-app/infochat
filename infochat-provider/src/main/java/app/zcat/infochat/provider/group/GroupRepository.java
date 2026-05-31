@@ -110,6 +110,16 @@ public class GroupRepository {
     private static final String COUNT_ALL_GROUPS =
             "SELECT COUNT(*) FROM groups";
 
+    // /status admin-only pending-groups discovery (M1-114). Mirrors the
+    // exact predicate spec'd in docs/spec/commands.md §Discovery: rows
+    // with approval_status='pending' that have NOT been removed. Excludes
+    // removed rows so a soft-deleted pending group does not haunt the
+    // admin's status forever.
+    private static final String COUNT_PENDING_GROUPS =
+            "SELECT COUNT(*) FROM groups "
+          + "WHERE approval_status = 'pending' "
+          + "  AND removed_at IS NULL";
+
     private final DataSource dataSource;
 
     @Inject
@@ -415,6 +425,24 @@ public class GroupRepository {
             return rs.getLong(1);
         } catch (SQLException e) {
             throw new IllegalStateException("countAllGroups failed", e);
+        }
+    }
+
+    /**
+     * Count {@code groups} rows with {@code approval_status='pending'}
+     * AND {@code removed_at IS NULL}. Consumed by
+     * {@code StatusCommandHandler}'s admin-only pending-groups line per
+     * {@code docs/spec/commands.md} §Discovery — passive discovery of
+     * groups awaiting approval without running {@code /list-groups}.
+     */
+    public long countPendingGroups() {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(COUNT_PENDING_GROUPS);
+             ResultSet rs = ps.executeQuery()) {
+            rs.next();
+            return rs.getLong(1);
+        } catch (SQLException e) {
+            throw new IllegalStateException("countPendingGroups failed", e);
         }
     }
 }

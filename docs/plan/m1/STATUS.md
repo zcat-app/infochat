@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 141 |
+| done | 142 |
 | deferred | 3 |
 | **total** | **149** |
 
@@ -28,7 +28,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-101 — SSRF guard for wss:// relay connections (complexity: low, risk: low)
 - M1-104 — SimpleX group support + mention recognition (complexity: medium, risk: medium)
 - M1-109 — Multi-adapter production shape IT (complexity: medium, risk: low)
-- M1-114 — D47 /status pending count + group authorization roundtrip IT (complexity: medium, risk: medium)
 
 ---
 
@@ -66,6 +65,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 |---|---|---|---|
 | M1-119 | SimpleX logging hygiene — drainStream + MalformedFrame exception messages | 2026-05-31 | round 1 APPROVE |
 | M1-118 | SimpleX input-validation hardening — contactId shape + inbound size cap | 2026-05-31 | round 1 APPROVE |
+| M1-114 | D47 /status pending count + group authorization roundtrip IT | 2026-05-31 | round 1 APPROVE |
 | M1-113 | D47 admin commands — approve-group, reject-group, list-groups | 2026-05-31 | round 2 APPROVE |
 | M1-108 | Signal mention recognition + group support | 2026-05-31 | round 1 APPROVE |
 | M1-105 | Multi-adapter Provider wiring + isolation IT | 2026-05-31 | round 1 APPROVE |
@@ -73,7 +73,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-099 | Nostr per-relay degradation + cycle cap | 2026-05-31 | round 2 APPROVE |
 | M1-098 | Nostr cross-relay dedup | 2026-05-31 | round 1 APPROVE |
 | M1-097 | Nostr event verification + kind filter | 2026-05-31 | round 1 APPROVE |
-| M1-094 | Fetcher failure ladder (D42) | 2026-05-31 | round 1 APPROVE |
 
 ---
 
@@ -285,7 +284,7 @@ M1-110 (done)
   └── M1-111 (done)
         ├── M1-112 (done)
         │     └── M1-113 (done)
-        │           └── M1-114 (pending) ← runnable
+        │           └── M1-114 (done)
         └── M1-116 (done)
 M1-115 (done)
 M1-117 (done)
