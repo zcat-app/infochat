@@ -10,6 +10,9 @@ import jakarta.inject.Inject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+
 /**
  * Drives {@link AdapterRegistry#start()} once Quarkus is up. Per
  * {@code docs/design/01-architecture.md} §1.4.3 the Provider startup
@@ -23,10 +26,13 @@ import org.slf4j.LoggerFactory;
  * per-adapter transport startup. Per §6.7 per-adapter resilience: a
  * connection failure on one adapter is logged at ERROR via SLF4J
  * and the loop continues — the failure does NOT abort Provider
- * startup. MVP InMemoryAdapter has no {@code start()} method on the
- * SPI (M1-035a froze that shape), so the per-adapter loop is a
- * no-op for InMemory and gains meaning when T3-A's SimpleX/Signal
- * beans land.</p>
+ * startup. The per-adapter {@code start()} dispatch lives in
+ * {@link #startAllAdapters} and is reflective ({@link Class#getMethod})
+ * because {@link MessagingAdapter} does not declare {@code start()}
+ * on the SPI — only the production adapter classes (SimpleX, Signal)
+ * carry it. InMemoryAdapter has no transport and no {@code start()}
+ * method, so the loop is a no-op for it (the {@link NoSuchMethodException}
+ * from the reflective lookup is the silent skip).</p>
  */
 @Startup
 @Priority(300)
@@ -45,24 +51,50 @@ public class MessagingStartup {
     }
 
     /**
-     * Per-adapter transport startup with per-adapter resilience.
-     * A failure on one adapter is logged at ERROR and does not
-     * propagate; the next adapter is still attempted. MVP InMemory
-     * has no transport, so this loop is a no-op shape today.
+     * Per-adapter transport startup with per-adapter resilience. A
+     * failure on one adapter is logged at ERROR and does not propagate;
+     * the next adapter is still attempted (§6.7 invariant).
+     *
+     * <p>{@link MessagingAdapter} does not declare {@code start()} on
+     * the SPI (M1-120's out-of-scope freeze: the interface stays
+     * unchanged). Concrete adapter classes — {@link app.zcat.infochat.messaging.impl.simplex.SimpleXAdapter},
+     * {@link app.zcat.infochat.messaging.impl.signal.SignalAdapter} —
+     * carry their own {@code start()} methods. The reflective
+     * {@link Class#getMethod} lookup invokes them when present and
+     * skips silently when absent ({@link app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter} has no
+     * transport and exposes no {@code start()}). The catch is on
+     * {@link Throwable} because reflective invocation unwraps the
+     * target exception as a {@link Throwable} and the per-adapter
+     * resilience invariant requires that NO subclass — checked, runtime,
+     * or otherwise (e.g. SimpleX's checked
+     * {@link app.zcat.infochat.messaging.MessagingException}) — abort
+     * the loop.</p>
      */
     void startAllAdapters() {
         for (MessagingAdapter adapter : adapterRegistry.activatedAdapters()) {
             try {
-                // SPI does not yet declare start(); InMemoryAdapter has
-                // no transport. The shape is preserved here so T3-A's
-                // SimpleX/Signal beans can drop in their connect call
-                // without re-shaping the startup ordering.
-                log.info("starting adapter transport: {}", adapter.name());
-            } catch (RuntimeException e) {
+                Method startMethod;
+                try {
+                    startMethod = adapter.getClass().getMethod("start");
+                } catch (NoSuchMethodException notPresent) {
+                    // Adapter declares no start() — InMemoryAdapter is the
+                    // shape today. The activation log line still fires so
+                    // the operator sees the adapter has come up.
+                    log.info("adapter has no transport start(): {}", adapter.name());
+                    continue;
+                }
+                startMethod.invoke(adapter);
+                log.info("started adapter transport: {}", adapter.name());
+            } catch (InvocationTargetException invocationFailure) {
                 SafeLog.error(log,
                         "Adapter " + adapter.name()
                                 + " failed to start; continuing with the remaining adapters",
-                        e);
+                        invocationFailure.getCause());
+            } catch (Throwable t) {
+                SafeLog.error(log,
+                        "Adapter " + adapter.name()
+                                + " failed to start; continuing with the remaining adapters",
+                        t);
             }
         }
     }

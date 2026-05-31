@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 146 |
+| done | 147 |
 | deferred | 3 |
 | **total** | **150** |
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-120 — SimpleX + Signal CDI activation (D46) (complexity: medium, risk: medium)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -60,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-120 | SimpleX + Signal CDI activation (D46) | 2026-05-31 | round 1 APPROVE |
 | M1-119 | SimpleX logging hygiene — drainStream + MalformedFrame exception messages | 2026-05-31 | round 1 APPROVE |
 | M1-118 | SimpleX input-validation hardening — contactId shape + inbound size cap | 2026-05-31 | round 1 APPROVE |
 | M1-114 | D47 /status pending count + group authorization roundtrip IT | 2026-05-31 | round 1 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-104 | SimpleX group support + mention recognition | 2026-05-31 | round 2 APPROVE |
 | M1-103 | SimpleX subprocess + WebSocket messaging | 2026-05-31 | round 2 APPROVE |
 | M1-101 | SSRF guard for wss:// relay connections | 2026-05-31 | round 2 APPROVE |
-| M1-100 | Nostr kind-6 cross-source linking | 2026-05-31 | round 1 APPROVE |
 
 ---
 
@@ -289,6 +289,6 @@ M1-115 (done)
 M1-117 (done)
 M1-118 (done)
 M1-119 (done)
-M1-120 (pending) ← runnable
+M1-120 (done)
   └── M1-109 (deferred) [see above]
 ```

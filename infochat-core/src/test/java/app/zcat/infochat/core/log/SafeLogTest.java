@@ -82,4 +82,48 @@ class SafeLogTest {
         assertFalse(result.contains("Auth failed"),
                 "exception message text must not leak");
     }
+
+    @Test
+    void formatSafeIncludesSuppressedClassNames() {
+        var ex = new RuntimeException("primary secret");
+        ex.addSuppressed(new IllegalStateException("suppressed user content"));
+        ex.addSuppressed(new java.io.IOException("api key=sk-ant-0123456789"));
+        String result = SafeLog.formatSafe("parallel-op failed", ex);
+
+        assertTrue(result.contains("[+java.lang.IllegalStateException,+java.io.IOException]"),
+                "suppressed class names must be emitted in [+ClassName,+ClassName] form; got: " + result);
+        assertFalse(result.contains("suppressed user content"),
+                "suppressed exception message body must not leak");
+        assertFalse(result.contains("sk-ant-0123456789"),
+                "suppressed exception API key must not leak");
+        assertFalse(result.contains("primary secret"),
+                "primary exception message must not leak");
+    }
+
+    @Test
+    void formatSafeWalksSuppressedOnCauseChainElements() {
+        var rootCause = new IllegalArgumentException("root secret");
+        rootCause.addSuppressed(new java.io.IOException("root suppressed body"));
+        var top = new RuntimeException("top secret", rootCause);
+        top.addSuppressed(new IllegalStateException("top suppressed body"));
+        String result = SafeLog.formatSafe("nested op", top);
+
+        assertTrue(result.contains("java.lang.RuntimeException[+java.lang.IllegalStateException]"),
+                "top-level suppressed must be emitted attached to top exception; got: " + result);
+        assertTrue(result.contains("java.lang.IllegalArgumentException[+java.io.IOException]"),
+                "cause-chain suppressed must be emitted attached to cause exception; got: " + result);
+        assertFalse(result.contains("root suppressed body"),
+                "suppressed message body must not leak from cause-chain elements");
+        assertFalse(result.contains("top suppressed body"),
+                "suppressed message body must not leak from top exception");
+    }
+
+    @Test
+    void formatSafeOmitsBracketsWhenNoSuppressed() {
+        var ex = new RuntimeException("plain");
+        String result = SafeLog.formatSafe("simple", ex);
+
+        assertEquals("simple | exception=java.lang.RuntimeException", result,
+                "exact format must not include empty [] when there are no suppressed exceptions");
+    }
 }

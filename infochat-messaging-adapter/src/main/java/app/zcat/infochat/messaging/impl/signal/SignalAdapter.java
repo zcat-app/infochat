@@ -178,6 +178,19 @@ public final class SignalAdapter implements MessagingAdapter {
                     "SignalAdapter.start() requires the production constructor "
                             + "(binary, dataDir, account, botAci, daemonEndpoint).");
         }
+        // D10 trust anchor: the bot's ACI must be a real Signal account
+        // identifier, never blank. A blank ACI breaks the ACI-anchored
+        // mention recognition group handler builds (lower-cased compare
+        // in SignalGroupHandler) and conflates the bot's identity with
+        // any operator-supplied blank-default. Property key is named so
+        // the operator can fix it directly.
+        if (botAci.isBlank()) {
+            throw new IllegalStateException(
+                    "infochat.adapters.signal.bot-aci must be set to the"
+                            + " bot's own Signal ACI (distinct from the"
+                            + " bootstrap admin's ACI in"
+                            + " infochat.adapters.signal.admin)");
+        }
         ProcessBuilder pb = new ProcessBuilder(
                 binary,
                 "--config", dataDir,

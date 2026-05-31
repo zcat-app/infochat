@@ -35,8 +35,16 @@ public final class SafeLog {
 
     /**
      * Build the sanitized log line: {@code redact(msg) + " | exception=" +
-     * className + (" > " + causeClassName)*}. Cause chain is depth-capped
-     * at {@value #MAX_CAUSE_DEPTH}.
+     * className + suppressed? + (" > " + causeClassName + suppressed?)*}.
+     * Cause chain is depth-capped at {@value #MAX_CAUSE_DEPTH}; suppressed
+     * exceptions are emitted as {@code [+suppressedClassName,+...]} after
+     * each exception's class name. Only class names traverse — message
+     * bodies and stack frames stay out, mirroring the cause-chain
+     * invariant. Walking suppressed closes the security.md §"User content
+     * in exceptions" gap that future {@code try-with-resources} or parallel
+     * {@code addSuppressed} call sites could otherwise carry user-authored
+     * content into the log if a contributor later called the underlying
+     * SLF4J {@code error(msg, t)} instead of this wrapper.
      */
     static @NonNull String formatSafe(@NonNull String msg, @NonNull Throwable t) {
         String redacted = Redactor.redact(msg);
@@ -44,13 +52,30 @@ public final class SafeLog {
         sb.append(redacted)
                 .append(" | exception=")
                 .append(t.getClass().getName());
+        appendSuppressedClassNames(sb, t);
         Throwable cause = t.getCause();
         int depth = 0;
         while (cause != null && depth < MAX_CAUSE_DEPTH) {
             sb.append(" > ").append(cause.getClass().getName());
+            appendSuppressedClassNames(sb, cause);
             cause = cause.getCause();
             depth++;
         }
         return sb.toString();
+    }
+
+    private static void appendSuppressedClassNames(@NonNull StringBuilder sb, @NonNull Throwable t) {
+        Throwable[] suppressed = t.getSuppressed();
+        if (suppressed.length == 0) {
+            return;
+        }
+        sb.append("[");
+        for (int i = 0; i < suppressed.length; i++) {
+            if (i > 0) {
+                sb.append(",");
+            }
+            sb.append("+").append(suppressed[i].getClass().getName());
+        }
+        sb.append("]");
     }
 }

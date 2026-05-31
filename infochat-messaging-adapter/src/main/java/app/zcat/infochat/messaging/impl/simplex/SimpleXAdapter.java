@@ -161,6 +161,26 @@ public final class SimpleXAdapter implements MessagingAdapter {
             throw new IllegalStateException(
                     "SimpleXAdapter not fully wired (httpClient/adminNotifier/botIdentity are null)");
         }
+        // System-boundary validation: filesystem/port checks the operator
+        // promised at config time. Runs only for activated adapters so an
+        // inmemory-only deployment never trips simplex's checks. Without
+        // this call a mis-typed binary path or out-of-range ws-port
+        // surfaces deep inside subprocess launch as an opaque exception
+        // that MessagingStartup's §6.7 catch-Throwable silently absorbs.
+        cfg.validate();
+        // D10 trust anchor: the bot's queue address must be a real
+        // cryptographic identity, never blank. A blank identity would let
+        // SimpleXMentionParser.botMentioned match any mention list entry
+        // that decodes to empty bytes (the forged-mention class the spec
+        // forever excludes per security.md §"What's intentionally NOT in
+        // v1"). Property key is named so an operator can fix it directly.
+        if (identity.queueAddress().isBlank()) {
+            throw new IllegalStateException(
+                    "infochat.adapters.simplex.bot-queue-address must be set"
+                            + " to the bot's own SimpleX queue address (distinct"
+                            + " from the bootstrap admin's queue address in"
+                            + " infochat.adapters.simplex.admin)");
+        }
         SimpleXSubprocess sub = new SimpleXSubprocess(
                 SimpleXSubprocess.commandFor(cfg),
                 Duration.ofSeconds(1),
