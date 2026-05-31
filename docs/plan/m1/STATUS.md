@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 10 |
+| pending | 12 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 134 |
 | deferred | 3 |
-| **total** | **147** |
+| **total** | **149** |
 
 ---
 
@@ -30,6 +30,8 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-104 — SimpleX group support + mention recognition (complexity: medium, risk: medium)
 - M1-105 — Multi-adapter Provider wiring + isolation IT (complexity: medium, risk: low)
 - M1-113 — D47 admin commands — approve-group, reject-group, list-groups (complexity: medium, risk: low)
+- M1-118 — SimpleX input-validation hardening — contactId shape + inbound size cap (complexity: low, risk: high)
+- M1-119 — SimpleX logging hygiene — drainStream + MalformedFrame exception messages (complexity: medium, risk: medium)
 
 ---
 
@@ -293,4 +295,6 @@ M1-110 (done)
         └── M1-116 (done)
 M1-115 (done)
 M1-117 (done)
+M1-118 (pending) ← runnable
+M1-119 (pending) ← runnable
 ```

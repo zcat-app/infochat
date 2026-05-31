@@ -131,7 +131,126 @@ revisions:
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
+redteam_findings:
+  - date: 2026-05-31
+    category: INFO-LEAK
+    severity: high
+    promise: |
+      "Stdout console logs pass through the closed API-key catalogue
+      redactor, fail-closed on regex timeout (whole message replaced
+      with a fixed sentinel). The audit_log writer consumes the same
+      Redactor utility so the two cannot drift." +
+      "User-content logging. chat_memory content, saved_post bodies
+      and annotations, and the bodies of inbound chat-mode messages
+      never appear in non-audit logs, at any log level (decision
+      D37)." + "Contact IDs are logged in redacted form (prefix +
+      ellipsis + suffix) outside the audit log."
+    gap: |
+      infochat-messaging-adapter/.../SimpleXSubprocess.java:285-287 —
+      drainStream pipes raw simplex-chat stdout/stderr lines directly
+      to SLF4J (LOG.warn("simplex-chat: {}", line) / LOG.info(...))
+      with no Redactor pass, no contact-id redaction, and no
+      chat-body suppression.
+    repro: |
+      A peer DMs the bot any message body containing what looks like
+      an API key (e.g. sk-ant-abc...) or any prose. simplex-chat logs
+      the inbound envelope to stdout. The drainer copies the line
+      into the application log unredacted, violating D37, the
+      contact-id redaction rule, and the API-key redactor commitment.
+    suggested_fix_class: input-sanitization
+  - date: 2026-05-31
+    category: INJECTION
+    severity: high
+    promise: |
+      "The adapter asserts identity via a stable, cryptographically
+      anchored ID." (Trust boundary 1) + the spec's adapter-inbound
+      boundary commits to validating system-boundary input. The
+      simplex-chat command-string surface is the only path the
+      adapter has into a privileged local subprocess.
+    gap: |
+      SimpleXMessageCodec.java:137-142 — targetSelector concatenates
+      "@" + dm.contactId() (or "#" + g.adapterGroupId()) into the
+      outbound simplex-chat command string with no validation that
+      the id contains only the queue-address character set. contactId
+      is sourced from inbound JSON (lines 236-241, 263-266) with no
+      shape check, then echoed back into outbound /_send, /_update
+      item, and /_set_contact_typing commands (lines 87-89, 109-115,
+      132-134).
+    repro: |
+      A peer (or a compromised relay) registers a contact whose id
+      contains the bytes "attacker_id on\n/_send @victim json
+      {...}". The codec stores it in ScopeRef.Dm. When the Provider
+      replies to that DM, encodeSendCommand produces a command line
+      that, after the newline, contains a second /_send directed at
+      the victim — sent under the bot's queue identity.
+    suggested_fix_class: input-sanitization
+  - date: 2026-05-31
+    category: DOS
+    severity: medium
+    promise: |
+      The capability surface in messaging.md is a contract:
+      maxInboundMessageBytes declares the size cap above which
+      inbound is rejected. The Provider trusts the adapter to honor
+      its declared caps; otherwise downstream paths face inputs
+      larger than the budget assumed.
+    gap: |
+      SimpleXAdapter.java:62-68 declares maxInboundMessageBytes =
+      16 KiB. SimpleXMessageCodec.decodeNewChatItem (lines 255-258,
+      263-270) extracts text from JSON and constructs InboundMessage
+      with no length check. The only size bound is
+      SimpleXWebSocketClient.MAX_FRAME_BYTES = 1_048_576 (line 54)
+      — 64× the declared inbound cap.
+    repro: |
+      A peer sends a 1 MiB text body in a single newChatItem frame.
+      The frame passes MAX_FRAME_BYTES, the codec deserializes it,
+      and the InboundMessage with a 1 MiB body is dispatched to the
+      Provider's InboundHandler — contradicting the declared
+      capability flag.
+    suggested_fix_class: input-sanitization
+  - date: 2026-05-31
+    category: INFO-LEAK
+    severity: low
+    promise: |
+      "Exception messages and stack traces emitted via the
+      application logger MUST NOT contain user-authored prose ...
+      The application provides a SafeLog utility that drops the
+      exception message body, retains only the exception class
+      name..."
+    gap: |
+      SimpleXWebSocketClient.java:248-251 — dispatch catches
+      MalformedFrameException and logs e.getMessage() directly.
+      MalformedFrameException's message (SimpleXMessageCodec.java:194)
+      embeds Jackson's parse error with byte fragments of the
+      offending input. Similarly LOG.debug at line 253 and the
+      Ignored(...) reason string at SimpleXMessageCodec.java:233
+      interpolate untrusted JSON values into log messages without
+      sanitization.
+    repro: |
+      A peer's relay delivers a malformed frame containing
+      "sk-ant-abc-real-key-bytes-here...invalid". Jackson's parse
+      error message includes the offending tokens; the warn-level
+      log line carries the bytes verbatim, exposing them to
+      operators with log access — SafeLog/Redactor bypassed.
+    suggested_fix_class: input-sanitization
+redteam_audits:
+  - date: 2026-05-31
+    verdict: FINDINGS
+    base: ec1806c33e28ac6254f5fbd7239c66800cd7dc9f
+    head: 0b24a7f794797fc026f41de9cc87f4680a9ae9b5
+    verdict_file: docs/plan/m1/redteam/M1-103-2026-05-31.md
+    findings_count: 4
+    out_of_model_count: 2
+    note: |
+      Audit ran post-/m1-tick commit, pre-/m1-tick merge. 4 findings
+      (2 high, 1 medium, 1 low) + 2 out-of-model observations.
+      Ticket is `done` and commit is immutable; remediation must
+      land as a new ticket with `remediates: M1-103`. Findings 1+4
+      collapse into one redaction-coverage remediation (drainStream +
+      MalformedFrame log); finding 2 (command injection) is highest
+      priority — local-subprocess command injection under bot
+      identity; finding 3 (size cap) is a single-line fix (enforce
+      maxInboundMessageBytes in decodeNewChatItem rather than
+      relying on MAX_FRAME_BYTES).
 outline_file: target/m1-tick-outline-M1-103.md
 clarity_check:
   date: 2026-05-30
