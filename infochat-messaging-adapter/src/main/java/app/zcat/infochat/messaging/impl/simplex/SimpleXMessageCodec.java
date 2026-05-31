@@ -249,7 +249,14 @@ final class SimpleXMessageCodec {
         try {
             root = MAPPER.readTree(frame);
         } catch (JsonProcessingException e) {
-            throw new MalformedFrameException("frame is not JSON: " + e.getOriginalMessage());
+            // Fixed message only — Jackson's getOriginalMessage() embeds
+            // byte fragments from the offending frame (security.md
+            // §User content in exceptions: exception messages emitted
+            // via the application logger MUST NOT contain user-authored
+            // prose). The structural fix is to keep the bytes out of
+            // the exception in the first place; the WS-client dispatch
+            // site logs the fixed message and drops the frame.
+            throw new MalformedFrameException("frame is not JSON");
         }
         JsonNode resp = root.get("resp");
         if (resp == null || !resp.isObject()) {
@@ -265,7 +272,15 @@ final class SimpleXMessageCodec {
             case "newChatItem" -> decodeNewChatItem(resp);
             case "sentMessage", "apiSendMessageResponse", "newChatItems" -> decodeSendAck(corrId, resp);
             case "chatCmdError", "chatItemUpdateError" -> decodeError(corrId, resp);
-            default -> new Ignored(type);
+            // Fixed sentinel — same rule as the chatType-non-direct branch
+            // below. The top-level resp.type is attacker-influenceable
+            // through the inbound frame and the Ignored.reason() value
+            // flows into the WS-client's DEBUG log via dispatch()
+            // (security.md §User content in exceptions / §User-content
+            // logging: at any log level). The actual type value is
+            // never needed downstream — the dispatch decision is the
+            // same for every unrecognized variant.
+            default -> new Ignored("unknown-resp-type");
         };
     }
 
@@ -284,10 +299,16 @@ final class SimpleXMessageCodec {
         }
         // Group scope is M1-104 territory — the mention-recognition rule
         // depends on the bot's queue address which the adapter does not
-        // surface to the codec in this ticket. Drop with a marker so the
-        // WS client can DEBUG-log.
+        // surface to the codec in this ticket. Drop with a fixed sentinel.
+        // The variant carries no bytes from chatType: that field is
+        // attacker-influenceable through the inbound frame and the
+        // Ignored.reason() value flows into the WS-client's DEBUG log
+        // (security.md §User content in exceptions). Discriminating on
+        // chatType beyond the direct/non-direct split is not needed in
+        // v1 — the dropping decision is the same for every non-direct
+        // value.
         if (!"direct".equals(chatType)) {
-            return new Ignored("newChatItem-non-direct:" + chatType);
+            return new Ignored("newChatItem-non-direct");
         }
         JsonNode contact = chatInfo.get("contact");
         if (contact == null) {
@@ -358,9 +379,22 @@ final class SimpleXMessageCodec {
     private static DecodedFrame decodeError(String corrId, JsonNode resp) {
         String errorTag = findFirstString(resp, "chatError", "errorType", "error");
         FailureCategory category = classifyError(errorTag == null ? "" : errorTag);
+        // Fixed sentinel when no recognized error tag is found — the prior
+        // resp.toString() fallback dumped the whole error envelope (which
+        // simplex-chat may populate with bytes echoed back from the
+        // offending inbound, e.g. user message body fragments) into
+        // CommandError.detail(), which then flowed into both the
+        // WS-client DEBUG log at failPending() and the MessagingException
+        // message text returned to the adapter caller. security.md
+        // §User-content logging is "at any log level"; §User content
+        // in exceptions covers the MessagingException path. The
+        // structural fix is to keep envelope bytes out of CommandError
+        // in the first place. The dropped envelope content is not
+        // needed by the Provider — the FailureCategory is the routing
+        // signal and the corrId is the correlation key.
         return new CommandError(corrId == null ? "" : corrId,
                 category,
-                errorTag == null ? resp.toString() : errorTag);
+                errorTag == null ? "unrecognized-error-envelope" : errorTag);
     }
 
     private static String optText(JsonNode node, String field) {

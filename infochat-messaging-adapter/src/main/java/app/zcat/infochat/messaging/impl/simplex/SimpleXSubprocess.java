@@ -4,11 +4,8 @@ import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Random;
@@ -276,16 +273,32 @@ final class SimpleXSubprocess {
         }
     }
 
+    // Per D37 (security.md §User-content logging) the bodies of inbound
+    // chat-mode messages MUST NOT appear in non-audit logs. simplex-chat
+    // may emit envelopes (contact ids, message bodies) on its own stdout
+    // depending on its log level, so the drain reads the pipe purely to
+    // prevent a deadlocked buffer and discards the bytes — at most one
+    // fixed-shape marker per drain lifetime announces that output exists.
+    // The marker carries no bytes from the stream. See docs/design/06-messaging.md
+    // §6.4.8 for the chosen policy and rationale.
     private static void drainStream(InputStream in, boolean stderr) {
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(in, StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                if (stderr) {
-                    LOG.warn("simplex-chat: {}", line);
-                } else {
-                    LOG.info("simplex-chat: {}", line);
+        boolean markerEmitted = false;
+        byte[] buf = new byte[4096];
+        try (InputStream stream = in) {
+            while (true) {
+                int n = stream.read(buf);
+                if (n < 0) {
+                    return;
                 }
+                if (n > 0 && !markerEmitted) {
+                    markerEmitted = true;
+                    if (stderr) {
+                        LOG.info("simplex-chat subprocess stderr output suppressed");
+                    } else {
+                        LOG.info("simplex-chat subprocess stdout output suppressed");
+                    }
+                }
+                // bytes in buf[0..n-1] are intentionally discarded.
             }
         } catch (IOException e) {
             // Process exited; stream closed. Normal lifecycle.

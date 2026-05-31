@@ -605,6 +605,34 @@
   │   — item too old, deleted, not owner)    │ correlationId; metric incremented  │                                                           │
   └──────────────────────────────────────────┴────────────────────────────────────┴───────────────────────────────────────────────────────────┘                                                                                                         
                                                                                    
+  ### 6.4.8 Subprocess log discipline
+
+  The simplex-chat OS process is launched by the adapter and may emit
+  envelopes (contact ids, message-body excerpts) on its own stdout/stderr
+  depending on the simplex-chat log level the operator picks. Piping those
+  bytes verbatim into the Provider's SLF4J chain would violate
+  `docs/spec/security.md` §User-content logging (D37: the bodies of
+  inbound chat-mode messages MUST NOT appear in non-audit logs) and the
+  contact-id redaction rule.
+
+  **Policy.** The drainer threads (`SimpleXSubprocess.drainStream`) still
+  read both pipes — otherwise a full pipe buffer would block the
+  subprocess — but the bytes are **discarded**. Exactly one fixed-shape
+  marker (`simplex-chat subprocess stdout output suppressed` /
+  `... stderr output suppressed`) fires per drain lifetime to record
+  that output existed; the marker carries no bytes from the stream. The
+  operator can still consult the subprocess's own log file (configured
+  via `simplex-chat`'s flags, outside the adapter's control) for
+  diagnostics.
+
+  Rationale: structural over filtering. A redaction step that scans each
+  drained line for sensitive content would inevitably drift behind
+  simplex-chat's log format; the structural choice — never log the bytes
+  in the first place — is invariant to whatever simplex-chat decides to
+  print. The API-key redactor (`infochat-core`'s `Redactor`, registered
+  as the JBoss LogManager console filter) is still in front of every
+  SLF4J line for defence-in-depth.
+
   ---
 
   ## 6.5 Signal adapter

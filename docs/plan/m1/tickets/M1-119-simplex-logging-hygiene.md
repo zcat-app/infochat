@@ -1,7 +1,7 @@
 ---
 id: M1-119
 title: "SimpleX logging hygiene — drainStream + MalformedFrame exception messages"
-status: pending
+status: done
 created: 2026-05-31
 last_updated: 2026-05-31
 blocked_by: []
@@ -37,7 +37,10 @@ acceptance:
   - "SimpleXSubprocessTest.drainStreamDoesNotLeakSubprocessOutput passes — the test asserts that after the fake subprocess writes a line containing a sentinel string ('REDTEAM-SENTINEL-XXXXX'), the captured log output does NOT contain that sentinel"
   - "SimpleXMessageCodecTest.malformedFrameExceptionHasFixedMessage passes — MalformedFrameException thrown from a non-JSON frame has a fixed message ('frame is not JSON' or equivalent) that does NOT contain bytes from the original input"
   - "SimpleXMessageCodecTest.ignoredVariantReasonStringsAreFixed passes — for the non-direct chatType case, the Ignored variant's reason() returns a fixed string ('newChatItem-non-direct' or equivalent) that does NOT interpolate the chatType value"
+  - "SimpleXMessageCodecTest.unknownRespTypeYieldsFixedIgnoredReason passes — the default switch branch in decode() returns an Ignored variant whose reason() is a fixed sentinel ('unknown-resp-type') and does NOT interpolate the attacker-controlled top-level resp.type value (post-audit follow-up fix)"
+  - "SimpleXMessageCodecTest.unrecognizedErrorEnvelopeYieldsFixedDetail passes — decodeError on a chatCmdError/chatItemUpdateError frame with no recognized chatError/errorType/error tag returns a CommandError whose detail() is a fixed sentinel ('unrecognized-error-envelope') and does NOT contain the resp envelope bytes (post-audit follow-up fix)"
   - "SimpleXWebSocketClientTest.malformedFrameLogIsSafe passes — when dispatch() catches MalformedFrameException, the WARN log line does not contain Jackson byte fragments from the offending input (verified via a sentinel string assertion on the captured log)"
+  - "SimpleXWebSocketClientTest.unrecognizedErrorEnvelopeDoesNotLeakBytesToLog passes — when failPending() logs the no-pending-command DEBUG line for an unrecognized error envelope, the captured log does NOT contain the envelope's attacker-supplied bytes (the JBoss logger is forced to FINE in the test so the DEBUG line is observable; the assertion follows from CommandError.detail() being a fixed sentinel after the post-audit follow-up fix)"
   - "drainStream / log-content policy is documented in docs/design/06-messaging.md (one short subsection explaining the chosen approach and why)"
   - "mvn -B clean verify from the repo root exits 0"
 test_plan:
@@ -53,12 +56,117 @@ spec_refs:
   - docs/spec/security.md §User content in exceptions
 decision_refs:
   - D37
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-05-31
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 9
+      added: 399
+      removed: 24
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
-clarity_check: {}
+redteam_findings:
+  - date: 2026-05-31
+    category: INFO-LEAK
+    severity: medium
+    promise: |
+      "Exception messages and stack traces emitted via the application
+      logger MUST NOT contain user-authored prose (chat-mode message
+      bodies, post bodies, saved-post annotations, command arguments)."
+      AND "the bodies of inbound chat-mode messages never appear in
+      non-audit logs, at any log level (decision D37)."
+      (`docs/spec/security.md` §User content in exceptions and §Secrets
+      handling)
+    gap: |
+      `SimpleXMessageCodec.java:302` still falls back to `resp.toString()`
+      (the entire JSON `resp` envelope) when no recognized
+      `chatError`/`errorType`/`error` tag is present. That string is
+      stored in `CommandError.detail()`, which then (a) flows verbatim
+      into the application logger at `SimpleXWebSocketClient.java:305`
+      (`LOG.debug("no pending command for error corrId={}: {}", ...)`)
+      and (b) becomes the message text of the `MessagingException`
+      constructed at `SimpleXWebSocketClient.java:303`. The diff fixed
+      `MalformedFrameException` and the non-direct `chatType` `Ignored`
+      reason but left the `decodeError` envelope-dump leak unchanged.
+      The spec's "at any log level" wording explicitly covers DEBUG.
+    repro: |
+      A peer (compromised simplex-chat, MITM at the unauthenticated
+      localhost ws://, or a malicious upstream relay echoing crafted
+      error envelopes) sends
+      `{"resp":{"type":"chatCmdError","attackerPayload":"REDTEAM-SENTINEL plus chat body bytes"}}`
+      — an error frame whose envelope carries content but contains no
+      `chatError`/`errorType`/`error` field at any depth `findFirstString`
+      probes. Codec falls into the `resp.toString()` branch; the entire
+      envelope lands at DEBUG via `LOG.debug` and is also embedded into
+      the `MessagingException` returned to the adapter caller.
+    suggested_fix_class: input-sanitization
+  - date: 2026-05-31
+    category: INFO-LEAK
+    severity: low
+    promise: |
+      "Exception messages and stack traces emitted via the application
+      logger MUST NOT contain user-authored prose" — by parity, neither
+      should the parallel non-exception `Ignored.reason()` channel: M1-103
+      Finding 4 treats interpolation of untrusted JSON values into
+      `Ignored` reason strings as a §User content in exceptions violation
+      because they flow into the WS-client DEBUG log via
+      `LOG.debug("simplex-chat frame ignored: {}", ignored.reason())`
+      (`SimpleXWebSocketClient.java:285`). D37 §User-content logging also
+      covers this path "at any log level".
+    gap: |
+      `SimpleXMessageCodec.java:217` still emits `new Ignored(type)` where
+      `type` is the attacker-controllable top-level `resp.type` value from
+      the inbound JSON frame. The diff fixed the parallel
+      `chatType`-non-direct branch at line 245 with the comment "The
+      variant carries no bytes from chatType: that field is
+      attacker-influenceable…and the Ignored.reason() value flows into the
+      WS-client's DEBUG log" — the exact same reasoning applies to the
+      top-level `type` field at line 217, but that site was left unchanged.
+      The ticket's Finding 4 description ("Ignored variants interpolate
+      untrusted JSON values into reason strings") covers both sites; only
+      one was remediated.
+    repro: |
+      A peer sends `{"resp":{"type":"REDTEAM-SENTINEL-XXXXX-with-chosen-bytes"}}`.
+      The codec's `switch (type)` falls through to `default -> new Ignored(type)`;
+      dispatch logs `simplex-chat frame ignored: REDTEAM-SENTINEL-XXXXX-with-chosen-bytes`
+      at DEBUG. The attacker chose those bytes; the §User-content /
+      §User content in exceptions rules say they must not reach the
+      application logger.
+    suggested_fix_class: input-sanitization
+redteam_audits:
+  - date: 2026-05-31
+    verdict: FINDINGS
+    base: dd69fcb^
+    head: dd69fcb
+    verdict_file: docs/plan/m1/redteam/M1-119-2026-05-31.md
+    findings_count: 2
+    out_of_model_count: 1
+    note: |
+      M1-119 is the remediation for M1-103 Findings 1 and 4. The
+      original commit closed both cited sites but did not extend the
+      structural-over-filtering pattern to the other two interpolation
+      sites in the same codec (decodeError's `resp.toString()` fallback
+      and the top-level `default -> new Ignored(type)` branch). Per user
+      direction, both findings are fixed in the same M1-119 scope: a
+      follow-up commit on the branch replaces both with fixed sentinels
+      (`"unrecognized-error-envelope"` and `"unknown-resp-type"`) and
+      adds three sentinel-string tests (two in SimpleXMessageCodecTest,
+      one end-to-end in SimpleXWebSocketClientTest with the JBoss logger
+      forced to FINE so the DEBUG log site at failPending() is observable).
+clarity_check:
+  date: 2026-05-31
+  verdict: WARN
+  warnings:
+    - 'Acceptance item 6 (design-doc policy subsection) uses the inspection-based "is documented" form rather than a runnable check; reviewer verifies by reading docs/design/06-messaging.md after the diff'
+  blockers: []
 remediates: M1-103
 ---
 

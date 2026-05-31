@@ -11,7 +11,11 @@ import java.util.Random;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.logging.Handler;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 
+import org.jboss.logmanager.LogContext;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -21,6 +25,7 @@ class SimpleXSubprocessTest {
 
     private static final String SLEEP = pickBinary("/bin/sleep", "/usr/bin/sleep");
     private static final String TRUE = pickBinary("/bin/true", "/usr/bin/true");
+    private static final String SH = pickBinary("/bin/sh", "/usr/bin/sh");
 
     @Test
     void startsAndStopsProcess() throws Exception {
@@ -133,6 +138,79 @@ class SimpleXSubprocessTest {
         assertFalse(capped.isNegative());
     }
 
+    @Test
+    void drainStreamEmitsLifecycleEventsOnly() throws Exception {
+        // M1-119 acceptance item 1: the application log receives only a
+        // fixed-shape lifecycle marker (one per drain lifetime) — never
+        // the raw byte content the subprocess emitted on stdout. The drain
+        // still consumes the pipe so the subprocess does not deadlock on
+        // a full buffer, but the bytes themselves go nowhere.
+        CapturingLogHandler logCapture = CapturingLogHandler.attach(SimpleXSubprocess.class);
+        try {
+            SimpleXSubprocess sub = new SimpleXSubprocess(
+                    List.of(SH, "-c", "echo DRAIN-MARKER-CHECK-BYTES; sleep 60"),
+                    Duration.ofMillis(5),
+                    Duration.ofMillis(20),
+                    /* crashCap */ 5,
+                    msg -> { /* unused */ },
+                    new Random(0L));
+            sub.start();
+            try {
+                awaitLogContains(logCapture,
+                        "subprocess stdout output suppressed",
+                        Duration.ofSeconds(2));
+            } finally {
+                sub.stop();
+            }
+            String captured = logCapture.formatted();
+            assertTrue(captured.contains("subprocess stdout output suppressed"),
+                    "expected fixed-shape suppression marker; captured: " + captured);
+            assertFalse(captured.contains("DRAIN-MARKER-CHECK-BYTES"),
+                    "raw subprocess output bytes must not reach the log; captured: "
+                            + captured);
+            long stdoutMarkers = captured.split(
+                    "subprocess stdout output suppressed", -1).length - 1;
+            assertEquals(1L, stdoutMarkers,
+                    "exactly one stdout marker per drain lifetime; captured: " + captured);
+        } finally {
+            logCapture.detach();
+        }
+    }
+
+    @Test
+    void drainStreamDoesNotLeakSubprocessOutput() throws Exception {
+        // M1-119 acceptance item 2: sentinel-string proof that a byte
+        // sequence the test owns, written to the fake subprocess's stdout,
+        // does NOT appear anywhere in the captured application log.
+        String sentinel = "REDTEAM-SENTINEL-XXXXX";
+        CapturingLogHandler logCapture = CapturingLogHandler.attach(SimpleXSubprocess.class);
+        try {
+            SimpleXSubprocess sub = new SimpleXSubprocess(
+                    List.of(SH, "-c", "echo " + sentinel + "; sleep 60"),
+                    Duration.ofMillis(5),
+                    Duration.ofMillis(20),
+                    /* crashCap */ 5,
+                    msg -> { /* unused */ },
+                    new Random(0L));
+            sub.start();
+            try {
+                // Wait for the suppression marker — proves the drain has
+                // already read past the sentinel-bearing line.
+                awaitLogContains(logCapture,
+                        "subprocess stdout output suppressed",
+                        Duration.ofSeconds(2));
+            } finally {
+                sub.stop();
+            }
+            String captured = logCapture.formatted();
+            assertFalse(captured.contains(sentinel),
+                    "subprocess stdout bytes must not reach the log; captured: "
+                            + captured);
+        } finally {
+            logCapture.detach();
+        }
+    }
+
     private static String pickBinary(String... candidates) {
         for (String path : candidates) {
             if (java.nio.file.Files.isExecutable(java.nio.file.Path.of(path))) {
@@ -164,6 +242,77 @@ class SimpleXSubprocessTest {
                 return;
             }
             TimeUnit.MILLISECONDS.sleep(5);
+        }
+    }
+
+    private static void awaitLogContains(CapturingLogHandler capture,
+                                         String needle,
+                                         Duration timeout) throws InterruptedException {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        while (System.nanoTime() < deadline) {
+            if (capture.formatted().contains(needle)) {
+                return;
+            }
+            TimeUnit.MILLISECONDS.sleep(5);
+        }
+        throw new AssertionError(
+                "expected captured log to contain `" + needle + "` within "
+                        + timeout + "; captured: " + capture.formatted());
+    }
+
+    /**
+     * Test-only JUL handler that records every {@link LogRecord} a target
+     * named logger publishes. Attaches to BOTH the jboss-logmanager Logger
+     * and the JUL Logger so the capture is robust to whether
+     * jboss-logmanager is the active LogManager under surefire (the same
+     * pattern as {@code InboundRouterContactIdRedactionTest} in
+     * infochat-provider — see CLAUDE.md feedback memory
+     * "avoid-test-inner-classes": one named inner per file is within the
+     * &gt;3 rule of thumb).
+     */
+    private static final class CapturingLogHandler extends Handler {
+
+        private final List<LogRecord> records = new CopyOnWriteArrayList<>();
+        private final org.jboss.logmanager.Logger jbossLogger;
+        private final Logger julLogger;
+
+        private CapturingLogHandler(org.jboss.logmanager.Logger jbossLogger,
+                                    Logger julLogger) {
+            this.jbossLogger = jbossLogger;
+            this.julLogger = julLogger;
+            jbossLogger.addHandler(this);
+            julLogger.addHandler(this);
+        }
+
+        static CapturingLogHandler attach(Class<?> target) {
+            org.jboss.logmanager.Logger jboss =
+                    LogContext.getLogContext().getLogger(target.getName());
+            Logger jul = Logger.getLogger(target.getName());
+            return new CapturingLogHandler(jboss, jul);
+        }
+
+        void detach() {
+            jbossLogger.removeHandler(this);
+            julLogger.removeHandler(this);
+        }
+
+        @Override
+        public void publish(LogRecord record) {
+            records.add(record);
+        }
+
+        @Override
+        public void flush() { }
+
+        @Override
+        public void close() { }
+
+        String formatted() {
+            StringBuilder sb = new StringBuilder("[");
+            for (LogRecord r : records) {
+                sb.append(r.getLevel()).append(": ").append(r.getMessage()).append("; ");
+            }
+            return sb.append("]").toString();
         }
     }
 }

@@ -423,4 +423,115 @@ class SimpleXMessageCodecTest {
             throw new AssertionError("jsonStringLiteral", e);
         }
     }
+
+    // --- M1-119: log-hygiene sentinel tests (Finding 4) ---
+
+    @Test
+    void malformedFrameExceptionHasFixedMessage() {
+        // M1-119 acceptance item 3 (security.md §User content in
+        // exceptions): MalformedFrameException thrown from a non-JSON
+        // frame must carry only a fixed message — Jackson's
+        // getOriginalMessage() interpolates bytes from the offending
+        // input, which the M1-103 audit (Finding 4) flagged as a leak.
+        String sentinel = "REDTEAM-SENTINEL-XXXXX";
+        SimpleXMessageCodec.MalformedFrameException ex = assertThrows(
+                SimpleXMessageCodec.MalformedFrameException.class,
+                () -> SimpleXMessageCodec.decode("not json " + sentinel));
+        assertNotNull(ex.getMessage(), "exception must carry a non-null message");
+        assertFalse(ex.getMessage().contains(sentinel),
+                "exception message must not interpolate bytes from the offending frame; was: "
+                        + ex.getMessage());
+        assertEquals("frame is not JSON", ex.getMessage(),
+                "fixed-message contract per security.md §User content in exceptions");
+    }
+
+    @Test
+    void ignoredVariantReasonStringsAreFixed() {
+        // M1-119 acceptance item 4: the Ignored variant returned for a
+        // non-direct chatType must NOT interpolate the chatType value.
+        // The attacker controls chatType through the inbound frame; the
+        // Ignored.reason() value flows to the WS-client's DEBUG log
+        // (security.md §User content in exceptions).
+        String sentinel = "REDTEAM-SENTINEL-XXXXX";
+        String frame = """
+                {
+                  "resp": {
+                    "type": "newChatItem",
+                    "chatItem": {
+                      "chatInfo": {
+                        "chatType": "%s"
+                      }
+                    }
+                  }
+                }
+                """.formatted(sentinel);
+        var decoded = SimpleXMessageCodec.decode(frame);
+        var ignored = assertInstanceOf(SimpleXMessageCodec.Ignored.class, decoded);
+        assertFalse(ignored.reason().contains(sentinel),
+                "Ignored.reason() must not echo attacker-controlled chatType; was: "
+                        + ignored.reason());
+        assertEquals("newChatItem-non-direct", ignored.reason(),
+                "fixed sentinel per security.md §User content in exceptions");
+    }
+
+    @Test
+    void unknownRespTypeYieldsFixedIgnoredReason() {
+        // Top-level resp.type is attacker-influenceable through the inbound
+        // frame and Ignored.reason() flows into the WS-client's DEBUG log
+        // (security.md §User content in exceptions / §User-content logging
+        // at any log level). The default switch branch must drop the
+        // attacker-chosen type string and emit only a fixed sentinel —
+        // parallel to the chatType non-direct rule covered above.
+        String sentinel = "REDTEAM-SENTINEL-XXXXX";
+        String frame = """
+                {
+                  "resp": {
+                    "type": "%s"
+                  }
+                }
+                """.formatted(sentinel);
+        var decoded = SimpleXMessageCodec.decode(frame);
+        var ignored = assertInstanceOf(SimpleXMessageCodec.Ignored.class, decoded);
+        assertFalse(ignored.reason().contains(sentinel),
+                "Ignored.reason() must not echo attacker-controlled resp.type; was: "
+                        + ignored.reason());
+        assertEquals("unknown-resp-type", ignored.reason(),
+                "fixed sentinel per security.md §User content in exceptions");
+    }
+
+    @Test
+    void unrecognizedErrorEnvelopeYieldsFixedDetail() {
+        // chatCmdError / chatItemUpdateError frames where no recognized
+        // tag (chatError / errorType / error) is found previously fell
+        // back to resp.toString() — the entire envelope, which simplex-chat
+        // may populate with bytes echoed back from the offending inbound
+        // (user message body fragments). That detail flowed into both
+        // the WS-client DEBUG log at failPending() and the
+        // MessagingException message text returned to the adapter caller
+        // (security.md §User-content logging at any log level;
+        // §User content in exceptions). The fix replaces the envelope dump
+        // with a fixed sentinel so the leak channel is closed structurally.
+        String sentinel = "REDTEAM-SENTINEL-XXXXX";
+        String frame = """
+                {
+                  "corrId": "corr-x",
+                  "resp": {
+                    "type": "chatCmdError",
+                    "echoedBody": "%s"
+                  }
+                }
+                """.formatted(sentinel);
+        var decoded = assertInstanceOf(
+                SimpleXMessageCodec.CommandError.class,
+                SimpleXMessageCodec.decode(frame));
+        assertFalse(decoded.detail().contains(sentinel),
+                "CommandError.detail() must not carry envelope bytes; was: "
+                        + decoded.detail());
+        assertEquals("unrecognized-error-envelope", decoded.detail(),
+                "fixed sentinel per security.md §User content in exceptions");
+        // FailureCategory still classifies the missing-tag case as PERMANENT
+        // — the spec rule (unknown tags default to PERMANENT) is unchanged.
+        assertEquals(FailureCategory.PERMANENT, decoded.category());
+        assertEquals("corr-x", decoded.corrId());
+    }
 }

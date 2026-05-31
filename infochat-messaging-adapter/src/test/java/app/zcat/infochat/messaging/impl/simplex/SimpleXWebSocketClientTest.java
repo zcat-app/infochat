@@ -1,6 +1,7 @@
 package app.zcat.infochat.messaging.impl.simplex;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -15,8 +16,15 @@ import app.zcat.infochat.messaging.ScopeRef;
 
 import java.net.http.HttpClient;
 import java.time.Duration;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.logging.Handler;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 
+import org.jboss.logmanager.LogContext;
 import org.junit.jupiter.api.Test;
 
 class SimpleXWebSocketClientTest {
@@ -125,6 +133,93 @@ class SimpleXWebSocketClientTest {
     }
 
     @Test
+    void malformedFrameLogIsSafe() throws Exception {
+        // M1-119 acceptance item 5: when dispatch() catches
+        // MalformedFrameException, the WARN log line must not contain
+        // byte fragments from the offending frame (security.md §User
+        // content in exceptions). Send a syntactically-valid JSON frame
+        // missing the 'resp' envelope so the codec throws, with a sentinel
+        // string in a sibling field; assert the captured log does not
+        // carry that sentinel.
+        String sentinel = "REDTEAM-SENTINEL-XXXXX";
+        CapturingLogHandler logCapture =
+                CapturingLogHandler.attach(SimpleXWebSocketClient.class);
+        try (FakeSimpleXProcess fake = new FakeSimpleXProcess()) {
+            fake.start();
+            SimpleXWebSocketClient client = new SimpleXWebSocketClient(
+                    fake.wsUri(),
+                    HttpClient.newHttpClient(),
+                    msg -> { /* unused */ });
+            client.start();
+            try {
+                fake.awaitClient(WAIT);
+                fake.sendFrame("{\"junk\":\"" + sentinel + "\"}");
+                awaitLogContains(logCapture,
+                        "simplex-chat sent a malformed frame",
+                        WAIT);
+            } finally {
+                client.close();
+            }
+            String captured = logCapture.formatted();
+            assertTrue(captured.contains("simplex-chat sent a malformed frame"),
+                    "expected the malformed-frame WARN log; captured: " + captured);
+            assertFalse(captured.contains(sentinel),
+                    "log line must not carry bytes from the offending frame; captured: "
+                            + captured);
+        } finally {
+            logCapture.detach();
+        }
+    }
+
+    @Test
+    void unrecognizedErrorEnvelopeDoesNotLeakBytesToLog() throws Exception {
+        // End-to-end defense-in-depth for the codec's unrecognized-error
+        // sentinel rule: a chatCmdError frame whose envelope echoes back
+        // user bytes but carries no chatError/errorType/error tag must
+        // produce a DEBUG log line at failPending() (no pending command
+        // for that corrId) that does NOT include the sentinel — the
+        // codec contract makes CommandError.detail() a fixed string and
+        // the log site interpolates only that detail.
+        String sentinel = "REDTEAM-SENTINEL-XXXXX";
+        // Force the WS-client logger to publish DEBUG records — default
+        // surefire level is INFO, which would suppress the no-pending-command
+        // line we are asserting on. Restore the prior level after the test.
+        org.jboss.logmanager.Logger jbossLogger =
+                LogContext.getLogContext().getLogger(SimpleXWebSocketClient.class.getName());
+        java.util.logging.Level prior = jbossLogger.getLevel();
+        jbossLogger.setLevel(java.util.logging.Level.FINE);
+        CapturingLogHandler logCapture =
+                CapturingLogHandler.attach(SimpleXWebSocketClient.class);
+        try (FakeSimpleXProcess fake = new FakeSimpleXProcess()) {
+            fake.start();
+            SimpleXWebSocketClient client = new SimpleXWebSocketClient(
+                    fake.wsUri(),
+                    HttpClient.newHttpClient(),
+                    msg -> { /* unused */ });
+            client.start();
+            try {
+                fake.awaitClient(WAIT);
+                fake.sendFrame(
+                        "{\"corrId\":\"never-issued\",\"resp\":{\"type\":\"chatCmdError\","
+                                + "\"echoedBody\":\"" + sentinel + "\"}}");
+                awaitLogContains(logCapture,
+                        "no pending command for error",
+                        WAIT);
+            } finally {
+                client.close();
+            }
+            String captured = logCapture.formatted();
+            assertTrue(captured.contains("no pending command for error"),
+                    "expected the unmatched-error DEBUG log; captured: " + captured);
+            assertFalse(captured.contains(sentinel),
+                    "log line must not carry envelope bytes; captured: " + captured);
+        } finally {
+            logCapture.detach();
+            jbossLogger.setLevel(prior);
+        }
+    }
+
+    @Test
     void sendAfterCloseRaisesPermanent() throws Exception {
         // close() must release callers waiting on pending acks. A subsequent
         // sendCommand on a closed client raises PERMANENT (matches the SPI
@@ -148,6 +243,74 @@ class SimpleXWebSocketClientTest {
                                     "should fail"),
                             WAIT));
             assertEquals(FailureCategory.PERMANENT, ex.category());
+        }
+    }
+
+    private static void awaitLogContains(CapturingLogHandler capture,
+                                         String needle,
+                                         Duration timeout) throws InterruptedException {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        while (System.nanoTime() < deadline) {
+            if (capture.formatted().contains(needle)) {
+                return;
+            }
+            TimeUnit.MILLISECONDS.sleep(5);
+        }
+        throw new AssertionError(
+                "expected captured log to contain `" + needle + "` within "
+                        + timeout + "; captured: " + capture.formatted());
+    }
+
+    /**
+     * Test-only JUL handler that records every {@link LogRecord} a target
+     * named logger publishes. Attaches to BOTH the jboss-logmanager Logger
+     * and the JUL Logger so the capture is robust to whether
+     * jboss-logmanager is the active LogManager under surefire — same
+     * pattern as the InboundRouter redaction tests in infochat-provider.
+     */
+    private static final class CapturingLogHandler extends Handler {
+
+        private final List<LogRecord> records = new CopyOnWriteArrayList<>();
+        private final org.jboss.logmanager.Logger jbossLogger;
+        private final Logger julLogger;
+
+        private CapturingLogHandler(org.jboss.logmanager.Logger jbossLogger,
+                                    Logger julLogger) {
+            this.jbossLogger = jbossLogger;
+            this.julLogger = julLogger;
+            jbossLogger.addHandler(this);
+            julLogger.addHandler(this);
+        }
+
+        static CapturingLogHandler attach(Class<?> target) {
+            org.jboss.logmanager.Logger jboss =
+                    LogContext.getLogContext().getLogger(target.getName());
+            Logger jul = Logger.getLogger(target.getName());
+            return new CapturingLogHandler(jboss, jul);
+        }
+
+        void detach() {
+            jbossLogger.removeHandler(this);
+            julLogger.removeHandler(this);
+        }
+
+        @Override
+        public void publish(LogRecord record) {
+            records.add(record);
+        }
+
+        @Override
+        public void flush() { }
+
+        @Override
+        public void close() { }
+
+        String formatted() {
+            StringBuilder sb = new StringBuilder("[");
+            for (LogRecord r : records) {
+                sb.append(r.getLevel()).append(": ").append(r.getMessage()).append("; ");
+            }
+            return sb.append("]").toString();
         }
     }
 }

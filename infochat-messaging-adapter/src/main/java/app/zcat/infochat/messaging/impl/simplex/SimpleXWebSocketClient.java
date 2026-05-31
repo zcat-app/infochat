@@ -269,7 +269,12 @@ final class SimpleXWebSocketClient {
         try {
             decoded = SimpleXMessageCodec.decode(frame);
         } catch (SimpleXMessageCodec.MalformedFrameException e) {
-            LOG.warn("simplex-chat sent a malformed frame, skipping: {}", e.getMessage());
+            // No interpolation of the exception message or the frame
+            // contents — security.md §User content in exceptions: the
+            // application logger MUST NOT carry user-authored prose.
+            // The exception's message is fixed by codec contract, so the
+            // log site stays defense-in-depth by not echoing it either.
+            LOG.warn("simplex-chat sent a malformed frame, skipping");
             return;
         }
         switch (decoded) {
