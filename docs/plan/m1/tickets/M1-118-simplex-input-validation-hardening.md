@@ -1,7 +1,7 @@
 ---
 id: M1-118
 title: "SimpleX input-validation hardening — contactId shape + inbound size cap"
-status: pending
+status: done
 created: 2026-05-31
 last_updated: 2026-05-31
 blocked_by: []
@@ -46,12 +46,30 @@ spec_refs:
 decision_refs:
   - D32
   - D46
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-05-31
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 357
+      removed: 10
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-05-31
+  verdict: WARN
+  warnings:
+    - "Acceptance item 6 (queue-address character-set rule documented in docs/design/06-messaging.md) is verifiable by diff inspection but uses the weaker inspection form rather than a runnable test or command."
+  blockers: []
 remediates: M1-103
 ---
 

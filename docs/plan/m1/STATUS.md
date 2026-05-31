@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 11 |
+| pending | 10 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 135 |
+| done | 136 |
 | deferred | 3 |
 | **total** | **149** |
 
@@ -30,7 +30,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-104 — SimpleX group support + mention recognition (complexity: medium, risk: medium)
 - M1-105 — Multi-adapter Provider wiring + isolation IT (complexity: medium, risk: low)
 - M1-113 — D47 admin commands — approve-group, reject-group, list-groups (complexity: medium, risk: medium)
-- M1-118 — SimpleX input-validation hardening — contactId shape + inbound size cap (complexity: low, risk: high)
 - M1-119 — SimpleX logging hygiene — drainStream + MalformedFrame exception messages (complexity: medium, risk: medium)
 
 ---
@@ -69,6 +68,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-118 | SimpleX input-validation hardening — contactId shape + inbound size cap | 2026-05-31 | round 1 APPROVE |
 | M1-108 | Signal mention recognition + group support | 2026-05-31 | round 1 APPROVE |
 | M1-103 | SimpleX subprocess + WebSocket messaging | 2026-05-31 | round 2 APPROVE |
 | M1-097 | Nostr event verification + kind filter | 2026-05-31 | round 1 APPROVE |
@@ -78,7 +78,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-106 | Signal adapter skeleton — capabilities and ACI | 2026-05-30 | round 2 APPROVE |
 | M1-102 | SimpleX adapter skeleton — capabilities and config | 2026-05-30 | round 2 APPROVE |
 | M1-096 | NostrStreamSource — JDK WebSocket relay pool | 2026-05-30 | round 1 APPROVE |
-| M1-095 | StreamSourceSupervisor lifecycle and drain framework | 2026-05-30 | round 1 APPROVE |
 
 ---
 
@@ -294,6 +293,6 @@ M1-110 (done)
         └── M1-116 (done)
 M1-115 (done)
 M1-117 (done)
-M1-118 (pending) ← runnable
+M1-118 (done)
 M1-119 (pending) ← runnable
 ```

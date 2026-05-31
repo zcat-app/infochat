@@ -507,6 +507,41 @@
                                                                                                                                                                                                                                                         
   The decoder is pure (no I/O) and unit-tested with recorded JSON fixtures.                                                                                                                                                                             
 
+
+  #### Queue-address character set (decode and encode validation)
+
+  Every identifier the adapter pastes into a SimpleX command string —
+  `contactId` (DM scope), `adapterGroupId` (group scope), and the
+  `chatItemId` round-tripped on edit — MUST match the regex
+  `^[A-Za-z0-9_=.-]+$`. The character class is the intersection of two
+  shapes the simplex-chat bot API uses for these fields: URL-safe
+  base64 (the SimpleX queue address itself) and decimal (the
+  simplex-chat DB row id, used by some API versions). It explicitly
+  excludes whitespace, newlines, and the simplex-chat command
+  terminators (`@`, `#`, ` `) so an attacker-controlled id cannot
+  piggyback a forged verb (`/_send`, `/_update item`,
+  `/_set_contact_typing`, …) into the outbound command string.
+
+  - **Decode-time** (`newChatItem`): a contactId failing the regex
+    drops the frame as `Ignored` before any `InboundMessage` is
+    constructed, so no scope state is populated and no echoed text
+    is ever pasted back into an outbound command. This is the
+    adapter-inbound trust boundary (`docs/spec/security.md`
+    §Trust boundaries).
+  - **Decode-time also enforces** `capabilities.maxInboundMessageBytes`
+    on the extracted `text` field (UTF-8 byte length): a frame whose
+    text exceeds the SPI-declared cap is dropped as `Ignored` before
+    `InboundMessage` is constructed, so the Provider's downstream
+    budgets (LLM tokens, Stage 1 watchdog) plan against a real ceiling
+    rather than the 1 MiB WebSocket frame ceiling.
+  - **Encode-time**: the encode helpers (`encodeSendCommand`,
+    `encodeUpdateCommand`, `encodeFinalizeCommand`,
+    `encodeTypingCommand`) re-assert the validator on the
+    `ScopeRef` and on `chatItemId`. A failure throws
+    `IllegalStateException` — this is defense-in-depth (the
+    decoder should already have rejected the value), and the
+    exception documents the invariant for any future caller.
+
   ### 6.4.5 Command encoding                                                                                                                                                                                                                                
                                                                                    
   SimplexCommandEncoder serializes OutboundMessage to SimpleX /sendMessage commands:                                                                                                                                                                    

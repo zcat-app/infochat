@@ -14,6 +14,7 @@ import app.zcat.infochat.messaging.InboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 
 import java.time.Instant;
+import java.util.regex.Pattern;
 
 /**
  * JSON codec for the simplex-chat WebSocket bot API. Pure functions; no I/O,
@@ -53,6 +54,31 @@ final class SimpleXMessageCodec {
      * narrowest internal boundary that still sees the raw text.
      */
     static final int MAX_OUTBOUND_TEXT_BYTES = 4_000;
+
+    /**
+     * Inbound text cap (UTF-8 bytes) enforced at decode time on the
+     * {@code text} field of every {@code newChatItem} frame. Mirrors the
+     * SPI-level cap {@link app.zcat.infochat.messaging.CapabilityFlags#maxInboundMessageBytes()}
+     * that {@code SimpleXAdapter} advertises — both values are
+     * 16 KiB on the laptop profile per {@code docs/design/06-messaging.md}
+     * §6.2.2 / §6.4.4. The codec MUST stay in lockstep with the SPI value:
+     * the SPI value is what the Provider's downstream budgets (LLM tokens,
+     * Stage 1 watchdog) plan against; this constant is the codec-local
+     * enforcement that keeps the SPI promise honest at the inbound trust
+     * boundary instead of relying on the 1 MiB WebSocket frame ceiling.
+     */
+    static final int MAX_INBOUND_TEXT_BYTES = 16_384;
+
+    /**
+     * Queue-address character set per {@code docs/design/06-messaging.md}
+     * §6.4.4. URL-safe base64 ∪ decimal: admits both SimpleX queue addresses
+     * and simplex-chat DB row ids; rejects whitespace, newlines, and the
+     * simplex-chat command terminators (' ', '@', '#') so an
+     * attacker-controlled {@code contactId} / {@code adapterGroupId} /
+     * {@code chatItemId} cannot piggyback a forged command verb into an
+     * outbound command string.
+     */
+    private static final Pattern QUEUE_ADDRESS_CHARSET = Pattern.compile("^[A-Za-z0-9_=.-]+$");
 
     // FAIL_ON_UNKNOWN_PROPERTIES off so a future simplex-chat field
     // additions on the same envelope do not break the v1 decoder. The
@@ -111,6 +137,11 @@ final class SimpleXMessageCodec {
     private static String encodeEdit(String corrId, String chatItemId, ScopeRef scope,
                                      String text, boolean live) {
         requireWithinCap(text);
+        // chatItemId is round-tripped from simplex-chat in a SendAck and equally
+        // untrusted; reject it before pasting it into a command verb. The decode
+        // path already gates inbound contactId / adapterGroupId; the encode-time
+        // assertion here is the defense-in-depth half of design §6.4.4.
+        requireValidQueueAddressId(chatItemId, "chatItemId");
         String target = targetSelector(scope);
         String cmd = "/_update item " + target + " " + chatItemId
                 + " live=" + (live ? "on" : "off")
@@ -136,9 +167,36 @@ final class SimpleXMessageCodec {
 
     private static String targetSelector(ScopeRef scope) {
         return switch (scope) {
-            case ScopeRef.Dm dm -> "@" + dm.contactId();
-            case ScopeRef.Group g -> "#" + g.adapterGroupId();
+            case ScopeRef.Dm dm -> {
+                requireValidQueueAddressId(dm.contactId(), "contactId");
+                yield "@" + dm.contactId();
+            }
+            case ScopeRef.Group g -> {
+                requireValidQueueAddressId(g.adapterGroupId(), "adapterGroupId");
+                yield "#" + g.adapterGroupId();
+            }
         };
+    }
+
+    /**
+     * Reject any id that does not match the queue-address character set
+     * (design §6.4.4). Encode-time use throws {@link IllegalStateException};
+     * decode-time callers use the lower-level {@link #isValidQueueAddressId}
+     * predicate and convert a failure into an {@link Ignored} frame.
+     */
+    private static void requireValidQueueAddressId(String id, String fieldName) {
+        if (!isValidQueueAddressId(id)) {
+            // Do NOT log the raw id — it may contain injected newlines that
+            // would split the log line and create a false-positive
+            // command-injection footprint in stdout-scraping operators.
+            throw new IllegalStateException(
+                    fieldName + " fails queue-address validator (design §6.4.4); length="
+                            + id.length());
+        }
+    }
+
+    static boolean isValidQueueAddressId(@NonNull String id) {
+        return !id.isEmpty() && QUEUE_ADDRESS_CHARSET.matcher(id).matches();
     }
 
     private static String textContent(String text) {
@@ -239,6 +297,14 @@ final class SimpleXMessageCodec {
         if (contactId == null) {
             return new Ignored("newChatItem-without-contactId");
         }
+        // Adapter-inbound trust boundary (docs/spec/security.md §Trust
+        // boundaries): reject any contactId that doesn't match the
+        // queue-address character set BEFORE constructing an InboundMessage,
+        // so the value can never be echoed into an outbound command (design
+        // §6.4.4).
+        if (!isValidQueueAddressId(contactId)) {
+            return new Ignored("newChatItem-invalid-contactId");
+        }
         String displayName = optText(contact, "displayName");
         JsonNode itemBody = chatItem.get("chatItem");
         if (itemBody == null) {
@@ -255,6 +321,14 @@ final class SimpleXMessageCodec {
         String text = optText(msgContent, "text");
         if (text == null) {
             return new Ignored("newChatItem-without-text");
+        }
+        // Enforce the SPI-declared inbound cap at the parse boundary so the
+        // Provider's downstream budgets (LLM tokens, Stage 1 watchdog) plan
+        // against a real ceiling rather than the 1 MiB WebSocket frame
+        // ceiling. UTF-8 byte length, not Java char length — the cap is a
+        // wire-level budget.
+        if (text.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > MAX_INBOUND_TEXT_BYTES) {
+            return new Ignored("newChatItem-text-exceeds-inbound-cap");
         }
         String adapterMessageId = optText(itemBody, "itemId");
         if (adapterMessageId == null) {
