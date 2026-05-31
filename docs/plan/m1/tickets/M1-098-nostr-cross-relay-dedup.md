@@ -3,16 +3,19 @@ id: M1-098
 title: "Nostr cross-relay dedup"
 status: pending
 created: 2026-05-26
-last_updated: 2026-05-26
+last_updated: 2026-05-31
 blocked_by:
   - M1-096
   - M1-097
-files_budget: 4
+files_budget: 7
 files_scope:
   - infochat-collector/src/main/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSource.java
   - infochat-collector/src/main/java/app/zcat/infochat/collector/stream/nostr/NostrDedupFilter.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrDedupFilterTest.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrDedupIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSourceTest.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSourceIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSourceVerificationIT.java
 complexity: medium
 risk: medium
 round_cap: 2
@@ -39,8 +42,31 @@ test_plan:
   adds:
     - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrDedupFilterTest.java
     - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrDedupIT.java
+  modifies:
+    - path: infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSourceTest.java
+      why_safe: |
+        M1-098 threads NostrDedupFilter into NostrStreamSource via ctor
+        injection, mirroring M1-097's NostrEventVerifier addition (Registrar
+        remains the single per-source collaborator construction site). The
+        four `new NostrStreamSource(...)` call sites (lines 58, 72, 95, 124)
+        gain a 7th argument; no assertion weakened, no test disabled, no
+        gate bypassed. Test intent (connectsToAllConfiguredRelays,
+        receivesAndDeliversEvents, reconnectsWithSinceOnDisconnect,
+        stopDrainsAndClosesConnections) preserved verbatim.
+    - path: infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSourceIT.java
+      why_safe: |
+        Same root cause: endToEndWithFakeRelay's single ctor call site
+        (line 86) gains the 7th argument. End-to-end persist + eval-queue
+        emit assertions unchanged.
+    - path: infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSourceVerificationIT.java
+      why_safe: |
+        Same root cause: VerificationIT's single ctor call site (line 168)
+        gains the 7th argument. Verification assertions (failed-sig
+        counter, kind allowlist behavior) unchanged.
   preserves:
-    - all tests currently green on main
+    - all tests currently green on main, with the three modified files
+      updated per the modifies block above (only the ctor argument list
+      changes)
 spec_refs:
   - docs/spec/architecture.md §Ingest SPIs
 decision_refs:
@@ -91,3 +117,18 @@ verification+kind-filter and the outbox deliver callback.
   `upstream_identifier` UNIQUE constraint on the post table) handles
   this; the in-memory filter is a performance optimization to avoid
   redundant DB writes, not a correctness requirement.
+- **Constructor integration.** NostrDedupFilter is constructor-injected
+  by Registrar, one per source (dedup state is per-publisher),
+  mirroring M1-097's NostrEventVerifier injection. The asymmetry
+  between the verifier (shared, stateless — Registrar field) and the
+  filter (per-source, stateful — constructed inside the source-row
+  loop) lives at the Registrar construction sites, not in the
+  NostrStreamSource ctor shape. The 7th ctor argument is the price of
+  that symmetry, and cascades mechanically into the three existing
+  test ctor call sites authorized in `test_plan.modifies`.
+- **Window configuration.** The dedup window size is a hardcoded
+  constant on NostrDedupFilter for v1 (~10K event ids, ~640KB — well
+  under any profile's RAM budget). Profile-driven configuration via
+  `@ConfigProperty` would require a property key in
+  `application.properties` (not in `files_scope`); defer to a
+  follow-up ticket if a profile ever needs a different bound.
