@@ -18,6 +18,8 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
+import org.jspecify.annotations.NonNull;
+
 /**
  * Top-level package-private test double for signal-cli's TCP JSON-RPC
  * daemon. Binds an ephemeral local port, accepts one client connection
@@ -30,7 +32,7 @@ import java.util.concurrent.TimeUnit;
  * one per {@code "\n"}. No backpressure, no flow control — tests stay
  * within a handful of requests per case.</p>
  */
-final class FakeSignalCli implements AutoCloseable {
+public final class FakeSignalCli implements AutoCloseable {
 
     private final ServerSocket server;
     private final BlockingQueue<JsonObject> received = new LinkedBlockingQueue<>();
@@ -40,7 +42,7 @@ final class FakeSignalCli implements AutoCloseable {
     private volatile Socket clientConn;
     private volatile BufferedWriter clientWriter;
 
-    FakeSignalCli() throws IOException {
+    public FakeSignalCli() throws IOException {
         this.server = new ServerSocket();
         this.server.bind(new InetSocketAddress("127.0.0.1", 0));
         this.acceptThread = new Thread(this::acceptLoop, "fake-signal-cli-accept");
@@ -48,12 +50,12 @@ final class FakeSignalCli implements AutoCloseable {
         this.acceptThread.start();
     }
 
-    InetSocketAddress endpoint() {
+    public InetSocketAddress endpoint() {
         return new InetSocketAddress("127.0.0.1", server.getLocalPort());
     }
 
     /** Block up to {@code timeoutMs} for the next outbound JSON-RPC line. */
-    JsonObject nextOutbound(long timeoutMs) throws InterruptedException {
+    public JsonObject nextOutbound(long timeoutMs) throws InterruptedException {
         JsonObject msg = received.poll(timeoutMs, TimeUnit.MILLISECONDS);
         if (msg == null) {
             throw new AssertionError(
@@ -62,7 +64,7 @@ final class FakeSignalCli implements AutoCloseable {
         return msg;
     }
 
-    void respondSuccess(String requestId, JsonObject result)
+    public void respondSuccess(@NonNull String requestId, @NonNull JsonObject result)
             throws IOException, InterruptedException {
         sendLine(Json.createObjectBuilder()
                 .add("jsonrpc", "2.0")
@@ -118,16 +120,34 @@ final class FakeSignalCli implements AutoCloseable {
     }
 
     private void acceptLoop() {
-        try {
-            Socket s = server.accept();
-            this.clientConn = s;
-            this.clientWriter = new BufferedWriter(
-                    new OutputStreamWriter(s.getOutputStream(), StandardCharsets.UTF_8));
-            Thread reader = new Thread(() -> readLoop(s), "fake-signal-cli-read");
-            reader.setDaemon(true);
-            reader.start();
-        } catch (IOException e) {
-            // Server closed; expected during teardown.
+        // Loop rather than accept-once: SignalAdapter.start() does a TCP
+        // probe via awaitEndpoint() BEFORE the JSON-RPC connect, and the
+        // probe socket is closed immediately without sending any bytes.
+        // With single-shot accept that probe would consume the slot and
+        // the subsequent real JSON-RPC connect would have no userspace
+        // accepter (the OS would silently absorb its TCP handshake into
+        // the listen backlog, leaving the client's first JSON-RPC line
+        // sitting unread until the SignalJsonRpcClient response timeout
+        // fires). Looping lets the probe land harmlessly — its reader
+        // thread reads EOF and exits — and the real client connect on
+        // the next iteration overwrites clientConn / clientWriter with
+        // the live socket. Real clients always send their first
+        // JSON-RPC line right after connect, so by the time a test
+        // observes a message via nextOutbound() the live writer is
+        // already wired.
+        while (true) {
+            try {
+                Socket s = server.accept();
+                this.clientConn = s;
+                this.clientWriter = new BufferedWriter(
+                        new OutputStreamWriter(s.getOutputStream(), StandardCharsets.UTF_8));
+                Thread reader = new Thread(() -> readLoop(s), "fake-signal-cli-read");
+                reader.setDaemon(true);
+                reader.start();
+            } catch (IOException e) {
+                // Server closed; expected during teardown.
+                return;
+            }
         }
     }
 

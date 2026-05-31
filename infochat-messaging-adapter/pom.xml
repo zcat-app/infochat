@@ -54,4 +54,44 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <!--
+                 Publish this module's test classes as a secondary test-jar
+                 artifact so other modules can consume the protocol-shaped
+                 test doubles (FakeSimpleXProcess, FakeSignalCli) in their
+                 own integration tests. infochat-provider's
+                 MultiAdapterProductionIT (M1-109) is the consumer: it
+                 drives the production SimpleXAdapter + SignalAdapter beans
+                 against these in-process fakes to exercise cross-adapter
+                 blast-radius without needing real adapter binaries in CI.
+                 The plain compile-time dependency on infochat-messaging-adapter
+                 only exposes main-jar classes; the test-jar is the
+                 mechanism that exposes test classes across module
+                 boundaries (Maven test-classpath convention).
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <!--
+                     Version pinned because no parent-level pluginManagement
+                     entry exists for maven-jar-plugin; without a version
+                     Maven warns and falls back to whatever the super-pom
+                     resolves at build time. 3.4.2 matches the LTS line
+                     paired with Maven 3.9.x (the same generation as the
+                     failsafe 3.5.4 pin in infochat-provider).
+                -->
+                <version>3.4.2</version>
+                <executions>
+                    <execution>
+                        <id>test-jar</id>
+                        <goals>
+                            <goal>test-jar</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
 </project>

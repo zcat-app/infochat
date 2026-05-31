@@ -26,6 +26,35 @@
             <groupId>app.zcat.infochat</groupId>
             <artifactId>infochat-messaging-adapter</artifactId>
         </dependency>
+        <!--
+             Test-only dependency on infochat-messaging-adapter's test-jar
+             (the secondary artifact published by its maven-jar-plugin
+             test-jar execution). Exposes the protocol-shaped test doubles
+             FakeSimpleXProcess and FakeSignalCli to MultiAdapterProductionIT
+             (M1-109), which drives the production SimpleXAdapter +
+             SignalAdapter beans against in-process fakes to exercise the
+             cross-adapter blast-radius scenarios without needing real
+             adapter binaries in CI.
+
+             Version pinned inline (one-off exception to the M1-001
+             BOM-managed-versions invariant): the parent's dependencyManagement
+             entry for infochat-messaging-adapter covers the default
+             <type>jar</type> form only; Maven does NOT inherit that
+             version onto a <type>test-jar</type> request with the same
+             groupId+artifactId (the classifier "tests" makes it a distinct
+             artifact for management purposes). The two correct fixes are
+             (a) inline ${project.version} here, or (b) add a second
+             dependencyManagement entry for <type>test-jar</type> in the
+             parent pom. (b) is out of M1-109's files_scope; (a) keeps
+             the change in-scope and is a one-line localized exception.
+        -->
+        <dependency>
+            <groupId>app.zcat.infochat</groupId>
+            <artifactId>infochat-messaging-adapter</artifactId>
+            <version>${project.version}</version>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>app.zcat.infochat</groupId>
             <artifactId>infochat-ssrf</artifactId>

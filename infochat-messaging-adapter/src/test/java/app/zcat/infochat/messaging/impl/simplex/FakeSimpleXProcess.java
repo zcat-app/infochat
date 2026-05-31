@@ -18,6 +18,8 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
+import org.jspecify.annotations.NonNull;
+
 /**
  * Test double that stands in for a running simplex-chat process for the
  * sake of {@link SimpleXWebSocketClientTest}. Listens on a loopback random
@@ -35,7 +37,7 @@ import java.util.concurrent.TimeUnit;
  * the outbound side. No TLS, no extensions, no continuation frames — the
  * SimpleX adapter only sends/receives single-fragment text frames.</p>
  */
-final class FakeSimpleXProcess implements AutoCloseable {
+public final class FakeSimpleXProcess implements AutoCloseable {
 
     private static final String WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
@@ -49,14 +51,14 @@ final class FakeSimpleXProcess implements AutoCloseable {
     private volatile Thread readerThread;
     private volatile boolean closed = false;
 
-    FakeSimpleXProcess() throws IOException {
+    public FakeSimpleXProcess() throws IOException {
         this.serverSocket = new ServerSocket();
         this.serverSocket.bind(new InetSocketAddress("127.0.0.1", 0));
         this.port = serverSocket.getLocalPort();
     }
 
     /** Begin accepting one connection. Non-blocking. */
-    void start() {
+    public void start() {
         acceptThread = Thread.ofVirtual().name("fake-simplex-accept").start(this::runAccept);
     }
 
@@ -65,12 +67,12 @@ final class FakeSimpleXProcess implements AutoCloseable {
         return URI.create("ws://127.0.0.1:" + port);
     }
 
-    int port() {
+    public int port() {
         return port;
     }
 
     /** Wait until the client has finished the WS handshake. */
-    void awaitClient(Duration timeout) throws InterruptedException {
+    public void awaitClient(@NonNull Duration timeout) throws InterruptedException {
         if (!clientConnected.await(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
             throw new IllegalStateException(
                     "client did not connect within " + timeout);
@@ -103,7 +105,7 @@ final class FakeSimpleXProcess implements AutoCloseable {
     }
 
     /** Pop the next text frame the client sent us, or fail the test on timeout. */
-    String awaitFrame(Duration timeout) throws InterruptedException {
+    public String awaitFrame(@NonNull Duration timeout) throws InterruptedException {
         String frame = received.poll(timeout.toMillis(), TimeUnit.MILLISECONDS);
         if (frame == null) {
             throw new IllegalStateException(
@@ -135,16 +137,46 @@ final class FakeSimpleXProcess implements AutoCloseable {
     // -- internals ---------------------------------------------------------
 
     private void runAccept() {
-        try {
-            Socket s = serverSocket.accept();
-            this.clientSocket = s;
-            handleHandshake(s);
-            clientConnected.countDown();
-            this.readerThread = Thread.ofVirtual()
-                    .name("fake-simplex-reader")
-                    .start(() -> runReader(s));
-        } catch (IOException e) {
-            if (!closed) {
+        // Loop rather than accept-once: SimpleXAdapter.start() does a TCP
+        // probe to the port (waitForWebSocketReady) BEFORE the WebSocket
+        // handshake, and the probe socket is closed immediately without
+        // sending any HTTP bytes. With single-shot accept, that probe
+        // would consume the slot and the subsequent real handshake would
+        // hang. Looping — with per-iteration handshake failures absorbed
+        // — lets the probe land harmlessly and the real client connect
+        // afterward. Existing unit tests still see one successful
+        // handshake (they make exactly one connection); the loop then
+        // blocks in accept() until close() unblocks it via serverSocket
+        // close.
+        while (!closed) {
+            try {
+                Socket s = serverSocket.accept();
+                try {
+                    handleHandshake(s);
+                } catch (IOException handshakeFailure) {
+                    // Handshake failure (e.g. WaitForWebSocketReady's
+                    // zero-byte probe) — drop this socket and wait for
+                    // the next connection. Real WebSocket clients send
+                    // the GET upgrade line synchronously after connect,
+                    // so a real client's handshake will be readable on
+                    // the next iteration.
+                    try { s.close(); } catch (IOException ignored) { /* dropped */ }
+                    continue;
+                }
+                this.clientSocket = s;
+                clientConnected.countDown();
+                this.readerThread = Thread.ofVirtual()
+                        .name("fake-simplex-reader")
+                        .start(() -> runReader(s));
+                // After a successful handshake we exit the accept loop —
+                // the existing single-client read-path semantics are
+                // preserved (this fake handles one live client at a time,
+                // matching what the M1-103 unit tests expect).
+                return;
+            } catch (IOException e) {
+                if (closed) {
+                    return;
+                }
                 throw new IllegalStateException("accept failed", e);
             }
         }

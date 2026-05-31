@@ -1,22 +1,22 @@
 ---
 id: M1-109
 title: "Multi-adapter production shape IT"
-status: deferred
+status: done
 created: 2026-05-26
-last_updated: 2026-05-31
+last_updated: 2026-06-01
 blocked_by:
   - M1-108
   - M1-105
-deferred_on: M1-120
-deferred_reason: blocked-on-new-ticket
 files_budget: 6
 files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/MultiAdapterProductionIT.java
   - infochat-provider/src/test/resources/application.properties
   - infochat-provider/pom.xml
   - infochat-messaging-adapter/pom.xml
+  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/FakeSimpleXProcess.java
+  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/FakeSignalCli.java
 complexity: medium
-risk: low
+risk: medium
 round_cap: 2
 security_relevant: true
 migration_touch: false
@@ -51,11 +51,49 @@ spec_refs:
   - docs/spec/security.md §Per-adapter admin threat profile
 decision_refs:
   - D46
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-01
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 886
+      removed: 48
 overrides: []
 aborted_attempts: []
-reopens: []
+reopens:
+  - date: 2026-05-31
+    prior_deferred_reason: blocked-on-new-ticket
+    prior_deferred_on: M1-120
+    reason: M1-120 landed (production CDI ready)
 redteam_findings: []
+redteam_audits:
+  - date: 2026-06-01
+    verdict: CLEAN
+    base: 5f6300f
+    head: a374907
+    verdict_file: docs/plan/m1/redteam/M1-109-2026-06-01.md
+    out_of_model_count: 4
+    note: |
+      CLEAN — no spec/diff gap. M1-109 is a test-only ticket; the IT
+      faithfully exercises the cross-adapter security promises in
+      security.md (per-(adapter, contact_id) identity isolation, global
+      last-admin protection, inbound-adapter-scoped /grant-admin,
+      blast-radius isolation across adapters). 4 OUT-OF-MODEL
+      observations recorded in the verdict file (fake-vs-prod drift on
+      multi-connect, audit-trigger disable in cleanup, acceptance
+      asymmetry on grantAdminIsAdapterScoped vice-versa direction,
+      bootstrap-admin cleanup prefix mismatch). None block merge; all
+      are test-side or in-trust-boundary concerns. The acceptance
+      asymmetry could feed a small follow-up test-coverage ticket if
+      desired — production code is symmetric so it is not a security
+      gap today.
 escalations:
   - date: 2026-05-31
     reason: budget-breach
@@ -136,6 +174,61 @@ escalations:
       MessagingStartup integration. When M1-120 ships, M1-109 reopens
       with the IT-only scope and a small additional refine for Fake
       visibility (2 single-line edits).
+  - date: 2026-05-31
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A (developer-initiated escalation before implementation, post-reopen
+      after M1-120 landed).
+
+      Trigger: M1-109 IT must construct FakeSimpleXProcess (M1-103) and
+      FakeSignalCli (M1-107) from infochat-provider's test classpath, but
+      both fakes are declared `final class` (no public modifier) with
+      package-private constructors. The IT lives at
+      `app.zcat.infochat.provider.messaging.MultiAdapterProductionIT` per
+      files_scope; the fakes live at
+      `app.zcat.infochat.messaging.impl.simplex.FakeSimpleXProcess` and
+      `app.zcat.infochat.messaging.impl.signal.FakeSignalCli`. Cross-package
+      access to package-private types/constructors is impossible without
+      visibility changes — verified via grep:
+        infochat-messaging-adapter/src/test/.../FakeSimpleXProcess.java:38:
+          final class FakeSimpleXProcess implements AutoCloseable {
+        infochat-messaging-adapter/src/test/.../FakeSimpleXProcess.java:52:
+          FakeSimpleXProcess() throws IOException {
+        infochat-messaging-adapter/src/test/.../FakeSignalCli.java:33:
+          final class FakeSignalCli implements AutoCloseable {
+        infochat-messaging-adapter/src/test/.../FakeSignalCli.java:43:
+          FakeSignalCli() throws IOException {
+
+      The two visibility edits (add `public` modifier on class + constructor
+      for each fake) target files NOT in the current files_scope:
+        - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/FakeSimpleXProcess.java
+        - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/FakeSignalCli.java
+
+      This was anticipated. The prior reopens note (2026-05-31, recorded
+      when M1-120 landed) explicitly said: "When M1-120 ships, M1-109
+      reopens with the IT-only scope and a small additional refine for
+      Fake visibility (2 single-line edits)." files_budget was set to 6
+      (= 4 current files_scope + 2 visibility edits) for exactly this
+      refine.
+
+      Alternatives considered and rejected:
+      - In-package wrapper in app.zcat.infochat.messaging.impl.simplex/.signal:
+        same scope expansion (2 new files in the fakes' packages),
+        plus a new abstraction with no production purpose.
+      - Move the IT to the fakes' package: violates files_scope path
+        for MultiAdapterProductionIT.java and loses access to Provider
+        beans (GrantAdminCommandHandler, InboundContext, AdapterRegistry,
+        DataSource) that acceptance items 4-6, 9-11 require.
+      - Reflection from cross-package: package-private constructors are
+        also blocked by JPMS-style access checks unless setAccessible
+        is used, which would be a fragile and reviewer-unfriendly
+        workaround for what was already planned as a visibility refine.
+
+      Resolution recommendation: refine to widen files_scope to 6 entries
+      (current 4 plus the two fake source files); files_budget already 6
+      remains unchanged. The risk: low rating could also be revisited per
+      the still-open clarity_check warning (recommend medium given
+      security_relevant: true and authorization-invariant coverage).
 revisions:
   - date: 2026-05-31
     reason: budget-breach rework — extend files_scope to include the test-jar Maven plumbing required to expose FakeSimpleXProcess (M1-103) and FakeSignalCli (M1-107) on the Provider test classpath; bump files_budget 4→6 for headroom
@@ -144,12 +237,20 @@ revisions:
       files_scope:
         - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/MultiAdapterProductionIT.java
         - infochat-provider/src/test/resources/application.properties
+  - date: 2026-05-31
+    reason: budget-breach rework (round 1) — widen files_scope to the two fake source files so the public-visibility edits required to construct FakeSimpleXProcess + FakeSignalCli from infochat-provider's test classpath are in-scope; bump risk low→medium per the standing clarity_check WARN (security_relevant ticket covering authorization invariants)
+    prior_values: |
+      risk: low
+      files_scope:
+        - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/MultiAdapterProductionIT.java
+        - infochat-provider/src/test/resources/application.properties
+        - infochat-provider/pom.xml
+        - infochat-messaging-adapter/pom.xml
 clarity_check:
   date: 2026-05-31
   verdict: WARN
   warnings:
-    - "ACCEPTANCE-RUNNABLE item 6 (/grant-admin on SimpleX does not elevate on Signal and vice versa) has no named test method counterpart in items 7-10 — fold into crossAdapterIsolation or add a dedicated grantAdminIsAdapterScoped test"
-    - "COMPLEXITY-RISK-CALIBRATED: risk: low is under-calibrated for a security_relevant ticket verifying authorization invariants (global last-admin, adapter-scoped /grant-admin); risk: medium would be more appropriate"
+    - "COMPLEXITY-RISK-CALIBRATED: risk: low is under-calibrated for a security_relevant ticket whose acceptance criteria directly test global last-admin protection and adapter-scoped /grant-admin elevation invariants; risk: medium would be more appropriate"
   blockers: []
 ---
 
