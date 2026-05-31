@@ -3,16 +3,19 @@ id: M1-099
 title: "Nostr per-relay degradation + cycle cap"
 status: pending
 created: 2026-05-26
-last_updated: 2026-05-30
+last_updated: 2026-05-31
 blocked_by:
   - M1-096
-files_budget: 6
+files_budget: 8
 files_scope:
   - infochat-collector/src/main/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSource.java
   - infochat-collector/src/main/java/app/zcat/infochat/collector/stream/nostr/RelayHealthTracker.java
   - infochat-collector/src/main/resources/application.properties
   - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/RelayHealthTrackerTest.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrDegradationIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSourceTest.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSourceIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSourceVerificationIT.java
 complexity: medium
 risk: medium
 round_cap: 2
@@ -40,11 +43,21 @@ acceptance:
   - "RelayHealthTrackerTest.allRelaysBadCycleCap_terminalFailure passes — after N consecutive all-relays-bad cycles, the tracker returns terminal-failed state"
   - "RelayHealthTrackerTest.recoveryAfterAllRelaysBad_clearsCounter passes — one relay recovering resets the all-relays-bad cycle counter"
   - "NostrDegradationIT.relayDegradation_endToEnd passes — a QuarkusTest with 2 fake relays; one relay drops connections; events from the healthy relay continue flowing"
+  - "Signature-verification failures (M1-097 failedSig counter) DO NOT contribute to RelayHealthTracker state — relay health is decided from connection-level events only (TCP drop, WSS frame errors, parse failures inside NostrRelayConnection)"
   - "mvn -B clean verify from the repo root exits 0"
 test_plan:
   adds:
     - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/RelayHealthTrackerTest.java
     - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrDegradationIT.java
+  modifies:
+    # Constructor-arg propagation only — NostrStreamSource gains a 7th
+    # parameter (RelayHealthTracker, added by this ticket on top of the
+    # NostrEventVerifier added by M1-097). These three files are the
+    # existing direct call sites of `new NostrStreamSource(...)`. No
+    # test intent or behavior is changed.
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSourceTest.java
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSourceIT.java
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSourceVerificationIT.java
   preserves:
     - all tests currently green on main
 spec_refs:
@@ -107,3 +120,22 @@ See frontmatter.
 - **ThrottledAdminNotifier.** Same pattern as M1-081a and M1-094.
   Error class: `nostr_all_relays_bad` for the transition notification,
   `nostr_terminal_failure` for the permanent stop.
+- **M1-097 constructor wiring.** M1-097 (committed after this ticket
+  was authored) added a `NostrEventVerifier verifier` parameter to
+  `NostrStreamSource`'s package-private constructor, taking it from 5
+  to 6 arguments. This ticket adds a 7th `RelayHealthTracker tracker`
+  parameter. The producer-loop in `NostrStreamSource.NostrSourcesProducer`
+  must instantiate a fresh tracker per source (relay health is per-
+  source state) and pass it; the verifier remains the shared instance.
+  All three existing direct call sites are tests, captured in
+  `files_scope` + `test_plan.modifies`; the constructor-arg change is
+  mechanical and preserves test intent.
+- **Sig failures are NOT a relay-health signal.** M1-097's `failedSig`
+  counter tracks forged events at the trust boundary inside
+  `enqueueInbound`. RelayHealthTracker reacts only to connection-level
+  events surfaced by `NostrRelayConnection` (TCP drop, WSS frame error,
+  parse failure). Reason: a forger spraying bad-sig events through any
+  relay (including healthy ones) would otherwise DoS innocent relays'
+  reputations — the two failure surfaces have different actors (relay
+  misconfig vs. event forgery) and conflating them would let an
+  attacker harm operators by exploiting the degradation logic.
