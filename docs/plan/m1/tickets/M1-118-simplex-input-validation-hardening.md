@@ -64,6 +64,22 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-05-31
+    verdict: CLEAN
+    base: e5ce26e93a390eb0776a8a3ff762314c234c1950
+    head: 13ec3689bd2a12b9d5141e9e62f3f8dd68d548e0
+    verdict_file: docs/plan/m1/redteam/M1-118-2026-05-31.md
+    findings_count: 0
+    out_of_model_count: 3
+    note: |
+      Post-remediation audit of the M1-103 finding fixes. CLEAN — both the
+      INJECTION/high (contactId command-injection) and DOS/medium (inbound
+      text cap) gaps are closed, and no new gap surfaced against the
+      threat model. The 3 OUT-OF-MODEL items all reduce to "simplex-chat
+      subprocess is operator-controlled per docs/spec/security.md
+      §Threat model — Operator-set config is trusted" and would require
+      a spec amendment to promote in-model, not a remediation ticket.
 clarity_check:
   date: 2026-05-31
   verdict: WARN
