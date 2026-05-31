@@ -201,7 +201,9 @@ Squash-merge the per-ticket branch into `main` so `main` history stays one-commi
 - Squash-merge path: `git checkout main` → `git merge --squash <branch>` → `git commit -C <branch-tip>` (reuses the branch tip's commit message verbatim, preserving the `Reviewed-by:` trailer and any `Alternatives considered:` block) → `git branch -D <branch>`. The squash hides the branch's intermediate refine commits so `main`'s history stays one ticket = one commit.
 - Status is NOT mutated — `done` is the only terminal status. The squash commit on `main` IS the merge audit trail; `git log main --grep -F "M<N>-NNN: <title>"` (with `<title>` filled in from the ticket frontmatter) answers "is this merged?" in one command.
 - The driver never pushes. Push remains the user's call.
-- Conflicts at the `git merge --squash` step indicate `main` advanced between commit and merge (e.g. another ticket landed in between). The driver refuses; the user rebases the per-ticket branch onto fresh `main` and re-runs `/<driver> merge`.
+- Conflicts at the `git merge --squash` step indicate `main` advanced between commit and merge (e.g. another ticket landed in between). The driver branches on the conflict set:
+  - **Conflict set is exactly the regenerated status board** (`docs/plan/<milestone>/STATUS.md` in the M1 driver, `M2` driver, etc.): the board is a deterministic regen from the union of ticket frontmatter, so a divergent regen between branch tip and moved `main` is a pseudo-conflict whose post-merge union is well-defined. The driver auto-resolves by re-running its status regen script against the post-merge tree, staging the regenerated board, and continuing the merge.
+  - **Conflict set is anything else** (substantive code, design, or ticket-body conflict, or a multi-path set that happens to include the board alongside a substantive file): the driver refuses; the user rebases the per-ticket branch onto fresh `main` and re-runs `/<driver> merge`.
 
 ### 8. Escalate — `/<driver> escalate M<N>-NNN`
 
