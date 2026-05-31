@@ -8,6 +8,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Random;
 import java.util.UUID;
 import java.util.OptionalLong;
@@ -65,6 +66,7 @@ final class NostrRelayConnection {
     private final Duration backoffBase;
     private final Duration backoffMax;
     private final HttpClient httpClient;
+    private final RelayHealthTracker healthTracker;
     private final Random random = new Random();
 
     private volatile boolean running = true;
@@ -77,7 +79,8 @@ final class NostrRelayConnection {
                          @NonNull Supplier<OptionalLong> sinceCursor,
                          @NonNull Consumer<NostrEvent> eventSink,
                          @NonNull Duration backoffBase, @NonNull Duration backoffMax,
-                         @NonNull HttpClient httpClient) {
+                         @NonNull HttpClient httpClient,
+                         @NonNull RelayHealthTracker healthTracker) {
         this.relayUri = relayUri;
         this.subscriptionId = "infochat-" + UUID.randomUUID();
         this.filterSpec = filterSpec;
@@ -86,6 +89,7 @@ final class NostrRelayConnection {
         this.backoffBase = backoffBase;
         this.backoffMax = backoffMax;
         this.httpClient = httpClient;
+        this.healthTracker = healthTracker;
     }
 
     /** Start the connect/reconnect loop on a dedicated virtual thread. Returns immediately. */
@@ -126,7 +130,11 @@ final class NostrRelayConnection {
 
     private void runLoop() {
         int consecutiveFailures = 0;
-        while (running) {
+        // !healthTracker.isTerminal() exits the loop once the source-level
+        // cycle cap fires; the Registrar's terminal-callback then runs
+        // supervisor.stop() on a different thread (it joins this loop, so
+        // it cannot be the same thread — see NostrStreamSource.Registrar).
+        while (running && !healthTracker.isTerminal()) {
             try {
                 connectAndSubscribe();
                 closeSignal.await();
@@ -145,11 +153,28 @@ final class NostrRelayConnection {
             if (!running) {
                 break;
             }
+            // Report the (un)productive outcome to the health tracker. A
+            // productive connection had its recordSuccess fired inline by
+            // handleFrame on the first EOSE/EVENT (so the source-level
+            // RECOVERED notification fires in real time, not retrospectively
+            // on disconnect); only the unproductive close path records a
+            // failure here.
+            if (!productiveSinceConnect) {
+                healthTracker.recordFailure(relayUri);
+            }
             // A subscription that proved productive resets the backoff; a
             // relay that never answered keeps escalating it.
             consecutiveFailures = productiveSinceConnect ? 1 : consecutiveFailures + 1;
             try {
-                Thread.sleep(backoffDelay(consecutiveFailures, backoffBase, backoffMax, random).toMillis());
+                // Sleep at LEAST the backoff curve, but extend to the tracker's
+                // cooldown expiry when the relay is in cooldown. The floor is
+                // the backoff (so a tracker that returns "now" never produces
+                // a zero-sleep tight loop); the cooldown extends it when the
+                // relay must park longer than backoff alone would dictate.
+                long backoffMs = backoffDelay(consecutiveFailures, backoffBase, backoffMax, random).toMillis();
+                long cooldownMs = Math.max(0L,
+                        Duration.between(Instant.now(), healthTracker.nextAttemptTime(relayUri)).toMillis());
+                Thread.sleep(Math.max(backoffMs, cooldownMs));
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 break;
@@ -177,12 +202,31 @@ final class NostrRelayConnection {
         }
         switch (message) {
             case NostrMessage.Event event -> {
-                productiveSinceConnect = true;
+                markProductive();
                 eventSink.accept(event.event());
             }
-            case NostrMessage.Eose ignored -> productiveSinceConnect = true;
+            case NostrMessage.Eose ignored -> markProductive();
             case NostrMessage.Notice notice ->
                     LOG.debug("Nostr relay {} NOTICE: {}", relayUri, notice.message());
+        }
+    }
+
+    /**
+     * Mark this (re)connect productive and, on the false→true edge, fire
+     * the tracker's recordSuccess so the source-level RECOVERED transition
+     * notifies in real time on the first productive frame rather than
+     * retrospectively on the next disconnect. handleFrame runs serially on
+     * the per-connection WebSocket listener thread (request(1) pull model),
+     * so the read-modify-write on {@code productiveSinceConnect} is race-free
+     * within one connection. A fresh RelayListener instance is built per
+     * (re)connect (so {@code productiveSinceConnect} is reset to false in
+     * {@code connectAndSubscribe}), giving exactly one recordSuccess per
+     * productive subscription.
+     */
+    private void markProductive() {
+        if (!productiveSinceConnect) {
+            productiveSinceConnect = true;
+            healthTracker.recordSuccess(relayUri);
         }
     }
 

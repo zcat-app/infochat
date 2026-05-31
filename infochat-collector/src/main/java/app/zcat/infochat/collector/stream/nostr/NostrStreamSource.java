@@ -6,6 +6,7 @@ import app.zcat.infochat.collector.stream.StreamSourceSupervisor;
 import app.zcat.infochat.core.ingest.NormalizedPost;
 import app.zcat.infochat.core.ingest.StreamSource;
 import app.zcat.infochat.core.log.SafeLog;
+import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.quarkus.runtime.Startup;
@@ -26,6 +27,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -82,6 +84,7 @@ public final class NostrStreamSource implements StreamSource {
     private final Duration backoffMax;
     private final HttpClient httpClient;
     private final NostrEventVerifier verifier;
+    private final RelayHealthTracker healthTracker;
     private final NostrDedupFilter dedupFilter;
 
     private final List<NostrRelayConnection> connections = new ArrayList<>();
@@ -101,13 +104,14 @@ public final class NostrStreamSource implements StreamSource {
     NostrStreamSource(@NonNull List<URI> relayUris, @NonNull Supplier<OptionalLong> sinceCursor,
                       @NonNull Duration backoffBase, @NonNull Duration backoffMax,
                       @NonNull HttpClient httpClient, @NonNull NostrEventVerifier verifier,
-                      @NonNull NostrDedupFilter dedupFilter) {
+                      @NonNull RelayHealthTracker healthTracker, @NonNull NostrDedupFilter dedupFilter) {
         this.relayUris = List.copyOf(relayUris);
         this.sinceCursor = sinceCursor;
         this.backoffBase = backoffBase;
         this.backoffMax = backoffMax;
         this.httpClient = httpClient;
         this.verifier = verifier;
+        this.healthTracker = healthTracker;
         this.dedupFilter = dedupFilter;
     }
 
@@ -121,7 +125,8 @@ public final class NostrStreamSource implements StreamSource {
                 .start(this::deliveryLoop);
         for (URI relayUri : relayUris) {
             NostrRelayConnection connection = new NostrRelayConnection(
-                    relayUri, filterSpec, sinceCursor, this::enqueueInbound, backoffBase, backoffMax, httpClient);
+                    relayUri, filterSpec, sinceCursor, this::enqueueInbound,
+                    backoffBase, backoffMax, httpClient, healthTracker);
             connections.add(connection);
             connection.start();
         }
@@ -243,11 +248,26 @@ public final class NostrStreamSource implements StreamSource {
         @Inject
         EvalQueueProducer evalQueueProducer;
 
+        @Inject
+        ThrottledAdminNotifier adminNotifier;
+
+        @Inject
+        Clock clock;
+
         @ConfigProperty(name = "infochat.stream.nostr.reconnect-base-delay")
         Duration backoffBase;
 
         @ConfigProperty(name = "infochat.stream.nostr.reconnect-max-delay")
         Duration backoffMax;
+
+        @ConfigProperty(name = "infochat.stream.nostr.relay-failure-threshold")
+        int relayFailureThreshold;
+
+        @ConfigProperty(name = "infochat.stream.nostr.cooldown-duration")
+        Duration cooldownDuration;
+
+        @ConfigProperty(name = "infochat.stream.nostr.all-relays-bad-cycle-cap")
+        int allRelaysBadCycleCap;
 
         // One shared client (and its executor) across every relay of every
         // nostr source; relay connections only subscribe and read.
@@ -265,26 +285,86 @@ public final class NostrStreamSource implements StreamSource {
                 SafeLog.error(LOG, "Failed to enumerate nostr sources; none registered", e);
                 return;
             }
-            long dispatchKey = 1L;
+            long nextDispatchKey = 1L;
             for (NostrSourceRow row : rows) {
                 List<URI> relays = parseRelays(row);
                 if (relays.isEmpty()) {
                     LOG.warn("Nostr source {} has no relays in config; skipping registration", row.id());
                     continue;
                 }
-                Supplier<OptionalLong> since = () -> latestPublishedAtEpochSeconds(row.id());
+                final UUID sourceUuid = row.id();
+                final long dispatchKey = nextDispatchKey++;
+                RelayHealthTracker tracker = new RelayHealthTracker(
+                        relays, relayFailureThreshold, cooldownDuration, allRelaysBadCycleCap,
+                        clock, transition -> handleTransition(transition, sourceUuid, dispatchKey));
+                Supplier<OptionalLong> since = () -> latestPublishedAtEpochSeconds(sourceUuid);
                 // One filter per source: dedup state is per-publisher
                 // (see NostrDedupFilter javadoc). Verifier is shared
                 // because it's stateless.
                 NostrDedupFilter dedupFilter = new NostrDedupFilter();
-                NostrStreamSource worker = new NostrStreamSource(
-                        relays, since, backoffBase, backoffMax, httpClient, verifier, dedupFilter);
-                UUID sourceUuid = row.id();
+                NostrStreamSource worker =
+                        new NostrStreamSource(relays, since, backoffBase, backoffMax, httpClient, verifier, tracker, dedupFilter);
                 Consumer<NormalizedPost> deliver =
                         post -> postPersister.persist(sourceUuid, post).ifPresent(evalQueueProducer::emit);
-                supervisor.register(dispatchKey++, row.identifier(), worker, deliver);
+                supervisor.register(dispatchKey, row.identifier(), worker, deliver);
                 LOG.info("Registered NostrStreamSource for source {} across {} relay(s)",
                         sourceUuid, relays.size());
+            }
+        }
+
+        /**
+         * Source-level transition side effects. ALL_RELAYS_BAD / RECOVERED fire
+         * a throttled admin notification on the calling thread (the tracker
+         * invokes this callback outside its synchronized region, so JDBC here
+         * does not block parallel relay-worker calls). TERMINAL additionally
+         * marks the source row failed and stops the supervisor's worker; the
+         * supervisor's stop joins the relay loopThread, so the call MUST run on
+         * a different thread than the loopThread that fired the transition —
+         * we spawn a fresh virtual thread for the terminal teardown.
+         */
+        void handleTransition(RelayHealthTracker.@NonNull Transition transition,
+                              @NonNull UUID sourceUuid, long dispatchKey) {
+            switch (transition) {
+                case ALL_RELAYS_BAD -> adminNotifier.notifyOnce(
+                        "nostr-all-relays-bad:" + sourceUuid,
+                        "nostr_all_relays_bad",
+                        "All relays for nostr source " + sourceUuid + " are in cooldown");
+                case RECOVERED -> adminNotifier.notifyOnce(
+                        "nostr-recovered:" + sourceUuid,
+                        "nostr_recovery",
+                        "Nostr source " + sourceUuid + " recovered from all-relays-bad");
+                case TERMINAL -> Thread.ofVirtual()
+                        .name("nostr-terminal-" + sourceUuid)
+                        .start(() -> handleTerminal(sourceUuid, dispatchKey));
+                case NONE -> { /* unreachable: tracker only invokes the callback for non-NONE transitions */ }
+            }
+        }
+
+        private void handleTerminal(UUID sourceUuid, long dispatchKey) {
+            try {
+                markSourceFailed(sourceUuid);
+            } catch (SQLException e) {
+                SafeLog.warn(LOG, "Failed to mark nostr source " + sourceUuid + " as failed in DB", e);
+            }
+            adminNotifier.notifyOnce(
+                    "nostr-source-failed:" + sourceUuid,
+                    "nostr_terminal_failure",
+                    "StreamSource for source " + sourceUuid
+                            + " permanently stopped: all-relays-bad cycle cap exhausted");
+            supervisor.stop(dispatchKey);
+        }
+
+        // Inline SQL via the already-injected DataSource — SourceRepository is
+        // out of scope for M1-099, and a single-row status flip does not need
+        // a repository method. The `status='active'` guard means a concurrent
+        // failure path (e.g. D42 fetcher ladder for a misclassified row) does
+        // not clobber a status that has already moved on.
+        private void markSourceFailed(UUID sourceUuid) throws SQLException {
+            final String sql = "UPDATE source SET status = 'failed' WHERE id = ? AND status = 'active'";
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setObject(1, sourceUuid);
+                ps.executeUpdate();
             }
         }
 

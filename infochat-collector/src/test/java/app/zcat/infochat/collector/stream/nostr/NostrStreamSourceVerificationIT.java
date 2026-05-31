@@ -12,10 +12,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
+import java.net.URI;
 import java.net.http.HttpClient;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -166,15 +168,22 @@ class NostrStreamSourceVerificationIT {
     }
 
     private NostrStreamSource registerWorker(long dispatchKey, FakeNostrRelay relay, UUID sourceUuid) {
-        NostrStreamSource worker = new NostrStreamSource(List.of(relay.uri()),
+        List<URI> relayUris = List.of(relay.uri());
+        NostrStreamSource worker = new NostrStreamSource(relayUris,
                 OptionalLong::empty, Duration.ofMillis(50), Duration.ofMillis(200),
-                httpClient, verifier, dedupFilter);
+                httpClient, verifier, noOpTracker(relayUris), dedupFilter);
         String filterSpec = "{\"kinds\":[1,6,7]}";
         Consumer<NormalizedPost> deliver =
                 post -> postPersister.persist(sourceUuid, post).ifPresent(evalQueueProducer::emit);
         supervisor.register(dispatchKey, filterSpec, worker, deliver);
         registeredDispatchKeys.add(dispatchKey);
         return worker;
+    }
+
+    /** See {@code NostrStreamSourceTest.noOpTracker} — same intent: satisfy the constructor only. */
+    private static RelayHealthTracker noOpTracker(List<URI> relayUris) {
+        return new RelayHealthTracker(relayUris, Integer.MAX_VALUE,
+                Duration.ofHours(1), Integer.MAX_VALUE, Clock.systemUTC(), t -> { });
     }
 
     /**

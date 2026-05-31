@@ -12,10 +12,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
+import java.net.URI;
 import java.net.http.HttpClient;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
 import java.util.OptionalLong;
@@ -84,9 +86,10 @@ class NostrStreamSourceIT {
         UUID sourceUuid = seedNostrSource(filterSpec, "Nostr IT source");
         long preCount = countPostsForSource(sourceUuid);
 
-        NostrStreamSource worker = new NostrStreamSource(List.of(relay.uri()),
+        List<URI> relayUris = List.of(relay.uri());
+        NostrStreamSource worker = new NostrStreamSource(relayUris,
                 OptionalLong::empty, Duration.ofMillis(50), Duration.ofMillis(200),
-                httpClient, verifier, dedupFilter);
+                httpClient, verifier, noOpTracker(relayUris), dedupFilter);
         Consumer<NormalizedPost> deliver =
                 post -> postPersister.persist(sourceUuid, post).ifPresent(evalQueueProducer::emit);
         supervisor.register(DISPATCH_KEY, filterSpec, worker, deliver);
@@ -149,6 +152,12 @@ class NostrStreamSourceIT {
         while (countPostsForSource(sourceUuid) < expected && System.currentTimeMillis() < deadline) {
             Thread.sleep(25);
         }
+    }
+
+    /** See {@code NostrStreamSourceTest.noOpTracker} — same intent: satisfy the constructor only. */
+    private static RelayHealthTracker noOpTracker(List<URI> relayUris) {
+        return new RelayHealthTracker(relayUris, Integer.MAX_VALUE,
+                Duration.ofHours(1), Integer.MAX_VALUE, Clock.systemUTC(), t -> { });
     }
 
     private void awaitConsumerSize(int expected) throws InterruptedException {

@@ -1,14 +1,15 @@
 ---
 id: M1-099
 title: "Nostr per-relay degradation + cycle cap"
-status: pending
+status: done
 created: 2026-05-26
 last_updated: 2026-05-31
 blocked_by:
   - M1-096
-files_budget: 8
+files_budget: 10
 files_scope:
   - infochat-collector/src/main/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSource.java
+  - infochat-collector/src/main/java/app/zcat/infochat/collector/stream/nostr/NostrRelayConnection.java
   - infochat-collector/src/main/java/app/zcat/infochat/collector/stream/nostr/RelayHealthTracker.java
   - infochat-collector/src/main/resources/application.properties
   - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/RelayHealthTrackerTest.java
@@ -16,6 +17,7 @@ files_scope:
   - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSourceTest.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSourceIT.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSourceVerificationIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrDedupIT.java
 complexity: medium
 risk: medium
 round_cap: 2
@@ -50,21 +52,117 @@ test_plan:
     - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/RelayHealthTrackerTest.java
     - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrDegradationIT.java
   modifies:
-    # Constructor-arg propagation only — NostrStreamSource gains a 7th
-    # parameter (RelayHealthTracker, added by this ticket on top of the
-    # NostrEventVerifier added by M1-097). These three files are the
-    # existing direct call sites of `new NostrStreamSource(...)`. No
-    # test intent or behavior is changed.
+    # Constructor-arg propagation only — NostrStreamSource gains an 8th
+    # parameter (RelayHealthTracker, added by this ticket; the 7th —
+    # NostrDedupFilter — was added by M1-098 which landed on main while
+    # this ticket was in-flight). These four files are the existing direct
+    # call sites of `new NostrStreamSource(...)`. No test intent or
+    # behavior is changed.
     - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSourceTest.java
     - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSourceIT.java
     - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSourceVerificationIT.java
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrDedupIT.java
   preserves:
     - all tests currently green on main
 spec_refs:
   - docs/spec/architecture.md §Ingest SPIs
 decision_refs:
   - D38
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-05-31
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 11
+      added: 944
+      removed: 34
+  - round: 2
+    date: 2026-05-31
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 12
+      added: 1008
+      removed: 44
+escalations:
+  - date: 2026-05-31
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A — developer-detected during implementation, before any review round.
+      Discovered while wiring RelayHealthTracker into NostrStreamSource:
+      the tracker integration cannot be completed without modifying
+      infochat-collector/src/main/java/.../stream/nostr/NostrRelayConnection.java,
+      which is NOT in files_scope. NostrRelayConnection owns the per-relay
+      reconnect loop (lines 127–158) and the productive-frame detection (line
+      180) — both must call tracker.recordFailure / recordSuccess / nextAttemptTime /
+      isTerminal. The class exposes no external observation hook on its
+      runLoop state (running, productiveSinceConnect, currentWebSocket are
+      all private/volatile with no accessors), so a wrap-from-outside design
+      requires either reflection or rewriting the WebSocket loop into
+      NostrStreamSource (much larger change than just adding the file to scope).
+revisions:
+  - date: 2026-05-31
+    reason: |
+      refine after budget-breach (pre-implementation; widen files_scope to
+      include NostrRelayConnection.java — the per-relay reconnect loop is
+      the actual integration site for tracker.recordFailure / recordSuccess
+      / nextAttemptTime / isTerminal, and the class exposes no external
+      observation hook so a wrap-from-outside design is impractical).
+      NostrRelayConnectionTest.java does NOT need to enter scope: it
+      exercises only the static backoffDelay() helper (verified by grep —
+      no `new NostrRelayConnection(...)` call sites), and preserving
+      backoffDelay's signature keeps the test green.
+    snapshot:
+      files_budget: 8
+      files_scope:
+        - infochat-collector/src/main/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSource.java
+        - infochat-collector/src/main/java/app/zcat/infochat/collector/stream/nostr/RelayHealthTracker.java
+        - infochat-collector/src/main/resources/application.properties
+        - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/RelayHealthTrackerTest.java
+        - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrDegradationIT.java
+        - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSourceTest.java
+        - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSourceIT.java
+        - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSourceVerificationIT.java
+  - date: 2026-05-31
+    reason: |
+      refine after post-merge-conflict rebase (post-round-1; M1-098 landed
+      on main between this ticket's start and the /m1-tick merge step,
+      adding NostrDedupFilter as the 7th NostrStreamSource ctor argument).
+      The rebase resolution wove the dedupFilter into the production
+      Registrar and into the three test files already in test_plan.modifies,
+      but missed two test call sites that the round-1 review never saw:
+        - NostrDegradationIT.java (M1-099's new file, authored against the
+          pre-M1-098 7-arg ctor) — needs `dedupFilter` appended as the 8th arg.
+        - NostrDedupIT.java (M1-098's new file, brought into the branch by
+          the rebase, authored against the pre-M1-099 7-arg ctor) — needs
+          `healthTracker` inserted at position 7. Adding it to files_scope
+          / test_plan.modifies bumps files_budget from 9 to 10.
+      Strictly mechanical constructor-arg propagation, analogous to the
+      M1-097 cascade that already triggered an earlier refine on this
+      ticket. No test intent or behavior is changed.
+    snapshot:
+      files_budget: 9
+      files_scope:
+        - infochat-collector/src/main/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSource.java
+        - infochat-collector/src/main/java/app/zcat/infochat/collector/stream/nostr/NostrRelayConnection.java
+        - infochat-collector/src/main/java/app/zcat/infochat/collector/stream/nostr/RelayHealthTracker.java
+        - infochat-collector/src/main/resources/application.properties
+        - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/RelayHealthTrackerTest.java
+        - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrDegradationIT.java
+        - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSourceTest.java
+        - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSourceIT.java
+        - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSourceVerificationIT.java
 overrides: []
 aborted_attempts:
   - date: 2026-05-30
@@ -80,7 +178,11 @@ aborted_attempts:
     reason: no reason given
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-05-31
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-099: Nostr per-relay degradation + cycle cap
@@ -139,3 +241,25 @@ See frontmatter.
   reputations — the two failure surfaces have different actors (relay
   misconfig vs. event forgery) and conflating them would let an
   attacker harm operators by exploiting the degradation logic.
+- **Tracker hook points inside NostrRelayConnection.** The relay
+  connection's private `runLoop` (lines 127–158) is the integration
+  site for the four tracker calls. Specifically:
+    - **`while`-condition (line 129)** gains `&& !tracker.isTerminal()`
+      so the loop exits once the source-level cycle cap is exhausted.
+    - **Sleep computation (line 152)** must honor cooldown timing —
+      the per-attempt backoff floor stays (preserves backoffDelay
+      semantics and its unit test), but is extended by
+      `tracker.nextAttemptTime(relayUri)` so an in-cooldown relay
+      sleeps the cooldown duration rather than just the backoff curve.
+    - **Outcome recording (around line 150)** calls
+      `tracker.recordFailure(relayUri)` when `productiveSinceConnect`
+      is false at close (a relay that connected but never sent EOSE/
+      EVENT is treated as a failure for cooldown purposes).
+    - **Productivity detection (line 180, inside `handleFrame`)** calls
+      `tracker.recordSuccess(relayUri)` on the false→true transition
+      of `productiveSinceConnect`, so the all-relays-bad RECOVERED
+      transition fires in real time on the first productive frame
+      rather than retrospectively on the next disconnect.
+  No constructor-signature changes to existing call sites of static
+  `NostrRelayConnection.backoffDelay()`; `NostrRelayConnectionTest`
+  stays untouched.

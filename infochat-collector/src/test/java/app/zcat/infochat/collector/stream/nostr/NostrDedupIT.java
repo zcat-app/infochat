@@ -94,10 +94,11 @@ class NostrDedupIT {
         long preCount = countPostsForSource(sourceUuid);
 
         NostrDedupFilter dedupFilter = new NostrDedupFilter();
+        List<java.net.URI> relays = List.of(relayA.uri(), relayB.uri());
         NostrStreamSource worker = new NostrStreamSource(
-                List.of(relayA.uri(), relayB.uri()),
+                relays,
                 OptionalLong::empty, Duration.ofMillis(50), Duration.ofMillis(200),
-                httpClient, verifier, dedupFilter);
+                httpClient, verifier, noOpTracker(relays), dedupFilter);
         AtomicInteger deliveryCount = new AtomicInteger();
         Consumer<NormalizedPost> deliver = post -> {
             deliveryCount.incrementAndGet();
@@ -172,5 +173,11 @@ class NostrDedupIT {
         while (countPostsForSource(sourceUuid) < expected && System.currentTimeMillis() < deadline) {
             Thread.sleep(25);
         }
+    }
+
+    /** See {@code NostrStreamSourceTest.noOpTracker} — same intent: satisfy the constructor only. */
+    private static RelayHealthTracker noOpTracker(List<java.net.URI> relayUris) {
+        return new RelayHealthTracker(relayUris, Integer.MAX_VALUE,
+                Duration.ofHours(1), Integer.MAX_VALUE, java.time.Clock.systemUTC(), t -> { });
     }
 }

@@ -5,7 +5,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import java.net.URI;
 import java.net.http.HttpClient;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -56,8 +58,10 @@ class NostrStreamSourceTest {
         FakeNostrRelay r1 = newRelay();
         FakeNostrRelay r2 = newRelay();
         FakeNostrRelay r3 = newRelay();
-        source = new NostrStreamSource(List.of(r1.uri(), r2.uri(), r3.uri()),
-                OptionalLong::empty, FAST_BASE, FAST_MAX, httpClient, verifier, dedupFilter);
+        List<URI> relayUris = List.of(r1.uri(), r2.uri(), r3.uri());
+        source = new NostrStreamSource(relayUris,
+                OptionalLong::empty, FAST_BASE, FAST_MAX, httpClient, verifier,
+                noOpTracker(relayUris), dedupFilter);
 
         source.start(1L, FILTER, post -> { });
 
@@ -70,8 +74,9 @@ class NostrStreamSourceTest {
     void receivesAndDeliversEvents() {
         FakeNostrRelay relay = newRelay();
         List<NormalizedPost> delivered = new CopyOnWriteArrayList<>();
-        source = new NostrStreamSource(List.of(relay.uri()), OptionalLong::empty,
-                FAST_BASE, FAST_MAX, httpClient, verifier, dedupFilter);
+        List<URI> relayUris = List.of(relay.uri());
+        source = new NostrStreamSource(relayUris, OptionalLong::empty,
+                FAST_BASE, FAST_MAX, httpClient, verifier, noOpTracker(relayUris), dedupFilter);
 
         source.start(7L, FILTER, delivered::add);
         assertTrue(relay.awaitFrameCount(1, AWAIT), "REQ received");
@@ -93,8 +98,9 @@ class NostrStreamSourceTest {
     void reconnectsWithSinceOnDisconnect() throws Exception {
         FakeNostrRelay relay = newRelay();
         AtomicReference<OptionalLong> since = new AtomicReference<>(OptionalLong.empty());
-        source = new NostrStreamSource(List.of(relay.uri()), since::get, FAST_BASE, FAST_MAX,
-                httpClient, verifier, dedupFilter);
+        List<URI> relayUris = List.of(relay.uri());
+        source = new NostrStreamSource(relayUris, since::get, FAST_BASE, FAST_MAX,
+                httpClient, verifier, noOpTracker(relayUris), dedupFilter);
 
         source.start(1L, FILTER, post -> { });
         assertTrue(relay.awaitFrameCount(1, AWAIT), "initial REQ received");
@@ -122,8 +128,9 @@ class NostrStreamSourceTest {
             sleepQuietly(50);
             delivered.add(post);
         };
-        source = new NostrStreamSource(List.of(relay.uri()), OptionalLong::empty,
-                FAST_BASE, FAST_MAX, httpClient, verifier, dedupFilter);
+        List<URI> relayUris = List.of(relay.uri());
+        source = new NostrStreamSource(relayUris, OptionalLong::empty,
+                FAST_BASE, FAST_MAX, httpClient, verifier, noOpTracker(relayUris), dedupFilter);
 
         source.start(1L, FILTER, slowDeliver);
         assertTrue(relay.awaitFrameCount(1, AWAIT), "REQ received");
@@ -150,6 +157,18 @@ class NostrStreamSourceTest {
         FakeNostrRelay relay = new FakeNostrRelay();
         relays.add(relay);
         return relay;
+    }
+
+    /**
+     * A tracker that never enters cooldown or terminal state — every threshold
+     * is set so high that recordFailure / recordSuccess are inert side-effect
+     * wise. These tests assert on M1-096 reconnect / delivery behaviour, not
+     * on M1-099 degradation behaviour; the tracker is wired only to satisfy
+     * the constructor contract.
+     */
+    private static RelayHealthTracker noOpTracker(List<URI> relayUris) {
+        return new RelayHealthTracker(relayUris, Integer.MAX_VALUE,
+                Duration.ofHours(1), Integer.MAX_VALUE, Clock.systemUTC(), t -> { });
     }
 
     private static boolean awaitSize(List<?> list, int size) {
