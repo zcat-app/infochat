@@ -63,6 +63,7 @@ class NostrStreamSourceVerificationIT {
 
     private final HttpClient httpClient = HttpClient.newHttpClient();
     private final NostrEventVerifier verifier = new NostrEventVerifier();
+    private final NostrDedupFilter dedupFilter = new NostrDedupFilter();
     private final Set<Long> registeredDispatchKeys = new HashSet<>();
     private final List<FakeNostrRelay> relays = new ArrayList<>();
 
@@ -167,7 +168,7 @@ class NostrStreamSourceVerificationIT {
     private NostrStreamSource registerWorker(long dispatchKey, FakeNostrRelay relay, UUID sourceUuid) {
         NostrStreamSource worker = new NostrStreamSource(List.of(relay.uri()),
                 OptionalLong::empty, Duration.ofMillis(50), Duration.ofMillis(200),
-                httpClient, verifier);
+                httpClient, verifier, dedupFilter);
         String filterSpec = "{\"kinds\":[1,6,7]}";
         Consumer<NormalizedPost> deliver =
                 post -> postPersister.persist(sourceUuid, post).ifPresent(evalQueueProducer::emit);

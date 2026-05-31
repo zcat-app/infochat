@@ -20,28 +20,28 @@ import java.time.Duration;
 import java.util.List;
 import java.util.OptionalLong;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * End-to-end integration test: a {@link NostrStreamSource} subscribed to an
- * in-process {@link FakeNostrRelay}, registered with the live
- * {@link StreamSourceSupervisor}, drives a received EVENT through the real
- * {@link PostPersister} onto a {@code post} row and the {@code eval-queue}
- * channel (observed via {@link TestEvalQueueConsumer}).
+ * Cross-relay dedup integration test: a {@link NostrStreamSource}
+ * subscribed to two {@link FakeNostrRelay}s receives the same event id
+ * from both relays, and only one {@code post} row ends up in the outbox.
  *
- * <p>The worker is constructed and registered directly here rather than via
- * the startup {@code Registrar}: the relay's port is only known once the test
- * starts the fake, which is after the {@code @Startup} registrar has already
- * run. This mirrors {@code StreamSourceSupervisorIT}'s in-container
- * {@code register()} call.</p>
+ * <p>The post table's UNIQUE constraint is
+ * {@code (source_id, upstream_identifier, fetched_at)} — it does not
+ * absorb two writes for the same event id with millisecond-apart
+ * fetched_at timestamps. The in-memory {@link NostrDedupFilter} is
+ * therefore the actual dedup gate, and that's what this IT proves: the
+ * deliver callback fires exactly once, before the outbox write.</p>
  */
 @QuarkusTest
-class NostrStreamSourceIT {
+class NostrDedupIT {
 
-    private static final long DISPATCH_KEY = 990096L;
+    private static final long DISPATCH_KEY = 990198L;
     private static final Duration FIVE_SECONDS = Duration.ofSeconds(5);
 
     @Inject
@@ -61,48 +61,71 @@ class NostrStreamSourceIT {
 
     private final HttpClient httpClient = HttpClient.newHttpClient();
     private final NostrEventVerifier verifier = new NostrEventVerifier();
-    private final NostrDedupFilter dedupFilter = new NostrDedupFilter();
-    private FakeNostrRelay relay;
+    private FakeNostrRelay relayA;
+    private FakeNostrRelay relayB;
 
     @BeforeEach
     void setup() {
-        relay = new FakeNostrRelay();
+        relayA = new FakeNostrRelay();
+        relayB = new FakeNostrRelay();
         consumer.drain();
     }
 
     @AfterEach
     void teardown() {
         supervisor.stop(DISPATCH_KEY);
-        if (relay != null) {
-            relay.close();
+        if (relayA != null) {
+            relayA.close();
+        }
+        if (relayB != null) {
+            relayB.close();
         }
     }
 
     @Test
-    void endToEndWithFakeRelay() throws Exception {
-        String filterSpec = "{\"kinds\":[1]}";
-        UUID sourceUuid = seedNostrSource(filterSpec, "Nostr IT source");
+    void multiRelayDedup() throws Exception {
+        // Per-run UUID suffix on the filter-spec identifier: the (kind,
+        // identifier) UNIQUE constraint is enforced across the shared
+        // QuarkusTest container, so a plain {"kinds":[1]} would collide
+        // with NostrStreamSourceIT's seed in the same run. The fake relay
+        // ignores filter content, so adding a #test tag is harmless.
+        String filterSpec = "{\"kinds\":[1],\"#test\":\"" + UUID.randomUUID() + "\"}";
+        UUID sourceUuid = seedNostrSource(filterSpec, "Nostr dedup IT source");
         long preCount = countPostsForSource(sourceUuid);
 
-        NostrStreamSource worker = new NostrStreamSource(List.of(relay.uri()),
+        NostrDedupFilter dedupFilter = new NostrDedupFilter();
+        NostrStreamSource worker = new NostrStreamSource(
+                List.of(relayA.uri(), relayB.uri()),
                 OptionalLong::empty, Duration.ofMillis(50), Duration.ofMillis(200),
                 httpClient, verifier, dedupFilter);
-        Consumer<NormalizedPost> deliver =
-                post -> postPersister.persist(sourceUuid, post).ifPresent(evalQueueProducer::emit);
+        AtomicInteger deliveryCount = new AtomicInteger();
+        Consumer<NormalizedPost> deliver = post -> {
+            deliveryCount.incrementAndGet();
+            postPersister.persist(sourceUuid, post).ifPresent(evalQueueProducer::emit);
+        };
         supervisor.register(DISPATCH_KEY, filterSpec, worker, deliver);
 
-        assertTrue(relay.awaitFrameCount(1, FIVE_SECONDS), "relay received the subscriber's REQ");
-        relay.sendEvent(NostrSignedEventFixtures.VALID_KIND_1_EVENT);
+        assertTrue(relayA.awaitFrameCount(1, FIVE_SECONDS), "relay A received the subscriber's REQ");
+        assertTrue(relayB.awaitFrameCount(1, FIVE_SECONDS), "relay B received the subscriber's REQ");
+
+        // Same event id from both relays — the cross-relay duplication
+        // case the in-memory filter must suppress.
+        relayA.sendEvent(NostrSignedEventFixtures.VALID_KIND_1_EVENT);
+        relayB.sendEvent(NostrSignedEventFixtures.VALID_KIND_1_EVENT);
 
         awaitPostCount(sourceUuid, preCount + 1);
-        assertEquals(preCount + 1, countPostsForSource(sourceUuid),
-                "the received EVENT produced one post row");
-        assertEquals(NostrSignedEventFixtures.KIND_1_ID, upstreamIdentifierFor(sourceUuid),
-                "the post carries the Nostr event id as upstream_identifier");
+        // Give the second relay's delivery time to fire if dedup were broken.
+        // Without the filter, two deliver callbacks would fire, producing
+        // two post rows (the UNIQUE constraint includes fetched_at and so
+        // does NOT absorb the duplicate).
+        Thread.sleep(300);
 
-        awaitConsumerSize(1);
-        assertEquals(1, consumer.drain().size(),
-                "the persisted post key reached the eval-queue channel");
+        assertEquals(preCount + 1, countPostsForSource(sourceUuid),
+                "same event id from two relays produces exactly one post row");
+        assertEquals(1, deliveryCount.get(),
+                "in-memory dedup short-circuited the second arrival before deliver");
+        assertEquals(NostrSignedEventFixtures.KIND_1_ID, upstreamIdentifierFor(sourceUuid),
+                "the single post row is the deduplicated event");
     }
 
     private UUID seedNostrSource(String identifier, String displayName) throws Exception {
@@ -148,17 +171,6 @@ class NostrStreamSourceIT {
         long deadline = System.currentTimeMillis() + FIVE_SECONDS.toMillis();
         while (countPostsForSource(sourceUuid) < expected && System.currentTimeMillis() < deadline) {
             Thread.sleep(25);
-        }
-    }
-
-    private void awaitConsumerSize(int expected) throws InterruptedException {
-        long deadline = System.currentTimeMillis() + FIVE_SECONDS.toMillis();
-        while (consumer.size() < expected && System.currentTimeMillis() < deadline) {
-            Thread.sleep(25);
-        }
-        if (consumer.size() < expected) {
-            throw new AssertionError("timeout: expected consumer size >= " + expected
-                    + " but got " + consumer.size());
         }
     }
 }

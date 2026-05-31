@@ -37,6 +37,7 @@ class NostrStreamSourceTest {
 
     private final HttpClient httpClient = HttpClient.newHttpClient();
     private final NostrEventVerifier verifier = new NostrEventVerifier();
+    private final NostrDedupFilter dedupFilter = new NostrDedupFilter();
     private final List<FakeNostrRelay> relays = new ArrayList<>();
     private NostrStreamSource source;
 
@@ -56,7 +57,7 @@ class NostrStreamSourceTest {
         FakeNostrRelay r2 = newRelay();
         FakeNostrRelay r3 = newRelay();
         source = new NostrStreamSource(List.of(r1.uri(), r2.uri(), r3.uri()),
-                OptionalLong::empty, FAST_BASE, FAST_MAX, httpClient, verifier);
+                OptionalLong::empty, FAST_BASE, FAST_MAX, httpClient, verifier, dedupFilter);
 
         source.start(1L, FILTER, post -> { });
 
@@ -70,7 +71,7 @@ class NostrStreamSourceTest {
         FakeNostrRelay relay = newRelay();
         List<NormalizedPost> delivered = new CopyOnWriteArrayList<>();
         source = new NostrStreamSource(List.of(relay.uri()), OptionalLong::empty,
-                FAST_BASE, FAST_MAX, httpClient, verifier);
+                FAST_BASE, FAST_MAX, httpClient, verifier, dedupFilter);
 
         source.start(7L, FILTER, delivered::add);
         assertTrue(relay.awaitFrameCount(1, AWAIT), "REQ received");
@@ -93,7 +94,7 @@ class NostrStreamSourceTest {
         FakeNostrRelay relay = newRelay();
         AtomicReference<OptionalLong> since = new AtomicReference<>(OptionalLong.empty());
         source = new NostrStreamSource(List.of(relay.uri()), since::get, FAST_BASE, FAST_MAX,
-                httpClient, verifier);
+                httpClient, verifier, dedupFilter);
 
         source.start(1L, FILTER, post -> { });
         assertTrue(relay.awaitFrameCount(1, AWAIT), "initial REQ received");
@@ -122,7 +123,7 @@ class NostrStreamSourceTest {
             delivered.add(post);
         };
         source = new NostrStreamSource(List.of(relay.uri()), OptionalLong::empty,
-                FAST_BASE, FAST_MAX, httpClient, verifier);
+                FAST_BASE, FAST_MAX, httpClient, verifier, dedupFilter);
 
         source.start(1L, FILTER, slowDeliver);
         assertTrue(relay.awaitFrameCount(1, AWAIT), "REQ received");

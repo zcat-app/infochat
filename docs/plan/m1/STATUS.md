@@ -24,8 +24,8 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-098 — Nostr cross-relay dedup (complexity: medium, risk: medium)
 - M1-099 — Nostr per-relay degradation + cycle cap (complexity: medium, risk: medium)
+- M1-100 — Nostr kind-6 cross-source linking (complexity: medium, risk: low)
 - M1-101 — SSRF guard for wss:// relay connections (complexity: low, risk: low)
 - M1-104 — SimpleX group support + mention recognition (complexity: medium, risk: medium)
 - M1-105 — Multi-adapter Provider wiring + isolation IT (complexity: medium, risk: low)
@@ -47,7 +47,6 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-100 — blocked_by: M1-098 (pending), M1-093 (done)
 - M1-109 — blocked_by: M1-108 (done), M1-105 (pending)
 - M1-114 — blocked_by: M1-113 (pending)
 
@@ -71,6 +70,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-118 | SimpleX input-validation hardening — contactId shape + inbound size cap | 2026-05-31 | round 1 APPROVE |
 | M1-108 | Signal mention recognition + group support | 2026-05-31 | round 1 APPROVE |
 | M1-103 | SimpleX subprocess + WebSocket messaging | 2026-05-31 | round 2 APPROVE |
+| M1-098 | Nostr cross-relay dedup | 2026-05-31 | round 1 APPROVE |
 | M1-097 | Nostr event verification + kind filter | 2026-05-31 | round 1 APPROVE |
 | M1-094 | Fetcher failure ladder (D42) | 2026-05-31 | round 1 APPROVE |
 | M1-112 | GroupApprovalService + per-group rate cap + step 3.5 | 2026-05-30 | round 1 APPROVE |
@@ -266,14 +266,14 @@ M1-086 (done)
   └── M1-091 (done)
 M1-092 (done)
   └── M1-093 (done)
-        └── M1-100 (pending)
+        └── M1-100 (pending) ← runnable
 M1-094 (done)
 M1-095 (done)
   └── M1-096 (done)
         ├── M1-097 (done)
-        │     └── M1-098 (pending) ← runnable
+        │     └── M1-098 (done)
         │           └── M1-100 (pending) [see above]
-        ├── M1-098 (pending) [see above]
+        ├── M1-098 (done) [see above]
         ├── M1-099 (pending) ← runnable
         └── M1-101 (pending) ← runnable
 M1-102 (done)

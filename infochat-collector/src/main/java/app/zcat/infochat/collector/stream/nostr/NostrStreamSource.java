@@ -82,6 +82,7 @@ public final class NostrStreamSource implements StreamSource {
     private final Duration backoffMax;
     private final HttpClient httpClient;
     private final NostrEventVerifier verifier;
+    private final NostrDedupFilter dedupFilter;
 
     private final List<NostrRelayConnection> connections = new ArrayList<>();
     private final BlockingQueue<NostrEvent> inbound = new LinkedBlockingQueue<>(INBOUND_CAPACITY);
@@ -99,13 +100,15 @@ public final class NostrStreamSource implements StreamSource {
 
     NostrStreamSource(@NonNull List<URI> relayUris, @NonNull Supplier<OptionalLong> sinceCursor,
                       @NonNull Duration backoffBase, @NonNull Duration backoffMax,
-                      @NonNull HttpClient httpClient, @NonNull NostrEventVerifier verifier) {
+                      @NonNull HttpClient httpClient, @NonNull NostrEventVerifier verifier,
+                      @NonNull NostrDedupFilter dedupFilter) {
         this.relayUris = List.copyOf(relayUris);
         this.sinceCursor = sinceCursor;
         this.backoffBase = backoffBase;
         this.backoffMax = backoffMax;
         this.httpClient = httpClient;
         this.verifier = verifier;
+        this.dedupFilter = dedupFilter;
     }
 
     @Override
@@ -141,6 +144,13 @@ public final class NostrStreamSource implements StreamSource {
             // Silent drop: a well-behaved relay's REQ filter should have
             // suppressed disallowed kinds, but the relay is untrusted. No
             // counter — kind drops are noise, not a signal that needs auditing.
+            return false;
+        }
+        if (!dedupFilter.accept(event.id())) {
+            // Same event id already delivered (most likely from another
+            // relay of this same source). Silent drop: the in-memory filter
+            // is the authoritative cross-relay dedup per architecture.md
+            // §Ingest SPIs, and one-event-many-relays is the design.
             return false;
         }
         boolean accepted = inbound.offer(event);
@@ -263,8 +273,12 @@ public final class NostrStreamSource implements StreamSource {
                     continue;
                 }
                 Supplier<OptionalLong> since = () -> latestPublishedAtEpochSeconds(row.id());
-                NostrStreamSource worker =
-                        new NostrStreamSource(relays, since, backoffBase, backoffMax, httpClient, verifier);
+                // One filter per source: dedup state is per-publisher
+                // (see NostrDedupFilter javadoc). Verifier is shared
+                // because it's stateless.
+                NostrDedupFilter dedupFilter = new NostrDedupFilter();
+                NostrStreamSource worker = new NostrStreamSource(
+                        relays, since, backoffBase, backoffMax, httpClient, verifier, dedupFilter);
                 UUID sourceUuid = row.id();
                 Consumer<NormalizedPost> deliver =
                         post -> postPersister.persist(sourceUuid, post).ifPresent(evalQueueProducer::emit);

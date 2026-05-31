@@ -1,7 +1,7 @@
 ---
 id: M1-098
 title: "Nostr cross-relay dedup"
-status: pending
+status: done
 created: 2026-05-26
 last_updated: 2026-05-31
 blocked_by:
@@ -71,12 +71,29 @@ spec_refs:
   - docs/spec/architecture.md §Ingest SPIs
 decision_refs:
   - D38
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-05-31
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 9
+      added: 347
+      removed: 19
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-05-31
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-098: Nostr cross-relay dedup
