@@ -29,7 +29,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-101 — SSRF guard for wss:// relay connections (complexity: low, risk: low)
 - M1-104 — SimpleX group support + mention recognition (complexity: medium, risk: medium)
 - M1-105 — Multi-adapter Provider wiring + isolation IT (complexity: medium, risk: low)
-- M1-113 — D47 admin commands — approve-group, reject-group, list-groups (complexity: medium, risk: low)
+- M1-113 — D47 admin commands — approve-group, reject-group, list-groups (complexity: medium, risk: medium)
 - M1-118 — SimpleX input-validation hardening — contactId shape + inbound size cap (complexity: low, risk: high)
 - M1-119 — SimpleX logging hygiene — drainStream + MalformedFrame exception messages (complexity: medium, risk: medium)
 

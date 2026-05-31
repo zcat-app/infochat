@@ -3,7 +3,7 @@ id: M1-113
 title: "D47 admin commands — approve-group, reject-group, list-groups"
 status: pending
 created: 2026-05-27
-last_updated: 2026-05-27
+last_updated: 2026-05-31
 blocked_by:
   - M1-112
 files_budget: 10
@@ -19,7 +19,7 @@ files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/RejectGroupCommandHandlerTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/ListGroupsCommandHandlerTest.java
 complexity: medium
-risk: low
+risk: medium
 round_cap: 2
 security_relevant: true
 migration_touch: false
@@ -50,13 +50,38 @@ test_plan:
   preserves:
     - all tests currently green on main
 spec_refs:
-  - docs/spec/commands.md §Admin /approve-group
-  - docs/spec/commands.md §Admin /reject-group
-  - docs/spec/commands.md §Admin /list-groups
+  - docs/spec/commands.md §Admin (bot admin)
   - docs/spec/commands.md §Permission model — closed list
 decision_refs:
   - D47
 reviews: {}
+escalations:
+  - date: 2026-05-31
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      SPEC-REFS-VALID: FAIL
+        - docs/spec/commands.md §Admin /approve-group → ANCHOR-NOT-FOUND. No heading contains "admin /approve-group". The content about /approve-group is a bullet point inside "### Admin (bot admin)" (line 813), not a separate heading.
+        - docs/spec/commands.md §Admin /reject-group → ANCHOR-NOT-FOUND. Same: /reject-group is a bullet point under "### Admin (bot admin)", not a heading.
+        - docs/spec/commands.md §Admin /list-groups → ANCHOR-NOT-FOUND. Same: /list-groups is a bullet point under "### Admin (bot admin)", not a heading.
+        - docs/spec/commands.md §Permission model — closed list → FOUND (line 984).
+revisions:
+  - date: 2026-05-31
+    reason: clarity-fail rework — collapse three non-resolving spec_refs into the single resolving §Admin (bot admin) heading; bump risk low→medium per WARN
+    prior_values: |
+      risk: low
+      spec_refs:
+        - docs/spec/commands.md §Admin /approve-group
+        - docs/spec/commands.md §Admin /reject-group
+        - docs/spec/commands.md §Admin /list-groups
+        - docs/spec/commands.md §Permission model — closed list
+      (The three /<cmd> entries pointed at bullet points under the
+       "### Admin (bot admin)" heading, not at distinct headings, so
+       spec_refs anchor resolution failed. The actual heading
+       containing all three commands is "Admin (bot admin)" at
+       commands.md:813. risk was also bumped because security_relevant
+       is true and the commands mutate approval_status; the handlers
+       still delegate to M1-112's frozen service, so the bump is
+       calibration, not new risk.)
 overrides: []
 aborted_attempts: []
 reopens: []
