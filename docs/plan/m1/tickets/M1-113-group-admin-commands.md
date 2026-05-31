@@ -1,12 +1,12 @@
 ---
 id: M1-113
 title: "D47 admin commands — approve-group, reject-group, list-groups"
-status: pending
+status: done
 created: 2026-05-27
 last_updated: 2026-05-31
 blocked_by:
   - M1-112
-files_budget: 10
+files_budget: 11
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/ApproveGroupCommandHandler.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/RejectGroupCommandHandler.java
@@ -15,6 +15,7 @@ files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
   - infochat-provider/src/main/resources/bundles/en.properties
   - infochat-provider/src/main/resources/bundles/cs.properties
+  - infochat-core/src/main/java/app/zcat/infochat/core/audit/AuditAction.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/ApproveGroupCommandHandlerTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/RejectGroupCommandHandlerTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/ListGroupsCommandHandlerTest.java
@@ -25,13 +26,14 @@ security_relevant: true
 migration_touch: false
 out_of_scope:
   - infochat-collector/** — no collector changes
-  - infochat-core/** — no SPI changes
+  - infochat-messaging-adapter/** — no SPI changes (CommandHandler, ScopeRef, MessagingAdapter all consumed unchanged)
   - any migration file — M1-110 is frozen
   - GroupApprovalService internals — M1-112 is frozen
   - InboundRouter — M1-112 is frozen
   - /status changes — M1-114
   - GroupAutoPromoteService — not modified here; activated_by priority can be wired if clean, but is not required by acceptance
   - adapter-layer group support — M1-104, M1-108
+  - infochat-core touches other than the AuditAction enum-content additions in files_scope (no migration, no AuditLogWriter/RedactionHook/ContactIds changes)
 acceptance:
   - "ApproveGroupCommandHandler implements CommandHandler with name()=='approve-group'. Requires is_admin=true. Parses one positional <group_id> argument (UUID). Transitions approval_status from 'pending' or 'rejected' to 'approved'. Sends a one-time 'group approved' message to the group. Audit-logged. No-op with friendly reply if already approved. No confirm required"
   - "RejectGroupCommandHandler implements CommandHandler with name()=='reject-group'. Requires is_admin=true. Parses one positional <group_id> argument (UUID). Transitions approval_status to 'rejected'. Sends a one-time 'group rejected' message to the group. Audit-logged. Requires confirm (destructive). No-op with friendly reply if already rejected"
@@ -51,10 +53,36 @@ test_plan:
     - all tests currently green on main
 spec_refs:
   - docs/spec/commands.md §Admin (bot admin)
-  - docs/spec/commands.md §Permission model — closed list
+  - docs/spec/commands.md §Permission model
 decision_refs:
   - D47
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-05-31
+    verdict: REWORK
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 12
+      added: 2136
+      removed: 1
+  - round: 2
+    date: 2026-05-31
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 12
+      added: 2165
+      removed: 2
 escalations:
   - date: 2026-05-31
     reason: clarity-fail
@@ -64,6 +92,20 @@ escalations:
         - docs/spec/commands.md §Admin /reject-group → ANCHOR-NOT-FOUND. Same: /reject-group is a bullet point under "### Admin (bot admin)", not a heading.
         - docs/spec/commands.md §Admin /list-groups → ANCHOR-NOT-FOUND. Same: /list-groups is a bullet point under "### Admin (bot admin)", not a heading.
         - docs/spec/commands.md §Permission model — closed list → FOUND (line 984).
+  - date: 2026-05-31
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      About to touch infochat-core/src/main/java/app/zcat/infochat/core/audit/AuditAction.java
+      to add APPROVE_GROUP + REJECT_GROUP enum constants required by acceptance
+      items 1 and 2 ("Audit-logged"). The file is NOT in files_scope (which lists
+      10 provider-only paths) and is covered by out_of_scope entry
+      "infochat-core/** — no SPI changes". The AuditLogWriter SPI requires an
+      AuditAction enum constant; no existing value is semantically appropriate
+      (APPROVE/REJECT_QUARANTINE are for posts, GRANT/REVOKE_ADMIN are for users).
+      Prior admin tickets (M1-046, M1-053, M1-079c, M1-080c, M1-083) extended
+      AuditAction in the same enum-content pattern; the gloss "no SPI changes"
+      arguably permits content-only enum additions, but files_scope is the
+      binding mechanical constraint.
 revisions:
   - date: 2026-05-31
     reason: clarity-fail rework — collapse three non-resolving spec_refs into the single resolving §Admin (bot admin) heading; bump risk low→medium per WARN
@@ -82,11 +124,100 @@ revisions:
        is true and the commands mutate approval_status; the handlers
        still delegate to M1-112's frozen service, so the bump is
        calibration, not new risk.)
+  - date: 2026-05-31
+    reason: budget-breach rework — add infochat-core AuditAction.java to files_scope (+1, budget 10→11); narrow over-broad infochat-core/** out_of_scope entry to permit enum-content additions
+    prior_values: |
+      files_budget: 10
+      files_scope: (lacked infochat-core AuditAction.java)
+      out_of_scope:
+        - infochat-collector/** — no collector changes
+        - infochat-core/** — no SPI changes
+        - any migration file — M1-110 is frozen
+        - GroupApprovalService internals — M1-112 is frozen
+        - InboundRouter — M1-112 is frozen
+        - /status changes — M1-114
+        - GroupAutoPromoteService — not modified here; activated_by priority can be wired if clean, but is not required by acceptance
+        - adapter-layer group support — M1-104, M1-108
+      (Acceptance items 1 and 2 mandate "Audit-logged" for /approve-group
+       and /reject-group. The AuditLogWriter SPI requires an AuditAction
+       enum constant; no existing verb fits semantically — APPROVE_QUARANTINE
+       and REJECT_QUARANTINE are post-level moderation, PROMOTE_GROUP_ADMIN
+       and DEMOTE_GROUP_ADMIN are group membership admin role (orthogonal to
+       groups.approval_status). The corpus pattern across M1-046, M1-053,
+       M1-079c, M1-080c, M1-083 is to extend AuditAction as a content
+       addition; the prior infochat-core/** ban was over-broad. Narrow the
+       out_of_scope entry to the migration subtree and the AuditLogWriter/
+       RedactionHook/ContactIds SPI surface; add AuditAction.java explicitly
+       to files_scope. Also moved the SPI-no-touch reason to its proper home
+       on the infochat-messaging-adapter/** entry, which IS the SPI module.)
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
-clarity_check: {}
+redteam_findings:
+  - date: 2026-05-31
+    category: AUDIT-EVASION
+    severity: medium
+    promise: |
+      From docs/spec/security.md §Authorization model, evaluation order step 8:
+      "Audit-log the intent." The spec lists audit-log as a deterministic step
+      that runs after the permission check and before execution — applying to
+      every inbound dispatched command, with privileged-tier reads explicitly
+      covered by the corpus pattern (compare ListSourcesCommandHandler line
+      142–151 which writes a privilegedReadAuditRow precisely because the
+      privileged enumeration is audited because it discloses deployment-wide
+      state).
+    gap: |
+      infochat-provider/src/main/java/app/zcat/infochat/provider/command/ListGroupsCommandHandler.java
+      lines 71–125 (the entire handle(...) method) writes NO audit row. The
+      class-level javadoc declares "Read-only handler: no audit row, no state
+      mutation". The handler enumerates every groups row including each
+      group's id, approval_status, timezone, activated_by contact id
+      (redacted but identifiable by prefix/suffix), and active member count
+      — global, deployment-wide state visible only to bot admins. The
+      corpus precedent in ListSourcesCommandHandler (writePrivilegedReadAuditRow)
+      audits an analogous privileged-tier admin enumeration; /list-groups
+      is the same shape yet writes no row.
+    repro: |
+      A compromised bot admin issues /list-groups --page 1, /list-groups
+      --page 2, ..., enumerating every group's (id, approval_status, redacted
+      activator contact, member count, timezone) across the deployment. No
+      audit trail is written. A forensic investigator reviewing audit_log
+      later cannot establish which admin enumerated the group inventory,
+      when, or how often. The redacted activator contact id is reversible by
+      anyone who already knows the contact id prefix/suffix (the redaction
+      is identity-preserving for known contacts), so the disclosure scope is
+      non-trivial — yet the operation is invisible in /audit.
+    suggested_fix_class: audit-log-coverage
+redteam_audits:
+  - date: 2026-05-31
+    verdict: FINDINGS
+    base: 14d676f
+    head: e19b99b
+    verdict_file: docs/plan/m1/redteam/M1-113-2026-05-31.md
+    findings_count: 1
+    out_of_model_count: 2
+    note: |
+      Audit ran between /m1-tick commit and /m1-tick merge (canonical squash
+      commit e19b99b on branch m1/M1-113-group-admin-commands). One MEDIUM
+      AUDIT-EVASION finding RESOLVED on this branch (2026-05-31) via fix
+      commit on top of e19b99b (M1-112 precedent). Added AuditAction.LIST_GROUPS
+      constant and wired ListGroupsCommandHandler.writePrivilegedReadAuditRow
+      mirroring ListSourcesCommandHandler line 190–230: audit-before-effect
+      in own short transaction after admin gate, before deployment-wide
+      SELECT. Audit row carries target_kind='group', target_id='all',
+      details_json={"page":N}. Three new tests in ListGroupsCommandHandlerTest
+      (4 → 7); mvn -B verify SUCCESS (97 provider tests, 0 failures). Two
+      OUT-OF-MODEL observations recorded but not fixed (advisory only):
+      (a) escapeJson string-concatenation JSON builder is sound for the
+      current closed details_json field set, (b) RejectGroup intent-phase
+      TOCTOU between outside-tx admin check and audit-row write
+      (audit-row pollution only — execution is gated by the confirm-leg
+      in-tx FOR UPDATE re-check).
+clarity_check:
+  date: 2026-05-31
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-113: D47 admin commands — approve-group, reject-group, list-groups
@@ -129,3 +260,22 @@ See frontmatter.
   sanitizer parses `commands.md` at test tier, so the closed-list
   vs. spec parity check is independent of whether the command
   handlers are registered.
+
+## Round 1 rework
+
+Reviewer verdict 2026-05-31, round 1: REWORK. All 5 structural
+checks PASS; rework items are mechanical unused-symbol cleanups in
+`RejectGroupCommandHandlerTest.java`. Per engineering-rules §1
+("Clean up imports/variables that YOUR changes made unused").
+
+1. Drop `import java.sql.Types;` (line 19) — never referenced
+   (`seedGroup` uses `ps.setObject` only).
+2. Drop the unused `UUID actorId =` LHS on
+   `seedUser(...)` in `rejectPendingGroupRequiresConfirmThenFlipsStatus`
+   (line 116) — the test never asserts the actor on the audit rows
+   (only the count). Test (c) already covers actor-on-audit-row
+   asymmetrically; no behaviour gap.
+3. Drop the unused `String expectedPrompt = MessageFormat.format(...)`
+   computation (line 124) — the assertions use `prompt.text()`
+   substring checks, not equality against `expectedPrompt`. Keep the
+   substring contract (the timeout token may differ across profiles).

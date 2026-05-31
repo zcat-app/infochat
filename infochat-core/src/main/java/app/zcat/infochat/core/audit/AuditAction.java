@@ -44,6 +44,12 @@ package app.zcat.infochat.core.audit;
  *       established read-only-doesn't-audit pattern); the gap the
  *       audit closes is specifically the privileged-read
  *       enumeration of every source URL across the deployment.</li>
+ *   <li>{@link #LIST_GROUPS} records the bot-admin-only
+ *       {@code /list-groups [--page N]} read — a deployment-wide
+ *       enumeration of every {@code groups} row. Distinct from
+ *       {@link #LIST_SOURCES_ALL} in that {@code /list-groups} has
+ *       no unprivileged form (the whole command is admin-only), so
+ *       the verb carries no {@code _ALL} suffix.</li>
  * </ul>
  *
  * <p>{@link #STARTUP_RELEASE_ON_STAGE2_FAILURE_TRUE} pre-dates this
@@ -78,6 +84,32 @@ public enum AuditAction {
     INVITE_BRUTE_FORCE_BREACH,
     PROMOTE_GROUP_ADMIN,
     DEMOTE_GROUP_ADMIN,
+    // D47 group authorization (M1-113). APPROVE_GROUP records the
+    // bot-admin transition of groups.approval_status from
+    // 'pending'/'rejected' to 'approved'; REJECT_GROUP records the
+    // transition to 'rejected'. Distinct from APPROVE_QUARANTINE /
+    // REJECT_QUARANTINE (which act on the post quarantine row, not the
+    // group) and from PROMOTE_GROUP_ADMIN / DEMOTE_GROUP_ADMIN (which
+    // act on the group_membership.is_group_admin role, orthogonal to
+    // groups.approval_status). REJECT_GROUP_INTENT is the
+    // audit-on-intent row written on the first call of confirm-gated
+    // /reject-group per security.md §Authorization model step 8 (same
+    // pattern as BAN_INTENT / INVITE_REVOKE_INTENT). /approve-group is
+    // not confirm-gated, so no APPROVE_GROUP_INTENT counterpart exists.
+    APPROVE_GROUP,
+    REJECT_GROUP,
+    REJECT_GROUP_INTENT,
+    // LIST_GROUPS records the bot-admin-only /list-groups read — a
+    // deployment-wide enumeration of every groups row (id,
+    // approval_status, activated_by contact id (redacted),
+    // member_count, timezone). Mirrors LIST_SOURCES_ALL's role for
+    // /list-sources --all: closes the gap between "destructive admin
+    // writes audited" and "privileged admin reads not audited" for
+    // the §Source URL visibility-shaped disclosure that the groups
+    // enumeration produces. Unlike /list-sources, /list-groups has
+    // no unprivileged form (every call is admin-only), so the verb
+    // carries no _ALL suffix.
+    LIST_GROUPS,
     MEMBER_LEFT,
     BOT_REMOVED,
     ADD_SOURCE,

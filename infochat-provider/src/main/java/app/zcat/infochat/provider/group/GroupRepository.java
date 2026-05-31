@@ -12,6 +12,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -66,6 +68,47 @@ public class GroupRepository {
             "SELECT COUNT(*) FROM groups "
           + "WHERE removed_at IS NULL "
           + "  AND approval_status IN ('pending', 'approved')";
+
+    // /approve-group + /reject-group lookup by primary key. Returns a
+    // richer projection than findApprovalRow (adds adapter +
+    // upstream_group_id) so the handler can build the OutboundMessage
+    // addressed at the target group without a follow-up query.
+    private static final String SELECT_BY_ID =
+            "SELECT id, adapter, upstream_group_id, approval_status, "
+          + "       activated_by, removed_at "
+          + "  FROM groups WHERE id = ?";
+
+    // Status transition for /approve-group + /reject-group. Returns the
+    // pre-update status via RETURNING so the handler can detect the no-op
+    // (same-status) path without a separate SELECT — single round-trip.
+    // OLD.approval_status is referenced via the standard "RETURNING old"
+    // shape isn't supported by PostgreSQL; instead we filter the UPDATE
+    // to fire only when the status would actually change, and detect the
+    // no-op via getUpdateCount() == 0.
+    private static final String UPDATE_APPROVAL_STATUS =
+            "UPDATE groups SET approval_status = ? "
+          + "WHERE id = ? AND approval_status <> ?";
+
+    // /list-groups paginated read. JOINs users for the activated_by
+    // contact id (LEFT JOIN — pre-V26 groups have NULL activated_by, and
+    // bootstrap data may too). LEFT JOIN group_membership with removed_at
+    // filter aggregates the active member count. ORDER BY created_at DESC
+    // matches the /list-sources / /audit ordering convention (newest first).
+    private static final String LIST_GROUPS_PAGE =
+            "SELECT g.id, g.approval_status, g.timezone, "
+          + "       u.contact_id AS activator_contact_id, "
+          + "       COALESCE(m.member_count, 0) AS member_count "
+          + "  FROM groups g "
+          + "  LEFT JOIN users u ON u.id = g.activated_by "
+          + "  LEFT JOIN (SELECT group_id, COUNT(*) AS member_count "
+          + "               FROM group_membership "
+          + "              WHERE removed_at IS NULL "
+          + "              GROUP BY group_id) m ON m.group_id = g.id "
+          + " ORDER BY g.created_at DESC "
+          + " LIMIT ? OFFSET ?";
+
+    private static final String COUNT_ALL_GROUPS =
+            "SELECT COUNT(*) FROM groups";
 
     private final DataSource dataSource;
 
@@ -240,6 +283,138 @@ public class GroupRepository {
             return rs.getLong(1);
         } catch (SQLException e) {
             throw new IllegalStateException("countActiveGroups failed", e);
+        }
+    }
+
+    /**
+     * Richer snapshot of a {@code groups} row than
+     * {@link GroupApprovalRow}: adds {@code adapter} +
+     * {@code upstreamGroupId} so {@code /approve-group} and
+     * {@code /reject-group} can build the post-mutation
+     * {@code OutboundMessage} addressed at the target group without
+     * a second SELECT. Returned by {@link #findById}.
+     */
+    public record GroupRow(
+            @NonNull UUID id,
+            @NonNull String adapter,
+            @NonNull String upstreamGroupId,
+            @NonNull String approvalStatus,
+            @Nullable UUID activatedBy,
+            @Nullable Instant removedAt) {}
+
+    /**
+     * Look up a group by its UUID primary key. Used by
+     * {@code /approve-group} and {@code /reject-group} to resolve the
+     * positional {@code <group_id>} argument before mutating
+     * {@code approval_status}, and to retrieve the
+     * {@code (adapter, upstream_group_id)} pair the post-mutation
+     * group-message delivery needs.
+     */
+    public @NonNull Optional<GroupRow> findById(@NonNull UUID groupId) {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(SELECT_BY_ID)) {
+            ps.setObject(1, groupId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return Optional.empty();
+                }
+                UUID id = rs.getObject("id", UUID.class);
+                String adapter = rs.getString("adapter");
+                String upstreamGroupId = rs.getString("upstream_group_id");
+                String status = rs.getString("approval_status");
+                UUID activatedBy = rs.getObject("activated_by", UUID.class);
+                Timestamp removedTs = rs.getTimestamp("removed_at");
+                Instant removedAt = removedTs == null ? null : removedTs.toInstant();
+                return Optional.of(new GroupRow(
+                        id, adapter, upstreamGroupId, status, activatedBy, removedAt));
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "findById failed for groupId=" + groupId, e);
+        }
+    }
+
+    /**
+     * Set {@code approval_status} on the row identified by {@code groupId}.
+     * The UPDATE filters on {@code approval_status <> newStatus} so the
+     * no-op case (target already in {@code newStatus}) returns row count
+     * 0 in a single round-trip, letting the caller distinguish "mutated"
+     * from "already in target state" without a separate SELECT. Runs on
+     * the caller's connection so the caller can wrap audit-before-effect
+     * around the call inside one transaction.
+     *
+     * @return {@code true} when one row was updated, {@code false} when
+     *         the row was already in {@code newStatus} (no-op path).
+     *         A non-existent row also returns {@code false}; the caller
+     *         must short-circuit on {@link #findById} before calling this.
+     */
+    public boolean setApprovalStatus(@NonNull Connection conn,
+                                     @NonNull UUID groupId,
+                                     @NonNull String newStatus) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(UPDATE_APPROVAL_STATUS)) {
+            ps.setString(1, newStatus);
+            ps.setObject(2, groupId);
+            ps.setString(3, newStatus);
+            return ps.executeUpdate() == 1;
+        }
+    }
+
+    /**
+     * One row of {@code /list-groups} output. {@code activatorContactId}
+     * carries the {@code users.contact_id} of {@code activated_by} (NULL
+     * when the group has no activator, e.g. pre-V26 rows or bootstrap
+     * data); the handler is responsible for redacting it via
+     * {@code ContactIds.redact}.
+     */
+    public record GroupListRow(
+            @NonNull UUID id,
+            @NonNull String approvalStatus,
+            @NonNull String timezone,
+            @Nullable String activatorContactId,
+            long memberCount) {}
+
+    /**
+     * Paginated read for {@code /list-groups}. ORDER BY created_at DESC
+     * (newest first). Returns at most {@code pageSize} rows starting at
+     * {@code (page - 1) * pageSize}; the caller computes total pages
+     * separately via {@link #countAllGroups}.
+     */
+    public @NonNull List<GroupListRow> listGroupsPage(int page, int pageSize) {
+        List<GroupListRow> out = new ArrayList<>();
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(LIST_GROUPS_PAGE)) {
+            ps.setInt(1, pageSize);
+            ps.setInt(2, (page - 1) * pageSize);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    out.add(new GroupListRow(
+                            rs.getObject("id", UUID.class),
+                            rs.getString("approval_status"),
+                            rs.getString("timezone"),
+                            rs.getString("activator_contact_id"),
+                            rs.getLong("member_count")));
+                }
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "listGroupsPage failed for page=" + page + " pageSize=" + pageSize, e);
+        }
+        return out;
+    }
+
+    /**
+     * Row count for {@code /list-groups} pagination. Counts every row
+     * including {@code removed_at IS NOT NULL} ones (mirrors the
+     * {@link #listGroupsPage} SELECT, which is unfiltered on removed_at).
+     */
+    public long countAllGroups() {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(COUNT_ALL_GROUPS);
+             ResultSet rs = ps.executeQuery()) {
+            rs.next();
+            return rs.getLong(1);
+        } catch (SQLException e) {
+            throw new IllegalStateException("countAllGroups failed", e);
         }
     }
 }

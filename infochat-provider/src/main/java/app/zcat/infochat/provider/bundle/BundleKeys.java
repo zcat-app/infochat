@@ -960,6 +960,65 @@ public final class BundleKeys {
     /** Fixed reply when first @mention would exceed the global max-groups cap ({@code infochat.groups.global-max-groups}). */
     public static final String GROUP_GLOBAL_LIMIT = "group.global_limit";
 
+    // ----- D47 admin commands — /approve-group + /reject-group + /list-groups (M1-113) -----
+    // Per docs/spec/commands.md §Admin (bot admin) + decision D47.
+    // The three handlers operate on groups.approval_status. /approve-group
+    // is constructive (no confirm); /reject-group is destructive (confirm
+    // via the M1-051 ConfirmStateService pattern, mirroring /ban). The
+    // group.approved_message / group.rejected_message keys are sent to
+    // the TARGET group (not the admin's scope), so they need self-contained
+    // text that reads independently of any admin context.
+
+    /** One-time message sent to the target group on /approve-group success. Plain text, no tokens. */
+    public static final String GROUP_APPROVED_MESSAGE = "group.approved_message";
+
+    /** One-time message sent to the target group on /reject-group success. Plain text, no tokens. */
+    public static final String GROUP_REJECTED_MESSAGE = "group.rejected_message";
+
+    /** {@code /approve-group} success reply to the admin. Token {@code {0}} = group id (UUID). */
+    public static final String REPLY_APPROVE_GROUP_SUCCESS = "reply.approve_group.success";
+
+    /** {@code /approve-group} no-op reply when the group is already approved. Token {@code {0}} = group id (UUID). */
+    public static final String REPLY_APPROVE_GROUP_NOOP = "reply.approve_group.noop";
+
+    /** {@code /reject-group confirm} success reply to the admin. Token {@code {0}} = group id (UUID). */
+    public static final String REPLY_REJECT_GROUP_SUCCESS = "reply.reject_group.success";
+
+    /** {@code /reject-group} no-op reply when the group is already rejected. Token {@code {0}} = group id (UUID). */
+    public static final String REPLY_REJECT_GROUP_NOOP = "reply.reject_group.noop";
+
+    /** {@code /list-groups} reply when no groups exist at all. */
+    public static final String REPLY_LIST_GROUPS_EMPTY = "reply.list_groups.empty";
+
+    /**
+     * Header line for {@code /list-groups}. Tokens:
+     * {@code {0}} = displayed row count, {@code {1}} = current page (1-indexed),
+     * {@code {2}} = total pages.
+     */
+    public static final String REPLY_LIST_GROUPS_HEADER = "reply.list_groups.header";
+
+    /**
+     * Per-row template for {@code /list-groups}. Tokens:
+     * {@code {0}} = group id (UUID), {@code {1}} = approval_status,
+     * {@code {2}} = activated_by redacted contact id (or {@code -} if NULL),
+     * {@code {3}} = member count, {@code {4}} = timezone.
+     */
+    public static final String REPLY_LIST_GROUPS_LINE = "reply.list_groups.line";
+
+    /**
+     * {@code /approve-group <id>} or {@code /reject-group <id>}: no
+     * {@code groups} row with the supplied id exists. Token {@code {0}} =
+     * the supplied id. Distinct from {@link #ERROR_CONTACT_NOT_REGISTERED}
+     * because the target is a group, not a user.
+     */
+    public static final String ERROR_GROUP_NOT_FOUND = "error.group_not_found";
+
+    /**
+     * First-call prompt template for {@code /reject-group}. Tokens:
+     * {@code {0}} = timeout in whole seconds, {@code {1}} = group id (UUID).
+     */
+    public static final String REPLY_CONFIRM_PROMPT_REJECT_GROUP = "reply.confirm.prompt.reject_group";
+
     private BundleKeys() {
         throw new AssertionError("BundleKeys is a constant holder and must not be instantiated");
     }
