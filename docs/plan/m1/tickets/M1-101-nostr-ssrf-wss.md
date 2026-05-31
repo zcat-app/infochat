@@ -125,6 +125,23 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-05-31
+    verdict: CLEAN
+    base: 94bc3e3fc1b7d67001f8cccf19ea895546938972
+    head: e3db27624818dd517e619b8bd21a20ea4c1e5c26
+    verdict_file: docs/plan/m1/redteam/M1-101-2026-05-31.md
+    out_of_model_count: 2
+    note: |
+      Post-rebase audit of the per-ticket branch tip (rebased over M1-099 +
+      M1-100 between commit and merge). CLEAN against the documented threat
+      model — every spec promise in security.md §SSRF and outbound connections
+      is delivered for the wss:// path. Two OUT-OF-MODEL observations, neither
+      escalated: (1) DNS-re-resolve proxy for "socket-layer" peer-IP wording —
+      JDK API limitation, spec-amendment candidate; (2) orphan-dial window if
+      TLS hangs past 11s buildAsync().get(), bounded by the in-window DNS
+      pinning. Disposition detail in verdict_file above. Supersedes the
+      pre-rebase audit on commit 94f084e (same date, equivalent CLEAN verdict).
 clarity_check:
   date: 2026-05-31
   verdict: WARN

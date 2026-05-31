@@ -68,7 +68,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-105 | Multi-adapter Provider wiring + isolation IT | 2026-05-31 | round 1 APPROVE |
 | M1-104 | SimpleX group support + mention recognition | 2026-05-31 | round 2 APPROVE |
 | M1-103 | SimpleX subprocess + WebSocket messaging | 2026-05-31 | round 2 APPROVE |
-| M1-101 | SSRF guard for wss:// relay connections | 2026-05-31 | round 1 APPROVE |
+| M1-101 | SSRF guard for wss:// relay connections | 2026-05-31 | round 2 APPROVE |
 | M1-100 | Nostr kind-6 cross-source linking | 2026-05-31 | round 1 APPROVE |
 
 ---
