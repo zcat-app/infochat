@@ -3,7 +3,7 @@ id: M1-114
 title: "D47 /status pending count + group authorization roundtrip IT"
 status: pending
 created: 2026-05-27
-last_updated: 2026-05-27
+last_updated: 2026-05-31
 blocked_by:
   - M1-113
 files_budget: 6
@@ -15,7 +15,7 @@ files_scope:
   - infochat-provider/src/main/resources/bundles/cs.properties
   - infochat-provider/src/test/java/app/zcat/infochat/provider/group/GroupAuthorizationRoundtripIT.java
 complexity: medium
-risk: low
+risk: medium
 round_cap: 2
 security_relevant: true
 migration_touch: false
@@ -40,12 +40,26 @@ test_plan:
   preserves:
     - all tests currently green on main
 spec_refs:
-  - docs/spec/commands.md §Discovery /status
-  - docs/spec/security.md §Authorization model steps 3, 3.5
+  - docs/spec/commands.md §Discovery
+  - docs/spec/security.md §Authorization model
   - docs/spec/commands.md §Periodic group digests
 decision_refs:
   - D47
 reviews: {}
+escalations:
+  - date: 2026-05-31
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      N/A
+revisions:
+  - date: 2026-05-31
+    reason: clarity-fail rework — trim spec_refs to real heading anchors; raise risk to medium per clarity WARN (security_relevant: true ticket described as D47 acceptance gate)
+    prior_values: |
+      risk: low
+      spec_refs:
+        - docs/spec/commands.md §Discovery /status
+        - docs/spec/security.md §Authorization model steps 3, 3.5
+        - docs/spec/commands.md §Periodic group digests
 overrides: []
 aborted_attempts: []
 reopens: []

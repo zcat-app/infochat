@@ -28,7 +28,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-101 — SSRF guard for wss:// relay connections (complexity: low, risk: low)
 - M1-104 — SimpleX group support + mention recognition (complexity: medium, risk: medium)
 - M1-109 — Multi-adapter production shape IT (complexity: medium, risk: low)
-- M1-114 — D47 /status pending count + group authorization roundtrip IT (complexity: medium, risk: low)
+- M1-114 — D47 /status pending count + group authorization roundtrip IT (complexity: medium, risk: medium)
 
 ---
 
