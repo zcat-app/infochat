@@ -11,6 +11,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.Config;
+import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -20,6 +21,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Resolves {@code (ModelTask, scope_language) → LlmProvider} per
@@ -74,6 +76,8 @@ import java.util.Set;
 @ApplicationScoped
 public class LlmRouter {
 
+    private static final Logger LOG = Logger.getLogger(LlmRouter.class);
+
     /**
      * Configuration key that names the default provider when no
      * per-task override is set. Operators rarely change this in v1
@@ -85,6 +89,16 @@ public class LlmRouter {
     private final List<Entry> entries;
     private final Map<String, Entry> entriesByName;
     private final ConfigReader config;
+
+    /**
+     * One-shot guard for the priority-3 unknown-default-provider WARN
+     * (M1-042). Set true on the first {@link #forTask} call that
+     * observes an operator-configured {@link #CONFIG_KEY_DEFAULT_PROVIDER}
+     * naming a provider that resolves to no registered entry. The
+     * audit-loud-fallback posture is documented in {@link #forTask}'s
+     * priority-3 branch.
+     */
+    private final AtomicBoolean warnedUnknownDefault = new AtomicBoolean(false);
 
     /**
      * Test-friendly constructor: hand-supplied entries + config
@@ -158,16 +172,44 @@ public class LlmRouter {
 
         // Priority 3: profile default (or the configured default
         // provider name).
-        String defaultName = config.get(CONFIG_KEY_DEFAULT_PROVIDER)
-            .filter(s -> !s.isEmpty())
-            .orElse(OpenAiCompatibleProvider.PROVIDER_NAME);
+        Optional<String> configuredDefault = config.get(CONFIG_KEY_DEFAULT_PROVIDER)
+            .filter(s -> !s.isEmpty());
+        String defaultName = configuredDefault.orElse(OpenAiCompatibleProvider.PROVIDER_NAME);
         Entry defaultEntry = entriesByName.get(defaultName);
         if (defaultEntry == null) {
-            // Fall back to the FIRST registered entry when the
-            // configured default name doesn't match any registered
-            // bean — keeps the router resilient against a partial
-            // production wiring (only one provider in v1; the
-            // fallback is the same provider).
+            // M1-042 audit-loud-fallback posture: when the operator
+            // EXPLICITLY configured infochat.llm.default.provider but
+            // the named provider resolves to no registered LlmProvider,
+            // emit a one-shot WARN (per JVM) naming the configured
+            // value AND the registered provider set AND the fallback,
+            // then proceed with entries.get(0). Replaces M1-033's
+            // silent fall-back which would route SECURITY_JUDGE (and
+            // every other task with no per-task override) to whatever
+            // bean CDI discovery happened to list first — a typo would
+            // silently re-route every Stage 2 call.
+            //
+            // Fail-loud-fallback (not fail-startup) is the chosen
+            // posture because (1) M1-042 §out_of_scope forbids touching
+            // LlmRouterStartupGuard, where a startup-time guard would
+            // most naturally live, and (2) existing test fixtures (e.g.
+            // Stage2WorkerIT.TestStubLlmProvider, registered under its
+            // class simple-name) rely on the legacy silent-fallback
+            // behavior when CONFIG_KEY_DEFAULT_PROVIDER defaults to
+            // OpenAiCompatibleProvider.PROVIDER_NAME (absent from the
+            // test classpath). The unconfigured-default case (operator
+            // never set the key) does NOT emit the WARN — only an
+            // EXPLICIT operator-set value that fails to resolve is
+            // treated as misconfiguration.
+            if (configuredDefault.isPresent()
+                    && warnedUnknownDefault.compareAndSet(false, true)) {
+                LOG.warnf(
+                    "LlmRouter: %s='%s' is an unknown default provider "
+                        + "(registered providers: %s); falling back to first "
+                        + "registered entry '%s'. This warning is logged once "
+                        + "per JVM; correct the operator config to silence it.",
+                    CONFIG_KEY_DEFAULT_PROVIDER, defaultName,
+                    entriesByName.keySet(), entries.get(0).name());
+            }
             defaultEntry = entries.get(0);
         }
         return defaultEntry.provider();

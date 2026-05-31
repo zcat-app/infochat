@@ -5,6 +5,7 @@ import app.zcat.infochat.collector.outbox.PostPersister;
 import app.zcat.infochat.core.ingest.Fetcher;
 import app.zcat.infochat.core.ingest.NormalizedPost;
 import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
+import app.zcat.infochat.ssrf.UrlRedactor;
 import io.quarkus.arc.All;
 import io.quarkus.arc.InstanceHandle;
 import io.quarkus.runtime.Startup;
@@ -27,13 +28,17 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Drives the per-source fetch loop for all polled source kinds.
@@ -249,10 +254,12 @@ public class FetchScheduler {
         } catch (Exception e) {
             // Log the numeric dispatch key + UUID; NEVER the
             // identifier URL (which can carry embedded credentials
-            // per M1-023's redteam INFO-LEAK finding).
-            LOG.warnf(e,
-                "FetchScheduler tick failed for source uuid=%s (dispatch=%d)",
-                row.uuid(), row.dispatchKey());
+            // per M1-023's redteam INFO-LEAK finding). The chained
+            // exception's message is walked and any embedded URL
+            // substrings are redacted via UrlRedactor before logging
+            // — see logFetchFailure / redactUrlsInText below for the
+            // M1-042 redaction contract.
+            logFetchFailure(row, e);
             // D42 failure path: increment counter, refresh
             // last_fetch_at, flip active→failed when threshold
             // reached. Fire the throttled admin notification once on
@@ -277,6 +284,111 @@ public class FetchScheduler {
             }
         }
     }
+
+    /**
+     * M1-042 redaction-aware logger for the fetch-failure path. Walks
+     * the {@link Throwable#getCause() cause chain}, builds a
+     * {@code "ClassName: message"} digest per level, runs every level's
+     * message through {@link #redactUrlsInText(String)} so any URL
+     * substring containing {@code userinfo} (e.g. the embedded
+     * credentials JDK's {@code IOException} surfaces when a connection
+     * is refused mid-handshake) is stripped, then logs the digest at
+     * WARN.
+     *
+     * <p>The throwable is NOT passed as the SLF4J/JBoss-Logger
+     * {@code Throwable} parameter — doing so would cause the underlying
+     * handler to invoke {@code printStackTrace} on the raw
+     * {@code Throwable}, re-emitting the un-redacted message text
+     * inside the stack rendering. Losing the stack trace is the
+     * deliberate trade-off: in production we accept reduced
+     * debuggability at the per-tick fetch-failure site for stronger
+     * redaction guarantees, since URLs only appear in the per-level
+     * message strings (stack frames carry class/file/line, not raw
+     * input). The catch site itself is reached only on Fetcher
+     * exceptions; the chain message identifies the immediate failure
+     * class and the root cause's class, which is the diagnostic
+     * surface that matters at this log level.
+     *
+     * <p>Package-private so {@code FetchSchedulerLogRedactionTest} can
+     * invoke this helper directly without re-wiring the full
+     * {@link #tickOnce(SourceRow)} dependency graph.
+     */
+    void logFetchFailure(@NonNull SourceRow row, @NonNull Throwable t) {
+        String chain = redactUrlsInText(exceptionChainMessage(t));
+        LOG.warnf(
+            "FetchScheduler tick failed for source uuid=%s (dispatch=%d): %s",
+            row.uuid(), row.dispatchKey(), chain);
+    }
+
+    /**
+     * Walk the {@link Throwable#getCause() cause chain} and produce a
+     * single-line digest in the form
+     * {@code "ClassName: message" + " | caused by: " + ...}. Self-
+     * referential cause cycles (an exception whose {@code getCause()}
+     * eventually returns itself or an ancestor) are guarded against
+     * via an {@link IdentityHashMap}-based visited set so the walk
+     * always terminates.
+     *
+     * <p>Package-private (not private) so a future test can exercise
+     * the chain walker in isolation if the format itself becomes
+     * load-bearing.
+     */
+    static String exceptionChainMessage(@NonNull Throwable t) {
+        StringBuilder sb = new StringBuilder();
+        Map<Throwable, Boolean> seen = new IdentityHashMap<>();
+        Throwable current = t;
+        while (current != null && seen.put(current, Boolean.TRUE) == null) {
+            if (sb.length() > 0) {
+                sb.append(" | caused by: ");
+            }
+            sb.append(current.getClass().getSimpleName());
+            String msg = current.getMessage();
+            if (msg != null && !msg.isEmpty()) {
+                sb.append(": ").append(msg);
+            }
+            current = current.getCause();
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Find every {@code http(s)://...} URL substring in {@code text}
+     * and replace each with its {@link UrlRedactor#redact(String)}
+     * rendering — which strips embedded userinfo and replaces the
+     * query string with the literal placeholder. The regex matches
+     * the URL up to the next whitespace, double quote, single quote,
+     * comma, or closing parenthesis — punctuation that commonly
+     * delimits a URL inside a free-text exception message. This is
+     * deliberately conservative: ambiguous trailing punctuation
+     * (e.g. a sentence-terminating period right after a URL) is
+     * absorbed into the match and passed to {@link UrlRedactor#redact},
+     * which renders it as {@code <malformed-url>} — strictly worse
+     * for debuggability but strictly safer for redaction. URLs are
+     * not common in exception messages outside of network-error
+     * surfaces.
+     */
+    @Nullable
+    static String redactUrlsInText(@Nullable String text) {
+        if (text == null || text.isEmpty()) {
+            return text;
+        }
+        Matcher m = URL_PATTERN.matcher(text);
+        if (!m.find()) {
+            return text;
+        }
+        StringBuilder sb = new StringBuilder(text.length());
+        int cursor = 0;
+        do {
+            sb.append(text, cursor, m.start());
+            sb.append(UrlRedactor.redact(m.group()));
+            cursor = m.end();
+        } while (m.find());
+        sb.append(text, cursor, text.length());
+        return sb.toString();
+    }
+
+    private static final Pattern URL_PATTERN = Pattern.compile(
+        "https?://[^\\s\"',)]+");
 
     /**
      * Reads all active source rows regardless of kind. Public so the

@@ -1,11 +1,34 @@
 ---
 id: M1-042
 title: Operator-config + outbox/log hardening (LlmRouter default fallback, outbox pagination, fetcher log)
-status: deferred
+status: done
 created: 2026-05-19
 last_updated: 2026-05-31
-deferred_reason: post-mvp-hardening
-deferred_on: []
+reviews:
+  - round: 1
+    date: 2026-05-31
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 1093
+      removed: 62
+reopens:
+  - date: 2026-05-31
+    prior_deferred_reason: post-mvp-hardening
+    prior_deferred_on: []
+    reason: "M1 finishing (T3 wrap-up); no approved M2 backstop, and all three items verified still unaddressed in current code (LlmRouter.java:171 silent fallback; OutboxRehydrator.rehydrate() unbounded List; FetchScheduler.tickOnce logs exception chain without UrlRedactor)."
+clarity_check:
+  date: 2026-05-31
+  verdict: WARN
+  warnings:
+    - "TEST-CHANGES-AUTHORIZED: body 'Authorized test changes' section says 'adds four new test files' but the 2026-05-31 narrowing reduced the bundle to three"
+  blockers: []
 blocked_by: []
 files_budget: 7
 files_scope:
