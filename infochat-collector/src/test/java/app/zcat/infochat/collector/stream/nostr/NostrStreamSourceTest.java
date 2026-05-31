@@ -36,6 +36,7 @@ class NostrStreamSourceTest {
     private static final String FILTER = "{\"kinds\":[1]}";
 
     private final HttpClient httpClient = HttpClient.newHttpClient();
+    private final NostrEventVerifier verifier = new NostrEventVerifier();
     private final List<FakeNostrRelay> relays = new ArrayList<>();
     private NostrStreamSource source;
 
@@ -55,7 +56,7 @@ class NostrStreamSourceTest {
         FakeNostrRelay r2 = newRelay();
         FakeNostrRelay r3 = newRelay();
         source = new NostrStreamSource(List.of(r1.uri(), r2.uri(), r3.uri()),
-                OptionalLong::empty, FAST_BASE, FAST_MAX, httpClient);
+                OptionalLong::empty, FAST_BASE, FAST_MAX, httpClient, verifier);
 
         source.start(1L, FILTER, post -> { });
 
@@ -69,18 +70,20 @@ class NostrStreamSourceTest {
         FakeNostrRelay relay = newRelay();
         List<NormalizedPost> delivered = new CopyOnWriteArrayList<>();
         source = new NostrStreamSource(List.of(relay.uri()), OptionalLong::empty,
-                FAST_BASE, FAST_MAX, httpClient);
+                FAST_BASE, FAST_MAX, httpClient, verifier);
 
         source.start(7L, FILTER, delivered::add);
         assertTrue(relay.awaitFrameCount(1, AWAIT), "REQ received");
-        relay.sendEvent(new NostrEvent("evt-id-1", "pk", 1700000000L, 1, List.of(), "hello world", "sig"));
+        relay.sendEvent(NostrSignedEventFixtures.VALID_KIND_1_EVENT);
 
         assertTrue(awaitSize(delivered, 1), "event delivered to the callback");
         NormalizedPost post = delivered.get(0);
-        assertEquals("evt-id-1", post.upstreamIdentifier(), "upstream id is the Nostr event id");
-        assertEquals("hello world", post.body());
+        assertEquals(NostrSignedEventFixtures.KIND_1_ID, post.upstreamIdentifier(),
+                "upstream id is the Nostr event id");
+        assertEquals(NostrSignedEventFixtures.KIND_1_CONTENT, post.body());
         assertEquals(7L, post.sourceId());
-        assertEquals(Instant.ofEpochSecond(1700000000L), post.publishedAt(), "published_at is created_at");
+        assertEquals(Instant.ofEpochSecond(NostrSignedEventFixtures.FIXED_CREATED_AT), post.publishedAt(),
+                "published_at is created_at");
         assertNull(post.title());
         assertNull(post.url());
     }
@@ -89,7 +92,8 @@ class NostrStreamSourceTest {
     void reconnectsWithSinceOnDisconnect() throws Exception {
         FakeNostrRelay relay = newRelay();
         AtomicReference<OptionalLong> since = new AtomicReference<>(OptionalLong.empty());
-        source = new NostrStreamSource(List.of(relay.uri()), since::get, FAST_BASE, FAST_MAX, httpClient);
+        source = new NostrStreamSource(List.of(relay.uri()), since::get, FAST_BASE, FAST_MAX,
+                httpClient, verifier);
 
         source.start(1L, FILTER, post -> { });
         assertTrue(relay.awaitFrameCount(1, AWAIT), "initial REQ received");
@@ -118,14 +122,14 @@ class NostrStreamSourceTest {
             delivered.add(post);
         };
         source = new NostrStreamSource(List.of(relay.uri()), OptionalLong::empty,
-                FAST_BASE, FAST_MAX, httpClient);
+                FAST_BASE, FAST_MAX, httpClient, verifier);
 
         source.start(1L, FILTER, slowDeliver);
         assertTrue(relay.awaitFrameCount(1, AWAIT), "REQ received");
-        relay.sendEvent(event(1));
-        relay.sendEvent(event(2));
-        relay.sendEvent(event(3));
-        // Wait until the first delivery starts; events 2 and 3 are now queued.
+        relay.sendEvent(NostrSignedEventFixtures.VALID_KIND_1_DRAIN_A_EVENT);
+        relay.sendEvent(NostrSignedEventFixtures.VALID_KIND_1_DRAIN_B_EVENT);
+        relay.sendEvent(NostrSignedEventFixtures.VALID_KIND_1_DRAIN_C_EVENT);
+        // Wait until the first delivery starts; the remaining events are now queued.
         assertTrue(awaitSize(delivered, 1), "delivery started while running");
 
         source.stop();
@@ -136,7 +140,7 @@ class NostrStreamSourceTest {
                 "stop() closed the WebSocket connection");
 
         // No callback may fire after stop() returns.
-        relay.sendEvent(event(4));
+        relay.sendEvent(NostrSignedEventFixtures.VALID_KIND_1_EVENT);
         sleepQuietly(200);
         assertEquals(3, delivered.size(), "no deliver callback fires after stop() returns");
     }
@@ -145,10 +149,6 @@ class NostrStreamSourceTest {
         FakeNostrRelay relay = new FakeNostrRelay();
         relays.add(relay);
         return relay;
-    }
-
-    private static NostrEvent event(int n) {
-        return new NostrEvent("evt-" + n, "pk", 1700000000L + n, 1, List.of(), "content " + n, "sig");
     }
 
     private static boolean awaitSize(List<?> list, int size) {

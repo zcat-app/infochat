@@ -31,6 +31,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.OptionalLong;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -69,15 +70,27 @@ public final class NostrStreamSource implements StreamSource {
     // replay on reconnect via the since cursor.
     static final int INBOUND_CAPACITY = 10_000;
 
+    // Kind allowlist per security.md §Nostr (StreamSource, v1): only text
+    // notes (1) and reposts (6) reach the ingest pipeline; every other kind
+    // is dropped after signature verification passes. Compile-time constant
+    // in v1; a future ticket can extend this via config if needed.
+    static final Set<Integer> ALLOWED_KINDS = Set.of(1, 6);
+
     private final List<URI> relayUris;
     private final Supplier<OptionalLong> sinceCursor;
     private final Duration backoffBase;
     private final Duration backoffMax;
     private final HttpClient httpClient;
+    private final NostrEventVerifier verifier;
 
     private final List<NostrRelayConnection> connections = new ArrayList<>();
     private final BlockingQueue<NostrEvent> inbound = new LinkedBlockingQueue<>(INBOUND_CAPACITY);
     private final AtomicLong droppedEvents = new AtomicLong();
+    // Per-source counter of events that failed BIP-340 verification. A hostile
+    // relay can produce many; no admin notification per failure — the counter
+    // is the audit surface, exposed via the same first+every-100th log pattern
+    // used for droppedEvents.
+    private final AtomicLong failedSig = new AtomicLong();
 
     private volatile boolean delivering;
     private volatile Thread deliveryThread;
@@ -86,12 +99,13 @@ public final class NostrStreamSource implements StreamSource {
 
     NostrStreamSource(@NonNull List<URI> relayUris, @NonNull Supplier<OptionalLong> sinceCursor,
                       @NonNull Duration backoffBase, @NonNull Duration backoffMax,
-                      @NonNull HttpClient httpClient) {
+                      @NonNull HttpClient httpClient, @NonNull NostrEventVerifier verifier) {
         this.relayUris = List.copyOf(relayUris);
         this.sinceCursor = sinceCursor;
         this.backoffBase = backoffBase;
         this.backoffMax = backoffMax;
         this.httpClient = httpClient;
+        this.verifier = verifier;
     }
 
     @Override
@@ -111,6 +125,24 @@ public final class NostrStreamSource implements StreamSource {
     }
 
     private boolean enqueueInbound(NostrEvent event) {
+        // Trust-boundary gate per security.md §Per-source trust boundaries:
+        // signature verification → kind allowlist → outbox write. The order
+        // is load-bearing — kind alone gates nothing if the sig is forged, and
+        // a hostile relay can ignore the REQ subscription filter regardless.
+        if (!verifier.verify(event)) {
+            long total = failedSig.incrementAndGet();
+            if (total == 1 || total % 100 == 0) {
+                LOG.warn("Nostr signature verification failed; dropped {} event(s) cumulative for source {}",
+                        total, sourceId);
+            }
+            return false;
+        }
+        if (!ALLOWED_KINDS.contains(event.kind())) {
+            // Silent drop: a well-behaved relay's REQ filter should have
+            // suppressed disallowed kinds, but the relay is untrusted. No
+            // counter — kind drops are noise, not a signal that needs auditing.
+            return false;
+        }
         boolean accepted = inbound.offer(event);
         if (!accepted) {
             long total = droppedEvents.incrementAndGet();
@@ -122,6 +154,11 @@ public final class NostrStreamSource implements StreamSource {
             }
         }
         return accepted;
+    }
+
+    /** Package-private accessor for the failed-sig counter used by the IT. */
+    long failedSigCount() {
+        return failedSig.get();
     }
 
     @Override
@@ -206,6 +243,9 @@ public final class NostrStreamSource implements StreamSource {
         // nostr source; relay connections only subscribe and read.
         private final HttpClient httpClient = HttpClient.newHttpClient();
 
+        // Stateless and thread-safe — one verifier shared across every source.
+        private final NostrEventVerifier verifier = new NostrEventVerifier();
+
         @PostConstruct
         void registerNostrSources() {
             List<NostrSourceRow> rows;
@@ -224,7 +264,7 @@ public final class NostrStreamSource implements StreamSource {
                 }
                 Supplier<OptionalLong> since = () -> latestPublishedAtEpochSeconds(row.id());
                 NostrStreamSource worker =
-                        new NostrStreamSource(relays, since, backoffBase, backoffMax, httpClient);
+                        new NostrStreamSource(relays, since, backoffBase, backoffMax, httpClient, verifier);
                 UUID sourceUuid = row.id();
                 Consumer<NormalizedPost> deliver =
                         post -> postPersister.persist(sourceUuid, post).ifPresent(evalQueueProducer::emit);

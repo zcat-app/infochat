@@ -87,6 +87,24 @@
             <artifactId>commons-text</artifactId>
             <version>1.12.0</version>
         </dependency>
+        <!--
+             Bouncy Castle (provider) — used by NostrEventVerifier for
+             BIP-340 Schnorr signature verification on secp256k1. BC's
+             public crypto/signers API does NOT expose a BIP-340
+             verifier as of 1.80; the verifier hand-rolls the BIP-340
+             framing (x-only pubkey lift, tagged-hash challenge,
+             R = s·G − e·P check) on top of BC's secp256k1 curve
+             parameters (SECNamedCurves.getByName("secp256k1")) and
+             ECPoint math. Version pinned here (no project-wide BOM
+             coverage) at the latest stable release as of M1-097's
+             authoring. Scoped to collector only — Collector is forever
+             read-only per D38, so no signing surface is ever needed.
+        -->
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcprov-jdk18on</artifactId>
+            <version>1.80</version>
+        </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-junit5</artifactId>

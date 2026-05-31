@@ -60,6 +60,7 @@ class NostrStreamSourceIT {
     TestEvalQueueConsumer consumer;
 
     private final HttpClient httpClient = HttpClient.newHttpClient();
+    private final NostrEventVerifier verifier = new NostrEventVerifier();
     private FakeNostrRelay relay;
 
     @BeforeEach
@@ -83,19 +84,19 @@ class NostrStreamSourceIT {
         long preCount = countPostsForSource(sourceUuid);
 
         NostrStreamSource worker = new NostrStreamSource(List.of(relay.uri()),
-                OptionalLong::empty, Duration.ofMillis(50), Duration.ofMillis(200), httpClient);
+                OptionalLong::empty, Duration.ofMillis(50), Duration.ofMillis(200),
+                httpClient, verifier);
         Consumer<NormalizedPost> deliver =
                 post -> postPersister.persist(sourceUuid, post).ifPresent(evalQueueProducer::emit);
         supervisor.register(DISPATCH_KEY, filterSpec, worker, deliver);
 
         assertTrue(relay.awaitFrameCount(1, FIVE_SECONDS), "relay received the subscriber's REQ");
-        relay.sendEvent(new NostrEvent(
-                "nostr-it-evt", "pk", 1700000123L, 1, List.of(), "hello from nostr", "sig"));
+        relay.sendEvent(NostrSignedEventFixtures.VALID_KIND_1_EVENT);
 
         awaitPostCount(sourceUuid, preCount + 1);
         assertEquals(preCount + 1, countPostsForSource(sourceUuid),
                 "the received EVENT produced one post row");
-        assertEquals("nostr-it-evt", upstreamIdentifierFor(sourceUuid),
+        assertEquals(NostrSignedEventFixtures.KIND_1_ID, upstreamIdentifierFor(sourceUuid),
                 "the post carries the Nostr event id as upstream_identifier");
 
         awaitConsumerSize(1);
