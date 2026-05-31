@@ -15,8 +15,8 @@
 | in-review | 0 |
 | escalated | 0 |
 | done | 144 |
-| deferred | 3 |
-| **total** | **149** |
+| deferred | 4 |
+| **total** | **150** |
 
 ---
 
@@ -25,7 +25,7 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-101 — SSRF guard for wss:// relay connections (complexity: low, risk: low)
-- M1-109 — Multi-adapter production shape IT (complexity: medium, risk: low)
+- M1-120 — SimpleX + Signal CDI activation (D46) (complexity: medium, risk: medium)
 
 ---
 
@@ -75,6 +75,9 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 ---
 
 ## Deferred
+
+### blocked-on-new-ticket (1)
+- M1-109 → M1-120
 
 ### decomposed (1)
 - M1-034 → M1-034a
@@ -273,11 +276,11 @@ M1-102 (done)
   └── M1-103 (done)
         ├── M1-104 (done)
         └── M1-105 (done)
-              └── M1-109 (pending) ← runnable
+              └── M1-109 (deferred)
 M1-106 (done)
   └── M1-107 (done)
         └── M1-108 (done)
-              └── M1-109 (pending) [see above]
+              └── M1-109 (deferred) [see above]
 M1-110 (done)
   └── M1-111 (done)
         ├── M1-112 (done)
@@ -288,4 +291,6 @@ M1-115 (done)
 M1-117 (done)
 M1-118 (done)
 M1-119 (done)
+M1-120 (pending) ← runnable
+  └── M1-109 (deferred) [see above]
 ```
