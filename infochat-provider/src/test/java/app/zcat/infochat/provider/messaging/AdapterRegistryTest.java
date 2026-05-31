@@ -24,6 +24,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -113,13 +114,63 @@ class AdapterRegistryTest {
                 "fake-y must be in the activated set");
     }
 
+    /**
+     * M1-105 acceptance item 10. Empty {@code infochat.adapters}
+     * trips gate 1 (zero enabled adapters causes startup failure).
+     * Independent coverage from {@link StartupGatesTest#gate1RejectsEmptyAdaptersList}:
+     * the M1-105 IT plan ties the at-least-one-up readiness invariant
+     * explicitly to {@link AdapterRegistryTest}; this method pins the
+     * behavior on that named class even though the gate sad-path
+     * already has a sibling test in {@link StartupGatesTest}.
+     */
+    @Test
+    void atLeastOneAdapterRequired() {
+        IllegalStateException e = assertThrows(
+                IllegalStateException.class, () -> registry.start(""));
+        assertTrue(e.getMessage().contains("no adapters configured"),
+                "gate 1 message must pinpoint the empty adapters list, got: "
+                        + e.getMessage());
+    }
+
+    /**
+     * M1-105 acceptance item 11. An adapter that declares
+     * {@code supportsMarkdownLinks=true} trips gate 3 (fail-fast per
+     * messaging.md §Capability flags). Uses the
+     * {@code "bad-md"} {@link StartupGatesTest.BadMarkdownLinksAdapter}
+     * bean discovered globally by ArC across the test classpath; the
+     * cross-file reference is intentional — duplicating the fake here
+     * would push this class past the 5-inner-class refactor threshold
+     * documented in the auto-memory entry on inner-class fakes.
+     * The {@link StartupGatesTest} import below makes the dependency
+     * explicit so a rename would surface as a compile error.
+     */
+    @Test
+    void markdownLinksValidation() {
+        // Compile-time backreference so a rename of the cross-file
+        // fake adapter breaks this test at javac time rather than at
+        // runtime via a gate-2 "unknown adapter" miss.
+        @SuppressWarnings("unused")
+        Class<?> backreference = StartupGatesTest.BadMarkdownLinksAdapter.class;
+        IllegalStateException e = assertThrows(
+                IllegalStateException.class, () -> registry.start("bad-md"));
+        assertTrue(e.getMessage().contains("supportsMarkdownLinks"),
+                "gate 3 message must name the offending capability, got: "
+                        + e.getMessage());
+    }
+
     public static class Profile implements QuarkusTestProfile {
         @Override
         public Map<String, String> getConfigOverrides() {
+            // fake-x.admin satisfies the M1-105 gate-7 union for the
+            // multi-adapter happy path (fake-x + fake-y). The inmemory
+            // bootstrap admin is inherited from the %test default in
+            // application.properties; gate-1 / gate-3 paths trip an
+            // earlier gate and never reach gate 7.
             return Map.of(
                     "quarkus.arc.exclude-types",
                     "app.zcat.infochat.provider.messaging.MessagingStartup",
-                    "infochat.adapters.inmemory.allow-low-trust", "true"
+                    "infochat.adapters.inmemory.allow-low-trust", "true",
+                    "infochat.adapters.fake-x.admin", "fake-x-test-bootstrap"
             );
         }
 

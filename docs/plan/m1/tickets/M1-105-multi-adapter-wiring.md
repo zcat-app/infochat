@@ -1,9 +1,9 @@
 ---
 id: M1-105
 title: "Multi-adapter Provider wiring + isolation IT"
-status: pending
+status: done
 created: 2026-05-26
-last_updated: 2026-05-26
+last_updated: 2026-05-31
 blocked_by:
   - M1-103
 files_budget: 6
@@ -49,12 +49,49 @@ spec_refs:
   - docs/spec/security.md §Per-adapter admin threat profile
 decision_refs:
   - D46
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-05-31
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 459
+      removed: 13
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-05-31
+    verdict: CLEAN
+    base: main
+    head: m1/M1-105-multi-adapter-wiring
+    verdict_file: docs/plan/m1/redteam/M1-105-2026-05-31.md
+    out_of_model_count: 3
+    note: |
+      Single-ticket audit on the post-commit / pre-merge branch tip.
+      CLEAN — no spec/diff gap. 3 OUT-OF-MODEL observations recorded
+      in the verdict file: (1) Gate 7 validates non-blankness only
+      (no adapter-specific shape parsing — deferred to M1-046's
+      @Startup admin-bootstrap bean); (2) IT's @BeforeEach disables
+      audit_log append-only triggers during prefix-scoped DELETE
+      cleanup (bounded by Surefire's per-module JVM fork); (3) the
+      %test bootstrap-admin default would activate Gate 7 if an
+      operator runs production with quarkus.profile=test. All three
+      are operator-trust-boundary concerns flagged for future tickets,
+      none block merge.
+clarity_check:
+  date: 2026-05-31
+  verdict: WARN
+  warnings:
+    - "COMPLEXITY-RISK-CALIBRATED: risk: low is underclaimed for a security_relevant ticket that implements admin-tier scoping (/grant-admin, /revoke-admin, last-admin protection) and cross-adapter isolation. Consider raising to risk: medium or risk: high before start."
+  blockers: []
 ---
 
 # M1-105: Multi-adapter Provider wiring + isolation IT

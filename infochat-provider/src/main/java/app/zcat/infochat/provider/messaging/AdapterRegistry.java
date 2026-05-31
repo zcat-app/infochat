@@ -205,6 +205,43 @@ public class AdapterRegistry {
             }
         }
 
+        // Gate 7: per-adapter bootstrap admin union non-empty per
+        // docs/spec/deployment.md §Operator inputs item 2 +
+        // §Bootstrap behavior on startup. Each enabled adapter MAY
+        // declare `infochat.adapters.<name>.admin=<contact-id>` and
+        // individual adapters may omit it, but the union across
+        // activated adapters MUST be non-empty — last-admin
+        // protection (security.md §Authorization model) is global
+        // across adapters and only works when the deployment has at
+        // least one admin row to begin with. The @Startup
+        // admin-bootstrap bean (deferred per M1-046's notes) will
+        // later read the same per-adapter property to seed the row;
+        // this gate makes the operator-input misconfig fail fast at
+        // boot rather than at first /grant-admin attempt.
+        Config config = ConfigProvider.getConfig();
+        boolean anyBootstrapAdminConfigured = false;
+        for (MessagingAdapter adapter : activating) {
+            String admin = config.getOptionalValue(
+                    "infochat.adapters." + adapter.name() + ".admin",
+                    String.class).orElse("");
+            if (!admin.isBlank()) {
+                anyBootstrapAdminConfigured = true;
+                break;
+            }
+        }
+        if (!anyBootstrapAdminConfigured) {
+            String names = activating.stream()
+                    .map(MessagingAdapter::name)
+                    .reduce((a, b) -> a + ", " + b)
+                    .orElse("");
+            throw new IllegalStateException(
+                    "Bootstrap admin: the union of infochat.adapters.<name>.admin"
+                            + " across activated adapters (" + names + ") is empty —"
+                            + " at least one enabled adapter MUST declare a"
+                            + " bootstrap admin contact id per"
+                            + " docs/spec/deployment.md §Operator inputs");
+        }
+
         // All gates passed. Wire each activated adapter to the router and
         // emit the §6.8 activation log line. Order matters: setReplyTarget
         // first so a misbehaving adapter that synchronously delivers from
