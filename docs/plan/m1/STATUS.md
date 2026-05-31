@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 142 |
+| done | 143 |
 | deferred | 3 |
 | **total** | **149** |
 
@@ -26,7 +26,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-100 — Nostr kind-6 cross-source linking (complexity: medium, risk: low)
 - M1-101 — SSRF guard for wss:// relay connections (complexity: low, risk: low)
-- M1-104 — SimpleX group support + mention recognition (complexity: medium, risk: medium)
 - M1-109 — Multi-adapter production shape IT (complexity: medium, risk: low)
 
 ---
@@ -69,10 +68,10 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-113 | D47 admin commands — approve-group, reject-group, list-groups | 2026-05-31 | round 2 APPROVE |
 | M1-108 | Signal mention recognition + group support | 2026-05-31 | round 1 APPROVE |
 | M1-105 | Multi-adapter Provider wiring + isolation IT | 2026-05-31 | round 1 APPROVE |
+| M1-104 | SimpleX group support + mention recognition | 2026-05-31 | round 2 APPROVE |
 | M1-103 | SimpleX subprocess + WebSocket messaging | 2026-05-31 | round 2 APPROVE |
 | M1-099 | Nostr per-relay degradation + cycle cap | 2026-05-31 | round 2 APPROVE |
 | M1-098 | Nostr cross-relay dedup | 2026-05-31 | round 1 APPROVE |
-| M1-097 | Nostr event verification + kind filter | 2026-05-31 | round 1 APPROVE |
 
 ---
 
@@ -273,7 +272,7 @@ M1-095 (done)
         └── M1-101 (pending) ← runnable
 M1-102 (done)
   └── M1-103 (done)
-        ├── M1-104 (pending) ← runnable
+        ├── M1-104 (done)
         └── M1-105 (done)
               └── M1-109 (pending) ← runnable
 M1-106 (done)

@@ -43,7 +43,8 @@ class SimpleXWebSocketClientTest {
             SimpleXWebSocketClient client = new SimpleXWebSocketClient(
                     fake.wsUri(),
                     HttpClient.newHttpClient(),
-                    delivered::add);
+                    delivered::add,
+                    gc -> { /* no group candidate in this test */ });
             client.start();
             try {
                 fake.awaitClient(WAIT);
@@ -93,7 +94,8 @@ class SimpleXWebSocketClientTest {
             SimpleXWebSocketClient client = new SimpleXWebSocketClient(
                     fake.wsUri(),
                     HttpClient.newHttpClient(),
-                    msg -> { /* unused — no inbound in this test */ });
+                    msg -> { /* unused — no inbound in this test */ },
+                    gc -> { /* unused — no group candidate in this test */ });
             client.start();
             try {
                 fake.awaitClient(WAIT);
@@ -149,7 +151,8 @@ class SimpleXWebSocketClientTest {
             SimpleXWebSocketClient client = new SimpleXWebSocketClient(
                     fake.wsUri(),
                     HttpClient.newHttpClient(),
-                    msg -> { /* unused */ });
+                    msg -> { /* unused */ },
+                    gc -> { /* no group candidate in this test */ });
             client.start();
             try {
                 fake.awaitClient(WAIT);
@@ -195,7 +198,8 @@ class SimpleXWebSocketClientTest {
             SimpleXWebSocketClient client = new SimpleXWebSocketClient(
                     fake.wsUri(),
                     HttpClient.newHttpClient(),
-                    msg -> { /* unused */ });
+                    msg -> { /* unused */ },
+                    gc -> { /* no group candidate in this test */ });
             client.start();
             try {
                 fake.awaitClient(WAIT);
@@ -229,7 +233,8 @@ class SimpleXWebSocketClientTest {
             SimpleXWebSocketClient client = new SimpleXWebSocketClient(
                     fake.wsUri(),
                     HttpClient.newHttpClient(),
-                    msg -> { /* unused */ });
+                    msg -> { /* unused */ },
+                    gc -> { /* unused */ });
             client.start();
             fake.awaitClient(WAIT);
             client.close();

@@ -1,6 +1,7 @@
 package app.zcat.infochat.messaging.impl.simplex;
 
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
@@ -14,6 +15,8 @@ import app.zcat.infochat.messaging.InboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.regex.Pattern;
 
 /**
@@ -239,10 +242,14 @@ final class SimpleXMessageCodec {
      * without tearing the connection down (parallel to NostrMessage.parse's
      * MalformedFrameException discipline).
      *
-     * <p>Group-scope inbound messages are decoded as {@link Ignored} for
-     * M1-103 — group support and the mention-recognition handshake land in
-     * M1-104, which extends this method to emit {@link Inbound} for groups
-     * once the bot's queue address is known at decode time.</p>
+     * <p>Group-scope inbound {@code newChatItem} frames decode as
+     * {@link GroupCandidate}. The codec deliberately does not make the
+     * mention-recognition decision (which depends on the bot's queue
+     * address, runtime state not visible to a pure-static codec); it
+     * exposes the raw mention list and lets {@link SimpleXGroupHandler}
+     * compare against {@link SimpleXIdentity#queueAddress()}. Non-{@code
+     * direct} and non-{@code group} chatTypes still surface as
+     * {@link Ignored}.</p>
      */
     static @NonNull DecodedFrame decode(@NonNull String frame) {
         JsonNode root;
@@ -297,16 +304,19 @@ final class SimpleXMessageCodec {
         if (chatType == null) {
             return new Ignored("newChatItem-without-chatType");
         }
-        // Group scope is M1-104 territory — the mention-recognition rule
-        // depends on the bot's queue address which the adapter does not
-        // surface to the codec in this ticket. Drop with a fixed sentinel.
-        // The variant carries no bytes from chatType: that field is
-        // attacker-influenceable through the inbound frame and the
-        // Ignored.reason() value flows into the WS-client's DEBUG log
-        // (security.md §User content in exceptions). Discriminating on
-        // chatType beyond the direct/non-direct split is not needed in
-        // v1 — the dropping decision is the same for every non-direct
-        // value.
+        // chatType == "group" routes to the dedicated group-frame
+        // decoder (M1-104). chatType == "direct" falls through to the
+        // existing direct-message path. Any other chatType is dropped
+        // with a fixed sentinel: the variant carries no bytes from
+        // chatType because that field is attacker-influenceable through
+        // the inbound frame and the Ignored.reason() value flows into
+        // the WS-client's DEBUG log (security.md §User content in
+        // exceptions). Discriminating on chatType beyond the
+        // {group, direct, other} split is not needed in v1 — the
+        // dropping decision is the same for every other value.
+        if ("group".equals(chatType)) {
+            return decodeGroupNewChatItem(chatInfo, chatItem);
+        }
         if (!"direct".equals(chatType)) {
             return new Ignored("newChatItem-non-direct");
         }
@@ -363,6 +373,148 @@ final class SimpleXMessageCodec {
                 Instant.now(),
                 adapterMessageId);
         return new Inbound(msg);
+    }
+
+    /**
+     * Decode a {@code newChatItem} frame whose {@code chatInfo.chatType}
+     * is {@code "group"}. Surfaces the raw mention list (queue addresses
+     * only — display names are intentionally not extracted because
+     * display-name matching is never sufficient for the D10 mention
+     * rule) so {@link SimpleXGroupHandler} can apply byte-equality
+     * against the bot's per-adapter queue address.
+     *
+     * <p>Same trust-boundary discipline as the direct-message branch:
+     * adapterGroupId, sender contact id, and each mention's queue
+     * address are validated by {@link #isValidQueueAddressId} before
+     * landing in a {@link GroupCandidate}, so an attacker-controlled id
+     * cannot piggyback a forged command verb downstream. An invalid
+     * adapterGroupId or sender contact id drops the whole frame; an
+     * invalid mention entry is skipped individually (other valid
+     * mentions in the same frame remain).</p>
+     *
+     * <p>Frame-path conventions used here (simplex-chat WebSocket bot
+     * API):</p>
+     * <ul>
+     *   <li>{@code chatInfo.groupInfo.groupId} → adapterGroupId</li>
+     *   <li>{@code chatItem.chatDir.groupMember.memberContactId} →
+     *       sender contact id. Frames lacking {@code memberContactId}
+     *       are dropped as {@code Ignored("newChatItem-group-without-
+     *       sender")} — the D10 trust anchor requires a stable,
+     *       cryptographically-anchored account id, and the per-group
+     *       {@code memberId} counter does not meet that bar (a
+     *       globally-banned user surfacing only via {@code memberId}
+     *       would evade the ban check; two pre-contact members in
+     *       different groups can share the same {@code memberId} and
+     *       collide on Provider's {@code (adapter, contact_id)} join
+     *       key)</li>
+     *   <li>{@code chatItem.chatDir.groupMember.localDisplayName} →
+     *       optional displayName (informational only; never
+     *       authoritative for mentions)</li>
+     *   <li>{@code chatItem.formattedText[*]} where {@code format.type
+     *       == "mention"} → mention queue addresses extracted from
+     *       {@code format.memberRef}</li>
+     * </ul>
+     */
+    private static DecodedFrame decodeGroupNewChatItem(JsonNode chatInfo, JsonNode outerChatItem) {
+        JsonNode groupInfo = chatInfo.get("groupInfo");
+        if (groupInfo == null) {
+            return new Ignored("newChatItem-group-without-groupInfo");
+        }
+        String adapterGroupId = optText(groupInfo, "groupId");
+        if (adapterGroupId == null) {
+            return new Ignored("newChatItem-group-without-groupId");
+        }
+        if (!isValidQueueAddressId(adapterGroupId)) {
+            return new Ignored("newChatItem-group-invalid-groupId");
+        }
+        JsonNode itemBody = outerChatItem.get("chatItem");
+        if (itemBody == null) {
+            return new Ignored("newChatItem-group-without-inner-chatItem");
+        }
+        JsonNode chatDir = itemBody.get("chatDir");
+        if (chatDir == null) {
+            return new Ignored("newChatItem-group-without-chatDir");
+        }
+        JsonNode groupMember = chatDir.get("groupMember");
+        if (groupMember == null) {
+            return new Ignored("newChatItem-group-without-groupMember");
+        }
+        // D10 trust anchor: Identity.contactId MUST be a stable,
+        // cryptographically-anchored account id. The per-group
+        // memberId counter (which simplex-chat surfaces for not-yet-
+        // bidirectionally-contacted members) does NOT meet that bar
+        // — using it as a fallback would let a globally-banned user
+        // evade the ban check via a group message that surfaces only
+        // memberId, and would cross-contaminate state when two
+        // pre-contact members in different groups share the same
+        // counter value. Drop the frame instead; the Provider falls
+        // back to silent-ignore for unknown contacts in groups.
+        String senderContactId = optText(groupMember, "memberContactId");
+        if (senderContactId == null) {
+            return new Ignored("newChatItem-group-without-sender");
+        }
+        if (!isValidQueueAddressId(senderContactId)) {
+            return new Ignored("newChatItem-group-invalid-sender");
+        }
+        String senderDisplayName = optText(groupMember, "localDisplayName");
+        JsonNode content = itemBody.get("content");
+        if (content == null) {
+            return new Ignored("newChatItem-group-without-content");
+        }
+        JsonNode msgContent = content.get("msgContent");
+        if (msgContent == null) {
+            return new Ignored("newChatItem-group-without-msgContent");
+        }
+        String text = optText(msgContent, "text");
+        if (text == null) {
+            return new Ignored("newChatItem-group-without-text");
+        }
+        if (text.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > MAX_INBOUND_TEXT_BYTES) {
+            return new Ignored("newChatItem-group-text-exceeds-inbound-cap");
+        }
+        List<String> mentions = extractMentionQueueAddresses(itemBody.get("formattedText"));
+        String adapterMessageId = optText(itemBody, "itemId");
+        if (adapterMessageId == null) {
+            adapterMessageId = "simplex-" + System.nanoTime();
+        }
+        return new GroupCandidate(
+                adapterGroupId,
+                senderContactId,
+                senderDisplayName,
+                text,
+                List.copyOf(mentions),
+                adapterMessageId);
+    }
+
+    /**
+     * Walk the {@code formattedText} array and collect every entry whose
+     * {@code format.type} is {@code "mention"}, returning the entries'
+     * {@code format.memberRef} queue address strings. Entries whose
+     * memberRef fails the queue-address validator are skipped (a peer
+     * cannot smuggle a forged command verb through the mention list).
+     * A null or non-array input returns the empty list — the spec rule
+     * "no mentions → cannot mention the bot" is honored downstream.
+     */
+    private static List<String> extractMentionQueueAddresses(@Nullable JsonNode formattedText) {
+        if (formattedText == null || !formattedText.isArray()) {
+            return List.of();
+        }
+        List<String> mentions = new ArrayList<>();
+        for (JsonNode element : formattedText) {
+            JsonNode format = element.get("format");
+            if (format == null || !format.isObject()) {
+                continue;
+            }
+            if (!"mention".equals(optText(format, "type"))) {
+                continue;
+            }
+            String memberRef = optText(format, "memberRef");
+            if (memberRef == null || !isValidQueueAddressId(memberRef)) {
+                continue;
+            }
+            mentions.add(memberRef);
+        }
+        return mentions;
     }
 
     private static DecodedFrame decodeSendAck(String corrId, JsonNode resp) {
@@ -461,11 +613,29 @@ final class SimpleXMessageCodec {
     // --- Sealed decoded-frame surface ---------------------------------------
 
     /** Sealed hierarchy of frame variants returned by {@link #decode}. */
-    sealed interface DecodedFrame permits Inbound, SendAck, CommandError, Ignored {
+    sealed interface DecodedFrame permits Inbound, GroupCandidate, SendAck, CommandError, Ignored {
     }
 
     /** A direct-message inbound that should be delivered to Provider. */
     record Inbound(@NonNull InboundMessage message) implements DecodedFrame {
+    }
+
+    /**
+     * A group-scope {@code newChatItem} surfaced verbatim from the wire.
+     * Mention recognition (whether this candidate is delivered to
+     * Provider) happens in {@link SimpleXGroupHandler}; the codec stays
+     * pure-static and has no view of the bot's per-adapter queue
+     * address. The {@code mentionQueueAddresses} list carries queue
+     * addresses extracted from the simplex-chat formatted-text mention
+     * format, validated through {@link #isValidQueueAddressId}.
+     */
+    record GroupCandidate(
+            @NonNull String adapterGroupId,
+            @NonNull String senderContactId,
+            @Nullable String senderDisplayName,
+            @NonNull String text,
+            @NonNull List<String> mentionQueueAddresses,
+            @NonNull String adapterMessageId) implements DecodedFrame {
     }
 
     /** Response to a command we previously issued, carrying the chat-item id. */

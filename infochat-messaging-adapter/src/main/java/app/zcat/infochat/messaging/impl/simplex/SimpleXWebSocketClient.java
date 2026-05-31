@@ -58,9 +58,21 @@ final class SimpleXWebSocketClient {
         void onInbound(@NonNull InboundMessage msg);
     }
 
+    /**
+     * Receives decoded group-scope candidates from the WS listener
+     * thread. The mention-recognition decision belongs to the
+     * downstream consumer ({@link SimpleXGroupHandler}); the client
+     * just routes the variant.
+     */
+    @FunctionalInterface
+    interface GroupCandidateConsumer {
+        void onGroupCandidate(SimpleXMessageCodec.@NonNull GroupCandidate gc);
+    }
+
     private final URI uri;
     private final HttpClient httpClient;
     private final InboundConsumer inboundConsumer;
+    private final GroupCandidateConsumer groupCandidateConsumer;
 
     private final Map<String, CompletableFuture<String>> pending = new ConcurrentHashMap<>();
     private volatile WebSocket webSocket;
@@ -68,10 +80,12 @@ final class SimpleXWebSocketClient {
 
     SimpleXWebSocketClient(@NonNull URI uri,
                            @NonNull HttpClient httpClient,
-                           @NonNull InboundConsumer inboundConsumer) {
+                           @NonNull InboundConsumer inboundConsumer,
+                           @NonNull GroupCandidateConsumer groupCandidateConsumer) {
         this.uri = uri;
         this.httpClient = httpClient;
         this.inboundConsumer = inboundConsumer;
+        this.groupCandidateConsumer = groupCandidateConsumer;
     }
 
     /**
@@ -279,6 +293,7 @@ final class SimpleXWebSocketClient {
         }
         switch (decoded) {
             case SimpleXMessageCodec.Inbound in -> inboundConsumer.onInbound(in.message());
+            case SimpleXMessageCodec.GroupCandidate gc -> groupCandidateConsumer.onGroupCandidate(gc);
             case SimpleXMessageCodec.SendAck ack -> completePending(ack.corrId(), ack.chatItemId());
             case SimpleXMessageCodec.CommandError err -> failPending(err);
             case SimpleXMessageCodec.Ignored ignored ->

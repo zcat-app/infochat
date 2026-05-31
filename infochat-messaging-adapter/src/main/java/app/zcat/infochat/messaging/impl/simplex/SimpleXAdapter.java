@@ -83,6 +83,7 @@ public final class SimpleXAdapter implements MessagingAdapter {
     private final @Nullable SimpleXConfig config;
     private final @Nullable HttpClient httpClient;
     private final @Nullable Consumer<String> adminNotifier;
+    private final @Nullable SimpleXIdentity botIdentity;
 
     private final AtomicLong handleCounter = new AtomicLong();
     private final AtomicLong commandCounter = new AtomicLong();
@@ -108,20 +109,25 @@ public final class SimpleXAdapter implements MessagingAdapter {
         this.config = null;
         this.httpClient = null;
         this.adminNotifier = null;
+        this.botIdentity = null;
     }
 
     /**
      * Full constructor used by Provider-side wiring (M1-105). Supplies
      * the operator config, the JDK {@link HttpClient} used to dial the
-     * simplex-chat WebSocket, and the admin-notification consumer the
-     * subprocess supervisor calls at the FAILED transition.
+     * simplex-chat WebSocket, the admin-notification consumer the
+     * subprocess supervisor calls at the FAILED transition, and the
+     * bot's per-adapter SimpleX identity used as the D10 trust anchor
+     * for group mention recognition (see {@link SimpleXGroupHandler}).
      */
     public SimpleXAdapter(@NonNull SimpleXConfig config,
                           @NonNull HttpClient httpClient,
-                          @NonNull Consumer<String> adminNotifier) {
+                          @NonNull Consumer<String> adminNotifier,
+                          @NonNull SimpleXIdentity botIdentity) {
         this.config = config;
         this.httpClient = httpClient;
         this.adminNotifier = adminNotifier;
+        this.botIdentity = botIdentity;
     }
 
     @Override
@@ -150,9 +156,10 @@ public final class SimpleXAdapter implements MessagingAdapter {
         SimpleXConfig cfg = requireWired();
         HttpClient http = httpClient;
         Consumer<String> notify = adminNotifier;
-        if (http == null || notify == null) {
+        SimpleXIdentity identity = botIdentity;
+        if (http == null || notify == null || identity == null) {
             throw new IllegalStateException(
-                    "SimpleXAdapter not fully wired (httpClient/adminNotifier are null)");
+                    "SimpleXAdapter not fully wired (httpClient/adminNotifier/botIdentity are null)");
         }
         SimpleXSubprocess sub = new SimpleXSubprocess(
                 SimpleXSubprocess.commandFor(cfg),
@@ -171,7 +178,15 @@ public final class SimpleXAdapter implements MessagingAdapter {
             throw e;
         }
         URI uri = URI.create("ws://127.0.0.1:" + cfg.wsPort());
-        SimpleXWebSocketClient ws = new SimpleXWebSocketClient(uri, http, this::onInbound);
+        // The group handler funnels its deliveries through onInbound so
+        // both DM and group paths share the volatile-field read of
+        // `inboundHandler` and the misbehaving-handler protection in
+        // one place. A Provider that calls setInboundHandler after
+        // start() still gets group messages routed correctly because
+        // onInbound re-reads the field on each dispatch.
+        SimpleXGroupHandler groupHandler = new SimpleXGroupHandler(identity, this::onInbound);
+        SimpleXWebSocketClient ws = new SimpleXWebSocketClient(
+                uri, http, this::onInbound, groupHandler::onGroupCandidate);
         try {
             ws.start();
         } catch (MessagingException e) {
