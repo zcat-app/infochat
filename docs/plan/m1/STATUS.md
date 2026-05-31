@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 144 |
+| done | 145 |
 | deferred | 4 |
 | **total** | **150** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-101 — SSRF guard for wss:// relay connections (complexity: low, risk: low)
 - M1-120 — SimpleX + Signal CDI activation (D46) (complexity: medium, risk: medium)
 
 ---
@@ -69,8 +68,8 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-105 | Multi-adapter Provider wiring + isolation IT | 2026-05-31 | round 1 APPROVE |
 | M1-104 | SimpleX group support + mention recognition | 2026-05-31 | round 2 APPROVE |
 | M1-103 | SimpleX subprocess + WebSocket messaging | 2026-05-31 | round 2 APPROVE |
+| M1-101 | SSRF guard for wss:// relay connections | 2026-05-31 | round 1 APPROVE |
 | M1-100 | Nostr kind-6 cross-source linking | 2026-05-31 | round 1 APPROVE |
-| M1-099 | Nostr per-relay degradation + cycle cap | 2026-05-31 | round 2 APPROVE |
 
 ---
 
@@ -271,7 +270,7 @@ M1-095 (done)
         │           └── M1-100 (done) [see above]
         ├── M1-098 (done) [see above]
         ├── M1-099 (done)
-        └── M1-101 (pending) ← runnable
+        └── M1-101 (done)
 M1-102 (done)
   └── M1-103 (done)
         ├── M1-104 (done)

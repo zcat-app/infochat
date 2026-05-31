@@ -7,6 +7,7 @@ import app.zcat.infochat.core.ingest.NormalizedPost;
 import app.zcat.infochat.core.ingest.StreamSource;
 import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
+import app.zcat.infochat.ssrf.SsrfGuardedHttpClient;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.quarkus.runtime.Startup;
@@ -83,6 +84,7 @@ public final class NostrStreamSource implements StreamSource {
     private final Duration backoffBase;
     private final Duration backoffMax;
     private final HttpClient httpClient;
+    private final SsrfGuardedHttpClient ssrfClient;
     private final NostrEventVerifier verifier;
     private final RelayHealthTracker healthTracker;
     private final NostrDedupFilter dedupFilter;
@@ -103,13 +105,15 @@ public final class NostrStreamSource implements StreamSource {
 
     NostrStreamSource(@NonNull List<URI> relayUris, @NonNull Supplier<OptionalLong> sinceCursor,
                       @NonNull Duration backoffBase, @NonNull Duration backoffMax,
-                      @NonNull HttpClient httpClient, @NonNull NostrEventVerifier verifier,
+                      @NonNull HttpClient httpClient, @NonNull SsrfGuardedHttpClient ssrfClient,
+                      @NonNull NostrEventVerifier verifier,
                       @NonNull RelayHealthTracker healthTracker, @NonNull NostrDedupFilter dedupFilter) {
         this.relayUris = List.copyOf(relayUris);
         this.sinceCursor = sinceCursor;
         this.backoffBase = backoffBase;
         this.backoffMax = backoffMax;
         this.httpClient = httpClient;
+        this.ssrfClient = ssrfClient;
         this.verifier = verifier;
         this.healthTracker = healthTracker;
         this.dedupFilter = dedupFilter;
@@ -126,7 +130,8 @@ public final class NostrStreamSource implements StreamSource {
         for (URI relayUri : relayUris) {
             NostrRelayConnection connection = new NostrRelayConnection(
                     relayUri, filterSpec, sinceCursor, this::enqueueInbound,
-                    backoffBase, backoffMax, httpClient, healthTracker);
+                    backoffBase, backoffMax, httpClient, ssrfClient,
+                    NostrRelayConnection.DEFAULT_PEER_IP_CHECK_INTERVAL, healthTracker);
             connections.add(connection);
             connection.start();
         }
@@ -276,6 +281,13 @@ public final class NostrStreamSource implements StreamSource {
         // nostr source; relay connections only subscribe and read.
         private final HttpClient httpClient = HttpClient.newHttpClient();
 
+        // Default-strict SSRF guard — IpBlocklist refuses loopback,
+        // private, link-local, CGNAT, cloud-metadata, multicast, and the
+        // host's own non-loopback interfaces (security.md §SSRF). One
+        // instance shared across every relay of every source; the guard
+        // is stateless apart from its configuration.
+        private final SsrfGuardedHttpClient ssrfClient = new SsrfGuardedHttpClient();
+
         // Stateless and thread-safe — one verifier shared across every source.
         private final NostrEventVerifier verifier = new NostrEventVerifier();
 
@@ -305,8 +317,9 @@ public final class NostrStreamSource implements StreamSource {
                 // (see NostrDedupFilter javadoc). Verifier is shared
                 // because it's stateless.
                 NostrDedupFilter dedupFilter = new NostrDedupFilter();
-                NostrStreamSource worker =
-                        new NostrStreamSource(relays, since, backoffBase, backoffMax, httpClient, verifier, tracker, dedupFilter);
+                NostrStreamSource worker = new NostrStreamSource(
+                        relays, since, backoffBase, backoffMax,
+                        httpClient, ssrfClient, verifier, tracker, dedupFilter);
                 // Dispatch by NormalizedPost.rawMetadata's NostrEvent.META_KIND key
                 // per M1-100. NostrEvent.toNormalizedPost populates the key for
                 // kind-6 events; kind-1 events emit an empty rawMetadata and follow

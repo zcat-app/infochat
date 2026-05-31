@@ -1,10 +1,14 @@
 package app.zcat.infochat.collector.stream.nostr;
 
 import app.zcat.infochat.core.ingest.NormalizedPost;
+import app.zcat.infochat.ssrf.IpBlocklist;
+import app.zcat.infochat.ssrf.SsrfGuardedHttpClient;
 import com.fasterxml.jackson.databind.JsonNode;
+import org.jspecify.annotations.NonNull;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import java.net.InetAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.time.Clock;
@@ -38,6 +42,19 @@ class NostrStreamSourceTest {
     private static final String FILTER = "{\"kinds\":[1]}";
 
     private final HttpClient httpClient = HttpClient.newHttpClient();
+    // Loopback-permitting SSRF guard so FakeNostrRelay (bound to 127.0.0.1)
+    // remains dialable; every other blocklist range still refuses. Same
+    // pattern the Fetcher tests use against the in-process HttpServer
+    // fixture (RssFetcherTest, NitterFetcherTest, ...). Production wires
+    // a default-strict SsrfGuardedHttpClient through Registrar.
+    private final SsrfGuardedHttpClient ssrfClient = new SsrfGuardedHttpClient(
+            new LoopbackPermittingBlocklist(),
+            Duration.ofSeconds(2),
+            Duration.ofSeconds(5),
+            Duration.ofSeconds(5),
+            Duration.ofMinutes(2),
+            10L * 1024 * 1024,
+            3);
     private final NostrEventVerifier verifier = new NostrEventVerifier();
     private final NostrDedupFilter dedupFilter = new NostrDedupFilter();
     private final List<FakeNostrRelay> relays = new ArrayList<>();
@@ -60,7 +77,7 @@ class NostrStreamSourceTest {
         FakeNostrRelay r3 = newRelay();
         List<URI> relayUris = List.of(r1.uri(), r2.uri(), r3.uri());
         source = new NostrStreamSource(relayUris,
-                OptionalLong::empty, FAST_BASE, FAST_MAX, httpClient, verifier,
+                OptionalLong::empty, FAST_BASE, FAST_MAX, httpClient, ssrfClient, verifier,
                 noOpTracker(relayUris), dedupFilter);
 
         source.start(1L, FILTER, post -> { });
@@ -76,7 +93,7 @@ class NostrStreamSourceTest {
         List<NormalizedPost> delivered = new CopyOnWriteArrayList<>();
         List<URI> relayUris = List.of(relay.uri());
         source = new NostrStreamSource(relayUris, OptionalLong::empty,
-                FAST_BASE, FAST_MAX, httpClient, verifier, noOpTracker(relayUris), dedupFilter);
+                FAST_BASE, FAST_MAX, httpClient, ssrfClient, verifier, noOpTracker(relayUris), dedupFilter);
 
         source.start(7L, FILTER, delivered::add);
         assertTrue(relay.awaitFrameCount(1, AWAIT), "REQ received");
@@ -100,7 +117,7 @@ class NostrStreamSourceTest {
         AtomicReference<OptionalLong> since = new AtomicReference<>(OptionalLong.empty());
         List<URI> relayUris = List.of(relay.uri());
         source = new NostrStreamSource(relayUris, since::get, FAST_BASE, FAST_MAX,
-                httpClient, verifier, noOpTracker(relayUris), dedupFilter);
+                httpClient, ssrfClient, verifier, noOpTracker(relayUris), dedupFilter);
 
         source.start(1L, FILTER, post -> { });
         assertTrue(relay.awaitFrameCount(1, AWAIT), "initial REQ received");
@@ -130,7 +147,7 @@ class NostrStreamSourceTest {
         };
         List<URI> relayUris = List.of(relay.uri());
         source = new NostrStreamSource(relayUris, OptionalLong::empty,
-                FAST_BASE, FAST_MAX, httpClient, verifier, noOpTracker(relayUris), dedupFilter);
+                FAST_BASE, FAST_MAX, httpClient, ssrfClient, verifier, noOpTracker(relayUris), dedupFilter);
 
         source.start(1L, FILTER, slowDeliver);
         assertTrue(relay.awaitFrameCount(1, AWAIT), "REQ received");
@@ -191,6 +208,25 @@ class NostrStreamSourceTest {
             Thread.sleep(millis);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+        }
+    }
+
+    /**
+     * Test-only {@link IpBlocklist} subclass that permits loopback
+     * (127.0.0.0/8 + IPv6 ::1) so the in-process {@link FakeNostrRelay}
+     * fixture remains dialable. Every other range (private, link-local,
+     * CGNAT, cloud-metadata, multicast) is still refused via the strict
+     * super-implementation. Subclass-override is the explicit seam the
+     * Fetcher tests use against the same module.
+     */
+    private static final class LoopbackPermittingBlocklist extends IpBlocklist {
+
+        @Override
+        public boolean isBlocked(@NonNull InetAddress addr) {
+            if (addr.isLoopbackAddress()) {
+                return false;
+            }
+            return super.isBlocked(addr);
         }
     }
 }

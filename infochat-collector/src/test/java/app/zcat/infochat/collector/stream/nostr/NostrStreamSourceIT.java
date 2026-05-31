@@ -5,13 +5,17 @@ import app.zcat.infochat.collector.outbox.PostPersister;
 import app.zcat.infochat.collector.outbox.TestEvalQueueConsumer;
 import app.zcat.infochat.collector.stream.StreamSourceSupervisor;
 import app.zcat.infochat.core.ingest.NormalizedPost;
+import app.zcat.infochat.ssrf.IpBlocklist;
+import app.zcat.infochat.ssrf.SsrfGuardedHttpClient;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import org.jspecify.annotations.NonNull;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
+import java.net.InetAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.sql.Connection;
@@ -62,6 +66,17 @@ class NostrStreamSourceIT {
     TestEvalQueueConsumer consumer;
 
     private final HttpClient httpClient = HttpClient.newHttpClient();
+    // Loopback-permitting SSRF guard so FakeNostrRelay (127.0.0.1) remains
+    // dialable; every other blocklist range still refuses. Production
+    // Registrar wires a default-strict instance.
+    private final SsrfGuardedHttpClient ssrfClient = new SsrfGuardedHttpClient(
+            new LoopbackPermittingBlocklist(),
+            Duration.ofSeconds(2),
+            Duration.ofSeconds(5),
+            Duration.ofSeconds(5),
+            Duration.ofMinutes(2),
+            10L * 1024 * 1024,
+            3);
     private final NostrEventVerifier verifier = new NostrEventVerifier();
     private final NostrDedupFilter dedupFilter = new NostrDedupFilter();
     private FakeNostrRelay relay;
@@ -89,7 +104,7 @@ class NostrStreamSourceIT {
         List<URI> relayUris = List.of(relay.uri());
         NostrStreamSource worker = new NostrStreamSource(relayUris,
                 OptionalLong::empty, Duration.ofMillis(50), Duration.ofMillis(200),
-                httpClient, verifier, noOpTracker(relayUris), dedupFilter);
+                httpClient, ssrfClient, verifier, noOpTracker(relayUris), dedupFilter);
         Consumer<NormalizedPost> deliver =
                 post -> postPersister.persist(sourceUuid, post).ifPresent(evalQueueProducer::emit);
         supervisor.register(DISPATCH_KEY, filterSpec, worker, deliver);
@@ -168,6 +183,23 @@ class NostrStreamSourceIT {
         if (consumer.size() < expected) {
             throw new AssertionError("timeout: expected consumer size >= " + expected
                     + " but got " + consumer.size());
+        }
+    }
+
+    /**
+     * Loopback-permitting {@link IpBlocklist} so the in-process
+     * {@link FakeNostrRelay} (127.0.0.1) remains dialable while every
+     * other range stays refused. Same shape used by the Fetcher tests
+     * (RssFetcherTest, NitterFetcherTest, ...).
+     */
+    private static final class LoopbackPermittingBlocklist extends IpBlocklist {
+
+        @Override
+        public boolean isBlocked(@NonNull InetAddress addr) {
+            if (addr.isLoopbackAddress()) {
+                return false;
+            }
+            return super.isBlocked(addr);
         }
     }
 }

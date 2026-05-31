@@ -4,13 +4,17 @@ import app.zcat.infochat.collector.outbox.EvalQueueProducer;
 import app.zcat.infochat.collector.outbox.PostPersister;
 import app.zcat.infochat.collector.stream.StreamSourceSupervisor;
 import app.zcat.infochat.core.ingest.NormalizedPost;
+import app.zcat.infochat.ssrf.IpBlocklist;
+import app.zcat.infochat.ssrf.SsrfGuardedHttpClient;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import org.jspecify.annotations.NonNull;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
+import java.net.InetAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.sql.Connection;
@@ -61,6 +65,16 @@ class NostrDegradationIT {
     EvalQueueProducer evalQueueProducer;
 
     private final HttpClient httpClient = HttpClient.newHttpClient();
+    // Loopback-permitting SSRF guard so FakeNostrRelays (127.0.0.1) remain
+    // dialable. Production Registrar wires a default-strict instance.
+    private final SsrfGuardedHttpClient ssrfClient = new SsrfGuardedHttpClient(
+            new LoopbackPermittingBlocklist(),
+            Duration.ofSeconds(2),
+            Duration.ofSeconds(5),
+            Duration.ofSeconds(5),
+            Duration.ofMinutes(2),
+            10L * 1024 * 1024,
+            3);
     private final NostrEventVerifier verifier = new NostrEventVerifier();
 
     private FakeNostrRelay badRelay;
@@ -116,7 +130,7 @@ class NostrDegradationIT {
                 /*allRelaysBadCycleCap=*/1_000, Clock.systemUTC(), t -> { });
         NostrStreamSource worker = new NostrStreamSource(relays,
                 OptionalLong::empty, Duration.ofMillis(50), Duration.ofMillis(200),
-                httpClient, verifier, tracker, new NostrDedupFilter());
+                httpClient, ssrfClient, verifier, tracker, new NostrDedupFilter());
         Consumer<NormalizedPost> deliver =
                 post -> postPersister.persist(sourceUuid, post).ifPresent(evalQueueProducer::emit);
         supervisor.register(DISPATCH_KEY, filterSpec, worker, deliver);
@@ -195,6 +209,18 @@ class NostrDegradationIT {
         long deadline = System.currentTimeMillis() + FIVE_SECONDS.toMillis();
         while (countPostsForSource(sourceUuid) < expected && System.currentTimeMillis() < deadline) {
             Thread.sleep(25);
+        }
+    }
+
+    /** See {@code NostrStreamSourceTest.LoopbackPermittingBlocklist} — same pattern. */
+    private static final class LoopbackPermittingBlocklist extends IpBlocklist {
+
+        @Override
+        public boolean isBlocked(@NonNull InetAddress addr) {
+            if (addr.isLoopbackAddress()) {
+                return false;
+            }
+            return super.isBlocked(addr);
         }
     }
 }
