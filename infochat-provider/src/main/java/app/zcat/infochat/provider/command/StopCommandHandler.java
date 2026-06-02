@@ -6,6 +6,7 @@ import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.chat.CancellationService;
 import app.zcat.infochat.provider.chat.InFlightTracker;
+import app.zcat.infochat.provider.group.GroupRepository;
 import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -52,6 +53,9 @@ public class StopCommandHandler implements CommandHandler {
     @Inject
     InboundContext inboundContext;
 
+    @Inject
+    GroupRepository groupRepository;
+
     @Override
     public @NonNull String name() {
         return "stop";
@@ -59,14 +63,21 @@ public class StopCommandHandler implements CommandHandler {
 
     @Override
     public @NonNull OutboundMessage handle(@NonNull ScopeRef scope, @NonNull String rawText) {
-        Optional<UUID> userId = resolveUserId(scope);
+        Optional<UUID> userId = resolveUserId();
         if (userId.isEmpty()) {
             return reply(scope, bundleLoader.get(BundleKeys.REPLY_STOP_NOOP));
         }
 
-        // v1 DM scope: scopeKind = "dm", scopeId = userId
-        String scopeKind = "dm";
-        UUID scopeId = userId.get();
+        // Per-(user, scope) cancellation key, mirroring
+        // InboundRouter.resolveChatScopeId (D35): DM → (dm, userId),
+        // group → (group, groupId). A group with no row (cannot host
+        // in-flight chat work) yields the idempotent no-op.
+        Optional<ScopeResolution> resolved = resolveScope(scope, userId.get());
+        if (resolved.isEmpty()) {
+            return reply(scope, bundleLoader.get(BundleKeys.REPLY_STOP_NOOP));
+        }
+        String scopeKind = resolved.get().scopeKind();
+        UUID scopeId = resolved.get().scopeId();
 
         boolean cancelledInFlight = cancellationService.cancel(userId.get(), scopeKind, scopeId);
 
@@ -94,15 +105,21 @@ public class StopCommandHandler implements CommandHandler {
         return reply(scope, bundleLoader.get(BundleKeys.REPLY_STOP_NOOP));
     }
 
-    private Optional<UUID> resolveUserId(ScopeRef scope) {
-        if (!(scope instanceof ScopeRef.Dm dm)) {
-            return Optional.empty();
-        }
+    /**
+     * Resolve the calling user's id from {@code (adapter, contact_id)}.
+     * The sender's contact id is read from {@link InboundContext} so the
+     * lookup works in BOTH DM and group scope — the prior version pulled
+     * the contact id from {@code ScopeRef.Dm} and returned empty for any
+     * non-DM scope, which is the A17 bug that left group chat work
+     * uncancellable.
+     */
+    private Optional<UUID> resolveUserId() {
         String adapterName = inboundContext.adapterName();
+        String contactId = inboundContext.senderContactId();
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(SELECT_USER_ID)) {
             ps.setString(1, adapterName);
-            ps.setString(2, dm.contactId());
+            ps.setString(2, contactId);
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) {
                     return Optional.empty();
@@ -113,6 +130,25 @@ public class StopCommandHandler implements CommandHandler {
             throw new IllegalStateException("StopCommandHandler.resolveUserId failed", e);
         }
     }
+
+    /**
+     * Resolve the {@code (scopeKind, scopeId)} that keys the calling
+     * user's in-flight chat work, mirroring
+     * {@code InboundRouter.resolveChatScopeId}: DM scope keys on the
+     * user's own id; group scope keys on the {@code groups} row's UUID.
+     * A group scope with no {@code groups} row returns empty — there is
+     * no in-flight work to cancel, so the caller emits the no-op reply.
+     */
+    private Optional<ScopeResolution> resolveScope(ScopeRef scope, UUID userId) {
+        return switch (scope) {
+            case ScopeRef.Dm ignored -> Optional.of(new ScopeResolution("dm", userId));
+            case ScopeRef.Group group -> groupRepository
+                    .findApprovalRow(inboundContext.adapterName(), group.adapterGroupId())
+                    .map(row -> new ScopeResolution("group", row.id()));
+        };
+    }
+
+    private record ScopeResolution(String scopeKind, UUID scopeId) {}
 
     private OutboundMessage reply(ScopeRef scope, String text) {
         return new OutboundMessage(scope, text, Instant.now(), UUID.randomUUID().toString());

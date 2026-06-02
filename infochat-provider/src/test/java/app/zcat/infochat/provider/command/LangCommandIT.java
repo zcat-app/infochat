@@ -116,13 +116,25 @@ class LangCommandIT {
         List<OutboundMessage> after2 = adapter.sentMessages();
         assertEquals(2, after2.size(),
                 "step 2: /help must produce one further outbound");
-        String enHelp = bundleLoader.get(BundleKeys.HELP_HEADER_DM_USER)
-                + "\n"
-                + bundleLoader.get(BundleKeys.HELP_CMD_HELP_SHORT)
-                + "\n"
-                + bundleLoader.get(BundleKeys.HELP_CMD_ADD_SOURCE_SHORT)
-                + "\n"
-                + bundleLoader.get(BundleKeys.HELP_CMD_SUMMARY_SHORT);
+        String enHelp = String.join("\n",
+                bundleLoader.get(BundleKeys.HELP_HEADER_DM_USER),
+                bundleLoader.get(BundleKeys.HELP_CMD_HELP_SHORT),
+                bundleLoader.get(BundleKeys.HELP_CMD_STATUS_SHORT),
+                bundleLoader.get(BundleKeys.HELP_CMD_SUMMARY_SHORT),
+                bundleLoader.get(BundleKeys.HELP_CMD_LIST_SOURCES_SHORT),
+                bundleLoader.get(BundleKeys.HELP_CMD_SAVE_SHORT),
+                bundleLoader.get(BundleKeys.HELP_CMD_SAVED_SHORT),
+                bundleLoader.get(BundleKeys.HELP_CMD_UNSAVE_SHORT),
+                bundleLoader.get(BundleKeys.HELP_CMD_EXPORT_SHORT),
+                bundleLoader.get(BundleKeys.HELP_CMD_ADD_SOURCE_SHORT),
+                bundleLoader.get(BundleKeys.HELP_CMD_FOLLOW_TAG_SHORT),
+                bundleLoader.get(BundleKeys.HELP_CMD_UNFOLLOW_TAG_SHORT),
+                bundleLoader.get(BundleKeys.HELP_CMD_LANG_SHORT),
+                bundleLoader.get(BundleKeys.HELP_CMD_CLEAR_SHORT),
+                bundleLoader.get(BundleKeys.HELP_CMD_COMPRESS_SHORT),
+                bundleLoader.get(BundleKeys.HELP_CMD_FORGET_SHORT),
+                bundleLoader.get(BundleKeys.HELP_CMD_STOP_SHORT),
+                bundleLoader.get(BundleKeys.HELP_CMD_RETRY_SHORT));
         assertEquals(enHelp, after2.get(1).text(),
                 "step 2: /help outbound must still resolve via the 1-arg accessor "
                         + "(en values verbatim) — T2-F migrates handlers wholesale to the "

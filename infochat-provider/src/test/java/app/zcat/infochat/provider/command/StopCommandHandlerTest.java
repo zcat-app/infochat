@@ -5,6 +5,7 @@ import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.chat.CancellationService;
 import app.zcat.infochat.provider.chat.InFlightTracker;
+import app.zcat.infochat.provider.group.GroupRepository;
 import app.zcat.infochat.provider.messaging.InboundContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -29,6 +30,7 @@ class StopCommandHandlerTest {
 
     private static final String PREFIX = "m1-065-stop-";
     private static final UUID USER_ID = UUID.randomUUID();
+    private static final UUID GROUP_ID = UUID.randomUUID();
 
     private StopCommandHandler handler;
     private RecordingCancellationService cancellationService;
@@ -47,8 +49,10 @@ class StopCommandHandlerTest {
         handler.cancellationService = cancellationService;
         handler.inFlightTracker = tracker;
         handler.confirmStateService = confirmService;
+        handler.groupRepository = new StubGroupRepository(GROUP_ID);
         InboundContext ctx = new InboundContext();
         ctx.setAdapterName("inmemory");
+        ctx.setSenderContactId(PREFIX + "sender");
         handler.inboundContext = ctx;
     }
 
@@ -110,16 +114,59 @@ class StopCommandHandlerTest {
                 "reply must mention the cancelled confirmation. Got: " + reply.text());
     }
 
+    @Test
+    void cancelsInFlightChatRequestInGroupScope() {
+        cancellationService.nextResult = true;
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Group(PREFIX + "group"), "/stop");
+
+        // A17 regression: a group /stop must resolve to the group's
+        // (group, groupId) cancellation key — not return empty (the old
+        // bug) and not fall back to the DM key.
+        assertTrue(cancellationService.cancelCalled,
+                "CancellationService.cancel must be called in group scope");
+        assertEquals("group", cancellationService.lastScopeKind,
+                "group /stop must cancel under scopeKind=group");
+        assertEquals(GROUP_ID, cancellationService.lastScopeId,
+                "group /stop must key on the group's UUID, not the user's id");
+        assertEquals(USER_ID, cancellationService.lastUserId,
+                "cancellation is still per-(user, scope): the caller's user id");
+        assertTrue(reply.text().contains("Cancelled the in-flight request"),
+                "reply must confirm the cancellation. Got: " + reply.text());
+    }
+
     // ----- stubs -----------------------------------------------------------
 
     private static class RecordingCancellationService extends CancellationService {
         boolean cancelCalled = false;
         boolean nextResult = false;
+        UUID lastUserId = null;
+        String lastScopeKind = null;
+        UUID lastScopeId = null;
 
         @Override
         public boolean cancel(UUID userId, String scopeKind, UUID scopeId) {
             cancelCalled = true;
+            lastUserId = userId;
+            lastScopeKind = scopeKind;
+            lastScopeId = scopeId;
             return nextResult;
+        }
+    }
+
+    private static class StubGroupRepository extends GroupRepository {
+        private final UUID groupId;
+
+        StubGroupRepository(UUID groupId) {
+            super(null);
+            this.groupId = groupId;
+        }
+
+        @Override
+        public java.util.Optional<GroupApprovalRow> findApprovalRow(String adapter, String upstreamGroupId) {
+            return java.util.Optional.of(
+                    new GroupApprovalRow(groupId, "approved", null, null));
         }
     }
 

@@ -4,6 +4,8 @@ import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.command.AssetCommandFamilyOracle;
+import app.zcat.infochat.provider.command.CommandPermissions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -19,33 +21,36 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Handler-tier (plain JUnit, no Quarkus boot) test for
- * {@link HelpCommandHandler} per the test-pyramid convention at
- * {@code docs/process/test-pyramid.md} §Handler unit tests.
+ * {@link HelpCommandHandler} per {@code docs/spec/commands.md}
+ * §Discovery (context-aware, per-tier-filtered, scope-aware /help).
  *
- * <p>Behavioral tests for the bundle-driven reply composition per
- * {@code docs/design/03-commands.md} §3.4 and decision D30 (plain
- * text, no markdown). Four invariants, each in its own
- * {@code @Test}:</p>
+ * <p>The DB-backed tier resolution ({@code resolveTier}) is a
+ * package-private seam this test overrides with a fixed
+ * {@link HelpCommandHandler.CallerTier}, so the catalogue-filtering
+ * logic under test runs without a {@link javax.sql.DataSource} or the
+ * group repositories — mirroring the {@code InboundRouter#lookupUser}
+ * test seam. Behavioral invariants:</p>
  * <ol>
- *   <li>The composed reply contains the header text plus the three
- *       MVP command short-help lines (acceptance item 11).</li>
- *   <li>The handler consumes exactly the four MVP bundle keys —
- *       {@code help.header.dm-user}, {@code help.cmd.help.short},
- *       {@code help.cmd.add-source.short}, {@code help.cmd.summary.short}
- *       (acceptance item 12).</li>
- *   <li>A missing bundle key propagates as an exception rather than
- *       silently producing an incomplete reply (DoD §HelpCommandHandler
- *       and bundle-completeness CI alignment).</li>
- *   <li>The reply contains no markdown link syntax and no HTML
- *       anchor tags (acceptance item 13).</li>
+ *   <li>DM non-admin sees user commands, hides bot-admin and group-only
+ *       commands; group scope swaps the header.</li>
+ *   <li>Bot admin additionally sees bot-admin commands.</li>
+ *   <li>Group scope shows group-admin-only commands only to the group
+ *       admin; the dual (user-in-DM / group-admin-in-group) commands
+ *       follow the same gate.</li>
+ *   <li>A probation caller sees only the slow-start allowed subset plus
+ *       the probation footer.</li>
+ *   <li>A missing bundle key propagates rather than shipping a partial
+ *       reply (bundle-completeness CI alignment).</li>
+ *   <li>The reply contains no markdown link syntax / HTML anchors (D30).</li>
  * </ol>
  */
 class HelpCommandHandlerTest {
 
     private BundleLoader productionBundleLoader;
+    private CommandPermissions commandPermissions;
 
     @BeforeEach
-    void buildProductionBundleLoader() throws Exception {
+    void buildCollaborators() throws Exception {
         // Without CDI driving the @PostConstruct lifecycle, the test
         // constructs BundleLoader by hand and invokes the
         // package-private load() via reflection so the production
@@ -54,47 +59,106 @@ class HelpCommandHandlerTest {
         Method load = BundleLoader.class.getDeclaredMethod("load");
         load.setAccessible(true);
         load.invoke(productionBundleLoader);
+
+        // The real probation classifier so the probation-filter test
+        // exercises the genuine allowed-subset (the same predicate the
+        // intake gate uses), not a stubbed always-true.
+        commandPermissions = new CommandPermissions(new AssetCommandFamilyOracle());
     }
 
     @Test
-    void replyContainsHeaderAndThreeMvpCommandShortHelpLines() {
-        HelpCommandHandler handler = new HelpCommandHandler();
-        handler.bundleLoader = productionBundleLoader;
-
-        OutboundMessage reply = handler.handle(new ScopeRef.Dm("alice"), "/help");
-        String body = reply.text();
-
-        // Each fragment below is the header value or a command name
-        // present in en.properties' MVP entries.
-        assertTrue(body.contains("Available"),
-                "reply must contain the header from help.header.dm-user: " + body);
-        assertTrue(body.contains("/help"), "reply must mention /help: " + body);
-        assertTrue(body.contains("/add-source"), "reply must mention /add-source: " + body);
-        assertTrue(body.contains("/summary"), "reply must mention /summary: " + body);
-
-        assertEquals("help", handler.name());
+    void handlerNameIsHelp() {
+        assertEquals("help", handlerFor(dm(false, false, false), productionBundleLoader).name());
     }
 
     @Test
-    void handlerConsumesExactlyTheFourMvpBundleKeys() {
-        RecordingBundleLoader spy = new RecordingBundleLoader(Set.of(
-                BundleKeys.HELP_HEADER_DM_USER,
-                BundleKeys.HELP_CMD_HELP_SHORT,
-                BundleKeys.HELP_CMD_ADD_SOURCE_SHORT,
-                BundleKeys.HELP_CMD_SUMMARY_SHORT));
-        HelpCommandHandler handler = new HelpCommandHandler();
-        handler.bundleLoader = spy;
+    void dmNonAdminSeesUserCommandsAndHidesAdminAndGroupOnlyCommands() {
+        String body = handlerFor(dm(false, false, false), productionBundleLoader)
+                .handle(new ScopeRef.Dm("alice"), "/help").text();
 
-        handler.handle(new ScopeRef.Dm("alice"), "/help");
+        assertTrue(body.contains(productionBundleLoader.get(BundleKeys.HELP_HEADER_DM_USER)),
+                "DM reply must carry the DM header: " + body);
+        // User-tier and dual-in-DM commands are visible.
+        assertContainsLine(body, BundleKeys.HELP_CMD_HELP_SHORT);
+        assertContainsLine(body, BundleKeys.HELP_CMD_SUMMARY_SHORT);
+        assertContainsLine(body, BundleKeys.HELP_CMD_STATUS_SHORT);
+        assertContainsLine(body, BundleKeys.HELP_CMD_SAVE_SHORT);
+        assertContainsLine(body, BundleKeys.HELP_CMD_ADD_SOURCE_SHORT);
+        assertContainsLine(body, BundleKeys.HELP_CMD_LANG_SHORT);
+        // Bot-admin commands hidden from a non-admin.
+        assertOmitsLine(body, BundleKeys.HELP_CMD_BAN_SHORT);
+        assertOmitsLine(body, BundleKeys.HELP_CMD_GRANT_ADMIN_SHORT);
+        // Group-only command hidden in DM.
+        assertOmitsLine(body, BundleKeys.HELP_CMD_GROUP_TIMEZONE_SHORT);
+        // No probation footer for a non-probation caller.
+        assertOmitsLine(body, BundleKeys.HELP_FOOTER_PROBATION);
+    }
 
-        assertTrue(spy.lookups.contains(BundleKeys.HELP_HEADER_DM_USER),
-                "HELP_HEADER_DM_USER lookup missing; recorded: " + spy.lookups);
-        assertTrue(spy.lookups.contains(BundleKeys.HELP_CMD_HELP_SHORT),
-                "HELP_CMD_HELP_SHORT lookup missing; recorded: " + spy.lookups);
-        assertTrue(spy.lookups.contains(BundleKeys.HELP_CMD_ADD_SOURCE_SHORT),
-                "HELP_CMD_ADD_SOURCE_SHORT lookup missing; recorded: " + spy.lookups);
-        assertTrue(spy.lookups.contains(BundleKeys.HELP_CMD_SUMMARY_SHORT),
-                "HELP_CMD_SUMMARY_SHORT lookup missing; recorded: " + spy.lookups);
+    @Test
+    void dmBotAdminSeesBotAdminCommands() {
+        String body = handlerFor(dm(true, false, false), productionBundleLoader)
+                .handle(new ScopeRef.Dm("admin"), "/help").text();
+
+        assertContainsLine(body, BundleKeys.HELP_CMD_BAN_SHORT);
+        assertContainsLine(body, BundleKeys.HELP_CMD_GRANT_ADMIN_SHORT);
+        assertContainsLine(body, BundleKeys.HELP_CMD_LIST_GROUPS_SHORT);
+        // group-timezone is group-only — hidden in DM even for a bot admin.
+        assertOmitsLine(body, BundleKeys.HELP_CMD_GROUP_TIMEZONE_SHORT);
+    }
+
+    @Test
+    void groupNonGroupAdminHidesGroupAdminAndDualCommands() {
+        String body = handlerFor(group(false, false, false), productionBundleLoader)
+                .handle(new ScopeRef.Group("g1"), "/help").text();
+
+        assertTrue(body.contains(productionBundleLoader.get(BundleKeys.HELP_HEADER_GROUP)),
+                "group reply must carry the group header: " + body);
+        // Plain user commands still visible in a group.
+        assertContainsLine(body, BundleKeys.HELP_CMD_SUMMARY_SHORT);
+        assertContainsLine(body, BundleKeys.HELP_CMD_STOP_SHORT);
+        // Dual command is group-admin-gated in a group.
+        assertOmitsLine(body, BundleKeys.HELP_CMD_ADD_SOURCE_SHORT);
+        // Group-admin-only command hidden from a non-group-admin.
+        assertOmitsLine(body, BundleKeys.HELP_CMD_GROUP_TIMEZONE_SHORT);
+        // Bot-admin command hidden.
+        assertOmitsLine(body, BundleKeys.HELP_CMD_BAN_SHORT);
+    }
+
+    @Test
+    void groupAdminSeesGroupAdminAndDualCommandsButNotBotAdminCommands() {
+        String body = handlerFor(group(false, true, false), productionBundleLoader)
+                .handle(new ScopeRef.Group("g1"), "/help").text();
+
+        assertContainsLine(body, BundleKeys.HELP_CMD_GROUP_TIMEZONE_SHORT);
+        assertContainsLine(body, BundleKeys.HELP_CMD_ADD_SOURCE_SHORT);
+        assertContainsLine(body, BundleKeys.HELP_CMD_FOLLOW_TAG_SHORT);
+        // Still not a bot admin.
+        assertOmitsLine(body, BundleKeys.HELP_CMD_BAN_SHORT);
+    }
+
+    @Test
+    void probationCallerSeesOnlyAllowedSubsetPlusFooter() {
+        String body = handlerFor(dm(false, false, true), productionBundleLoader)
+                .handle(new ScopeRef.Dm("rookie"), "/help").text();
+
+        assertTrue(body.contains(productionBundleLoader.get(BundleKeys.HELP_FOOTER_PROBATION)),
+                "probation reply must carry the probation footer: " + body);
+        // Allowed-during-probation commands present.
+        assertContainsLine(body, BundleKeys.HELP_CMD_HELP_SHORT);
+        assertContainsLine(body, BundleKeys.HELP_CMD_SUMMARY_SHORT);
+        assertContainsLine(body, BundleKeys.HELP_CMD_STATUS_SHORT);
+        assertContainsLine(body, BundleKeys.HELP_CMD_LIST_SOURCES_SHORT);
+        assertContainsLine(body, BundleKeys.HELP_CMD_SAVED_SHORT);
+        assertContainsLine(body, BundleKeys.HELP_CMD_EXPORT_SHORT);
+        assertContainsLine(body, BundleKeys.HELP_CMD_LANG_SHORT);
+        assertContainsLine(body, BundleKeys.HELP_CMD_FORGET_SHORT);
+        assertContainsLine(body, BundleKeys.HELP_CMD_STOP_SHORT);
+        // Write / chat-mode commands NOT allowed during probation.
+        assertOmitsLine(body, BundleKeys.HELP_CMD_SAVE_SHORT);
+        assertOmitsLine(body, BundleKeys.HELP_CMD_CLEAR_SHORT);
+        assertOmitsLine(body, BundleKeys.HELP_CMD_ADD_SOURCE_SHORT);
+        // Admin commands never shown during probation.
+        assertOmitsLine(body, BundleKeys.HELP_CMD_BAN_SHORT);
     }
 
     @Test
@@ -103,9 +167,8 @@ class HelpCommandHandlerTest {
         // real BundleLoader would for a missing entry. Handler must
         // propagate; silently catching would defeat the bundle-completeness
         // CI guard.
-        RecordingBundleLoader spy = new RecordingBundleLoader(Set.of());
-        HelpCommandHandler handler = new HelpCommandHandler();
-        handler.bundleLoader = spy;
+        HelpCommandHandler handler = handlerFor(dm(false, false, false),
+                new RecordingBundleLoader(Set.of()));
 
         assertThrows(IllegalStateException.class,
                 () -> handler.handle(new ScopeRef.Dm("alice"), "/help"));
@@ -113,16 +176,54 @@ class HelpCommandHandlerTest {
 
     @Test
     void replyContainsNoMarkdownLinkSyntaxOrHtmlAnchors() {
-        HelpCommandHandler handler = new HelpCommandHandler();
-        handler.bundleLoader = productionBundleLoader;
-
-        OutboundMessage reply = handler.handle(new ScopeRef.Dm("alice"), "/help");
-        String body = reply.text();
+        String body = handlerFor(dm(true, false, false), productionBundleLoader)
+                .handle(new ScopeRef.Dm("admin"), "/help").text();
 
         assertFalse(containsMarkdownLink(body),
                 "reply must not contain markdown link syntax [text](url): " + body);
         assertFalse(body.contains("<a href="),
                 "reply must not contain HTML anchor tags: " + body);
+    }
+
+    // ----- helpers ----------------------------------------------------------
+
+    /**
+     * Build a handler whose {@code resolveTier} is pinned to {@code tier},
+     * wired with the supplied bundle loader and the real
+     * {@link CommandPermissions}. The DB / repository collaborators are
+     * left null because the overridden {@code resolveTier} never reaches
+     * them.
+     */
+    private HelpCommandHandler handlerFor(HelpCommandHandler.CallerTier tier, BundleLoader loader) {
+        HelpCommandHandler handler = new HelpCommandHandler() {
+            @Override
+            HelpCommandHandler.CallerTier resolveTier(ScopeRef scope) {
+                return tier;
+            }
+        };
+        handler.bundleLoader = loader;
+        handler.commandPermissions = commandPermissions;
+        return handler;
+    }
+
+    private static HelpCommandHandler.CallerTier dm(boolean botAdmin, boolean groupAdmin, boolean probation) {
+        return new HelpCommandHandler.CallerTier(botAdmin, groupAdmin, probation, false);
+    }
+
+    private static HelpCommandHandler.CallerTier group(boolean botAdmin, boolean groupAdmin, boolean probation) {
+        return new HelpCommandHandler.CallerTier(botAdmin, groupAdmin, probation, true);
+    }
+
+    private void assertContainsLine(String body, String bundleKey) {
+        String line = productionBundleLoader.get(bundleKey);
+        assertTrue(body.contains(line),
+                "reply must contain the line for " + bundleKey + " (" + line + "); got: " + body);
+    }
+
+    private void assertOmitsLine(String body, String bundleKey) {
+        String line = productionBundleLoader.get(bundleKey);
+        assertFalse(body.contains(line),
+                "reply must NOT contain the line for " + bundleKey + " (" + line + "); got: " + body);
     }
 
     /** Minimal {@code [text](url)} detector: a `[` followed (eventually) by `](` and a closing `)` on the same line. */

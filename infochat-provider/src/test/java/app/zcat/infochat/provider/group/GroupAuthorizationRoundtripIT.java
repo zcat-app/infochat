@@ -236,8 +236,8 @@ class GroupAuthorizationRoundtripIT {
                 "step (6): approved-group @mention must NOT return GROUP_PENDING");
         assertNotEquals(bundleLoader.get(BundleKeys.GROUP_REJECTED), reply6,
                 "step (6): approved-group @mention must NOT return GROUP_REJECTED");
-        assertTrue(reply6.startsWith(bundleLoader.get(BundleKeys.HELP_HEADER_DM_USER)),
-                "step (6): /help must render the help header on the approved-group path; got: "
+        assertTrue(reply6.startsWith(bundleLoader.get(BundleKeys.HELP_HEADER_GROUP)),
+                "step (6): /help must render the group help header on the approved-group path; got: "
                         + reply6);
         adapter.reset();
 

@@ -174,10 +174,23 @@ class AdapterRouterIT {
     }
 
     private String expectedHelpBody() {
+        // mvp-user-1 is a non-admin caller seeded in slow-start probation
+        // (probation_until = NOW()+24h). Per M1-138, /help is now tier- and
+        // scope-filtered: a probation caller sees ONLY the slow-start
+        // allowed subset (in HelpCommandHandler.CATALOGUE order) under the
+        // DM header, followed by the probation footer. No assets are
+        // enabled in this profile, so no asset lines appear.
         return bundleLoader.get(BundleKeys.HELP_HEADER_DM_USER)
                 + "\n" + bundleLoader.get(BundleKeys.HELP_CMD_HELP_SHORT)
-                + "\n" + bundleLoader.get(BundleKeys.HELP_CMD_ADD_SOURCE_SHORT)
-                + "\n" + bundleLoader.get(BundleKeys.HELP_CMD_SUMMARY_SHORT);
+                + "\n" + bundleLoader.get(BundleKeys.HELP_CMD_STATUS_SHORT)
+                + "\n" + bundleLoader.get(BundleKeys.HELP_CMD_SUMMARY_SHORT)
+                + "\n" + bundleLoader.get(BundleKeys.HELP_CMD_LIST_SOURCES_SHORT)
+                + "\n" + bundleLoader.get(BundleKeys.HELP_CMD_SAVED_SHORT)
+                + "\n" + bundleLoader.get(BundleKeys.HELP_CMD_EXPORT_SHORT)
+                + "\n" + bundleLoader.get(BundleKeys.HELP_CMD_LANG_SHORT)
+                + "\n" + bundleLoader.get(BundleKeys.HELP_CMD_FORGET_SHORT)
+                + "\n" + bundleLoader.get(BundleKeys.HELP_CMD_STOP_SHORT)
+                + "\n" + bundleLoader.get(BundleKeys.HELP_FOOTER_PROBATION);
     }
 
     private void assertUsersRowMatchesMvpDefaults(String contactId, Instant before, Instant after)

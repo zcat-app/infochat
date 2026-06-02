@@ -32,6 +32,115 @@ public final class BundleKeys {
     /** Short-help line for {@code /summary}. Authored here so T1-F's implementation lands without bundle churn. */
     public static final String HELP_CMD_SUMMARY_SHORT = "help.cmd.summary.short";
 
+    // ----- /help per-tier catalogue (M1-138) ------------------------------
+    // Per docs/spec/commands.md §Discovery (Bundle composition): /help is
+    // composed from one short-help bundle key per command, filtered by the
+    // caller's tier (probation / non-admin / non-group-admin) and scope
+    // (DM vs group header), with a probation-tier footer. The header keys,
+    // the footer key, and every per-command help-line key below are
+    // BundleKeys constants so the reflection-based bundle-completeness CI
+    // (BundleLoaderTest) asserts each one resolves in en + cs. The closed
+    // (command, bundleKey, tier) catalogue lives in HelpCommandHandler.
+
+    /** Header line at the top of the {@code /help} reply when invoked in a group scope. */
+    public static final String HELP_HEADER_GROUP = "help.header.group";
+
+    /** Footer appended to the {@code /help} reply for a slow-start probation caller, noting that fuller access (and chat mode) unlocks when probation ends. */
+    public static final String HELP_FOOTER_PROBATION = "help.footer.probation";
+
+    /** Short-help line for {@code /status}. */
+    public static final String HELP_CMD_STATUS_SHORT = "help.cmd.status.short";
+
+    /** Short-help line for {@code /list-sources}. */
+    public static final String HELP_CMD_LIST_SOURCES_SHORT = "help.cmd.list-sources.short";
+
+    /** Short-help line for {@code /save}. */
+    public static final String HELP_CMD_SAVE_SHORT = "help.cmd.save.short";
+
+    /** Short-help line for {@code /saved}. */
+    public static final String HELP_CMD_SAVED_SHORT = "help.cmd.saved.short";
+
+    /** Short-help line for {@code /unsave}. */
+    public static final String HELP_CMD_UNSAVE_SHORT = "help.cmd.unsave.short";
+
+    /** Short-help line for {@code /export}. */
+    public static final String HELP_CMD_EXPORT_SHORT = "help.cmd.export.short";
+
+    /** Short-help line for {@code /follow-tag}. */
+    public static final String HELP_CMD_FOLLOW_TAG_SHORT = "help.cmd.follow-tag.short";
+
+    /** Short-help line for {@code /unfollow-tag}. */
+    public static final String HELP_CMD_UNFOLLOW_TAG_SHORT = "help.cmd.unfollow-tag.short";
+
+    /** Short-help line for {@code /lang}. */
+    public static final String HELP_CMD_LANG_SHORT = "help.cmd.lang.short";
+
+    /** Short-help line for {@code /clear}. */
+    public static final String HELP_CMD_CLEAR_SHORT = "help.cmd.clear.short";
+
+    /** Short-help line for {@code /compress}. */
+    public static final String HELP_CMD_COMPRESS_SHORT = "help.cmd.compress.short";
+
+    /** Short-help line for {@code /forget}. */
+    public static final String HELP_CMD_FORGET_SHORT = "help.cmd.forget.short";
+
+    /** Short-help line for {@code /stop}. */
+    public static final String HELP_CMD_STOP_SHORT = "help.cmd.stop.short";
+
+    /** Short-help line for {@code /retry}. */
+    public static final String HELP_CMD_RETRY_SHORT = "help.cmd.retry.short";
+
+    /** Short-help line for {@code /group-timezone} (group-admin tier). */
+    public static final String HELP_CMD_GROUP_TIMEZONE_SHORT = "help.cmd.group-timezone.short";
+
+    /** Short-help line for {@code /grant-admin} (bot-admin tier). */
+    public static final String HELP_CMD_GRANT_ADMIN_SHORT = "help.cmd.grant-admin.short";
+
+    /** Short-help line for {@code /revoke-admin} (bot-admin tier). */
+    public static final String HELP_CMD_REVOKE_ADMIN_SHORT = "help.cmd.revoke-admin.short";
+
+    /** Short-help line for {@code /ban} (bot-admin tier). */
+    public static final String HELP_CMD_BAN_SHORT = "help.cmd.ban.short";
+
+    /** Short-help line for {@code /unban} (bot-admin tier). */
+    public static final String HELP_CMD_UNBAN_SHORT = "help.cmd.unban.short";
+
+    /** Short-help line for {@code /promote} (bot-admin tier). */
+    public static final String HELP_CMD_PROMOTE_SHORT = "help.cmd.promote.short";
+
+    /** Short-help line for {@code /demote} (bot-admin tier). */
+    public static final String HELP_CMD_DEMOTE_SHORT = "help.cmd.demote.short";
+
+    /** Short-help line for {@code /vouch} (bot-admin tier). */
+    public static final String HELP_CMD_VOUCH_SHORT = "help.cmd.vouch.short";
+
+    /** Short-help line for {@code /invite} (bot-admin tier). */
+    public static final String HELP_CMD_INVITE_SHORT = "help.cmd.invite.short";
+
+    /** Short-help line for {@code /quarantine} (bot-admin tier). */
+    public static final String HELP_CMD_QUARANTINE_SHORT = "help.cmd.quarantine.short";
+
+    /** Short-help line for {@code /audit} (bot-admin tier). */
+    public static final String HELP_CMD_AUDIT_SHORT = "help.cmd.audit.short";
+
+    /** Short-help line for {@code /remove-source} (bot-admin tier). */
+    public static final String HELP_CMD_REMOVE_SOURCE_SHORT = "help.cmd.remove-source.short";
+
+    /** Short-help line for {@code /source-enable} (bot-admin tier). */
+    public static final String HELP_CMD_SOURCE_ENABLE_SHORT = "help.cmd.source-enable.short";
+
+    /** Short-help line for {@code /source-disable} (bot-admin tier). */
+    public static final String HELP_CMD_SOURCE_DISABLE_SHORT = "help.cmd.source-disable.short";
+
+    /** Short-help line for {@code /approve-group} (bot-admin tier). */
+    public static final String HELP_CMD_APPROVE_GROUP_SHORT = "help.cmd.approve-group.short";
+
+    /** Short-help line for {@code /reject-group} (bot-admin tier). */
+    public static final String HELP_CMD_REJECT_GROUP_SHORT = "help.cmd.reject-group.short";
+
+    /** Short-help line for {@code /list-groups} (bot-admin tier). */
+    public static final String HELP_CMD_LIST_GROUPS_SHORT = "help.cmd.list-groups.short";
+
     /** Deterministic reply for an unknown slash command. InboundRouter still uses its own literal at M1-035b's commit; replacing the literal with this lookup is a post-umbrella follow-up. */
     public static final String ERROR_UNKNOWN_COMMAND = "error.unknown_command";
 
