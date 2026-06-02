@@ -130,7 +130,7 @@ based on (in priority order):
 sets the explicit local-only property, the router never picks a
 remote provider — and a per-task override pointing to a remote
 provider while local-only is set is **a configuration conflict
-that fails Provider startup with a fatal log line identifying the
+that fails startup with a fatal log line identifying the
 offending task and provider**. This is checked once at startup,
 not per call, so an operator cannot accidentally route one task
 remote while believing the deployment is local-only. The
@@ -142,6 +142,15 @@ notice.
 Switching the embedding provider to a remote service
 emits an explicit confirmation log line on startup so operators see when                                                                                                                                                                              
 post bodies start leaving the host.
+
+The local-only conflict check and the remote-embedding confirmation
+log both run on **Collector** startup, not Provider startup: embedding
+generation (title + summary → vector) and the Stage 2 security-judge
+call both run in the collector ingest pipeline, so the off-host routes
+the guard inspects — the per-task LLM base-urls/providers and the
+embedding base-url — are all Collector-side configuration. The guard's
+scan therefore covers the per-task base-urls, the embedding base-url,
+and per-task provider overrides that name a cloud-only provider.
 
 **No fallback chain in v1.** The router resolves `(ModelTask,
 scope_language)` to **exactly one** `LlmProvider`; an unreachable

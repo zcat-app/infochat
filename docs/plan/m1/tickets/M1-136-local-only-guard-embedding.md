@@ -1,7 +1,7 @@
 ---
 id: M1-136
 title: "local-only startup guard covers embedding endpoint + remote-embedding log"
-status: pending
+status: done
 created: 2026-06-02
 last_updated: 2026-06-02
 blocked_by: []
@@ -9,6 +9,7 @@ files_budget: 4
 files_scope:
   - infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/routing
   - infochat-llm-adapter/src/test/java/app/zcat/infochat/llm/routing
+  - docs/spec/llm.md
 complexity: medium
 risk: medium
 round_cap: 2
@@ -32,12 +33,86 @@ spec_refs:
   - docs/spec/llm.md §Per-task routing rules
   - docs/spec/llm.md §Embedding pipeline
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-02
+    verdict: MANUAL
+    checks:
+      scope_drift: FAIL
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 3
+      added: 331
+      removed: 36
+  - round: 2
+    date: 2026-06-02
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 3
+      added: 331
+      removed: 36
+escalations:
+  - date: 2026-06-02
+    reason: manual-verdict
+    reviewer_verdict_excerpt: |
+      SCOPE-DRIFT-CHECK: FAIL — docs/spec/llm.md does NOT match any files_scope
+      entry (which lists only the two routing directories) and is not a
+      lifecycle-exempt path, so the membership rule forces a FAIL. Every other
+      check PASSED (test-integrity, out-of-scope, negative-space, acceptance
+      items 1-5, spec-conformance, parameter-contract). The reviewer flags this
+      as a ticket-internal conflict, not developer overreach: acceptance item 4
+      names docs/spec/llm.md, out_of_scope item 2 carves out "a spec-
+      reconciliation note", and Context says "the spec wording needs the note" —
+      but files_scope omits docs/spec/. Resolution options: (1) refine the ticket
+      to add docs/spec/llm.md to files_scope → clean APPROVE; (2) drop the
+      docs/spec/llm.md hunk and satisfy item 4 via the code comment alone,
+      leaving the stale "fails Provider startup" wording for a later spec: commit.
+revisions:
+  - date: 2026-06-02
+    reason: "manual-verdict (round 1) rework — reviewer SCOPE-DRIFT-CHECK FAIL was a ticket-internal conflict, not developer overreach: acceptance item 4 names docs/spec/llm.md and out_of_scope item 2 carves out 'a spec-reconciliation note', but files_scope omitted docs/spec/. Refine adds docs/spec/llm.md to files_scope (the scope the acceptance/out_of_scope text already intended). No code change, no acceptance-semantics change, no files_budget change (still 4) — only the files_scope membership widens so the existing faithful spec note is in-bounds. Every other reviewer check (test-integrity, out-of-scope, negative-space, acceptance 1-5, spec-conformance, parameter-contract) already PASSED."
+    prior_values: |
+      files_scope (pre-refine, 2 entries):
+        - infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/routing
+        - infochat-llm-adapter/src/test/java/app/zcat/infochat/llm/routing
+      status (pre-refine, transient): escalated (manual-verdict)
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-02
+    verdict: CLEAN
+    base: main (merge-base d518ff7)
+    head: 2d922bc
+    verdict_file: docs/plan/m1/redteam/M1-136-2026-06-02.md
+    out_of_model_count: 1
+    note: |
+      Adversarial audit of the startup-time local-only guard broadening
+      (embedding base-url + provider-override key coverage) and the
+      remote-embedding confirmation log. CLEAN: the diff operates only on
+      trusted operator config (inside the security.md trust boundary), touches
+      no untrusted-input surface, and faithfully delivers both docs/spec/llm.md
+      promises. One OUT-OF-MODEL advisory (startup-only loopback / DNS-rebind /
+      multi-A-record window) is explicitly accepted by the spec's "checked once
+      at startup" wording and requires attacker-controlled DNS or malicious
+      operator config (out of scope per TLS/MITM + trusted-config assumptions).
+      No remediation ticket needed; a possible v2 hardening (per-call SSRF
+      re-resolution for the LLM/embedding outbound path) is noted for the user.
+clarity_check:
+  date: 2026-06-02
+  verdict: WARN
+  warnings:
+    - "Acceptance item 4 is a by-inspection criterion (adding a comment or spec note is verifiable only by reading the source); the reviewer should confirm the note is present in the diff."
+  blockers: []
 ---
 
 # M1-136: local-only startup guard covers embedding endpoint + remote-embedding log

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 32 |
+| pending | 31 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 158 |
+| done | 159 |
 | deferred | 2 |
 | **total** | **192** |
 
@@ -29,7 +29,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-133 — CT1 shared text/util extraction (JsonEscaper + TagNormalizer + Sha256) + TODO cleanup (complexity: medium, risk: medium)
 - M1-134 — quarantine_review NOTIFY channel completeness (CT2) (complexity: high, risk: medium)
 - M1-135 — SSRF hardening bundle (complexity: medium, risk: high)
-- M1-136 — local-only startup guard covers embedding endpoint + remote-embedding log (complexity: medium, risk: medium)
 - M1-137 — SimpleX mention canonicalization → exact-bytes compare (complexity: medium, risk: medium)
 - M1-138 — /stop group/DM scope fix + /help per-tier filtering (complexity: medium, risk: medium)
 - M1-139 — Kind-6 repost edge resolution (complexity: high, risk: medium)
@@ -90,6 +89,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-136 | local-only startup guard covers embedding endpoint + remote-embedding log | 2026-06-02 | round 2 APPROVE |
 | M1-132 | Signal/SimpleX adapter resilience (handler isolation, hung-process, config-validate, send/close race) | 2026-06-02 | round 1 APPROVE |
 | M1-130 | ReadyPromoter transaction boundary + IT driven through tick() | 2026-06-02 | round 1 APPROVE |
 | M1-129 | DigestScheduler approval_status filter + negative-case fixture | 2026-06-02 | round 1 APPROVE |
@@ -99,7 +99,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-124 | Anthropic header names + test alignment + narrow catch + unused import | 2026-06-02 | round 1 APPROVE |
 | M1-123 | InstanceLockGuard held-session liveness + collector/provider dedup | 2026-06-02 | round 1 APPROVE |
 | M1-122 | infochat.reeval.* keys in main config + @ConfigProperty CI guard | 2026-06-02 | round 1 APPROVE |
-| M1-121 | June+July 2026 partitions + monthly partition-creator scheduler | 2026-06-02 | round 2 APPROVE |
 
 ---
 
@@ -337,7 +336,7 @@ M1-133 (pending) ← runnable
   └── M1-146 (pending)
 M1-134 (pending) ← runnable
 M1-135 (pending) ← runnable
-M1-136 (pending) ← runnable
+M1-136 (done)
 M1-137 (pending) ← runnable
 M1-138 (pending) ← runnable
 M1-139 (pending) ← runnable
