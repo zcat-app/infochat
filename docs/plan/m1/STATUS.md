@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 25 |
+| pending | 24 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 165 |
-| deferred | 2 |
-| **total** | **192** |
+| done | 166 |
+| deferred | 3 |
+| **total** | **193** |
 
 ---
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-127 — DB per-service role wiring + audit_log_view redaction (complexity: high, risk: high)
 - M1-131 — ChatAgent Jackson tool-arg parse + dispatcher catch widening + TOOL-LEAK (complexity: high, risk: high)
 - M1-134 — quarantine_review NOTIFY channel completeness (CT2) (complexity: high, risk: medium)
 - M1-138 — /stop group/DM scope fix + /help per-tier filtering (complexity: medium, risk: medium)
@@ -46,6 +45,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-160 — [INVESTIGATE] summary_anchor scope_kind discriminator (complexity: medium, risk: medium)
 - M1-161 — [INVESTIGATE] price_snapshot PK/dedup invariant + new_price_snapshot channel intent (complexity: medium, risk: medium)
 - M1-162 — [INVESTIGATE] confirm-or-drop adapter SPI surfaces vs D47 (complexity: medium, risk: low)
+- M1-163 — Shared DB test-seeding seam for the IT suite (complexity: high, risk: low)
 
 ---
 
@@ -92,11 +92,13 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-133 | CT1 shared text/util extraction (JsonEscaper + TagNormalizer + Sha256) + TODO cleanup | 2026-06-02 | round 1 APPROVE |
 | M1-132 | Signal/SimpleX adapter resilience (handler isolation, hung-process, config-validate, send/close race) | 2026-06-02 | round 1 APPROVE |
 | M1-130 | ReadyPromoter transaction boundary + IT driven through tick() | 2026-06-02 | round 1 APPROVE |
-| M1-129 | DigestScheduler approval_status filter + negative-case fixture | 2026-06-02 | round 1 APPROVE |
 
 ---
 
 ## Deferred
+
+### blocked-on-new-ticket (1)
+- M1-127 → M1-163
 
 ### decomposed (1)
 - M1-034 → M1-034a
@@ -317,7 +319,6 @@ M1-124 (done)
 M1-125 (done)
   └── M1-155 (pending) ← runnable
 M1-126 (done)
-M1-127 (pending) ← runnable
 M1-128 (done)
 M1-129 (done)
 M1-130 (done)
@@ -352,4 +353,6 @@ M1-159 (pending) ← runnable
 M1-160 (pending) ← runnable
 M1-161 (pending) ← runnable
 M1-162 (pending) ← runnable
+M1-163 (pending) ← runnable
+  └── M1-127 (deferred)
 ```

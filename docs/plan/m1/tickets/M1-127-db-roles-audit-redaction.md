@@ -1,10 +1,12 @@
 ---
 id: M1-127
 title: "DB per-service role wiring + audit_log_view redaction"
-status: pending
+status: deferred
 created: 2026-06-02
 last_updated: 2026-06-02
-blocked_by: []
+blocked_by: [M1-163]
+deferred_on: M1-163
+deferred_reason: blocked-on-new-ticket
 files_budget: 10
 complexity: high
 risk: high
@@ -126,6 +128,27 @@ escalations:
       which would force migrating ~103 injection sites and blow the budget.
 
       SUGGESTED ESCALATION: refine
+  - date: 2026-06-02
+    reason: prerequisite-surfaced
+    reviewer_verdict_excerpt: |
+      Developer-initiated defer during /m1-tick start (post-outline, before
+      datasource wiring). Implementation revealed that genuinely exercising the
+      role split in test — the intent behind acceptance #5 ("fix real
+      privilege-mismatched DML surfaced as IT failures") — requires the app's
+      default datasource to connect as the least-privileged role under
+      @QuarkusTest. Measured blocker: ~36 provider ITs (and several collector
+      ITs) seed fixtures by inlining dataSource.getConnection() + raw INSERT
+      against the default datasource (collector-owned tables: post/source/tag/
+      post_embedding/post_entity). Flipping the default to the weak role makes
+      every such fixture INSERT fail with permission-denied. There is no shared
+      seeding seam today (no base test class; ~99 files open connections inline),
+      so the flip is a ~36–99-file rework — 4× files_budget:10 and a large
+      mechanical diff tangled into a security change. Resolution: defer behind
+      M1-163 (shared DB test-seeding seam, behavior-preserving). When M1-163 is
+      done, reopen M1-127, rebase its branch (carries the V31 migration WIP:
+      service-role LOGIN + audit_log_view redactors), flip the default to the
+      weak role via the seam, and finish. The migration half is already written
+      and committed on m1/M1-127-db-roles-audit-redaction as a resume point.
 reviews: {}
 overrides: []
 aborted_attempts: []
