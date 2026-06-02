@@ -12,8 +12,10 @@ import java.util.List;
 /**
  * D10 trust-anchor tests for {@link SimpleXMentionParser}. The parser
  * decides whether one or more {@code formattedText} mentions refer to
- * the bot, and the comparison MUST be done on decoded queue-address
- * bytes — never display names, never base64-string equality.
+ * the bot, and the comparison MUST be exact bytes of the queue-address
+ * string — never display names, and with no decoding or canonicalization
+ * (a canonicalizing compare is non-injective and lets distinct addresses
+ * collide).
  */
 class SimpleXMentionParserTest {
 
@@ -73,22 +75,28 @@ class SimpleXMentionParserTest {
     }
 
     /**
-     * Padded vs. unpadded base64 of the same bytes must compare equal
-     * (the JDK URL decoder accepts both forms). The bot's address and
-     * the mention payload may be encoded differently across simplex-chat
-     * versions; byte equality on the decoded form is the only invariant.
+     * Regression for the removed non-injective canonicalization. The old
+     * implementation base64-decoded each operand before comparing, so the
+     * base64 string {@code "MTIzNDU="} (which decodes to the bytes of
+     * {@code "12345"}) and the literal {@code "12345"} (UTF-8 fallback)
+     * collapsed to the same bytes {@code [0x31..0x35]} and compared equal
+     * — yet they are distinct queue-address strings, both of which pass
+     * {@link SimpleXMessageCodec#isValidQueueAddressId} and therefore both
+     * reach the parser. Exact-bytes string comparison must keep them
+     * distinct: the colliding non-mention is NOT read as a mention, and a
+     * real (exact-string) mention of the bot is NOT suppressed.
      */
     @Test
-    void base64PaddedVsUnpaddedEquivalence() {
-        byte[] bytes = new byte[]{
-                (byte) 0xDE, (byte) 0xAD, (byte) 0xBE, (byte) 0xEF, 1};
-        String padded = Base64.getUrlEncoder().encodeToString(bytes);
-        String unpadded = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    void collidingDecodedPair_notReadAsMention() {
+        String botAddress = "12345";
+        String collidingNonMention = "MTIzNDU=";
 
-        assertTrue(SimpleXMentionParser.botMentioned(List.of(padded), unpadded),
-                "padded vs unpadded base64 of identical bytes must match");
-        assertTrue(SimpleXMentionParser.botMentioned(List.of(unpadded), padded),
-                "comparison is symmetric across padding");
+        assertFalse(
+                SimpleXMentionParser.botMentioned(List.of(collidingNonMention), botAddress),
+                "distinct queue-address strings the old decode collided must NOT mention the bot");
+        assertTrue(
+                SimpleXMentionParser.botMentioned(List.of(botAddress), botAddress),
+                "an exact-string mention of the bot is still recognised, not suppressed");
     }
 
     /**

@@ -3,8 +3,7 @@ package app.zcat.infochat.messaging.impl.simplex;
 import org.jspecify.annotations.NonNull;
 
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
-import java.util.Base64;
+import java.security.MessageDigest;
 import java.util.List;
 
 /**
@@ -16,22 +15,29 @@ import java.util.List;
  * <p>Mention recognition follows {@code docs/spec/messaging.md}
  * §Required SPI surface — Receive: a group message counts as an
  * {@code @mention} of the bot <strong>only</strong> when an entry in the
- * frame's mention list carries a queue address whose decoded bytes equal
- * the bot's per-adapter queue address (decision D10). Display-name
- * matching is never sufficient — an attacker who can spoof the bot's
- * display name in a group must not be able to fake or suppress a
- * mention, and SimpleX's queue address is the D10 trust anchor for
- * this adapter.</p>
+ * frame's mention list carries a queue address that is
+ * <strong>byte-equal to the bot's per-adapter queue address</strong>
+ * (decision D10). Display-name matching is never sufficient — an
+ * attacker who can spoof the bot's display name in a group must not be
+ * able to fake or suppress a mention, and SimpleX's queue address is the
+ * D10 trust anchor for this adapter.</p>
  *
- * <p>Comparison is on the decoded bytes, not the base64 string. SimpleX
- * queue addresses are URL-safe base64; different encodings of the same
- * key (padded vs. unpadded, occasional standard-alphabet variants) MUST
- * compare equal under D10. When either operand fails to decode as
- * base64 (e.g. the simplex-chat WebSocket bot API also surfaces
- * decimal DB row ids that are legitimate values under
- * {@link SimpleXMessageCodec#isValidQueueAddressId}), the comparison
- * falls back to UTF-8 byte equality on the literal string — both sides
- * undergo the same decode attempt, so the fallback is symmetric.</p>
+ * <p>Comparison is on the <em>exact bytes of the queue-address string</em>,
+ * with no decoding or canonicalization. The mention entries are
+ * simplex-chat's own {@code format.memberRef} strings and the bot address
+ * is {@link SimpleXIdentity#queueAddress()}; both are the stable canonical
+ * identifier simplex-chat emits for a member, and both are constrained to
+ * {@link SimpleXMessageCodec#isValidQueueAddressId}'s character set before
+ * they reach this parser. A prior implementation base64-decoded each
+ * operand (with a UTF-8 literal fallback) before comparing the decoded
+ * bytes; that canonicalization was <strong>non-injective</strong> — e.g.
+ * the base64 string {@code "MTIzNDU="} and the literal {@code "12345"}
+ * both reduce to the bytes {@code [0x31..0x35]} and both pass the queue
+ * address validator, so a non-mention could be read as a bot mention (or
+ * a real mention suppressed). Treating the canonical identifier as the
+ * opaque value it is removes that collision: distinct queue-address
+ * strings are distinct mentions, and the only thing that mentions the bot
+ * is the bot's exact queue-address string.</p>
  */
 final class SimpleXMentionParser {
 
@@ -40,9 +46,15 @@ final class SimpleXMentionParser {
     }
 
     /**
-     * Returns true when any entry in {@code mentionQueueAddresses}
-     * decodes to the same bytes as {@code botQueueAddress}. An empty
-     * list returns false (no mentions → cannot mention the bot).
+     * Returns true when any entry in {@code mentionQueueAddresses} is
+     * byte-equal to {@code botQueueAddress}. An empty list returns false
+     * (no mentions → cannot mention the bot).
+     *
+     * <p>The per-entry comparison is constant-time
+     * ({@link MessageDigest#isEqual}) so the number of leading bytes a
+     * mention shares with the bot's queue address is not observable via
+     * timing — the queue address is the group-mode authorization trust
+     * anchor (D10) and must not leak byte-by-byte.</p>
      *
      * @param mentionQueueAddresses queue addresses extracted from the
      *                              frame's mention metadata; never null,
@@ -50,45 +62,21 @@ final class SimpleXMentionParser {
      * @param botQueueAddress       the bot's per-adapter queue address
      *                              ({@link SimpleXIdentity#queueAddress()});
      *                              never null.
-     * @return true iff some mention entry byte-equals the bot's queue
-     *         address under base64-decoded (with literal-string
-     *         fallback) comparison.
+     * @return true iff some mention entry is byte-equal to the bot's
+     *         queue-address string.
      */
     static boolean botMentioned(@NonNull List<String> mentionQueueAddresses,
                                 @NonNull String botQueueAddress) {
         if (mentionQueueAddresses.isEmpty()) {
             return false;
         }
-        byte[] botBytes = decodeQueueAddress(botQueueAddress);
+        byte[] botBytes = botQueueAddress.getBytes(StandardCharsets.UTF_8);
         for (String mention : mentionQueueAddresses) {
-            byte[] mentionBytes = decodeQueueAddress(mention);
-            if (Arrays.equals(botBytes, mentionBytes)) {
+            byte[] mentionBytes = mention.getBytes(StandardCharsets.UTF_8);
+            if (MessageDigest.isEqual(mentionBytes, botBytes)) {
                 return true;
             }
         }
         return false;
-    }
-
-    /**
-     * Decode a queue address into its raw bytes, accepting either the
-     * URL-safe base64 cryptographic form (with or without padding) or a
-     * non-base64 literal (e.g. a simplex-chat DB row id). The literal
-     * fallback is the UTF-8 bytes of the original string; both sides of
-     * the comparison apply the same routine so the fallback is
-     * symmetric — two row ids "12345" still byte-equal each other, and
-     * a row id never accidentally collides with a real queue address
-     * because their character sets do not overlap meaningfully (a
-     * 5-digit decimal is not a valid base64-decoded queue address).
-     */
-    private static byte[] decodeQueueAddress(String value) {
-        try {
-            return Base64.getUrlDecoder().decode(value);
-        } catch (IllegalArgumentException urlFailed) {
-            try {
-                return Base64.getDecoder().decode(value);
-            } catch (IllegalArgumentException stdFailed) {
-                return value.getBytes(StandardCharsets.UTF_8);
-            }
-        }
     }
 }
