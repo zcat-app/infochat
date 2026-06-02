@@ -70,7 +70,7 @@ public final class SignalAdapter implements MessagingAdapter {
     private static final CapabilityFlags CAPABILITIES = new CapabilityFlags(
             /* supportsMentionByContactId */ true,
             /* supportsMembershipEvents   */ true,
-            /* supportsCodeFormatting     */ false,
+            /* supportsCodeFormatting     */ true,
             /* supportsMarkdownLinks      */ false,
             /* supportsMultilineCode      */ false,
             /* supportsAttachments        */ false,
@@ -336,7 +336,7 @@ public final class SignalAdapter implements MessagingAdapter {
         SignalJsonRpcClient c = client;
         if (c == null) {
             throw new MessagingException(
-                    FailureCategory.TRANSIENT,
+                    FailureCategory.PERMANENT,
                     "Signal adapter " + op + ": JSON-RPC client not connected (start() not called or close() in progress)");
         }
         return c;

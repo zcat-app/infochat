@@ -1,9 +1,10 @@
 ---
 id: M1-147
 title: "Adapter capability-flag reconciliation + cross-adapter contract test (CT5)"
-status: pending
+status: done
 created: 2026-06-02
 last_updated: 2026-06-02
+outline_file: target/m1-tick-outline-M1-147.md
 blocked_by: []
 files_budget: 12
 files_scope:
@@ -41,7 +42,20 @@ spec_refs:
   - docs/spec/messaging.md §Capability flags (minimum set)
   - docs/spec/verification.md §Messaging
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-02
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 11
+      added: 187
+      removed: 57
 escalations:
   - date: 2026-06-02
     reason: outline-fail
@@ -164,7 +178,12 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-02
+  verdict: PASS
+  warnings:
+    - "Acceptance item 5 is phrased as a scope-exclusion clause (INBOUND decode validators are explicitly OUT of item 4's scope and stay as-is) rather than a positive checkable assertion. Verifiable by inspecting the named classes are not modified in the diff; informational, does not block."
+  blockers: []
 ---
 
 # M1-147: Adapter capability-flag reconciliation + cross-adapter contract test (CT5)

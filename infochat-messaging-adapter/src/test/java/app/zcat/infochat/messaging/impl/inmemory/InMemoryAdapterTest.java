@@ -27,7 +27,7 @@ import org.junit.jupiter.api.Test;
  * history shape, finalize exclusivity, typing-event ordering, and the
  * trust-level constructor defaulting.
  *
- * <p>Capability-flag values (supportsCodeFormatting=false,
+ * <p>Capability-flag values (supportsCodeFormatting=true,
  * supportsMarkdownLinks=false, supportsMentionByContactId=true,
  * supportsMembershipEvents=true) are asserted alongside the trust-level
  * constructor test rather than each in their own @Test method — the
@@ -122,7 +122,7 @@ class InMemoryAdapterTest {
 
         // Capability declarations the umbrella locks in (MVP §4 readability;
         // §6.2.1 markdown-link gate; §6.6 group-test coverage rationale).
-        assertFalse(defaultAdapter.capabilities().supportsCodeFormatting());
+        assertTrue(defaultAdapter.capabilities().supportsCodeFormatting());
         assertFalse(defaultAdapter.capabilities().supportsMarkdownLinks());
         assertTrue(defaultAdapter.capabilities().supportsMentionByContactId());
         assertTrue(defaultAdapter.capabilities().supportsMembershipEvents());

@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import app.zcat.infochat.messaging.FailureCategory;
+import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.ScopeRef;
 
 import org.junit.jupiter.api.Test;
@@ -300,34 +301,36 @@ class SimpleXMessageCodecTest {
         // Defense-in-depth (design §6.4.4): every encode entry point
         // re-asserts the validator on the ScopeRef's contactId /
         // adapterGroupId, and on chatItemId for the edit paths. A failure
-        // throws IllegalStateException so a Provider bug that bypassed the
-        // decode-time gate (e.g., synthesised ScopeRef from a non-codec
-        // source) still cannot leak a forged verb to the wire.
+        // throws MessagingException(PERMANENT) — the SPI's two-category
+        // retry model — so a Provider bug that bypassed the decode-time
+        // gate (e.g., synthesised ScopeRef from a non-codec source) still
+        // cannot leak a forged verb to the wire, and the fault routes as a
+        // non-retryable permanent failure rather than an unchecked escape.
         ScopeRef badDm = new ScopeRef.Dm("abc /_send @victim json {}");
         ScopeRef badGroup = new ScopeRef.Group("group\n/_set_contact_typing @v on");
         ScopeRef goodDm = new ScopeRef.Dm("contact-abc");
 
-        assertThrows(IllegalStateException.class,
-                () -> SimpleXMessageCodec.encodeSendCommand("corr-1", badDm, "hi"));
-        assertThrows(IllegalStateException.class,
-                () -> SimpleXMessageCodec.encodeSendCommand("corr-1", badGroup, "hi"));
+        assertEquals(FailureCategory.PERMANENT, assertThrows(MessagingException.class,
+                () -> SimpleXMessageCodec.encodeSendCommand("corr-1", badDm, "hi")).category());
+        assertEquals(FailureCategory.PERMANENT, assertThrows(MessagingException.class,
+                () -> SimpleXMessageCodec.encodeSendCommand("corr-1", badGroup, "hi")).category());
 
-        assertThrows(IllegalStateException.class,
-                () -> SimpleXMessageCodec.encodeUpdateCommand("corr-1", "chat-item-1", badDm, "hi"));
-        assertThrows(IllegalStateException.class,
-                () -> SimpleXMessageCodec.encodeFinalizeCommand("corr-1", "chat-item-1", badDm, "hi"));
-        assertThrows(IllegalStateException.class,
-                () -> SimpleXMessageCodec.encodeTypingCommand("corr-1", badDm, true));
+        assertEquals(FailureCategory.PERMANENT, assertThrows(MessagingException.class,
+                () -> SimpleXMessageCodec.encodeUpdateCommand("corr-1", "chat-item-1", badDm, "hi")).category());
+        assertEquals(FailureCategory.PERMANENT, assertThrows(MessagingException.class,
+                () -> SimpleXMessageCodec.encodeFinalizeCommand("corr-1", "chat-item-1", badDm, "hi")).category());
+        assertEquals(FailureCategory.PERMANENT, assertThrows(MessagingException.class,
+                () -> SimpleXMessageCodec.encodeTypingCommand("corr-1", badDm, true)).category());
 
         // chatItemId is round-tripped from simplex-chat in a SendAck; an
         // attacker-poisoned ack would surface here. encodeUpdate / encodeFinalize
         // must reject a tainted chatItemId even with a clean ScopeRef.
-        assertThrows(IllegalStateException.class,
+        assertEquals(FailureCategory.PERMANENT, assertThrows(MessagingException.class,
                 () -> SimpleXMessageCodec.encodeUpdateCommand(
-                        "corr-1", "chat-item-1\n/_send @victim json {}", goodDm, "hi"));
-        assertThrows(IllegalStateException.class,
+                        "corr-1", "chat-item-1\n/_send @victim json {}", goodDm, "hi")).category());
+        assertEquals(FailureCategory.PERMANENT, assertThrows(MessagingException.class,
                 () -> SimpleXMessageCodec.encodeFinalizeCommand(
-                        "corr-1", "chat-item-1 forged", goodDm, "hi"));
+                        "corr-1", "chat-item-1 forged", goodDm, "hi")).category());
     }
 
     // --- M1-118: inbound text-size cap (Finding 3, DOS) ---

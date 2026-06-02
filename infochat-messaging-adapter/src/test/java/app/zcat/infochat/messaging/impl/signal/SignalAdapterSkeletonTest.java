@@ -23,7 +23,7 @@ class SignalAdapterSkeletonTest {
         CapabilityFlags caps = adapter.capabilities();
         assertTrue(caps.supportsMentionByContactId(), "Signal mentionUuid = ACI");
         assertTrue(caps.supportsMembershipEvents(), "Signal exposes native membership events");
-        assertFalse(caps.supportsCodeFormatting());
+        assertTrue(caps.supportsCodeFormatting(), "design §6.5.2: Signal renders monospace");
         assertFalse(caps.supportsMarkdownLinks(), "v1 adapters MUST declare supportsMarkdownLinks=false");
         assertFalse(caps.supportsMultilineCode());
         assertFalse(caps.supportsAttachments());

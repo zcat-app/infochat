@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import app.zcat.infochat.messaging.FailureCategory;
 import app.zcat.infochat.messaging.Identity;
 import app.zcat.infochat.messaging.InboundMessage;
+import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.ScopeRef;
 
 import java.time.Instant;
@@ -102,14 +103,14 @@ final class SimpleXMessageCodec {
      * The {@code corrId} is the adapter-chosen correlation id used to pair
      * the response carrying the new {@code chatItemId} back to the caller.
      *
-     * @throws IllegalArgumentException if {@code text} exceeds
-     *         {@link #MAX_OUTBOUND_TEXT_BYTES} — the Provider's
-     *         capability-flag chunking should have prevented this; the
-     *         check is a system-boundary defense.
+     * @throws MessagingException ({@link FailureCategory#PERMANENT}) if
+     *         {@code text} exceeds {@link #MAX_OUTBOUND_TEXT_BYTES} — the
+     *         Provider's capability-flag chunking should have prevented
+     *         this; the check is a system-boundary defense.
      */
     static @NonNull String encodeSendCommand(@NonNull String corrId,
                                              @NonNull ScopeRef scope,
-                                             @NonNull String text) {
+                                             @NonNull String text) throws MessagingException {
         requireWithinCap(text);
         String target = targetSelector(scope);
         String cmd = "/_send " + target + " json " + jsonString(textContent(text));
@@ -125,7 +126,7 @@ final class SimpleXMessageCodec {
     static @NonNull String encodeUpdateCommand(@NonNull String corrId,
                                                @NonNull String chatItemId,
                                                @NonNull ScopeRef scope,
-                                               @NonNull String text) {
+                                               @NonNull String text) throws MessagingException {
         return encodeEdit(corrId, chatItemId, scope, text, /* live */ true);
     }
 
@@ -133,12 +134,12 @@ final class SimpleXMessageCodec {
     static @NonNull String encodeFinalizeCommand(@NonNull String corrId,
                                                  @NonNull String chatItemId,
                                                  @NonNull ScopeRef scope,
-                                                 @NonNull String text) {
+                                                 @NonNull String text) throws MessagingException {
         return encodeEdit(corrId, chatItemId, scope, text, /* live */ false);
     }
 
     private static String encodeEdit(String corrId, String chatItemId, ScopeRef scope,
-                                     String text, boolean live) {
+                                     String text, boolean live) throws MessagingException {
         requireWithinCap(text);
         // chatItemId is round-tripped from simplex-chat in a SendAck and equally
         // untrusted; reject it before pasting it into a command verb. The decode
@@ -162,13 +163,13 @@ final class SimpleXMessageCodec {
      */
     static @NonNull String encodeTypingCommand(@NonNull String corrId,
                                                @NonNull ScopeRef scope,
-                                               boolean typing) {
+                                               boolean typing) throws MessagingException {
         String target = targetSelector(scope);
         String cmd = "/_set_contact_typing " + target + " " + (typing ? "on" : "off");
         return envelope(corrId, cmd);
     }
 
-    private static String targetSelector(ScopeRef scope) {
+    private static String targetSelector(ScopeRef scope) throws MessagingException {
         return switch (scope) {
             case ScopeRef.Dm dm -> {
                 requireValidQueueAddressId(dm.contactId(), "contactId");
@@ -183,16 +184,19 @@ final class SimpleXMessageCodec {
 
     /**
      * Reject any id that does not match the queue-address character set
-     * (design §6.4.4). Encode-time use throws {@link IllegalStateException};
-     * decode-time callers use the lower-level {@link #isValidQueueAddressId}
-     * predicate and convert a failure into an {@link Ignored} frame.
+     * (design §6.4.4). Encode-time use throws {@link MessagingException}
+     * with {@link FailureCategory#PERMANENT} so the fault reaches the
+     * send/update/finalize SPI contract through the two-category retry
+     * model rather than escaping as an unchecked exception; decode-time
+     * callers use the lower-level {@link #isValidQueueAddressId} predicate
+     * and convert a failure into an {@link Ignored} frame.
      */
-    private static void requireValidQueueAddressId(String id, String fieldName) {
+    private static void requireValidQueueAddressId(String id, String fieldName) throws MessagingException {
         if (!isValidQueueAddressId(id)) {
             // Do NOT log the raw id — it may contain injected newlines that
             // would split the log line and create a false-positive
             // command-injection footprint in stdout-scraping operators.
-            throw new IllegalStateException(
+            throw new MessagingException(FailureCategory.PERMANENT,
                     fieldName + " fails queue-address validator (design §6.4.4); length="
                             + id.length());
         }
@@ -223,10 +227,10 @@ final class SimpleXMessageCodec {
         return raw;
     }
 
-    private static void requireWithinCap(String text) {
+    private static void requireWithinCap(String text) throws MessagingException {
         int byteLength = text.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
         if (byteLength > MAX_OUTBOUND_TEXT_BYTES) {
-            throw new IllegalArgumentException(
+            throw new MessagingException(FailureCategory.PERMANENT,
                     "outbound text " + byteLength + " bytes exceeds adapter cap "
                             + MAX_OUTBOUND_TEXT_BYTES);
         }

@@ -58,7 +58,7 @@ public final class InMemoryAdapter implements MessagingAdapter {
     private static final CapabilityFlags CAPABILITIES = new CapabilityFlags(
             /* supportsMentionByContactId */ true,
             /* supportsMembershipEvents   */ true,
-            /* supportsCodeFormatting     */ false,
+            /* supportsCodeFormatting     */ true,
             /* supportsMarkdownLinks      */ false,
             /* supportsMultilineCode      */ true,
             /* supportsAttachments        */ false,

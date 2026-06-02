@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 22 |
+| pending | 21 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 168 |
+| done | 169 |
 | deferred | 3 |
 | **total** | **193** |
 
@@ -30,7 +30,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-143 — MembershipEventHandler audit-before-effect (Invariant 7) (complexity: medium, risk: medium)
 - M1-144 — UserRepository extraction + /promote FOR UPDATE (complexity: medium, risk: medium)
 - M1-146 — JSpecify annotation pass + lint-contracts CI + defensive-code sweep (CT4) (complexity: medium, risk: low)
-- M1-147 — Adapter capability-flag reconciliation + cross-adapter contract test (CT5) (complexity: high, risk: low)
 - M1-148 — MessagingAdapter SPI lifecycle (finalize→shutdown, start/stop) + low-level cleanup (complexity: medium, risk: low)
 - M1-150 — Digest hygiene (concurrency guard, timezone WARN, broad-catch narrow) (complexity: low, risk: low)
 - M1-152 — Schema-hardening migration (stage2_verdict CHECK + V27 audit verb + Nostr index) (complexity: low, risk: medium)
@@ -81,6 +80,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-149 | Fetcher pagination cursor URL-encoding | 2026-06-02 | round 1 APPROVE |
+| M1-147 | Adapter capability-flag reconciliation + cross-adapter contract test (CT5) | 2026-06-02 | round 1 APPROVE |
 | M1-145 | /save personal-tag length + count caps | 2026-06-02 | round 1 APPROVE |
 | M1-141 | LLM adapter robustness (body cap, Retry-After) + router decoupling | 2026-06-02 | round 2 APPROVE |
 | M1-140 | EmbeddingResult value semantics + embedding SPI size-equals-input contract | 2026-06-02 | round 1 APPROVE |
@@ -89,7 +89,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-136 | local-only startup guard covers embedding endpoint + remote-embedding log | 2026-06-02 | round 2 APPROVE |
 | M1-135 | SSRF hardening bundle | 2026-06-02 | round 1 APPROVE |
 | M1-133 | CT1 shared text/util extraction (JsonEscaper + TagNormalizer + Sha256) + TODO cleanup | 2026-06-02 | round 1 APPROVE |
-| M1-132 | Signal/SimpleX adapter resilience (handler isolation, hung-process, config-validate, send/close race) | 2026-06-02 | round 1 APPROVE |
 
 ---
 
@@ -338,7 +337,7 @@ M1-141 (done)
 M1-142 (pending) ← runnable
 M1-143 (pending) ← runnable
 M1-145 (done)
-M1-147 (pending) ← runnable
+M1-147 (done)
 M1-148 (pending) ← runnable
 M1-149 (done)
 M1-150 (pending) ← runnable

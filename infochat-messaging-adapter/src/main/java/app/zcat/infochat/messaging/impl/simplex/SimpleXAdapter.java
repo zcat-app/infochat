@@ -45,10 +45,10 @@ import java.util.function.Consumer;
  * and methods that need the deps throw {@link IllegalStateException}.
  * Provider-side wiring (M1-105) instantiates with the configured form.</p>
  *
- * <p>The supportsTypingIndicator capability flag remains {@code true}
- * (declared by the M1-102 skeleton); acceptance item 11 commits to
- * sending {@code apiSetContactTyping}-shaped commands when the SPI's
- * {@link #setTyping} is invoked. If simplex-chat rejects the command, the
+ * <p>The supportsTypingIndicator capability flag is {@code false} per
+ * design §6.4.2 (SimpleX has no first-class typing indicator). {@link
+ * #setTyping} still issues the {@code apiSetContactTyping}-shaped command
+ * on a best-effort basis; if simplex-chat rejects it, the
  * fire-and-forget path absorbs the failure — typing is best-effort by
  * the SPI's own contract ({@link MessagingAdapter#setTyping}).</p>
  */
@@ -74,7 +74,7 @@ public final class SimpleXAdapter implements MessagingAdapter {
             /* maxInflightSends           */ 4,
             /* maxSendsPerSecond          */ 8,
             /* supportsMessageEdit        */ true,
-            /* supportsTypingIndicator    */ true,
+            /* supportsTypingIndicator    */ false,
             /* minEditInterval            */ Duration.ZERO);
 
     static final Duration WS_READY_TIMEOUT = Duration.ofSeconds(10);
@@ -292,9 +292,18 @@ public final class SimpleXAdapter implements MessagingAdapter {
             // the typing pulse per SPI Javadoc on setTyping (no throw).
             return;
         }
-        String envelope = SimpleXMessageCodec.encodeTypingCommand(
-                nextCorrId(), scope, typing);
-        ws.sendFireAndForget(envelope);
+        try {
+            String envelope = SimpleXMessageCodec.encodeTypingCommand(
+                    nextCorrId(), scope, typing);
+            ws.sendFireAndForget(envelope);
+        } catch (MessagingException e) {
+            // Best-effort: encodeTypingCommand now propagates a checked
+            // PERMANENT on a bad queue address (the codec's encode-time
+            // validator). setTyping has a no-throw SPI contract, so absorb
+            // it here exactly as the ws == null branch above absorbs an
+            // un-started adapter.
+            LOG.debug("setTyping absorbed encode failure: {}", e.category());
+        }
     }
 
     @Override
