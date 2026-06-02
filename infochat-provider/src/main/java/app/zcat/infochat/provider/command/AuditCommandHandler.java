@@ -3,6 +3,7 @@ package app.zcat.infochat.provider.command;
 import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
+import app.zcat.infochat.core.util.JsonEscaper;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
@@ -109,9 +110,9 @@ public class AuditCommandHandler implements CommandHandler {
             try {
                 StringBuilder detailsJson = new StringBuilder("{");
                 detailsJson.append("\"actor\":").append(args.actor != null
-                        ? "\"" + escapeJson(args.actor) + "\"" : "null");
+                        ? "\"" + JsonEscaper.escape(args.actor) + "\"" : "null");
                 detailsJson.append(",\"action\":").append(args.action != null
-                        ? "\"" + escapeJson(args.action) + "\"" : "null");
+                        ? "\"" + JsonEscaper.escape(args.action) + "\"" : "null");
                 detailsJson.append('}');
                 RedactionHook.AuditRow auditRow = RedactionHook.AuditRow.builder()
                         .actorUserId(actor.id)
@@ -207,14 +208,6 @@ public class AuditCommandHandler implements CommandHandler {
             LOG.errorf(e, "/audit query failed");
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL));
         }
-    }
-
-    static String escapeJson(String value) {
-        return value.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t");
     }
 
     private static void bindParams(PreparedStatement ps, List<Object> params) throws SQLException {

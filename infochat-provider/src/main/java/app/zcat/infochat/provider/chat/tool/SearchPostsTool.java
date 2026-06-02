@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.chat.tool;
 
+import app.zcat.infochat.core.util.JsonEscaper;
 import app.zcat.infochat.provider.chat.ChatToolRegistry;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
@@ -193,19 +194,7 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
 
     static @NonNull String jsonStr(@Nullable String s) {
         if (s == null) return "null";
-        StringBuilder sb = new StringBuilder("\"");
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            switch (c) {
-                case '"' -> sb.append("\\\"");
-                case '\\' -> sb.append("\\\\");
-                case '\n' -> sb.append("\\n");
-                case '\r' -> sb.append("\\r");
-                case '\t' -> sb.append("\\t");
-                default -> sb.append(c);
-            }
-        }
-        return sb.append('"').toString();
+        return "\"" + JsonEscaper.escape(s) + "\"";
     }
 
     static void appendJsonArray(@NonNull StringBuilder sb, @NonNull String[] items) {

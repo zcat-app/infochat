@@ -3,6 +3,9 @@ package app.zcat.infochat.collector.bootstrap;
 import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
+import app.zcat.infochat.core.util.JsonEscaper;
+import app.zcat.infochat.core.util.Sha256;
+import app.zcat.infochat.core.util.TagNormalizer;
 import io.quarkus.runtime.Startup;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Priority;
@@ -16,20 +19,15 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.sql.Array;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Timestamp;
-import java.text.Normalizer;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.regex.Pattern;
 
 /**
  * Reads {@code bootstrap-sources.json} at Collector startup and idempotently
@@ -57,8 +55,7 @@ import java.util.regex.Pattern;
  *       lifecycle, not the bootstrap path).</li>
  *   <li>Union {@code tags} across every entry, upsert into {@code tag}
  *       with {@code source_origin = 'bootstrap'} ({@code ON CONFLICT
- *       (name) DO NOTHING}). Inline NFC + {@code Locale.ROOT.toLowerCase}
- *       normalization until T1-D extracts the shared
+ *       (name) DO NOTHING}). Tag normalization via the shared
  *       {@code TagNormalizer}.</li>
  *   <li>Insert one {@code audit_log} row with action
  *       {@code BOOTSTRAP_SOURCE_LOAD}; {@code target_id} is the SHA-256
@@ -87,12 +84,6 @@ import java.util.regex.Pattern;
 public class BootstrapLoader {
 
     private static final Logger LOG = Logger.getLogger(BootstrapLoader.class);
-
-    // Same pattern as TagVocabulary.TAG_NAME_PATTERN; duplicated here
-    // because that constant is package-private. TODO(T1-D): consolidate
-    // into shared TagNormalizer helper.
-    private static final Pattern TAG_NAME_PATTERN =
-        Pattern.compile("^[a-z0-9][a-z0-9-]{0,47}$");
 
     static final String AUDIT_VERB = AuditAction.BOOTSTRAP_SOURCE_LOAD.name();
 
@@ -129,7 +120,7 @@ public class BootstrapLoader {
             throw new IllegalStateException(
                 "BootstrapLoader: could not read bootstrap-sources file at " + path.toAbsolutePath(), e);
         }
-        String sha256 = sha256Hex(bytes);
+        String sha256 = Sha256.hex(bytes);
 
         BootstrapSourcesParser parser = new BootstrapSourcesParser();
         List<BootstrapSourcesEntry> entries = parser.parse(bytes);
@@ -225,7 +216,7 @@ public class BootstrapLoader {
         // before any user has acted. target_id is the file content SHA
         // so the audit trail is keyed by file-content version.
         String detailsJson =
-            "{\"path\":\"" + jsonEscape(resolvedPath)
+            "{\"path\":\"" + JsonEscaper.escape(resolvedPath)
                 + "\",\"sha256\":\"" + sha256
                 + "\",\"entry_count\":" + entryCount + "}";
         RedactionHook.AuditRow row = RedactionHook.AuditRow.builder()
@@ -257,55 +248,19 @@ public class BootstrapLoader {
     }
 
     /**
-     * NFC + Locale.ROOT lower-case + character-class validation against
-     * {@link #TAG_NAME_PATTERN}. Throws on invalid tags so the operator
-     * gets a fast-fail at startup rather than a cryptic DB constraint
+     * Delegates to the shared {@link TagNormalizer#normalize(String)}
+     * (NFC + {@code Locale.ROOT} lower-case + character-class
+     * validation). Throws on an invalid tag so the operator gets a
+     * fast-fail at startup rather than a cryptic DB constraint
      * violation mid-transaction.
      */
-    // TODO(T1-D): move to TagNormalizer helper
     private static String normalizeTag(String raw) {
-        String normalized = Normalizer.normalize(raw, Normalizer.Form.NFC).toLowerCase(Locale.ROOT);
-        if (!TAG_NAME_PATTERN.matcher(normalized).matches()) {
+        String normalized = TagNormalizer.normalize(raw);
+        if (normalized == null) {
             throw new IllegalStateException(
-                "BootstrapLoader: invalid tag '" + raw + "' (normalized: '" + normalized
-                    + "') — must match " + TAG_NAME_PATTERN.pattern());
+                "BootstrapLoader: invalid tag '" + raw + "' — must match "
+                    + TagNormalizer.TAG_NAME_PATTERN.pattern());
         }
         return normalized;
-    }
-
-    private static String sha256Hex(byte[] data) {
-        MessageDigest md;
-        try {
-            md = MessageDigest.getInstance("SHA-256");
-        } catch (NoSuchAlgorithmException e) {
-            // SHA-256 is a JRE-mandated digest; unreachable.
-            throw new IllegalStateException("SHA-256 unavailable in this JRE", e);
-        }
-        byte[] digest = md.digest(data);
-        StringBuilder hex = new StringBuilder(digest.length * 2);
-        for (byte b : digest) {
-            hex.append(String.format("%02x", b & 0xff));
-        }
-        return hex.toString();
-    }
-
-    /**
-     * Minimal JSON-string escaper for the audit row's details_json
-     * payload. Only escapes the four characters Path-toString output
-     * can legally contain: backslash, double-quote, CR, LF.
-     */
-    private static String jsonEscape(String raw) {
-        StringBuilder out = new StringBuilder(raw.length() + 8);
-        for (int i = 0; i < raw.length(); i++) {
-            char c = raw.charAt(i);
-            switch (c) {
-                case '\\' -> out.append("\\\\");
-                case '"'  -> out.append("\\\"");
-                case '\r' -> out.append("\\r");
-                case '\n' -> out.append("\\n");
-                default   -> out.append(c);
-            }
-        }
-        return out.toString();
     }
 }

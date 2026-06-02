@@ -3,6 +3,7 @@ package app.zcat.infochat.collector.bootstrap;
 import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
+import app.zcat.infochat.core.util.JsonEscaper;
 import io.quarkus.runtime.Startup;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Priority;
@@ -328,7 +329,7 @@ public class BootstrapAssetsLoader {
     private void insertAuditRow(Connection conn, String sha256, String resolvedPath,
                                 int upsertedCount, int softDisabledCount) throws SQLException {
         String detailsJson =
-            "{\"path\":\"" + jsonEscape(resolvedPath)
+            "{\"path\":\"" + JsonEscaper.escape(resolvedPath)
                 + "\",\"sha256\":\"" + sha256
                 + "\",\"upserted_count\":" + upsertedCount
                 + ",\"soft_disabled_count\":" + softDisabledCount + "}";
@@ -375,18 +376,4 @@ public class BootstrapAssetsLoader {
         return hex.toString();
     }
 
-    private static String jsonEscape(String raw) {
-        StringBuilder out = new StringBuilder(raw.length() + 8);
-        for (int i = 0; i < raw.length(); i++) {
-            char c = raw.charAt(i);
-            switch (c) {
-                case '\\' -> out.append("\\\\");
-                case '"'  -> out.append("\\\"");
-                case '\r' -> out.append("\\r");
-                case '\n' -> out.append("\\n");
-                default   -> out.append(c);
-            }
-        }
-        return out.toString();
-    }
 }

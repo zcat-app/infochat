@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.command;
 
+import app.zcat.infochat.core.util.JsonEscaper;
 import org.jspecify.annotations.NonNull;
 
 import java.util.ArrayList;
@@ -142,7 +143,7 @@ public final class ExportPaginator {
                 sb.append(',');
             }
             firstTable = false;
-            sb.append('"').append(escapeJsonString(entry.getKey())).append("\":[");
+            sb.append('"').append(JsonEscaper.escape(entry.getKey())).append("\":[");
             StringJoiner joiner = new StringJoiner(",");
             for (String row : entry.getValue()) {
                 joiner.add(row);
@@ -153,21 +154,4 @@ public final class ExportPaginator {
         return sb.toString();
     }
 
-    private static String escapeJsonString(String s) {
-        // Table names are lowercase alpha + underscore; no escaping
-        // needed in practice, but handle the general case.
-        StringBuilder sb = new StringBuilder(s.length());
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            switch (c) {
-                case '"' -> sb.append("\\\"");
-                case '\\' -> sb.append("\\\\");
-                case '\n' -> sb.append("\\n");
-                case '\r' -> sb.append("\\r");
-                case '\t' -> sb.append("\\t");
-                default -> sb.append(c);
-            }
-        }
-        return sb.toString();
-    }
 }

@@ -3,6 +3,7 @@ package app.zcat.infochat.collector.eval.stage2;
 import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
+import app.zcat.infochat.core.util.JsonEscaper;
 import io.quarkus.runtime.Startup;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Priority;
@@ -112,7 +113,7 @@ public class StartupReleaseOnStage2FailureWarn {
 
     private void writeAuditRow() throws SQLException {
         String targetId = hostPidTargetId();
-        String detailsJson = "{\"profile\":\"" + jsonEscape(profileLabel) + "\"}";
+        String detailsJson = "{\"profile\":\"" + JsonEscaper.escape(profileLabel) + "\"}";
 
         RedactionHook.AuditRow row = RedactionHook.AuditRow.builder()
                 .action(AuditAction.STARTUP_RELEASE_ON_STAGE2_FAILURE_TRUE)
@@ -141,36 +142,4 @@ public class StartupReleaseOnStage2FailureWarn {
         return name == null || name.isEmpty() ? "collector-unknown" : name;
     }
 
-    /**
-     * Minimal JSON-string escape for the profile-label field.
-     * {@code profile.label} values are operator-controlled but
-     * derived from a small enum (laptop / vps / pi / remote-llm /
-     * unknown), so the realistic charset is ASCII alphanumeric +
-     * hyphen — the escape is precaution against a misconfigured
-     * value containing quotes or backslashes.
-     */
-    private static String jsonEscape(String s) {
-        if (s == null) {
-            return "";
-        }
-        StringBuilder out = new StringBuilder(s.length());
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            switch (c) {
-                case '\\' -> out.append("\\\\");
-                case '"' -> out.append("\\\"");
-                case '\n' -> out.append("\\n");
-                case '\r' -> out.append("\\r");
-                case '\t' -> out.append("\\t");
-                default -> {
-                    if (c < 0x20) {
-                        out.append(String.format("\\u%04x", (int) c));
-                    } else {
-                        out.append(c);
-                    }
-                }
-            }
-        }
-        return out.toString();
-    }
 }

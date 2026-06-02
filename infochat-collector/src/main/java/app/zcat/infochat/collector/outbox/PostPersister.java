@@ -1,20 +1,18 @@
 package app.zcat.infochat.collector.outbox;
 
 import app.zcat.infochat.core.ingest.NormalizedPost;
+import app.zcat.infochat.core.util.Sha256;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 import javax.sql.DataSource;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
-import java.util.HexFormat;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -162,18 +160,7 @@ public class PostPersister {
      */
     static String deriveUid(UUID sourceUuid, String upstreamIdentifier) {
         String preimage = sourceUuid.toString() + "|" + upstreamIdentifier;
-        return sha256Hex(preimage.getBytes(StandardCharsets.UTF_8));
-    }
-
-    private static String sha256Hex(byte[] data) {
-        MessageDigest md;
-        try {
-            md = MessageDigest.getInstance("SHA-256");
-        } catch (NoSuchAlgorithmException e) {
-            // SHA-256 is JRE-mandated; unreachable.
-            throw new IllegalStateException("SHA-256 unavailable in this JRE", e);
-        }
-        return HexFormat.of().formatHex(md.digest(data));
+        return Sha256.hex(preimage.getBytes(StandardCharsets.UTF_8));
     }
 
     /**

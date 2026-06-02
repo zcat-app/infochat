@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 27 |
+| pending | 26 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 163 |
+| done | 164 |
 | deferred | 2 |
 | **total** | **192** |
 
@@ -26,13 +26,14 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-127 — DB per-service role wiring + audit_log_view redaction (complexity: high, risk: high)
 - M1-131 — ChatAgent Jackson tool-arg parse + dispatcher catch widening + TOOL-LEAK (complexity: high, risk: high)
-- M1-133 — CT1 shared text/util extraction (JsonEscaper + TagNormalizer + Sha256) + TODO cleanup (complexity: medium, risk: medium)
 - M1-134 — quarantine_review NOTIFY channel completeness (CT2) (complexity: high, risk: medium)
 - M1-138 — /stop group/DM scope fix + /help per-tier filtering (complexity: medium, risk: medium)
 - M1-139 — Kind-6 repost edge resolution (complexity: high, risk: medium)
 - M1-141 — LLM adapter robustness (body cap, Retry-After) + router decoupling (complexity: medium, risk: medium)
 - M1-142 — NewPostListener reconcile after reconnect (complexity: low, risk: medium)
 - M1-143 — MembershipEventHandler audit-before-effect (Invariant 7) (complexity: medium, risk: medium)
+- M1-144 — UserRepository extraction + /promote FOR UPDATE (complexity: medium, risk: medium)
+- M1-146 — JSpecify annotation pass + lint-contracts CI + defensive-code sweep (CT4) (complexity: medium, risk: low)
 - M1-147 — Adapter capability-flag reconciliation + cross-adapter contract test (CT5) (complexity: high, risk: low)
 - M1-148 — MessagingAdapter SPI lifecycle (finalize→shutdown, start/stop) + low-level cleanup (complexity: medium, risk: low)
 - M1-149 — Fetcher pagination cursor URL-encoding (complexity: low, risk: medium)
@@ -63,8 +64,6 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-144 — blocked_by: M1-133 (pending)
-- M1-146 — blocked_by: M1-133 (pending)
 - M1-151 — blocked_by: M1-144 (pending)
 - M1-154 — blocked_by: M1-131 (pending)
 
@@ -90,11 +89,11 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-137 | SimpleX mention canonicalization → exact-bytes compare | 2026-06-02 | round 1 APPROVE |
 | M1-136 | local-only startup guard covers embedding endpoint + remote-embedding log | 2026-06-02 | round 2 APPROVE |
 | M1-135 | SSRF hardening bundle | 2026-06-02 | round 1 APPROVE |
+| M1-133 | CT1 shared text/util extraction (JsonEscaper + TagNormalizer + Sha256) + TODO cleanup | 2026-06-02 | round 1 APPROVE |
 | M1-132 | Signal/SimpleX adapter resilience (handler isolation, hung-process, config-validate, send/close race) | 2026-06-02 | round 1 APPROVE |
 | M1-130 | ReadyPromoter transaction boundary + IT driven through tick() | 2026-06-02 | round 1 APPROVE |
 | M1-129 | DigestScheduler approval_status filter + negative-case fixture | 2026-06-02 | round 1 APPROVE |
 | M1-128 | ReEvaluationJob enumerate filter + cap-exhaustion transition + IT | 2026-06-02 | round 1 APPROVE |
-| M1-126 | Asset-command extensibility (operator-config driven) + Locale.ROOT | 2026-06-02 | round 1 APPROVE |
 
 ---
 
@@ -326,10 +325,10 @@ M1-130 (done)
 M1-131 (pending) ← runnable
   └── M1-154 (pending)
 M1-132 (done)
-M1-133 (pending) ← runnable
-  ├── M1-144 (pending)
+M1-133 (done)
+  ├── M1-144 (pending) ← runnable
   │     └── M1-151 (pending)
-  └── M1-146 (pending)
+  └── M1-146 (pending) ← runnable
 M1-134 (pending) ← runnable
 M1-135 (done)
 M1-136 (done)

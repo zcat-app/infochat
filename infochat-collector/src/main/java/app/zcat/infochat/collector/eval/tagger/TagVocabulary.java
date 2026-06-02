@@ -1,5 +1,6 @@
 package app.zcat.infochat.collector.eval.tagger;
 
+import app.zcat.infochat.core.util.TagNormalizer;
 import io.quarkus.runtime.Startup;
 import jakarta.annotation.Priority;
 import jakarta.annotation.PostConstruct;
@@ -12,11 +13,8 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.text.Normalizer;
 import java.util.LinkedHashSet;
-import java.util.Locale;
 import java.util.Set;
-import java.util.regex.Pattern;
 
 /**
  * Controlled-vocabulary cache for the Tagger pipeline. Loads
@@ -63,14 +61,6 @@ public class TagVocabulary {
 
     private static final Logger LOG = Logger.getLogger(TagVocabulary.class);
 
-    /**
-     * The tag-name character class — same regex as V6's
-     * {@code tag.name} CHECK constraint. Inlined here to keep the
-     * normalization rule self-contained at every site that applies
-     * it.
-     */
-    static final Pattern TAG_NAME_PATTERN = Pattern.compile("^[a-z0-9][a-z0-9-]{0,47}$");
-
     @Inject
     DataSource dataSource;
 
@@ -85,7 +75,7 @@ public class TagVocabulary {
              ResultSet rs = ps.executeQuery()) {
             while (rs.next()) {
                 String raw = rs.getString(1);
-                String normalized = normalize(raw);
+                String normalized = TagNormalizer.normalize(raw);
                 if (normalized != null) {
                     loaded.add(normalized);
                 }
@@ -115,21 +105,4 @@ public class TagVocabulary {
         return normalized != null && names.contains(normalized);
     }
 
-    /**
-     * Apply the tag normalization rule (NFC + Locale.ROOT lower-case
-     * + character class) and return the normalized form, or
-     * {@code null} when the input fails the character-class filter.
-     * Package-private so {@link TaggerWorker} reuses the same logic
-     * without a public-API commitment.
-     */
-    // TODO(T1-D): move to TagNormalizer helper alongside
-    // BootstrapLoader.normalizeTag.
-    static String normalize(String raw) {
-        if (raw == null) {
-            return null;
-        }
-        String nfc = Normalizer.normalize(raw, Normalizer.Form.NFC);
-        String lower = nfc.toLowerCase(Locale.ROOT);
-        return TAG_NAME_PATTERN.matcher(lower).matches() ? lower : null;
-    }
 }

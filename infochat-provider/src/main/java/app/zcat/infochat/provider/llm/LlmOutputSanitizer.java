@@ -3,6 +3,7 @@ package app.zcat.infochat.provider.llm;
 import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
+import app.zcat.infochat.core.util.JsonEscaper;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -233,7 +234,7 @@ public class LlmOutputSanitizer {
             conn.setAutoCommit(false);
             for (String token : matches) {
                 String detailsJson = "{\"match_count\":1,\"match_kind\":\""
-                        + jsonEscape(token) + "\"}";
+                        + JsonEscaper.escape(token) + "\"}";
                 RedactionHook.AuditRow row = RedactionHook.AuditRow.builder()
                         .action(AuditAction.LLM_OUTPUT_SANITIZED)
                         .targetKind("system")
@@ -258,33 +259,4 @@ public class LlmOutputSanitizer {
         }
     }
 
-    /**
-     * Minimal JSON-string escaper for the closed-list token going
-     * into the audit row's {@code details_json}. Closed-list tokens
-     * are well-formed identifiers ({@code /grant-admin} etc.) with
-     * no quotes / backslashes today, so this is precaution against
-     * a future spec edit that introduces a token with a quotable
-     * character.
-     */
-    private static String jsonEscape(String s) {
-        StringBuilder out = new StringBuilder(s.length());
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            switch (c) {
-                case '\\' -> out.append("\\\\");
-                case '"' -> out.append("\\\"");
-                case '\n' -> out.append("\\n");
-                case '\r' -> out.append("\\r");
-                case '\t' -> out.append("\\t");
-                default -> {
-                    if (c < 0x20) {
-                        out.append(String.format("\\u%04x", (int) c));
-                    } else {
-                        out.append(c);
-                    }
-                }
-            }
-        }
-        return out.toString();
-    }
 }

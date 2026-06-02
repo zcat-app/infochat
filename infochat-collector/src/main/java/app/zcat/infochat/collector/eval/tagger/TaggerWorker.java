@@ -3,6 +3,7 @@ package app.zcat.infochat.collector.eval.tagger;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
+import app.zcat.infochat.core.util.TagNormalizer;
 import app.zcat.infochat.llm.LlmProvider;
 import app.zcat.infochat.llm.LlmResponse;
 import app.zcat.infochat.llm.ModelTask;
@@ -24,12 +25,10 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
-import java.text.Normalizer;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Semaphore;
@@ -413,22 +412,14 @@ public class TaggerWorker {
     }
 
     /**
-     * Apply the tag normalization rule (NFC + {@code Locale.ROOT}
-     * lower-case + character class {@code ^[a-z0-9][a-z0-9-]{0,47}$})
-     * and return the normalized form, or {@code null} when the input
-     * fails the character-class filter. Same rule
-     * {@link TagVocabulary#normalize} applies to the loaded vocabulary
-     * so {@link TagVocabulary#contains} is byte-equal.
+     * Delegates to the shared {@link TagNormalizer#normalize(String)}
+     * (NFC + {@code Locale.ROOT} lower-case + character class) and
+     * returns the normalized form, or {@code null} when the input
+     * fails the character-class filter. The same helper normalizes the
+     * loaded vocabulary so {@link TagVocabulary#contains} is byte-equal.
      */
-    // TODO(T1-D): move to TagNormalizer helper alongside
-    // BootstrapLoader.normalizeTag and TagVocabulary.normalize.
     static String normalizeTag(String raw) {
-        if (raw == null) {
-            return null;
-        }
-        String nfc = Normalizer.normalize(raw, Normalizer.Form.NFC);
-        String lower = nfc.toLowerCase(Locale.ROOT);
-        return TagVocabulary.TAG_NAME_PATTERN.matcher(lower).matches() ? lower : null;
+        return TagNormalizer.normalize(raw);
     }
 
     /**

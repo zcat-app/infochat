@@ -12,6 +12,7 @@ import javax.sql.DataSource;
 import org.jspecify.annotations.NonNull;
 
 import app.zcat.infochat.collector.assets.PriceSnapshot;
+import app.zcat.infochat.core.util.JsonEscaper;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
@@ -96,8 +97,8 @@ public class PriceSnapshotStore {
             // ("(asset, source)") with architecture wording
             // ("(asset, sub_verb)"). M1-055c deserialises by key
             // "source".
-            String payload = "{\"asset\":\"" + jsonEscape(snapshot.asset())
-                + "\",\"source\":\"" + jsonEscape(snapshot.subVerb()) + "\"}";
+            String payload = "{\"asset\":\"" + JsonEscaper.escape(snapshot.asset())
+                + "\",\"source\":\"" + JsonEscaper.escape(snapshot.subVerb()) + "\"}";
             try (PreparedStatement ps = conn.prepareStatement("SELECT pg_notify(?, ?)")) {
                 ps.setString(1, NEW_PRICE_SNAPSHOT_CHANNEL);
                 ps.setString(2, payload);
@@ -123,14 +124,4 @@ public class PriceSnapshotStore {
         }
     }
 
-    // The two payload fields are sub_verb (lowercase alpha) and asset
-    // (lowercase alpha). The escape covers the defensive case where a
-    // future asset id contains characters that JSON requires escaping;
-    // production asset ids in v1 are pure [a-z], so this is a guard
-    // rather than a hot path. Backslash MUST be escaped before the
-    // double quote so the second pass does not also escape the
-    // backslashes the first pass introduced.
-    private static String jsonEscape(String in) {
-        return in.replace("\\", "\\\\").replace("\"", "\\\"");
-    }
 }

@@ -3,6 +3,7 @@ package app.zcat.infochat.provider.command;
 import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
+import app.zcat.infochat.core.util.JsonEscaper;
 import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.OutboundMessage;
@@ -323,31 +324,9 @@ public class ApproveGroupCommandHandler implements CommandHandler {
     }
 
     private static String groupDetailsJson(GroupRepository.GroupRow targetGroup) {
-        return "{\"target_adapter\":\"" + escapeJson(targetGroup.adapter())
-                + "\",\"upstream_group_id\":\"" + escapeJson(targetGroup.upstreamGroupId())
-                + "\",\"previous_status\":\"" + escapeJson(targetGroup.approvalStatus()) + "\"}";
-    }
-
-    private static String escapeJson(String s) {
-        StringBuilder sb = new StringBuilder(s.length());
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            switch (c) {
-                case '"' -> sb.append("\\\"");
-                case '\\' -> sb.append("\\\\");
-                case '\n' -> sb.append("\\n");
-                case '\r' -> sb.append("\\r");
-                case '\t' -> sb.append("\\t");
-                default -> {
-                    if (c < 0x20) {
-                        sb.append(String.format("\\u%04x", (int) c));
-                    } else {
-                        sb.append(c);
-                    }
-                }
-            }
-        }
-        return sb.toString();
+        return "{\"target_adapter\":\"" + JsonEscaper.escape(targetGroup.adapter())
+                + "\",\"upstream_group_id\":\"" + JsonEscaper.escape(targetGroup.upstreamGroupId())
+                + "\",\"previous_status\":\"" + JsonEscaper.escape(targetGroup.approvalStatus()) + "\"}";
     }
 
     private record UserRow(UUID id, String contactId, boolean isAdmin, boolean isBanned) {}
