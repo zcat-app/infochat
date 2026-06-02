@@ -50,9 +50,14 @@ class DigestRoundtripIT {
     static final UUID USER_1 = UUID.fromString("d1e50003-0003-4000-8000-000000000003");
     static final UUID SOURCE_1 = UUID.fromString("d1e50004-0004-4000-8000-000000000004");
     static final UUID POST_1 = UUID.fromString("d1e50005-0005-4000-8000-000000000005");
+    // Pending group (M1-129): approval_status='pending', otherwise fully
+    // subscribed like GROUP_1, so the scheduler's approval filter is the
+    // only thing keeping it from receiving a digest.
+    static final UUID GROUP_3 = UUID.fromString("d1e50006-0006-4000-8000-000000000006");
 
     static final String UPSTREAM_G1 = "digest-it-g1";
     static final String UPSTREAM_G2 = "digest-it-g2";
+    static final String UPSTREAM_G3 = "digest-it-g3";
     static final String ADMIN_CONTACT = "digest-it-admin";
 
     // Window width from Profile: 60 minutes. Morning center hour: 0.
@@ -118,6 +123,17 @@ class DigestRoundtripIT {
         assertTrue(cacheC.isPresent(), "Step (c): cache row must exist for group 2");
         assertEquals(noPostsText, cacheC.get().content(),
                 "Step (c): cache content must match fixed reply");
+
+        // ---- Step (c2): pending group receives no digest (M1-129) ----
+        // GROUP_3 is approval_status='pending' but otherwise subscribed
+        // exactly like GROUP_1 (same source, same eligible post). The
+        // scheduler's approval_status filter must exclude it, so no slot
+        // fires, no summary_cache row is written, and no message is
+        // delivered — the negative path the original fixture never seeded.
+        assertTrue(sentToGroup(UPSTREAM_G3).isEmpty(),
+                "Step (c2): pending group must receive no digest delivery");
+        assertTrue(readCacheRow(GROUP_3, "morning", morningWindowStart).isEmpty(),
+                "Step (c2): pending group must have no summary_cache row");
 
         // ---- Step (d): scheduler slot deduplication (cache hit) ----
         int llmCountAfterMorning = testLlmProvider.callCount();
@@ -335,12 +351,29 @@ class DigestRoundtripIT {
                         + " DO UPDATE SET id = EXCLUDED.id, removed_at = NULL, approval_status = 'approved'",
                 GROUP_2, UPSTREAM_G2);
 
+        // Pending group (M1-129): seeded as a full GROUP_1 twin except for
+        // approval_status='pending'. ON CONFLICT re-normalizes a carried-over
+        // row back to pending so the negative assertion stays meaningful.
+        exec(conn,
+                "INSERT INTO groups (id, adapter, upstream_group_id, display_name, timezone, approval_status)"
+                        + " VALUES (?, 'inmemory', ?, 'Digest IT Group 3', 'UTC', 'pending')"
+                        + " ON CONFLICT (adapter, upstream_group_id)"
+                        + " DO UPDATE SET id = EXCLUDED.id, removed_at = NULL, approval_status = 'pending'",
+                GROUP_3, UPSTREAM_G3);
+
         exec(conn,
                 "INSERT INTO group_membership (group_id, user_id, is_group_admin)"
                         + " VALUES (?, ?, TRUE)"
                         + " ON CONFLICT (group_id, user_id)"
                         + " DO UPDATE SET is_group_admin = TRUE, removed_at = NULL",
                 GROUP_1, USER_1);
+
+        exec(conn,
+                "INSERT INTO group_membership (group_id, user_id, is_group_admin)"
+                        + " VALUES (?, ?, TRUE)"
+                        + " ON CONFLICT (group_id, user_id)"
+                        + " DO UPDATE SET is_group_admin = TRUE, removed_at = NULL",
+                GROUP_3, USER_1);
 
         exec(conn,
                 "INSERT INTO scope_preferences (scope_kind, scope_id, tag_mode,"
@@ -352,10 +385,25 @@ class DigestRoundtripIT {
                 GROUP_1);
 
         exec(conn,
+                "INSERT INTO scope_preferences (scope_kind, scope_id, tag_mode,"
+                        + " tag_subscription_version, source_subscription_version)"
+                        + " VALUES ('group', ?, 'ALL', 1, 1)"
+                        + " ON CONFLICT (scope_kind, scope_id)"
+                        + " DO UPDATE SET tag_mode = 'ALL',"
+                        + " tag_subscription_version = 1, source_subscription_version = 1",
+                GROUP_3);
+
+        exec(conn,
                 "INSERT INTO source_subscription (scope_kind, scope_id, source_id)"
                         + " VALUES ('group', ?, ?)"
                         + " ON CONFLICT DO NOTHING",
                 GROUP_1, SOURCE_1);
+
+        exec(conn,
+                "INSERT INTO source_subscription (scope_kind, scope_id, source_id)"
+                        + " VALUES ('group', ?, ?)"
+                        + " ON CONFLICT DO NOTHING",
+                GROUP_3, SOURCE_1);
 
         // published_at is updated dynamically in the test to match the window
         Instant seedTime = Instant.parse("2026-05-26T06:00:00Z");
@@ -372,15 +420,15 @@ class DigestRoundtripIT {
     }
 
     private void cleanTestData(Connection conn) throws SQLException {
-        exec(conn, "DELETE FROM summary_cache WHERE group_id IN (?, ?)", GROUP_1, GROUP_2);
-        exec(conn, "DELETE FROM source_subscription WHERE scope_id IN (?, ?)", GROUP_1, GROUP_2);
-        exec(conn, "DELETE FROM scope_tag WHERE scope_id IN (?, ?)", GROUP_1, GROUP_2);
-        exec(conn, "DELETE FROM scope_preferences WHERE scope_id IN (?, ?)", GROUP_1, GROUP_2);
+        exec(conn, "DELETE FROM summary_cache WHERE group_id IN (?, ?, ?)", GROUP_1, GROUP_2, GROUP_3);
+        exec(conn, "DELETE FROM source_subscription WHERE scope_id IN (?, ?, ?)", GROUP_1, GROUP_2, GROUP_3);
+        exec(conn, "DELETE FROM scope_tag WHERE scope_id IN (?, ?, ?)", GROUP_1, GROUP_2, GROUP_3);
+        exec(conn, "DELETE FROM scope_preferences WHERE scope_id IN (?, ?, ?)", GROUP_1, GROUP_2, GROUP_3);
         exec(conn,
-                "DELETE FROM audit_log WHERE scope_id IN (?, ?)"
+                "DELETE FROM audit_log WHERE scope_id IN (?, ?, ?)"
                         + " OR (actor_user_id = ? AND action IN ('DIGEST_RETRY', 'DIGEST_SLOT_MISSED'))",
-                GROUP_1, GROUP_2, USER_1);
-        exec(conn, "DELETE FROM group_membership WHERE group_id IN (?, ?)", GROUP_1, GROUP_2);
+                GROUP_1, GROUP_2, GROUP_3, USER_1);
+        exec(conn, "DELETE FROM group_membership WHERE group_id IN (?, ?, ?)", GROUP_1, GROUP_2, GROUP_3);
         exec(conn, "DELETE FROM post WHERE id = ?", POST_1);
     }
 

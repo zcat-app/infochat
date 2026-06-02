@@ -172,7 +172,8 @@ public class DigestScheduler {
         List<GroupRow> groups = new ArrayList<>();
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                     "SELECT id, timezone FROM groups WHERE removed_at IS NULL")) {
+                     "SELECT id, timezone FROM groups WHERE removed_at IS NULL"
+                             + " AND approval_status = 'approved'")) {
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     groups.add(new GroupRow(

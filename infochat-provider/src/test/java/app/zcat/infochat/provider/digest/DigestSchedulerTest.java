@@ -193,8 +193,8 @@ class DigestSchedulerTest {
     private UUID insertGroup(String timezone) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                     "INSERT INTO groups (adapter, upstream_group_id, display_name, timezone) "
-                             + "VALUES ('inmemory', ?, 'test-digest-group', ?) "
+                     "INSERT INTO groups (adapter, upstream_group_id, display_name, timezone, approval_status) "
+                             + "VALUES ('inmemory', ?, 'test-digest-group', ?, 'approved') "
                              + "RETURNING id")) {
             ps.setString(1, "digest-sched-" + UUID.randomUUID());
             ps.setString(2, timezone);
