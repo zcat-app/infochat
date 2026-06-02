@@ -140,9 +140,13 @@ class ReadyPromoterIT {
             }
             PGConnection pg = listenConn.unwrap(PGConnection.class);
 
-            assertThrows(RuntimeException.class,
-                () -> readyPromoter.promoteOne(post.id, post.fetchedAt),
-                "the test hook's throw must propagate");
+            // Drive the production entry point: onTick() self-invokes
+            // promoteOne — the exact call shape whose missing
+            // transaction this ticket fixes. onTick swallows the hook's
+            // RuntimeException (logs + moves to the next post), so there
+            // is nothing to assertThrows on; the atomicity claim is
+            // proven by the post staying RAW and no NOTIFY arriving.
+            readyPromoter.onTick();
 
             // Give Postgres a brief window to deliver any phantom
             // NOTIFY that might have escaped the rollback. The
@@ -152,7 +156,7 @@ class ReadyPromoterIT {
             // "nothing delivered".
             PGNotification[] notifications = pg.getNotifications(500);
             assertTrue(notifications == null || notifications.length == 0,
-                "no NOTIFY may be observable when the surrounding @Transactional rolled back; got: "
+                "no NOTIFY may be observable when the explicit transaction rolled back; got: "
                     + java.util.Arrays.toString(notifications));
         }
 

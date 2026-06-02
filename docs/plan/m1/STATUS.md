@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 33 |
+| pending | 32 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 157 |
+| done | 158 |
 | deferred | 2 |
 | **total** | **192** |
 
@@ -25,7 +25,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-127 — DB per-service role wiring + audit_log_view redaction (complexity: high, risk: high)
-- M1-130 — ReadyPromoter transaction boundary + IT driven through tick() (complexity: medium, risk: medium)
 - M1-131 — ChatAgent Jackson tool-arg parse + dispatcher catch widening + TOOL-LEAK (complexity: high, risk: high)
 - M1-133 — CT1 shared text/util extraction (JsonEscaper + TagNormalizer + Sha256) + TODO cleanup (complexity: medium, risk: medium)
 - M1-134 — quarantine_review NOTIFY channel completeness (CT2) (complexity: high, risk: medium)
@@ -92,6 +91,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-132 | Signal/SimpleX adapter resilience (handler isolation, hung-process, config-validate, send/close race) | 2026-06-02 | round 1 APPROVE |
+| M1-130 | ReadyPromoter transaction boundary + IT driven through tick() | 2026-06-02 | round 1 APPROVE |
 | M1-129 | DigestScheduler approval_status filter + negative-case fixture | 2026-06-02 | round 1 APPROVE |
 | M1-128 | ReEvaluationJob enumerate filter + cap-exhaustion transition + IT | 2026-06-02 | round 1 APPROVE |
 | M1-126 | Asset-command extensibility (operator-config driven) + Locale.ROOT | 2026-06-02 | round 1 APPROVE |
@@ -100,7 +100,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-123 | InstanceLockGuard held-session liveness + collector/provider dedup | 2026-06-02 | round 1 APPROVE |
 | M1-122 | infochat.reeval.* keys in main config + @ConfigProperty CI guard | 2026-06-02 | round 1 APPROVE |
 | M1-121 | June+July 2026 partitions + monthly partition-creator scheduler | 2026-06-02 | round 2 APPROVE |
-| M1-109 | Multi-adapter production shape IT | 2026-06-01 | round 1 APPROVE |
 
 ---
 
@@ -328,7 +327,7 @@ M1-126 (done)
 M1-127 (pending) ← runnable
 M1-128 (done)
 M1-129 (done)
-M1-130 (pending) ← runnable
+M1-130 (done)
 M1-131 (pending) ← runnable
   └── M1-154 (pending)
 M1-132 (done)

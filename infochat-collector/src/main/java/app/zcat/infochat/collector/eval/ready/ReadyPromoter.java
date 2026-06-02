@@ -3,7 +3,6 @@ package app.zcat.infochat.collector.eval.ready;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.transaction.Transactional;
 import org.jboss.logging.Logger;
 
 import javax.sql.DataSource;
@@ -45,10 +44,14 @@ import java.util.UUID;
  * produces no additional side effect." The
  * {@code UPDATE post SET status='READY', ready_at=now(),
  * status_changed_at=now()} AND the {@code pg_notify('new_post', ...)}
- * emit MUST commit or rollback together. The {@code @Transactional}
- * boundary on {@link #promoteOne} is the enforcement; a NOTIFY outside
- * the transaction would survive a rollback as a phantom event,
- * advancing the Provider cursor past a non-existent post.
+ * emit MUST commit or rollback together. {@link #promoteOne} enforces
+ * this by managing the JDBC transaction explicitly
+ * ({@code setAutoCommit(false)} + a single {@code commit}). A
+ * {@code @Transactional} annotation could NOT: {@link #onTick}
+ * self-invokes {@code promoteOne}, so the CDI interceptor never fires
+ * and the two statements would fall back to separate autocommits. A
+ * NOTIFY outside the transaction would survive a rollback as a phantom
+ * event, advancing the Provider cursor past a non-existent post.
  *
  * <h2>NOTIFY payload contract</h2>
  *
@@ -98,7 +101,7 @@ public class ReadyPromoter {
      * but BEFORE the {@code pg_notify} statement. Production code
      * never sets this — the default no-op runs in every production
      * promotion. {@code ReadyPromoterIT} uses it to throw a
-     * RuntimeException inside the {@code @Transactional} boundary
+     * RuntimeException inside the explicit transaction
      * to assert that the UPDATE rolls back AND no NOTIFY is
      * delivered. Package-private so cross-package tests cannot
      * reach in.
@@ -140,50 +143,66 @@ public class ReadyPromoter {
      * AND the NOTIFY is also suppressed because both statements run
      * in the same SQL session against the same row.
      */
-    @Transactional
     public void promoteOne(UUID postId, Instant fetchedAt) {
         Instant readyAt = Instant.now();
         try (Connection conn = dataSource.getConnection()) {
-            int rowsUpdated;
-            try (PreparedStatement ps = conn.prepareStatement(
-                "UPDATE post "
-                    + "   SET status = 'READY', "
-                    + "       ready_at = ?, "
-                    + "       status_changed_at = ? "
-                    + " WHERE id = ? "
-                    + "   AND fetched_at = ? "
-                    + "   AND status = 'RAW'")) {
-                Timestamp ts = Timestamp.from(readyAt);
-                ps.setTimestamp(1, ts);
-                ps.setTimestamp(2, ts);
-                ps.setObject(3, postId);
-                ps.setTimestamp(4, Timestamp.from(fetchedAt));
-                rowsUpdated = ps.executeUpdate();
-            }
-            if (rowsUpdated == 0) {
-                // The post was no longer RAW (concurrent promotion
-                // by another tick, or status flipped to QUARANTINED
-                // between enumeratePending and this UPDATE). No
-                // NOTIFY — the same-transaction rule cuts both
-                // ways: no UPDATE means no NOTIFY for this id.
-                return;
-            }
-            // Test-only seam: production sets this to a no-op
-            // (declared above). The IT injects a throwing Runnable
-            // here to assert the same-transaction rule rolls back
-            // both the UPDATE and any pending NOTIFY.
-            afterUpdateHook.run();
-            String payload = "{\"ready_at\":\"" + readyAt.toString()
-                + "\",\"post_id\":\"" + postId.toString() + "\"}";
-            try (PreparedStatement ps = conn.prepareStatement(
-                "SELECT pg_notify(?, ?)")) {
-                ps.setString(1, NEW_POST_CHANNEL);
-                ps.setString(2, payload);
-                try (ResultSet rs = ps.executeQuery()) {
-                    // Drain the result set; pg_notify returns void
-                    // but JDBC requires the cursor be consumed.
-                    rs.next();
+            // Explicit transaction boundary: the UPDATE and the
+            // pg_notify('new_post') below must commit or roll back as
+            // one unit (class javadoc §Same-transaction rule). The
+            // default-pool connection arrives in autocommit mode; turn
+            // it off so both statements ride a single commit.
+            conn.setAutoCommit(false);
+            try {
+                int rowsUpdated;
+                try (PreparedStatement ps = conn.prepareStatement(
+                    "UPDATE post "
+                        + "   SET status = 'READY', "
+                        + "       ready_at = ?, "
+                        + "       status_changed_at = ? "
+                        + " WHERE id = ? "
+                        + "   AND fetched_at = ? "
+                        + "   AND status = 'RAW'")) {
+                    Timestamp ts = Timestamp.from(readyAt);
+                    ps.setTimestamp(1, ts);
+                    ps.setTimestamp(2, ts);
+                    ps.setObject(3, postId);
+                    ps.setTimestamp(4, Timestamp.from(fetchedAt));
+                    rowsUpdated = ps.executeUpdate();
                 }
+                if (rowsUpdated == 0) {
+                    // The post was no longer RAW (concurrent promotion
+                    // by another tick, or status flipped to QUARANTINED
+                    // between enumeratePending and this UPDATE). No
+                    // NOTIFY — the same-transaction rule cuts both
+                    // ways: no UPDATE means no NOTIFY for this id.
+                    conn.rollback();
+                    return;
+                }
+                // Test-only seam: production sets this to a no-op
+                // (declared above). The IT injects a throwing Runnable
+                // here to assert the same-transaction rule rolls back
+                // both the UPDATE and any pending NOTIFY.
+                afterUpdateHook.run();
+                String payload = "{\"ready_at\":\"" + readyAt.toString()
+                    + "\",\"post_id\":\"" + postId.toString() + "\"}";
+                try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT pg_notify(?, ?)")) {
+                    ps.setString(1, NEW_POST_CHANNEL);
+                    ps.setString(2, payload);
+                    try (ResultSet rs = ps.executeQuery()) {
+                        // Drain the result set; pg_notify returns void
+                        // but JDBC requires the cursor be consumed.
+                        rs.next();
+                    }
+                }
+                conn.commit();
+            } catch (RuntimeException e) {
+                // A mid-transaction failure (the afterUpdateHook seam, or
+                // any unchecked error after the UPDATE) must discard the
+                // UPDATE so neither a phantom READY row nor a phantom
+                // NOTIFY survives.
+                conn.rollback();
+                throw e;
             }
         } catch (SQLException e) {
             throw new IllegalStateException(

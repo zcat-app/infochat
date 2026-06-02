@@ -1,7 +1,7 @@
 ---
 id: M1-130
 title: "ReadyPromoter transaction boundary + IT driven through tick()"
-status: pending
+status: done
 created: 2026-06-02
 last_updated: 2026-06-02
 blocked_by: []
@@ -30,12 +30,29 @@ test_plan:
 spec_refs:
   - docs/spec/architecture.md §Inter-service communication
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-02
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 83
+      removed: 58
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-02
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-130: ReadyPromoter transaction boundary + IT driven through tick()
