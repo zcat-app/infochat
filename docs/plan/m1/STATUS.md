@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 42 |
+| pending | 41 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 148 |
+| done | 149 |
 | deferred | 2 |
 | **total** | **192** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-121 — June+July 2026 partitions + monthly partition-creator scheduler (complexity: medium, risk: high)
 - M1-122 — infochat.reeval.* keys in main config + @ConfigProperty CI guard (complexity: low, risk: high)
 - M1-123 — InstanceLockGuard held-session liveness + collector/provider dedup (complexity: high, risk: high)
 - M1-124 — Anthropic header names + test alignment + narrow catch + unused import (complexity: low, risk: high)
@@ -100,6 +99,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-121 | June+July 2026 partitions + monthly partition-creator scheduler | 2026-06-02 | round 2 APPROVE |
 | M1-109 | Multi-adapter production shape IT | 2026-06-01 | round 1 APPROVE |
 | M1-120 | SimpleX + Signal CDI activation (D46) | 2026-05-31 | round 1 APPROVE |
 | M1-119 | SimpleX logging hygiene — drainStream + MalformedFrame exception messages | 2026-05-31 | round 1 APPROVE |
@@ -109,7 +109,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-108 | Signal mention recognition + group support | 2026-05-31 | round 1 APPROVE |
 | M1-105 | Multi-adapter Provider wiring + isolation IT | 2026-05-31 | round 1 APPROVE |
 | M1-104 | SimpleX group support + mention recognition | 2026-05-31 | round 2 APPROVE |
-| M1-103 | SimpleX subprocess + WebSocket messaging | 2026-05-31 | round 2 APPROVE |
 
 ---
 
@@ -327,7 +326,7 @@ M1-117 (done)
 M1-118 (done)
 M1-119 (done)
 M1-120 (done)
-M1-121 (pending) ← runnable
+M1-121 (done)
 M1-122 (pending) ← runnable
 M1-123 (pending) ← runnable
 M1-124 (pending) ← runnable

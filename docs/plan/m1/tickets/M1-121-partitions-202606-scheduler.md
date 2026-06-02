@@ -1,7 +1,7 @@
 ---
 id: M1-121
 title: "June+July 2026 partitions + monthly partition-creator scheduler"
-status: pending
+status: done
 created: 2026-06-02
 last_updated: 2026-06-02
 blocked_by: []
@@ -10,6 +10,7 @@ files_scope:
   - infochat-core/src/main/resources/db/migration
   - infochat-collector/src/main/java/app/zcat/infochat/collector
   - infochat-collector/src/test/java/app/zcat/infochat/collector
+  - infochat-collector/src/main/resources/application.properties
 complexity: medium
 risk: high
 round_cap: 2
@@ -34,12 +35,62 @@ spec_refs:
   - docs/spec/schema.md §Posts and derivatives
   - docs/spec/architecture.md §Pipelines
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-02
+    verdict: REWORK
+    checks:
+      scope_drift: FAIL
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 347
+      removed: 0
+  - round: 2
+    date: 2026-06-02
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 347
+      removed: 0
+escalations:
+  - date: 2026-06-02
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      SCOPE-DRIFT-CHECK: FAIL — the changed file
+      infochat-collector/src/main/resources/application.properties (the
+      +infochat.partitions.check-interval=24h property) matches none of the
+      files_scope entries; src/main/resources is a sibling of the src/main/java
+      prefix the scope declares. The change is substantively legitimate (the
+      @Scheduled binding needs the property to resolve) but the scope list did
+      not authorize a resources/ edit.
+revisions:
+  - date: 2026-06-02
+    reason: "refine (round 1 rework) — widen files_scope to authorize the application.properties edit the @Scheduled interval binding requires"
+    snapshot:
+      files_scope:
+        - infochat-core/src/main/resources/db/migration
+        - infochat-collector/src/main/java/app/zcat/infochat/collector
+        - infochat-collector/src/test/java/app/zcat/infochat/collector
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-02
+  verdict: PASS
+  warnings:
+    - "Acceptance item [3] asserts a WARN log if the partition-creator has not run in 25 days, but no named test covers the liveness-check path; verification may rely on log inspection."
+  blockers: []
 ---
 
 # M1-121: June+July 2026 partitions + monthly partition-creator scheduler
@@ -81,3 +132,14 @@ version number is assigned at start by the workflow (do not hardcode it).
   DDL; the immediate migration is the data-shape unblock so the suite goes green
   today. Keep the month-bound computation in one place; mirror the existing
   partition naming convention (`<table>_YYYYMM`).
+
+## Round 1 rework
+
+1. Resolve the out-of-scope edit to
+   `infochat-collector/src/main/resources/application.properties` (the added
+   `infochat.partitions.check-interval=24h` property). The change is needed for
+   the `@Scheduled` binding, but the file is outside the ticket's `files_scope`
+   (which lists only `src/main/java` and `src/main/resources/db/migration`
+   paths). Either escalate to widen `files_scope` to include the properties
+   file, or move the cadence to a hardcoded `@Scheduled(every = "24h")` inside
+   the declared scope. Do NOT silently broaden scope without authorization.
