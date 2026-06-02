@@ -125,6 +125,18 @@ public class SaveCommandHandler implements CommandHandler {
     @ConfigProperty(name = "infochat.save.cap")
     int saveCap;
 
+    // Profile-driven personal-tag caps. defaultValue mirrors the
+    // read-side comparator (ChatToolDispatcher's input-max-length /
+    // list-max-size), so the write side bounds tag length + count
+    // symmetrically without a separate application.properties entry.
+    @Inject
+    @ConfigProperty(name = "infochat.save.personal-tag-max-length", defaultValue = "64")
+    int personalTagMaxLength;
+
+    @Inject
+    @ConfigProperty(name = "infochat.save.personal-tag-max-count", defaultValue = "20")
+    int personalTagMaxCount;
+
     @Override
     public String name() {
         return "save";
@@ -133,6 +145,25 @@ public class SaveCommandHandler implements CommandHandler {
     @Override
     public OutboundMessage handle(@NonNull ScopeRef scope, @NonNull String rawText) {
         ParsedArgs args = parseArgs(rawText);
+
+        // Parser-boundary personal-tag caps. /saved interpolates
+        // personal_tags into outbound text (bypassing the inbound body
+        // cap) and listSaves reads them into the chat prompt, so the
+        // write side must reject over-length / over-count tags here —
+        // before any DB work — so they are never stored.
+        if (args.personalTags.size() > personalTagMaxCount) {
+            return reply(scope, MessageFormat.format(
+                    bundleLoader.get(BundleKeys.ERROR_SAVE_TOO_MANY_TAGS),
+                    personalTagMaxCount));
+        }
+        for (String tag : args.personalTags) {
+            if (tag.length() > personalTagMaxLength) {
+                return reply(scope, MessageFormat.format(
+                        bundleLoader.get(BundleKeys.ERROR_SAVE_TAG_TOO_LONG),
+                        personalTagMaxLength));
+            }
+        }
+
         if (args.uid == null) {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_SAVE_UNKNOWN_UID));
         }

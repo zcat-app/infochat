@@ -411,6 +411,12 @@ public final class BundleKeys {
     /** {@code /save <uid>} on a post already in the actor's library — PK collision on (user_id, post_uid). */
     public static final String ERROR_SAVE_ALREADY_SAVED = "error.save.already_saved";
 
+    /** {@code /save -t}: a personal tag exceeds the profile-driven per-tag length cap; rejected at the parser boundary before any DB work. {@code {0}} = the configured max length. */
+    public static final String ERROR_SAVE_TAG_TOO_LONG = "error.save.tag_too_long";
+
+    /** {@code /save -t}: the personal-tag list exceeds the profile-driven per-call count cap; rejected at the parser boundary before any DB work. {@code {0}} = the configured max count. */
+    public static final String ERROR_SAVE_TOO_MANY_TAGS = "error.save.too_many_tags";
+
     /** {@code /save} invoked from group scope — v1 short-circuit; T2-F lands the group-actor seam. */
     public static final String ERROR_SAVE_GROUP_NOT_IN_V1 = "error.save.group_not_in_v1";
 

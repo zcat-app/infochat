@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 29 |
+| pending | 28 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 161 |
+| done | 162 |
 | deferred | 2 |
 | **total** | **192** |
 
@@ -34,7 +34,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-141 — LLM adapter robustness (body cap, Retry-After) + router decoupling (complexity: medium, risk: medium)
 - M1-142 — NewPostListener reconcile after reconnect (complexity: low, risk: medium)
 - M1-143 — MembershipEventHandler audit-before-effect (Invariant 7) (complexity: medium, risk: medium)
-- M1-145 — /save personal-tag length + count caps (complexity: low, risk: low)
 - M1-147 — Adapter capability-flag reconciliation + cross-adapter contract test (CT5) (complexity: high, risk: low)
 - M1-148 — MessagingAdapter SPI lifecycle (finalize→shutdown, start/stop) + low-level cleanup (complexity: medium, risk: low)
 - M1-149 — Fetcher pagination cursor URL-encoding (complexity: low, risk: medium)
@@ -87,6 +86,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-145 | /save personal-tag length + count caps | 2026-06-02 | round 1 APPROVE |
 | M1-137 | SimpleX mention canonicalization → exact-bytes compare | 2026-06-02 | round 1 APPROVE |
 | M1-136 | local-only startup guard covers embedding endpoint + remote-embedding log | 2026-06-02 | round 2 APPROVE |
 | M1-135 | SSRF hardening bundle | 2026-06-02 | round 1 APPROVE |
@@ -96,7 +96,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-128 | ReEvaluationJob enumerate filter + cap-exhaustion transition + IT | 2026-06-02 | round 1 APPROVE |
 | M1-126 | Asset-command extensibility (operator-config driven) + Locale.ROOT | 2026-06-02 | round 1 APPROVE |
 | M1-125 | Per-adapter reply target + AdapterRegistry duplicate-name dedup | 2026-06-02 | round 1 APPROVE |
-| M1-124 | Anthropic header names + test alignment + narrow catch + unused import | 2026-06-02 | round 1 APPROVE |
 
 ---
 
@@ -342,7 +341,7 @@ M1-140 (pending) ← runnable
 M1-141 (pending) ← runnable
 M1-142 (pending) ← runnable
 M1-143 (pending) ← runnable
-M1-145 (pending) ← runnable
+M1-145 (done)
 M1-147 (pending) ← runnable
 M1-148 (pending) ← runnable
 M1-149 (pending) ← runnable

@@ -64,6 +64,14 @@ class SaveCommandHandlerTest {
     @ConfigProperty(name = "infochat.save.cap")
     int saveCap;
 
+    @Inject
+    @ConfigProperty(name = "infochat.save.personal-tag-max-length", defaultValue = "64")
+    int personalTagMaxLength;
+
+    @Inject
+    @ConfigProperty(name = "infochat.save.personal-tag-max-count", defaultValue = "20")
+    int personalTagMaxCount;
+
     @BeforeEach
     void cleanup() throws Exception {
         inboundContext.setAdapterName(ADAPTER);
@@ -246,6 +254,56 @@ class SaveCommandHandlerTest {
                         "personal_tags must carry the comma-split -t values verbatim");
             }
         }
+    }
+
+    @Test
+    void saveWithOverLengthPersonalTagIsRejectedAndWritesNoRow() throws Exception {
+        String contactId = PREFIX + "longtag-actor";
+        seedUser(contactId);
+        UUID sourceId = seedSource(PREFIX + "longtag-source", new String[] {});
+        String uid = PREFIX + "longtag-uid";
+        // A valid READY post — the only reason nothing is stored must be
+        // the over-length tag, not a missing/non-READY target.
+        seedPost(sourceId, uid, "READY", "Title L", "Body L", null, null, null);
+
+        String overLengthTag = "x".repeat(personalTagMaxLength + 1);
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(contactId), "/save " + uid + " -t " + overLengthTag);
+
+        assertEquals(MessageFormat.format(
+                        bundleLoader.get(BundleKeys.ERROR_SAVE_TAG_TOO_LONG), personalTagMaxLength),
+                reply.text(),
+                "an over-length personal tag must surface error.save.tag_too_long");
+        assertEquals(0L, countSavedPosts(contactId),
+                "no saved_post row may be written when a personal tag exceeds the length cap");
+    }
+
+    @Test
+    void saveWithOverCountPersonalTagListIsRejectedAndWritesNoRow() throws Exception {
+        String contactId = PREFIX + "manytags-actor";
+        seedUser(contactId);
+        UUID sourceId = seedSource(PREFIX + "manytags-source", new String[] {});
+        String uid = PREFIX + "manytags-uid";
+        seedPost(sourceId, uid, "READY", "Title M", "Body M", null, null, null);
+
+        // One tag past the per-call count cap; each tag is short so only
+        // the count cap (checked first) can trip.
+        StringBuilder csv = new StringBuilder();
+        for (int i = 0; i <= personalTagMaxCount; i++) {
+            if (i > 0) {
+                csv.append(',');
+            }
+            csv.append('t').append(i);
+        }
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(contactId), "/save " + uid + " -t " + csv);
+
+        assertEquals(MessageFormat.format(
+                        bundleLoader.get(BundleKeys.ERROR_SAVE_TOO_MANY_TAGS), personalTagMaxCount),
+                reply.text(),
+                "an over-count personal-tag list must surface error.save.too_many_tags");
+        assertEquals(0L, countSavedPosts(contactId),
+                "no saved_post row may be written when the tag list exceeds the count cap");
     }
 
     @Test
