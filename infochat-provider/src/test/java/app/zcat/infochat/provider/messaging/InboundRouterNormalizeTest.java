@@ -305,9 +305,12 @@ class InboundRouterNormalizeTest {
     private static final class CapturingAdapter implements MessagingAdapter {
         final List<OutboundMessage> captured = new ArrayList<>();
 
+        // Reports the inbound adapterName the test delivers ("inmemory")
+        // so the router's name-keyed reply resolution finds this fake
+        // (M1-125). The assertions below are unchanged.
         @Override
         public String name() {
-            return "capturing";
+            return "inmemory";
         }
 
         @Override

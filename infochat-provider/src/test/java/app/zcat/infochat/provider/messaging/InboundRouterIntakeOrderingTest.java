@@ -390,6 +390,69 @@ class InboundRouterIntakeOrderingTest {
                         + "groupApprovalCheck.check and handler.handle MUST NOT appear; got: " + log.calls);
     }
 
+    // ----- (j) two activated adapters → reply routes to the inbound one ----
+    //
+    // M1-125 acceptance item 2: with two adapters bound as reply targets,
+    // a message inbound on adapter "inmemory" must be replied through
+    // "inmemory" and NEVER through the other activated adapter "other".
+    // This is the multi-adapter shape v1 ships (SimpleX + Signal, D46);
+    // the former single last-registered-wins reply field cross-routed
+    // every reply through whichever adapter registered last.
+
+    @Test
+    void replyRoutesThroughInboundAdapterNeverAnotherActivatedAdapter() {
+        CallLog log = new CallLog();
+        InboundRouter router = newRouterWithLog(log,
+                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), false, "vouched")));
+        CapturingAdapter inboundAdapter = new CapturingAdapter("inmemory");
+        CapturingAdapter otherAdapter = new CapturingAdapter("other");
+        router.setReplyTarget(inboundAdapter);
+        router.setReplyTarget(otherAdapter);
+
+        router.onMessage(dmInbound(DM_CONTACT, "/help"), "inmemory");
+
+        assertEquals(1, inboundAdapter.captured.size(),
+                "reply must route through the adapter that delivered the inbound; got: "
+                        + inboundAdapter.captured);
+        assertEquals(InboundRouter.UNKNOWN_COMMAND_REPLY, inboundAdapter.captured.get(0).text(),
+                "the routed reply is the /help dispatch (UNKNOWN_COMMAND_REPLY)");
+        assertTrue(otherAdapter.captured.isEmpty(),
+                "reply must NEVER cross-route to a different activated adapter; got: "
+                        + otherAdapter.captured);
+    }
+
+    // ----- (k) banned-user fixed reply routes through the inbound adapter --
+    //
+    // M1-125 acceptance item 3: the banned-user fixed reply must be
+    // DELIVERED (not silently dropped) through the inbound adapter, and
+    // never cross-routed to another activated adapter. Under the former
+    // single-field design a name-mismatched last adapter could silently
+    // turn the ban reply into a drop.
+
+    @Test
+    void bannedUserFixedReplyDeliveredThroughInboundAdapterNotDroppedOrCrossRouted() {
+        CallLog log = new CallLog();
+        InboundRouter router = newRouterWithLog(log,
+                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), false, "vouched")));
+        ((FakeBanCheck) router.banCheck).banned = true;
+        CapturingAdapter inboundAdapter = new CapturingAdapter("inmemory");
+        CapturingAdapter otherAdapter = new CapturingAdapter("other");
+        router.setReplyTarget(inboundAdapter);
+        router.setReplyTarget(otherAdapter);
+
+        router.onMessage(dmInbound(DM_CONTACT, "/help"), "inmemory");
+
+        assertEquals(1, inboundAdapter.captured.size(),
+                "banned-user fixed reply must be delivered through the inbound adapter, not dropped; got: "
+                        + inboundAdapter.captured);
+        assertEquals(FakeBundleLoader.stubFor(BundleKeys.ERROR_BAN_FIXED),
+                inboundAdapter.captured.get(0).text(),
+                "banned reply body must equal the error.ban.fixed bundle entry");
+        assertTrue(otherAdapter.captured.isEmpty(),
+                "banned reply must NEVER cross-route to a different activated adapter; got: "
+                        + otherAdapter.captured);
+    }
+
     // ----- helpers + fakes ------------------------------------------------
 
     /**
@@ -653,10 +716,23 @@ class InboundRouterIntakeOrderingTest {
     /** Captures outbound messages the router sends. */
     private static final class CapturingAdapter implements MessagingAdapter {
         final List<OutboundMessage> captured = new ArrayList<>();
+        private final String name;
+
+        // Default name "inmemory" matches the inbound adapterName the
+        // existing scenarios deliver, so the router's name-keyed reply
+        // resolution (M1-125) finds this fake. The two-adapter routing
+        // tests construct a second instance under a different name.
+        CapturingAdapter() {
+            this("inmemory");
+        }
+
+        CapturingAdapter(String name) {
+            this.name = name;
+        }
 
         @Override
         public String name() {
-            return "capturing";
+            return name;
         }
 
         @Override

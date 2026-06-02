@@ -113,6 +113,20 @@ class StartupGatesTest {
                 "gate 6 message must name the missing opt-in, got: " + e.getMessage());
     }
 
+    @Test
+    void rejectsDuplicateAdapterName() {
+        // M1-125: a repeated name in infochat.adapters (e.g.
+        // "inmemory,inmemory") would double-wire the same adapter; the
+        // dedup check fails fast naming the duplicate before bean
+        // resolution.
+        IllegalStateException e = assertThrows(
+                IllegalStateException.class, () -> registry.start("inmemory,inmemory"));
+        assertTrue(e.getMessage().contains("duplicate"),
+                "duplicate-name check must flag the duplication, got: " + e.getMessage());
+        assertTrue(e.getMessage().contains("inmemory"),
+                "duplicate-name check must name the duplicated adapter, got: " + e.getMessage());
+    }
+
     /**
      * Single profile shared by every gate test. Excludes
      * {@link MessagingStartup} from ARC so its {@code @PostConstruct}

@@ -303,9 +303,13 @@ class InboundRouterContactIdRedactionTest {
 
     /** Adapter that throws on send — drives the reply-send-failed log site. */
     private static final class FailingAdapter implements MessagingAdapter {
+        // Reports the inbound adapterName ("inmemory") this test delivers
+        // so the router's name-keyed reply resolution binds this fake as
+        // the reply target and the reply-send-failed log site fires
+        // (M1-125). The redaction assertions are unchanged.
         @Override
         public String name() {
-            return "failing";
+            return "inmemory";
         }
 
         @Override
@@ -351,9 +355,13 @@ class InboundRouterContactIdRedactionTest {
 
     /** Adapter that swallows {@link #send} without throwing — used to isolate the dispatch-exception path. */
     private static final class NoopAdapter implements MessagingAdapter {
+        // Reports the inbound adapterName ("inmemory") this test delivers
+        // so the router's name-keyed reply resolution binds this fake as
+        // the reply target on the dispatch-exception path (M1-125). The
+        // redaction assertions are unchanged.
         @Override
         public String name() {
-            return "noop";
+            return "inmemory";
         }
 
         @Override

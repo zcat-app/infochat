@@ -1,7 +1,7 @@
 ---
 id: M1-125
 title: "Per-adapter reply target + AdapterRegistry duplicate-name dedup"
-status: pending
+status: done
 created: 2026-06-02
 last_updated: 2026-06-02
 blocked_by: []
@@ -40,7 +40,20 @@ spec_refs:
   - docs/spec/security.md §Per-adapter admin threat profile
 decision_refs:
   - D46
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-02
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 9
+      added: 196
+      removed: 41
 escalations:
   - date: 2026-06-02
     reason: outline-fail
@@ -105,7 +118,29 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-02
+    verdict: CLEAN
+    base: df41a6c^ (22c1664)
+    head: df41a6c
+    verdict_file: docs/plan/m1/redteam/M1-125-2026-06-02.md
+    out_of_model_count: 0
+    note: |
+      Adversarial review of the implementation commit (df41a6c). CLEAN —
+      the per-name reply resolution strengthens cross-adapter isolation
+      (§Trust boundaries 1, §Per-adapter admin threat profile) rather than
+      weakening it; the ban fixed-reply (§User ban / step 4) still fires once
+      per inbound through the correct adapter; adapterName is registry-canonical
+      (not a user-controllable InboundMessage field) so no reply can be spoofed
+      across adapter identity spaces, and the new error-log line carries no
+      user-controlled bytes (scope id redacted). Nothing feeds a remediation
+      ticket.
+clarity_check:
+  date: 2026-06-02
+  verdict: PASS
+  warnings: []
+  blockers: []
+outline_file: target/m1-tick-outline-M1-125.md
 ---
 
 # M1-125: Per-adapter reply target + AdapterRegistry duplicate-name dedup

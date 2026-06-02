@@ -158,12 +158,15 @@ import java.util.concurrent.atomic.AtomicLong;
  * scope's id through {@link ContactIds#redact} so a contact id never
  * appears unredacted in non-audit logs.</p>
  *
- * <p><b>Multi-adapter reply.</b> {@link #replyTarget} is a single
- * volatile reference. {@link AdapterRegistry} sets it once per
- * activated adapter; in a multi-adapter MVP the last-registered
- * adapter wins as the reply target — an acceptable MVP limitation
- * because no MVP user-facing flow runs more than one adapter
- * simultaneously.</p>
+ * <p><b>Multi-adapter reply.</b> {@link #replyTargets} holds one
+ * bound adapter per {@link MessagingAdapter#name()}.
+ * {@link AdapterRegistry} binds one entry per activated adapter, and
+ * {@link #sendReply} resolves the target by the inbound
+ * {@code adapterName} so a reply always ships through the exact
+ * adapter that delivered the message — never across adapter identity
+ * spaces (D46, {@code security.md} §Per-adapter admin threat profile).
+ * An {@code adapterName} with no bound target takes the no-target
+ * drop+redact branch.</p>
  */
 @ApplicationScoped
 public class InboundRouter {
@@ -289,14 +292,34 @@ public class InboundRouter {
     private final ConcurrentHashMap<UUID, Deque<Long>> llmCallTimestamps =
             new ConcurrentHashMap<>();
 
-    private volatile MessagingAdapter replyTarget;
+    /**
+     * Reply targets keyed by {@link MessagingAdapter#name()}.
+     * {@link AdapterRegistry} binds one entry per activated adapter so
+     * {@link #sendReply} can route a reply back through the exact
+     * adapter that delivered the inbound (resolved by the inbound
+     * {@code adapterName}) — never across adapter identity spaces.
+     * Replaces the former single last-registered-wins reference.
+     */
+    private final ConcurrentHashMap<String, MessagingAdapter> replyTargets =
+            new ConcurrentHashMap<>();
 
     /**
-     * Bind the adapter used to send replies. Called by
+     * Bind the adapter used to send replies for inbound delivered under
+     * its {@link MessagingAdapter#name()}. Called by
      * {@link AdapterRegistry} once per activated adapter at startup.
      */
     void setReplyTarget(MessagingAdapter adapter) {
-        this.replyTarget = adapter;
+        this.replyTargets.put(adapter.name(), adapter);
+    }
+
+    /**
+     * Clear all bound reply targets. {@link AdapterRegistry#start}
+     * calls this before re-registering so an idempotent restart in the
+     * same JVM does not retain a stale name&rarr;adapter entry from a
+     * prior activation.
+     */
+    void resetReplyTargets() {
+        this.replyTargets.clear();
     }
 
     /**
@@ -341,7 +364,7 @@ public class InboundRouter {
         // normalize so NFKC amplification cannot drive cost on
         // adversarial inputs.
         if (raw != null && exceedsUtf8ByteLength(raw, maxInboundBodyBytes)) {
-            sendReply(msg.scope(), MESSAGE_TOO_LARGE_REPLY);
+            sendReply(msg.scope(), MESSAGE_TOO_LARGE_REPLY, adapterName);
             return;
         }
 
@@ -371,11 +394,11 @@ public class InboundRouter {
                     inviteCodeConsumer.consume(adapterName, contactId, normalized);
             switch (outcome) {
                 case InviteCodeConsumer.Accepted a ->
-                        sendReply(msg.scope(), bundleLoader.get(BundleKeys.REPLY_WELCOME_DM_FRESH));
+                        sendReply(msg.scope(), bundleLoader.get(BundleKeys.REPLY_WELCOME_DM_FRESH), adapterName);
                 case InviteCodeConsumer.Rejected r ->
-                        sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_INVITE_REQUIRED));
+                        sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_INVITE_REQUIRED), adapterName);
                 case InviteCodeConsumer.BruteForceThresholdBreached b ->
-                        sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_INVITE_REQUIRED));
+                        sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_INVITE_REQUIRED), adapterName);
             }
             return;
         }
@@ -407,7 +430,7 @@ public class InboundRouter {
         // execution-order indices"; execution order is the source-
         // code order in this method.
         if (banCheck.isBanned(adapterName, contactId)) {
-            sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_BAN_FIXED));
+            sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_BAN_FIXED), adapterName);
             return;
         }
 
@@ -433,7 +456,7 @@ public class InboundRouter {
                     // Fall through to step 4.1 (auto-promote).
                 }
                 case GroupApprovalCheck.Outcome.FixedReply f -> {
-                    sendReply(msg.scope(), bundleLoader.get(f.bundleKey()));
+                    sendReply(msg.scope(), bundleLoader.get(f.bundleKey()), adapterName);
                     return;
                 }
                 case GroupApprovalCheck.Outcome.SilentDrop s -> {
@@ -479,7 +502,7 @@ public class InboundRouter {
                 String body = MessageFormat.format(
                         bundleLoader.get(BundleKeys.ERROR_PROBATION_BLOCKED),
                         formatTimeUntilUnlock(expiry));
-                sendReply(msg.scope(), body);
+                sendReply(msg.scope(), body, adapterName);
                 return;
             }
         } else {
@@ -509,7 +532,7 @@ public class InboundRouter {
             String cancellation = MessageFormat.format(
                     bundleLoader.get(BundleKeys.REPLY_CONFIRM_CANCELLED),
                     cancelled.commandName());
-            sendReply(msg.scope(), cancellation);
+            sendReply(msg.scope(), cancellation, adapterName);
         }
         // Matching confirm-shape: leave pending in place; the
         // handler's takeMatching pops it on the dispatch path.
@@ -557,7 +580,7 @@ public class InboundRouter {
             body = INTERNAL_ERROR_REPLY;
         }
 
-        sendReply(msg.scope(), body);
+        sendReply(msg.scope(), body, adapterName);
     }
 
     /**
@@ -608,16 +631,18 @@ public class InboundRouter {
      */
     record UserSnapshot(UUID id, boolean isBanned, String registrationState) {}
 
-    private void sendReply(ScopeRef scope, String body) {
-        MessagingAdapter target = replyTarget;
+    private void sendReply(ScopeRef scope, String body, String adapterName) {
+        MessagingAdapter target = replyTargets.get(adapterName);
         if (target == null) {
-            // The AdapterRegistry calls setReplyTarget before
-            // setInboundHandler at registration, so this is reachable
-            // only if onMessage is invoked before the registry has
-            // bound a reply target — i.e. a test that forgot to wire
-            // the router. Log and drop; no defensive throw.
-            log.error("InboundRouter has no replyTarget; dropping reply for scope={}",
-                    ContactIds.redact(scopeIdOf(scope)));
+            // No adapter is bound under this inbound's adapterName. The
+            // AdapterRegistry binds every activated adapter's reply
+            // target before wiring its inbound handler, so a miss means
+            // either a test that did not bind this name or a stale
+            // teardown — log (redacting the scope id) and drop; no
+            // defensive throw, and deliberately no last-wins fallback
+            // (per-adapter isolation, D46).
+            log.error("InboundRouter has no replyTarget for adapter={}; dropping reply for scope={}",
+                    adapterName, ContactIds.redact(scopeIdOf(scope)));
             return;
         }
         try {

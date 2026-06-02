@@ -17,10 +17,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Provider-side adapter discovery + activation, per
@@ -142,6 +144,21 @@ public class AdapterRegistry {
                             + csv + "\")");
         }
 
+        // Reject a duplicate adapter name in infochat.adapters (e.g.
+        // "simplex,simplex"): the activation loop binds one reply target
+        // and one inbound handler per name, so a repeated name would
+        // double-wire the same adapter (two handlers, two reply-target
+        // puts) and silently mask an operator CSV typo. Fail fast naming
+        // the duplicate before any bean resolution.
+        Set<String> seenNames = new HashSet<>();
+        for (String name : requested) {
+            if (!seenNames.add(name)) {
+                throw new IllegalStateException(
+                        "infochat.adapters: duplicate adapter name \"" + name
+                                + "\" in \"" + csv + "\"");
+            }
+        }
+
         // Gate 2: every name resolves to a registered bean.
         Map<String, MessagingAdapter> byName = new LinkedHashMap<>();
         for (MessagingAdapter adapter : discoveredAdapters) {
@@ -251,6 +268,12 @@ public class AdapterRegistry {
         // adapter is activated; the SPI's InboundMessage stays free of an
         // adapter-identity field (the registry is the single source of
         // adapter-name truth).
+        //
+        // Reset the router's per-name reply targets before re-registering
+        // so an idempotent restart (start() called again in the same JVM,
+        // mirroring activatedAdapters.clear() above) does not retain a
+        // stale name→adapter binding from a prior activation.
+        inboundRouter.resetReplyTargets();
         for (MessagingAdapter adapter : activating) {
             inboundRouter.setReplyTarget(adapter);
             String adapterName = adapter.name();

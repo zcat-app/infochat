@@ -561,7 +561,10 @@ class InboundRouterProbationOrderingTest {
 
     private static final class CapturingAdapter implements MessagingAdapter {
         final List<OutboundMessage> captured = new ArrayList<>();
-        @Override public String name() { return "capturing"; }
+        // Reports the inbound adapterName the test delivers ("inmemory")
+        // so the router's name-keyed reply resolution finds this fake
+        // (M1-125). The assertions below are unchanged.
+        @Override public String name() { return "inmemory"; }
         @Override public CapabilityFlags capabilities() { throw new UnsupportedOperationException(); }
         @Override public app.zcat.infochat.messaging.AdapterTrustLevel trustLevel() { throw new UnsupportedOperationException(); }
         @Override public Identity assertIdentity(InboundMessage msg) { throw new UnsupportedOperationException(); }
