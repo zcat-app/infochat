@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 26 |
+| pending | 25 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 164 |
+| done | 165 |
 | deferred | 2 |
 | **total** | **192** |
 
@@ -36,7 +36,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-146 — JSpecify annotation pass + lint-contracts CI + defensive-code sweep (CT4) (complexity: medium, risk: low)
 - M1-147 — Adapter capability-flag reconciliation + cross-adapter contract test (CT5) (complexity: high, risk: low)
 - M1-148 — MessagingAdapter SPI lifecycle (finalize→shutdown, start/stop) + low-level cleanup (complexity: medium, risk: low)
-- M1-149 — Fetcher pagination cursor URL-encoding (complexity: low, risk: medium)
 - M1-150 — Digest hygiene (concurrency guard, timezone WARN, broad-catch narrow) (complexity: low, risk: low)
 - M1-152 — Schema-hardening migration (stage2_verdict CHECK + V27 audit verb + Nostr index) (complexity: low, risk: medium)
 - M1-153 — Collector worker hygiene (dead semaphores, interrupt, backoff Random, dup counter, timeouts) (complexity: low, risk: low)
@@ -84,6 +83,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-149 | Fetcher pagination cursor URL-encoding | 2026-06-02 | round 1 APPROVE |
 | M1-145 | /save personal-tag length + count caps | 2026-06-02 | round 1 APPROVE |
 | M1-140 | EmbeddingResult value semantics + embedding SPI size-equals-input contract | 2026-06-02 | round 1 APPROVE |
 | M1-137 | SimpleX mention canonicalization → exact-bytes compare | 2026-06-02 | round 1 APPROVE |
@@ -93,7 +93,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-132 | Signal/SimpleX adapter resilience (handler isolation, hung-process, config-validate, send/close race) | 2026-06-02 | round 1 APPROVE |
 | M1-130 | ReadyPromoter transaction boundary + IT driven through tick() | 2026-06-02 | round 1 APPROVE |
 | M1-129 | DigestScheduler approval_status filter + negative-case fixture | 2026-06-02 | round 1 APPROVE |
-| M1-128 | ReEvaluationJob enumerate filter + cap-exhaustion transition + IT | 2026-06-02 | round 1 APPROVE |
 
 ---
 
@@ -342,7 +341,7 @@ M1-143 (pending) ← runnable
 M1-145 (done)
 M1-147 (pending) ← runnable
 M1-148 (pending) ← runnable
-M1-149 (pending) ← runnable
+M1-149 (done)
 M1-150 (pending) ← runnable
 M1-152 (pending) ← runnable
 M1-153 (pending) ← runnable

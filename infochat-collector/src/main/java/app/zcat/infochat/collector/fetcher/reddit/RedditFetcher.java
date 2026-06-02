@@ -12,7 +12,9 @@ import org.jspecify.annotations.NonNull;
 
 import java.io.IOException;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -108,7 +110,9 @@ public class RedditFetcher implements Fetcher {
     private static URI buildPageUri(String identifier, String afterCursor) {
         String url = identifier + ".json";
         if (afterCursor != null) {
-            url += "?after=" + afterCursor;
+            // afterCursor is upstream-supplied (untrusted): encode so a value
+            // containing & / # / ? cannot inject or truncate the query.
+            url += "?after=" + URLEncoder.encode(afterCursor, StandardCharsets.UTF_8);
         }
         return URI.create(url);
     }

@@ -15,10 +15,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -41,8 +44,17 @@ class RedditFetcherTest {
         """
         {"kind":"Listing","data":{"after":null,"children":[]}}""";
 
+    // An `after` cursor whose value contains the URL metacharacters & # ?
+    // that would inject or truncate the next-page query if unencoded.
+    private static final String CRAFTED_CURSOR = "next&after=evil#?x";
+
+    private static final String INJECT_FIRST_PAGE_JSON =
+        "{\"kind\":\"Listing\",\"data\":{\"after\":\"" + CRAFTED_CURSOR
+        + "\",\"children\":[]}}";
+
     private HttpServer server;
     private int port;
+    private final AtomicReference<String> injectSecondPageRawQuery = new AtomicReference<>();
 
     @BeforeEach
     void startServer() throws IOException {
@@ -79,6 +91,25 @@ class RedditFetcherTest {
         server.createContext("/r/error/new.json", exchange -> {
             exchange.sendResponseHeaders(500, -1);
             exchange.close();
+        });
+
+        // First page hands back CRAFTED_CURSOR as `after`; the fetcher's
+        // second request is captured raw so the test can inspect how the
+        // cursor was placed into the query string.
+        server.createContext("/r/inject/new.json", exchange -> {
+            String rawQuery = exchange.getRequestURI().getRawQuery();
+            byte[] body;
+            if (rawQuery != null && rawQuery.contains("after=")) {
+                injectSecondPageRawQuery.set(rawQuery);
+                body = EMPTY_LISTING_JSON.getBytes(StandardCharsets.UTF_8);
+            } else {
+                body = INJECT_FIRST_PAGE_JSON.getBytes(StandardCharsets.UTF_8);
+            }
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(body);
+            }
         });
 
         server.start();
@@ -164,6 +195,25 @@ class RedditFetcherTest {
         List<NormalizedPost> posts = fetcher.fetch(42L, baseUrl() + "/r/empty/new");
 
         assertTrue(posts.isEmpty());
+    }
+
+    @Test
+    void afterCursorWithSpecialCharsIsEncodedNotInterpreted() {
+        RedditFetcher fetcher = testModeFetcher(5);
+        fetcher.fetch(42L, baseUrl() + "/r/inject/new");
+
+        String rawQuery = injectSecondPageRawQuery.get();
+        assertNotNull(rawQuery, "fetcher must have requested a second page using the cursor");
+        // The crafted & # ? are percent-encoded, leaving `after` a single
+        // opaque token rather than three injected/truncating fragments.
+        assertTrue(rawQuery.contains("after=next%26after%3Devil%23%3Fx"),
+            "crafted cursor must be percent-encoded: " + rawQuery);
+        // The injection collapses to exactly one `after` parameter.
+        long afterParams = Arrays.stream(rawQuery.split("&"))
+            .filter(part -> part.startsWith("after="))
+            .count();
+        assertEquals(1, afterParams,
+            "cursor injection must not introduce a second after parameter: " + rawQuery);
     }
 
     private String baseUrl() {

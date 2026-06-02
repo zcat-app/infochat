@@ -18,8 +18,10 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -40,8 +42,13 @@ class BlueskyFetcherTest {
 
     private static final String EMPTY_FEED = "{\"feed\":[]}";
 
+    // A cursor whose value contains the URL metacharacters & # ? that would
+    // inject or truncate the next-page query if concatenated unencoded.
+    private static final String CRAFTED_CURSOR = "next&actor=evil#?x";
+
     private HttpServer server;
     private int port;
+    private final AtomicReference<String> injectSecondPageRawQuery = new AtomicReference<>();
 
     @BeforeEach
     void startServer() throws IOException {
@@ -78,6 +85,26 @@ class BlueskyFetcherTest {
         server.createContext("/error", exchange -> {
             exchange.sendResponseHeaders(429, -1);
             exchange.close();
+        });
+
+        // First page hands back CRAFTED_CURSOR; the fetcher's second request
+        // is captured raw so the test can inspect how the cursor was placed
+        // into the query string.
+        server.createContext("/inject/xrpc", exchange -> {
+            String rawQuery = exchange.getRequestURI().getRawQuery();
+            byte[] body;
+            if (rawQuery != null && rawQuery.contains("cursor=")) {
+                injectSecondPageRawQuery.set(rawQuery);
+                body = secondPageJson();
+            } else {
+                body = ("{\"cursor\":\"" + CRAFTED_CURSOR + "\",\"feed\":[]}")
+                    .getBytes(StandardCharsets.UTF_8);
+            }
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(body);
+            }
         });
 
         server.start();
@@ -166,6 +193,29 @@ class BlueskyFetcherTest {
         List<NormalizedPost> posts = fetcher.fetch(1L, "alice.bsky.social");
 
         assertTrue(posts.isEmpty(), "empty feed must return an empty list");
+    }
+
+    @Test
+    void cursorWithSpecialCharsIsEncodedNotInterpreted() {
+        BlueskyFetcher fetcher = new BlueskyFetcher(
+            testModeClient(),
+            5,
+            "http://127.0.0.1:" + port + "/inject/xrpc");
+
+        fetcher.fetch(1L, "alice.bsky.social");
+
+        String rawQuery = injectSecondPageRawQuery.get();
+        assertNotNull(rawQuery, "fetcher must have requested a second page using the cursor");
+        // The crafted & # ? are percent-encoded, leaving the cursor a single
+        // opaque token rather than three injected/truncating fragments.
+        assertTrue(rawQuery.contains("cursor=next%26actor%3Devil%23%3Fx"),
+            "crafted cursor must be percent-encoded: " + rawQuery);
+        // The injected actor override never becomes a second query parameter.
+        long actorParams = Arrays.stream(rawQuery.split("&"))
+            .filter(part -> part.startsWith("actor="))
+            .count();
+        assertEquals(1, actorParams,
+            "cursor injection must not introduce a second actor parameter: " + rawQuery);
     }
 
     private BlueskyFetcher testModeFetcher(int pageCap) {

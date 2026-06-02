@@ -11,7 +11,9 @@ import org.jspecify.annotations.NonNull;
 
 import java.io.IOException;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -111,7 +113,9 @@ public class BlueskyFetcher implements Fetcher {
         StringBuilder sb = new StringBuilder(xrpcBase)
             .append("?actor=").append(actor);
         if (cursor != null) {
-            sb.append("&cursor=").append(cursor);
+            // cursor is upstream-supplied (untrusted): encode so a value
+            // containing & / # / ? cannot inject or truncate the query.
+            sb.append("&cursor=").append(URLEncoder.encode(cursor, StandardCharsets.UTF_8));
         }
         return URI.create(sb.toString());
     }

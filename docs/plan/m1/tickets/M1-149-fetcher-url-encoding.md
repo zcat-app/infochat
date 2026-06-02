@@ -1,7 +1,7 @@
 ---
 id: M1-149
 title: "Fetcher pagination cursor URL-encoding"
-status: pending
+status: done
 created: 2026-06-02
 last_updated: 2026-06-02
 blocked_by: []
@@ -30,12 +30,43 @@ spec_refs:
   - docs/spec/security.md §SSRF and outbound connections
   - docs/spec/security.md §Per-source trust boundaries
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-02
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 121
+      removed: 10
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-02
+    verdict: CLEAN
+    base: 8da9c22^
+    head: 8da9c22
+    verdict_file: docs/plan/m1/redteam/M1-149-2026-06-02.md
+    out_of_model_count: 0
+    note: |
+      CLEAN. The cursor URL-encoding closes a query-injection/URL-truncation
+      gap at the untrusted-feed trust boundary; SSRF host/IP/redirect
+      guarantees are unaffected (URI still flows through
+      SsrfGuardedHttpClient). The remaining unencoded actor/identifier is
+      operator-set trusted config. No remediation ticket needed.
+clarity_check:
+  date: 2026-06-02
+  verdict: PASS
+  warnings:
+    - "Acceptance item 2 does not name the test class/method; weak but not a blocker"
+  blockers: []
 ---
 
 # M1-149: Fetcher pagination cursor URL-encoding
