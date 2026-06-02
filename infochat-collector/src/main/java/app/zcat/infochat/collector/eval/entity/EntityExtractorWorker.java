@@ -32,7 +32,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.Semaphore;
 
 /**
  * Collector-side scheduled poller that runs the entity-extraction step
@@ -92,10 +91,14 @@ import java.util.concurrent.Semaphore;
  *
  * <h2>Bounded concurrency</h2>
  *
- * <p>The {@link Semaphore} bounds in-flight entity LLM calls per
- * {@code docs/spec/llm.md} §Bounded concurrency, mirroring TaggerWorker
- * and Stage2Worker. The permit count is read from
- * {@code infochat.llm.entity.max-concurrency}.
+ * <p>Each tick enumerates at most
+ * {@code infochat.llm.entity.max-concurrency} posts (the {@code LIMIT}
+ * in {@link #enumeratePending(int)}) and processes them in a serial
+ * {@code for} loop, so at most one entity-extraction LLM call is ever
+ * in flight per {@code docs/spec/llm.md} §Bounded concurrency. The
+ * configured value is the per-tick batch ceiling, not a parallelism
+ * degree — there is no fan-out, so no semaphore is needed to bound
+ * in-flight calls.
  */
 @ApplicationScoped
 public class EntityExtractorWorker {
@@ -153,7 +156,6 @@ public class EntityExtractorWorker {
     @ConfigProperty(name = "infochat.llm.entity.max-concurrency")
     int maxConcurrency;
 
-    private Semaphore concurrencyPermits;
     private ObjectMapper objectMapper;
 
     @PostConstruct
@@ -162,7 +164,6 @@ public class EntityExtractorWorker {
             throw new IllegalStateException(
                 "EntityExtractorWorker: infochat.llm.entity.max-concurrency must be >= 1; got " + maxConcurrency);
         }
-        this.concurrencyPermits = new Semaphore(maxConcurrency);
         this.objectMapper = new ObjectMapper();
     }
 
@@ -200,22 +201,17 @@ public class EntityExtractorWorker {
      * clock.
      */
     void processOne(PostRow row) {
-        concurrencyPermits.acquireUninterruptibly();
-        try {
-            LlmProvider provider = llmRouter.forTask(ModelTask.ENTITY, "en");
+        LlmProvider provider = llmRouter.forTask(ModelTask.ENTITY, "en");
 
-            AttemptResult first = tryOnce(provider, row, 1);
-            AttemptResult chosen = first.kind() == AttemptKind.PARSED
-                ? first
-                : tryOnce(provider, row, 2);
+        AttemptResult first = tryOnce(provider, row, 1);
+        AttemptResult chosen = first.kind() == AttemptKind.PARSED
+            ? first
+            : tryOnce(provider, row, 2);
 
-            if (chosen.kind() == AttemptKind.PARSED) {
-                persistEntities(row, chosen.result());
-            } else {
-                releaseWithoutEntities(row, first.kind(), chosen.kind());
-            }
-        } finally {
-            concurrencyPermits.release();
+        if (chosen.kind() == AttemptKind.PARSED) {
+            persistEntities(row, chosen.result());
+        } else {
+            releaseWithoutEntities(row, first.kind(), chosen.kind());
         }
     }
 

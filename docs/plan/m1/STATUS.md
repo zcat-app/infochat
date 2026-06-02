@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 21 |
+| pending | 20 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 169 |
+| done | 170 |
 | deferred | 3 |
 | **total** | **193** |
 
@@ -33,7 +33,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-148 — MessagingAdapter SPI lifecycle (finalize→shutdown, start/stop) + low-level cleanup (complexity: medium, risk: low)
 - M1-150 — Digest hygiene (concurrency guard, timezone WARN, broad-catch narrow) (complexity: low, risk: low)
 - M1-152 — Schema-hardening migration (stage2_verdict CHECK + V27 audit verb + Nostr index) (complexity: low, risk: medium)
-- M1-153 — Collector worker hygiene (dead semaphores, interrupt, backoff Random, dup counter, timeouts) (complexity: low, risk: low)
 - M1-154 — Provider chat/sanitizer hygiene (pattern caching, closed-list whitespace, dispatcher completeness) (complexity: low, risk: low)
 - M1-155 — InboundRouter hygiene (chat body-cap ordering, bidi-control gap, lookupGroupId Optional) (complexity: medium, risk: medium)
 - M1-156 — Misc security-low hardening (Redactor separator, invite per-code counter, AddSource userinfo) (complexity: low, risk: low)
@@ -79,6 +78,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-153 | Collector worker hygiene (dead semaphores, interrupt, backoff Random, dup counter, timeouts) | 2026-06-02 | round 1 APPROVE |
 | M1-149 | Fetcher pagination cursor URL-encoding | 2026-06-02 | round 1 APPROVE |
 | M1-147 | Adapter capability-flag reconciliation + cross-adapter contract test (CT5) | 2026-06-02 | round 1 APPROVE |
 | M1-145 | /save personal-tag length + count caps | 2026-06-02 | round 1 APPROVE |
@@ -88,7 +88,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-137 | SimpleX mention canonicalization → exact-bytes compare | 2026-06-02 | round 1 APPROVE |
 | M1-136 | local-only startup guard covers embedding endpoint + remote-embedding log | 2026-06-02 | round 2 APPROVE |
 | M1-135 | SSRF hardening bundle | 2026-06-02 | round 1 APPROVE |
-| M1-133 | CT1 shared text/util extraction (JsonEscaper + TagNormalizer + Sha256) + TODO cleanup | 2026-06-02 | round 1 APPROVE |
 
 ---
 
@@ -342,7 +341,7 @@ M1-148 (pending) ← runnable
 M1-149 (done)
 M1-150 (pending) ← runnable
 M1-152 (pending) ← runnable
-M1-153 (pending) ← runnable
+M1-153 (done)
 M1-156 (pending) ← runnable
 M1-157 (pending) ← runnable
 M1-158 (pending) ← runnable

@@ -278,8 +278,14 @@ public final class NostrStreamSource implements StreamSource {
         int allRelaysBadCycleCap;
 
         // One shared client (and its executor) across every relay of every
-        // nostr source; relay connections only subscribe and read.
-        private final HttpClient httpClient = HttpClient.newHttpClient();
+        // nostr source; relay connections only subscribe and read. The
+        // connect timeout bounds the handshake so a relay host that accepts
+        // the TCP SYN but never completes the connection cannot pin this
+        // shared client open indefinitely (mirrors the 10s handshake bound
+        // in NostrRelayConnection.CONNECT_TIMEOUT).
+        private final HttpClient httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(10))
+                .build();
 
         // Default-strict SSRF guard — IpBlocklist refuses loopback,
         // private, link-local, CGNAT, cloud-metadata, multicast, and the

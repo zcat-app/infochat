@@ -249,6 +249,32 @@ class EmbeddingWorkerIT {
         assertEquals(1, postEmbeddingCount(a.id));
     }
 
+    // ---------- 7. interrupt during permit acquire → restore flag, skip embed ----------
+
+    @Test
+    @Order(7)
+    void processBatchInterruptedDuringAcquireRestoresFlagAndSkipsEmbed() {
+        EmbeddingWorker.PostRow row = new EmbeddingWorker.PostRow(
+            UUID.randomUUID(), FETCHED_AT, "interrupt-probe", "body", null);
+
+        // An already-interrupted caller makes Semaphore.acquire() throw on
+        // entry; processBatch must restore the interrupt flag (acquire clears
+        // it when it throws) and return WITHOUT invoking the provider — the
+        // C-ACQUIRE-INT graceful-shutdown contract. No post is seeded and no
+        // result is queued: a correct short-circuit never reaches the DB or
+        // the provider.
+        Thread.currentThread().interrupt();
+        embeddingWorker.processBatch(List.of(row));
+        // Read-and-clear in one step so the flag cannot leak onto the shared
+        // JUnit worker thread for sibling tests.
+        boolean interruptRestored = Thread.interrupted();
+
+        assertTrue(interruptRestored,
+            "the interrupt flag must be restored after acquire() is interrupted");
+        assertEquals(0, stub().callCount(),
+            "no embed call may be issued when the permit acquire is interrupted");
+    }
+
     // ---------- helpers ----------
 
     private SeededPost seedPickupReadyPost(String slug) throws Exception {

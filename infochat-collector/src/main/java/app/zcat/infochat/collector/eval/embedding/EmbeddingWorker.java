@@ -190,7 +190,18 @@ public class EmbeddingWorker {
      * the operator runs the re-embed procedure).
      */
     public void processBatch(List<PostRow> batch) {
-        concurrencyPermits.acquireUninterruptibly();
+        try {
+            concurrencyPermits.acquire();
+        } catch (InterruptedException e) {
+            // Interrupted while parked waiting for a permit — the JVM is
+            // shutting down. Restore the interrupt flag (acquire() clears it)
+            // so the scheduler/executor still observes the shutdown request,
+            // and abandon this batch: the posts stay embedding_done=FALSE and
+            // the next tick after restart re-picks them (the pickup query is
+            // idempotent). Swallowing the interrupt here would hinder shutdown.
+            Thread.currentThread().interrupt();
+            return;
+        }
         try {
             List<String> inputs = new ArrayList<>(batch.size());
             for (PostRow row : batch) {

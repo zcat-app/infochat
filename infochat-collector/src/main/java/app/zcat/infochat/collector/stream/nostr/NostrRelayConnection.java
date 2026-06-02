@@ -17,6 +17,7 @@ import java.util.UUID;
 import java.util.OptionalLong;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -88,7 +89,6 @@ final class NostrRelayConnection {
     private final SsrfGuardedHttpClient ssrfClient;
     private final Duration peerIpCheckInterval;
     private final RelayHealthTracker healthTracker;
-    private final Random random = new Random();
 
     private volatile boolean running = true;
     private volatile Thread loopThread;
@@ -228,7 +228,7 @@ final class NostrRelayConnection {
                 // the backoff (so a tracker that returns "now" never produces
                 // a zero-sleep tight loop); the cooldown extends it when the
                 // relay must park longer than backoff alone would dictate.
-                long backoffMs = backoffDelay(consecutiveFailures, backoffBase, backoffMax, random).toMillis();
+                long backoffMs = backoffDelay(consecutiveFailures, backoffBase, backoffMax, ThreadLocalRandom.current()).toMillis();
                 long cooldownMs = Math.max(0L,
                         Duration.between(Instant.now(), healthTracker.nextAttemptTime(relayUri)).toMillis());
                 Thread.sleep(Math.max(backoffMs, cooldownMs));

@@ -226,6 +226,20 @@ public class AssetSnapshotFetcher {
     }
 
     private void recordFailure(@NonNull EnabledPair row, @NonNull FetchException cause) {
+        // This is the D42 failure ladder for asset_config. It is deliberately
+        // NOT commonized with SourceRepository's D42 ladder for the `source`
+        // table: the two share only an incidental shape. They key on different
+        // columns (source.id UUID vs (asset, sub_verb)), track different
+        // timestamps (source bumps last_fetch_at every tick + last_success_at
+        // on success; asset_config bumps last_failure_at on failure +
+        // last_success_at on success, with no per-tick fetch timestamp), and
+        // split the notify differently (SourceRepository.recordFailure returns
+        // a FailureOutcome for its caller to notify; this method fires
+        // notifyOnce inline). Asset snapshots are not posts (spec §Asset
+        // commands), so the two ladders live in independent domains; unifying
+        // them would need a table/column/notify-parameterized helper more
+        // complex than either concrete method and would couple assets to fetch.
+        //
         // Step 1: bump the per-pair counter, capture the post-bump
         // value via RETURNING. The atomic increment guarantees N
         // concurrent ticks (shouldn't happen — single scheduler — but

@@ -31,7 +31,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.Semaphore;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -104,12 +103,15 @@ import java.util.regex.Pattern;
  *
  * <h2>Bounded concurrency</h2>
  *
- * <p>The {@link Semaphore} bounds in-flight tagger LLM calls per
- * {@code docs/spec/llm.md} §Bounded concurrency and observability.
- * The permit count is read from
- * {@code infochat.llm.tagger.max-concurrency} (laptop default 4
- * per {@code docs/design/05-llm-and-embeddings.md} §5.7) — the
- * same shape M1-033's Stage2Worker uses.
+ * <p>Each tick enumerates at most
+ * {@code infochat.llm.tagger.max-concurrency} posts (the {@code LIMIT}
+ * in {@link #enumeratePending(int)}) and processes them in a serial
+ * {@code for} loop, so at most one tagger LLM call is ever in flight
+ * per {@code docs/spec/llm.md} §Bounded concurrency and observability.
+ * The configured value is the per-tick batch ceiling, not a
+ * parallelism degree — there is no fan-out, so no semaphore is needed
+ * to bound in-flight calls. (laptop default 4 per
+ * {@code docs/design/05-llm-and-embeddings.md} §5.7.)
  *
  * <h2>Idempotency</h2>
  *
@@ -158,7 +160,6 @@ public class TaggerWorker {
     @ConfigProperty(name = "infochat.llm.tagger.max-concurrency")
     int maxConcurrency;
 
-    private Semaphore concurrencyPermits;
     private String primaryPromptTemplate;
     private String fallbackPromptTemplate;
     private ObjectMapper objectMapper;
@@ -169,7 +170,6 @@ public class TaggerWorker {
             throw new IllegalStateException(
                 "TaggerWorker: infochat.llm.tagger.max-concurrency must be >= 1; got " + maxConcurrency);
         }
-        this.concurrencyPermits = new Semaphore(maxConcurrency);
         this.primaryPromptTemplate = loadResource(PRIMARY_PROMPT_RESOURCE);
         this.fallbackPromptTemplate = loadResource(FALLBACK_PROMPT_RESOURCE);
         this.objectMapper = new ObjectMapper();
@@ -210,13 +210,8 @@ public class TaggerWorker {
      * on the scheduler clock.
      */
     void processOne(PostRow row) {
-        concurrencyPermits.acquireUninterruptibly();
-        try {
-            TaggerOutcome outcome = invokeWithFallbackChain(row);
-            persistCursor(row, outcome);
-        } finally {
-            concurrencyPermits.release();
-        }
+        TaggerOutcome outcome = invokeWithFallbackChain(row);
+        persistCursor(row, outcome);
     }
 
     /**
