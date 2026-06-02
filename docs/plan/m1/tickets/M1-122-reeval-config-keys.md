@@ -1,7 +1,7 @@
 ---
 id: M1-122
 title: "infochat.reeval.* keys in main config + @ConfigProperty CI guard"
-status: pending
+status: done
 created: 2026-06-02
 last_updated: 2026-06-02
 blocked_by: []
@@ -33,12 +33,31 @@ spec_refs:
   - docs/spec/security.md §Re-evaluation job
   - docs/spec/deployment.md §Configuration surface (spec level)
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-02
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 371
+      removed: 2
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-02
+  verdict: WARN
+  warnings:
+    - "SECURITY-FLAG-CONSISTENT: consider marking security_relevant: true; the nine reeval.* keys govern the security model's quarantine/re-evaluation policy and live under deployment.md's Security configuration category."
+    - "SELF-CONTAINED-CHECK: inline the per-profile values table (laptop/vps/pi/remote-llm × reeval cadence + caps) from docs/design/04-security.md §Re-evaluation job so acceptance item [1] is verifiable without loading the design file."
+  blockers: []
 ---
 
 # M1-122: infochat.reeval.* keys in main config + @ConfigProperty CI guard
