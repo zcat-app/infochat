@@ -16,15 +16,15 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.locks.ReentrantLock;
@@ -124,6 +124,12 @@ public final class SsrfGuardedHttpClient {
 
     private static final String ACCEPT_HEADER = "*/*";
 
+    // One virtual thread per body read (B-READBOUNDED-EXECUTOR). Shared
+    // factory; each read spins a fresh short-lived virtual thread, so no
+    // pool / shutdown bookkeeping is needed.
+    private static final ThreadFactory BODY_READER_THREAD_FACTORY =
+        Thread.ofVirtual().name("ssrf-body-reader-", 0).factory();
+
     private final IpBlocklist blocklist;
 
     private final Duration connectTimeout;
@@ -192,10 +198,10 @@ public final class SsrfGuardedHttpClient {
             throw new IllegalArgumentException("blocklist must be configured");
         }
         if (connectTimeout == null || connectTimeout.isZero() || connectTimeout.isNegative()) {
-            throw new IllegalArgumentException("timeout must be configured");
+            throw new IllegalArgumentException("connect timeout must be configured");
         }
         if (requestTimeout == null || requestTimeout.isZero() || requestTimeout.isNegative()) {
-            throw new IllegalArgumentException("timeout must be configured");
+            throw new IllegalArgumentException("request timeout must be configured");
         }
         if (readTimeout == null || readTimeout.isZero() || readTimeout.isNegative()) {
             throw new IllegalArgumentException("read timeout must be configured");
@@ -249,10 +255,19 @@ public final class SsrfGuardedHttpClient {
      * <ol>
      *   <li>Reject null or blank input with
      *       {@link IllegalArgumentException}.</li>
-     *   <li>{@code IDN.toASCII(host, IDN.ALLOW_UNASSIGNED)} — convert
-     *       Unicode / punycode to canonical ASCII Compatible Encoding.
-     *       Applied first because lowercase-then-toASCII can mis-handle
-     *       case-sensitive punycode constructs.</li>
+     *   <li>IPv6 URL-literals arrive bracketed from {@code URI.getHost()}
+     *       (e.g. {@code [::1]}); {@code IDN.toASCII} rejects the
+     *       brackets. For a bracketed host, strip the brackets, case-fold
+     *       the inner literal, and re-add the brackets so the value still
+     *       reads as an IPv6 literal for the dial and the pin key — the
+     *       remaining steps do not apply.</li>
+     *   <li>{@code IDN.toASCII(host)} — convert Unicode / punycode to
+     *       canonical ASCII Compatible Encoding. Applied first because
+     *       lowercase-then-toASCII can mis-handle case-sensitive punycode
+     *       constructs. {@code ALLOW_UNASSIGNED} is deliberately NOT
+     *       passed: this is a security-critical path, so unassigned code
+     *       points are rejected rather than passed through to the
+     *       resolver.</li>
      *   <li>{@code toLowerCase(Locale.ROOT)} — case-fold without the
      *       Turkish-dotless-i hazard of the default-locale form.</li>
      *   <li>Strip a single trailing {@code .} if present — the FQDN
@@ -270,7 +285,14 @@ public final class SsrfGuardedHttpClient {
         if (host == null || host.isBlank()) {
             throw new IllegalArgumentException("host must not be null or blank");
         }
-        String ascii = IDN.toASCII(host, IDN.ALLOW_UNASSIGNED);
+        // IPv6 URL-literals arrive bracketed from URI.getHost() (e.g.
+        // "[::1]"); IDN.toASCII rejects the brackets. Strip them,
+        // case-fold the inner literal, and re-add the brackets so the
+        // pin key and the dial target agree on the IPv6 literal form.
+        if (host.startsWith("[") && host.endsWith("]")) {
+            return "[" + host.substring(1, host.length() - 1).toLowerCase(Locale.ROOT) + "]";
+        }
+        String ascii = IDN.toASCII(host);
         String lower = ascii.toLowerCase(Locale.ROOT);
         if (lower.endsWith(".")) {
             return lower.substring(0, lower.length() - 1);
@@ -311,58 +333,110 @@ public final class SsrfGuardedHttpClient {
     public HttpResponse<byte[]> get(@NonNull URI uri, @NonNull Map<String, String> extraHeaders)
             throws IOException, InterruptedException {
         HttpResponse<InputStream> terminalResponse;
-        ReentrantLock lock = PinnedDnsResolver.Provider.lock();
-        lock.lock();
-        try {
-            URI current = uri;
-            int redirectCount = 0;
-            while (true) {
-                ResolvedHost resolved = resolveAndValidate(current, HTTP_SCHEMES);
-                PinnedDnsResolver.Provider.installPins(
-                    Map.of(resolved.canonicalHost(), resolved.addresses()));
+        // Mutable per-call copy of the caller's headers: credential
+        // headers are scrubbed from it when a redirect crosses origin so
+        // they are not replayed to a different host/port/scheme (browsers
+        // and curl do the same). The caller's map is never mutated.
+        Map<String, String> hopHeaders = new LinkedHashMap<>(extraHeaders);
+        // B-HTTP-CLIENT: build ONE HttpClient before the redirect loop,
+        // reuse it across hops (so the connection pool and the
+        // SelectorManager thread are shared), and close it after the
+        // body read. The body InputStream stays valid until readBounded
+        // drains it, so the close() must happen after that — hence the
+        // try-with-resources spans the whole method, not just the loop.
+        try (HttpClient perCallClient = HttpClient.newBuilder()
+                .connectTimeout(connectTimeout)
+                .followRedirects(HttpClient.Redirect.NEVER)
+                .build()) {
+            ReentrantLock lock = PinnedDnsResolver.Provider.lock();
+            lock.lock();
+            try {
+                URI current = uri;
+                int redirectCount = 0;
+                while (true) {
+                    ResolvedHost resolved = resolveAndValidate(current, HTTP_SCHEMES);
+                    PinnedDnsResolver.Provider.installPins(
+                        Map.of(resolved.canonicalHost(), resolved.addresses()));
 
-                HttpClient perCallClient = HttpClient.newBuilder()
-                    .connectTimeout(connectTimeout)
-                    .followRedirects(HttpClient.Redirect.NEVER)
-                    .build();
-                HttpRequest.Builder reqBuilder = HttpRequest.newBuilder()
-                    .uri(current)
-                    .timeout(requestTimeout)
-                    .header("Accept", ACCEPT_HEADER)
-                    .header("User-Agent", USER_AGENT)
-                    .GET();
-                extraHeaders.forEach(reqBuilder::header);
-                HttpRequest request = reqBuilder.build();
-                HttpResponse<InputStream> response =
-                    perCallClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+                    HttpRequest.Builder reqBuilder = HttpRequest.newBuilder()
+                        .uri(current)
+                        .timeout(requestTimeout)
+                        .header("Accept", ACCEPT_HEADER)
+                        .header("User-Agent", USER_AGENT)
+                        .GET();
+                    hopHeaders.forEach(reqBuilder::header);
+                    HttpRequest request = reqBuilder.build();
+                    HttpResponse<InputStream> response =
+                        perCallClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
 
-                int status = response.statusCode();
-                if (status >= 300 && status < 400) {
-                    try (InputStream discard = response.body()) {
-                        // Drain via close(); redirect bodies carry
-                        // no payload we need.
+                    int status = response.statusCode();
+                    if (isFollowableRedirect(status)) {
+                        try (InputStream discard = response.body()) {
+                            // Drain via close(); redirect bodies carry
+                            // no payload we need.
+                        }
+                        redirectCount++;
+                        if (redirectCount > redirectCap) {
+                            throw new SsrfPolicyException("redirect cap exceeded");
+                        }
+                        String location = response.headers().firstValue("Location")
+                            .orElseThrow(() -> new SsrfPolicyException(
+                                "redirect response missing Location header"));
+                        URI next = current.resolve(location);
+                        if (isCrossOrigin(current, next)) {
+                            hopHeaders.keySet().removeIf(SsrfGuardedHttpClient::isCredentialHeader);
+                        }
+                        current = next;
+                        continue;
                     }
-                    redirectCount++;
-                    if (redirectCount > redirectCap) {
-                        throw new SsrfPolicyException("redirect cap exceeded");
-                    }
-                    String location = response.headers().firstValue("Location")
-                        .orElseThrow(() -> new SsrfPolicyException(
-                            "redirect response missing Location header"));
-                    current = current.resolve(location);
-                    continue;
+
+                    terminalResponse = response;
+                    break;
                 }
-
-                terminalResponse = response;
-                break;
+            } finally {
+                PinnedDnsResolver.Provider.clearPins();
+                lock.unlock();
             }
-        } finally {
-            PinnedDnsResolver.Provider.clearPins();
-            lock.unlock();
-        }
 
-        byte[] body = readBounded(terminalResponse);
-        return new BoundedByteArrayResponse(terminalResponse, body);
+            byte[] body = readBounded(terminalResponse);
+            return new BoundedByteArrayResponse(terminalResponse, body);
+        }
+    }
+
+    // 3xx statuses this wrapper follows. 300 (Multiple Choices), 304
+    // (Not Modified), 305 (Use Proxy) and 306 (unused) are NOT redirects
+    // with a follow-able Location and must fall through to the terminal
+    // response rather than being chased (C-SSRF-304).
+    private static boolean isFollowableRedirect(int status) {
+        return switch (status) {
+            case 301, 302, 303, 307, 308 -> true;
+            default -> false;
+        };
+    }
+
+    // A redirect crosses origin when the scheme, host, or effective port
+    // differs. {@code from} is always validated (it was resolved this
+    // hop); {@code to} is an as-yet-unvalidated redirect target, so its
+    // scheme/host may be null — String.equalsIgnoreCase(null) is false,
+    // which fails safe to "cross-origin" (scrub credentials when unsure).
+    private static boolean isCrossOrigin(URI from, URI to) {
+        return !from.getScheme().equalsIgnoreCase(to.getScheme())
+            || !from.getHost().equalsIgnoreCase(to.getHost())
+            || effectivePort(from) != effectivePort(to);
+    }
+
+    private static int effectivePort(URI uri) {
+        int port = uri.getPort();
+        if (port != -1) {
+            return port;
+        }
+        return "https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80;
+    }
+
+    private static boolean isCredentialHeader(String name) {
+        return name.equalsIgnoreCase("Authorization")
+            || name.equalsIgnoreCase("Cookie")
+            || name.equalsIgnoreCase("Proxy-Authorization");
     }
 
     private ResolvedHost resolveAndValidate(URI uri, Set<String> allowedSchemes) {
@@ -407,9 +481,11 @@ public final class SsrfGuardedHttpClient {
         // HttpRequest.timeout() bounds only the receipt of response
         // HEADERS; without this watchdog a malicious upstream can
         // dribble body bytes one per minute and hold a fetcher thread
-        // for hours. We run each in.read(buf) call on a single-thread
-        // executor and supervise from the caller thread; on timeout
-        // we cancel the future and raise SsrfPolicyException.
+        // for hours. We run each in.read(buf) call on a virtual thread
+        // (B-READBOUNDED-EXECUTOR: one per read, JDK 25 — cheap enough
+        // to spin per read and needs no pool / shutdownNow bookkeeping)
+        // and supervise from the caller thread; on timeout we cancel
+        // the task and raise SsrfPolicyException.
         //
         // M1-026 Finding 1: in addition to the per-read watchdog,
         // the TOTAL wall-clock time from the start of body-read is
@@ -417,11 +493,6 @@ public final class SsrfGuardedHttpClient {
         // 1 byte per (readTimeout - epsilon) defeats the per-read
         // watchdog (each individual read completes well under the
         // window) but cannot defeat a total-elapsed deadline.
-        ExecutorService readerExecutor = Executors.newSingleThreadExecutor(r -> {
-            Thread t = new Thread(r, "ssrf-body-reader");
-            t.setDaemon(true);
-            return t;
-        });
         long bodyReadStartNanos = System.nanoTime();
         try (InputStream in = response.body();
              ByteArrayOutputStream out = new ByteArrayOutputStream()) {
@@ -429,17 +500,36 @@ public final class SsrfGuardedHttpClient {
             long total = 0;
             while (true) {
                 long elapsedNanos = System.nanoTime() - bodyReadStartNanos;
-                if (elapsedNanos > bodyReadDeadline.toNanos()) {
-                    long elapsedMs = TimeUnit.NANOSECONDS.toMillis(elapsedNanos);
+                long remainingNanos = bodyReadDeadline.toNanos() - elapsedNanos;
+                if (remainingNanos <= 0) {
                     throw new SsrfPolicyException(
-                        "body read deadline exceeded after " + elapsedMs + "ms");
+                        "body read deadline exceeded after "
+                        + TimeUnit.NANOSECONDS.toMillis(elapsedNanos) + "ms");
                 }
-                Future<Integer> readFuture = readerExecutor.submit(() -> in.read(buf));
+                // B-DEADLINE-TOCTOU: clamp each read to
+                // min(readTimeout, remaining-until-deadline) so one read
+                // cannot overshoot the total deadline by up to a full
+                // readTimeout. remaining is rounded UP to whole ms so the
+                // clamped wait never expires BEFORE the deadline — that
+                // keeps the classification below correct (a clamp expiry
+                // at or past the deadline is a deadline breach, not a
+                // per-read stall).
+                long remainingMillisCeil = (remainingNanos + 999_999L) / 1_000_000L;
+                long readBudgetMillis = Math.min(readTimeout.toMillis(), remainingMillisCeil);
+
+                FutureTask<Integer> readTask = new FutureTask<>(() -> in.read(buf));
+                BODY_READER_THREAD_FACTORY.newThread(readTask).start();
                 int n;
                 try {
-                    n = readFuture.get(readTimeout.toMillis(), TimeUnit.MILLISECONDS);
+                    n = readTask.get(readBudgetMillis, TimeUnit.MILLISECONDS);
                 } catch (TimeoutException e) {
-                    readFuture.cancel(true);
+                    readTask.cancel(true);
+                    long elapsedAtTimeoutNanos = System.nanoTime() - bodyReadStartNanos;
+                    if (elapsedAtTimeoutNanos >= bodyReadDeadline.toNanos()) {
+                        throw new SsrfPolicyException(
+                            "body read deadline exceeded after "
+                            + TimeUnit.NANOSECONDS.toMillis(elapsedAtTimeoutNanos) + "ms");
+                    }
                     throw new SsrfPolicyException(
                         "body read timeout after " + readTimeout.toMillis() + "ms");
                 } catch (ExecutionException e) {
@@ -453,7 +543,7 @@ public final class SsrfGuardedHttpClient {
                     throw new IOException("body read failed", cause);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
-                    readFuture.cancel(true);
+                    readTask.cancel(true);
                     throw new IOException("interrupted during body read", e);
                 }
                 if (n == -1) {
@@ -467,8 +557,6 @@ public final class SsrfGuardedHttpClient {
                 out.write(buf, 0, n);
             }
             return out.toByteArray();
-        } finally {
-            readerExecutor.shutdownNow();
         }
     }
 

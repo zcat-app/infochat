@@ -59,4 +59,24 @@ class UrlRedactorTest {
             UrlRedactor.redact("https://user:pw@host:8443/p?token=abc"),
             "non-default port must round-trip into the redacted output");
     }
+
+    @Test
+    void redactBracketsIpv6Host() {
+        // URI.getHost() returns IPv6 literals bracketed ("[::1]"), so
+        // the rendered output must keep the brackets — otherwise the
+        // address would be ambiguous against a port suffix (C-URLREDACTOR-IPV6).
+        assertEquals(
+            "https://[::1]/p?[REDACTED]",
+            UrlRedactor.redact("https://[::1]/p?token=abc"),
+            "IPv6 literal host must keep its brackets in the redacted output");
+    }
+
+    @Test
+    void redactBracketsIpv6HostWithUserinfoAndPort() {
+        assertEquals(
+            "https://[2606:4700::1111]:8443/p?[REDACTED]",
+            UrlRedactor.redact("https://user:pw@[2606:4700::1111]:8443/p?token=abc"),
+            "bracketed IPv6 with userinfo+port: brackets and port preserved, "
+            + "userinfo and query redacted");
+    }
 }

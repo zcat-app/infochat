@@ -1,7 +1,7 @@
 ---
 id: M1-135
 title: "SSRF hardening bundle"
-status: pending
+status: done
 created: 2026-06-02
 last_updated: 2026-06-02
 blocked_by: []
@@ -34,12 +34,94 @@ test_plan:
 spec_refs:
   - docs/spec/security.md §SSRF and outbound connections
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-02
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 403
+      removed: 106
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
-clarity_check: {}
+redteam_findings:
+  - date: 2026-06-02
+    category: INFO-LEAK
+    severity: medium
+    promise: |
+      "DNS-resolved IPs are checked against a blocklist of private,
+      loopback, link-local, multicast, CGNAT, and cloud-metadata ranges
+      (notably `169.254.169.254` and IPv6 equivalents) plus the host's
+      own non-loopback interfaces." (docs/spec/security.md §SSRF and
+      outbound connections, lines 137-140)
+    gap: |
+      The new IPv6-transition-form decode in IpBlocklist routes an
+      embedded IPv4 through isBlockedV4 only, which checks the static
+      range table but NOT the host's-own-interface set. The
+      host-interface check lives solely at the top of isBlocked
+      (IpBlocklist.java:101, hostInterfacesProvider.get().contains(addr))
+      and compares the as-supplied InetAddress. For 6to4 / Teredo /
+      NAT64 / IPv4-compatible inputs the supplied address is a genuine
+      16-byte Inet6Address (IpBlocklist.java:225-255), so it never
+      equals the v4 interface entry in the set; the code then falls
+      through to embeddedV4(...) -> isBlockedV4(embedded)
+      (IpBlocklist.java:117-118), which has no host-interface
+      consultation (IpBlocklist.java:121-164). An embedded IPv4 equal to
+      one of the host's own public non-loopback interface IPs (VPN
+      tunnel, container bridge, freshly-attached cloud EIP) is therefore
+      not blocked. The IPv4-mapped form escapes this because the JDK
+      normalizes ::ffff:a.b.c.d to an Inet4Address; the four new
+      transition forms do not normalize and so expose the gap.
+    repro: |
+      Host has a non-RFC1918 interface IP, e.g. a cloud EIP 203.0.113.5,
+      with a sensitive service bound to it. Attacker submits a URL whose
+      host resolves to (or is the literal) 2002:cb00:7105:: (6to4 of
+      203.0.113.5) — or the equivalent Teredo / 64:ff9b::cb00:7105 NAT64
+      / ::203.0.113.5 IPv4-compatible spelling. isBlocked returns false
+      (host-interface contains misses the Inet6Address; isBlockedV6
+      misses; embeddedV4 decodes to 203.0.113.5; isBlockedV4 returns
+      false because the public IP is in no static range and host
+      interfaces are not re-checked), so the dial proceeds against an
+      address the spec commits to blocking. The IPv4-mapped spelling of
+      the same IP would be blocked, demonstrating the inconsistency.
+    suggested_fix_class: trust-boundary-tightening
+redteam_audits:
+  - date: 2026-06-02
+    verdict: FINDINGS
+    base: 254ad1a22cc6a3b8f45178280bf78b98eb38ced0^
+    head: 254ad1a22cc6a3b8f45178280bf78b98eb38ced0
+    verdict_file: docs/plan/m1/redteam/M1-135-2026-06-02.md
+    findings_count: 1
+    out_of_model_count: 2
+    note: |
+      One medium INFO-LEAK finding: the IPv6-transition-form decode
+      checks the embedded IPv4 against the static range table but not the
+      host's-own-non-loopback-interface set, so a 6to4/Teredo/NAT64/
+      IPv4-compatible spelling of a host public interface IP bypasses the
+      host-interface clause (the IPv4-mapped form does not, because the
+      JDK normalizes it to Inet4Address). Defense-in-depth gap against an
+      explicit spec clause; medium because end-to-end exploitation also
+      needs a non-RFC1918 host interface plus working transition-gateway
+      return-routing (the latter out-of-model). FIXED IN-BRANCH before
+      merge (per user direction): isBlocked now routes every decoded
+      embeddedV4 through a host-interface check (isHostInterfaceV4); the
+      original commit 254ad1a was not amended — the fix is a follow-up
+      commit on the branch that squashes into the single M1-135 commit
+      at merge. Five IpBlocklistTest cases added. Two OUT-OF-MODEL
+      advisories recorded in the verdict file; neither converted to a
+      ticket.
+clarity_check:
+  date: 2026-06-02
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-135: SSRF hardening bundle

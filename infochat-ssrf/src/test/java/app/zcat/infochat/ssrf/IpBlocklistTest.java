@@ -115,6 +115,49 @@ class IpBlocklistTest {
             + "otherwise the cloud-metadata bypass survives");
     }
 
+    // -----------------------------------------------------------------
+    // IPv6 transition formats that embed an IPv4 target (A16). Only
+    // IPv4-mapped was decoded before; 6to4, Teredo, NAT64 and the
+    // deprecated IPv4-compatible form each wrap an IPv4 address that a
+    // v6-only range check would miss. Each embedded IPv4 must route
+    // through isBlockedV4 so a blocked v4 range cannot be reached by
+    // spelling it as an IPv6 transition address.
+    // -----------------------------------------------------------------
+
+    @Test
+    void blocks6to4EmbeddedCloudMetadata() throws UnknownHostException {
+        // 2002:a9fe:a9fe:: — 6to4 (RFC 3056) wrapping 169.254.169.254
+        // (a9.fe.a9.fe) in bytes 2-5. Must block via the embedded-IPv4
+        // decode; the handout notes 6to4 can reach cloud metadata.
+        assertTrue(blocklist.isBlocked(InetAddress.getByName("2002:a9fe:a9fe::")),
+            "6to4 address embedding 169.254.169.254 must block via isBlockedV4");
+    }
+
+    @Test
+    void blocksTeredoEmbeddedLoopback() throws UnknownHostException {
+        // 2001:0:0:0:0:0:80ff:fffe — Teredo (RFC 4380). The client
+        // global IPv4 is the last 32 bits XOR 0xFFFFFFFF; 0x80fffffe
+        // XOR 0xffffffff = 127.0.0.1, so this wraps loopback.
+        assertTrue(blocklist.isBlocked(InetAddress.getByName("2001:0:0:0:0:0:80ff:fffe")),
+            "Teredo address whose obfuscated client IPv4 is 127.0.0.1 must block");
+    }
+
+    @Test
+    void blocksNat64EmbeddedPrivate() throws UnknownHostException {
+        // 64:ff9b::10.0.0.1 — NAT64 well-known prefix (RFC 6052)
+        // wrapping the RFC 1918 address 10.0.0.1 in the low 32 bits.
+        assertTrue(blocklist.isBlocked(InetAddress.getByName("64:ff9b::10.0.0.1")),
+            "NAT64 well-known-prefix address embedding 10.0.0.1 must block");
+    }
+
+    @Test
+    void blocksIpv4CompatibleLoopback() throws UnknownHostException {
+        // ::127.0.0.1 — deprecated IPv4-compatible form (RFC 4291);
+        // bytes 0-11 zero, IPv4 in the low 32 bits. Must block.
+        assertTrue(blocklist.isBlocked(InetAddress.getByName("::127.0.0.1")),
+            "IPv4-compatible ::127.0.0.1 must block via the embedded-IPv4 decode");
+    }
+
     @Test
     void allowsGooglePublicDns() throws UnknownHostException {
         assertFalse(blocklist.isBlocked(InetAddress.getByName("8.8.8.8")),
@@ -147,7 +190,7 @@ class IpBlocklistTest {
         // so it cannot be the test machine's actual interface IP
         // by accident.
         InetAddress hostIp = InetAddress.getByName("203.0.113.5");
-        IpBlocklist withHost = new IpBlocklist(Set.of(hostIp));
+        IpBlocklist withHost = new IpBlocklist(() -> Set.of(hostIp));
         assertTrue(withHost.isBlocked(InetAddress.getByName("203.0.113.5")),
             "an IP in the host-interface set must block; "
             + "spec's \"host's own non-loopback interfaces\" clause");
@@ -158,10 +201,79 @@ class IpBlocklistTest {
         // Negative control: the host-IP seam adds host IPs WITHOUT
         // affecting the public-IP allowlist. 8.8.8.8 must still pass.
         InetAddress hostIp = InetAddress.getByName("203.0.113.5");
-        IpBlocklist withHost = new IpBlocklist(Set.of(hostIp));
+        IpBlocklist withHost = new IpBlocklist(() -> Set.of(hostIp));
         assertFalse(withHost.isBlocked(InetAddress.getByName("8.8.8.8")),
             "a public IP not in the host-interface set must remain "
             + "allowed even when the seam is populated");
+    }
+
+    // -----------------------------------------------------------------
+    // Host-interface clause via IPv6 transition forms. A host's own
+    // non-loopback interface IP (e.g. a freshly-attached cloud EIP) can
+    // be a PUBLIC IPv4 that no static range blocks. Spelled in a
+    // transition form it arrives as a genuine Inet6Address, so the
+    // top-level Set#contains check on the as-supplied address misses the
+    // host's v4 binding; the decoded IPv4 must therefore also be matched
+    // against the host-interface set. The IPv4-mapped form escapes this
+    // because the JDK normalizes ::ffff:a.b.c.d to an Inet4Address.
+    // 203.0.113.5 (cb.00.71.05) is TEST-NET-3 (RFC 5737): a public-shaped
+    // address in no blocked range, so isBlockedV4 alone returns false and
+    // only the host-interface hop can block it.
+    // -----------------------------------------------------------------
+
+    @Test
+    void hostInterfaceVia6to4IsBlocked() throws UnknownHostException {
+        // 2002:cb00:7105:: — 6to4 wrapping the host IP 203.0.113.5.
+        InetAddress hostIp = InetAddress.getByName("203.0.113.5");
+        IpBlocklist withHost = new IpBlocklist(() -> Set.of(hostIp));
+        assertTrue(withHost.isBlocked(InetAddress.getByName("2002:cb00:7105::")),
+            "6to4 spelling of a host interface IP must block via the "
+            + "embedded-IPv4 host-interface check");
+    }
+
+    @Test
+    void hostInterfaceViaTeredoIsBlocked() throws UnknownHostException {
+        // 2001:0:0:0:0:0:34ff:8efa — Teredo whose obfuscated client IPv4
+        // (0x34ff8efa XOR 0xffffffff) is 203.0.113.5, the host IP.
+        InetAddress hostIp = InetAddress.getByName("203.0.113.5");
+        IpBlocklist withHost = new IpBlocklist(() -> Set.of(hostIp));
+        assertTrue(withHost.isBlocked(InetAddress.getByName("2001:0:0:0:0:0:34ff:8efa")),
+            "Teredo spelling of a host interface IP must block via the "
+            + "embedded-IPv4 host-interface check");
+    }
+
+    @Test
+    void hostInterfaceViaNat64IsBlocked() throws UnknownHostException {
+        // 64:ff9b::203.0.113.5 — NAT64 well-known prefix wrapping the
+        // host IP 203.0.113.5 in the low 32 bits.
+        InetAddress hostIp = InetAddress.getByName("203.0.113.5");
+        IpBlocklist withHost = new IpBlocklist(() -> Set.of(hostIp));
+        assertTrue(withHost.isBlocked(InetAddress.getByName("64:ff9b::203.0.113.5")),
+            "NAT64 spelling of a host interface IP must block via the "
+            + "embedded-IPv4 host-interface check");
+    }
+
+    @Test
+    void hostInterfaceViaIpv4CompatibleIsBlocked() throws UnknownHostException {
+        // ::203.0.113.5 — deprecated IPv4-compatible form wrapping the
+        // host IP 203.0.113.5.
+        InetAddress hostIp = InetAddress.getByName("203.0.113.5");
+        IpBlocklist withHost = new IpBlocklist(() -> Set.of(hostIp));
+        assertTrue(withHost.isBlocked(InetAddress.getByName("::203.0.113.5")),
+            "IPv4-compatible spelling of a host interface IP must block "
+            + "via the embedded-IPv4 host-interface check");
+    }
+
+    @Test
+    void nonHostPublicIpViaTransitionFormStillAllowed() throws UnknownHostException {
+        // Negative control: the embedded-IPv4 host-interface hop must not
+        // over-block. 8.8.8.8 (not in the host set, no blocked range) in
+        // 6to4 form must still pass.
+        InetAddress hostIp = InetAddress.getByName("203.0.113.5");
+        IpBlocklist withHost = new IpBlocklist(() -> Set.of(hostIp));
+        assertFalse(withHost.isBlocked(InetAddress.getByName("2002:0808:0808::")),
+            "a public IP not in the host-interface set, spelled in 6to4 "
+            + "form, must remain allowed");
     }
 
     // -----------------------------------------------------------------

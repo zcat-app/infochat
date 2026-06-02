@@ -16,12 +16,15 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -506,6 +509,98 @@ class SsrfGuardedHttpClientTest {
             + "stripped); a raw URI.getHost() would still carry case "
             + "or the trailing dot, indicating canonicalization was "
             + "missing on the install side");
+    }
+
+    // -----------------------------------------------------------------
+    // IPv6 URL-literal canonicalization (C-IPV6-CANON). URI.getHost()
+    // returns IPv6 literals bracketed ("[::1]"); IDN.toASCII rejects
+    // the brackets, so canonicalizeHost must strip them, case-fold the
+    // inner literal, and re-add the brackets for the dial and pin key.
+    // -----------------------------------------------------------------
+
+    @Test
+    void canonicalizeHostStripsAndReAddsIpv6Brackets() {
+        assertEquals("[::1]", SsrfGuardedHttpClient.canonicalizeHost("[::1]"),
+            "bracketed IPv6 literal must round-trip through canonicalizeHost");
+        assertEquals("[2606:4700::abcd]",
+            SsrfGuardedHttpClient.canonicalizeHost("[2606:4700::ABCD]"),
+            "IPv6 hex must be lowercased and the brackets preserved");
+    }
+
+    // -----------------------------------------------------------------
+    // 3xx narrowing (C-SSRF-304). 304/305/306 are 3xx but are not
+    // follow-able redirects; the wrapper must return them as the
+    // terminal response rather than chasing a Location header.
+    // -----------------------------------------------------------------
+
+    @Test
+    void status304IsNotTreatedAsRedirect() {
+        server.createContext("/notmodified", exchange -> {
+            // A Location header is present but must be ignored: 304 is
+            // not a follow-able redirect.
+            exchange.getResponseHeaders().add("Location", "/elsewhere");
+            exchange.sendResponseHeaders(304, -1);
+            exchange.close();
+        });
+
+        SsrfGuardedHttpClient client = testModeClient();
+        HttpResponse<byte[]> response = assertDoesNotThrow(
+            () -> client.get(URI.create("http://127.0.0.1:" + port + "/notmodified")));
+        assertEquals(304, response.statusCode(),
+            "304 must be returned as the terminal response, not followed "
+            + "(no \"redirect cap exceeded\" / \"missing Location\" error)");
+    }
+
+    // -----------------------------------------------------------------
+    // Cross-origin credential-header scrub (C-EXTRAHEADERS-REDIRECT). A
+    // redirect to a different host/port/scheme must NOT replay
+    // Authorization / Cookie / Proxy-Authorization headers the caller
+    // injected for the original origin; non-credential headers still
+    // ride along.
+    // -----------------------------------------------------------------
+
+    @Test
+    void crossOriginRedirectStripsCredentialHeaders() throws Exception {
+        // Second loopback server on a DIFFERENT port: the redirect from
+        // the first server to this one is cross-origin (port differs).
+        HttpServer second = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        int secondPort = second.getAddress().getPort();
+        AtomicReference<String> authOnSecond = new AtomicReference<>("ABSENT-SENTINEL");
+        AtomicReference<String> userAgentOnSecond = new AtomicReference<>();
+        second.createContext("/end", exchange -> {
+            authOnSecond.set(exchange.getRequestHeaders().getFirst("Authorization"));
+            userAgentOnSecond.set(exchange.getRequestHeaders().getFirst("User-Agent"));
+            byte[] body = "ok".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, body.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(body);
+            }
+        });
+        second.start();
+
+        server.createContext("/start", exchange -> {
+            exchange.getResponseHeaders().add("Location",
+                "http://127.0.0.1:" + secondPort + "/end");
+            exchange.sendResponseHeaders(302, -1);
+            exchange.close();
+        });
+
+        try {
+            SsrfGuardedHttpClient client = testModeClient();
+            HttpResponse<byte[]> response = client.get(
+                URI.create("http://127.0.0.1:" + port + "/start"),
+                Map.of("Authorization", "Bearer secret-token"));
+
+            assertEquals(200, response.statusCode(),
+                "the cross-origin redirect must still be followed");
+            assertNull(authOnSecond.get(),
+                "Authorization must be stripped on the cross-origin redirect hop "
+                + "(it was injected for the first origin only)");
+            assertNotNull(userAgentOnSecond.get(),
+                "non-credential headers (User-Agent) must still ride cross-origin");
+        } finally {
+            second.stop(0);
+        }
     }
 
     @Test

@@ -3,6 +3,7 @@ package app.zcat.infochat.ssrf;
 import org.jspecify.annotations.NonNull;
 
 import java.net.InetAddress;
+import java.util.Arrays;
 import java.util.Set;
 import java.util.function.Supplier;
 
@@ -37,6 +38,17 @@ import java.util.function.Supplier;
  *       IPv4 range — a naive v6-only check would let an attacker bypass
  *       the v4 blocklist by spelling {@code 127.0.0.1} as
  *       {@code ::ffff:127.0.0.1}.</li>
+ *   <li>IPv6 transition forms that embed an IPv4 target — 6to4
+ *       ({@code 2002::/16}), Teredo ({@code 2001:0000::/32}), the NAT64
+ *       well-known prefix ({@code 64:ff9b::/96}), and the deprecated
+ *       IPv4-compatible form ({@code ::a.b.c.d}). Each embedded IPv4 is
+ *       decoded and routed through the v4 blocklist, so an attacker
+ *       cannot reach a blocked v4 range (e.g. {@code 169.254.169.254})
+ *       by spelling it as {@code 2002:a9fe:a9fe::} or {@code ::127.0.0.1}.
+ *       The decoded IPv4 is also matched against the host's own
+ *       interface set (next bullet): a transition form arrives as an
+ *       {@code Inet6Address}, so the as-supplied host-interface check
+ *       cannot catch a host's v4 binding spelled in transition form.</li>
  *   <li>The host's own non-loopback {@link InetAddress} bindings,
  *       consulted PER CALL via the {@link Supplier} seam (M1-026
  *       Finding 3 remediation). The production no-arg constructor
@@ -53,12 +65,11 @@ import java.util.function.Supplier;
  * strict blocklist via the no-arg constructor, which supplies
  * {@code HostInterfaceSet::enumerate} as the per-call host-interface
  * provider. Tests that need a deterministic host-IP set use the
- * package-private constructors: a fixed {@link Set} overload
- * (preserved from M1-025; internally widens to a Supplier returning
- * the snapshot) or the Supplier overload (M1-026; lets tests
- * simulate post-startup interface changes via a mutable supplier).
- * Tests that also need to dial localhost supply a SUBCLASS that
- * overrides {@link #isBlocked} to carve out the loopback range.
+ * package-private {@link Supplier} overload (M1-026; lets tests supply
+ * a fixed set, or simulate post-startup interface changes via a
+ * mutable supplier). Tests that also need to dial localhost supply a
+ * SUBCLASS that overrides {@link #isBlocked} to carve out the loopback
+ * range.
  */
 public class IpBlocklist {
 
@@ -73,17 +84,6 @@ public class IpBlocklist {
      */
     public IpBlocklist() {
         this((Supplier<Set<InetAddress>>) HostInterfaceSet::enumerate);
-    }
-
-    /**
-     * M1-025 test-mode constructor — preserved as an overload so
-     * M1-025 tests pass unchanged. Internally widens to the Supplier
-     * form via a defensive copy: the snapshot is captured once at
-     * construction and returned by the supplier on every call, so
-     * isBlocked semantics match the fixed-set intent.
-     */
-    IpBlocklist(Set<InetAddress> hostInterfaces) {
-        this(() -> Set.copyOf(hostInterfaces));
     }
 
     /**
@@ -103,19 +103,53 @@ public class IpBlocklist {
         // attached cloud EIP) are seen on the very next isBlocked.
         // M1-025 snapshotted at construction; spec is present-tense
         // ("are checked") with no startup-snapshot qualifier.
-        if (hostInterfacesProvider.get().contains(addr)) {
+        Set<InetAddress> hostInterfaces = hostInterfacesProvider.get();
+        if (hostInterfaces.contains(addr)) {
             return true;
         }
         byte[] raw = addr.getAddress();
         if (raw.length == 4) {
             return isBlockedV4(raw);
         }
-        // length == 16: IPv6, possibly IPv4-mapped (::ffff:0:0/96).
-        if (isIpv4Mapped(raw)) {
-            byte[] mapped = new byte[] { raw[12], raw[13], raw[14], raw[15] };
-            return isBlockedV4(mapped);
+        // length == 16: IPv6. Native blocked ranges (::, ::1,
+        // fe80::/10, fc00::/7, ff00::/8) are checked first; if none
+        // match, decode any embedded IPv4 (IPv4-mapped or one of the
+        // transition formats) and route it through isBlockedV4 so an
+        // attacker cannot reach a blocked v4 range by spelling it as an
+        // IPv6 transition address (e.g. ::127.0.0.1, 2002:a9fe:a9fe::).
+        if (isBlockedV6(raw)) {
+            return true;
         }
-        return isBlockedV6(raw);
+        byte[] embedded = embeddedV4(raw);
+        if (embedded == null) {
+            return false;
+        }
+        // A transition-form host (6to4/Teredo/NAT64/IPv4-compatible)
+        // arrives as a genuine Inet6Address, so the contains() check
+        // above could not have matched a host's own v4 interface
+        // binding — re-check the decoded IPv4 against the host-interface
+        // set too. (The IPv4-mapped form ::ffff:a.b.c.d is normalized to
+        // an Inet4Address by the JDK and so was already covered by the
+        // contains() check; only the genuinely-16-byte transition forms
+        // need this extra hop.)
+        return isBlockedV4(embedded) || isHostInterfaceV4(embedded, hostInterfaces);
+    }
+
+    /**
+     * True if the 4-byte IPv4 address {@code v4} matches any address in
+     * the host's own non-loopback interface set. Extends the
+     * host-interface clause to the IPv4 embedded in an IPv6 transition
+     * form, which arrives as an {@link java.net.Inet6Address} and so
+     * cannot be matched by the {@link Set#contains} check on the
+     * as-supplied address.
+     */
+    private static boolean isHostInterfaceV4(byte[] v4, Set<InetAddress> hostInterfaces) {
+        for (InetAddress hostAddr : hostInterfaces) {
+            if (Arrays.equals(hostAddr.getAddress(), v4)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean isBlockedV4(byte[] raw) {
@@ -212,5 +246,54 @@ public class IpBlocklist {
             }
         }
         return (raw[10] & 0xFF) == 0xFF && (raw[11] & 0xFF) == 0xFF;
+    }
+
+    /**
+     * Decode the IPv4 address embedded in an IPv6 transition / mapping
+     * format, or {@code null} if {@code raw} is not one of them. The
+     * caller routes a non-null result through {@link #isBlockedV4} so a
+     * blocked v4 range cannot be reached by spelling it as an IPv6
+     * address. {@code ::} and {@code ::1} never reach here — they are
+     * caught by {@link #isBlockedV6} before the embedded-v4 decode.
+     */
+    private static byte[] embeddedV4(byte[] raw) {
+        // ::ffff:a.b.c.d — IPv4-mapped (bytes 0-9 zero, 10-11 == ffff).
+        if (isIpv4Mapped(raw)) {
+            return new byte[] { raw[12], raw[13], raw[14], raw[15] };
+        }
+        // 2002:a.b.c.d::/48 — 6to4 (RFC 3056); IPv4 in bytes 2-5.
+        if ((raw[0] & 0xFF) == 0x20 && (raw[1] & 0xFF) == 0x02) {
+            return new byte[] { raw[2], raw[3], raw[4], raw[5] };
+        }
+        // 2001:0000::/32 — Teredo (RFC 4380); the client global IPv4 is
+        // in bytes 12-15, obfuscated by XOR 0xFFFFFFFF.
+        if ((raw[0] & 0xFF) == 0x20 && (raw[1] & 0xFF) == 0x01
+                && raw[2] == 0 && raw[3] == 0) {
+            return new byte[] {
+                (byte) (raw[12] ^ 0xFF), (byte) (raw[13] ^ 0xFF),
+                (byte) (raw[14] ^ 0xFF), (byte) (raw[15] ^ 0xFF) };
+        }
+        // 64:ff9b::/96 — NAT64 well-known prefix (RFC 6052); IPv4 in
+        // bytes 12-15, with bytes 4-11 zero in the well-known prefix.
+        if ((raw[0] & 0xFF) == 0x00 && (raw[1] & 0xFF) == 0x64
+                && (raw[2] & 0xFF) == 0xFF && (raw[3] & 0xFF) == 0x9B
+                && allZero(raw, 4, 12)) {
+            return new byte[] { raw[12], raw[13], raw[14], raw[15] };
+        }
+        // ::a.b.c.d — deprecated IPv4-compatible (RFC 4291); bytes 0-11
+        // zero, IPv4 in bytes 12-15.
+        if (allZero(raw, 0, 12)) {
+            return new byte[] { raw[12], raw[13], raw[14], raw[15] };
+        }
+        return null;
+    }
+
+    private static boolean allZero(byte[] raw, int fromInclusive, int toExclusive) {
+        for (int i = fromInclusive; i < toExclusive; i++) {
+            if (raw[i] != 0) {
+                return false;
+            }
+        }
+        return true;
     }
 }
