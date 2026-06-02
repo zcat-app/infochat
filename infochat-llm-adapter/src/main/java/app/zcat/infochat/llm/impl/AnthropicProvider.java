@@ -90,6 +90,11 @@ public class AnthropicProvider implements LlmProvider {
     }
 
     @Override
+    public String providerName() {
+        return PROVIDER_NAME;
+    }
+
+    @Override
     public @NonNull LlmResponse generate(@NonNull ModelTask task, @NonNull String systemPrompt,
                                           @NonNull String userPrompt) {
         TaskConfig cfg = configFor(task);
@@ -97,7 +102,7 @@ public class AnthropicProvider implements LlmProvider {
     }
 
     private TaskConfig configFor(ModelTask task) {
-        String prefix = "infochat.llm." + taskKeySegment(task) + ".";
+        String prefix = "infochat.llm." + task.keySegment() + ".";
         String baseUrl = config.getValue(prefix + "base-url", String.class);
         String apiKey = config.getOptionalValue(prefix + "api-key", String.class).orElse("");
         String model = config.getValue(prefix + "model", String.class);
@@ -142,9 +147,12 @@ public class AnthropicProvider implements LlmProvider {
         }
         HttpRequest request = reqBuilder.build();
 
+        long cap = LlmHttpSupport.clampBodyCapBytes(
+            config.getOptionalValue("infochat.llm.max-response-bytes", Long.class)
+                .orElse(LlmHttpSupport.DEFAULT_BODY_CAP_BYTES));
         HttpResponse<String> response;
         try {
-            response = http.send(request, HttpResponse.BodyHandlers.ofString());
+            response = http.send(request, LlmHttpSupport.boundedStringHandler(cap));
         } catch (IOException e) {
             throw new LlmCallFailedException(
                 "AnthropicProvider: HTTP call failed for " + uri, e);
@@ -155,12 +163,13 @@ public class AnthropicProvider implements LlmProvider {
         }
 
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            long retryAfterMs = LlmHttpSupport.retryAfterMsFor(response);
             String errorMsg = extractErrorMessage(response.body());
             LOG.warnf("AnthropicProvider: non-2xx %d from %s; error: %s",
                 response.statusCode(), uri, errorMsg);
             throw new LlmCallFailedException(
                 "AnthropicProvider: non-2xx status " + response.statusCode()
-                    + " from " + uri + ": " + errorMsg);
+                    + " from " + uri + ": " + errorMsg, retryAfterMs);
         }
 
         return parseContentText(response.body(), uri);
@@ -201,19 +210,6 @@ public class AnthropicProvider implements LlmProvider {
             // Fall through to preview
         }
         return preview(body);
-    }
-
-    // Mirrors LlmRouter.taskKeySegment — duplicated here to avoid
-    // a cross-package dependency on a package-private method.
-    private static String taskKeySegment(ModelTask task) {
-        return switch (task) {
-            case SECURITY_JUDGE -> "security";
-            case TAGGER -> "tagger";
-            case ENTITY -> "entity";
-            case SUMMARIZER -> "summarizer";
-            case CHAT_AGENT -> "chat";
-            case TRANSLATOR -> "translator";
-        };
     }
 
     private static String joinPath(String base, String path) {

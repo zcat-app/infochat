@@ -54,6 +54,14 @@ import java.util.Set;
  * misconfiguration is caught BEFORE any post reaches the eval queue and
  * exercises the Stage 2 / embedding call paths.
  *
+ * <h2>Routed-task scan</h2>
+ * <p>Beyond the local-only conflict, the guard also calls
+ * {@link LlmRouter#assertAllTasksResolve()} so a per-task provider
+ * override naming an unregistered provider (a misrouted {@code TAGGER},
+ * say) fails Collector startup here rather than at the first call that
+ * routes that task. Same @Priority slot, same fail-before-the-eval-queue
+ * intent as the local-only check.
+ *
  * <h2>Loopback check</h2>
  * <p>The "non-loopback host" check DNS-resolves the URI host and
  * tests {@link InetAddress#isLoopbackAddress()}. This catches the
@@ -137,10 +145,14 @@ public class LlmRouterStartupGuard {
     @Inject
     Config config;
 
+    @Inject
+    LlmRouter router;
+
     @PostConstruct
     void onStartup() {
         Map<String, String> snapshot = snapshotConfig(config);
         validateLocalOnlyConfiguration(snapshot);
+        router.assertAllTasksResolve();
     }
 
     /**

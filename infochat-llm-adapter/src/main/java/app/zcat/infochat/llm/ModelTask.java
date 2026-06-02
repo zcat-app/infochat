@@ -21,10 +21,28 @@ package app.zcat.infochat.llm;
  * dispatch to this task internally.</p>
  */
 public enum ModelTask {
-    SECURITY_JUDGE,
-    TAGGER,
-    ENTITY,
-    SUMMARIZER,
-    CHAT_AGENT,
-    TRANSLATOR
+    SECURITY_JUDGE("security"),
+    TAGGER("tagger"),
+    ENTITY("entity"),
+    SUMMARIZER("summarizer"),
+    CHAT_AGENT("chat"),
+    TRANSLATOR("translator");
+
+    private final String keySegment;
+
+    ModelTask(String keySegment) {
+        this.keySegment = keySegment;
+    }
+
+    /**
+     * The operator-facing config-key segment for this task: the
+     * {@code <seg>} in {@code infochat.llm.<seg>.<property>} (e.g.
+     * {@code SECURITY_JUDGE} → {@code security}, abbreviating the enum
+     * name; {@code CHAT_AGENT} → {@code chat}). Single source of truth
+     * so the router, the per-provider config readers, and the startup
+     * guard cannot drift in how they spell the same task's keys.
+     */
+    public String keySegment() {
+        return keySegment;
+    }
 }

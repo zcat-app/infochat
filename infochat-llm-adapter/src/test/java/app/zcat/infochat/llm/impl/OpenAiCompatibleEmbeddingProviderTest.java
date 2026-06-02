@@ -72,6 +72,26 @@ class OpenAiCompatibleEmbeddingProviderTest {
         assertEquals(new EmbeddingResult(new float[] {0.3f, 0.4f}), results.get(1));
     }
 
+    @Test
+    void embedParsesRetryAfterHeaderOn503() {
+        mockServer.createContext("/embeddings", exchange -> {
+            byte[] resp = "{\"error\":\"unavailable\"}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Retry-After", "3");
+            exchange.sendResponseHeaders(503, resp.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(resp);
+            }
+        });
+        mockServer.start();
+
+        OpenAiCompatibleEmbeddingProvider provider = provider();
+
+        EmbeddingCallFailedException ex = assertThrows(EmbeddingCallFailedException.class,
+            () -> provider.embed(List.of("text")));
+        assertEquals(3000L, ex.retryAfterMs(),
+            "Retry-After: 3 on a 503 must surface as 3000ms on the exception");
+    }
+
     private void respondWith(String json) {
         mockServer.createContext("/embeddings", exchange -> {
             byte[] resp = json.getBytes(StandardCharsets.UTF_8);

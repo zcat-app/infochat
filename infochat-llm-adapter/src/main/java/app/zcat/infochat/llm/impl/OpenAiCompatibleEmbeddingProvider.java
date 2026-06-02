@@ -100,6 +100,14 @@ public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
     @ConfigProperty(name = "infochat.embeddings.timeout-ms", defaultValue = "30000")
     long timeoutMs;
 
+    /**
+     * Operator-configurable response-body cap. {@code "8388608"} is
+     * 8 MiB ({@link LlmHttpSupport#DEFAULT_BODY_CAP_BYTES}); the value is
+     * clamped into {@code [1 MiB, 8 MiB]} before use.
+     */
+    @ConfigProperty(name = "infochat.embeddings.max-response-bytes", defaultValue = "8388608")
+    long maxResponseBytes;
+
     public OpenAiCompatibleEmbeddingProvider() {
         this.http = HttpClient.newHttpClient();
     }
@@ -137,7 +145,8 @@ public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
 
         HttpResponse<String> response;
         try {
-            response = http.send(request, HttpResponse.BodyHandlers.ofString());
+            response = http.send(request,
+                LlmHttpSupport.boundedStringHandler(LlmHttpSupport.clampBodyCapBytes(maxResponseBytes)));
         } catch (IOException e) {
             throw new EmbeddingCallFailedException(
                 "OpenAiCompatibleEmbeddingProvider: HTTP call failed for " + uri, e);
@@ -148,12 +157,13 @@ public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
         }
 
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            long retryAfterMs = LlmHttpSupport.retryAfterMsFor(response);
             String preview = preview(response.body());
             LOG.warnf("OpenAiCompatibleEmbeddingProvider: non-2xx %d from %s; body preview: %s",
                 response.statusCode(), uri, preview);
             throw new EmbeddingCallFailedException(
                 "OpenAiCompatibleEmbeddingProvider: non-2xx status " + response.statusCode()
-                    + " from " + uri);
+                    + " from " + uri, retryAfterMs);
         }
 
         return parseEmbeddings(response.body(), uri, texts.size());
@@ -235,12 +245,31 @@ public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
      * catches this type uniformly.
      */
     public static final class EmbeddingCallFailedException extends RuntimeException {
+        private final long retryAfterMs;
+
         public EmbeddingCallFailedException(String message) {
+            this(message, 0L);
+        }
+
+        public EmbeddingCallFailedException(@NonNull String message, long retryAfterMs) {
             super(message);
+            this.retryAfterMs = retryAfterMs;
         }
 
         public EmbeddingCallFailedException(String message, Throwable cause) {
             super(message, cause);
+            this.retryAfterMs = 0L;
+        }
+
+        /**
+         * Server-advised retry delay in milliseconds parsed from a
+         * 429/503 {@code Retry-After} header, or 0 when the response
+         * carried no such advice. The EmbeddingWorker's retry-once
+         * harness sleeps this long before re-submitting the same batch
+         * instead of immediately re-hitting the rate limit.
+         */
+        public long retryAfterMs() {
+            return retryAfterMs;
         }
     }
 }

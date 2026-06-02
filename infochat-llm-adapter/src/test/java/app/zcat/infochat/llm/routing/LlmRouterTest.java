@@ -16,9 +16,11 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * Plain JUnit5 unit tests for {@link LlmRouter}. Bypasses Quarkus
@@ -251,6 +253,40 @@ class LlmRouterTest {
 
         assertSame(anthropicProvider, resolved,
             "language-aware branch must pick the Anthropic provider for Czech summarizer");
+    }
+
+    /**
+     * Acceptance item 4 (startup scan): a per-task provider override
+     * naming a provider with no registered entry must throw from
+     * {@link LlmRouter#assertAllTasksResolve()} — surfacing the misroute
+     * at startup rather than at the first call that routes that task.
+     */
+    @Test
+    void assertAllTasksResolveThrowsWhenPerTaskOverrideNamesUnregisteredProvider() {
+        StubProvider registered = new StubProvider();
+        LlmRouter router = new LlmRouter(
+            List.of(new LlmRouter.Entry(NAME_DEFAULT, registered, Set.of("en"))),
+            LlmRouter.ConfigReader.fromMap(Map.of(
+                "infochat.llm.tagger.provider", "no-such-provider")));
+
+        assertThrows(IllegalStateException.class, router::assertAllTasksResolve,
+            "a TAGGER override naming an unregistered provider must fail the startup scan");
+    }
+
+    /**
+     * Acceptance item 4 (startup scan): with no per-task overrides every
+     * task falls through to the priority-3 default, which resolves, so
+     * the scan passes without throwing.
+     */
+    @Test
+    void assertAllTasksResolvePassesWhenEveryTaskResolves() {
+        StubProvider registered = new StubProvider();
+        LlmRouter router = new LlmRouter(
+            List.of(new LlmRouter.Entry(NAME_DEFAULT, registered, Set.of("en"))),
+            LlmRouter.ConfigReader.fromMap(Map.of()));
+
+        assertDoesNotThrow(router::assertAllTasksResolve,
+            "every task resolves to the default provider when no override is set");
     }
 
     /**

@@ -206,27 +206,67 @@ class AnthropicProviderTest {
             () -> provider.generate(ModelTask.SUMMARIZER, "sys", "usr"));
     }
 
+    @Test
+    void generateThrowsWhenResponseBodyExceedsCap() throws Exception {
+        // providerFor pins the cap to 1 MiB (the clamp floor); a 2 MiB
+        // reply must abort the bounded read rather than buffer it whole.
+        byte[] huge = new byte[2 * 1024 * 1024];
+        java.util.Arrays.fill(huge, (byte) 'x');
+        mockServer.createContext("/messages", exchange -> {
+            exchange.sendResponseHeaders(200, huge.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(huge);
+            } catch (java.io.IOException ignored) {
+                // Client cancels mid-stream once the cap is crossed; a
+                // broken-pipe on the server write is expected, not a failure.
+            }
+        });
+        mockServer.start();
+
+        AnthropicProvider provider = providerFor(ModelTask.SUMMARIZER, API_KEY);
+
+        LlmCallFailedException ex = assertThrows(LlmCallFailedException.class,
+            () -> provider.generate(ModelTask.SUMMARIZER, "sys", "usr"));
+        assertNotNull(ex.getCause(), "body-cap overflow must surface as a wrapped IOException");
+        assertTrue(ex.getCause().getMessage().contains("cap"),
+            "wrapped cause must name the byte cap; got: " + ex.getCause().getMessage());
+    }
+
+    @Test
+    void generateParsesRetryAfterHeaderOn429() throws Exception {
+        String errorBody = """
+            {"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}""";
+        mockServer.createContext("/messages", exchange -> {
+            byte[] resp = errorBody.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Retry-After", "2");
+            exchange.sendResponseHeaders(429, resp.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(resp);
+            }
+        });
+        mockServer.start();
+
+        AnthropicProvider provider = providerFor(ModelTask.SUMMARIZER, API_KEY);
+
+        LlmCallFailedException ex = assertThrows(LlmCallFailedException.class,
+            () -> provider.generate(ModelTask.SUMMARIZER, "sys", "usr"));
+        assertEquals(2000L, ex.retryAfterMs(),
+            "Retry-After: 2 on a 429 must surface as 2000ms on the exception");
+    }
+
     private AnthropicProvider providerFor(ModelTask task, String apiKey) {
-        String seg = taskKeySegment(task);
+        String seg = task.keySegment();
         Config cfg = new StubConfig(Map.of(
             "infochat.llm." + seg + ".base-url", baseUrl,
             "infochat.llm." + seg + ".api-key", apiKey,
             "infochat.llm." + seg + ".model", MODEL,
             "infochat.llm." + seg + ".timeout-ms", "5000",
-            "infochat.llm." + seg + ".max-tokens", "1024"
+            "infochat.llm." + seg + ".max-tokens", "1024",
+            // Pin the body cap to the 1 MiB clamp floor so the body-cap
+            // test can overflow it with a 2 MiB reply instead of 8 MiB.
+            "infochat.llm.max-response-bytes", "1048576"
         ));
         return new AnthropicProvider(cfg, HttpClient.newHttpClient());
-    }
-
-    private static String taskKeySegment(ModelTask task) {
-        return switch (task) {
-            case SECURITY_JUDGE -> "security";
-            case TAGGER -> "tagger";
-            case ENTITY -> "entity";
-            case SUMMARIZER -> "summarizer";
-            case CHAT_AGENT -> "chat";
-            case TRANSLATOR -> "translator";
-        };
     }
 
     private static String successResponse(String text) {

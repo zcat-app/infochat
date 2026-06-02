@@ -5,7 +5,6 @@ import org.jspecify.annotations.Nullable;
 
 import app.zcat.infochat.llm.LlmProvider;
 import app.zcat.infochat.llm.ModelTask;
-import app.zcat.infochat.llm.impl.AnthropicProvider;
 import app.zcat.infochat.llm.impl.OpenAiCompatibleProvider;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -216,6 +215,22 @@ public class LlmRouter {
     }
 
     /**
+     * Startup-time assertion that every {@link ModelTask} resolves to a
+     * registered provider under the current config. A per-task provider
+     * override naming a provider with no registered {@link Entry} throws
+     * {@link IllegalStateException} from {@link #forTask} here — at
+     * startup — instead of at the first Stage 2 / digest call that
+     * routes that task. Tasks with no override fall through to the
+     * priority-3 default and never throw, so the scan surfaces exactly
+     * the misroute case. Driven by {@link LlmRouterStartupGuard}.
+     */
+    public void assertAllTasksResolve() {
+        for (ModelTask task : ModelTask.values()) {
+            forTask(task, "en");
+        }
+    }
+
+    /**
      * Returns whether the given task is one whose downstream output
      * has a target language that the language-aware capability
      * branch should consider. {@link ModelTask#SECURITY_JUDGE} is
@@ -237,24 +252,7 @@ public class LlmRouter {
      * abbreviation of {@code SECURITY_JUDGE} → {@code security}.
      */
     private static String perTaskOverrideKey(ModelTask task) {
-        return "infochat.llm." + taskKeySegment(task) + ".provider";
-    }
-
-    /**
-     * Map the enum to its operator-facing key segment. SECURITY_JUDGE
-     * abbreviates to {@code security} (matching
-     * {@code infochat.llm.security.base-url}); the others use the
-     * lowercase enum name.
-     */
-    static String taskKeySegment(ModelTask task) {
-        return switch (task) {
-            case SECURITY_JUDGE -> "security";
-            case TAGGER -> "tagger";
-            case ENTITY -> "entity";
-            case SUMMARIZER -> "summarizer";
-            case CHAT_AGENT -> "chat";
-            case TRANSLATOR -> "translator";
-        };
+        return "infochat.llm." + task.keySegment() + ".provider";
     }
 
     /**
@@ -277,7 +275,7 @@ public class LlmRouter {
     private static List<Entry> buildFromCdi(Instance<LlmProvider> providers, Config mpConfig) {
         List<Entry> out = new ArrayList<>();
         for (LlmProvider p : providers) {
-            String name = providerName(p);
+            String name = p.providerName();
             Set<String> langs = supportedLanguagesFor(p, mpConfig);
             out.add(new Entry(name, p, langs));
         }
@@ -287,31 +285,6 @@ public class LlmRouter {
                     + "at least OpenAiCompatibleProvider must be on the classpath");
         }
         return out;
-    }
-
-    /**
-     * Stable name for a CDI-discovered provider.
-     * {@link OpenAiCompatibleProvider} resolves to its operator-
-     * facing constant; any other provider (test stub or future
-     * impl that wires itself here) uses its simple class name.
-     */
-    private static String providerName(LlmProvider p) {
-        if (p instanceof OpenAiCompatibleProvider) {
-            return OpenAiCompatibleProvider.PROVIDER_NAME;
-        }
-        if (p instanceof AnthropicProvider) {
-            return AnthropicProvider.PROVIDER_NAME;
-        }
-        // CDI client proxies are subclasses whose name carries a
-        // framework suffix (e.g. _ClientProxy). Walk up to the
-        // developer-authored class so the operator-facing config key
-        // is stable across framework versions.
-        Class<?> cls = p.getClass();
-        while (cls.getSimpleName().contains("_") && cls.getSuperclass() != null
-                && LlmProvider.class.isAssignableFrom(cls.getSuperclass())) {
-            cls = cls.getSuperclass();
-        }
-        return cls.getSimpleName();
     }
 
     /**
@@ -326,7 +299,7 @@ public class LlmRouter {
      * exercise the helper directly with a hand-rolled {@link Config}.
      */
     static Set<String> supportedLanguagesFor(LlmProvider p, Config config) {
-        String key = "infochat.llm." + providerName(p) + ".languages";
+        String key = "infochat.llm." + p.providerName() + ".languages";
         Optional<String> raw = config.getOptionalValue(key, String.class);
         if (raw.isEmpty() || raw.get().isBlank()) {
             return Set.of("en");
@@ -394,6 +367,15 @@ public class LlmRouter {
 
         @Override
         public Optional<String> get(@NonNull String key) {
+            // The literal string "null" (case-insensitive) is normalized
+            // to empty so it reads as "no override set". Some config
+            // sources stringify an explicitly-unset/null value as the
+            // four-character text "null" (e.g. an env var exported as
+            // `=null`, or a YAML null serialized through a String
+            // converter); without this, forTask would look up a provider
+            // named "null", find no Entry, and throw — surprising an
+            // operator who meant "leave it unset". This is config-boundary
+            // normalization, not internal defensive code.
             return delegate.getOptionalValue(key, String.class)
                 .map(s -> s.trim())
                 .map(s -> s.toLowerCase(Locale.ROOT).equals("null") ? "" : s);

@@ -131,8 +131,21 @@ public class OpenAiCompatibleProvider implements LlmProvider {
     @ConfigProperty(name = "infochat.llm.security.timeout-ms", defaultValue = "30000")
     long securityTimeoutMs;
 
+    /**
+     * Operator-configurable response-body cap. {@code "8388608"} is
+     * 8 MiB ({@link LlmHttpSupport#DEFAULT_BODY_CAP_BYTES}); the value is
+     * clamped into {@code [1 MiB, 8 MiB]} before use.
+     */
+    @ConfigProperty(name = "infochat.llm.max-response-bytes", defaultValue = "8388608")
+    long maxResponseBytes;
+
     public OpenAiCompatibleProvider() {
         this.http = HttpClient.newHttpClient();
+    }
+
+    @Override
+    public String providerName() {
+        return PROVIDER_NAME;
     }
 
     @Override
@@ -186,7 +199,8 @@ public class OpenAiCompatibleProvider implements LlmProvider {
 
         HttpResponse<String> response;
         try {
-            response = http.send(request, HttpResponse.BodyHandlers.ofString());
+            response = http.send(request,
+                LlmHttpSupport.boundedStringHandler(LlmHttpSupport.clampBodyCapBytes(maxResponseBytes)));
         } catch (IOException e) {
             throw new LlmCallFailedException(
                 "OpenAiCompatibleProvider: HTTP call failed for " + uri, e);
@@ -197,12 +211,13 @@ public class OpenAiCompatibleProvider implements LlmProvider {
         }
 
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            long retryAfterMs = LlmHttpSupport.retryAfterMsFor(response);
             String preview = preview(response.body());
             LOG.warnf("OpenAiCompatibleProvider: non-2xx %d from %s; body preview: %s",
                 response.statusCode(), uri, preview);
             throw new LlmCallFailedException(
                 "OpenAiCompatibleProvider: non-2xx status " + response.statusCode()
-                    + " from " + uri);
+                    + " from " + uri, retryAfterMs);
         }
 
         return parseChoiceText(response.body(), uri);
@@ -268,12 +283,31 @@ public class OpenAiCompatibleProvider implements LlmProvider {
      * uniformly per {@code docs/spec/security.md} §Failure handling.
      */
     public static final class LlmCallFailedException extends RuntimeException {
+        private final long retryAfterMs;
+
         public LlmCallFailedException(String message) {
+            this(message, 0L);
+        }
+
+        public LlmCallFailedException(@NonNull String message, long retryAfterMs) {
             super(message);
+            this.retryAfterMs = retryAfterMs;
         }
 
         public LlmCallFailedException(String message, Throwable cause) {
             super(message, cause);
+            this.retryAfterMs = 0L;
+        }
+
+        /**
+         * Server-advised retry delay in milliseconds parsed from a
+         * 429/503 {@code Retry-After} header, or 0 when the response
+         * carried no such advice. The Stage 2 worker's retry-once
+         * harness sleeps this long before re-issuing the call instead of
+         * immediately re-hitting the rate limit.
+         */
+        public long retryAfterMs() {
+            return retryAfterMs;
         }
     }
 }
