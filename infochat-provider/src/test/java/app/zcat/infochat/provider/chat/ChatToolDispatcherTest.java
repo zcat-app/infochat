@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.chat;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -261,5 +262,108 @@ class ChatToolDispatcherTest {
         assertInstanceOf(ChatToolDispatcher.ToolResult.Success.class, userBSaves);
         assertEquals("[]",
                 ((ChatToolDispatcher.ToolResult.Success) userBSaves).content());
+    }
+
+    // --- M1-131: type/parse failures become ValidationError, not an
+    // escaped exception that surfaces as the generic chat-unavailable error ---
+
+    @Test
+    void typeMismatchBecomesValidationError() {
+        ChatToolDispatcher d = dispatcher(Map.of("searchPosts",
+                (u, sk, si, a) -> { throw new ClassCastException("wrong runtime type"); }));
+
+        ChatToolDispatcher.ToolResult result =
+                d.dispatch("searchPosts", new HashMap<>(), USER_A, "dm", SCOPE_A);
+
+        assertInstanceOf(ChatToolDispatcher.ToolResult.ValidationError.class, result);
+    }
+
+    @Test
+    void durationParseFailureBecomesValidationError() {
+        // The real source: SearchPostsTool does Duration.parse((String) window).
+        ChatToolDispatcher d = dispatcher(Map.of("searchPosts",
+                (u, sk, si, a) -> { Duration.parse("not-a-duration"); return "[]"; }));
+
+        ChatToolDispatcher.ToolResult result =
+                d.dispatch("searchPosts", new HashMap<>(), USER_A, "dm", SCOPE_A);
+
+        assertInstanceOf(ChatToolDispatcher.ToolResult.ValidationError.class, result);
+    }
+
+    @Test
+    void numberFormatFailureBecomesValidationError() {
+        ChatToolDispatcher d = dispatcher(Map.of("searchPosts",
+                (u, sk, si, a) -> { Integer.parseInt("not-a-number"); return "[]"; }));
+
+        ChatToolDispatcher.ToolResult result =
+                d.dispatch("searchPosts", new HashMap<>(), USER_A, "dm", SCOPE_A);
+
+        assertInstanceOf(ChatToolDispatcher.ToolResult.ValidationError.class, result);
+    }
+
+    @Test
+    void nonNumericLimitBecomesValidationError() {
+        // clampLimit's `(Number) args.get("limit")` cast runs before the tool;
+        // a non-numeric limit must surface as ValidationError, not escape.
+        ChatToolDispatcher d = dispatcher(Map.of());
+
+        Map<String, Object> args = new HashMap<>();
+        args.put("limit", "ten");
+
+        ChatToolDispatcher.ToolResult result =
+                d.dispatch("searchPosts", args, USER_A, "dm", SCOPE_A);
+
+        assertInstanceOf(ChatToolDispatcher.ToolResult.ValidationError.class, result);
+    }
+
+    // --- M1-131 (round 2, redteam DOS finding): length/size caps must be
+    // enforced at the dispatch boundary for the nested value shapes the Jackson
+    // parser can now produce, not incidentally via a downstream cast failure ---
+
+    @Test
+    void nestedMapOversizedStringBecomesValidationError() {
+        // inputMaxLength = 10; an oversized String buried inside a nested Map
+        // value must be rejected by the dispatcher before the tool runs.
+        ChatToolDispatcher d = dispatcher(Map.of(), 10, 200);
+
+        Map<String, Object> args = new HashMap<>();
+        args.put("filter", new HashMap<>(Map.of("k", "a".repeat(11))));
+
+        ChatToolDispatcher.ToolResult result =
+                d.dispatch("searchPosts", args, USER_A, "dm", SCOPE_A);
+
+        assertInstanceOf(ChatToolDispatcher.ToolResult.ValidationError.class, result);
+        assertTrue(((ChatToolDispatcher.ToolResult.ValidationError) result)
+                .reason().contains("maximum length"));
+    }
+
+    @Test
+    void deeplyNestedMapOversizedStringBecomesValidationError() {
+        ChatToolDispatcher d = dispatcher(Map.of(), 10, 200);
+
+        Map<String, Object> args = new HashMap<>();
+        args.put("a", new HashMap<>(Map.of(
+                "b", new HashMap<>(Map.of("c", "a".repeat(11))))));
+
+        ChatToolDispatcher.ToolResult result =
+                d.dispatch("searchPosts", args, USER_A, "dm", SCOPE_A);
+
+        assertInstanceOf(ChatToolDispatcher.ToolResult.ValidationError.class, result);
+    }
+
+    @Test
+    void nestedMapWithinBoundsReachesTool() {
+        // Recursive validation must not reject a nested map whose values are
+        // within the caps — it should pass through to the tool.
+        ChatToolDispatcher d = dispatcher(
+                Map.of("searchPosts", (u, sk, si, a) -> "[{\"ok\":1}]"), 10, 200);
+
+        Map<String, Object> args = new HashMap<>();
+        args.put("filter", new HashMap<>(Map.of("k", "short")));
+
+        ChatToolDispatcher.ToolResult result =
+                d.dispatch("searchPosts", args, USER_A, "dm", SCOPE_A);
+
+        assertInstanceOf(ChatToolDispatcher.ToolResult.Success.class, result);
     }
 }

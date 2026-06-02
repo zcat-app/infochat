@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 23 |
+| pending | 22 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 167 |
+| done | 168 |
 | deferred | 3 |
 | **total** | **193** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-131 — ChatAgent Jackson tool-arg parse + dispatcher catch widening + TOOL-LEAK (complexity: high, risk: high)
 - M1-134 — quarantine_review NOTIFY channel completeness (CT2) (complexity: high, risk: medium)
 - M1-139 — Kind-6 repost edge resolution (complexity: high, risk: medium)
 - M1-142 — NewPostListener reconcile after reconnect (complexity: low, risk: medium)
@@ -36,6 +35,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-150 — Digest hygiene (concurrency guard, timezone WARN, broad-catch narrow) (complexity: low, risk: low)
 - M1-152 — Schema-hardening migration (stage2_verdict CHECK + V27 audit verb + Nostr index) (complexity: low, risk: medium)
 - M1-153 — Collector worker hygiene (dead semaphores, interrupt, backoff Random, dup counter, timeouts) (complexity: low, risk: low)
+- M1-154 — Provider chat/sanitizer hygiene (pattern caching, closed-list whitespace, dispatcher completeness) (complexity: low, risk: low)
 - M1-155 — InboundRouter hygiene (chat body-cap ordering, bidi-control gap, lookupGroupId Optional) (complexity: medium, risk: medium)
 - M1-156 — Misc security-low hardening (Redactor separator, invite per-code counter, AddSource userinfo) (complexity: low, risk: low)
 - M1-157 — Explicit connection-pool sizing per profile (complexity: low, risk: low)
@@ -62,7 +62,6 @@ _(none)_
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
 - M1-151 — blocked_by: M1-144 (pending)
-- M1-154 — blocked_by: M1-131 (pending)
 
 ---
 
@@ -321,8 +320,8 @@ M1-126 (done)
 M1-128 (done)
 M1-129 (done)
 M1-130 (done)
-M1-131 (pending) ← runnable
-  └── M1-154 (pending)
+M1-131 (done)
+  └── M1-154 (pending) ← runnable
 M1-132 (done)
 M1-133 (done)
   ├── M1-144 (pending) ← runnable

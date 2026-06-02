@@ -11,6 +11,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jspecify.annotations.NonNull;
 
 import java.sql.SQLException;
+import java.time.format.DateTimeParseException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -131,15 +132,26 @@ public class ChatToolDispatcher {
         if (lengthCheck != null) return lengthCheck;
 
         Map<String, Object> validatedArgs = new HashMap<>(args);
-        clampLimit(validatedArgs);
 
         ChatToolRegistry.ChatTool tool = tools.get(toolName);
         try {
+            // clampLimit runs inside the try: its `(Number) args.get("limit")`
+            // cast throws ClassCastException when the model emits a non-numeric
+            // limit (e.g. {"limit":"ten"}), and that must surface as a typed
+            // validation error the LLM can self-correct on, not escape the turn.
+            clampLimit(validatedArgs);
             String result = tool.execute(userId, scopeKind, scopeId, validatedArgs);
             turn.cache.put(cacheKey, result);
             return new ToolResult.Success(result);
         } catch (IllegalArgumentException e) {
+            // NumberFormatException (a subclass) lands here too.
             return new ToolResult.ValidationError(e.getMessage());
+        } catch (ClassCastException | DateTimeParseException e) {
+            // Wrong runtime type or unparseable window (Duration.parse) →
+            // a self-correctable signal, not the opaque chat-unavailable error.
+            // The Java exception text is not surfaced; it would leak internals.
+            return new ToolResult.ValidationError(
+                    "Invalid argument type or format for tool: " + toolName);
         } catch (SQLException e) {
             throw new IllegalStateException("Tool execution failed: " + toolName, e);
         }
@@ -147,25 +159,37 @@ public class ChatToolDispatcher {
 
     private ToolResult validateInputLengths(Map<String, Object> args) {
         for (Map.Entry<String, Object> entry : args.entrySet()) {
-            Object value = entry.getValue();
-            if (value instanceof String s && s.length() > inputMaxLength) {
+            ToolResult error = validateValue(entry.getKey(), entry.getValue());
+            if (error != null) return error;
+        }
+        return null;
+    }
+
+    // Recurses into nested List and Map values so the length/size caps apply to
+    // every shape the Jackson tool-arg parser can produce (string, list, nested
+    // object), not just the top-level String/List<String> the flat v1 parser
+    // emitted. The bound must be enforced here, at the dispatch boundary before
+    // any SQL or tool execution — not incidentally by a downstream (List<String>)
+    // cast failure in the consuming tool.
+    private ToolResult validateValue(String key, Object value) {
+        if (value instanceof String s && s.length() > inputMaxLength) {
+            return new ToolResult.ValidationError(
+                    "Input '" + key + "' exceeds maximum length of " + inputMaxLength);
+        }
+        if (value instanceof List<?> list) {
+            if (list.size() > listMaxSize) {
                 return new ToolResult.ValidationError(
-                        "Input '" + entry.getKey()
-                      + "' exceeds maximum length of " + inputMaxLength);
+                        "List '" + key + "' exceeds maximum size of " + listMaxSize);
             }
-            if (value instanceof List<?> list) {
-                if (list.size() > listMaxSize) {
-                    return new ToolResult.ValidationError(
-                            "List '" + entry.getKey()
-                          + "' exceeds maximum size of " + listMaxSize);
-                }
-                for (Object item : list) {
-                    if (item instanceof String s && s.length() > inputMaxLength) {
-                        return new ToolResult.ValidationError(
-                                "List item in '" + entry.getKey()
-                              + "' exceeds maximum length of " + inputMaxLength);
-                    }
-                }
+            for (Object item : list) {
+                ToolResult error = validateValue(key, item);
+                if (error != null) return error;
+            }
+        }
+        if (value instanceof Map<?, ?> map) {
+            for (Object item : map.values()) {
+                ToolResult error = validateValue(key, item);
+                if (error != null) return error;
             }
         }
         return null;

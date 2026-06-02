@@ -12,6 +12,9 @@ import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.translation.TranslationPipeline;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jspecify.annotations.NonNull;
@@ -23,7 +26,10 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -39,16 +45,14 @@ public class ChatAgent {
 
     // Text-based tool call protocol for v1's single-string LLM SPI.
     // The system prompt instructs the LLM to emit exactly this format;
-    // the parser below extracts tool name and JSON args.
+    // group(1) is the tool name and group(2) is the opening brace of the
+    // JSON args. The args body is delimited by scanning for the brace's
+    // balanced match (matchBrace) rather than a reluctant `\{.*?\}`, which
+    // would truncate nested objects at the first inner '}'.
     static final Pattern TOOL_CALL_PATTERN = Pattern.compile(
-            "TOOL_CALL:\\s*(\\w+)\\s+(\\{.*?\\})", Pattern.DOTALL);
+            "TOOL_CALL:\\s*(\\w+)\\s*(\\{)");
 
-    // Broader pattern for the strip pass: catches partial tool calls
-    // (no JSON body, broken JSON) that the parsing pattern above misses.
-    // LLM is instructed to put tool calls on their own line, so
-    // stripping to end-of-line is safe.
-    private static final Pattern TOOL_CALL_STRIP_PATTERN = Pattern.compile(
-            "TOOL_CALL:.*");
+    private static final ObjectMapper TOOL_ARGS_MAPPER = new ObjectMapper();
 
     static final int MAX_TOOL_ITERATIONS = 10;
 
@@ -152,12 +156,12 @@ public class ChatAgent {
         String finalText = runToolLoop(provider, augmentedSystemPrompt, baseSystemPrompt,
                 prompt.userPrompt(), userId, scopeKind, scopeId);
 
-        // 5. Strip any residual TOOL_CALL patterns that leaked past
-        // the iteration cap — they are internal protocol, not user-visible.
-        // Two passes: the specific pattern for full calls, then the broad
-        // pattern for partials (no JSON body, broken JSON)
-        finalText = TOOL_CALL_PATTERN.matcher(finalText).replaceAll("");
-        finalText = TOOL_CALL_STRIP_PATTERN.matcher(finalText).replaceAll("");
+        // 5. Strip any residual TOOL_CALL fragments that leaked past the
+        // iteration cap — they are internal protocol, not user-visible.
+        // A fragment with balanced braces (possibly nested / multi-line) is
+        // removed whole; a partial or unbalanced fragment is removed through
+        // end-of-text so a malformed multi-line call cannot leak.
+        finalText = stripToolCalls(finalText);
 
         // 6. Sanitize BEFORE persist so admin commands never enter the DB
         String sanitized = outputSanitizer.sanitize(finalText);
@@ -207,9 +211,16 @@ public class ChatAgent {
                 return text;
             }
 
-            // Extract and execute the tool call
+            // Extract and execute the tool call. group(2) is the opening
+            // brace; scan for its balanced match so nested objects survive
+            // intact. An unbalanced fragment falls back to the tail of the
+            // text, which Jackson then rejects (→ empty args).
             String toolName = matcher.group(1);
-            String argsJson = matcher.group(2);
+            int braceStart = matcher.start(2);
+            int braceEnd = matchBrace(text, braceStart);
+            String argsJson = braceEnd >= 0
+                    ? text.substring(braceStart, braceEnd + 1)
+                    : text.substring(braceStart);
             Map<String, Object> args = parseToolArgs(argsJson);
 
             ChatToolDispatcher.ToolResult result =
@@ -243,65 +254,128 @@ public class ChatAgent {
     }
 
     /**
-     * Minimal JSON arg parser for the v1 text-based tool call protocol.
-     * Handles flat key-value objects with string and integer values.
-     * The LLM is instructed to emit simple JSON; nested objects are
-     * outside the v1 tool schema.
+     * Parses the JSON args of a text-based tool call into a map of plain
+     * JDK values. Array values become {@code List<String>}, nested objects
+     * become {@code Map<String, Object>}, integers in {@code int} range
+     * become {@code Integer}, and string values stay {@code String} — the
+     * runtime types every consuming tool casts to. Malformed JSON yields an
+     * empty map (no throw): the loop continues and the tool runs with no
+     * args rather than aborting the whole turn. The signature is kept
+     * {@code static Map<String, Object>(String)} so callers and the
+     * existing unit tests are unaffected by the Jackson rewrite.
      */
     static Map<String, Object> parseToolArgs(String json) {
         Map<String, Object> args = new HashMap<>();
         if (json == null || json.isBlank()) return args;
 
-        String trimmed = json.trim();
-        if (trimmed.equals("{}")) return args;
-
-        // Strip outer braces
-        if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-            trimmed = trimmed.substring(1, trimmed.length() - 1).trim();
+        JsonNode root;
+        try {
+            root = TOOL_ARGS_MAPPER.readTree(json);
+        } catch (JsonProcessingException e) {
+            return args;
         }
+        if (root == null || !root.isObject()) return args;
 
-        // Split on commas (outside quotes)
-        for (String pair : splitTopLevel(trimmed)) {
-            String[] kv = pair.split(":", 2);
-            if (kv.length != 2) continue;
-            String key = kv[0].trim().replaceAll("^\"|\"$", "");
-            String value = kv[1].trim();
-
-            if (value.startsWith("\"") && value.endsWith("\"")) {
-                args.put(key, value.substring(1, value.length() - 1));
-            } else {
-                try {
-                    args.put(key, Integer.parseInt(value));
-                } catch (NumberFormatException e) {
-                    args.put(key, value);
-                }
-            }
+        Iterator<Map.Entry<String, JsonNode>> fields = root.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> field = fields.next();
+            args.put(field.getKey(), toJavaValue(field.getValue()));
         }
         return args;
     }
 
-    private static String[] splitTopLevel(String s) {
-        java.util.List<String> parts = new java.util.ArrayList<>();
-        int depth = 0;
-        boolean inQuote = false;
-        int start = 0;
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            if (c == '"' && (i == 0 || s.charAt(i - 1) != '\\')) {
-                inQuote = !inQuote;
-            } else if (!inQuote) {
-                if (c == '{' || c == '[') depth++;
-                else if (c == '}' || c == ']') depth--;
-                else if (c == ',' && depth == 0) {
-                    parts.add(s.substring(start, i).trim());
-                    start = i + 1;
+    // Converts a JsonNode to the plain JDK type the tool consumers cast to:
+    // arrays → List<String>, objects → Map<String, Object>, in-range
+    // integers → Integer (so `(Number) args.get("limit")` and the
+    // `assertEquals(10, ...)` in tests both hold), other scalars → their
+    // natural Java value.
+    private static Object toJavaValue(JsonNode node) {
+        return switch (node.getNodeType()) {
+            case ARRAY -> {
+                List<String> list = new ArrayList<>(node.size());
+                for (JsonNode element : node) {
+                    list.add(element.asText());
+                }
+                yield list;
+            }
+            case OBJECT -> {
+                Map<String, Object> map = new HashMap<>();
+                Iterator<Map.Entry<String, JsonNode>> it = node.fields();
+                while (it.hasNext()) {
+                    Map.Entry<String, JsonNode> entry = it.next();
+                    map.put(entry.getKey(), toJavaValue(entry.getValue()));
+                }
+                yield map;
+            }
+            case NUMBER -> node.canConvertToInt()
+                    ? (Object) node.intValue()
+                    : node.isIntegralNumber()
+                            ? (Object) node.longValue()
+                            : (Object) node.doubleValue();
+            case BOOLEAN -> node.booleanValue();
+            default -> node.asText();
+        };
+    }
+
+    /**
+     * Strips every residual TOOL_CALL fragment from final text. A fragment
+     * whose JSON args have balanced braces is removed exactly (text before
+     * and after it is preserved); a fragment with no brace or unbalanced
+     * braces is removed through end-of-text, because a malformed multi-line
+     * call has no reliable terminator and must not leak the internal
+     * protocol to the user.
+     */
+    static String stripToolCalls(String text) {
+        StringBuilder result = new StringBuilder();
+        int cursor = 0;
+        while (cursor < text.length()) {
+            int marker = text.indexOf("TOOL_CALL:", cursor);
+            if (marker < 0) {
+                result.append(text, cursor, text.length());
+                return result.toString();
+            }
+            result.append(text, cursor, marker);
+
+            int brace = text.indexOf('{', marker);
+            int lineEnd = text.indexOf('\n', marker);
+            if (brace >= 0 && (lineEnd < 0 || brace < lineEnd)) {
+                int close = matchBrace(text, brace);
+                if (close >= 0) {
+                    cursor = close + 1;
+                    continue;
                 }
             }
+            // Partial or unbalanced fragment: drop through end-of-text.
+            return result.toString();
         }
-        if (start < s.length()) {
-            parts.add(s.substring(start).trim());
+        return result.toString();
+    }
+
+    // Returns the index of the '}' that balances the '{' at openIndex, or
+    // -1 if the braces never balance. Quoted strings (and their escaped
+    // characters) are skipped so braces inside a JSON string value and an
+    // escaped quote (\") do not corrupt the depth count.
+    private static int matchBrace(String text, int openIndex) {
+        int depth = 0;
+        boolean inQuote = false;
+        for (int i = openIndex; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (inQuote) {
+                if (c == '\\') {
+                    i++;
+                } else if (c == '"') {
+                    inQuote = false;
+                }
+            } else if (c == '"') {
+                inQuote = true;
+            } else if (c == '{') {
+                depth++;
+            } else if (c == '}') {
+                depth--;
+                if (depth == 0) return i;
+            }
         }
-        return parts.toArray(new String[0]);
+        return -1;
     }
 
     // Package-private so ChatAgentTest can override with a no-op.
