@@ -276,6 +276,30 @@ final class SignalSubprocess {
         }
     }
 
+    /**
+     * Force-restart a hung-but-alive daemon. {@link Process#onExit()} never
+     * fires for a deadlocked child, so {@link SignalJsonRpcClient} — the only
+     * component that observes JSON-RPC request timeouts — calls this after a
+     * run of consecutive timeouts. Forcibly killing the child makes
+     * {@code onExit} fire, routing recovery through the same
+     * {@link #onProcessExit} backoff-restart path as a natural crash (and
+     * counting against {@code maxRestarts}, since a wedged daemon is a
+     * failure). No-op when already {@link #stop()}ping or when no child is
+     * currently alive.
+     */
+    void restartHung() {
+        if (stopping) {
+            return;
+        }
+        Process p = current;
+        if (p != null && p.isAlive()) {
+            // SIGKILL, not SIGTERM: the daemon is unresponsive by definition,
+            // so a graceful terminate it may ignore would only delay recovery.
+            // onProcessExit then runs the normal RUNNING -> RESTARTING path.
+            p.destroyForcibly();
+        }
+    }
+
     boolean isAlive() {
         Process p = current;
         return p != null && p.isAlive();

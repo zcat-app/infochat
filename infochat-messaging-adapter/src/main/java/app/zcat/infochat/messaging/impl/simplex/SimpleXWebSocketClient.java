@@ -193,6 +193,17 @@ final class SimpleXWebSocketClient {
                     "ack future for corrId=" + corrId + " failed: "
                             + e.getCause().getClass().getSimpleName(),
                     e.getCause());
+        } catch (RuntimeException e) {
+            // close() can abort the WebSocket between the `closed` check above
+            // and ws.sendText() here; the JDK WebSocket then rejects the send
+            // with an IllegalStateException (a RuntimeException) that would
+            // otherwise escape sendCommand raw and uncategorised. Classify as
+            // PERMANENT — the socket is gone and retrying on it cannot succeed;
+            // the caller must rebuild via start(), the same category close()
+            // stamps on the pending futures it drains.
+            throw new MessagingException(FailureCategory.PERMANENT,
+                    "WebSocket send for corrId=" + corrId + " failed (closed concurrently): "
+                            + e.getClass().getSimpleName(), e);
         } finally {
             pending.remove(corrId);
         }

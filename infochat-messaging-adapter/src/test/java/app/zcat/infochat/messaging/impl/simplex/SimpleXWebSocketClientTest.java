@@ -14,6 +14,8 @@ import app.zcat.infochat.messaging.InboundMessage;
 import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.ScopeRef;
 
+import java.lang.reflect.Field;
+import java.net.URI;
 import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.List;
@@ -249,6 +251,35 @@ class SimpleXWebSocketClientTest {
                             WAIT));
             assertEquals(FailureCategory.PERMANENT, ex.category());
         }
+    }
+
+    @Test
+    void sendRacingCloseRaisesPermanentNotRawRuntime() throws Exception {
+        // B-SIMPLEX-RACE: when close() aborts the WebSocket between the
+        // `closed` check and ws.sendText(), the JDK WebSocket rejects the send
+        // with an IllegalStateException. sendCommand must classify it as a
+        // PERMANENT MessagingException, not let the raw RuntimeException
+        // escape. The real race window is too narrow to hit deterministically,
+        // so inject a WebSocket whose sendText throws the documented
+        // IllegalStateException (closed stays false) and drive sendCommand
+        // straight through the catch clause.
+        SimpleXWebSocketClient client = new SimpleXWebSocketClient(
+                URI.create("ws://127.0.0.1:1"),
+                HttpClient.newHttpClient(),
+                msg -> { /* unused */ },
+                gc -> { /* unused */ });
+        Field wsField = SimpleXWebSocketClient.class.getDeclaredField("webSocket");
+        wsField.setAccessible(true);
+        wsField.set(client, new ThrowingWebSocket());
+
+        MessagingException ex = assertThrows(MessagingException.class,
+                () -> client.sendCommand(
+                        "corr-race",
+                        SimpleXMessageCodec.encodeSendCommand(
+                                "corr-race", new ScopeRef.Dm("x"), "racing send"),
+                        WAIT));
+        assertEquals(FailureCategory.PERMANENT, ex.category(),
+                "a send that races close() must surface as PERMANENT, not a raw RuntimeException");
     }
 
     private static void awaitLogContains(CapturingLogHandler capture,

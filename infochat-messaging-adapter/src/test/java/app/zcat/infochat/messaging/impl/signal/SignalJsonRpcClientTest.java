@@ -13,6 +13,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import app.zcat.infochat.messaging.FailureCategory;
@@ -379,6 +381,86 @@ class SignalJsonRpcClientTest {
         if (failure.get() != null) {
             fail("finalize() failed: " + failure.get());
         }
+    }
+
+    @Test
+    void handlerExceptionDoesNotKillReader() throws Exception {
+        // A10: a RuntimeException thrown by the InboundHandler must be caught
+        // in dispatchNotification (mirroring SimpleXAdapter.onInbound) so the
+        // signal-jsonrpc-reader thread survives and keeps delivering inbound
+        // messages — a thrown handler used to propagate through readerLoop and
+        // kill the reader, leaving the subprocess alive but deaf.
+        try (FakeSignalCli fake = new FakeSignalCli()) {
+            SignalJsonRpcClient client = new SignalJsonRpcClient(
+                    fake.endpoint(), "+15551111111", new SignalMessageCodec(), TEST_RESPONSE_TIMEOUT);
+            LinkedBlockingQueue<InboundMessage> delivered = new LinkedBlockingQueue<>();
+            AtomicBoolean firstThrown = new AtomicBoolean(false);
+            client.setInboundHandler(msg -> {
+                if (firstThrown.compareAndSet(false, true)) {
+                    throw new RuntimeException("boom from handler");
+                }
+                delivered.add(msg);
+            });
+            client.connect();
+            try {
+                fake.pushNotification("receive", receiveParams("first", 1700000050000L));
+                fake.pushNotification("receive", receiveParams("second", 1700000051000L));
+
+                InboundMessage msg = delivered.poll(QUEUE_WAIT_MS, TimeUnit.MILLISECONDS);
+                assertNotNull(msg,
+                        "reader must survive a handler RuntimeException and deliver subsequent messages");
+                assertEquals("second", msg.text());
+            } finally {
+                client.disconnect();
+            }
+        }
+    }
+
+    @Test
+    void consecutiveTimeoutsForceSubprocessRestart() throws Exception {
+        // B-SIGNAL-HUNG: a deadlocked-but-alive daemon never fires
+        // Process.onExit, so the JSON-RPC client escalates a run of
+        // consecutive response timeouts into a forced subprocess restart.
+        // FakeSignalCli captures each outbound request but never responds, so
+        // every send() times out; the third consecutive timeout fires the
+        // restart hook exactly once.
+        try (FakeSignalCli fake = new FakeSignalCli()) {
+            AtomicInteger restartCalls = new AtomicInteger();
+            // Short response timeout so three timeouts accrue quickly.
+            SignalJsonRpcClient client = new SignalJsonRpcClient(
+                    fake.endpoint(), "+15551111111", new SignalMessageCodec(),
+                    Duration.ofMillis(150), restartCalls::incrementAndGet);
+            client.connect();
+            try {
+                for (int i = 0; i < 3; i++) {
+                    OutboundMessage out = new OutboundMessage(
+                            new ScopeRef.Dm("aabbccdd-1111-2222-3333-444455556666"),
+                            "msg", Instant.now(), "c" + i);
+                    MessagingException e = assertThrows(MessagingException.class,
+                            () -> client.send(out));
+                    assertEquals(FailureCategory.TRANSIENT, e.category(),
+                            "a JSON-RPC response timeout classifies as TRANSIENT");
+                }
+                assertEquals(1, restartCalls.get(),
+                        "three consecutive JSON-RPC timeouts must force exactly one subprocess restart");
+            } finally {
+                client.disconnect();
+            }
+        }
+    }
+
+    private static JsonObject receiveParams(String body, long timestamp) {
+        return Json.createObjectBuilder()
+                .add("envelope", Json.createObjectBuilder()
+                        .add("source", "+15557654321")
+                        .add("sourceUuid", "AABBCCDD-1111-2222-3333-444455556666")
+                        .add("sourceName", "Alice")
+                        .add("sourceDevice", 1)
+                        .add("timestamp", timestamp)
+                        .add("dataMessage", Json.createObjectBuilder()
+                                .add("timestamp", timestamp)
+                                .add("message", body)))
+                .build();
     }
 
     @Test

@@ -58,6 +58,13 @@ public class SignalConfig {
      * Runs eagerly at Provider boot via {@code @Startup}; a failure here
      * fails startup.
      *
+     * <p>This is a boot-time snapshot, not a standing guarantee: it proves
+     * the binary and data directory were present and writable at the instant
+     * it ran, but cannot prevent a later remount, deletion, or permission
+     * change from making signal-cli unusable afterward. Runtime signal-cli
+     * I/O failures must therefore still be handled, not assumed away. Mirrors
+     * {@link app.zcat.infochat.messaging.impl.simplex.SimpleXConfig#validate()}.</p>
+     *
      * @throws IllegalStateException if any check fails.
      */
     @PostConstruct

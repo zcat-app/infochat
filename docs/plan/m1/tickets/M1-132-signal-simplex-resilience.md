@@ -1,7 +1,7 @@
 ---
 id: M1-132
 title: "Signal/SimpleX adapter resilience (handler isolation, hung-process, config-validate, send/close race)"
-status: pending
+status: done
 created: 2026-06-02
 last_updated: 2026-06-02
 blocked_by: []
@@ -35,12 +35,33 @@ spec_refs:
   - docs/spec/messaging.md §Per-adapter trust level and identity
 decision_refs:
   - D37
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-02
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 312
+      removed: 10
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-02
+  verdict: WARN
+  warnings:
+    - "Acceptance item 2: hung-process threshold N is undefined (no value/range stated); implementer must guess or look it up externally."
+    - "Acceptance item 2: no test shape described for restart verification (no mock subprocess or restart-logic hook named)."
+    - "Acceptance item 3: SignalConfig.validate javadoc change is verifiable by inspection only; item uses imperative form like a behavioral assertion."
+    - "Acceptance item 4: no test shape described for the send/close race fix (no test class/concurrency harness named)."
+  blockers: []
 ---
 
 # M1-132: Signal/SimpleX adapter resilience

@@ -215,8 +215,13 @@ public final class SignalAdapter implements MessagingAdapter {
                     "signal-cli daemon endpoint " + daemonEndpoint + " not reachable within "
                             + ENDPOINT_PROBE_TIMEOUT);
         }
+        // Wire the hung-process escalation: when the JSON-RPC client sees a
+        // run of consecutive response timeouts (a daemon that is alive but
+        // deadlocked, so SignalSubprocess.onExit never fires), it kicks the
+        // supervisor to force-restart the subprocess.
         SignalJsonRpcClient c = new SignalJsonRpcClient(
-                daemonEndpoint, account, new SignalMessageCodec(), JSONRPC_RESPONSE_TIMEOUT);
+                daemonEndpoint, account, new SignalMessageCodec(), JSONRPC_RESPONSE_TIMEOUT,
+                sp::restartHung);
         try {
             c.connect();
         } catch (IOException e) {

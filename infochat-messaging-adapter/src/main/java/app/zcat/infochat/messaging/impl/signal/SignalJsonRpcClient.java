@@ -30,6 +30,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 import jakarta.json.JsonObject;
@@ -86,10 +87,30 @@ final class SignalJsonRpcClient {
      */
     private static final int MAX_INBOUND_LINE_CHARS = 16_384;
 
+    /**
+     * Number of consecutive JSON-RPC response timeouts that classifies the
+     * signal-cli daemon as hung — alive (so {@link Process#onExit()} never
+     * fires) but not answering — and forces a subprocess restart via
+     * {@link #hungRestartHook}. The request timeout is the only liveness
+     * signal available for a deadlocked-but-alive child. Set to 3 to match
+     * the "3 consecutive failures" escalation threshold the messaging design
+     * uses for the adapter auth/network-failure counters
+     * ({@code docs/design/06-messaging.md} §6.4.6); a single timeout is a
+     * normal transient and must never trigger a restart.
+     */
+    private static final int HUNG_TIMEOUT_THRESHOLD = 3;
+
     private final InetSocketAddress endpoint;
     private final String account;
     private final SignalMessageCodec codec;
     private final Duration responseTimeout;
+    private final Runnable hungRestartHook;
+
+    // Consecutive JSON-RPC response timeouts. Reset to zero whenever the
+    // daemon answers (a success OR an error response — either proves it is
+    // alive); reaching HUNG_TIMEOUT_THRESHOLD forces one subprocess restart
+    // per crossing (see recordTimeout).
+    private final AtomicInteger consecutiveTimeouts = new AtomicInteger();
 
     private final ConcurrentMap<String, CompletableFuture<SignalMessageCodec.JsonRpcMessage>> pending =
             new ConcurrentHashMap<>();
@@ -108,14 +129,30 @@ final class SignalJsonRpcClient {
     @Nullable private volatile BufferedWriter writer;
     @Nullable private volatile Thread readerThread;
 
+    /**
+     * Convenience constructor with no hung-process escalation wired:
+     * consecutive request timeouts are still counted but never restart the
+     * subprocess. Production wiring ({@link SignalAdapter#start()}) uses the
+     * five-arg form so the supervisor ({@link SignalSubprocess}) can be
+     * kicked when the daemon wedges.
+     */
     SignalJsonRpcClient(@NonNull InetSocketAddress endpoint,
                         @NonNull String account,
                         @NonNull SignalMessageCodec codec,
                         @NonNull Duration responseTimeout) {
+        this(endpoint, account, codec, responseTimeout, () -> { });
+    }
+
+    SignalJsonRpcClient(@NonNull InetSocketAddress endpoint,
+                        @NonNull String account,
+                        @NonNull SignalMessageCodec codec,
+                        @NonNull Duration responseTimeout,
+                        @NonNull Runnable hungRestartHook) {
         this.endpoint = endpoint;
         this.account = account;
         this.codec = codec;
         this.responseTimeout = responseTimeout;
+        this.hungRestartHook = hungRestartHook;
     }
 
     void setInboundHandler(MessagingAdapter.@NonNull InboundHandler handler) {
@@ -271,6 +308,7 @@ final class SignalJsonRpcClient {
             msg = future.get(responseTimeout.toMillis(), TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
             pending.remove(id);
+            recordTimeout();
             throw new MessagingException(
                     FailureCategory.TRANSIENT, "JSON-RPC response timed out after " + responseTimeout, e);
         } catch (InterruptedException e) {
@@ -285,6 +323,9 @@ final class SignalJsonRpcClient {
                     "JSON-RPC call failed: " + (cause == null ? e.getMessage() : cause.getMessage()),
                     cause);
         }
+        // The daemon answered (Response or ErrorResponse below); it is not
+        // hung, so clear the consecutive-timeout streak.
+        consecutiveTimeouts.set(0);
         if (msg instanceof SignalMessageCodec.JsonRpcMessage.ErrorResponse err) {
             // The signal-cli error TEXT routinely embeds destination
             // identifiers (phone numbers, ACIs) and other user-content
@@ -300,6 +341,19 @@ final class SignalJsonRpcClient {
         // ErrorResponse; notifications take a different path. The cast is an
         // internal-trust boundary, not defensive code.
         return (SignalMessageCodec.JsonRpcMessage.Response) msg;
+    }
+
+    private void recordTimeout() {
+        int n = consecutiveTimeouts.incrementAndGet();
+        // CAS-then-fire so a burst of concurrent timeouts that crosses the
+        // threshold restarts the subprocess once, not once per timeout: only
+        // the thread whose observed count still equals the live counter wins
+        // the reset, and it alone runs the hook.
+        if (n >= HUNG_TIMEOUT_THRESHOLD && consecutiveTimeouts.compareAndSet(n, 0)) {
+            LOG.warnf("signal-cli unresponsive after %d consecutive JSON-RPC timeouts;"
+                    + " forcing subprocess restart", HUNG_TIMEOUT_THRESHOLD);
+            hungRestartHook.run();
+        }
     }
 
     private static FailureCategory classify(SignalMessageCodec.JsonRpcMessage.ErrorResponse err) {
@@ -430,6 +484,17 @@ final class SignalJsonRpcClient {
                 received.body(),
                 Instant.ofEpochMilli(received.timestamp()),
                 "signal-" + received.timestamp());
-        handler.onMessage(inbound);
+        try {
+            handler.onMessage(inbound);
+        } catch (RuntimeException e) {
+            // Mirror SimpleXAdapter.onInbound: a Provider-side handler that
+            // throws must NOT propagate out of the reader loop and kill the
+            // signal-jsonrpc-reader thread, which would leave the subprocess
+            // alive but deaf. Drop this message and keep reading. D37: log the
+            // exception class only — the Throwable's message may carry inbound
+            // chat-mode bytes.
+            LOG.warnf("inbound Signal handler threw %s; dropping message, reader continues",
+                    e.getClass().getSimpleName());
+        }
     }
 }

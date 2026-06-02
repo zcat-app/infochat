@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 35 |
+| pending | 34 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 155 |
+| done | 156 |
 | deferred | 2 |
 | **total** | **192** |
 
@@ -28,7 +28,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-129 — DigestScheduler approval_status filter + negative-case fixture (complexity: low, risk: medium)
 - M1-130 — ReadyPromoter transaction boundary + IT driven through tick() (complexity: medium, risk: medium)
 - M1-131 — ChatAgent Jackson tool-arg parse + dispatcher catch widening + TOOL-LEAK (complexity: high, risk: high)
-- M1-132 — Signal/SimpleX adapter resilience (handler isolation, hung-process, config-validate, send/close race) (complexity: medium, risk: medium)
 - M1-133 — CT1 shared text/util extraction (JsonEscaper + TagNormalizer + Sha256) + TODO cleanup (complexity: medium, risk: medium)
 - M1-134 — quarantine_review NOTIFY channel completeness (CT2) (complexity: high, risk: medium)
 - M1-135 — SSRF hardening bundle (complexity: medium, risk: high)
@@ -93,6 +92,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-132 | Signal/SimpleX adapter resilience (handler isolation, hung-process, config-validate, send/close race) | 2026-06-02 | round 1 APPROVE |
 | M1-128 | ReEvaluationJob enumerate filter + cap-exhaustion transition + IT | 2026-06-02 | round 1 APPROVE |
 | M1-126 | Asset-command extensibility (operator-config driven) + Locale.ROOT | 2026-06-02 | round 1 APPROVE |
 | M1-125 | Per-adapter reply target + AdapterRegistry duplicate-name dedup | 2026-06-02 | round 1 APPROVE |
@@ -102,7 +102,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-121 | June+July 2026 partitions + monthly partition-creator scheduler | 2026-06-02 | round 2 APPROVE |
 | M1-109 | Multi-adapter production shape IT | 2026-06-01 | round 1 APPROVE |
 | M1-120 | SimpleX + Signal CDI activation (D46) | 2026-05-31 | round 1 APPROVE |
-| M1-119 | SimpleX logging hygiene — drainStream + MalformedFrame exception messages | 2026-05-31 | round 1 APPROVE |
 
 ---
 
@@ -333,7 +332,7 @@ M1-129 (pending) ← runnable
 M1-130 (pending) ← runnable
 M1-131 (pending) ← runnable
   └── M1-154 (pending)
-M1-132 (pending) ← runnable
+M1-132 (done)
 M1-133 (pending) ← runnable
   ├── M1-144 (pending)
   │     └── M1-151 (pending)
