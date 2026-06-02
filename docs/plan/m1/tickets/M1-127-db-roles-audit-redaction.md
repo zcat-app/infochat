@@ -10,7 +10,7 @@ files_scope:
   - infochat-core/src/main/resources/db/migration
   - infochat-collector/src/main/resources/application.properties
   - infochat-provider/src/main/resources/application.properties
-  - infochat-provider/src/main/java/app/zcat/infochat/provider/audit
+  - infochat-core/src/main/java/app/zcat/infochat/core/audit
   - docs/design/07-deployment.md
 complexity: high
 risk: high
@@ -36,6 +36,30 @@ spec_refs:
   - docs/spec/security.md §Authorization model
   - docs/spec/schema.md §Invariants
 decision_refs: []
+revisions:
+  - date: 2026-06-02
+    reason: clarity-fail refine — files_scope path infochat-provider/.../provider/audit
+      does not exist on disk; the two classes acceptance items #3/#4 reference live
+      elsewhere (DefaultRedactionHook/RedactionHook in infochat-core/.../core/audit;
+      AuditCommandHandler in infochat-provider/.../provider/command, read-only).
+      Replace the empty provider/audit path with infochat-core/.../core/audit so
+      acceptance #4 (flip DefaultRedactionHook off pass-through) is in-scope.
+    prior_files_scope:
+      - infochat-core/src/main/resources/db/migration
+      - infochat-collector/src/main/resources/application.properties
+      - infochat-provider/src/main/resources/application.properties
+      - infochat-provider/src/main/java/app/zcat/infochat/provider/audit
+      - docs/design/07-deployment.md
+escalations:
+  - date: 2026-06-02
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      N/A — caught at /m1-tick start step-0 grounding before the clarity
+      subagent ran: files_scope path
+      infochat-provider/src/main/java/app/zcat/infochat/provider/audit resolves
+      to no files on disk, and acceptance item #4 requires editing
+      infochat-core/.../core/audit/DefaultRedactionHook.java which was absent
+      from files_scope — the first edit would have tripped budget-breach.
 reviews: {}
 overrides: []
 aborted_attempts: []
