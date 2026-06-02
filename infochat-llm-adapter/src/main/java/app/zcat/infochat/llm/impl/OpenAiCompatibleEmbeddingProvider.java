@@ -187,15 +187,16 @@ public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
             }
             results.add(new EmbeddingResult(vector));
         }
-        // The caller's wrong-shape detection compares results.size()
-        // to expectedCount and treats divergence as a batch failure
-        // (one-failure-fails-batch retry). Surfacing the divergence
-        // here as a log line aids operator triage when the provider
-        // silently truncates a batch reply.
+        // The SPI contract is one EmbeddingResult per input, in input
+        // order. A size divergence means the provider truncated or padded
+        // the batch reply; a caller zip-indexing vectors to texts would
+        // silently mis-attribute embeddings. Throw at the seam so the
+        // divergence becomes a batch failure (EmbeddingWorker's
+        // one-failure-fails-batch retry) rather than a corrupt result.
         if (results.size() != expectedCount) {
-            LOG.warnf(
-                "OpenAiCompatibleEmbeddingProvider: response shape mismatch from %s — expected %d embeddings, got %d",
-                uri, expectedCount, results.size());
+            throw new EmbeddingCallFailedException(
+                "OpenAiCompatibleEmbeddingProvider: response shape mismatch from " + uri
+                    + " — expected " + expectedCount + " embeddings, got " + results.size());
         }
         return results;
     }
