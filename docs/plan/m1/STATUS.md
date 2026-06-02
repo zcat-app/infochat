@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 36 |
+| pending | 35 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 154 |
+| done | 155 |
 | deferred | 2 |
 | **total** | **192** |
 
@@ -25,7 +25,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-127 — DB per-service role wiring + audit_log_view redaction (complexity: high, risk: high)
-- M1-128 — ReEvaluationJob enumerate filter + cap-exhaustion transition + IT (complexity: low, risk: medium)
 - M1-129 — DigestScheduler approval_status filter + negative-case fixture (complexity: low, risk: medium)
 - M1-130 — ReadyPromoter transaction boundary + IT driven through tick() (complexity: medium, risk: medium)
 - M1-131 — ChatAgent Jackson tool-arg parse + dispatcher catch widening + TOOL-LEAK (complexity: high, risk: high)
@@ -94,6 +93,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-128 | ReEvaluationJob enumerate filter + cap-exhaustion transition + IT | 2026-06-02 | round 1 APPROVE |
 | M1-126 | Asset-command extensibility (operator-config driven) + Locale.ROOT | 2026-06-02 | round 1 APPROVE |
 | M1-125 | Per-adapter reply target + AdapterRegistry duplicate-name dedup | 2026-06-02 | round 1 APPROVE |
 | M1-124 | Anthropic header names + test alignment + narrow catch + unused import | 2026-06-02 | round 1 APPROVE |
@@ -103,7 +103,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-109 | Multi-adapter production shape IT | 2026-06-01 | round 1 APPROVE |
 | M1-120 | SimpleX + Signal CDI activation (D46) | 2026-05-31 | round 1 APPROVE |
 | M1-119 | SimpleX logging hygiene — drainStream + MalformedFrame exception messages | 2026-05-31 | round 1 APPROVE |
-| M1-118 | SimpleX input-validation hardening — contactId shape + inbound size cap | 2026-05-31 | round 1 APPROVE |
 
 ---
 
@@ -329,7 +328,7 @@ M1-125 (done)
   └── M1-155 (pending) ← runnable
 M1-126 (done)
 M1-127 (pending) ← runnable
-M1-128 (pending) ← runnable
+M1-128 (done)
 M1-129 (pending) ← runnable
 M1-130 (pending) ← runnable
 M1-131 (pending) ← runnable

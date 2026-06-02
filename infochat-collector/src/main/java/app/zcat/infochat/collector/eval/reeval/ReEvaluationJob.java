@@ -282,21 +282,22 @@ public class ReEvaluationJob {
     List<ReEvalCandidate> enumerateCandidates() throws SQLException {
         // Two classes: infra-failure (stage2_failed=true, any status that
         // isn't NEEDS_REVIEW) and UNKNOWN (QUARANTINED + stage2_done +
-        // !stage2_failed). Union in one query with a cap filter.
+        // !stage2_failed). No cap filter here: cap-reached rows must still
+        // enter processOne so its >= cap branch fires the NEEDS_REVIEW
+        // transition. transitionToNeedsReview flips status to NEEDS_REVIEW,
+        // which excludes the row from both branches on the next tick — so a
+        // cap-exhausted row is enumerated exactly once more, then drops out.
         final String sql =
             "SELECT id, fetched_at, stage2_failed, re_eval_attempts FROM post "
                 + "WHERE ("
-                + "  (stage2_failed = TRUE AND status != 'NEEDS_REVIEW' AND re_eval_attempts < ?)"
+                + "  (stage2_failed = TRUE AND status != 'NEEDS_REVIEW')"
                 + "  OR "
-                + "  (status = 'QUARANTINED' AND stage2_done = TRUE AND stage2_failed = FALSE "
-                + "   AND re_eval_attempts < ?)"
+                + "  (status = 'QUARANTINED' AND stage2_done = TRUE AND stage2_failed = FALSE)"
                 + ") ORDER BY fetched_at, id LIMIT ?";
         List<ReEvalCandidate> candidates = new ArrayList<>();
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setInt(1, infraFailureCap);
-            ps.setInt(2, unknownCap);
-            ps.setInt(3, batchSize);
+            ps.setInt(1, batchSize);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     candidates.add(new ReEvalCandidate(

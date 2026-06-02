@@ -1,7 +1,7 @@
 ---
 id: M1-128
 title: "ReEvaluationJob enumerate filter + cap-exhaustion transition + IT"
-status: pending
+status: done
 created: 2026-06-02
 last_updated: 2026-06-02
 blocked_by: []
@@ -12,7 +12,7 @@ files_scope:
 complexity: low
 risk: medium
 round_cap: 2
-security_relevant: false
+security_relevant: true
 migration_touch: false
 out_of_scope:
   - the infochat.reeval.* config keys (covered by M1-122)
@@ -29,12 +29,44 @@ test_plan:
 spec_refs:
   - docs/spec/security.md §Re-evaluation job
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-02
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 159
+      removed: 16
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-02
+    verdict: CLEAN
+    base: 03f78b84197fd0681c907c98c4f1754bfc58342b
+    head: de4db544dcc874ee99bf37d125b51bd33347845c
+    verdict_file: docs/plan/m1/redteam/M1-128-2026-06-02.md
+    out_of_model_count: 1
+    note: >
+      CLEAN. Diff makes the spec-mandated cap-exhaustion → NEEDS_REVIEW
+      transition reachable; separate caps, throttled notification, and
+      RE_EVAL_RELEASED audit preserved. One OUT-OF-MODEL advisory
+      (overlapping @Scheduled ticks → benign idempotent double-transition,
+      throttle-coalesced notification, no audit duplication); no remediation
+      ticket warranted — spec makes no concurrency commitment for this job.
+clarity_check:
+  date: 2026-06-02
+  verdict: WARN
+  warnings:
+    - "SECURITY-FLAG-CONSISTENT: security_relevant was false, but the ticket fixes a spec-mandated security commitment in the quarantine/admin-notification surface (docs/spec/security.md §Re-evaluation job); flipped to true at start so /redteam is triggered post-merge."
+  blockers: []
 ---
 
 # M1-128: ReEvaluationJob enumerate filter + cap-exhaustion transition + IT
