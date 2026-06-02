@@ -130,8 +130,8 @@ class AnthropicProviderTest {
         provider.generate(ModelTask.SUMMARIZER, "sys", "usr");
 
         Map<String, List<String>> headers = capturedHeaders.get();
-        assertEquals("2023-06-01", headers.get("X-anthropic-version").get(0));
-        assertEquals(API_KEY, headers.get("Anthropic-api-key").get(0));
+        assertEquals("2023-06-01", headers.get("Anthropic-version").get(0));
+        assertEquals(API_KEY, headers.get("X-api-key").get(0));
     }
 
     @Test
@@ -151,10 +151,10 @@ class AnthropicProviderTest {
         provider.generate(ModelTask.SUMMARIZER, "sys", "usr");
 
         Map<String, List<String>> headers = capturedHeaders.get();
-        assertFalse(headers.containsKey("Anthropic-api-key"),
-            "anthropic-api-key header must be omitted when api-key config is empty");
-        assertNotNull(headers.get("X-anthropic-version"),
-            "x-anthropic-version header must still be present");
+        assertFalse(headers.containsKey("X-api-key"),
+            "x-api-key header must be omitted when api-key config is empty");
+        assertNotNull(headers.get("Anthropic-version"),
+            "anthropic-version header must still be present");
     }
 
     @Test

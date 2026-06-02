@@ -1,7 +1,7 @@
 ---
 id: M1-124
 title: "Anthropic header names + test alignment + narrow catch + unused import"
-status: pending
+status: done
 created: 2026-06-02
 last_updated: 2026-06-02
 blocked_by: []
@@ -35,12 +35,46 @@ spec_refs:
   - docs/spec/llm.md §SPI shape
   - docs/spec/security.md §Secrets handling
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-02
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 22
+      removed: 21
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-02
+    verdict: CLEAN
+    base: main
+    head: cd2ced7
+    verdict_file: docs/plan/m1/redteam/M1-124-2026-06-02.md
+    out_of_model_count: 1
+    note: |
+      Clean audit of the committed branch tip (cd2ced7). Four-part
+      correctness change; no threat-model commitment unfulfilled, no
+      auth/authz/ban/audit surface touched, no header-injection surface
+      (constant + trusted-config header values). One OUT-OF-MODEL advisory:
+      the pre-existing LOG.warnf at AnthropicProvider.java:159-160 logs
+      remote-LLM-derived error text through the plain JBoss logger rather
+      than the §Secrets-handling redactor/SafeLog — not introduced or
+      regressed here (preview() caps it at 200 bytes). Candidate for a
+      separate redactor-coverage ticket; not blocking merge.
+clarity_check:
+  date: 2026-06-02
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-124: Anthropic header names + test alignment + narrow catch + unused import

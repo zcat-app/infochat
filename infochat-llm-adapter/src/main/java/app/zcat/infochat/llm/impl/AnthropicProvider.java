@@ -21,7 +21,6 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.util.Optional;
 
 /**
  * Native Anthropic Messages API provider. Uses the Anthropic-specific
@@ -47,8 +46,8 @@ import java.util.Optional;
  * }</pre>
  *
  * <h2>Auth</h2>
- * <p>{@code x-anthropic-version} carries the stable API version;
- * {@code anthropic-api-key} carries the raw key (not Bearer). The
+ * <p>{@code anthropic-version} carries the stable API version;
+ * {@code x-api-key} carries the raw key (not Bearer). The
  * api-key header is omitted when the config value is empty, matching
  * {@link OpenAiCompatibleProvider}'s empty-key behavior.
  *
@@ -136,10 +135,10 @@ public class AnthropicProvider implements LlmProvider {
         HttpRequest.Builder reqBuilder = HttpRequest.newBuilder(uri)
             .timeout(Duration.ofMillis(cfg.timeoutMs()))
             .header("Content-Type", "application/json")
-            .header("x-anthropic-version", API_VERSION)
+            .header("anthropic-version", API_VERSION)
             .POST(HttpRequest.BodyPublishers.ofString(body));
         if (!cfg.apiKey().isEmpty()) {
-            reqBuilder.header("anthropic-api-key", cfg.apiKey());
+            reqBuilder.header("x-api-key", cfg.apiKey());
         }
         HttpRequest request = reqBuilder.build();
 
@@ -196,9 +195,9 @@ public class AnthropicProvider implements LlmProvider {
         try {
             JsonNode root = JSON.readTree(body);
             if ("error".equals(root.path("type").asText())) {
-                return root.path("error").path("message").asText("(no message)");
+                return preview(root.path("error").path("message").asText("(no message)"));
             }
-        } catch (Exception ignored) {
+        } catch (IOException ignored) {
             // Fall through to preview
         }
         return preview(body);
