@@ -10,8 +10,10 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -178,6 +180,29 @@ class AssetHandlerTest {
         OutboundMessage reply = handler.handle("zcash", SCOPE, "/zcash");
         assertTrue(reply.text().contains("No price data"),
                 "error.asset.no_data bundle value");
+    }
+
+    /**
+     * Acceptance item 3: argument tokens are lowercased with
+     * {@link java.util.Locale#ROOT}, not the JVM default locale. Under a
+     * Turkish default locale {@code "I".toLowerCase()} yields the dotless
+     * {@code 'ı'} (U+0131) while ROOT yields ASCII {@code 'i'}; parseArgs must
+     * produce ASCII-lowercased tokens regardless of the default locale so
+     * sub-verb and quote-currency matching is locale-independent.
+     */
+    @Test
+    void parseArgsLowercasesWithRootLocaleNotDefault() {
+        Locale previous = Locale.getDefault();
+        try {
+            Locale.setDefault(Locale.forLanguageTag("tr"));
+            AssetHandler.ParsedArgs args = AssetHandler.parseArgs("/zcash BINANCE --vs XIB");
+            assertEquals("binance", args.subVerb(),
+                    "sub-verb token lowercased via Locale.ROOT (ASCII 'i'), not Turkish 'ı'");
+            assertEquals("xib", args.vsCurrency(),
+                    "quote-currency token lowercased via Locale.ROOT (ASCII 'i'), not Turkish 'ı'");
+        } finally {
+            Locale.setDefault(previous);
+        }
     }
 
     // --- Test doubles ---

@@ -12,6 +12,7 @@ import java.text.MessageFormat;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
 /**
@@ -153,11 +154,11 @@ public class AssetHandler {
         int i = 1; // skip the command name (e.g. "/zcash")
         while (i < tokens.length) {
             if ("--vs".equals(tokens[i]) && i + 1 < tokens.length) {
-                vsCurrency = tokens[i + 1].toLowerCase();
+                vsCurrency = tokens[i + 1].toLowerCase(Locale.ROOT);
                 i += 2;
             } else if (!tokens[i].startsWith("--")) {
                 if (subVerb == null) {
-                    subVerb = tokens[i].toLowerCase();
+                    subVerb = tokens[i].toLowerCase(Locale.ROOT);
                 }
                 i++;
             } else {

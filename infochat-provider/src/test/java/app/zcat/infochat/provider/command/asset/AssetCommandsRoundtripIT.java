@@ -82,9 +82,9 @@ class AssetCommandsRoundtripIT {
             conn.createStatement().executeUpdate(
                     "DELETE FROM audit_log WHERE actor_contact_id LIKE 'm55-%'");
             conn.createStatement().executeUpdate(
-                    "DELETE FROM price_snapshot WHERE asset IN ('zcash', 'monero')");
+                    "DELETE FROM price_snapshot WHERE asset IN ('zcash', 'monero', 'litecoin')");
             conn.createStatement().executeUpdate(
-                    "DELETE FROM asset_config WHERE asset IN ('zcash', 'monero')");
+                    "DELETE FROM asset_config WHERE asset IN ('zcash', 'monero', 'litecoin')");
             conn.createStatement().executeUpdate(
                     "DELETE FROM users WHERE contact_id LIKE 'm55-%'");
 
@@ -290,6 +290,45 @@ class AssetCommandsRoundtripIT {
 
         assertEquals(0, mockLlm.callCount(),
                 "no LLM call on banned-user path");
+    }
+
+    /**
+     * Acceptance item 1: a third asset configured at runtime ({@code litecoin}),
+     * absent from every hardcoded handler, is dispatchable as {@code /litecoin}
+     * with no new {@link app.zcat.infochat.provider.messaging.CommandHandler}.
+     * The slash dispatcher routes it to the shared {@link AssetHandler} via the
+     * operator-config-driven fallback, producing a rendered reply rather than
+     * the unknown-command response. The display name comes from the registry's
+     * capitalize fallback (litecoin is not in the bootstrap fixture).
+     */
+    @Test
+    void thirdAssetDispatchableWithoutHardcodedHandler() throws Exception {
+        try (Connection conn = dataSource.getConnection()) {
+            seedAssetConfig(conn, "litecoin", "coingecko", true,
+                    "coingecko.com/en/coins/litecoin", true);
+            seedPriceSnapshot(conn, "litecoin", "coingecko", "usd",
+                    new BigDecimal("88.40"), Instant.now().minusSeconds(30));
+            seedUser(conn, "m55-u4", false, false, "vouched", null);
+        }
+        // The registry loaded in @BeforeEach without litecoin; refreshing picks
+        // up the newly configured asset — no code change, no redeploy.
+        assetRegistry.refresh();
+
+        assertTrue(assetCommandFamilyOracle.isAssetCommand("litecoin"),
+                "registry must recognize the runtime-added third asset");
+
+        adapter.deliverDm("m55-u4", "/litecoin");
+        List<OutboundMessage> replies = adapter.sentMessages();
+
+        assertEquals(1, replies.size(), "exactly one reply");
+        String body = replies.getFirst().text();
+        assertTrue(body.contains("Litecoin"),
+                "the dispatcher routed /litecoin to the shared asset handler, "
+                        + "producing a rendered reply rather than the unknown-command response");
+        assertTrue(body.contains("coingecko.com/en/coins/litecoin"),
+                "rendered reply carries the litecoin attribution URL");
+
+        assertEquals(0, mockLlm.callCount(), "no LLM call on asset-command path");
     }
 
     // ---- helpers ----

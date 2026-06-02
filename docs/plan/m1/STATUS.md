@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 41 |
+| pending | 40 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 149 |
+| done | 150 |
 | deferred | 2 |
 | **total** | **192** |
 
@@ -28,7 +28,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-123 — InstanceLockGuard held-session liveness + collector/provider dedup (complexity: high, risk: high)
 - M1-124 — Anthropic header names + test alignment + narrow catch + unused import (complexity: low, risk: high)
 - M1-125 — Per-adapter reply target + AdapterRegistry duplicate-name dedup (complexity: high, risk: high)
-- M1-126 — Asset-command extensibility (operator-config driven) + Locale.ROOT (complexity: medium, risk: medium)
 - M1-127 — DB per-service role wiring + audit_log_view redaction (complexity: high, risk: high)
 - M1-128 — ReEvaluationJob enumerate filter + cap-exhaustion transition + IT (complexity: low, risk: medium)
 - M1-129 — DigestScheduler approval_status filter + negative-case fixture (complexity: low, risk: medium)
@@ -99,6 +98,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-126 | Asset-command extensibility (operator-config driven) + Locale.ROOT | 2026-06-02 | round 1 APPROVE |
 | M1-121 | June+July 2026 partitions + monthly partition-creator scheduler | 2026-06-02 | round 2 APPROVE |
 | M1-109 | Multi-adapter production shape IT | 2026-06-01 | round 1 APPROVE |
 | M1-120 | SimpleX + Signal CDI activation (D46) | 2026-05-31 | round 1 APPROVE |
@@ -108,7 +108,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-113 | D47 admin commands — approve-group, reject-group, list-groups | 2026-05-31 | round 2 APPROVE |
 | M1-108 | Signal mention recognition + group support | 2026-05-31 | round 1 APPROVE |
 | M1-105 | Multi-adapter Provider wiring + isolation IT | 2026-05-31 | round 1 APPROVE |
-| M1-104 | SimpleX group support + mention recognition | 2026-05-31 | round 2 APPROVE |
 
 ---
 
@@ -332,7 +331,7 @@ M1-123 (pending) ← runnable
 M1-124 (pending) ← runnable
 M1-125 (pending) ← runnable
   └── M1-155 (pending)
-M1-126 (pending) ← runnable
+M1-126 (done)
 M1-127 (pending) ← runnable
 M1-128 (pending) ← runnable
 M1-129 (pending) ← runnable

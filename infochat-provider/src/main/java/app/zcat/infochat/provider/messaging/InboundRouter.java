@@ -10,8 +10,10 @@ import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
+import app.zcat.infochat.provider.command.AssetCommandFamilyOracle;
 import app.zcat.infochat.provider.command.CommandPermissions;
 import app.zcat.infochat.provider.command.ConfirmStateService;
+import app.zcat.infochat.provider.command.asset.AssetHandler;
 import app.zcat.infochat.provider.group.GroupApprovalCheck;
 import app.zcat.infochat.provider.group.GroupAutoPromoteService;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -249,6 +251,12 @@ public class InboundRouter {
 
     @Inject
     CommandPermissions commandPermissions;
+
+    @Inject
+    AssetCommandFamilyOracle assetCommandFamilyOracle;
+
+    @Inject
+    AssetHandler assetHandler;
 
     @Inject
     ProbationCheck probationCheck;
@@ -654,6 +662,19 @@ public class InboundRouter {
             if (handler.name().equals(commandName)) {
                 return handler.handle(scope, normalized).text();
             }
+        }
+        // Asset-command fallback: operator-configured assets have no per-asset
+        // CommandHandler bean. Dispatch consults the SAME AssetCommandFamilyOracle
+        // the probation gate (CommandPermissions) uses, so the gate and the
+        // dispatcher agree by construction — an asset the gate admits during
+        // probation is the same asset this branch routes, closing the
+        // "pass the gate then Unknown command" path. A bootstrap-added asset
+        // becomes dispatchable with no new code. The null guard is the
+        // plain-JUnit subclass path, which wires no CDI fields and must still
+        // fall through to the unknown reply (mirrors the replyTarget /
+        // groupAutoPromoteService convention elsewhere in this class).
+        if (assetCommandFamilyOracle != null && assetCommandFamilyOracle.isAssetCommand(commandName)) {
+            return assetHandler.handle(commandName, scope, normalized).text();
         }
         return UNKNOWN_COMMAND_REPLY;
     }

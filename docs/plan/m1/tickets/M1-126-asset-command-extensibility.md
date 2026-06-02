@@ -1,7 +1,7 @@
 ---
 id: M1-126
 title: "Asset-command extensibility (operator-config driven) + Locale.ROOT"
-status: pending
+status: done
 created: 2026-06-02
 last_updated: 2026-06-02
 blocked_by: []
@@ -9,6 +9,7 @@ files_budget: 5
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/asset
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/asset
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/InboundRouter.java
 complexity: medium
 risk: medium
 round_cap: 2
@@ -31,12 +32,50 @@ test_plan:
 spec_refs:
   - docs/spec/commands.md §Asset commands
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-02
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 122
+      removed: 68
+escalations:
+  - date: 2026-06-02
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A — escalated at start, before any review round. Chosen design
+      (Option A: asset-dispatch fallback in InboundRouter.handleSlash that
+      consults AssetCommandFamilyOracle before UNKNOWN_COMMAND_REPLY) must
+      edit InboundRouter.java, which lay outside the original files_scope
+      (command/asset only). out_of_scope already carved in the minimal
+      fallback branch; files_scope was widened to match.
+revisions:
+  - date: 2026-06-02
+    reason: budget-breach refine — add InboundRouter.java to files_scope
+    snapshot:
+      files_budget: 5
+      files_scope:
+        - infochat-provider/src/main/java/app/zcat/infochat/provider/command/asset
+        - infochat-provider/src/test/java/app/zcat/infochat/provider/command/asset
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-02
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE item 3: Locale.ROOT lowercasing is verifiable by inspection only; consider a named test using a locale-sensitive character (e.g. Turkish İ) so the criterion is checkable from test output."
+    - "FILES-BUDGET-PLAUSIBLE: budget of 5 is plausible but tight if implementation takes option B (@Produces list) and adds a dedicated locale-fix test alongside the dispatch test."
+    - "SELF-CONTAINED-CHECK: the body defers the option A vs. option B implementation choice to the implementer; a mid-round design decision is expected — document it in the commit message per the Better-alternatives rule."
+  blockers: []
 ---
 
 # M1-126: Asset-command extensibility (operator-config driven) + Locale.ROOT
