@@ -45,10 +45,10 @@ If a ticket's acceptance criteria cannot be satisfied without violating another 
 
 ## §7a Method parameter contracts
 
-- Method parameter contracts MUST be explicit. Every reference-type parameter on a public method declares nullability — either via annotation (`@NonNull`/`@Nullable` from `org.jspecify.annotations`) or via javadoc `@param`. Public/protected methods MUST annotate; internal/package-private methods MAY inherit the default (non-null-assumed). Validation at system boundaries still uses explicit null-checks per the existing No-defensive-code rule.
-- The positive complement to §7: that rule prohibits paranoid null-checks; this rule requires the contract that makes paranoia unnecessary. A caller reading the signature can see immediately whether passing null is a legal call or a bug, and the reviewer can check at PR time whether the change adheres.
+- Method parameter contracts MUST be explicit and machine-checked. Non-null is the **package default** — every `app.zcat.infochat` package is null-marked (NullAway `AnnotatedPackages`), so a bare reference type means "never null." Only genuinely-nullable parameters, returns, and fields carry `@Nullable` (from `org.jspecify.annotations`); `@NonNull` is no longer written by hand. Validation at system boundaries still uses explicit null-checks per the existing No-defensive-code rule (§7).
+- The positive complement to §7: that rule prohibits paranoid null-checks; this rule requires the contract that makes paranoia unnecessary. A caller reading the signature can see immediately whether passing null is a legal call or a bug.
 - JSpecify (not JetBrains) is the v1 annotation source — the type-use semantics let `List<@Nullable String>` express "list of possibly-null strings," which JetBrains declaration-only annotations cannot.
-- The reviewer's `PARAMETER-CONTRACT-CHECK` enforces this rule on NEW public methods added in each diff. Author-side enforcement is `scripts/lint-contracts.py`, which walks `.java` files and reports any public/protected method whose reference-type parameter lacks `@NonNull`/`@Nullable`.
+- Enforcement is the Maven build, not a reviewer hand-check (decision D48): NullAway, built on Error Prone, runs as a compile-time annotation processor with `NullAway:ERROR` active across every module, so a missing or incorrect nullability contract fails `mvn verify`. The reviewer no longer checks annotation presence — the green build is the proof.
 
 ## §8 Test-integrity rules
 

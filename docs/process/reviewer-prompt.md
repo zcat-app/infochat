@@ -206,38 +206,17 @@ not SPEC-CONFORMANCE.
 
 ### Parameter contracts (engineering-rules-verbatim.md §7a)
 
-The §"Method parameter contracts" rule requires every reference-type
-parameter on a public or protected method to declare nullability via
-`@NonNull` or `@Nullable` from `org.jspecify.annotations`. Interface
-methods (implicitly public) and `@Override` methods on an annotated
-parent interface inherit the parent's annotated signature without
-restating it.
-
-PARAMETER-CONTRACT-CHECK applies to NEW public methods introduced or
-modified in the diff. The check ignores pre-existing methods the diff
-does not touch — those are the grandfather surface
-(`scripts/lint-contracts-baseline.txt`) for the incremental retroactive
-pass.
-
-For each `+` line in the diff that introduces a public/protected method
-declaration (or modifies one such that a reference-type parameter is
-added), confirm:
-  - PASS when every reference-type parameter on every newly added /
-    modified public method carries `@NonNull` or `@Nullable` (the
-    annotation may appear on the parameter directly, or be inherited
-    from a parent interface signature the method `@Override`s).
-  - FAIL with the file path + method name + parameter name for any
-    new public method whose reference-type parameter is unannotated and
-    not in the baseline file. The verdict line on FAIL is REWORK with
-    `PARAMETER-CONTRACT-CHECK` named in the rework item.
-  - PASS-WITH-NOTE when the diff touches a method whose nullability is
-    documented via javadoc `@param` (per the engineering rule's
-    "annotation OR javadoc @param" carve-out). Surface the javadoc form
-    in the verdict's reasoning so future readers can see why the
-    annotation is absent.
-
-Primitive parameters (boolean, int, long, etc. and `void` returns) are
-NEVER subject to this check — the rule applies only to reference types.
+§7a nullability contracts are enforced by the build, not by the reviewer
+(decision D48). NullAway, built on Error Prone, runs as a compile-time
+annotation processor with `NullAway:ERROR` active across every module
+under a non-null-by-default model: each `app.zcat.infochat` package is
+null-marked, so only genuinely-nullable parameters/returns/fields carry
+`@Nullable` (JSpecify) and `@NonNull` is no longer written by hand. A
+missing or incorrect contract fails `mvn verify`, which the reviewer
+already requires green. There is therefore NO reviewer hand-check of
+annotation presence — do not emit a PARAMETER-CONTRACT-CHECK verdict
+line, and do not flag a method for lacking `@NonNull`. If the build is
+green, the §7a contract holds.
 
 ---
 
@@ -308,16 +287,6 @@ SPEC-CONFORMANCE-CHECK: <PASS | WARN | FAIL>
    that conflicts. Per the Spec-conformance section above, Read each
    spec_refs entry by anchor range in your fresh context; on
    ANCHOR-NOT-FOUND or AMBIGUOUS, raise to WARN with a note.>
-
-PARAMETER-CONTRACT-CHECK: <PASS | FAIL>
-  <one paragraph: every reference-type parameter on every NEW public /
-   protected method introduced or modified by the diff carries
-   @NonNull or @Nullable from org.jspecify.annotations (or inherits an
-   annotated parent-interface signature). On FAIL, name each missing
-   annotation by file:method:parameter and surface them as REWORK items.
-   PASS when no new public methods are introduced (the check has nothing
-   to evaluate) or when every applicable parameter is annotated. See
-   engineering-rules-verbatim.md §7a "Method parameter contracts".>
 
 REWORK ITEMS: (omit on APPROVE; required on REWORK)
   1. <specific, addressable, scoped to the existing diff>

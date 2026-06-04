@@ -1,9 +1,9 @@
 ---
 id: M1-164
 title: "Adopt NullAway + Error Prone for §7a enforcement (umbrella)"
-status: pending
+status: done
 created: 2026-06-03
-last_updated: 2026-06-03
+last_updated: 2026-06-05
 blocked_by:
   - M1-164a
   - M1-164b
@@ -39,12 +39,29 @@ spec_refs:
   - docs/spec/architecture.md §Architectural principles
 decision_refs:
   - D48
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-05
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 34
+      removed: 384
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-05
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-164: Adopt NullAway + Error Prone for §7a enforcement (umbrella)
