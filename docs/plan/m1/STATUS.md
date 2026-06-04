@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 22 |
+| pending | 23 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 177 |
 | deferred | 3 |
-| **total** | **202** |
+| **total** | **203** |
 
 ---
 
@@ -44,6 +44,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-162 — [INVESTIGATE] confirm-or-drop adapter SPI surfaces vs D47 (complexity: medium, risk: low)
 - M1-163 — Shared DB test-seeding seam for the IT suite (complexity: high, risk: low)
 - M1-164 — Adopt NullAway + Error Prone for §7a enforcement (umbrella) (complexity: medium, risk: medium)
+- M1-167 — Fix residual EscapedEntity javadoc findings in provider (complexity: low, risk: low)
 
 ---
 
@@ -367,4 +368,5 @@ M1-164a (done)
   └── M1-164f (done)
         └── M1-164 (pending) [see above]
 M1-166 (done)
+M1-167 (pending) ← runnable
 ```
