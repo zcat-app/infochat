@@ -155,6 +155,11 @@ public class ThrottledAdminNotifier {
      * ({@link #SUPPRESSED_BUMP_SQL}) increments
      * {@code suppressed_count} as a separate atomic UPDATE.</p>
      */
+    // Assigned in the @PostConstruct init() before any notifyOnce() can run.
+    // NullAway's field-init check models only constructors/initializers, not
+    // @PostConstruct, so suppress that one check here; the field stays @NonNull
+    // for every dereference.
+    @SuppressWarnings("NullAway.Init")
     private String upsertSql;
 
     /**

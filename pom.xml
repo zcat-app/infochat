@@ -98,4 +98,86 @@
             <scope>provided</scope>
         </dependency>
     </dependencies>
+
+    <!--
+         NullAway + Error Prone static nullness enforcement (decision D48).
+         Declared in <pluginManagement> so every reactor module inherits the
+         full annotation-processor + compilerArgs configuration and opts in
+         with a minimal activation stanza (the plugin coordinates only, no
+         <configuration>) in its own <build><plugins>. Modules are onboarded
+         one at a time (subtickets M1-164b..f); a module that has not yet
+         added the activation stanza compiles exactly as before.
+
+         NullAway treats app.zcat.infochat as @NonNull-by-default
+         (AnnotatedPackages); genuinely-nullable parameters, returns, and
+         fields carry @Nullable (JSpecify). No @NonNull is written — non-null
+         is the default.
+    -->
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <version>3.13.0</version>
+                    <configuration>
+                        <!--
+                             Error Prone needs deep reflective access into the
+                             javac internals; <fork>true</fork> runs javac in a
+                             child JVM so the -J add-exports / add-opens args
+                             below reach the compiler rather than this Maven JVM.
+                        -->
+                        <fork>true</fork>
+                        <annotationProcessorPaths>
+                            <path>
+                                <groupId>com.google.errorprone</groupId>
+                                <artifactId>error_prone_core</artifactId>
+                                <version>2.42.0</version>
+                            </path>
+                            <path>
+                                <groupId>com.uber.nullaway</groupId>
+                                <artifactId>nullaway</artifactId>
+                                <version>0.10.25</version>
+                            </path>
+                        </annotationProcessorPaths>
+                        <compilerArgs>
+                            <arg>-XDcompilePolicy=simple</arg>
+                            <arg>--should-stop=ifError=FLOW</arg>
+                            <!--
+                                 The Error Prone + NullAway flags MUST share a
+                                 single <arg> element. Splitting them makes the
+                                 compiler plugin pass them as separate javac
+                                 arguments and the ErrorProne plugin never sees
+                                 the -XepOpt/-Xep flags (NullAway silently does
+                                 not run). ExcludedFieldAnnotations exempts
+                                 framework-initialized fields from the field-init
+                                 check: @Inject (CDI) and @ConfigProperty
+                                 (MicroProfile Config) are field-level so the
+                                 exemption matches directly. @PostConstruct is a
+                                 method annotation, so a field initialized inside
+                                 a @PostConstruct method is NOT matched by this
+                                 list — those fields carry
+                                 @SuppressWarnings("NullAway.Init") at the
+                                 declaration instead (which suppresses only the
+                                 init check, keeping the @NonNull dereference
+                                 contract). -XepExcludedPaths drops generated
+                                 sources (Quarkus build output) from analysis.
+                            -->
+                            <arg>-Xplugin:ErrorProne -XepOpt:NullAway:AnnotatedPackages=app.zcat.infochat -XepOpt:NullAway:ExcludedFieldAnnotations=jakarta.inject.Inject,jakarta.annotation.PostConstruct,org.eclipse.microprofile.config.inject.ConfigProperty -XepExcludedPaths:.*/target/generated-sources/.* -Xep:NullAway:ERROR</arg>
+                            <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED</arg>
+                            <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED</arg>
+                            <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.main=ALL-UNNAMED</arg>
+                            <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.model=ALL-UNNAMED</arg>
+                            <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED</arg>
+                            <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.processing=ALL-UNNAMED</arg>
+                            <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED</arg>
+                            <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED</arg>
+                            <arg>-J--add-opens=jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED</arg>
+                            <arg>-J--add-opens=jdk.compiler/com.sun.tools.javac.comp=ALL-UNNAMED</arg>
+                        </compilerArgs>
+                    </configuration>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
 </project>

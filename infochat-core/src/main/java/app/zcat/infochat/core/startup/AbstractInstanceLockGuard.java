@@ -78,7 +78,12 @@ public abstract class AbstractInstanceLockGuard {
 
     // Long-lived; never returned to the pool while the JVM is alive. The
     // advisory lock dies with the Postgres session, so closing this would
-    // silently release the single-instance gate.
+    // silently release the single-instance gate. Assigned in the
+    // @PostConstruct onStartup() (or the test seam); NullAway's field-init
+    // check models only constructors/initializers, not @PostConstruct, so
+    // suppress that one check — the field stays @NonNull for every dereference
+    // (all probe reads are guarded by the heldConnection == null check).
+    @SuppressWarnings("NullAway.Init")
     private Connection heldConnection;
 
     private volatile boolean lockHeld;

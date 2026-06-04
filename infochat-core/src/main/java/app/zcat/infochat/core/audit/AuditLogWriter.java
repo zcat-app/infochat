@@ -3,6 +3,7 @@ package app.zcat.infochat.core.audit;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -130,7 +131,7 @@ public class AuditLogWriter {
         }
     }
 
-    private static void setNullableString(PreparedStatement ps, int index, String value) throws SQLException {
+    private static void setNullableString(PreparedStatement ps, int index, @Nullable String value) throws SQLException {
         if (value == null) {
             ps.setNull(index, Types.VARCHAR);
         } else {

@@ -30,4 +30,27 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <!--
+                 NullAway / Error Prone opt-out (decision D48, M1-164a). The
+                 parent <pluginManagement> entry activates Error Prone on the
+                 lifecycle compile execution of every reactor module; this
+                 module is not onboarded yet, so override the inherited
+                 compilerArgs to empty and restore non-forked compilation —
+                 Error Prone / NullAway does not run here and the module builds
+                 exactly as it did before D48. Removed (and the module's genuine
+                 nullness findings resolved) by subticket M1-164b.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <fork>false</fork>
+                    <compilerArgs combine.self="override"/>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>
