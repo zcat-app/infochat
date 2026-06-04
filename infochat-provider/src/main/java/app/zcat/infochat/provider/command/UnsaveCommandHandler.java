@@ -10,6 +10,7 @@ import app.zcat.infochat.provider.messaging.InboundContext;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -98,7 +99,7 @@ public class UnsaveCommandHandler implements CommandHandler {
         }
     }
 
-    private UUID lookupActor(Connection conn, String adapter, String contactId) throws SQLException {
+    private @Nullable UUID lookupActor(Connection conn, String adapter, String contactId) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(SELECT_ACTOR_SQL)) {
             ps.setString(1, adapter);
             ps.setString(2, contactId);
@@ -129,7 +130,7 @@ public class UnsaveCommandHandler implements CommandHandler {
         return new OutboundMessage(scope, text, Instant.now(), UUID.randomUUID().toString());
     }
 
-    private static String parseUid(String rawText) {
+    private static @Nullable String parseUid(String rawText) {
         String[] tokens = rawText.trim().split("\\s+");
         if (tokens.length < 2) {
             return null;

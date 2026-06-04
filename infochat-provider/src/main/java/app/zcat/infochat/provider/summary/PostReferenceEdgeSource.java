@@ -16,6 +16,7 @@ import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.Objects;
 
 /**
  * Edge-source SPI for {@link ClusterTraversal}. Returns the symmetric
@@ -78,8 +79,11 @@ public interface PostReferenceEdgeSource {
                     while (rs.next()) {
                         UUID from = (UUID) rs.getObject(1);
                         UUID to = (UUID) rs.getObject(2);
-                        adjacency.get(from).add(to);
-                        adjacency.get(to).add(from);
+                        // from/to are drawn from the query, whose WHERE clause
+                        // restricts both to postIds — every such key was seeded
+                        // into adjacency above, so the get() is never null.
+                        Objects.requireNonNull(adjacency.get(from)).add(to);
+                        Objects.requireNonNull(adjacency.get(to)).add(from);
                     }
                 }
             } catch (SQLException e) {

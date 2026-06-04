@@ -13,6 +13,7 @@ import app.zcat.infochat.provider.messaging.InboundContext;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -187,7 +188,7 @@ public class ListSourcesCommandHandler implements CommandHandler {
         return reply(scope, renderReply(rows, /* withVisibilityCaveat */ true));
     }
 
-    private void writePrivilegedReadAuditRow(UserRow actor, String callerContactId,
+    private void writePrivilegedReadAuditRow(UserRow actor, @Nullable String callerContactId,
                                              String adapter, boolean includeDeleted) {
         // Audit-before-effect: write the row in its own short
         // transaction BEFORE adminAllPath issues the deployment-wide
@@ -257,7 +258,7 @@ public class ListSourcesCommandHandler implements CommandHandler {
         return row.status;
     }
 
-    private Optional<UserRow> lookupUser(String adapter, String contactId) {
+    private Optional<UserRow> lookupUser(String adapter, @Nullable String contactId) {
         if (adapter == null || contactId == null) {
             return Optional.empty();
         }
@@ -355,14 +356,14 @@ public class ListSourcesCommandHandler implements CommandHandler {
         return new OutboundMessage(scope, text, Instant.now(), UUID.randomUUID().toString());
     }
 
-    private static String contactIdOf(ScopeRef scope) {
+    private static @Nullable String contactIdOf(ScopeRef scope) {
         return scope instanceof ScopeRef.Dm dm ? dm.contactId() : null;
     }
 
     private record UserRow(UUID id, boolean isAdmin) {}
 
     private record SourceRow(String displayName, String identifier, String kind,
-                             String status, Instant deletedAt) {}
+                             String status, @Nullable Instant deletedAt) {}
 
     /**
      * Parsed form of {@code /list-sources [--all] [--include-deleted] [--page N]}.

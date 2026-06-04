@@ -15,6 +15,7 @@ import app.zcat.infochat.provider.messaging.ProbationCheck;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -340,11 +341,11 @@ public class RevokeAdminCommandHandler implements CommandHandler {
         return new OutboundMessage(scope, text, Instant.now(), UUID.randomUUID().toString());
     }
 
-    private static String contactIdOf(ScopeRef scope) {
+    private static @Nullable String contactIdOf(ScopeRef scope) {
         return scope instanceof ScopeRef.Dm dm ? dm.contactId() : null;
     }
 
-    private static String parseTargetContact(String rawText) {
+    private static @Nullable String parseTargetContact(String rawText) {
         String[] split = rawText.trim().split("\\s+", 2);
         if (split.length < 2) {
             return null;

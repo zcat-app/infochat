@@ -107,7 +107,7 @@ public final class ExportPaginator {
         // Temporarily add, measure, remove.
         List<String> existing = page.get(table);
         boolean newKey = (existing == null);
-        if (newKey) {
+        if (existing == null) {
             existing = new ArrayList<>();
             page.put(table, existing);
         }

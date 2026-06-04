@@ -38,6 +38,9 @@ public class LlmTranslationProvider implements TranslationProvider {
     @Inject
     LlmRouter llmRouter;
 
+    // Loaded once in @PostConstruct loadPromptTemplate(); the field-init check
+    // cannot see the @PostConstruct-time initialization.
+    @SuppressWarnings("NullAway.Init")
     private String promptTemplate;
 
     @PostConstruct

@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Deterministic SQL retrieval of eligible {@code READY} posts for
@@ -105,7 +106,7 @@ public class EligiblePostQuery {
             String title,
             String url,
             String body,
-            Instant publishedAt,
+            @Nullable Instant publishedAt,
             List<String> tags) {
     }
 

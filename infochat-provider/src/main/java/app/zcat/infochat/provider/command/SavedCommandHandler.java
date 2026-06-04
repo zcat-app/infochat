@@ -10,6 +10,7 @@ import app.zcat.infochat.provider.messaging.InboundContext;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
 import java.sql.Array;
@@ -137,7 +138,7 @@ public class SavedCommandHandler implements CommandHandler {
         }
     }
 
-    private UUID lookupActor(Connection conn, String adapter, String contactId) throws SQLException {
+    private @Nullable UUID lookupActor(Connection conn, String adapter, String contactId) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(SELECT_ACTOR_SQL)) {
             ps.setString(1, adapter);
             ps.setString(2, contactId);
@@ -320,7 +321,7 @@ public class SavedCommandHandler implements CommandHandler {
         return new ParsedArgs(tag, window, page);
     }
 
-    private static Duration parseWindow(String raw) {
+    private static @Nullable Duration parseWindow(String raw) {
         Matcher m = WINDOW_PATTERN.matcher(raw.toLowerCase(Locale.ROOT));
         if (!m.matches()) {
             return null;
@@ -342,7 +343,7 @@ public class SavedCommandHandler implements CommandHandler {
         }
     }
 
-    record ParsedArgs(String tag, Duration window, int page) {}
+    record ParsedArgs(@Nullable String tag, @Nullable Duration window, int page) {}
 
     private record Row(
             String postUid,

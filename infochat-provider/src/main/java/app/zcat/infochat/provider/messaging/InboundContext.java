@@ -1,7 +1,6 @@
 package app.zcat.infochat.provider.messaging;
 
 import jakarta.enterprise.context.RequestScoped;
-import org.jspecify.annotations.Nullable;
 
 /**
  * Per-inbound-dispatch context bean. Carries the originating
@@ -33,7 +32,12 @@ import org.jspecify.annotations.Nullable;
 @RequestScoped
 public class InboundContext {
 
+    // Both fields are set by InboundRouter.onMessage before any handler
+    // reads them (request-scoped, one instance per inbound dispatch); the
+    // field-init check cannot see that cross-method guarantee.
+    @SuppressWarnings("NullAway.Init")
     private String adapterName;
+    @SuppressWarnings("NullAway.Init")
     private String senderContactId;
 
     /**
@@ -66,7 +70,7 @@ public class InboundContext {
         return senderContactId;
     }
 
-    public void setSenderContactId(@Nullable String senderContactId) {
+    public void setSenderContactId(String senderContactId) {
         this.senderContactId = senderContactId;
     }
 }

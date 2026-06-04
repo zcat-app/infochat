@@ -1,5 +1,7 @@
 package app.zcat.infochat.provider.command;
 
+import org.jspecify.annotations.Nullable;
+
 import app.zcat.infochat.core.log.ContactIds;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
@@ -238,7 +240,7 @@ public class AddSourceCommandHandler implements CommandHandler {
         }
     }
 
-    private UUID lookupGroupId(String adapterGroupId) {
+    private @Nullable UUID lookupGroupId(String adapterGroupId) {
         String adapter = inboundContext.adapterName();
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(SELECT_GROUP_ID_SQL)) {

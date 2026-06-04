@@ -14,6 +14,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -286,7 +287,7 @@ public class QuarantineCommandHandler implements CommandHandler {
         return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL));
     }
 
-    private Optional<ActorRow> lookupActor(String adapter, String contactId) {
+    private Optional<ActorRow> lookupActor(String adapter, @Nullable String contactId) {
         if (adapter == null || contactId == null) {
             return Optional.empty();
         }
@@ -313,7 +314,7 @@ public class QuarantineCommandHandler implements CommandHandler {
         return new OutboundMessage(scope, text, Instant.now(), UUID.randomUUID().toString());
     }
 
-    private static String contactIdOf(ScopeRef scope) {
+    private static @Nullable String contactIdOf(ScopeRef scope) {
         return scope instanceof ScopeRef.Dm dm ? dm.contactId() : null;
     }
 

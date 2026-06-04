@@ -1,5 +1,7 @@
 package app.zcat.infochat.provider.command;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * Pending {@code /ban <contact> [--reason ...]} confirm payload.
  *
@@ -12,7 +14,7 @@ package app.zcat.infochat.provider.command;
  * change without coordinated edits in {@link BanCommandHandler} and
  * {@link app.zcat.infochat.provider.messaging.InboundRouter}.</p>
  */
-public record BanConfirm(String targetContactId, String reason)
+public record BanConfirm(String targetContactId, @Nullable String reason)
         implements ConfirmStateService.PendingConfirm {
 
     @Override

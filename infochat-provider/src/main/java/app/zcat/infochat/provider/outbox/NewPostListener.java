@@ -18,6 +18,8 @@ import java.time.Instant;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.jspecify.annotations.Nullable;
+import java.util.Objects;
 
 /**
  * Live LISTEN/NOTIFY worker for the {@code new_post} channel
@@ -106,8 +108,8 @@ public class NewPostListener {
     // Long-lived; never returned to the pool while the JVM is alive. LISTEN
     // is bound to the underlying Postgres backend session, so returning this
     // connection to Agroal would silently end the subscription.
-    private Connection listenConnection;
-    private Thread workerThread;
+    private @Nullable Connection listenConnection;
+    private @Nullable Thread workerThread;
     private volatile boolean stopRequested;
 
     @PostConstruct
@@ -228,7 +230,7 @@ public class NewPostListener {
             LOG.info(
                 "NewPostListener: (re)acquired LISTEN connection and re-issued LISTEN new_post");
         }
-        return listenConnection.unwrap(PGConnection.class);
+        return Objects.requireNonNull(listenConnection).unwrap(PGConnection.class);
     }
 
     private void openListenConnection() throws SQLException {

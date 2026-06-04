@@ -1,5 +1,7 @@
 package app.zcat.infochat.provider.command;
 
+import org.jspecify.annotations.Nullable;
+
 import app.zcat.infochat.provider.source.KindResolver.SourceKind;
 
 import java.net.URI;
@@ -226,7 +228,7 @@ public record AddSourceArgs(
         return Normalizer.normalize(raw.trim(), Normalizer.Form.NFC).toLowerCase(Locale.ROOT);
     }
 
-    private static URI parseUri(String s) {
+    private static @Nullable URI parseUri(String s) {
         try {
             URI uri = new URI(s);
             // The probe layer accepts http/https only; reject anything

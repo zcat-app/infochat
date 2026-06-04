@@ -14,6 +14,7 @@ import app.zcat.infochat.provider.messaging.InboundContext;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -232,7 +233,7 @@ public class BanCommandHandler implements CommandHandler {
      * M1-051.
      */
     private OutboundMessage executeBan(ScopeRef scope, UserRow actor, String adapter,
-                                       String targetContactId, String reason) {
+                                       String targetContactId, @Nullable String reason) {
         // Step 1.5 + 4..7 — open the transaction and run the
         // audit-first / mutate-after sequence. Reads of the target row
         // and the pending-invite list happen inside the transaction so
@@ -317,7 +318,7 @@ public class BanCommandHandler implements CommandHandler {
         return reply(scope, body);
     }
 
-    private Optional<UserRow> lookupUser(String adapter, String contactId) {
+    private Optional<UserRow> lookupUser(String adapter, @Nullable String contactId) {
         if (adapter == null || contactId == null) {
             return Optional.empty();
         }
@@ -391,7 +392,7 @@ public class BanCommandHandler implements CommandHandler {
                                  String adapter,
                                  String targetContactId,
                                  UUID actorId,
-                                 String reason) throws SQLException {
+                                 @Nullable String reason) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(INSERT_PREBAN_USER_SQL)) {
             ps.setObject(1, targetId);
             ps.setString(2, adapter);
@@ -409,7 +410,7 @@ public class BanCommandHandler implements CommandHandler {
     private void updateUserToBanned(Connection conn,
                                     UUID targetId,
                                     UUID actorId,
-                                    String reason) throws SQLException {
+                                    @Nullable String reason) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(UPDATE_BANNED_KNOWN_USER_SQL)) {
             ps.setObject(1, actorId);
             if (reason == null) {
@@ -437,7 +438,7 @@ public class BanCommandHandler implements CommandHandler {
         return new OutboundMessage(scope, text, Instant.now(), UUID.randomUUID().toString());
     }
 
-    private static String contactIdOf(ScopeRef scope) {
+    private static @Nullable String contactIdOf(ScopeRef scope) {
         return scope instanceof ScopeRef.Dm dm ? dm.contactId() : null;
     }
 
@@ -446,7 +447,7 @@ public class BanCommandHandler implements CommandHandler {
      * caller-supplied {@code --reason} verbatim when present (escaped
      * for safe JSON embedding); empty object otherwise.
      */
-    private static String banDetailsJson(String reason) {
+    private static String banDetailsJson(@Nullable String reason) {
         if (reason == null) {
             return "{}";
         }
@@ -474,9 +475,9 @@ public class BanCommandHandler implements CommandHandler {
      * is optional and accepts a quoted or unquoted value. Returns
      * {@code null} when the positional contact arg is missing.
      */
-    record BanArgs(String contact, String reason) {
+    record BanArgs(String contact, @Nullable String reason) {
 
-        static BanArgs parse(String rawText) {
+        static @Nullable BanArgs parse(String rawText) {
             // Drop the leading /ban token. Tokenize honoring double-quoted values.
             String[] split = rawText.trim().split("\\s+", 2);
             String remainder = split.length > 1 ? split[1].trim() : "";

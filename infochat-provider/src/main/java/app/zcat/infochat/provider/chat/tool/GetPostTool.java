@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.chat.tool;
 
 import app.zcat.infochat.provider.chat.ChatToolRegistry;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -67,7 +68,7 @@ public class GetPostTool implements ChatToolRegistry.ChatTool {
         }
     }
 
-    private static String instantStr(Timestamp ts) {
+    private static @Nullable String instantStr(@Nullable Timestamp ts) {
         return ts == null ? null : ts.toInstant().toString();
     }
 }

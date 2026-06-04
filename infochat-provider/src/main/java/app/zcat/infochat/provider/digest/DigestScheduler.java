@@ -27,6 +27,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Periodic scheduler that evaluates which groups have an open digest
@@ -187,7 +188,7 @@ public class DigestScheduler {
         return groups;
     }
 
-    private static ZoneId parseTimezone(String timezone) {
+    private static @Nullable ZoneId parseTimezone(String timezone) {
         try {
             return ZoneId.of(timezone);
         } catch (Exception e) {

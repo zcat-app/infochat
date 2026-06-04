@@ -13,6 +13,7 @@ import app.zcat.infochat.provider.messaging.InboundContext;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -250,7 +251,7 @@ public class UnbanCommandHandler implements CommandHandler {
         }
     }
 
-    private Optional<UserRow> lookupUser(String adapter, String contactId) {
+    private Optional<UserRow> lookupUser(String adapter, @Nullable String contactId) {
         if (adapter == null || contactId == null) {
             return Optional.empty();
         }
@@ -325,7 +326,7 @@ public class UnbanCommandHandler implements CommandHandler {
         return new OutboundMessage(scope, text, Instant.now(), UUID.randomUUID().toString());
     }
 
-    private static String contactIdOf(ScopeRef scope) {
+    private static @Nullable String contactIdOf(ScopeRef scope) {
         return scope instanceof ScopeRef.Dm dm ? dm.contactId() : null;
     }
 
@@ -382,7 +383,7 @@ public class UnbanCommandHandler implements CommandHandler {
      */
     record UnbanArgs(String contact) {
 
-        static UnbanArgs parse(String rawText) {
+        static @Nullable UnbanArgs parse(String rawText) {
             // Drop the leading /unban token.
             String[] split = rawText.trim().split("\\s+", 3);
             if (split.length < 2 || split[1].isBlank()) {

@@ -18,6 +18,7 @@ import javax.sql.DataSource;
 
 import org.jboss.logging.Logger;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.MessagingException;
@@ -152,7 +153,7 @@ public class DigestWorker {
         }
     }
 
-    private MessagingAdapter findAdapter(String adapterName) {
+    private @Nullable MessagingAdapter findAdapter(String adapterName) {
         for (MessagingAdapter adapter : adapterRegistry.activatedAdapters()) {
             if (adapter.name().equals(adapterName)) {
                 return adapter;

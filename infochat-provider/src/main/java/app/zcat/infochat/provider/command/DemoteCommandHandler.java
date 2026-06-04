@@ -13,6 +13,7 @@ import app.zcat.infochat.provider.messaging.InboundContext;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -137,7 +138,7 @@ public class DemoteCommandHandler implements CommandHandler {
         return reply(scope, replyText);
     }
 
-    private UUID resolveAdmin(Connection conn, String adapter,
+    private @Nullable UUID resolveAdmin(Connection conn, String adapter,
                               String contactId) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(SELECT_ACTOR_SQL)) {
             ps.setString(1, adapter);
@@ -150,7 +151,7 @@ public class DemoteCommandHandler implements CommandHandler {
         }
     }
 
-    private TargetRow resolveTarget(Connection conn, String adapter,
+    private @Nullable TargetRow resolveTarget(Connection conn, String adapter,
                                     String contactId) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(SELECT_TARGET_SQL)) {
             ps.setString(1, adapter);
@@ -198,7 +199,7 @@ public class DemoteCommandHandler implements CommandHandler {
         }
     }
 
-    private static String parseTarget(String rawText) {
+    private static @Nullable String parseTarget(String rawText) {
         String[] parts = rawText.split("\\s+", 3);
         return parts.length >= 2 ? parts[1] : null;
     }

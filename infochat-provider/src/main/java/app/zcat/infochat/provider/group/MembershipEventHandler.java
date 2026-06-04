@@ -9,6 +9,7 @@ import app.zcat.infochat.messaging.MembershipEvent;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -102,10 +103,10 @@ public class MembershipEventHandler {
         log.info("BotRemoved: marked group removed group={}", groupId);
     }
 
-    private void writeAudit(AuditAction action, UUID actorUserId,
-                            String actorContactId, String actorAdapter,
+    private void writeAudit(AuditAction action, @Nullable UUID actorUserId,
+                            @Nullable String actorContactId, String actorAdapter,
                             String targetKind, String targetId,
-                            UUID scopeId, String detailsJson) {
+                            UUID scopeId, @Nullable String detailsJson) {
         RedactionHook.AuditRow row = RedactionHook.AuditRow.builder()
                 .actorUserId(actorUserId)
                 .actorContactId(actorContactId)
@@ -126,7 +127,7 @@ public class MembershipEventHandler {
         }
     }
 
-    private UUID resolveGroup(String adapter, String adapterGroupId) {
+    private @Nullable UUID resolveGroup(String adapter, String adapterGroupId) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(SELECT_GROUP_SQL)) {
             ps.setString(1, adapter);
@@ -139,7 +140,7 @@ public class MembershipEventHandler {
         }
     }
 
-    private UUID resolveUser(String adapter, String contactId) {
+    private @Nullable UUID resolveUser(String adapter, String contactId) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(SELECT_USER_SQL)) {
             ps.setString(1, adapter);

@@ -17,6 +17,7 @@ import app.zcat.infochat.provider.messaging.InboundContext;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -274,7 +275,7 @@ public class ApproveGroupCommandHandler implements CommandHandler {
         }
     }
 
-    private MessagingAdapter findAdapter(String adapterName) {
+    private @Nullable MessagingAdapter findAdapter(String adapterName) {
         for (MessagingAdapter adapter : adapterRegistry.activatedAdapters()) {
             if (adapter.name().equals(adapterName)) {
                 return adapter;
@@ -293,7 +294,7 @@ public class ApproveGroupCommandHandler implements CommandHandler {
      * non-UUID literal). The caller distinguishes the failure modes by
      * the user-visible reply, not the parser.
      */
-    private static UUID parseGroupId(String rawText) {
+    private static @Nullable UUID parseGroupId(String rawText) {
         String raw = parseGroupIdRaw(rawText);
         if (raw == null) {
             return null;

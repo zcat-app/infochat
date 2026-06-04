@@ -8,6 +8,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -210,7 +211,7 @@ public class InviteCodeConsumer {
         }
     }
 
-    private static UUID parseUuid(String body) {
+    private static @Nullable UUID parseUuid(String body) {
         try {
             return UUID.fromString(body);
         } catch (IllegalArgumentException e) {
@@ -231,7 +232,7 @@ public class InviteCodeConsumer {
         }
     }
 
-    private UUID tryConsume(Connection conn, String contactId, UUID candidateCode,
+    private @Nullable UUID tryConsume(Connection conn, String contactId, UUID candidateCode,
                             String adapter) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(CONSUME_INVITE_SQL)) {
             ps.setString(1, contactId);

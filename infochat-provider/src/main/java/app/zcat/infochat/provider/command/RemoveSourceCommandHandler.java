@@ -14,6 +14,7 @@ import app.zcat.infochat.provider.messaging.InboundContext;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -279,7 +280,7 @@ public class RemoveSourceCommandHandler implements CommandHandler {
         }
     }
 
-    private LockedSourceRow selectSourceForUpdate(Connection conn, UUID sourceId)
+    private @Nullable LockedSourceRow selectSourceForUpdate(Connection conn, UUID sourceId)
             throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(SELECT_SOURCE_FOR_UPDATE_SQL)) {
             ps.setObject(1, sourceId);
@@ -340,7 +341,7 @@ public class RemoveSourceCommandHandler implements CommandHandler {
         auditLogWriter.write(conn, row);
     }
 
-    private static UUID parseSourceId(String rawText) {
+    private static @Nullable UUID parseSourceId(String rawText) {
         String[] split = rawText.trim().split("\\s+");
         if (split.length < 2) {
             return null;
@@ -371,7 +372,7 @@ public class RemoveSourceCommandHandler implements CommandHandler {
                 && groupMembershipRepository.isGroupAdmin(groupDbId, user.get().id);
     }
 
-    private UUID lookupGroupId(String adapter, String upstreamGroupId) {
+    private @Nullable UUID lookupGroupId(String adapter, String upstreamGroupId) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(SELECT_GROUP_ID_SQL)) {
             ps.setString(1, adapter);
@@ -390,7 +391,7 @@ public class RemoveSourceCommandHandler implements CommandHandler {
 
     private record UserRow(UUID id, String contactId, boolean isAdmin) {}
 
-    private record SourceRow(String displayName, Instant deletedAt) {}
+    private record SourceRow(String displayName, @Nullable Instant deletedAt) {}
 
-    private record LockedSourceRow(String displayName, Instant deletedAt) {}
+    private record LockedSourceRow(String displayName, @Nullable Instant deletedAt) {}
 }

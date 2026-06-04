@@ -11,6 +11,7 @@ import app.zcat.infochat.provider.messaging.InboundContext;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -304,7 +305,7 @@ public class FollowTagCommandHandler implements CommandHandler {
         }
     }
 
-    private UUID lookupGroupId(String adapterGroupId) {
+    private @Nullable UUID lookupGroupId(String adapterGroupId) {
         String adapter = inboundContext.adapterName();
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(SELECT_GROUP_ID_SQL)) {
@@ -374,7 +375,7 @@ public class FollowTagCommandHandler implements CommandHandler {
      * {@code /follow-tag}, so a body of length-one is the only
      * sub-case here).
      */
-    private static String parsePositionalTag(String rawText) {
+    private static @Nullable String parsePositionalTag(String rawText) {
         String[] parts = rawText.trim().split("\\s+", 2);
         if (parts.length < 2) {
             return null;

@@ -1,17 +1,17 @@
 ---
 id: M1-164f
 title: "Onboard infochat-provider to NullAway + Error Prone"
-status: pending
+status: done
 created: 2026-06-03
-last_updated: 2026-06-03
+last_updated: 2026-06-05
 blocked_by:
   - M1-164a
-files_budget: 14
+files_budget: 65
 files_scope:
   - infochat-provider
 complexity: medium
 risk: low
-round_cap: 2
+round_cap: 3
 security_relevant: false
 migration_touch: false
 decomposed_from: M1-164
@@ -34,12 +34,47 @@ spec_refs:
   - docs/spec/architecture.md §Architectural principles
 decision_refs:
   - D48
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-05
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 51
+      added: 261
+      removed: 147
+escalations:
+  - date: 2026-06-04
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A — budget-breach. Activating NullAway:ERROR on infochat-provider
+      surfaces 200 findings across 57 source files (command=31, messaging=7,
+      command/asset=4, summary=3, chat=3, digest=3, group=2, outbox=2,
+      chat/tool=1, translation=1). files_budget is 14; the fix touches ~57
+      files, a ~4x breach. Ticket Notes pre-authorize escalation: "escalate
+      to split per-package only if the diff exceeds files_budget."
+revisions:
+  - date: 2026-06-04
+    reason: budget-breach rework
+    snapshot:
+      status: escalated
+      files_budget: 14
+      round_cap: 2
+      escalation_reason: budget-breach
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-04
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-164f: Onboard infochat-provider to NullAway + Error Prone

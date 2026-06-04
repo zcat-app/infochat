@@ -219,16 +219,20 @@ public class AssetRegistry {
     @JsonIgnoreProperties(ignoreUnknown = true)
     private static class BootstrapDoc {
         @JsonProperty("assets")
-        List<BootstrapAsset> assets;
+        @Nullable List<BootstrapAsset> assets;
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     private static class BootstrapAsset {
+        // id is the asset key; consumers dereference it unguarded, so the
+        // contract stays @NonNull. Jackson sets it reflectively, which the
+        // field-init check cannot see — hence the Init suppression.
         @JsonProperty("id")
+        @SuppressWarnings("NullAway.Init")
         String id;
         @JsonProperty("display_name")
-        String displayName;
+        @Nullable String displayName;
         @JsonProperty("supported_vs")
-        List<String> supportedVs;
+        @Nullable List<String> supportedVs;
     }
 }

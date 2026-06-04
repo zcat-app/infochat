@@ -33,7 +33,10 @@ public class ChatMemoryPreFetcher {
         this.dataSource = dataSource;
     }
 
-    // Package-private for testing without a real DataSource
+    // Package-private for testing without a real DataSource. The null
+    // assignment is the test seam: tests exercising only the no-DB path
+    // (e.g. empty-keyword pre-fetch) never reach dataSource.
+    @SuppressWarnings("NullAway")
     ChatMemoryPreFetcher() {
         this.dataSource = null;
     }

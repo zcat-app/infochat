@@ -30,6 +30,7 @@ import jakarta.json.JsonReader;
 import jakarta.json.JsonString;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
 import java.io.StringReader;
@@ -251,7 +252,7 @@ public class RetryCommandHandler implements CommandHandler {
      * to only posts present in the readyPosts list. Clusters whose
      * posts all got filtered out are dropped.
      */
-    List<Cluster> reconstructClusters(String clusterMapJson, List<Post> readyPosts) {
+    List<Cluster> reconstructClusters(@Nullable String clusterMapJson, List<Post> readyPosts) {
         if (clusterMapJson == null || clusterMapJson.isBlank()) {
             // Fallback: re-cluster from scratch (same algorithm as /summary).
             // clusterMapJson is always non-null when written by SummaryCommandHandler,
@@ -422,7 +423,7 @@ public class RetryCommandHandler implements CommandHandler {
         }
     }
 
-    private ActorRow lookupActor(String adapter, String contactId) {
+    private @Nullable ActorRow lookupActor(String adapter, String contactId) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(SELECT_ACTOR_WITH_ADMIN)) {
             ps.setString(1, adapter);
@@ -441,7 +442,7 @@ public class RetryCommandHandler implements CommandHandler {
         }
     }
 
-    private UUID lookupGroupId(String adapterGroupId) {
+    private @Nullable UUID lookupGroupId(String adapterGroupId) {
         String adapter = inboundContext.adapterName();
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(SELECT_GROUP_ID)) {

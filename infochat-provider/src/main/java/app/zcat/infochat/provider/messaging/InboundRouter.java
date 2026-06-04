@@ -936,7 +936,7 @@ public class InboundRouter {
      *
      * @return the opener descriptor on a match, {@code null} otherwise.
      */
-    private static FenceOpener matchFenceOpener(String line) {
+    private static @Nullable FenceOpener matchFenceOpener(String line) {
         int i = 0;
         int n = line.length();
         while (i < n && i < 3 && line.charAt(i) == ' ') {

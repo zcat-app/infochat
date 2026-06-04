@@ -11,6 +11,7 @@ import app.zcat.infochat.provider.messaging.InboundContext;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -440,7 +441,7 @@ public class UnfollowTagCommandHandler implements CommandHandler {
         }
     }
 
-    private UUID lookupGroupId(String adapterGroupId) {
+    private @Nullable UUID lookupGroupId(String adapterGroupId) {
         String adapter = inboundContext.adapterName();
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(SELECT_GROUP_ID_SQL)) {
@@ -540,7 +541,7 @@ public class UnfollowTagCommandHandler implements CommandHandler {
      * when {@code --all} is also present — the positional path has no
      * confirm gate.
      */
-    private record UnfollowTagArgs(String positionalTag, boolean hasAllFlag,
+    private record UnfollowTagArgs(@Nullable String positionalTag, boolean hasAllFlag,
                                    boolean hasConfirmToken) {
 
         static UnfollowTagArgs parse(String rawText) {

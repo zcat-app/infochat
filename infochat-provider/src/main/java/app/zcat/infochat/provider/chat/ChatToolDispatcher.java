@@ -9,12 +9,14 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import java.sql.SQLException;
 import java.time.format.DateTimeParseException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.TreeMap;
 import java.util.UUID;
 
@@ -133,7 +135,9 @@ public class ChatToolDispatcher {
 
         Map<String, Object> validatedArgs = new HashMap<>(args);
 
-        ChatToolRegistry.ChatTool tool = tools.get(toolName);
+        // Non-null by construction: the constructor asserts tools covers every
+        // registry tool name, and line above rejects names not in the registry.
+        ChatToolRegistry.ChatTool tool = Objects.requireNonNull(tools.get(toolName));
         try {
             // clampLimit runs inside the try: its `(Number) args.get("limit")`
             // cast throws ClassCastException when the model emits a non-numeric
@@ -145,7 +149,8 @@ public class ChatToolDispatcher {
             return new ToolResult.Success(result);
         } catch (IllegalArgumentException e) {
             // NumberFormatException (a subclass) lands here too.
-            return new ToolResult.ValidationError(e.getMessage());
+            return new ToolResult.ValidationError(
+                    Objects.requireNonNullElse(e.getMessage(), "Invalid argument"));
         } catch (ClassCastException | DateTimeParseException e) {
             // Wrong runtime type or unparseable window (Duration.parse) →
             // a self-correctable signal, not the opaque chat-unavailable error.
@@ -157,7 +162,7 @@ public class ChatToolDispatcher {
         }
     }
 
-    private ToolResult validateInputLengths(Map<String, Object> args) {
+    private @Nullable ToolResult validateInputLengths(Map<String, Object> args) {
         for (Map.Entry<String, Object> entry : args.entrySet()) {
             ToolResult error = validateValue(entry.getKey(), entry.getValue());
             if (error != null) return error;
@@ -171,7 +176,7 @@ public class ChatToolDispatcher {
     // emitted. The bound must be enforced here, at the dispatch boundary before
     // any SQL or tool execution — not incidentally by a downstream (List<String>)
     // cast failure in the consuming tool.
-    private ToolResult validateValue(String key, Object value) {
+    private @Nullable ToolResult validateValue(String key, Object value) {
         if (value instanceof String s && s.length() > inputMaxLength) {
             return new ToolResult.ValidationError(
                     "Input '" + key + "' exceeds maximum length of " + inputMaxLength);

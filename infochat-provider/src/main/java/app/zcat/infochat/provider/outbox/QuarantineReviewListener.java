@@ -26,6 +26,8 @@ import java.time.ZoneOffset;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.jspecify.annotations.Nullable;
+import java.util.Objects;
 
 /**
  * LISTEN/NOTIFY consumer for the {@code quarantine_review} channel.
@@ -74,9 +76,12 @@ public class QuarantineReviewListener {
     @ConfigProperty(name = "infochat.admin-notifier.throttle-window", defaultValue = "1h")
     Duration throttleWindow;
 
-    private volatile String upsertSql;
-    private Connection listenConnection;
-    private Thread workerThread;
+    // upsertSql is computed lazily on first use; listenConnection and
+    // workerThread are (re)assigned across the LISTEN lifecycle and reset to
+    // null on close/shutdown — all three are genuinely nullable.
+    private volatile @Nullable String upsertSql;
+    private @Nullable Connection listenConnection;
+    private @Nullable Thread workerThread;
     private volatile boolean stopRequested;
 
     private String getUpsertSql() {
@@ -252,7 +257,7 @@ public class QuarantineReviewListener {
      * events: quarantine_review_view.updated_at. For post events:
      * post.status_changed_at.
      */
-    private Instant lookupEventTime(String targetKind, UUID targetId) throws SQLException {
+    private @Nullable Instant lookupEventTime(String targetKind, UUID targetId) throws SQLException {
         String sql = "quarantine".equals(targetKind)
                 ? "SELECT updated_at FROM quarantine_review_view WHERE id = ?"
                 : "SELECT status_changed_at FROM post WHERE id = ?";
@@ -293,7 +298,7 @@ public class QuarantineReviewListener {
             LOG.info("QuarantineReviewListener: (re)acquired LISTEN connection "
                     + "and re-issued LISTEN " + CHANNEL);
         }
-        return listenConnection.unwrap(PGConnection.class);
+        return Objects.requireNonNull(listenConnection).unwrap(PGConnection.class);
     }
 
     private void openListenConnection() throws SQLException {

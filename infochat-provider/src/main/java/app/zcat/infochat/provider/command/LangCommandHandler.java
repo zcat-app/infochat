@@ -11,6 +11,7 @@ import app.zcat.infochat.provider.messaging.InboundContext;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -170,7 +171,7 @@ public class LangCommandHandler implements CommandHandler {
         }
     }
 
-    private UUID lookupActorId(String contactId) {
+    private @Nullable UUID lookupActorId(String contactId) {
         String adapter = inboundContext.adapterName();
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
@@ -190,7 +191,7 @@ public class LangCommandHandler implements CommandHandler {
         }
     }
 
-    private UUID lookupGroupId(String adapterGroupId) {
+    private @Nullable UUID lookupGroupId(String adapterGroupId) {
         String adapter = inboundContext.adapterName();
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(SELECT_GROUP_ID_SQL)) {
@@ -231,7 +232,7 @@ public class LangCommandHandler implements CommandHandler {
      * the spec requires for any malformed invocation that is not a
      * silent no-op.
      */
-    private static String parsePositionalCode(String rawText) {
+    private static @Nullable String parsePositionalCode(String rawText) {
         String[] parts = rawText.trim().split("\\s+", 2);
         if (parts.length < 2) {
             return null;

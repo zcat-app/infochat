@@ -4,6 +4,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -87,7 +88,7 @@ public class DigestRetryService {
         }
     }
 
-    private SlotCoordinates findLatestCacheEntry(UUID groupId) {
+    private @Nullable SlotCoordinates findLatestCacheEntry(UUID groupId) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(SELECT_LATEST_CACHE)) {
             ps.setObject(1, groupId);
@@ -107,7 +108,7 @@ public class DigestRetryService {
         }
     }
 
-    private String lookupGroupTimezone(UUID groupId) {
+    private @Nullable String lookupGroupTimezone(UUID groupId) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(SELECT_GROUP_TIMEZONE)) {
             ps.setObject(1, groupId);

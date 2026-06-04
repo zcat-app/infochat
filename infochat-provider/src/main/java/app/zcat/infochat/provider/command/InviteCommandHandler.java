@@ -16,6 +16,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -415,7 +416,7 @@ public class InviteCommandHandler implements CommandHandler {
                               UUID code,
                               String inviteType,
                               String adapter,
-                              String expectedContactId,
+                              @Nullable String expectedContactId,
                               UUID createdBy,
                               OffsetDateTime expiresAt) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(INSERT_INVITE_SQL)) {
@@ -595,7 +596,7 @@ public class InviteCommandHandler implements CommandHandler {
         return reply(scope, bundleLoader.get(BundleKeys.REPLY_INVITE_REVOKED));
     }
 
-    private UUID lockPendingInviteId(Connection conn, UUID code) throws SQLException {
+    private @Nullable UUID lockPendingInviteId(Connection conn, UUID code) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(SELECT_INVITE_FOR_REVOKE_SQL)) {
             ps.setObject(1, code);
             try (ResultSet rs = ps.executeQuery()) {
@@ -621,7 +622,7 @@ public class InviteCommandHandler implements CommandHandler {
     private void insertAudit(Connection conn,
                              AuditAction action,
                              String targetId,
-                             String targetContactId,
+                             @Nullable String targetContactId,
                              UserRow actor,
                              String inboundAdapter,
                              String requestId,
@@ -640,7 +641,7 @@ public class InviteCommandHandler implements CommandHandler {
         auditLogWriter.write(conn, row);
     }
 
-    private Optional<UserRow> lookupUser(String adapter, String contactId) {
+    private Optional<UserRow> lookupUser(String adapter, @Nullable String contactId) {
         if (adapter == null || contactId == null) {
             return Optional.empty();
         }
@@ -678,7 +679,7 @@ public class InviteCommandHandler implements CommandHandler {
         return new OutboundMessage(scope, text, Instant.now(), UUID.randomUUID().toString());
     }
 
-    private static String contactIdOf(ScopeRef scope) {
+    private static @Nullable String contactIdOf(ScopeRef scope) {
         return scope instanceof ScopeRef.Dm dm ? dm.contactId() : null;
     }
 
@@ -701,7 +702,7 @@ public class InviteCommandHandler implements CommandHandler {
 
     /** One row of a {@code /invite list} result page. */
     private record PendingInviteRow(UUID code, String inviteType, String adapter,
-                                    String expectedContactId, Instant expiresAt) {}
+                                    String expectedContactId, @Nullable Instant expiresAt) {}
 
     /**
      * Parsed form of {@code /invite create --adapter <name>
@@ -709,7 +710,7 @@ public class InviteCommandHandler implements CommandHandler {
      * mutually-exclusive validation live in {@link #handleCreate}; the
      * parser only extracts the supplied flag values.
      */
-    record CreateArgs(String adapter, String contact, boolean open) {
+    record CreateArgs(@Nullable String adapter, @Nullable String contact, boolean open) {
 
         static CreateArgs parse(String remainder) {
             List<String> tokens = tokenize(remainder);

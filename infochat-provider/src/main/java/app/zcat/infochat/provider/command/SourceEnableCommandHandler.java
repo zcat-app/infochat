@@ -16,6 +16,7 @@ import app.zcat.infochat.provider.source.UrlProbe.ProbeResult;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
 import java.net.URI;
@@ -375,7 +376,7 @@ public class SourceEnableCommandHandler implements CommandHandler {
         }
     }
 
-    private LockedRow selectSourceForUpdate(Connection conn, UUID sourceId) throws SQLException {
+    private @Nullable LockedRow selectSourceForUpdate(Connection conn, UUID sourceId) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(SELECT_SOURCE_FOR_UPDATE_SQL)) {
             ps.setObject(1, sourceId);
             try (ResultSet rs = ps.executeQuery()) {
@@ -421,7 +422,7 @@ public class SourceEnableCommandHandler implements CommandHandler {
         auditLogWriter.write(conn, row);
     }
 
-    private static UUID parseSourceId(String rawText) {
+    private static @Nullable UUID parseSourceId(String rawText) {
         String[] split = rawText.trim().split("\\s+");
         if (split.length < 2) {
             return null;
@@ -452,7 +453,7 @@ public class SourceEnableCommandHandler implements CommandHandler {
                 && groupMembershipRepository.isGroupAdmin(groupDbId, user.get().id);
     }
 
-    private UUID lookupGroupId(String adapter, String upstreamGroupId) {
+    private @Nullable UUID lookupGroupId(String adapter, String upstreamGroupId) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(SELECT_GROUP_ID_SQL)) {
             ps.setString(1, adapter);
@@ -472,7 +473,7 @@ public class SourceEnableCommandHandler implements CommandHandler {
     private record UserRow(UUID id, String contactId, boolean isAdmin) {}
 
     private record SourceRow(String displayName, String identifier, String kind,
-                             String status, Instant deletedAt) {}
+                             String status, @Nullable Instant deletedAt) {}
 
-    private record LockedRow(String displayName, String kind, String status, Instant deletedAt) {}
+    private record LockedRow(String displayName, String kind, String status, @Nullable Instant deletedAt) {}
 }

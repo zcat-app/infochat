@@ -27,6 +27,8 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.jspecify.annotations.Nullable;
+import java.util.Objects;
 
 /**
  * Implements {@code /save <uid> [-t personal-tags]} per
@@ -179,6 +181,8 @@ public class SaveCommandHandler implements CommandHandler {
 
     private OutboundMessage executeSave(ScopeRef scope, String adapter,
                                         String callerContactId, ParsedArgs args) {
+        // uid is non-null here: handle() rejects a null uid before dispatch.
+        String uid = Objects.requireNonNull(args.uid);
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
@@ -196,7 +200,7 @@ public class SaveCommandHandler implements CommandHandler {
                 // Step 3b — target post lookup. Non-READY posts and
                 // missing UIDs both surface as unknown_uid per spec
                 // §Content Visibility-of-target rules.
-                Optional<PostSnapshot> postOpt = lookupReadyPost(conn, args.uid);
+                Optional<PostSnapshot> postOpt = lookupReadyPost(conn, uid);
                 if (postOpt.isEmpty()) {
                     conn.rollback();
                     return reply(scope, bundleLoader.get(BundleKeys.ERROR_SAVE_UNKNOWN_UID));
@@ -207,7 +211,7 @@ public class SaveCommandHandler implements CommandHandler {
                 // FOR UPDATE on the actor row above serializes a
                 // concurrent /save of the same UID; this SELECT
                 // observes the post-serialization state).
-                if (isAlreadySaved(conn, actor.id, args.uid)) {
+                if (isAlreadySaved(conn, actor.id, uid)) {
                     conn.rollback();
                     return reply(scope, bundleLoader.get(BundleKeys.ERROR_SAVE_ALREADY_SAVED));
                 }
@@ -220,7 +224,7 @@ public class SaveCommandHandler implements CommandHandler {
 
                 // Step 3e — snapshot INSERT. The V15 AFTER-INSERT
                 // trigger increments users.save_count in the same tx.
-                insertSavedPost(conn, actor.id, args.uid, post, args.personalTags);
+                insertSavedPost(conn, actor.id, uid, post, args.personalTags);
 
                 conn.commit();
 
@@ -362,7 +366,7 @@ public class SaveCommandHandler implements CommandHandler {
         return out;
     }
 
-    record ParsedArgs(String uid, List<String> personalTags) {}
+    record ParsedArgs(@Nullable String uid, List<String> personalTags) {}
 
     private record ActorRow(UUID id, int saveCount) {}
 
@@ -371,7 +375,7 @@ public class SaveCommandHandler implements CommandHandler {
             String body,
             String url,
             String author,
-            Instant publishedAt,
+            @Nullable Instant publishedAt,
             UUID sourceId,
             List<String> bootstrapTags) {}
 }

@@ -100,9 +100,16 @@ public class NewPostReconciler {
 
     private int caughtUpCount;
     private int pagesProcessed;
+    // Cursor watermarks of the catch-up range, assigned by runCatchUp (driven
+    // from @PostConstruct) before any read; the field-init check cannot see
+    // the @PostConstruct-time initialization.
+    @SuppressWarnings("NullAway.Init")
     private Instant startCursorHigh;
+    @SuppressWarnings("NullAway.Init")
     private String startCursorLowId;
+    @SuppressWarnings("NullAway.Init")
     private Instant endCursorHigh;
+    @SuppressWarnings("NullAway.Init")
     private String endCursorLowId;
 
     @PostConstruct

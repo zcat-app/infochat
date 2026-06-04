@@ -12,6 +12,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -110,7 +111,7 @@ public class ExportCommandHandler implements CommandHandler {
         return reply(scope, body);
     }
 
-    private UUID lookupUserId(String adapter, String contactId) {
+    private @Nullable UUID lookupUserId(String adapter, String contactId) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(USER_ID_SQL)) {
             ps.setString(1, adapter);

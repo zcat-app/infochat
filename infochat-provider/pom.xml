@@ -106,22 +106,32 @@
     <build>
         <plugins>
             <!--
-                 NullAway / Error Prone opt-out (decision D48, M1-164a). The
-                 parent <pluginManagement> entry activates Error Prone on the
-                 lifecycle compile execution of every reactor module; this
-                 module is not onboarded yet, so override the inherited
-                 compilerArgs to empty and restore non-forked compilation —
-                 Error Prone / NullAway does not run here and the module builds
-                 exactly as it did before D48. Removed (and the module's genuine
-                 nullness findings resolved) by subticket M1-164f.
+                 NullAway + Error Prone (decision D48). The full config lives in
+                 the parent <pluginManagement> and Maven applies it to the
+                 lifecycle compile execution of EVERY module, so infochat-provider
+                 needs NO activation stanza for its MAIN sources — they are gated
+                 by NullAway:ERROR via the inherited config. Onboarded by subticket
+                 M1-164f.
+
+                 TEST-SOURCE POLICY: main sources are gated by NullAway:ERROR
+                 (inherited config). Test sources are NOT onboarded yet — the
+                 default-testCompile execution below clears the inherited
+                 compilerArgs so Error Prone / NullAway does not run on
+                 src/test. Onboarding the test tree is deferred to a follow-up;
+                 gating main first is what this ticket validates green. This
+                 stanza exists ONLY to carry that test-source exclusion.
             -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <configuration>
-                    <fork>false</fork>
-                    <compilerArgs combine.self="override"/>
-                </configuration>
+                <executions>
+                    <execution>
+                        <id>default-testCompile</id>
+                        <configuration>
+                            <compilerArgs combine.self="override"/>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
             <plugin>
                 <groupId>io.quarkus.platform</groupId>

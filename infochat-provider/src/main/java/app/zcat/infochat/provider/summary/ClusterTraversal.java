@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.Objects;
 
 /**
  * Computes connected components of the V29 {@code post_reference}
@@ -120,7 +121,9 @@ public class ClusterTraversal {
         members.add(seed);
         while (!frontier.isEmpty()) {
             UUID currentId = frontier.poll();
-            int currentDepth = depth.get(currentId);
+            // currentId came off the frontier, and every id pushed to the
+            // frontier is recorded in depth at the same time — so this is set.
+            int currentDepth = Objects.requireNonNull(depth.get(currentId));
             if (currentDepth >= depthLimit) {
                 continue;
             }

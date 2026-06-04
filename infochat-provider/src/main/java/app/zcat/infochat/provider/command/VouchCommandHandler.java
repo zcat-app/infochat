@@ -24,6 +24,7 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Implements {@code /vouch <contact>} per
@@ -295,7 +296,7 @@ public class VouchCommandHandler implements CommandHandler {
         return new OutboundMessage(scope, text, Instant.now(), UUID.randomUUID().toString());
     }
 
-    private static String contactIdOf(ScopeRef scope) {
+    private static @Nullable String contactIdOf(ScopeRef scope) {
         return scope instanceof ScopeRef.Dm dm ? dm.contactId() : null;
     }
 
@@ -312,7 +313,7 @@ public class VouchCommandHandler implements CommandHandler {
 
     /** Target row state read INSIDE the transaction. */
     private record TargetRow(UUID id, String contactId,
-                             Instant probationUntil, boolean isBanned) {}
+                             @Nullable Instant probationUntil, boolean isBanned) {}
 
     /** Actor row state read INSIDE the transaction via SELECT FOR UPDATE. */
     private record ActorRow(UUID id, String contactId, boolean isAdmin) {}
@@ -323,7 +324,7 @@ public class VouchCommandHandler implements CommandHandler {
      * the positional contact arg is missing.
      */
     record VouchArgs(String contact) {
-        static VouchArgs parse(String rawText) {
+        static @Nullable VouchArgs parse(String rawText) {
             String[] split = rawText.trim().split("\\s+", 3);
             if (split.length < 2 || split[1].isBlank()) {
                 return null;

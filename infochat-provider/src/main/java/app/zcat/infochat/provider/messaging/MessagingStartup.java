@@ -12,6 +12,7 @@ import org.slf4j.LoggerFactory;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.Objects;
 
 /**
  * Drives {@link AdapterRegistry#start()} once Quarkus is up. Per
@@ -89,7 +90,7 @@ public class MessagingStartup {
                 SafeLog.error(log,
                         "Adapter " + adapter.name()
                                 + " failed to start; continuing with the remaining adapters",
-                        invocationFailure.getCause());
+                        Objects.requireNonNullElse(invocationFailure.getCause(), invocationFailure));
             } catch (Throwable t) {
                 SafeLog.error(log,
                         "Adapter " + adapter.name()
