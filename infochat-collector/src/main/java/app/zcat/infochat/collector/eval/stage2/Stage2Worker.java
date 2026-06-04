@@ -11,6 +11,7 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -105,7 +106,9 @@ public class Stage2Worker {
     @ConfigProperty(name = "infochat.llm.security.max-concurrency")
     int maxConcurrency;
 
+    @SuppressWarnings("NullAway.Init")
     private Semaphore concurrencyPermits;
+    @SuppressWarnings("NullAway.Init")
     private String promptTemplate;
 
     @PostConstruct
@@ -185,7 +188,7 @@ public class Stage2Worker {
      * {@code null} on exception / unparseable reply so the caller
      * can decide whether to retry.
      */
-    private Stage2VerdictHandler.Verdict tryOnce(UUID postId, String originalBody, int attempt) {
+    private Stage2VerdictHandler.@Nullable Verdict tryOnce(UUID postId, String originalBody, int attempt) {
         // Fresh UUID per individual prompt assembly per
         // docs/design/04-security.md §4.3 "The {uuid} is a fresh
         // UUID.randomUUID() per call (not per process, not per
@@ -213,7 +216,7 @@ public class Stage2Worker {
      * anything else returns {@code null} which the caller treats
      * as unparseable.
      */
-    static Stage2VerdictHandler.Verdict parseVerdict(String reply) {
+    static Stage2VerdictHandler.@Nullable Verdict parseVerdict(@Nullable String reply) {
         if (reply == null) {
             return null;
         }
@@ -229,7 +232,7 @@ public class Stage2Worker {
 
     /**
      * Load {@code prompts/security-judge.md} from the classpath at
-     * @PostConstruct. The prompt is module-versioned (lives under
+     * {@code @PostConstruct}. The prompt is module-versioned (lives under
      * {@code infochat-llm-adapter/src/main/resources/prompts/}) and
      * never changes at runtime, so reading once at startup is the
      * cheap path.

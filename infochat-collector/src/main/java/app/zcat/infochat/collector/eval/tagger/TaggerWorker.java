@@ -14,6 +14,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
 import java.io.IOException;
@@ -160,8 +161,11 @@ public class TaggerWorker {
     @ConfigProperty(name = "infochat.llm.tagger.max-concurrency")
     int maxConcurrency;
 
+    @SuppressWarnings("NullAway.Init")
     private String primaryPromptTemplate;
+    @SuppressWarnings("NullAway.Init")
     private String fallbackPromptTemplate;
+    @SuppressWarnings("NullAway.Init")
     private ObjectMapper objectMapper;
 
     @PostConstruct
@@ -345,7 +349,7 @@ public class TaggerWorker {
      * tag2}. Returns the raw (un-normalized, un-validated) tag list,
      * or {@code null} when the reply is schema-violating.
      */
-    List<String> parseTags(String text) {
+    @Nullable List<String> parseTags(@Nullable String text) {
         if (text == null) {
             return null;
         }
@@ -360,7 +364,7 @@ public class TaggerWorker {
                 return List.of();
             }
             List<String> out = new ArrayList<>();
-            for (String token : payload.split(",")) {
+            for (String token : payload.split(",", -1)) {
                 String t = token.trim();
                 if (!t.isEmpty()) {
                     out.add(t);
@@ -413,7 +417,7 @@ public class TaggerWorker {
      * fails the character-class filter. The same helper normalizes the
      * loaded vocabulary so {@link TagVocabulary#contains} is byte-equal.
      */
-    static String normalizeTag(String raw) {
+    static @Nullable String normalizeTag(String raw) {
         return TagNormalizer.normalize(raw);
     }
 

@@ -8,6 +8,7 @@ import app.zcat.infochat.ssrf.UrlRedactor;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.eclipse.microprofile.config.ConfigProvider;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import java.io.IOException;
 import java.net.URI;
@@ -109,7 +110,7 @@ public class BlueskyFetcher implements Fetcher {
         return Collections.unmodifiableList(allPosts);
     }
 
-    private URI buildUri(String actor, String cursor) {
+    private URI buildUri(String actor, @Nullable String cursor) {
         StringBuilder sb = new StringBuilder(xrpcBase)
             .append("?actor=").append(actor);
         if (cursor != null) {

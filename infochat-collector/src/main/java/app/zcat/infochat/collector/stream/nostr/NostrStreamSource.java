@@ -99,8 +99,13 @@ public final class NostrStreamSource implements StreamSource {
     private final AtomicLong failedSig = new AtomicLong();
 
     private volatile boolean delivering;
+    // deliveryThread and deliver are set in start(); null only in the
+    // pre-start window (stop() null-guards deliveryThread), non-null at
+    // every delivery-loop deref — hence NullAway.Init, not @Nullable.
+    @SuppressWarnings("NullAway.Init")
     private volatile Thread deliveryThread;
     private long sourceId;
+    @SuppressWarnings("NullAway.Init")
     private Consumer<NormalizedPost> deliver;
 
     NostrStreamSource(@NonNull List<URI> relayUris, @NonNull Supplier<OptionalLong> sinceCursor,

@@ -335,7 +335,7 @@ public class FetchScheduler {
      */
     static String exceptionChainMessage(@NonNull Throwable t) {
         StringBuilder sb = new StringBuilder();
-        Map<Throwable, Boolean> seen = new IdentityHashMap<>();
+        IdentityHashMap<Throwable, Boolean> seen = new IdentityHashMap<>();
         Throwable current = t;
         while (current != null && seen.put(current, Boolean.TRUE) == null) {
             if (sb.length() > 0) {

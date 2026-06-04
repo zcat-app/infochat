@@ -86,7 +86,7 @@ import java.util.UUID;
  *
  * <h2>Original (pre-Stage-1) content is NEVER auto-released</h2>
  * <p>The BENIGN and infra-fail-release paths leave the
- * {@code [REDACTED:&lt;id&gt;]} placeholders in {@code post.body}.
+ * {@code [REDACTED:<id>]} placeholders in {@code post.body}.
  * The original spans live only in {@code quarantine.original_html}
  * (admin-only column per V10). The only path that lifts
  * redactions is {@code /quarantine approve} (T2-G) — out of scope

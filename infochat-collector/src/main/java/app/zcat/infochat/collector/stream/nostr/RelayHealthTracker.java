@@ -101,7 +101,7 @@ final class RelayHealthTracker {
                 return Transition.NONE;
             }
             boolean allBefore = computeAllBad();
-            RelayState state = states.get(relay);
+            RelayState state = stateOf(relay);
             state.consecutiveFailures++;
             if (state.consecutiveFailures >= failureThreshold) {
                 state.cooldownUntil = clock.instant().plus(cooldownDuration);
@@ -130,7 +130,7 @@ final class RelayHealthTracker {
                 return Transition.NONE;
             }
             boolean allBefore = computeAllBad();
-            RelayState state = states.get(relay);
+            RelayState state = stateOf(relay);
             state.consecutiveFailures = 0;
             state.cooldownUntil = Instant.MIN;
             boolean allAfter = computeAllBad();
@@ -151,13 +151,25 @@ final class RelayHealthTracker {
     @NonNull
     synchronized Instant nextAttemptTime(@NonNull URI relay) {
         Instant now = clock.instant();
-        Instant cooldownUntil = states.get(relay).cooldownUntil;
+        Instant cooldownUntil = stateOf(relay).cooldownUntil;
         return cooldownUntil.isAfter(now) ? cooldownUntil : now;
     }
 
     /** True once the cycle cap has been hit; the runLoop exits and the source is permanently failed. */
     synchronized boolean isTerminal() {
         return terminal;
+    }
+
+    // Every relay passed to record*/nextAttemptTime was seeded into `states`
+    // by the constructor, so the lookup never misses; assert that closed-set
+    // invariant so NullAway sees a non-null RelayState at the deref sites.
+    // (Private helper — inherits the package's non-null-by-default contract.)
+    private RelayState stateOf(URI relay) {
+        RelayState state = states.get(relay);
+        if (state == null) {
+            throw new IllegalStateException("RelayHealthTracker: no state for relay " + relay);
+        }
+        return state;
     }
 
     private boolean computeAllBad() {

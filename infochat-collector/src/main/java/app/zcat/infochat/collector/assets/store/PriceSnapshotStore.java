@@ -10,6 +10,7 @@ import java.sql.Types;
 import javax.sql.DataSource;
 
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import app.zcat.infochat.collector.assets.PriceSnapshot;
 import app.zcat.infochat.core.util.JsonEscaper;
@@ -115,7 +116,7 @@ public class PriceSnapshotStore {
         }
     }
 
-    private static void setNullableBigDecimal(PreparedStatement ps, int idx, java.math.BigDecimal v)
+    private static void setNullableBigDecimal(PreparedStatement ps, int idx, java.math.@Nullable BigDecimal v)
             throws SQLException {
         if (v == null) {
             ps.setNull(idx, Types.NUMERIC);

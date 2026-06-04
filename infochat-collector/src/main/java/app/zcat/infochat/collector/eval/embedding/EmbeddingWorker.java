@@ -9,6 +9,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
+import org.jspecify.annotations.Nullable;
 import org.postgresql.util.PGobject;
 
 import javax.sql.DataSource;
@@ -129,7 +130,9 @@ public class EmbeddingWorker {
     @ConfigProperty(name = "infochat.embeddings.max-concurrency")
     int maxConcurrency;
 
+    @SuppressWarnings("NullAway.Init")
     private Semaphore concurrencyPermits;
+    @SuppressWarnings("NullAway.Init")
     private String cachedModelIdentifier;
     private int cachedDimension;
 
@@ -414,7 +417,7 @@ public class EmbeddingWorker {
      * results list or a structured failure description for the second
      * attempt's log line.
      */
-    private record AttemptResult(boolean success, List<EmbeddingResult> results, String failureReason) {
+    private record AttemptResult(boolean success, List<EmbeddingResult> results, @Nullable String failureReason) {
         static AttemptResult success(List<EmbeddingResult> results) {
             return new AttemptResult(true, results, null);
         }

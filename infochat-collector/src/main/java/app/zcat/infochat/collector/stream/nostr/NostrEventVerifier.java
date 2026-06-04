@@ -4,6 +4,7 @@ import org.bouncycastle.asn1.sec.SECNamedCurves;
 import org.bouncycastle.asn1.x9.X9ECParameters;
 import org.bouncycastle.math.ec.ECPoint;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
@@ -139,7 +140,7 @@ public final class NostrEventVerifier {
      * {@code x}, or null if no such point exists (i.e. {@code x^3 + 7 mod p}
      * is not a quadratic residue, or {@code x ≥ p}).
      */
-    private static ECPoint liftX(BigInteger x) {
+    private static @Nullable ECPoint liftX(BigInteger x) {
         if (x.compareTo(P) >= 0) {
             return null;
         }
@@ -235,7 +236,7 @@ public final class NostrEventVerifier {
         sb.append('"');
     }
 
-    private static byte[] decodeHex(String hex, int expectedBytes) {
+    private static byte @Nullable [] decodeHex(String hex, int expectedBytes) {
         if (hex.length() != expectedBytes * 2) {
             return null;
         }

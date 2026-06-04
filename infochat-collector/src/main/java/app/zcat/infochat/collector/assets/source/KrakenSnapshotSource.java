@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.Set;
 
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -47,8 +48,6 @@ public class KrakenSnapshotSource implements AssetDataSource {
     private static final String ID = "kraken";
     private static final String API_BASE =
         "https://api.kraken.com/0/public/Ticker?pair=";
-    private static final String ATTRIBUTION_TEMPLATE =
-        "https://www.kraken.com/prices/%s-usd-%s-price-chart";
 
     // v1 closed asset set's ticker map. A v2 broader set needs a
     // `kraken_ticker` column on asset_config.
@@ -177,10 +176,10 @@ public class KrakenSnapshotSource implements AssetDataSource {
 
     @Override
     public @NonNull String attributionUrl(@NonNull String asset, @NonNull String vs) {
-        return String.format(ATTRIBUTION_TEMPLATE, asset, asset);
+        return String.format("https://www.kraken.com/prices/%s-usd-%s-price-chart", asset, asset);
     }
 
-    private static BigDecimal readBigDecimal(JsonNode node) {
+    private static @Nullable BigDecimal readBigDecimal(JsonNode node) {
         if (node == null || node.isNull() || node.isMissingNode()) {
             return null;
         }

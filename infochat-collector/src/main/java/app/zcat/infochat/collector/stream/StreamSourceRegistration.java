@@ -29,6 +29,10 @@ final class StreamSourceRegistration {
     private final Consumer<NormalizedPost> deliver;
     private final AtomicLong eventsLostOnShutdown = new AtomicLong();
 
+    // Assigned in startOn() (called once, right after construction); null only
+    // in the pre-start window, which stop() null-guards. NullAway.Init: the
+    // field is logically non-null once the source is started.
+    @SuppressWarnings("NullAway.Init")
     private volatile Future<?> startFuture;
 
     StreamSourceRegistration(long sourceId, @NonNull String filterSpec,

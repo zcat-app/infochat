@@ -29,7 +29,7 @@ import java.util.UUID;
  * <h2>Driving set</h2>
  *
  * <p>{@code status='READY' AND (last_linked_at IS NULL OR last_linked_at
- * &lt; fetched_at)} bounded to the {@code infochat.linking.lookback-days}
+ * < fetched_at)} bounded to the {@code infochat.linking.lookback-days}
  * window. The V7 partial index {@code idx_post_link_cursor} backs this
  * scan exactly. Posts re-enter the driving set only when their
  * {@code last_linked_at} cursor drifts behind {@code fetched_at} — in
@@ -84,7 +84,7 @@ import java.util.UUID;
  * {@code UPDATE post SET last_linked_at = now()} commit inside one
  * {@link TransactionHelper#inTransaction} boundary. A crash mid-post
  * rolls back and the next tick re-picks the post via the
- * {@code last_linked_at IS NULL OR last_linked_at &lt; fetched_at}
+ * {@code last_linked_at IS NULL OR last_linked_at < fetched_at}
  * driving-set filter.
  */
 @ApplicationScoped

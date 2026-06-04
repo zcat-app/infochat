@@ -67,6 +67,7 @@ public class StreamSourceSupervisor {
     // start() workers and the transient stop() drain tasks. Created in
     // init() so the bean is usable both under CDI (@PostConstruct) and in
     // a plain unit test (the package-private test constructor).
+    @SuppressWarnings("NullAway.Init")
     private ExecutorService workerExecutor;
 
     // True once init() has run. Registration acceptance — not relay

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 23 |
+| pending | 22 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 176 |
+| done | 177 |
 | deferred | 3 |
 | **total** | **202** |
 
@@ -43,7 +43,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-161 — [INVESTIGATE] price_snapshot PK/dedup invariant + new_price_snapshot channel intent (complexity: medium, risk: medium)
 - M1-162 — [INVESTIGATE] confirm-or-drop adapter SPI surfaces vs D47 (complexity: medium, risk: low)
 - M1-163 — Shared DB test-seeding seam for the IT suite (complexity: high, risk: low)
-- M1-164e — Onboard infochat-collector to NullAway + Error Prone (complexity: medium, risk: low)
+- M1-164 — Adopt NullAway + Error Prone for §7a enforcement (umbrella) (complexity: medium, risk: medium)
 
 ---
 
@@ -61,7 +61,6 @@ _(none)_
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
 - M1-151 — blocked_by: M1-144 (pending)
-- M1-164 — blocked_by: M1-164a (done), M1-164b (done), M1-164c (done), M1-164d (done), M1-164e (pending), M1-164f (done)
 - M1-165 — blocked_by: M1-164 (pending)
 
 ---
@@ -82,6 +81,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-164f | Onboard infochat-provider to NullAway + Error Prone | 2026-06-05 | round 1 APPROVE |
+| M1-164e | Onboard infochat-collector to NullAway + Error Prone | 2026-06-05 | round 2 APPROVE |
 | M1-166 | Fix SimpleXSubprocess FAILED-before-notify race (flaky test) | 2026-06-04 | round 1 APPROVE |
 | M1-164d | Onboard infochat-messaging-adapter to NullAway + Error Prone | 2026-06-04 | round 1 APPROVE |
 | M1-164c | Onboard infochat-llm-adapter to NullAway + Error Prone | 2026-06-04 | round 1 APPROVE |
@@ -90,7 +90,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-153 | Collector worker hygiene (dead semaphores, interrupt, backoff Random, dup counter, timeouts) | 2026-06-02 | round 1 APPROVE |
 | M1-149 | Fetcher pagination cursor URL-encoding | 2026-06-02 | round 1 APPROVE |
 | M1-147 | Adapter capability-flag reconciliation + cross-adapter contract test (CT5) | 2026-06-02 | round 1 APPROVE |
-| M1-145 | /save personal-tag length + count caps | 2026-06-02 | round 1 APPROVE |
 
 ---
 
@@ -355,7 +354,7 @@ M1-162 (pending) ← runnable
 M1-163 (pending) ← runnable
   └── M1-127 (deferred)
 M1-164a (done)
-  ├── M1-164 (pending)
+  ├── M1-164 (pending) ← runnable
   │     └── M1-165 (pending)
   ├── M1-164b (done)
   │     └── M1-164 (pending) [see above]
@@ -363,7 +362,7 @@ M1-164a (done)
   │     └── M1-164 (pending) [see above]
   ├── M1-164d (done)
   │     └── M1-164 (pending) [see above]
-  ├── M1-164e (pending) ← runnable
+  ├── M1-164e (done)
   │     └── M1-164 (pending) [see above]
   └── M1-164f (done)
         └── M1-164 (pending) [see above]

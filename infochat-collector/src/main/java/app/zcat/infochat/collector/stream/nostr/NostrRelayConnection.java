@@ -2,6 +2,7 @@ package app.zcat.infochat.collector.stream.nostr;
 
 import app.zcat.infochat.ssrf.SsrfGuardedHttpClient;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -91,8 +92,14 @@ final class NostrRelayConnection {
     private final RelayHealthTracker healthTracker;
 
     private volatile boolean running = true;
+    // Lazily initialized when the run loop connects (null in the pre-connect
+    // window, which stop() guards with explicit null-checks); never assigned
+    // null thereafter, so @NonNull at every deref under NullAway.Init.
+    @SuppressWarnings("NullAway.Init")
     private volatile Thread loopThread;
+    @SuppressWarnings("NullAway.Init")
     private volatile WebSocket currentWebSocket;
+    @SuppressWarnings("NullAway.Init")
     private volatile CountDownLatch closeSignal;
     private volatile boolean productiveSinceConnect;
     // The address set the SSRF guard validated at connect time. The
@@ -100,6 +107,7 @@ final class NostrRelayConnection {
     // a disjoint re-resolve is a peer-IP change → hard close. Captured
     // from PinnedDial#addresses() before the WebSocket handshake so the
     // watcher's snapshot is stable for the life of the connection.
+    @SuppressWarnings("NullAway.Init")
     private volatile List<InetAddress> pinnedAddresses;
 
     NostrRelayConnection(@NonNull URI relayUri, @NonNull String filterSpec,
@@ -376,6 +384,11 @@ final class NostrRelayConnection {
         // don't half-parse a truncated frame.
         private boolean skipUntilLast = false;
 
+        // Fire-and-forget REQ send: the returned CompletableFuture is
+        // intentionally not awaited — a send failure also drives the JDK
+        // WebSocket into RelayListener.onError, which countDowns closeSignal
+        // and routes to the reconnect/backoff arm.
+        @SuppressWarnings("FutureReturnValueIgnored")
         @Override
         public void onOpen(@NonNull WebSocket webSocket) {
             webSocket.request(1);
@@ -384,7 +397,7 @@ final class NostrRelayConnection {
         }
 
         @Override
-        public CompletionStage<?> onText(@NonNull WebSocket webSocket, @NonNull CharSequence data, boolean last) {
+        public @Nullable CompletionStage<?> onText(@NonNull WebSocket webSocket, @NonNull CharSequence data, boolean last) {
             if (skipUntilLast) {
                 if (last) {
                     skipUntilLast = false;
@@ -411,7 +424,7 @@ final class NostrRelayConnection {
         }
 
         @Override
-        public CompletionStage<?> onClose(@NonNull WebSocket webSocket, int statusCode, @NonNull String reason) {
+        public @Nullable CompletionStage<?> onClose(@NonNull WebSocket webSocket, int statusCode, @NonNull String reason) {
             signalClosed();
             return null;
         }

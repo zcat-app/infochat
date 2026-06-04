@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.Set;
 
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -44,8 +45,6 @@ public class BitfinexSnapshotSource implements AssetDataSource {
     private static final String ID = "bitfinex";
     private static final String API_BASE =
         "https://api-pub.bitfinex.com/v2/ticker/";
-    private static final String ATTRIBUTION_TEMPLATE =
-        "https://www.bitfinex.com/t/%s:%s";
 
     // v1 closed asset set's ticker map. A v2 broader set needs a
     // `bitfinex_ticker` column on asset_config (the ticker is not
@@ -168,10 +167,10 @@ public class BitfinexSnapshotSource implements AssetDataSource {
     @Override
     public @NonNull String attributionUrl(@NonNull String asset, @NonNull String vs) {
         String ticker = TICKERS.getOrDefault(asset, asset.toUpperCase(Locale.ROOT));
-        return String.format(ATTRIBUTION_TEMPLATE, ticker, vs.toUpperCase(Locale.ROOT));
+        return String.format("https://www.bitfinex.com/t/%s:%s", ticker, vs.toUpperCase(Locale.ROOT));
     }
 
-    private static BigDecimal readBigDecimal(JsonNode node) {
+    private static @Nullable BigDecimal readBigDecimal(JsonNode node) {
         if (node == null || node.isNull() || node.isMissingNode()) {
             return null;
         }

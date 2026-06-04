@@ -58,8 +58,8 @@ import java.util.Optional;
 public class EmbeddingMetadataStartupGuard {
 
     /**
-     * @Priority value for this guard, documented as a public
-     * constant alongside the literal class-level @Priority(125)
+     * The {@code @Priority} value for this guard, documented as a public
+     * constant alongside the literal class-level {@code @Priority(125)}
      * annotation above. The annotation uses the literal so a
      * reviewer-side regex over the annotation source line sees
      * the bare integer; this constant exists so other code (the
@@ -176,8 +176,8 @@ public class EmbeddingMetadataStartupGuard {
      * Thrown when the configured embedding model differs from the
      * stored singleton row AND
      * {@code infochat.embeddings.allow-model-change} is not set. The
-     * @Startup bean's @PostConstruct re-throws this, which Quarkus
-     * treats as a fatal startup error and refuses to start.
+     * {@code @Startup} bean's {@code @PostConstruct} re-throws this, which
+     * Quarkus treats as a fatal startup error and refuses to start.
      */
     public static final class EmbeddingModelMismatchException extends RuntimeException {
         public EmbeddingModelMismatchException(String message) {

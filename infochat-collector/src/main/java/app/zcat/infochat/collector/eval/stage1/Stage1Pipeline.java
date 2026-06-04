@@ -6,6 +6,7 @@ import jakarta.inject.Inject;
 import org.apache.commons.text.StringEscapeUtils;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
+import org.jspecify.annotations.Nullable;
 import org.owasp.html.PolicyFactory;
 import org.owasp.html.Sanitizers;
 
@@ -165,6 +166,11 @@ import java.util.regex.Matcher;
  * boundary coercion (SQL deserialization), not internal-code
  * defensive code per CLAUDE.md §"No defensive code".
  */
+// EscapedEntity: the class javadoc documents HTML-entity examples
+// ({@code &amp;}, {@code &#105;gnore...}) verbatim — rendering them
+// literally is the intent, so the Error Prone check is suppressed
+// rather than rewritten (a rewrite would corrupt the security rationale).
+@SuppressWarnings("EscapedEntity")
 @ApplicationScoped
 public class Stage1Pipeline {
 
@@ -279,12 +285,12 @@ public class Stage1Pipeline {
         StringBuilder out = new StringBuilder(nfkc.length());
         for (int i = 0; i < nfkc.length(); i++) {
             char c = nfkc.charAt(i);
-            // bidi controls ‪..‮ (LRE, RLE, PDF, LRO, RLO)
-            if (c >= '‪' && c <= '‮') {
+            // bidi controls U+202A..U+202E (LRE, RLE, PDF, LRO, RLO)
+            if (c >= '\u202A' && c <= '\u202E') {
                 continue;
             }
-            // bidi isolates ⁦..⁩ (LRI, RLI, FSI, PDI)
-            if (c >= '⁦' && c <= '⁩') {
+            // bidi isolates U+2066..U+2069 (LRI, RLI, FSI, PDI)
+            if (c >= '\u2066' && c <= '\u2069') {
                 continue;
             }
             // zero-width: ​ (ZWSP), ‌ (ZWNJ),
@@ -480,7 +486,7 @@ public class Stage1Pipeline {
      * coalesce alerts on it without diff churn here.
      */
     private Stage1Result handleSanitizerException(UUID postId, String postUid, Instant postFetchedAt,
-                                                  String normalized, Throwable cause) {
+                                                  String normalized, @Nullable Throwable cause) {
         LOG.warnf(cause,
             "Stage 1 sanitizer exception on post_id=%s (rule_id=%s, error_class=%s, cause=%s)",
             postId, SANITIZER_EXCEPTION_RULE_ID, ERROR_CLASS_SANITIZER_EXCEPTION,

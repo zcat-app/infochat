@@ -1,12 +1,12 @@
 ---
 id: M1-164e
 title: "Onboard infochat-collector to NullAway + Error Prone"
-status: pending
+status: done
 created: 2026-06-03
-last_updated: 2026-06-03
+last_updated: 2026-06-05
 blocked_by:
   - M1-164a
-files_budget: 14
+files_budget: 28
 files_scope:
   - infochat-collector
 complexity: medium
@@ -34,12 +34,59 @@ spec_refs:
   - docs/spec/architecture.md §Architectural principles
 decision_refs:
   - D48
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-04
+    verdict: REWORK
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PARTIAL
+    diff_stats:
+      files: 29
+      added: 178
+      removed: 89
+  - round: 2
+    date: 2026-06-05
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 28
+      added: 201
+      removed: 84
+escalations:
+  - date: 2026-06-04
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A — budget-breach. Activating the inherited NullAway:ERROR config on
+      infochat-collector main sources surfaces 160 findings (142 NullAway, 16
+      UnicodeDirectionalityCharacters, 2 InlineFormatString) across 26 distinct
+      main-source files. Resolving them touches those 26 files + pom.xml = 27
+      files, vs files_budget: 14. Each finding sits in its own file, so the
+      diff cannot be shrunk below 27 within one ticket.
+revisions:
+  - date: 2026-06-04
+    reason: budget-breach rework
+    snapshot:
+      status: escalated
+      files_budget: 14
+      escalation_reason: budget-breach
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-04
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-164e: Onboard infochat-collector to NullAway + Error Prone
@@ -72,3 +119,16 @@ umbrella. No `@NonNull` (non-null is the default).
   fine; escalate to split per-package only if the diff exceeds files_budget.
 - Must not be started in parallel with M1-146 (defensive sweep), which also
   touches `infochat-collector` (`AssetSnapshotFetcher`, `BootstrapAssetsLoader`).
+
+## Round 1 rework
+
+Reviewer verdict round 1: REWORK (acceptance PARTIAL). Address only the item
+below, then re-run `mvn -B clean verify` and `/m1-tick review M1-164e`.
+
+1. Resolve the remaining Error Prone `[EscapedEntity]` finding at
+   `infochat-collector/src/main/java/app/zcat/infochat/collector/linking/LinkingJob.java`
+   line 31: change `last_linked_at &lt; fetched_at` inside the `{@code ...}`
+   javadoc block to `last_linked_at < fetched_at` (the same fix already applied
+   to the sibling occurrence at ~line 87 and to `Stage2VerdictHandler`), so
+   acceptance item 2's "all Error Prone default-check findings are resolved"
+   holds. The file is already in the diff; this is a one-line edit.

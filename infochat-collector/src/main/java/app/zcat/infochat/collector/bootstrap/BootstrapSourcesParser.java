@@ -14,6 +14,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * Parses {@code bootstrap-sources.json} into a
  * {@code List<BootstrapSourcesEntry>} per the schema in
@@ -182,7 +184,7 @@ public final class BootstrapSourcesParser {
     }
 
     @SuppressWarnings("unchecked")
-    private Object sortKeysRecursively(Object node) {
+    private @Nullable Object sortKeysRecursively(@Nullable Object node) {
         if (node instanceof Map<?, ?> mapNode) {
             Map<String, Object> sorted = new TreeMap<>();
             for (Map.Entry<?, ?> e : mapNode.entrySet()) {

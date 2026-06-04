@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.Set;
 
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -160,7 +161,7 @@ public class CoingeckoSnapshotSource implements AssetDataSource {
         return ATTRIBUTION_BASE + slug;
     }
 
-    private static BigDecimal readBigDecimal(JsonNode node) {
+    private static @Nullable BigDecimal readBigDecimal(JsonNode node) {
         if (node == null || node.isNull() || node.isMissingNode()) {
             return null;
         }

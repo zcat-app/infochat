@@ -6,6 +6,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.reactive.messaging.Incoming;
 import org.jboss.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -119,7 +120,7 @@ public class Stage1Worker {
         }
     }
 
-    private PostRow loadPost(PostPersister.PersistedPostKey key) throws SQLException {
+    private @Nullable PostRow loadPost(PostPersister.PersistedPostKey key) throws SQLException {
         final String sql =
             "SELECT uid, body, stage1_done FROM post "
                 + "WHERE id = ? AND fetched_at = ?";

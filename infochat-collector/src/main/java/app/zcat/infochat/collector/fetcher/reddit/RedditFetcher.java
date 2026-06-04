@@ -9,6 +9,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import java.io.IOException;
 import java.net.URI;
@@ -107,7 +108,7 @@ public class RedditFetcher implements Fetcher {
         return allPosts;
     }
 
-    private static URI buildPageUri(String identifier, String afterCursor) {
+    private static URI buildPageUri(String identifier, @Nullable String afterCursor) {
         String url = identifier + ".json";
         if (afterCursor != null) {
             // afterCursor is upstream-supplied (untrusted): encode so a value

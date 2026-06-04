@@ -15,6 +15,7 @@ import javax.sql.DataSource;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import app.zcat.infochat.collector.assets.source.AssetDataSource;
 import app.zcat.infochat.collector.assets.source.AssetDataSource.FetchException;
@@ -137,7 +138,7 @@ public class AssetSnapshotFetcher {
 
     // Per-host source map cached at first tick; the Instance<>
     // resolution is non-deterministic ordering but stable per JVM.
-    private volatile Map<String, AssetDataSource> sourcesById;
+    private volatile @Nullable Map<String, AssetDataSource> sourcesById;
 
     @Scheduled(every = "{infochat.assets.refresh.coingecko}")
     public void onCoingeckoTick() {
@@ -328,7 +329,7 @@ public class AssetSnapshotFetcher {
         return out;
     }
 
-    private AssetDataSource resolveSource(@NonNull String host) {
+    private @Nullable AssetDataSource resolveSource(@NonNull String host) {
         Map<String, AssetDataSource> snapshot = sourcesById;
         if (snapshot == null) {
             snapshot = buildSourceMap();

@@ -89,7 +89,7 @@ import java.util.UUID;
  * {@link app.zcat.infochat.collector.fetch.FetchScheduler}'s
  * {@code @Priority(400)} — so no FetchScheduler-driven INSERTs land
  * during the rehydrate loop. If a future ticket lets some other
- * @Startup bean INSERT RAW rows mid-rehydrate, the keyset cursor
+ * {@code @Startup} bean INSERT RAW rows mid-rehydrate, the keyset cursor
  * will pick up rows whose {@code (fetched_at, id)} sorts AFTER the
  * current bookmark (the natural ordering of arriving rows). Rows
  * sorting BEFORE the bookmark would be missed — relied on by the
@@ -98,7 +98,7 @@ import java.util.UUID;
  * acceptable only because the original enqueue path
  * ({@link app.zcat.infochat.collector.fetch.FetchScheduler#tickOnce})
  * has not yet started. Maintain the @Priority gap when adding new
- * @Startup beans that touch the post table.
+ * {@code @Startup} beans that touch the post table.
  *
  * <h2>Idempotency</h2>
  * <p>There is no "rehydrated" flag on the post row. The rehydrator

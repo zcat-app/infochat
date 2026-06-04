@@ -1,6 +1,7 @@
 package app.zcat.infochat.collector.fetcher.rss;
 
 import app.zcat.infochat.core.ingest.NormalizedPost;
+import org.jspecify.annotations.Nullable;
 
 import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamConstants;
@@ -290,7 +291,7 @@ public final class RssFeedParser {
         return sb.toString();
     }
 
-    private static Instant parseRfc1123(String raw) {
+    private static @Nullable Instant parseRfc1123(@Nullable String raw) {
         if (raw == null || raw.isEmpty()) {
             return null;
         }
@@ -301,7 +302,7 @@ public final class RssFeedParser {
         }
     }
 
-    private static Instant parseIso8601(String raw) {
+    private static @Nullable Instant parseIso8601(@Nullable String raw) {
         if (raw == null || raw.isEmpty()) {
             return null;
         }
