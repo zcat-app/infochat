@@ -1,7 +1,7 @@
 ---
 id: M1-167
 title: "Fix residual EscapedEntity javadoc findings in provider"
-status: pending
+status: done
 created: 2026-06-05
 last_updated: 2026-06-05
 blocked_by: []
@@ -31,12 +31,29 @@ spec_refs:
   - docs/spec/architecture.md §Architectural principles
 decision_refs:
   - D48
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-05
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 12
+      removed: 10
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-05
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-167: Fix residual EscapedEntity javadoc findings in provider

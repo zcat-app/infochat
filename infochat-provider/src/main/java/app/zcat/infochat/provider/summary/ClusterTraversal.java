@@ -33,7 +33,7 @@ import java.util.Objects;
  * (docs/spec/llm.md §Determinism boundary).
  *
  * <p>The {@link #cluster(List)} signature and the {@code Cluster(String,
- * List&lt;Post&gt;)} record shape are preserved verbatim from the v1
+ * List<Post>)} record shape are preserved verbatim from the v1
  * stub so the @Inject production call sites (DigestRenderer,
  * SummaryCommandHandler) and the four tests that import only the
  * {@code Cluster} type stay unchanged.

@@ -47,7 +47,7 @@ import java.util.UUID;
  *       parse failure returns {@code error.source_disable.unknown_id}.</li>
  *   <li>Open one transaction; SELECT the source row with
  *       {@code FOR UPDATE} to lock it; reject if
- *       {@code status &lt;&gt; 'active' OR deleted_at IS NOT NULL} with
+ *       {@code status <> 'active' OR deleted_at IS NOT NULL} with
  *       {@code error.source_disable.not_active}; otherwise pre-write the
  *       {@code SOURCE_DISABLE} audit row (Invariant 7: audit-before-effect)
  *       then {@code UPDATE source SET status = 'disabled' WHERE id = ?};
