@@ -145,6 +145,13 @@ final class LlmHttpSupport {
         private final List<ByteBuffer> received = new ArrayList<>();
         private final CompletableFuture<String> body = new CompletableFuture<>();
         private long byteCount = 0;
+        // Assigned in onSubscribe() before any onNext()/onComplete() can run
+        // (reactive-streams contract guarantees onSubscribe precedes every
+        // other signal). NullAway's field-init check models only
+        // constructors/initializers, not the Flow.Subscriber lifecycle, so
+        // suppress that one check here; the field stays @NonNull for every
+        // dereference.
+        @SuppressWarnings("NullAway.Init")
         private Flow.Subscription subscription;
 
         BoundedStringSubscriber(long maxBytes) {

@@ -163,7 +163,12 @@ public class LlmRouter {
         // docs/spec/llm.md §Per-task routing rules).
         if (isLanguageAwareTask(task) && !"en".equalsIgnoreCase(lang)) {
             for (Entry e : entries) {
-                if (e.supportedLanguages().contains(lang)) {
+                // supportedLanguages() is @Nullable per the Entry component
+                // contract; a null reads as "no declared language" and skips
+                // the entry, matching the compact constructor's null→empty
+                // normalization.
+                Set<String> supported = e.supportedLanguages();
+                if (supported != null && supported.contains(lang)) {
                     return e.provider();
                 }
             }

@@ -1,6 +1,7 @@
 package app.zcat.infochat.llm.routing;
 
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import app.zcat.infochat.llm.ModelTask;
 import app.zcat.infochat.llm.impl.AnthropicProvider;
@@ -282,7 +283,7 @@ public class LlmRouterStartupGuard {
         }
     }
 
-    private static String stripOrEmpty(String s) {
+    private static String stripOrEmpty(@Nullable String s) {
         return s == null ? "" : s.trim();
     }
 

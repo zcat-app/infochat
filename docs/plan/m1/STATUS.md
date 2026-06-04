@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 27 |
+| pending | 26 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 172 |
+| done | 173 |
 | deferred | 3 |
 | **total** | **202** |
 
@@ -44,7 +44,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-162 — [INVESTIGATE] confirm-or-drop adapter SPI surfaces vs D47 (complexity: medium, risk: low)
 - M1-163 — Shared DB test-seeding seam for the IT suite (complexity: high, risk: low)
 - M1-164b — Onboard infochat-ssrf to NullAway + Error Prone (complexity: low, risk: low)
-- M1-164c — Onboard infochat-llm-adapter to NullAway + Error Prone (complexity: low, risk: low)
 - M1-164d — Onboard infochat-messaging-adapter to NullAway + Error Prone (complexity: low, risk: low)
 - M1-164e — Onboard infochat-collector to NullAway + Error Prone (complexity: medium, risk: low)
 - M1-164f — Onboard infochat-provider to NullAway + Error Prone (complexity: medium, risk: low)
@@ -65,7 +64,7 @@ _(none)_
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
 - M1-151 — blocked_by: M1-144 (pending)
-- M1-164 — blocked_by: M1-164a (done), M1-164b (pending), M1-164c (pending), M1-164d (pending), M1-164e (pending), M1-164f (pending)
+- M1-164 — blocked_by: M1-164a (done), M1-164b (pending), M1-164c (done), M1-164d (pending), M1-164e (pending), M1-164f (pending)
 - M1-165 — blocked_by: M1-164 (pending)
 
 ---
@@ -86,6 +85,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-166 | Fix SimpleXSubprocess FAILED-before-notify race (flaky test) | 2026-06-04 | round 1 APPROVE |
+| M1-164c | Onboard infochat-llm-adapter to NullAway + Error Prone | 2026-06-04 | round 1 APPROVE |
 | M1-164a | NullAway/Error Prone build wiring + onboard infochat-core | 2026-06-04 | round 1 APPROVE |
 | M1-153 | Collector worker hygiene (dead semaphores, interrupt, backoff Random, dup counter, timeouts) | 2026-06-02 | round 1 APPROVE |
 | M1-149 | Fetcher pagination cursor URL-encoding | 2026-06-02 | round 1 APPROVE |
@@ -94,7 +94,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-141 | LLM adapter robustness (body cap, Retry-After) + router decoupling | 2026-06-02 | round 2 APPROVE |
 | M1-140 | EmbeddingResult value semantics + embedding SPI size-equals-input contract | 2026-06-02 | round 1 APPROVE |
 | M1-138 | /stop group/DM scope fix + /help per-tier filtering | 2026-06-02 | round 1 APPROVE |
-| M1-137 | SimpleX mention canonicalization → exact-bytes compare | 2026-06-02 | round 1 APPROVE |
 
 ---
 
@@ -363,7 +362,7 @@ M1-164a (done)
   │     └── M1-165 (pending)
   ├── M1-164b (pending) ← runnable
   │     └── M1-164 (pending) [see above]
-  ├── M1-164c (pending) ← runnable
+  ├── M1-164c (done)
   │     └── M1-164 (pending) [see above]
   ├── M1-164d (pending) ← runnable
   │     └── M1-164 (pending) [see above]
