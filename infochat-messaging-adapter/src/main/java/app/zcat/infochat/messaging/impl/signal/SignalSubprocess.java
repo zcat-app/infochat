@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.Objects;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -307,7 +308,10 @@ final class SignalSubprocess {
 
     @NonNull
     State state() {
-        return state.get();
+        // The AtomicReference is seeded non-null (State.NEW) and only ever
+        // CAS'd to non-null State values; NullAway models AtomicReference.get()
+        // as @Nullable, so assert the invariant here.
+        return Objects.requireNonNull(state.get());
     }
 
     int restartAttempts() {

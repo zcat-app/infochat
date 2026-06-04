@@ -1,5 +1,7 @@
 package app.zcat.infochat.messaging;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * Checked exception raised by every {@link MessagingAdapter} method
  * that can fail at the transport layer ({@link MessagingAdapter#send},
@@ -24,7 +26,7 @@ public class MessagingException extends Exception {
         this.category = category;
     }
 
-    public MessagingException(FailureCategory category, String message, Throwable cause) {
+    public MessagingException(FailureCategory category, String message, @Nullable Throwable cause) {
         super(message, cause);
         this.category = category;
     }

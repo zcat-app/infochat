@@ -1,9 +1,9 @@
 ---
 id: M1-164d
 title: "Onboard infochat-messaging-adapter to NullAway + Error Prone"
-status: pending
+status: done
 created: 2026-06-03
-last_updated: 2026-06-03
+last_updated: 2026-06-04
 blocked_by:
   - M1-164a
 files_budget: 10
@@ -33,12 +33,29 @@ spec_refs:
   - docs/spec/architecture.md §Architectural principles
 decision_refs:
   - D48
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-04
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 9
+      added: 86
+      removed: 45
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-04
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-164d: Onboard infochat-messaging-adapter to NullAway + Error Prone

@@ -1,6 +1,7 @@
 package app.zcat.infochat.messaging.impl.simplex;
 
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -8,6 +9,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.time.Duration;
 import java.util.List;
+import java.util.Objects;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -76,8 +78,10 @@ final class SimpleXSubprocess {
     private final AtomicInteger restartCount = new AtomicInteger(0);
     private final AtomicInteger adminNotifications = new AtomicInteger(0);
 
-    private volatile Process currentProcess;
-    private volatile Thread supervisor;
+    // Null until start() launches the process and its supervisor thread;
+    // every read copies to a local and guards on null before use.
+    private volatile @Nullable Process currentProcess;
+    private volatile @Nullable Thread supervisor;
     private volatile boolean stopping = false;
 
     SimpleXSubprocess(@NonNull List<String> command,
@@ -161,7 +165,10 @@ final class SimpleXSubprocess {
     }
 
     @NonNull State state() {
-        return state.get();
+        // The AtomicReference is seeded non-null (State.NOT_STARTED) and only
+        // ever CAS'd to non-null State values; NullAway models
+        // AtomicReference.get() as @Nullable, so assert the invariant here.
+        return Objects.requireNonNull(state.get());
     }
 
     /** How many times the supervisor has restarted the process. */

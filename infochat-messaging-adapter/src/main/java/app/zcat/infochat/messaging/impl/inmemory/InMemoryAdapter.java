@@ -1,6 +1,7 @@
 package app.zcat.infochat.messaging.impl.inmemory;
 
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import app.zcat.infochat.messaging.AdapterTrustLevel;
 import app.zcat.infochat.messaging.CapabilityFlags;
@@ -19,6 +20,7 @@ import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -83,8 +85,10 @@ public final class InMemoryAdapter implements MessagingAdapter {
     private final Map<String, Set<String>> groups = new ConcurrentHashMap<>();
     private final List<MembershipEvent> membershipEvents = new CopyOnWriteArrayList<>();
 
-    private volatile InboundHandler handler;
-    private volatile MembershipHandler membershipHandler;
+    // Null until a handler registers via the setter; every read guards on
+    // null (an un-attached adapter is a test-author bug, surfaced loudly).
+    private volatile @Nullable InboundHandler handler;
+    private volatile @Nullable MembershipHandler membershipHandler;
 
     /** Production-and-default constructor — declares LOW trust. */
     public InMemoryAdapter() {
@@ -139,14 +143,12 @@ public final class InMemoryAdapter implements MessagingAdapter {
 
     @Override
     public void update(@NonNull MessageHandle handle, @NonNull String body) throws MessagingException {
-        requireKnownAndOpen(handle);
-        history.get(handle.opaqueValue()).add(new UpdateEvent(body, false));
+        requireKnownAndOpen(handle).add(new UpdateEvent(body, false));
     }
 
     @Override
     public void finalize(@NonNull MessageHandle handle, @NonNull String body) throws MessagingException {
-        requireKnownAndOpen(handle);
-        history.get(handle.opaqueValue()).add(new UpdateEvent(body, true));
+        requireKnownAndOpen(handle).add(new UpdateEvent(body, true));
         finalized.put(handle.opaqueValue(), Boolean.TRUE);
     }
 
@@ -321,7 +323,7 @@ public final class InMemoryAdapter implements MessagingAdapter {
         handleIdGen.set(0);
     }
 
-    private void requireKnownAndOpen(MessageHandle handle) throws MessagingException {
+    private List<UpdateEvent> requireKnownAndOpen(MessageHandle handle) throws MessagingException {
         // Adapter boundary: handles are returned to test code that may
         // misuse them (the SPI's opacity is enforced by Javadoc, not
         // the type system). Surface the misuse as a PERMANENT
@@ -337,6 +339,10 @@ public final class InMemoryAdapter implements MessagingAdapter {
                     FailureCategory.PERMANENT,
                     "Handle already finalized: " + handle.opaqueValue());
         }
+        // send() populates `handles` and `history` together under the same
+        // key, and entries are only ever cleared together (reset()); a known,
+        // open handle therefore always has a history list.
+        return Objects.requireNonNull(history.get(handle.opaqueValue()));
     }
 
     /** Update / finalize event recorded per handle in the order applied. */

@@ -1,6 +1,7 @@
 package app.zcat.infochat.messaging.impl.simplex;
 
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -14,6 +15,7 @@ import java.net.http.HttpClient;
 import java.net.http.WebSocket;
 import java.time.Duration;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -75,7 +77,9 @@ final class SimpleXWebSocketClient {
     private final GroupCandidateConsumer groupCandidateConsumer;
 
     private final Map<String, CompletableFuture<String>> pending = new ConcurrentHashMap<>();
-    private volatile WebSocket webSocket;
+    // Null until connect() completes the handshake; every read copies to a
+    // local and guards on null before use.
+    private volatile @Nullable WebSocket webSocket;
     private volatile boolean closed = false;
 
     SimpleXWebSocketClient(@NonNull URI uri,
@@ -112,9 +116,11 @@ final class SimpleXWebSocketClient {
             // The handshake failed because simplex-chat refused the connection,
             // the port is not listening yet, or the network rejected the dial.
             // The supervisor will restart the subprocess; treat as transient.
+            // A future completed exceptionally always carries a cause.
+            Throwable cause = Objects.requireNonNull(e.getCause());
             throw new MessagingException(FailureCategory.TRANSIENT,
                     "WebSocket handshake to " + uri + " failed: "
-                            + e.getCause().getClass().getSimpleName(), e.getCause());
+                            + cause.getClass().getSimpleName(), cause);
         }
     }
 
@@ -186,13 +192,15 @@ final class SimpleXWebSocketClient {
         } catch (ExecutionException e) {
             // Unwrap MessagingException raised by the listener thread so the
             // caller sees the original FailureCategory, not a wrapper.
-            if (e.getCause() instanceof MessagingException me) {
+            // A future completed exceptionally always carries a cause.
+            Throwable cause = Objects.requireNonNull(e.getCause());
+            if (cause instanceof MessagingException me) {
                 throw me;
             }
             throw new MessagingException(FailureCategory.PERMANENT,
                     "ack future for corrId=" + corrId + " failed: "
-                            + e.getCause().getClass().getSimpleName(),
-                    e.getCause());
+                            + cause.getClass().getSimpleName(),
+                    cause);
         } catch (RuntimeException e) {
             // close() can abort the WebSocket between the `closed` check above
             // and ws.sendText() here; the JDK WebSocket then rejects the send
@@ -243,7 +251,7 @@ final class SimpleXWebSocketClient {
         }
 
         @Override
-        public java.util.concurrent.CompletionStage<?> onText(@NonNull WebSocket webSocket,
+        public java.util.concurrent.@Nullable CompletionStage<?> onText(@NonNull WebSocket webSocket,
                                                               @NonNull CharSequence data,
                                                               boolean last) {
             if (skipUntilLast) {
@@ -272,7 +280,7 @@ final class SimpleXWebSocketClient {
         }
 
         @Override
-        public java.util.concurrent.CompletionStage<?> onClose(@NonNull WebSocket webSocket,
+        public java.util.concurrent.@Nullable CompletionStage<?> onClose(@NonNull WebSocket webSocket,
                                                                int statusCode,
                                                                @NonNull String reason) {
             // The supervisor (SimpleXSubprocess) sees the process exit and

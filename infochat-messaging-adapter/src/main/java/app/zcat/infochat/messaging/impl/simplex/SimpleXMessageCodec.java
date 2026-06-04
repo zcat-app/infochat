@@ -521,7 +521,7 @@ final class SimpleXMessageCodec {
         return mentions;
     }
 
-    private static DecodedFrame decodeSendAck(String corrId, JsonNode resp) {
+    private static DecodedFrame decodeSendAck(@Nullable String corrId, JsonNode resp) {
         // Real simplex-chat returns one of several response shapes. Look for
         // a chatItemId anywhere reasonable; fall back to the bare envelope if
         // simplex-chat's response shape later varies.
@@ -532,7 +532,7 @@ final class SimpleXMessageCodec {
         return new SendAck(corrId == null ? "" : corrId, chatItemId);
     }
 
-    private static DecodedFrame decodeError(String corrId, JsonNode resp) {
+    private static DecodedFrame decodeError(@Nullable String corrId, JsonNode resp) {
         String errorTag = findFirstString(resp, "chatError", "errorType", "error");
         FailureCategory category = classifyError(errorTag == null ? "" : errorTag);
         // Fixed sentinel when no recognized error tag is found — the prior
@@ -553,13 +553,13 @@ final class SimpleXMessageCodec {
                 errorTag == null ? "unrecognized-error-envelope" : errorTag);
     }
 
-    private static String optText(JsonNode node, String field) {
+    private static @Nullable String optText(JsonNode node, String field) {
         JsonNode value = node.get(field);
         return value == null || value.isNull() ? null : value.asText();
     }
 
     /** Depth-first search for a textual node with one of the given names. */
-    private static String findFirstString(JsonNode node, String... names) {
+    private static @Nullable String findFirstString(JsonNode node, String... names) {
         for (String name : names) {
             JsonNode direct = node.get(name);
             if (direct != null && direct.isTextual()) {
