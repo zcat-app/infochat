@@ -244,11 +244,17 @@ final class SimpleXSubprocess {
         if (consecutiveCrashes < crashCap) {
             return false;
         }
-        state.set(State.FAILED);
         // The "throttled" admin notification commitment (acceptance item 4)
         // resolves to a single notify at the FAILED transition — the
         // supervisor stops looping after this, so a subsequent flood is
         // structurally impossible.
+        //
+        // Notify (and bump the counter) BEFORE the FAILED flip: the State.FAILED
+        // javadoc promises "admin notified", so an observer of FAILED must see
+        // the notification already delivered. state.set is a volatile write and
+        // state() a volatile read, so everything sequenced here is visible to any
+        // thread that observes FAILED. The message is a fixed string independent
+        // of state, so the ordering does not change what the notifier receives.
         adminNotifications.incrementAndGet();
         try {
             adminNotifier.accept(
@@ -259,6 +265,7 @@ final class SimpleXSubprocess {
             // must not leak past the supervisor.
             LOG.warn("admin notifier threw: {}", e.getClass().getSimpleName());
         }
+        state.set(State.FAILED);
         return true;
     }
 

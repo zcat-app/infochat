@@ -14,9 +14,9 @@
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 171 |
+| done | 172 |
 | deferred | 3 |
-| **total** | **201** |
+| **total** | **202** |
 
 ---
 
@@ -85,6 +85,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-166 | Fix SimpleXSubprocess FAILED-before-notify race (flaky test) | 2026-06-04 | round 1 APPROVE |
 | M1-164a | NullAway/Error Prone build wiring + onboard infochat-core | 2026-06-04 | round 1 APPROVE |
 | M1-153 | Collector worker hygiene (dead semaphores, interrupt, backoff Random, dup counter, timeouts) | 2026-06-02 | round 1 APPROVE |
 | M1-149 | Fetcher pagination cursor URL-encoding | 2026-06-02 | round 1 APPROVE |
@@ -94,7 +95,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-140 | EmbeddingResult value semantics + embedding SPI size-equals-input contract | 2026-06-02 | round 1 APPROVE |
 | M1-138 | /stop group/DM scope fix + /help per-tier filtering | 2026-06-02 | round 1 APPROVE |
 | M1-137 | SimpleX mention canonicalization → exact-bytes compare | 2026-06-02 | round 1 APPROVE |
-| M1-136 | local-only startup guard covers embedding endpoint + remote-embedding log | 2026-06-02 | round 2 APPROVE |
 
 ---
 
@@ -371,4 +371,5 @@ M1-164a (done)
   │     └── M1-164 (pending) [see above]
   └── M1-164f (pending) ← runnable
         └── M1-164 (pending) [see above]
+M1-166 (done)
 ```
