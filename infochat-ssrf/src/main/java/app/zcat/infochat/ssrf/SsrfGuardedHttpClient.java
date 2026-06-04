@@ -174,7 +174,7 @@ public final class SsrfGuardedHttpClient {
                                  int redirectCap) {
         this(blocklist, connectTimeout, requestTimeout, readTimeout,
              bodyReadDeadline, bodyCap, redirectCap,
-             defaultResolverSeam());
+             SsrfGuardedHttpClient::defaultResolve);
     }
 
     /**
@@ -228,14 +228,12 @@ public final class SsrfGuardedHttpClient {
         this.resolverSeam = resolverSeam;
     }
 
-    private static Function<String, List<InetAddress>> defaultResolverSeam() {
-        return host -> {
-            try {
-                return Arrays.asList(InetAddress.getAllByName(host));
-            } catch (UnknownHostException e) {
-                throw new SsrfPolicyException("unknown host: " + host, e);
-            }
-        };
+    private static List<InetAddress> defaultResolve(String host) {
+        try {
+            return Arrays.asList(InetAddress.getAllByName(host));
+        } catch (UnknownHostException e) {
+            throw new SsrfPolicyException("unknown host: " + host, e);
+        }
     }
 
     /**

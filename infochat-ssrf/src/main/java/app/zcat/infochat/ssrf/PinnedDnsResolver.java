@@ -1,6 +1,7 @@
 package app.zcat.infochat.ssrf;
 
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
@@ -112,13 +113,18 @@ public final class PinnedDnsResolver implements InetAddressResolver {
         // ACTIVE_PINS is mutated only while LOCK is held; reads are
         // unsynchronized but volatile, so the JDK's DNS-lookup
         // threads see a consistent snapshot (either null or a fully
-        // populated immutable map).
-        private static volatile Map<String, List<InetAddress>> ACTIVE_PINS;
+        // populated immutable map). @Nullable: the slot is empty
+        // (null) whenever no wrapper call holds a pin.
+        private static volatile @Nullable Map<String, List<InetAddress>> ACTIVE_PINS;
 
         // BUILTIN is captured once during get(Configuration) — the
         // JDK contract guarantees get() is invoked before any lookup
         // uses the returned resolver, so by the time the forwarding
-        // resolver below is called, BUILTIN is non-null.
+        // resolver below is called, BUILTIN is non-null. NullAway's
+        // field-init check models only constructors/initializers, not
+        // the SPI get() lifecycle, so suppress that one check; the
+        // field stays @NonNull for every dereference.
+        @SuppressWarnings("NullAway.Init")
         private static volatile InetAddressResolver BUILTIN;
 
         @Override

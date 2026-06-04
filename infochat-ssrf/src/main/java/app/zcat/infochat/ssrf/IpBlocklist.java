@@ -1,6 +1,7 @@
 package app.zcat.infochat.ssrf;
 
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import java.net.InetAddress;
 import java.util.Arrays;
@@ -256,7 +257,7 @@ public class IpBlocklist {
      * address. {@code ::} and {@code ::1} never reach here — they are
      * caught by {@link #isBlockedV6} before the embedded-v4 decode.
      */
-    private static byte[] embeddedV4(byte[] raw) {
+    private static byte @Nullable [] embeddedV4(byte[] raw) {
         // ::ffff:a.b.c.d — IPv4-mapped (bytes 0-9 zero, 10-11 == ffff).
         if (isIpv4Mapped(raw)) {
             return new byte[] { raw[12], raw[13], raw[14], raw[15] };

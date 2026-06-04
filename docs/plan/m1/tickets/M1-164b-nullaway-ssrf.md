@@ -1,9 +1,9 @@
 ---
 id: M1-164b
 title: "Onboard infochat-ssrf to NullAway + Error Prone"
-status: pending
+status: done
 created: 2026-06-03
-last_updated: 2026-06-03
+last_updated: 2026-06-04
 blocked_by:
   - M1-164a
 files_budget: 10
@@ -33,12 +33,30 @@ spec_refs:
   - docs/spec/architecture.md §Architectural principles
 decision_refs:
   - D48
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-04
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 53
+      removed: 35
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-04
+  verdict: WARN
+  warnings:
+    - "SECURITY-FLAG-CONSISTENT: infochat-ssrf contains SsrfGuardedHttpClient (an outbound-HTTP validation boundary). security_relevant: false is defensible because all changes are compile-time annotations only, but consider setting security_relevant: true to ensure a redteam reviewer inspects the diff for any unintended behavioral delta to the SSRF guard."
+  blockers: []
 ---
 
 # M1-164b: Onboard infochat-ssrf to NullAway + Error Prone
