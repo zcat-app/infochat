@@ -1,9 +1,9 @@
 ---
 id: M1-157
 title: "Explicit connection-pool sizing per profile"
-status: pending
+status: done
 created: 2026-06-02
-last_updated: 2026-06-02
+last_updated: 2026-06-05
 blocked_by: []
 files_budget: 3
 files_scope:
@@ -26,12 +26,31 @@ test_plan:
 spec_refs:
   - docs/spec/deployment.md §Configuration surface (spec level)
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-05
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 55
+      removed: 9
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-05
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE item 1 states the pool should be 'sized for the collector's scheduled workers + lock connection' but does not give a concrete value or formula. The reviewer can confirm the property key and profile overrides exist, but cannot verify numeric correctness without independently knowing the worker counts from design notes. Consider adding a concrete expected value (e.g., 'max-size=8 for laptop, 12 for vps') so the acceptance criterion is fully self-contained."
+    - "files_budget is 3 but files_scope lists only 2 files. Either reduce files_budget to 2 to match files_scope, or add the third file to files_scope."
+  blockers: []
 ---
 
 # M1-157: Explicit connection-pool sizing per profile
