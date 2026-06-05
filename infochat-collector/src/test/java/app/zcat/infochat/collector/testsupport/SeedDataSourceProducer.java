@@ -7,22 +7,20 @@ import javax.sql.DataSource;
 
 /**
  * The single, repointable source of the test seed datasource (see
- * {@code @SeedDataSource}). Today it returns the application default datasource,
- * so DB-backed test behavior is identical to injecting the default directly.
- *
- * <p>This producer is the one point a later ticket (M1-127) edits to repoint
- * fixture seeding at an owner-role datasource: production code keeps injecting
- * the unqualified default (then bound to the least-privileged service role),
- * while every fixture seed/mutation/read flows through this owner-role seam.
- * Keeping that swap confined to this method is the whole purpose of the seam —
- * no individual test changes when the role split lands.</p>
+ * {@code @SeedDataSource}). It returns the owner-role {@code owner} datasource:
+ * production code injects the unqualified default (bound to the
+ * least-privileged service role), while every fixture seed/mutation/read flows
+ * through this owner-role seam — fixtures may freely write collector-owned
+ * tables that the service role cannot. Keeping the owner hop confined to this
+ * method is the whole purpose of the seam: no individual test knows which role
+ * seeds its data.
  */
 @ApplicationScoped
 class SeedDataSourceProducer {
 
     @Produces
     @SeedDataSource
-    DataSource seedDataSource(DataSource defaultDataSource) {
-        return defaultDataSource;
+    DataSource seedDataSource(@io.quarkus.agroal.DataSource("owner") DataSource ownerDataSource) {
+        return ownerDataSource;
     }
 }

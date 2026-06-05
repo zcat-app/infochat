@@ -138,9 +138,16 @@ infochat.profile=laptop                          # laptop|vps|pi|remote-llm
 # on an older JDK fails class-loading at startup.
 
 # ── Database ───────────────────────────────────────────────────────────
+# Least-privilege role split (security.md §DB roles): the DEFAULT
+# datasource connects as the per-service role, so every unqualified
+# @Inject DataSource site — including future code that forgets to
+# qualify — gets the weak principal (fail-closed). The username/password
+# pair is SET PER-SERVICE, NOT SHARED:
+#   collector: quarkus.datasource.username=infochat_collector
+#              quarkus.datasource.password=${INFOCHAT_COLLECTOR_PASSWORD}
+#   provider:  quarkus.datasource.username=infochat_provider
+#              quarkus.datasource.password=${INFOCHAT_PROVIDER_PASSWORD}
 quarkus.datasource.db-kind=postgresql
-quarkus.datasource.username=infochat
-quarkus.datasource.password=${INFOCHAT_DB_PASSWORD}
 quarkus.datasource.jdbc.url=jdbc:postgresql://localhost:5432/infochat
 # Per-service pool sizes — provider holds connections across LLM calls and
 # needs more headroom; collector is mostly short writes. SET PER-SERVICE,
@@ -149,14 +156,19 @@ quarkus.datasource.jdbc.url=jdbc:postgresql://localhost:5432/infochat
 #   provider:  quarkus.datasource.jdbc.max-size=30
 #   collector: quarkus.datasource.jdbc.max-size=15
 
-# Service-specific role overrides (recommended for least-privilege)
-quarkus.datasource.collector.username=infochat_collector
-quarkus.datasource.collector.password=${INFOCHAT_COLLECTOR_PASSWORD}
-quarkus.datasource.provider.username=infochat_provider
-quarkus.datasource.provider.password=${INFOCHAT_PROVIDER_PASSWORD}
+# Named `owner` datasource — COLLECTOR ONLY. Flyway migrations and
+# partition DDL run as the schema owner; the named Flyway config below
+# binds to this datasource. The production Provider declares NO owner
+# datasource at all: the user-facing service never holds owner
+# credentials (its test profile carries a %test-scoped owner datasource
+# for the test-time Flyway and fixture seeding only).
+quarkus.datasource.owner.db-kind=postgresql
+quarkus.datasource.owner.username=infochat
+quarkus.datasource.owner.password=${INFOCHAT_DB_PASSWORD}
+quarkus.datasource.owner.jdbc.url=jdbc:postgresql://localhost:5432/infochat
 
-quarkus.flyway.migrate-at-start=true
-quarkus.flyway.locations=classpath:db/migration
+quarkus.flyway.owner.migrate-at-start=true
+quarkus.flyway.owner.locations=classpath:db/migration
 
 # ── Bootstrap ──────────────────────────────────────────────────────────
 infochat.bootstrap.sources-file=bootstrap-sources.json
@@ -296,7 +308,7 @@ Notes:
 | Variable | Required? | Read by | Purpose |
 |---|---|---|---|
 | `INFOCHAT_PROFILE` | optional | both | Override `infochat.profile` |
-| `INFOCHAT_DB_PASSWORD` | yes | both (migrations) | Superuser DB password |
+| `INFOCHAT_DB_PASSWORD` | yes | collector (owner datasource: migrations + partition DDL) | Superuser DB password |
 | `INFOCHAT_COLLECTOR_PASSWORD` | yes | collector | Collector DB role password |
 | `INFOCHAT_PROVIDER_PASSWORD` | yes | provider | Provider DB role password |
 | `INFOCHAT_SIMPLEX_ADMIN_CONTACT_ID` | optional per-adapter; union across enabled adapters MUST be non-empty (§7.6.3) | provider | Bootstrap bot-admin contact id on the SimpleX adapter |

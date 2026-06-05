@@ -38,7 +38,13 @@ public class PartitionCreator {
     // so a transient failure does not immediately trip the alarm.
     static final Duration LIVENESS_THRESHOLD = Duration.ofDays(25);
 
+    // The one deliberate owner-datasource qualification in the Collector:
+    // CREATE TABLE … PARTITION OF requires parent-table ownership, which the
+    // least-privileged infochat_collector role on the default datasource does
+    // not have. Schema DDL belongs on the owner connection — the same
+    // principle that points Flyway at the owner datasource.
     @Inject
+    @io.quarkus.agroal.DataSource("owner")
     DataSource dataSource;
 
     // Seeded at construction so a freshly started instance does not warn before

@@ -14,8 +14,8 @@
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 187 |
-| deferred | 3 |
+| done | 188 |
+| deferred | 2 |
 | **total** | **204** |
 
 ---
@@ -86,9 +86,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 ---
 
 ## Deferred
-
-### blocked-on-new-ticket (1)
-- M1-127 → M1-163
 
 ### decomposed (1)
 - M1-034 → M1-034a
@@ -344,7 +341,7 @@ M1-160 (pending) ← runnable
 M1-161 (pending) ← runnable
 M1-162 (pending) ← runnable
 M1-163 (done)
-  └── M1-127 (deferred)
+  └── M1-127 (done)
 M1-164a (done)
   ├── M1-164 (done)
   │     └── M1-165 (done)

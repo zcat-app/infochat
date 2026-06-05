@@ -15,27 +15,28 @@ import java.util.TreeSet;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Boots the full Quarkus app against a DevServices-managed Postgres and asserts
  * that the three application role principals described in docs/spec/security.md
- * §DB roles exist and carry the NOLOGIN attribute.
+ * §DB roles exist and carry the expected login attributes: the two service
+ * roles can LOGIN, the admin role cannot.
  *
  * <p>The presence check pins V2__roles.sql's outcome: each of
  * {@code infochat_collector}, {@code infochat_provider}, {@code infochat_admin}
  * must appear in {@code pg_roles}. Silent absence of a principal would leave
  * per-table GRANTs in the M1-008 umbrella with no target.
  *
- * <p>The NOLOGIN check pins V4__nologin.sql's outcome: each principal must have
- * {@code rolcanlogin = false}. V2's {@code IF NOT EXISTS} guard creates a role
- * only when absent, so a pre-seeded role with {@code LOGIN} would survive V2
- * with the wrong attribute; V4's idempotent {@code ALTER ROLE … NOLOGIN}
- * forces the attribute uniformly. The test connects via the bootstrap
- * {@code infochat} superuser per M1-006's wiring; {@code pg_roles} is queried
- * (rather than {@code pg_authid}) so the assertion remains portable if the
- * named-datasource wiring ticket later switches the test connection to a
- * non-superuser role.
+ * <p>The login-attribute check pins the V4 → V31 progression:
+ * {@code infochat_collector} and {@code infochat_provider} must carry
+ * {@code rolcanlogin = true} (V31 makes them the connection principals of the
+ * per-service datasource wiring), while {@code infochat_admin} must remain
+ * {@code rolcanlogin = false} — it is the operator-psql / admin-procedure
+ * principal, never a service login. An admin role that silently gained LOGIN
+ * would widen the deployment's connectable surface. The test reads roles via
+ * the owner-role seed seam ({@code @SeedDataSource}); {@code pg_roles} is
+ * queried (rather than {@code pg_authid}) so the assertion does not require
+ * superuser privilege.
  *
  * <p>Named with the {@code IT} suffix and bound to the failsafe plugin (see
  * {@code infochat-collector/pom.xml}) so this test runs in the verify phase,
@@ -49,7 +50,7 @@ class DbRoleMatrixIT {
     DataSource dataSource;
 
     @Test
-    void applicationRolesAreCreatedAndNologin() throws Exception {
+    void applicationRolesHaveExpectedLoginAttributes() throws Exception {
         assertNotNull(dataSource, "DataSource must be injectable when quarkus-jdbc-postgresql is on the classpath");
 
         Set<String> expected = Set.of("infochat_collector", "infochat_provider", "infochat_admin");
@@ -75,7 +76,8 @@ class DbRoleMatrixIT {
 
         assertEquals(expected, found,
             "V2__roles.sql must create exactly the three role principals; found: " + found);
-        assertTrue(withLogin.isEmpty(),
-            "V4__nologin.sql must enforce NOLOGIN on every application role; roles still LOGIN: " + withLogin);
+        assertEquals(Set.of("infochat_collector", "infochat_provider"), withLogin,
+            "V31 must grant LOGIN to exactly the two service roles and leave "
+                + "infochat_admin NOLOGIN; roles with LOGIN: " + withLogin);
     }
 }
