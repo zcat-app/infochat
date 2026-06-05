@@ -229,7 +229,8 @@ public final class SsrfGuardedHttpClient {
         try {
             return Arrays.asList(InetAddress.getAllByName(host));
         } catch (UnknownHostException e) {
-            throw new SsrfPolicyException("unknown host: " + host, e);
+            throw new SsrfPolicyException(
+                SsrfPolicyException.Reason.UNKNOWN_HOST, "unknown host: " + host, e);
         }
     }
 
@@ -372,10 +373,13 @@ public final class SsrfGuardedHttpClient {
                         }
                         redirectCount++;
                         if (redirectCount > redirectCap) {
-                            throw new SsrfPolicyException("redirect cap exceeded");
+                            throw new SsrfPolicyException(
+                                SsrfPolicyException.Reason.REDIRECT_CAP_EXCEEDED,
+                                "redirect cap exceeded");
                         }
                         String location = response.headers().firstValue("Location")
                             .orElseThrow(() -> new SsrfPolicyException(
+                                SsrfPolicyException.Reason.REDIRECT_LOCATION_MISSING,
                                 "redirect response missing Location header"));
                         URI next = current.resolve(location);
                         if (isCrossOrigin(current, next)) {
@@ -437,14 +441,17 @@ public final class SsrfGuardedHttpClient {
     private ResolvedHost resolveAndValidate(URI uri, Set<String> allowedSchemes) {
         String scheme = uri.getScheme();
         if (scheme == null || !allowedSchemes.contains(scheme)) {
-            throw new SsrfPolicyException("scheme not allowed: " + scheme);
+            throw new SsrfPolicyException(
+                SsrfPolicyException.Reason.SCHEME_NOT_ALLOWED, "scheme not allowed: " + scheme);
         }
         if (uri.getRawUserInfo() != null) {
-            throw new SsrfPolicyException("userinfo segment not allowed");
+            throw new SsrfPolicyException(
+                SsrfPolicyException.Reason.USERINFO_NOT_ALLOWED, "userinfo segment not allowed");
         }
         String rawHost = uri.getHost();
         if (rawHost == null) {
-            throw new SsrfPolicyException("host missing from URI");
+            throw new SsrfPolicyException(
+                SsrfPolicyException.Reason.HOST_MISSING, "host missing from URI");
         }
         // M1-026 Finding 2: canonicalize before BOTH the seam call
         // AND the pin install. The same helper is invoked on the
@@ -457,15 +464,18 @@ public final class SsrfGuardedHttpClient {
         try {
             canonicalHost = canonicalizeHost(rawHost);
         } catch (IllegalArgumentException e) {
-            throw new SsrfPolicyException("invalid host: " + rawHost, e);
+            throw new SsrfPolicyException(
+                SsrfPolicyException.Reason.INVALID_HOST, "invalid host: " + rawHost, e);
         }
         List<InetAddress> addresses = resolverSeam.apply(canonicalHost);
         if (addresses == null || addresses.isEmpty()) {
-            throw new SsrfPolicyException("unknown host: " + canonicalHost);
+            throw new SsrfPolicyException(
+                SsrfPolicyException.Reason.UNKNOWN_HOST, "unknown host: " + canonicalHost);
         }
         for (InetAddress addr : addresses) {
             if (blocklist.isBlocked(addr)) {
-                throw new SsrfPolicyException("blocked IP: " + addr.getHostAddress());
+                throw new SsrfPolicyException(
+                    SsrfPolicyException.Reason.BLOCKED_IP, "blocked IP: " + addr.getHostAddress());
             }
         }
         return new ResolvedHost(canonicalHost, addresses);
@@ -498,6 +508,7 @@ public final class SsrfGuardedHttpClient {
                 long remainingNanos = bodyReadDeadline.toNanos() - elapsedNanos;
                 if (remainingNanos <= 0) {
                     throw new SsrfPolicyException(
+                        SsrfPolicyException.Reason.BODY_READ_DEADLINE_EXCEEDED,
                         "body read deadline exceeded after "
                         + TimeUnit.NANOSECONDS.toMillis(elapsedNanos) + "ms");
                 }
@@ -522,10 +533,12 @@ public final class SsrfGuardedHttpClient {
                     long elapsedAtTimeoutNanos = System.nanoTime() - bodyReadStartNanos;
                     if (elapsedAtTimeoutNanos >= bodyReadDeadline.toNanos()) {
                         throw new SsrfPolicyException(
+                            SsrfPolicyException.Reason.BODY_READ_DEADLINE_EXCEEDED,
                             "body read deadline exceeded after "
                             + TimeUnit.NANOSECONDS.toMillis(elapsedAtTimeoutNanos) + "ms");
                     }
                     throw new SsrfPolicyException(
+                        SsrfPolicyException.Reason.BODY_READ_TIMEOUT,
                         "body read timeout after " + readTimeout.toMillis() + "ms");
                 } catch (ExecutionException e) {
                     Throwable cause = e.getCause();
@@ -547,6 +560,7 @@ public final class SsrfGuardedHttpClient {
                 total += n;
                 if (total > bodyCap) {
                     throw new SsrfPolicyException(
+                        SsrfPolicyException.Reason.BODY_CAP_EXCEEDED,
                         "response body exceeded " + bodyCap + " bytes");
                 }
                 out.write(buf, 0, n);
@@ -673,16 +687,41 @@ public final class SsrfGuardedHttpClient {
      * Raised on any policy violation in the wrapper pipeline:
      * disallowed scheme, userinfo in URI, blocked IP, oversize
      * body, exceeded redirect cap, body-read timeout, body-read
-     * deadline exceeded.
+     * deadline exceeded. {@link #reason()} carries the typed
+     * failure mode — callers branch on it, never on message text
+     * (the message is human-facing and free to reword).
      */
     public static final class SsrfPolicyException extends RuntimeException {
 
-        public SsrfPolicyException(String message) {
-            super(message);
+        /** Typed failure mode, one constant per policy violation. */
+        public enum Reason {
+            SCHEME_NOT_ALLOWED,
+            USERINFO_NOT_ALLOWED,
+            HOST_MISSING,
+            INVALID_HOST,
+            UNKNOWN_HOST,
+            BLOCKED_IP,
+            REDIRECT_CAP_EXCEEDED,
+            REDIRECT_LOCATION_MISSING,
+            BODY_CAP_EXCEEDED,
+            BODY_READ_TIMEOUT,
+            BODY_READ_DEADLINE_EXCEEDED
         }
 
-        public SsrfPolicyException(String message, Throwable cause) {
+        private final Reason reason;
+
+        public SsrfPolicyException(Reason reason, String message) {
+            super(message);
+            this.reason = reason;
+        }
+
+        public SsrfPolicyException(Reason reason, String message, Throwable cause) {
             super(message, cause);
+            this.reason = reason;
+        }
+
+        public Reason reason() {
+            return reason;
         }
     }
 

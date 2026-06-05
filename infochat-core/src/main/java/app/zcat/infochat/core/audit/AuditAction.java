@@ -71,6 +71,15 @@ public enum AuditAction {
     BOOTSTRAP_ASSET_LOAD,
     GRANT_ADMIN,
     REVOKE_ADMIN,
+    // REVOKE_ADMIN_INTENT is the audit-on-intent row written on a
+    // separate auto-commit connection BEFORE the revoke transaction's
+    // is_admin=FALSE UPDATE (security.md §Authorization model: step 8
+    // "Audit-log the intent" precedes step 9 "Execute"). Unlike
+    // BAN_INTENT / INVITE_*_INTENT (first-call leg of confirm-gated
+    // commands), /revoke-admin is single-shot — the row's job is to
+    // survive the last-admin trigger rollback, so a refused attempt
+    // still leaves an operator-visible audit record.
+    REVOKE_ADMIN_INTENT,
     BAN,
     BAN_INTENT,
     UNBAN,

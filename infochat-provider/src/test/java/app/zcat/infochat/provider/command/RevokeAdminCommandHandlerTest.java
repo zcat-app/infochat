@@ -210,9 +210,14 @@ class RevokeAdminCommandHandlerTest {
                     "/revoke-admin against the sole-active-admin must surface error.revoke_admin.last_admin");
             assertTrue(isAdmin(target),
                     "target's is_admin must remain true (transaction rolled back)");
-            assertEquals(auditBefore, countAuditUnderTargetPrefix(PREFIX + "lastAdmin-"),
-                    "the REVOKE_ADMIN audit row pre-written inside the transaction must roll back "
-                            + "with the failed UPDATE (Invariant 7: no audit row for failed attempt)");
+            assertEquals(auditBefore + 1, countAuditUnderTargetPrefix(PREFIX + "lastAdmin-"),
+                    "exactly one audit row survives the refused attempt: the REVOKE_ADMIN row "
+                            + "pre-written inside the transaction rolls back with the failed "
+                            + "UPDATE; the separately-committed REVOKE_ADMIN_INTENT row persists");
+            assertEquals(1L, countAuditByActionAndTarget("REVOKE_ADMIN_INTENT", target),
+                    "the REVOKE_ADMIN_INTENT row (separate auto-commit connection) must survive "
+                            + "the trigger-raised rollback so the refused attempt stays "
+                            + "operator-visible");
             assertEquals(0L, countAuditByActionAndTarget("REVOKE_ADMIN", target),
                     "no REVOKE_ADMIN audit row may exist for the trigger-rolled-back attempt");
         } finally {

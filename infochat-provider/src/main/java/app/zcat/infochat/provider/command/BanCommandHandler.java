@@ -60,10 +60,11 @@ import java.util.UUID;
  *       {@code trg_last_admin_protection_update} trigger raises
  *       {@code last_admin_protection: ...} on UPDATEs that would leave
  *       the deployment with zero {@code is_admin=TRUE AND
- *       is_banned=FALSE} rows. The handler matches the literal
- *       {@code last_admin_protection} in the SQLException message, rolls
- *       back the transaction (so the pre-written audit rows go with the
- *       failed mutation), and surfaces {@code error.ban.last_admin}.</li>
+ *       is_banned=FALSE} rows. The handler matches the trigger's
+ *       dedicated SQLSTATE {@code IC001} (V35, {@code USING ERRCODE}),
+ *       rolls back the transaction (so the pre-written audit rows go
+ *       with the failed mutation), and surfaces
+ *       {@code error.ban.last_admin}.</li>
  *   <li>Mutation — for an unknown target contact, MINT a {@code preban}
  *       row via {@code INSERT INTO users (...) VALUES (..., 'preban',
  *       NOW(), <actor.id>, <reason>)}. For a known target, UPDATE the
@@ -88,6 +89,10 @@ import java.util.UUID;
  */
 @ApplicationScoped
 public class BanCommandHandler implements CommandHandler {
+
+    // SQLSTATE raised by the last-admin protection triggers
+    // (V35: RAISE ... USING ERRCODE = 'IC001').
+    private static final String LAST_ADMIN_SQLSTATE = "IC001";
 
     private static final String SELECT_PENDING_CONTACT_BOUND_INVITES_SQL =
             "SELECT id FROM invite_code "
@@ -288,12 +293,11 @@ public class BanCommandHandler implements CommandHandler {
                 conn.commit();
             } catch (SQLException e) {
                 conn.rollback();
-                // The V5 trg_last_admin_protection_update trigger raises
-                // RAISE EXCEPTION 'last_admin_protection: cannot leave
-                // the deployment with zero bot admins'. The literal
-                // substring is the load-bearing match key (spec-pinned
-                // in V5).
-                if (e.getMessage() != null && e.getMessage().contains("last_admin_protection")) {
+                // The last-admin protection triggers raise USING
+                // ERRCODE 'IC001' (V35); the SQLSTATE is the
+                // load-bearing match key — message text is free to
+                // reword.
+                if (LAST_ADMIN_SQLSTATE.equals(e.getSQLState())) {
                     return reply(scope, bundleLoader.get(BundleKeys.ERROR_BAN_LAST_ADMIN));
                 }
                 // Redact the contact id in the wrapping message: §Secrets

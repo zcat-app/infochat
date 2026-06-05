@@ -19,7 +19,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code is_admin} to FALSE) and the ban path (flip
  * {@code is_banned} to TRUE on the only admin) fire the same guard;
  * both expect an exception whose message contains the literal
- * substring {@code last_admin_protection}. The two-admin happy path
+ * substring {@code last_admin_protection} and whose SQLSTATE is the
+ * trigger's dedicated {@code IC001} (V35, {@code USING ERRCODE}) —
+ * the typed signal handlers branch on. The two-admin happy path
  * verifies the guard does NOT fire when a sibling admin remains.
  */
 class LastAdminTriggerTest extends PostgresSchemaTestBase {
@@ -32,6 +34,8 @@ class LastAdminTriggerTest extends PostgresSchemaTestBase {
                     () -> updateIsAdmin(c, adminId, false));
             assertTrue(ex.getMessage().contains("last_admin_protection"),
                     "expected last_admin_protection in: " + ex.getMessage());
+            assertEquals("IC001", ex.getSQLState(),
+                    "expected last-admin ERRCODE IC001, got: " + ex.getSQLState());
         }
     }
 
@@ -43,6 +47,8 @@ class LastAdminTriggerTest extends PostgresSchemaTestBase {
                     () -> updateIsBanned(c, adminId, true));
             assertTrue(ex.getMessage().contains("last_admin_protection"),
                     "expected last_admin_protection in: " + ex.getMessage());
+            assertEquals("IC001", ex.getSQLState(),
+                    "expected last-admin ERRCODE IC001, got: " + ex.getSQLState());
         }
     }
 

@@ -86,17 +86,15 @@ public class UrlProbe {
             }
             return ProbeResult.failure(BundleKeys.ERROR_ADD_SOURCE_URL_UNREACHABLE, status);
         } catch (SsrfPolicyException e) {
-            // The wrapper raises SsrfPolicyException for: blocked IP /
-            // scheme / userinfo / oversize body / redirect cap / body-
-            // read timeout / body-read deadline. The first three are
-            // "blocked"; the last three are "timeout/unreachable".
-            // Split on message prefix because the exception is a single
-            // class.
-            String message = e.getMessage() == null ? "" : e.getMessage();
-            if (message.startsWith("body read timeout") || message.startsWith("body read deadline")) {
-                return ProbeResult.failure(BundleKeys.ERROR_ADD_SOURCE_URL_TIMEOUT, 0);
-            }
-            return ProbeResult.failure(BundleKeys.ERROR_ADD_SOURCE_URL_BLOCKED_SSRF, 0);
+            // Body-read stalls are slow-server symptoms, not policy
+            // rejections — surface them as TIMEOUT. Every other reason
+            // (and any future one, via the default arm) is a policy
+            // violation → BLOCKED_SSRF, the conservative bucket.
+            return switch (e.reason()) {
+                case BODY_READ_TIMEOUT, BODY_READ_DEADLINE_EXCEEDED ->
+                        ProbeResult.failure(BundleKeys.ERROR_ADD_SOURCE_URL_TIMEOUT, 0);
+                default -> ProbeResult.failure(BundleKeys.ERROR_ADD_SOURCE_URL_BLOCKED_SSRF, 0);
+            };
         } catch (java.net.http.HttpTimeoutException e) {
             return ProbeResult.failure(BundleKeys.ERROR_ADD_SOURCE_URL_TIMEOUT, 0);
         } catch (IOException e) {

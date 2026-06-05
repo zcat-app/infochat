@@ -183,6 +183,45 @@ class UrlProbeTest {
         assertEquals(BundleKeys.ERROR_ADD_SOURCE_URL_TIMEOUT, result.failureBundleKey());
     }
 
+    // (d) timeout — body-read stall variant: the wrapper raises
+    // SsrfPolicyException(BODY_READ_TIMEOUT) rather than
+    // HttpTimeoutException, and the probe must map the typed reason
+    // to TIMEOUT, not to the BLOCKED_SSRF default.
+    @Test
+    void bodyReadStallPropagatesAsUrlTimeout() {
+        // Headers promise 2 bytes; the server sends 1 and stalls past
+        // the 300ms readTimeout. The blocked read never completes (no
+        // further bytes arrive), so the per-read watchdog fires
+        // deterministically.
+        server.createContext("/stall", exchange -> {
+            exchange.sendResponseHeaders(200, 2);
+            OutputStream out = exchange.getResponseBody();
+            out.write('x');
+            out.flush();
+            try {
+                Thread.sleep(2_000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            exchange.close();
+        });
+
+        SsrfGuardedHttpClient stallTimingClient = new SsrfGuardedHttpClient(
+                new LoopbackPermitting(),
+                /* connectTimeout     */ Duration.ofSeconds(2),
+                /* requestTimeout     */ Duration.ofSeconds(2),
+                /* readTimeout        */ Duration.ofMillis(300),
+                /* bodyReadDeadline   */ Duration.ofMinutes(2),
+                /* bodyCap            */ 10L * 1024,
+                /* redirectCap        */ 3);
+        UrlProbe probe = new UrlProbe(stallTimingClient);
+
+        ProbeResult result = probe.probe(URI.create("http://127.0.0.1:" + port + "/stall"));
+
+        assertFalse(result.ok(), "body-read stall past readTimeout must FAIL");
+        assertEquals(BundleKeys.ERROR_ADD_SOURCE_URL_TIMEOUT, result.failureBundleKey());
+    }
+
     private SsrfGuardedHttpClient loopbackPermittingClient() {
         return new SsrfGuardedHttpClient(
                 new LoopbackPermitting(),
