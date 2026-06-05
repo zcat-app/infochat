@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-134 — quarantine_review NOTIFY channel completeness (CT2) (complexity: high, risk: medium)
+- M1-134 — quarantine_review NOTIFY channel completeness (CT2) (complexity: high, risk: high)
 - M1-139 — Kind-6 repost edge resolution (complexity: high, risk: medium)
 - M1-144 — UserRepository extraction + /promote FOR UPDATE (complexity: medium, risk: medium)
 - M1-150 — Digest hygiene (concurrency guard, timezone WARN, broad-catch narrow) (complexity: low, risk: low)
