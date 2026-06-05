@@ -16,15 +16,15 @@ import org.jspecify.annotations.NonNull;
  * adapter implements: an adapter-selection {@link #name()}, an
  * instance-level {@link #trustLevel()}, a {@link #capabilities()}
  * accessor, a strongly-typed {@link #assertIdentity} for inbound
- * messages, {@link #send} / {@link #update} / {@link #finalize} for
- * outbound replies, {@link #setTyping} for the typing-indicator
+ * messages, {@link #send} / {@link #update} / {@link #finalizeMessage}
+ * for outbound replies, {@link #setTyping} for the typing-indicator
  * pulse, and {@link #setInboundHandler} for Provider to register its
- * inbound dispatch callback.</p>
+ * inbound dispatch callback. Transport lifecycle is {@link #start()} /
+ * {@link #stop()} — no-op defaults so transportless adapters (the
+ * in-memory test double) are unaffected.</p>
  *
- * <p>Lifecycle methods ({@code start(InboundHandler)} / {@code stop()})
- * and group-membership probing ({@code groupExists}) are deferred to
- * the first concrete adapter (SimpleX / Signal) and to the groups
- * milestone (T2-F) respectively — speculative SPI surface for
+ * <p>Group-membership probing ({@code groupExists}) stays deferred to
+ * the groups milestone (T2-F) — speculative SPI surface for
  * non-existent callers would violate the engineering rules'
  * "no defensive code for impossible scenarios" corollary against
  * speculative API.</p>
@@ -85,7 +85,7 @@ public interface MessagingAdapter {
      *
      * @param msg the outbound message to deliver; never null.
      * @return an opaque {@link MessageHandle} the caller can pass to
-     *         {@link #update} / {@link #finalize}. Never null. The
+     *         {@link #update} / {@link #finalizeMessage}. Never null. The
      *         handle is valid only within this adapter, in-process —
      *         see {@link MessageHandle} for the full invariant list.
      * @throws MessagingException on transport failure; the exception's
@@ -112,17 +112,21 @@ public interface MessagingAdapter {
      * adapters with edit support this is one last
      * {@link #update}-shaped write; for others it is the only
      * {@link #send} that ever happens. Always called in a try/finally
-     * so placeholders are never left dangling. After {@code finalize}
-     * any further {@link #update} on the same handle MUST throw a
-     * {@link MessagingException} with category
+     * so placeholders are never left dangling. After
+     * {@code finalizeMessage} any further {@link #update} on the same
+     * handle MUST throw a {@link MessagingException} with category
      * {@link FailureCategory#PERMANENT}.
+     *
+     * <p>Named {@code finalizeMessage} (not {@code finalize}) so the
+     * SPI method cannot be confused with — or overload —
+     * {@link Object#finalize()}.</p>
      *
      * @param handle the handle returned by {@link #send}; never null.
      * @param body   the final body text; never null.
      * @throws MessagingException on transport failure or on attempting
      *         to mutate an already-finalized handle.
      */
-    void finalize(@NonNull MessageHandle handle, @NonNull String body) throws MessagingException;
+    void finalizeMessage(@NonNull MessageHandle handle, @NonNull String body) throws MessagingException;
 
     /**
      * Show or clear the typing indicator for a scope. No-op for
@@ -171,6 +175,32 @@ public interface MessagingAdapter {
      */
     default void onMembershipEvent(@NonNull MembershipEvent event) {
         // No-op — adapters surface events; Provider consumes them.
+    }
+
+    /**
+     * Start the adapter's transport (spawn the backing subprocess,
+     * open the wire connection, probe readiness). Called once by
+     * Provider's startup driver after handler registration; a failure
+     * here is isolated per adapter (one adapter's failed start must
+     * not prevent the others from starting). Default is no-op so
+     * transportless adapters (the in-memory test double) are
+     * unaffected.
+     *
+     * @throws MessagingException on transport startup failure.
+     */
+    default void start() throws MessagingException {
+        // No-op — overridden by adapters with a transport to bring up.
+    }
+
+    /**
+     * Stop the adapter's transport (close the wire connection, tear
+     * down the backing subprocess). Counterpart to {@link #start()};
+     * called by Provider's shutdown path. Idempotent: stopping an
+     * adapter that never started (or already stopped) is a no-op.
+     * Default is no-op so transportless adapters are unaffected.
+     */
+    default void stop() {
+        // No-op — overridden by adapters with a transport to tear down.
     }
 
     /**

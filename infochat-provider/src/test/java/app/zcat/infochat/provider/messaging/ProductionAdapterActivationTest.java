@@ -200,9 +200,9 @@ class ProductionAdapterActivationTest {
     /**
      * Test-only adapter that records {@code start()} invocations and
      * optionally throws on call. Mirrors the inner-fake pattern from
-     * {@link AdapterRegistryTest.FakeAdapterX} but adds the public
-     * {@code start()} method {@link MessagingStartup}'s reflective
-     * lookup discovers. {@code throwOnStart=true} still increments
+     * {@link AdapterRegistryTest.FakeAdapterX} but overrides the SPI's
+     * {@code start()} that {@link MessagingStartup} dispatches
+     * directly. {@code throwOnStart=true} still increments
      * the counter so the resilience test can also assert "failing
      * adapter saw its own start()".
      */
@@ -216,6 +216,7 @@ class ProductionAdapterActivationTest {
             this.throwOnStart = throwOnStart;
         }
 
+        @Override
         public void start() {
             startCount.incrementAndGet();
             if (throwOnStart) {
@@ -258,7 +259,7 @@ class ProductionAdapterActivationTest {
         }
 
         @Override
-        public void finalize(MessageHandle handle, String body) {
+        public void finalizeMessage(MessageHandle handle, String body) {
         }
 
         @Override

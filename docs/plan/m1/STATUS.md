@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 15 |
+| pending | 14 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 186 |
+| done | 187 |
 | deferred | 3 |
 | **total** | **204** |
 
@@ -28,7 +28,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-139 — Kind-6 repost edge resolution (complexity: high, risk: medium)
 - M1-143 — MembershipEventHandler audit-before-effect (Invariant 7) (complexity: medium, risk: medium)
 - M1-144 — UserRepository extraction + /promote FOR UPDATE (complexity: medium, risk: medium)
-- M1-148 — MessagingAdapter SPI lifecycle (finalize→shutdown, start/stop) + low-level cleanup (complexity: medium, risk: low)
 - M1-150 — Digest hygiene (concurrency guard, timezone WARN, broad-catch narrow) (complexity: low, risk: low)
 - M1-152 — Schema-hardening migration (stage2_verdict CHECK + V27 audit verb + Nostr index) (complexity: low, risk: medium)
 - M1-154 — Provider chat/sanitizer hygiene (pattern caching, closed-list whitespace, dispatcher completeness) (complexity: low, risk: low)
@@ -82,7 +81,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-163 | Shared DB test-seeding seam for the IT suite | 2026-06-05 | round 1 APPROVE |
 | M1-157 | Explicit connection-pool sizing per profile | 2026-06-05 | round 1 APPROVE |
 | M1-155 | InboundRouter hygiene (chat body-cap ordering, bidi-control gap, lookupGroupId Optional) | 2026-06-05 | round 1 APPROVE |
-| M1-146 | Defensive-code sweep: remove dead internal null-guards (CT4) | 2026-06-05 | round 1 APPROVE |
+| M1-148 | MessagingAdapter SPI lifecycle (finalize→finalizeMessage, start/stop) + low-level cleanup | 2026-06-05 | round 1 APPROVE |
 
 ---
 
@@ -332,7 +331,7 @@ M1-142 (done)
 M1-143 (pending) ← runnable
 M1-145 (done)
 M1-147 (done)
-M1-148 (pending) ← runnable
+M1-148 (done)
 M1-149 (done)
 M1-150 (pending) ← runnable
 M1-152 (pending) ← runnable

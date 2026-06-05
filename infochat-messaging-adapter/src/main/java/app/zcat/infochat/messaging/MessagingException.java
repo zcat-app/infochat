@@ -5,7 +5,7 @@ import org.jspecify.annotations.Nullable;
 /**
  * Checked exception raised by every {@link MessagingAdapter} method
  * that can fail at the transport layer ({@link MessagingAdapter#send},
- * {@link MessagingAdapter#update}, {@link MessagingAdapter#finalize}).
+ * {@link MessagingAdapter#update}, {@link MessagingAdapter#finalizeMessage}).
  * Per {@code docs/design/06-messaging.md} §6.2 and
  * {@code docs/spec/messaging.md} §Failure handling.
  *

@@ -147,7 +147,7 @@ public final class InMemoryAdapter implements MessagingAdapter {
     }
 
     @Override
-    public void finalize(@NonNull MessageHandle handle, @NonNull String body) throws MessagingException {
+    public void finalizeMessage(@NonNull MessageHandle handle, @NonNull String body) throws MessagingException {
         requireKnownAndOpen(handle).add(new UpdateEvent(body, true));
         finalized.put(handle.opaqueValue(), Boolean.TRUE);
     }

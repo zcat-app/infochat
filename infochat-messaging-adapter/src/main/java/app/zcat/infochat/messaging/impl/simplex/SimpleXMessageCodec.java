@@ -522,10 +522,17 @@ final class SimpleXMessageCodec {
     }
 
     private static DecodedFrame decodeSendAck(@Nullable String corrId, JsonNode resp) {
-        // Real simplex-chat returns one of several response shapes. Look for
-        // a chatItemId anywhere reasonable; fall back to the bare envelope if
-        // simplex-chat's response shape later varies.
-        String chatItemId = findFirstString(resp, "itemId", "chatItemId");
+        // Known simplex-chat shapes only: the chat-item id lives either
+        // directly on the response or under the chatItems container.
+        // Reading the known fields — not a breadth-first key search over
+        // every child object — keeps attacker-influenced envelope content
+        // (echoed inbound bytes) from being picked up as a forged
+        // chatItemId out of an unrelated nested object.
+        String chatItemId = firstTextual(
+                resp.get("itemId"),
+                resp.get("chatItemId"),
+                resp.path("chatItems").get("itemId"),
+                resp.path("chatItems").get("chatItemId"));
         if (chatItemId == null) {
             return new Ignored("send-ack-without-chatItemId");
         }
@@ -533,7 +540,14 @@ final class SimpleXMessageCodec {
     }
 
     private static DecodedFrame decodeError(@Nullable String corrId, JsonNode resp) {
-        String errorTag = findFirstString(resp, "chatError", "errorType", "error");
+        // Same known-field rule as decodeSendAck: the discriminating tag
+        // is either a textual chatError / errorType / error directly on
+        // the response, or nested as {chatError: {errorType: "..."}}.
+        String errorTag = firstTextual(
+                resp.get("chatError"),
+                resp.path("chatError").get("errorType"),
+                resp.get("errorType"),
+                resp.get("error"));
         FailureCategory category = classifyError(errorTag == null ? "" : errorTag);
         // Fixed sentinel when no recognized error tag is found — the prior
         // resp.toString() fallback dumped the whole error envelope (which
@@ -558,29 +572,22 @@ final class SimpleXMessageCodec {
         return value == null || value.isNull() ? null : value.asText();
     }
 
-    /** Depth-first search for a textual node with one of the given names. */
-    private static @Nullable String findFirstString(JsonNode node, String... names) {
-        for (String name : names) {
-            JsonNode direct = node.get(name);
-            if (direct != null && direct.isTextual()) {
-                return direct.asText();
-            }
+    /** First textual node among the given candidates, or null. */
+    private static @Nullable String firstTextual(@Nullable JsonNode first,
+                                                 @Nullable JsonNode second,
+                                                 @Nullable JsonNode third,
+                                                 @Nullable JsonNode fourth) {
+        if (first != null && first.isTextual()) {
+            return first.asText();
         }
-        // One-level descent: simplex-chat error envelopes nest the
-        // discriminating tag under {chatError: {type: "..."}}.
-        if (node.isObject()) {
-            var fieldNames = node.fieldNames();
-            while (fieldNames.hasNext()) {
-                JsonNode child = node.get(fieldNames.next());
-                if (child != null && child.isObject()) {
-                    for (String name : names) {
-                        JsonNode tagged = child.get(name);
-                        if (tagged != null && tagged.isTextual()) {
-                            return tagged.asText();
-                        }
-                    }
-                }
-            }
+        if (second != null && second.isTextual()) {
+            return second.asText();
+        }
+        if (third != null && third.isTextual()) {
+            return third.asText();
+        }
+        if (fourth != null && fourth.isTextual()) {
+            return fourth.asText();
         }
         return null;
     }

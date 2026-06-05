@@ -171,6 +171,7 @@ public final class SignalAdapter implements MessagingAdapter {
      * @throws IllegalStateException if the capability-only constructor
      *         was used or if the start sequence fails.
      */
+    @Override
     public void start() {
         if (binary == null || dataDir == null || account == null
                 || botAci == null || daemonEndpoint == null) {
@@ -252,6 +253,16 @@ public final class SignalAdapter implements MessagingAdapter {
         LOG.infof("Signal adapter stopped");
     }
 
+    /**
+     * SPI lifecycle teardown — delegates to {@link #close()} (the
+     * pre-existing teardown entry point) so both spellings share one
+     * idempotent implementation.
+     */
+    @Override
+    public void stop() {
+        close();
+    }
+
     @Override
     public Identity assertIdentity(@NonNull InboundMessage msg) {
         // The cryptographic assertion lives in the JSON-RPC client's
@@ -273,8 +284,8 @@ public final class SignalAdapter implements MessagingAdapter {
     }
 
     @Override
-    public void finalize(@NonNull MessageHandle handle, @NonNull String body) throws MessagingException {
-        requireConnected("finalize").finalizeHandle(handle, body);
+    public void finalizeMessage(@NonNull MessageHandle handle, @NonNull String body) throws MessagingException {
+        requireConnected("finalizeMessage").finalizeHandle(handle, body);
     }
 
     @Override
@@ -344,17 +355,23 @@ public final class SignalAdapter implements MessagingAdapter {
 
     private static boolean awaitEndpoint(InetSocketAddress endpoint, Duration timeout) {
         long deadline = System.nanoTime() + timeout.toNanos();
+        // Exponential backoff from the base probe interval toward a 1 s
+        // ceiling; each sleep is additionally capped at the time remaining
+        // so the loop never oversleeps past the deadline.
+        long sleepMs = ENDPOINT_PROBE_INTERVAL.toMillis();
         while (System.nanoTime() < deadline) {
             try (Socket probe = new Socket()) {
                 probe.connect(endpoint, (int) ENDPOINT_PROBE_INTERVAL.toMillis() * 2);
                 return true;
             } catch (IOException e) {
+                long remainingMs = Math.max(0, (deadline - System.nanoTime()) / 1_000_000);
                 try {
-                    Thread.sleep(ENDPOINT_PROBE_INTERVAL.toMillis());
+                    Thread.sleep(Math.min(sleepMs, remainingMs));
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
                     return false;
                 }
+                sleepMs = Math.min(sleepMs * 2, 1_000);
             }
         }
         return false;

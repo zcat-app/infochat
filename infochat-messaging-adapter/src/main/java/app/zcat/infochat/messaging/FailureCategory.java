@@ -4,7 +4,7 @@ package app.zcat.infochat.messaging;
  * Categorisation of {@link MessagingException} failures per
  * {@code docs/spec/messaging.md} §Failure handling. Every
  * {@link MessagingAdapter#send}, {@link MessagingAdapter#update}, and
- * {@link MessagingAdapter#finalize} failure raised by an adapter is
+ * {@link MessagingAdapter#finalizeMessage} failure raised by an adapter is
  * tagged with one of these two categories at throw site.
  *
  * <p>An adapter that cannot tell the two apart MUST default to

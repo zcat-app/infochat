@@ -338,7 +338,7 @@ class InboundRouterContactIdRedactionTest {
         }
 
         @Override
-        public void finalize(MessageHandle handle, String body) {
+        public void finalizeMessage(MessageHandle handle, String body) {
             throw new UnsupportedOperationException();
         }
 
@@ -390,7 +390,7 @@ class InboundRouterContactIdRedactionTest {
         }
 
         @Override
-        public void finalize(MessageHandle handle, String body) {
+        public void finalizeMessage(MessageHandle handle, String body) {
             throw new UnsupportedOperationException();
         }
 

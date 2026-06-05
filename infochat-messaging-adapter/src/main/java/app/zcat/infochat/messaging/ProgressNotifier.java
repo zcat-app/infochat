@@ -15,7 +15,7 @@ import org.jspecify.annotations.NonNull;
  *   <li>Coalescing pending edits and emitting them via
  *       {@link MessagingAdapter#update} at the next eligible tick,
  *       honoring {@code max(adapterMin, systemFloor)} for cadence.</li>
- *   <li>Calling {@link MessagingAdapter#finalize} on terminal
+ *   <li>Calling {@link MessagingAdapter#finalizeMessage} on terminal
  *       {@link ProgressStage#COMPLETED} / {@link ProgressStage#FAILED}
  *       inside a try/finally so placeholders are never left dangling.</li>
  * </ol>

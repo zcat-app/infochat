@@ -22,9 +22,9 @@ import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.time.Duration;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Random;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
@@ -32,8 +32,8 @@ import java.util.function.Consumer;
  * SimpleX production adapter. Owns a {@link SimpleXSubprocess} that runs
  * a local simplex-chat instance and a {@link SimpleXWebSocketClient} that
  * speaks the simplex-chat WebSocket bot API. Implements the full
- * {@link MessagingAdapter} contract: send / update / finalize via the
- * WebSocket, typing as a best-effort fire-and-forget, identity assertion
+ * {@link MessagingAdapter} contract: send / update / finalizeMessage via
+ * the WebSocket, typing as a best-effort fire-and-forget, identity assertion
  * from the SimpleX-cryptographically-routed inbound envelope (decision
  * D10 + D32, {@code docs/spec/messaging.md} §Per-adapter trust level).
  *
@@ -85,10 +85,26 @@ public final class SimpleXAdapter implements MessagingAdapter {
     private final @Nullable Consumer<String> adminNotifier;
     private final @Nullable SimpleXIdentity botIdentity;
 
+    /**
+     * Upper bound on tracked send-handles. Pre-M1-148 the handle and
+     * finalized tables grew for the life of the adapter (one entry per
+     * send, never removed). Access-order LRU keeps the hot tail; an
+     * evicted handle behaves exactly like an unknown one (PERMANENT
+     * "unknown handle"), the same outcome a Provider restart produces —
+     * handles are in-process-only by the {@link MessageHandle} contract.
+     */
+    static final int MAX_TRACKED_HANDLES = 1_024;
+
     private final AtomicLong handleCounter = new AtomicLong();
     private final AtomicLong commandCounter = new AtomicLong();
-    private final Map<String, SimpleXMessageHandle> handles = new ConcurrentHashMap<>();
-    private final Map<String, Boolean> finalized = new ConcurrentHashMap<>();
+    /** Guarded by its own monitor — LinkedHashMap is not thread-safe. */
+    private final Map<String, TrackedHandle> handles =
+            new LinkedHashMap<>(64, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<String, TrackedHandle> eldest) {
+                    return size() > MAX_TRACKED_HANDLES;
+                }
+            };
 
     private volatile @Nullable InboundHandler inboundHandler;
     private volatile @Nullable SimpleXSubprocess subprocess;
@@ -99,7 +115,7 @@ public final class SimpleXAdapter implements MessagingAdapter {
      * {@link #name}, {@link #trustLevel}, {@link #capabilities}, and
      * {@link #setInboundHandler} (the handler is stored for inspection)
      * but every transport call — {@link #start}, {@link #send},
-     * {@link #update}, {@link #finalize}, {@link #setTyping},
+     * {@link #update}, {@link #finalizeMessage}, {@link #setTyping},
      * {@link #assertIdentity} — throws because no config or
      * {@link HttpClient} was provided. Used by
      * {@code SimpleXAdapterSkeletonTest} to assert the static capability
@@ -152,6 +168,7 @@ public final class SimpleXAdapter implements MessagingAdapter {
      * launch / readiness / connect failure so Provider sees the failure
      * via the same exception channel as transport faults.
      */
+    @Override
     public void start() throws MessagingException {
         SimpleXConfig cfg = requireWired();
         HttpClient http = httpClient;
@@ -166,7 +183,7 @@ public final class SimpleXAdapter implements MessagingAdapter {
         // inmemory-only deployment never trips simplex's checks. Without
         // this call a mis-typed binary path or out-of-range ws-port
         // surfaces deep inside subprocess launch as an opaque exception
-        // that MessagingStartup's §6.7 catch-Throwable silently absorbs.
+        // that MessagingStartup's §6.7 per-adapter catch silently absorbs.
         cfg.validate();
         // D10 trust anchor: the bot's queue address must be a real
         // cryptographic identity, never blank. A blank identity would let
@@ -236,6 +253,16 @@ public final class SimpleXAdapter implements MessagingAdapter {
         }
     }
 
+    /**
+     * SPI lifecycle teardown — delegates to {@link #close()} (the
+     * pre-existing teardown entry point) so both spellings share one
+     * idempotent implementation.
+     */
+    @Override
+    public void stop() {
+        close();
+    }
+
     @Override
     public Identity assertIdentity(@NonNull InboundMessage msg) {
         // SimpleX is HIGH trust because the contact id is the cryptographic
@@ -253,7 +280,11 @@ public final class SimpleXAdapter implements MessagingAdapter {
         String envelope = SimpleXMessageCodec.encodeSendCommand(corrId, msg.scope(), msg.text());
         String chatItemId = ws.sendCommand(corrId, envelope, ACK_TIMEOUT);
         String opaque = "simplex-" + handleCounter.incrementAndGet();
-        handles.put(opaque, new SimpleXMessageHandle(chatItemId, msg.scope(), msg.correlationId()));
+        TrackedHandle tracked = new TrackedHandle(
+                new SimpleXMessageHandle(chatItemId, msg.scope(), msg.correlationId()));
+        synchronized (handles) {
+            handles.put(opaque, tracked);
+        }
         return new MessageHandle(opaque);
     }
 
@@ -271,17 +302,17 @@ public final class SimpleXAdapter implements MessagingAdapter {
     }
 
     @Override
-    public void finalize(@NonNull MessageHandle handle, @NonNull String body) throws MessagingException {
+    public void finalizeMessage(@NonNull MessageHandle handle, @NonNull String body) throws MessagingException {
         SimpleXMessageHandle internal = requireKnownAndOpen(handle);
         SimpleXWebSocketClient ws = requireConnected();
         String corrId = nextCorrId();
         String envelope = SimpleXMessageCodec.encodeFinalizeCommand(
                 corrId, internal.chatItemId(), internal.scope(), body);
         ws.sendCommand(corrId, envelope, ACK_TIMEOUT);
-        // SPI Javadoc lines 115–123: after finalize, any update() on the
-        // same handle MUST throw PERMANENT. The flag is checked above in
+        // SPI contract: after finalizeMessage, any update() on the same
+        // handle MUST throw PERMANENT. The flag is checked above in
         // requireKnownAndOpen — set it here on success.
-        finalized.put(handle.opaqueValue(), Boolean.TRUE);
+        markFinalized(handle.opaqueValue());
     }
 
     @Override
@@ -332,16 +363,30 @@ public final class SimpleXAdapter implements MessagingAdapter {
     }
 
     private SimpleXMessageHandle requireKnownAndOpen(MessageHandle handle) throws MessagingException {
-        SimpleXMessageHandle internal = handles.get(handle.opaqueValue());
-        if (internal == null) {
+        TrackedHandle tracked;
+        synchronized (handles) {
+            tracked = handles.get(handle.opaqueValue());
+        }
+        if (tracked == null) {
             throw new MessagingException(FailureCategory.PERMANENT,
                     "unknown handle: " + handle.opaqueValue());
         }
-        if (Boolean.TRUE.equals(finalized.get(handle.opaqueValue()))) {
-            throw new MessagingException(FailureCategory.PERMANENT,
-                    "handle already finalized: " + handle.opaqueValue());
+        synchronized (handles) {
+            if (tracked.finalized) {
+                throw new MessagingException(FailureCategory.PERMANENT,
+                        "handle already finalized: " + handle.opaqueValue());
+            }
         }
-        return internal;
+        return tracked.handle;
+    }
+
+    private void markFinalized(String opaqueValue) {
+        synchronized (handles) {
+            TrackedHandle tracked = handles.get(opaqueValue);
+            if (tracked != null) {
+                tracked.finalized = true;
+            }
+        }
     }
 
     private SimpleXConfig requireWired() {
@@ -368,15 +413,21 @@ public final class SimpleXAdapter implements MessagingAdapter {
     }
 
     /**
-     * TCP-probe loop: dial 127.0.0.1:wsPort every ~100 ms until the
-     * handshake succeeds (simplex-chat opened its socket) or the deadline
-     * elapses. Acceptance item 5 requires the WS endpoint be reachable
-     * before WS connect — otherwise the {@link HttpClient} handshake
-     * fails with a connection-refused that the supervisor then routes
-     * through a full restart cycle.
+     * TCP-probe loop: dial 127.0.0.1:wsPort until the handshake succeeds
+     * (simplex-chat opened its socket) or the deadline elapses. The WS
+     * endpoint must be reachable before WS connect — otherwise the
+     * {@link HttpClient} handshake fails with a connection-refused that
+     * the supervisor then routes through a full restart cycle.
+     *
+     * <p>Probe pacing is exponential backoff: simplex-chat usually opens
+     * its socket quickly, so probe densely at first (50 ms) and back off
+     * ×2 toward a 1 s ceiling as failures accumulate. Each sleep is
+     * additionally capped at the time remaining to the deadline so the
+     * loop never oversleeps past it.</p>
      */
     private void waitForWebSocketReady(int port) throws MessagingException {
         long deadline = System.nanoTime() + WS_READY_TIMEOUT.toNanos();
+        long sleepMs = 50;
         Throwable lastError = null;
         while (System.nanoTime() < deadline) {
             try (Socket probe = new Socket()) {
@@ -384,18 +435,36 @@ public final class SimpleXAdapter implements MessagingAdapter {
                 return;
             } catch (IOException e) {
                 lastError = e;
+                long remainingMs = Math.max(0, (deadline - System.nanoTime()) / 1_000_000);
                 try {
-                    Thread.sleep(100);
+                    Thread.sleep(Math.min(sleepMs, remainingMs));
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
                     throw new MessagingException(FailureCategory.TRANSIENT,
                             "interrupted while waiting for WebSocket port", ie);
                 }
+                sleepMs = Math.min(sleepMs * 2, 1_000);
             }
         }
         throw new MessagingException(FailureCategory.TRANSIENT,
                 "simplex-chat WebSocket port " + port + " not reachable within "
                         + WS_READY_TIMEOUT,
                 lastError);
+    }
+
+    /**
+     * One tracked send-handle: the internal SimpleX handle plus its
+     * finalized flag, merged into a single LRU entry so eviction can
+     * never strand a finalized-flag for a forgotten handle (the
+     * pre-M1-148 shape kept two parallel unbounded maps).
+     */
+    private static final class TrackedHandle {
+        final SimpleXMessageHandle handle;
+        /** Guarded by the {@code handles} monitor. */
+        boolean finalized;
+
+        TrackedHandle(SimpleXMessageHandle handle) {
+            this.handle = handle;
+        }
     }
 }

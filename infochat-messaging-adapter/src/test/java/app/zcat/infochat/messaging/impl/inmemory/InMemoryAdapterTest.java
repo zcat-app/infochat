@@ -62,7 +62,7 @@ class InMemoryAdapterTest {
         MessageHandle handle = adapter.send(outbound);
         adapter.update(handle, "second body");
         adapter.update(handle, "third body");
-        adapter.finalize(handle, "final body");
+        adapter.finalizeMessage(handle, "final body");
 
         List<InMemoryAdapter.UpdateEvent> history = adapter.updateHistory(handle);
         assertEquals(4, history.size());
@@ -83,7 +83,7 @@ class InMemoryAdapterTest {
         InMemoryAdapter adapter = new InMemoryAdapter();
         MessageHandle handle = adapter.send(new OutboundMessage(
                 new ScopeRef.Dm("alice"), "body", Instant.now(), "corr-1"));
-        adapter.finalize(handle, "done");
+        adapter.finalizeMessage(handle, "done");
 
         MessagingException update = assertThrows(MessagingException.class,
                 () -> adapter.update(handle, "too late"));
@@ -91,7 +91,7 @@ class InMemoryAdapterTest {
 
         // finalize is also forbidden after finalize on the same handle.
         MessagingException refinalize = assertThrows(MessagingException.class,
-                () -> adapter.finalize(handle, "really done"));
+                () -> adapter.finalizeMessage(handle, "really done"));
         assertEquals(FailureCategory.PERMANENT, refinalize.category());
     }
 

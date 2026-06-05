@@ -569,7 +569,7 @@ class InboundRouterProbationOrderingTest {
         @Override public Identity assertIdentity(InboundMessage msg) { throw new UnsupportedOperationException(); }
         @Override public MessageHandle send(OutboundMessage msg) { captured.add(msg); return null; }
         @Override public void update(MessageHandle handle, String body) { throw new UnsupportedOperationException(); }
-        @Override public void finalize(MessageHandle handle, String body) { throw new UnsupportedOperationException(); }
+        @Override public void finalizeMessage(MessageHandle handle, String body) { throw new UnsupportedOperationException(); }
         @Override public void setTyping(ScopeRef scope, boolean typing) { throw new UnsupportedOperationException(); }
         @Override public void setInboundHandler(InboundHandler handler) { throw new UnsupportedOperationException(); }
     }

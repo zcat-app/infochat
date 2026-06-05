@@ -1,5 +1,10 @@
 package app.zcat.infochat.messaging.impl.simplex;
 
+import io.quarkus.runtime.Startup;
+import jakarta.annotation.PostConstruct;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jspecify.annotations.NonNull;
 
 import java.nio.file.Files;
@@ -12,18 +17,21 @@ import java.nio.file.Path;
  * WebSocket API port — and validates them via {@link #validate()}
  * before the Provider serves any traffic.
  *
- * <p>This class is intentionally a plain value object with NO
- * CDI/Quarkus annotations ({@code @ApplicationScoped},
- * {@code @ConfigMapping}, {@code @ConfigProperty},
- * {@code @PostConstruct}, etc.) in production scope, mirroring
- * {@link app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter}.
- * Reading {@code infochat.adapters.simplex.*} from Quarkus config,
- * constructing the {@link SimpleXConfig} value, and invoking
- * {@link #validate()} at startup are Provider-side responsibilities
- * (the AdapterRegistry adapter wiring, M1-035b/M1-105) — a bad config
- * fails Provider startup, not this module's compile.</p>
+ * <p>{@code @ApplicationScoped @Startup} makes this an eager bean,
+ * mirroring {@link app.zcat.infochat.messaging.impl.signal.SignalConfig}:
+ * Quarkus instantiates it at Provider boot and runs {@link #validate()}
+ * ({@code @PostConstruct}) immediately, so a misconfigured simplex-chat
+ * fails startup rather than surfacing on the first transport call. The
+ * constructor reads {@code infochat.adapters.simplex.*} via
+ * {@code @ConfigProperty}; making the Provider <em>discover</em> this
+ * bean (jandex / {@code quarkus.index-dependency}) is Provider-side
+ * wiring (M1-035b/M1-105), not this module. Until then the Provider
+ * constructs the value directly and {@code SimpleXAdapter.start()}
+ * invokes {@link #validate()} lazily for activated adapters.</p>
  */
-public final class SimpleXConfig {
+@ApplicationScoped
+@Startup
+public class SimpleXConfig {
 
     /** Path to the simplex-chat binary. */
     public static final String BINARY_KEY = "infochat.adapters.simplex.binary";
@@ -41,7 +49,10 @@ public final class SimpleXConfig {
     private final String dataDir;
     private final int wsPort;
 
-    public SimpleXConfig(@NonNull String binary, @NonNull String dataDir, int wsPort) {
+    @Inject
+    public SimpleXConfig(@ConfigProperty(name = BINARY_KEY) @NonNull String binary,
+                         @ConfigProperty(name = DATA_DIR_KEY) @NonNull String dataDir,
+                         @ConfigProperty(name = WS_PORT_KEY, defaultValue = "" + DEFAULT_WS_PORT) int wsPort) {
         this.binary = binary;
         this.dataDir = dataDir;
         this.wsPort = wsPort;
@@ -64,12 +75,15 @@ public final class SimpleXConfig {
      * usable: the binary exists and is executable, the data directory
      * exists and is writable, and the WebSocket port is in the valid
      * TCP range. Throws naming the offending property key so an
-     * operator can fix the exact value. Provider invokes this during
-     * its startup gates; a failure here fails Provider startup.
+     * operator can fix the exact value. Runs eagerly at Provider boot
+     * via {@code @Startup} once the bean is discovered (and is invoked
+     * lazily from {@code SimpleXAdapter.start()} until then); a failure
+     * here fails Provider startup.
      *
      * @throws IllegalStateException if any check fails; the message
      *         names the offending property key.
      */
+    @PostConstruct
     public void validate() {
         Path binaryPath = Path.of(binary);
         if (!Files.exists(binaryPath) || !Files.isExecutable(binaryPath)) {

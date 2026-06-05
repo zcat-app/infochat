@@ -354,7 +354,7 @@ class InboundRouterNormalizeTest {
         }
 
         @Override
-        public void finalize(MessageHandle handle, String body) {
+        public void finalizeMessage(MessageHandle handle, String body) {
             throw new UnsupportedOperationException();
         }
 

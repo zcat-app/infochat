@@ -12,6 +12,7 @@ import org.slf4j.LoggerFactory;
 
 import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
+import java.time.Duration;
 import java.util.Optional;
 import java.util.function.Consumer;
 
@@ -135,7 +136,12 @@ public class ProductionAdapterBeans {
                 simplexBinary.orElse(""),
                 simplexDataDir.orElse(""),
                 simplexWsPort);
-        HttpClient httpClient = HttpClient.newHttpClient();
+        // Explicit connect timeout: the default HttpClient has none, so a
+        // simplex-chat that accepts the TCP dial but never completes the
+        // WS handshake would park the connecting thread indefinitely.
+        HttpClient httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(10))
+                .build();
         Consumer<String> adminNotifier = msg ->
                 log.warn("simplex adapter admin notification: {}", msg);
         SimpleXIdentity botIdentity = new SimpleXIdentity(simplexBotQueueAddress.orElse(""));

@@ -74,7 +74,7 @@ class AdapterCapabilityContractTest {
                     adapter.name() + ": unstarted update must classify PERMANENT");
 
             MessagingException finalizeEx = assertThrows(MessagingException.class,
-                    () -> adapter.finalize(handle, "body"),
+                    () -> adapter.finalizeMessage(handle, "body"),
                     adapter.name() + ": unstarted finalize must throw MessagingException");
             assertEquals(FailureCategory.PERMANENT, finalizeEx.category(),
                     adapter.name() + ": unstarted finalize must classify PERMANENT");

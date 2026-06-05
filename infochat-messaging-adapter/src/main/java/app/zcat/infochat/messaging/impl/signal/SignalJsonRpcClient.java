@@ -390,36 +390,69 @@ final class SignalJsonRpcClient {
             // StringBuilder ourselves, drop the line on overflow, and
             // resume at the next terminator.
             StringBuilder sb = new StringBuilder();
-            boolean overflow = false;
             int c;
             while ((c = r.read()) != -1) {
                 if (c == '\n') {
-                    if (overflow) {
-                        // Content already discarded; no user data leaks
-                        // into the log message.
-                        LOG.warnf("dropped inbound JSON-RPC line exceeding %d-char cap",
-                                MAX_INBOUND_LINE_CHARS);
-                    } else if (sb.length() > 0) {
+                    if (sb.length() > 0) {
                         handleLine(sb.toString());
                     }
                     sb.setLength(0);
-                    overflow = false;
                     continue;
                 }
                 if (sb.length() >= MAX_INBOUND_LINE_CHARS) {
-                    overflow = true;
-                    // Drop further chars on the floor until the next \n.
+                    // Content already discarded; no user data leaks
+                    // into the log message.
+                    LOG.warnf("dropped inbound JSON-RPC line exceeding %d-char cap",
+                            MAX_INBOUND_LINE_CHARS);
+                    sb.setLength(0);
+                    if (!skipToNewline(r)) {
+                        // EOF while draining the oversize line; the
+                        // partial content is dropped, same as the
+                        // under-cap trailing case below.
+                        return;
+                    }
                 } else {
                     sb.append((char) c);
                 }
             }
             // Trailing data without a terminator (peer half-closed mid-line)
             // is processed only when under the cap; otherwise dropped.
-            if (sb.length() > 0 && !overflow) {
+            if (sb.length() > 0) {
                 handleLine(sb.toString());
             }
         } catch (IOException e) {
             LOG.debugf("signal-cli reader loop exited: %s", e.getMessage());
+        }
+    }
+
+    /**
+     * Bulk-skip the remainder of an oversize line: read in chunks and
+     * scan for the terminator instead of issuing one locked
+     * {@code read()} call per discarded char. mark/reset keeps the
+     * chars after the terminator in the stream for the next line.
+     *
+     * @return true when a terminator was consumed; false on EOF.
+     */
+    private static boolean skipToNewline(BufferedReader r) throws IOException {
+        char[] chunk = new char[8_192];
+        while (true) {
+            r.mark(chunk.length);
+            int n = r.read(chunk);
+            if (n == -1) {
+                return false;
+            }
+            for (int i = 0; i < n; i++) {
+                if (chunk[i] == '\n') {
+                    // Rewind, then consume exactly through the
+                    // terminator so the next line's chars survive.
+                    r.reset();
+                    long toSkip = i + 1L;
+                    while (toSkip > 0) {
+                        toSkip -= r.skip(toSkip);
+                    }
+                    return true;
+                }
+            }
         }
     }
 

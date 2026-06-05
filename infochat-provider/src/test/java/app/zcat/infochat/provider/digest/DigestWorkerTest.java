@@ -275,7 +275,7 @@ class DigestWorkerTest {
             return null;
         }
         @Override public void update(MessageHandle h, String b) {}
-        @Override public void finalize(MessageHandle h, String b) {}
+        @Override public void finalizeMessage(MessageHandle h, String b) {}
         @Override public void setTyping(ScopeRef s, boolean t) {}
         @Override public void setInboundHandler(InboundHandler h) {}
     }
