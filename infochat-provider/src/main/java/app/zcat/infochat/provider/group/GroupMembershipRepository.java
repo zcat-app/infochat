@@ -58,15 +58,24 @@ public class GroupMembershipRepository {
     }
 
     public boolean isGroupAdmin(@NonNull UUID groupId, @NonNull UUID userId) {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(SELECT_ADMIN_FLAG)) {
+        try (Connection conn = dataSource.getConnection()) {
+            return isGroupAdmin(conn, groupId, userId);
+        } catch (SQLException e) {
+            throw new IllegalStateException("isGroupAdmin failed", e);
+        }
+    }
+
+    // Runs on the caller's connection so the caller can wrap
+    // audit-before-effect around the call inside one transaction
+    // (the GroupRepository.setApprovalStatus precedent).
+    public boolean isGroupAdmin(@NonNull Connection conn, @NonNull UUID groupId,
+                                @NonNull UUID userId) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(SELECT_ADMIN_FLAG)) {
             ps.setObject(1, groupId);
             ps.setObject(2, userId);
             try (ResultSet rs = ps.executeQuery()) {
                 return rs.next() && rs.getBoolean("is_group_admin");
             }
-        } catch (SQLException e) {
-            throw new IllegalStateException("isGroupAdmin failed", e);
         }
     }
 
@@ -100,13 +109,21 @@ public class GroupMembershipRepository {
     // Sets removed_at; the V5 trigger clears is_group_admin in the same
     // statement execution, freeing the partial unique index slot.
     public void markMemberRemoved(@NonNull UUID groupId, @NonNull UUID userId) {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(MARK_REMOVED)) {
+        try (Connection conn = dataSource.getConnection()) {
+            markMemberRemoved(conn, groupId, userId);
+        } catch (SQLException e) {
+            throw new IllegalStateException("markMemberRemoved failed", e);
+        }
+    }
+
+    // Runs on the caller's connection so the caller can wrap
+    // audit-before-effect around the call inside one transaction.
+    public void markMemberRemoved(@NonNull Connection conn, @NonNull UUID groupId,
+                                  @NonNull UUID userId) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(MARK_REMOVED)) {
             ps.setObject(1, groupId);
             ps.setObject(2, userId);
             ps.executeUpdate();
-        } catch (SQLException e) {
-            throw new IllegalStateException("markMemberRemoved failed", e);
         }
     }
 }

@@ -165,12 +165,21 @@ public class GroupRepository {
     }
 
     public void markRemoved(@NonNull UUID groupId) {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(SET_REMOVED)) {
-            ps.setObject(1, groupId);
-            ps.executeUpdate();
+        try (Connection conn = dataSource.getConnection()) {
+            markRemoved(conn, groupId);
         } catch (SQLException e) {
             throw new IllegalStateException("markRemoved failed", e);
+        }
+    }
+
+    // Runs on the caller's connection so the caller can wrap
+    // audit-before-effect around the call inside one transaction
+    // (the setApprovalStatus precedent).
+    public void markRemoved(@NonNull Connection conn, @NonNull UUID groupId)
+            throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(SET_REMOVED)) {
+            ps.setObject(1, groupId);
+            ps.executeUpdate();
         }
     }
 

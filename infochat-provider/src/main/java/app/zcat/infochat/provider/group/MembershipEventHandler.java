@@ -1,6 +1,5 @@
 package app.zcat.infochat.provider.group;
 
-import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
@@ -79,14 +78,31 @@ public class MembershipEventHandler {
                     adapter, ContactIds.redact(event.contactId()));
             return;
         }
-        // Check admin status before markMemberRemoved — the V5 trigger
-        // clears is_group_admin during the UPDATE, so querying after
-        // would always return false.
-        boolean wasGroupAdmin = membershipRepository.isGroupAdmin(groupId, userId);
-        membershipRepository.markMemberRemoved(groupId, userId);
-        writeAudit(AuditAction.MEMBER_LEFT, userId, event.contactId(), adapter,
-                "user", userId.toString(), groupId,
-                "{\"was_group_admin\":" + wasGroupAdmin + "}");
+        // One transaction, audit row INSERTed BEFORE the mutation per
+        // Invariant 7 (audit-before-effect, the BanCommandHandler
+        // pattern): an audit failure rolls the mutation back, so the
+        // was_group_admin flag is never silently lost.
+        try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                // Check admin status before markMemberRemoved — the V5
+                // trigger clears is_group_admin during the UPDATE, so
+                // querying after would always return false.
+                boolean wasGroupAdmin = membershipRepository.isGroupAdmin(conn, groupId, userId);
+                writeAudit(conn, AuditAction.MEMBER_LEFT, userId, event.contactId(), adapter,
+                        "user", userId.toString(), groupId,
+                        "{\"was_group_admin\":" + wasGroupAdmin + "}");
+                membershipRepository.markMemberRemoved(conn, groupId, userId);
+                conn.commit();
+            } catch (SQLException e) {
+                conn.rollback();
+                throw sanitizedFailure("UserLeft transaction failed group=" + groupId
+                        + " user=" + userId, e);
+            }
+        } catch (SQLException e) {
+            throw sanitizedFailure("UserLeft connection failed group=" + groupId
+                    + " user=" + userId, e);
+        }
         log.info("UserLeft: marked member removed group={} user={}", groupId, userId);
     }
 
@@ -96,17 +112,30 @@ public class MembershipEventHandler {
             log.warn("BotRemoved: unknown group adapter={} groupId={}", adapter, event.adapterGroupId());
             return;
         }
-        groupRepository.markRemoved(groupId);
-        // System-actor row: no user caused this — the platform removed the bot.
-        writeAudit(AuditAction.BOT_REMOVED, null, null, adapter,
-                "group", groupId.toString(), groupId, null);
+        // One transaction, audit row INSERTed BEFORE the mutation per
+        // Invariant 7 (audit-before-effect).
+        try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                // System-actor row: no user caused this — the platform removed the bot.
+                writeAudit(conn, AuditAction.BOT_REMOVED, null, null, adapter,
+                        "group", groupId.toString(), groupId, null);
+                groupRepository.markRemoved(conn, groupId);
+                conn.commit();
+            } catch (SQLException e) {
+                conn.rollback();
+                throw sanitizedFailure("BotRemoved transaction failed group=" + groupId, e);
+            }
+        } catch (SQLException e) {
+            throw sanitizedFailure("BotRemoved connection failed group=" + groupId, e);
+        }
         log.info("BotRemoved: marked group removed group={}", groupId);
     }
 
-    private void writeAudit(AuditAction action, @Nullable UUID actorUserId,
+    private void writeAudit(Connection conn, AuditAction action, @Nullable UUID actorUserId,
                             @Nullable String actorContactId, String actorAdapter,
                             String targetKind, String targetId,
-                            UUID scopeId, @Nullable String detailsJson) {
+                            UUID scopeId, @Nullable String detailsJson) throws SQLException {
         RedactionHook.AuditRow row = RedactionHook.AuditRow.builder()
                 .actorUserId(actorUserId)
                 .actorContactId(actorContactId)
@@ -118,13 +147,18 @@ public class MembershipEventHandler {
                 .requestId(UUID.randomUUID().toString())
                 .detailsJson(detailsJson)
                 .build();
-        try (Connection conn = dataSource.getConnection()) {
-            auditLogWriter.write(conn, row);
-        } catch (SQLException e) {
-            // Audit failure must not block the membership state mutation
-            // that already succeeded — log and continue.
-            SafeLog.error(log, "failed to write audit row action=" + action + " scope=" + scopeId, e);
-        }
+        auditLogWriter.write(conn, row);
+    }
+
+    // SQLException messages can echo bound values — a Postgres
+    // constraint-violation DETAIL line carries the inserted tuple,
+    // i.e. the audit row's unredacted contact id and details_json.
+    // Per security.md §User content in exceptions the failure
+    // propagates with the exception class name only (the SafeLog
+    // convention): no cause, no message body. This also covers a
+    // rollback() failure — the outer catch sanitizes it the same way.
+    private static IllegalStateException sanitizedFailure(String context, SQLException e) {
+        return new IllegalStateException(context + " | exception=" + e.getClass().getName());
     }
 
     private @Nullable UUID resolveGroup(String adapter, String adapterGroupId) {

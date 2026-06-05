@@ -12,11 +12,14 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @QuarkusTest
@@ -119,6 +122,91 @@ class MembershipEventHandlerTest {
         }
         assertTrue(hasAuditEntry(groupId, groupId.toString(), AuditAction.BOT_REMOVED),
                 "BOT_REMOVED audit row should exist");
+    }
+
+    @Test
+    void userLeft_auditWriteFailureRollsBackMutation() throws Exception {
+        membershipRepository.addMember(groupId, userId);
+        membershipRepository.promoteToAdmin(groupId, userId);
+
+        MembershipEventHandler failingHandler = new MembershipEventHandler(
+                dataSource, membershipRepository, groupRepository,
+                new FailingAuditLogWriter());
+
+        assertThrows(IllegalStateException.class, () -> failingHandler.handle(
+                new MembershipEvent.UserLeft(TEST_UPSTREAM_GROUP_ID, contactId),
+                TEST_ADAPTER));
+
+        // The mutation must roll back with the failed audit write: the
+        // member is still active and the was_group_admin flag survives.
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT removed_at, is_group_admin FROM group_membership "
+                             + "WHERE group_id = ? AND user_id = ?")) {
+            ps.setObject(1, groupId);
+            ps.setObject(2, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(), "membership row should exist");
+                assertNull(rs.getTimestamp("removed_at"),
+                        "removed_at should be rolled back to NULL");
+                assertTrue(rs.getBoolean("is_group_admin"),
+                        "is_group_admin should survive the rollback");
+            }
+        }
+        assertFalse(hasAuditEntry(groupId, userId.toString(), AuditAction.MEMBER_LEFT),
+                "no MEMBER_LEFT audit row should remain after rollback");
+    }
+
+    @Test
+    void botRemoved_auditWriteFailureRollsBackMutation() throws Exception {
+        MembershipEventHandler failingHandler = new MembershipEventHandler(
+                dataSource, membershipRepository, groupRepository,
+                new FailingAuditLogWriter());
+
+        assertThrows(IllegalStateException.class, () -> failingHandler.handle(
+                new MembershipEvent.BotRemoved(TEST_UPSTREAM_GROUP_ID),
+                TEST_ADAPTER));
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT removed_at FROM groups WHERE id = ?")) {
+            ps.setObject(1, groupId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(), "group row should exist");
+                assertNull(rs.getTimestamp("removed_at"),
+                        "removed_at should be rolled back to NULL");
+            }
+        }
+        assertFalse(hasAuditEntry(groupId, groupId.toString(), AuditAction.BOT_REMOVED),
+                "no BOT_REMOVED audit row should remain after rollback");
+    }
+
+    @Test
+    void userLeft_auditWriteFailureExceptionIsSanitized() throws Exception {
+        membershipRepository.addMember(groupId, userId);
+
+        MembershipEventHandler failingHandler = new MembershipEventHandler(
+                dataSource, membershipRepository, groupRepository,
+                new FailingAuditLogWriter());
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class,
+                () -> failingHandler.handle(
+                        new MembershipEvent.UserLeft(TEST_UPSTREAM_GROUP_ID, contactId),
+                        TEST_ADAPTER));
+
+        // SafeLog convention: the SQLException — whose message mimics a
+        // Postgres DETAIL line echoing the unredacted audit row — must
+        // not travel as cause or message text; only its class name may.
+        assertNull(thrown.getCause(),
+                "sanitized failure must not carry the SQLException as cause");
+        String message = thrown.getMessage();
+        assertNotNull(message, "failure message should name the context");
+        assertTrue(message.contains(SQLException.class.getName()),
+                "failure should preserve the exception class name");
+        assertFalse(message.contains("simulated audit-write failure"),
+                "SQLException message text must not leak");
+        assertFalse(message.contains(contactId),
+                "contact id must not leak into the exception");
     }
 
     @Test

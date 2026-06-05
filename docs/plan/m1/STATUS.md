@@ -14,9 +14,9 @@
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 188 |
+| done | 189 |
 | deferred | 2 |
-| **total** | **204** |
+| **total** | **205** |
 
 ---
 
@@ -26,7 +26,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-134 — quarantine_review NOTIFY channel completeness (CT2) (complexity: high, risk: medium)
 - M1-139 — Kind-6 repost edge resolution (complexity: high, risk: medium)
-- M1-143 — MembershipEventHandler audit-before-effect (Invariant 7) (complexity: medium, risk: medium)
 - M1-144 — UserRepository extraction + /promote FOR UPDATE (complexity: medium, risk: medium)
 - M1-150 — Digest hygiene (concurrency guard, timezone WARN, broad-catch narrow) (complexity: low, risk: low)
 - M1-152 — Schema-hardening migration (stage2_verdict CHECK + V27 audit verb + Nostr index) (complexity: low, risk: medium)
@@ -37,6 +36,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-160 — [INVESTIGATE] summary_anchor scope_kind discriminator (complexity: medium, risk: medium)
 - M1-161 — [INVESTIGATE] price_snapshot PK/dedup invariant + new_price_snapshot channel intent (complexity: medium, risk: medium)
 - M1-162 — [INVESTIGATE] confirm-or-drop adapter SPI surfaces vs D47 (complexity: medium, risk: low)
+- M1-169 — Drift guard: V31 audit redactors vs Redactor.CATALOGUE (complexity: medium, risk: low)
 
 ---
 
@@ -325,7 +325,7 @@ M1-139 (pending) ← runnable
 M1-140 (done)
 M1-141 (done)
 M1-142 (done)
-M1-143 (pending) ← runnable
+M1-143 (done)
 M1-145 (done)
 M1-147 (done)
 M1-148 (done)
@@ -358,4 +358,5 @@ M1-164a (done)
 M1-166 (done)
 M1-167 (done)
 M1-168 (done)
+M1-169 (pending) ← runnable
 ```
