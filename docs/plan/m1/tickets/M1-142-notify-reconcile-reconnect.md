@@ -1,9 +1,9 @@
 ---
 id: M1-142
 title: "NewPostListener reconcile after reconnect"
-status: pending
+status: done
 created: 2026-06-02
-last_updated: 2026-06-02
+last_updated: 2026-06-05
 blocked_by: []
 files_budget: 4
 files_scope:
@@ -30,12 +30,30 @@ test_plan:
 spec_refs:
   - docs/spec/architecture.md §Inter-service communication
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-05
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 272
+      removed: 19
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-05
+  verdict: WARN
+  warnings:
+    - "Acceptance item 2 ('Reconciler idempotency is confirmed before wiring the post-reconnect call') is unverifiable as written — no test name or artifact cited; suggested fix: assert idempotency in the reconnect test by invoking reconcile() twice and confirming no duplicate delivery"
+  blockers: []
 ---
 
 # M1-142: NewPostListener reconcile after reconnect

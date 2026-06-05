@@ -18,10 +18,12 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Provider startup catch-up reconciler for the {@code new_post} channel
+ * Provider catch-up reconciler for the {@code new_post} channel
  * (docs/spec/architecture.md §Inter-service communication §Catch-up;
  * docs/design/01-architecture.md §1.4.3 Startup-bean ordering;
- * docs/design/02-schema.md §2.9.2).
+ * docs/design/02-schema.md §2.9.2). Runs at startup and again after every
+ * {@link NewPostListener} reconnect, so NOTIFYs dropped during a transient
+ * connection loss are recovered without a process restart.
  *
  * <p><b>Bean ordering.</b> {@code @Startup} at {@code @Priority(250)} per the
  * Provider startup table in docs/design/01-architecture.md §1.4.3

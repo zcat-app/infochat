@@ -105,6 +105,9 @@ public class NewPostListener {
     @Inject
     NewPostHandler newPostHandler;
 
+    @Inject
+    NewPostReconciler newPostReconciler;
+
     // Long-lived; never returned to the pool while the JVM is alive. LISTEN
     // is bound to the underlying Postgres backend session, so returning this
     // connection to Agroal would silently end the subscription.
@@ -148,7 +151,9 @@ public class NewPostListener {
      *
      * <ol>
      *   <li>ensures the listen connection is open, re-issuing
-     *       {@code LISTEN new_post} after a reconnect;</li>
+     *       {@code LISTEN new_post} and replaying NOTIFYs missed during
+     *       the outage via {@link NewPostReconciler#runCatchUp()} after a
+     *       reconnect;</li>
      *   <li>blocks on {@code getNotifications} up to
      *       {@link #NOTIFICATION_TIMEOUT_MS};</li>
      *   <li>on SQLException, closes the dead connection so the next
@@ -159,9 +164,9 @@ public class NewPostListener {
      * </ol>
      *
      * <p>The backoff is bounded so a persistent Postgres outage does not
-     * spin. The reconciler-on-restart catches up any NOTIFY arrivals
-     * dropped during the outage, so the worst-case live-NOTIFY blackout
-     * for a single blip is one backoff cycle.
+     * spin. The post-reconnect catch-up recovers any NOTIFY arrivals
+     * dropped during the outage without a process restart, so a transient
+     * PG blip cannot leave the live cursor permanently behind.
      */
     private void runLoop() {
         long backoffMs = INITIAL_BACKOFF_MS;
@@ -174,7 +179,7 @@ public class NewPostListener {
                     return;
                 }
                 LOG.errorf(e,
-                    "NewPostListener: cannot (re)acquire LISTEN connection; backing off %dms",
+                    "NewPostListener: reconnect sequence failed (acquire/LISTEN/catch-up); backing off %dms",
                     backoffMs);
                 if (!sleepBackoff(backoffMs)) {
                     return;
@@ -216,9 +221,10 @@ public class NewPostListener {
     /**
      * Acquires the dedicated LISTEN connection if it is null or closed,
      * re-issuing {@code LISTEN new_post} so a fresh backend session is
-     * subscribed to the channel. Returns the unwrapped {@link PGConnection}
-     * for the caller to poll. Idempotent — repeated calls with a live
-     * connection short-circuit.
+     * subscribed to the channel, then running the reconciler catch-up to
+     * recover NOTIFYs lost while no session was subscribed. Returns the
+     * unwrapped {@link PGConnection} for the caller to poll. Idempotent —
+     * repeated calls with a live connection short-circuit.
      */
     private PGConnection ensureListenConnection() throws SQLException {
         if (listenConnection == null || listenConnection.isClosed()) {
@@ -229,8 +235,32 @@ public class NewPostListener {
             openListenConnection();
             LOG.info(
                 "NewPostListener: (re)acquired LISTEN connection and re-issued LISTEN new_post");
+            reconcileAfterReconnect();
         }
         return Objects.requireNonNull(listenConnection).unwrap(PGConnection.class);
+    }
+
+    /**
+     * Post-reconnect catch-up. NOTIFYs fired between the connection loss
+     * and the re-{@code LISTEN} above were dropped by Postgres (no session
+     * was subscribed), so the reconciler replays READY rows past the
+     * cursor. Ordering matters: {@code LISTEN} is re-issued BEFORE the
+     * catch-up so a NOTIFY arriving mid-scan queues on the new session;
+     * its duplicate dispatch collapses to a CAS no-op (class Javadoc
+     * §Idempotency). A catch-up failure closes the fresh connection and
+     * rethrows so the caller's backoff path retries the full
+     * reconnect-plus-reconcile sequence — otherwise a live connection with
+     * an unreconciled gap would short-circuit future
+     * {@link #ensureListenConnection()} calls and the gap would persist
+     * silently.
+     */
+    private void reconcileAfterReconnect() throws SQLException {
+        try {
+            newPostReconciler.runCatchUp();
+        } catch (SQLException e) {
+            closeListenConnectionQuietly();
+            throw e;
+        }
     }
 
     private void openListenConnection() throws SQLException {

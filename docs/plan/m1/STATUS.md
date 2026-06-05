@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 19 |
+| pending | 18 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 181 |
+| done | 182 |
 | deferred | 3 |
 | **total** | **203** |
 
@@ -26,7 +26,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-134 — quarantine_review NOTIFY channel completeness (CT2) (complexity: high, risk: medium)
 - M1-139 — Kind-6 repost edge resolution (complexity: high, risk: medium)
-- M1-142 — NewPostListener reconcile after reconnect (complexity: low, risk: medium)
 - M1-143 — MembershipEventHandler audit-before-effect (Invariant 7) (complexity: medium, risk: medium)
 - M1-144 — UserRepository extraction + /promote FOR UPDATE (complexity: medium, risk: medium)
 - M1-146 — Defensive-code sweep: remove dead internal null-guards (CT4) (complexity: medium, risk: medium)
@@ -83,10 +82,10 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-164e | Onboard infochat-collector to NullAway + Error Prone | 2026-06-05 | round 2 APPROVE |
 | M1-164 | Adopt NullAway + Error Prone for §7a enforcement (umbrella) | 2026-06-05 | round 1 APPROVE |
 | M1-163 | Shared DB test-seeding seam for the IT suite | 2026-06-05 | round 1 APPROVE |
+| M1-142 | NewPostListener reconcile after reconnect | 2026-06-05 | round 1 APPROVE |
 | M1-166 | Fix SimpleXSubprocess FAILED-before-notify race (flaky test) | 2026-06-04 | round 1 APPROVE |
 | M1-164d | Onboard infochat-messaging-adapter to NullAway + Error Prone | 2026-06-04 | round 1 APPROVE |
 | M1-164c | Onboard infochat-llm-adapter to NullAway + Error Prone | 2026-06-04 | round 1 APPROVE |
-| M1-164b | Onboard infochat-ssrf to NullAway + Error Prone | 2026-06-04 | round 1 APPROVE |
 
 ---
 
@@ -332,7 +331,7 @@ M1-138 (done)
 M1-139 (pending) ← runnable
 M1-140 (done)
 M1-141 (done)
-M1-142 (pending) ← runnable
+M1-142 (done)
 M1-143 (pending) ← runnable
 M1-145 (done)
 M1-147 (done)
