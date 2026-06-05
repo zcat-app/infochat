@@ -38,15 +38,12 @@ import java.util.UUID;
  *   <li><b>Permission gate.</b> DM scope is the caller's own scope
  *       ({@code ScopeRef.Dm} carries the caller's own contact id —
  *       cross-DM mutation is structurally impossible). Group scope
- *       short-circuits to
- *       {@link BundleKeys#ERROR_LANG_GROUP_ADMIN_NOT_IN_V1} per the
- *       M1-054 FollowTagCommandHandler / UnfollowTagCommandHandler
- *       SPI-freeze precedent — the frozen
- *       {@code CommandHandler.handle(ScopeRef, String)} SPI does not
- *       carry the inbound caller's contact id in group scope, so the
- *       handler cannot consult {@code group_membership} to identify
- *       a group admin. T2-F lands the actor seam and the group-admin
- *       proceed path.</li>
+ *       requires bot-admin or group-admin: the actor is resolved
+ *       from {@link InboundContext#senderContactId()} against
+ *       {@code users}, then checked against {@code user.is_admin}
+ *       and {@code group_membership.is_group_admin}. An unregistered
+ *       actor, unknown group, or non-admin caller gets
+ *       {@link BundleKeys#ERROR_LANG_GROUP_ADMIN_NOT_IN_V1}.</li>
  *   <li><b>Supported-code derivation + validation.</b> The supported
  *       set is {@link BundleLoader#supportedLanguages()} — derived
  *       from the loaded bundles, not hardcoded in the handler. An

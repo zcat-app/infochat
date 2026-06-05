@@ -34,11 +34,13 @@ import java.util.UUID;
  * <p>Mode-transition state machine (one transaction):
  * <ol>
  *   <li>Permission gate — DM scope is the caller's own scope; group
- *       scope short-circuits to
- *       {@link BundleKeys#ERROR_FOLLOW_TAG_GROUP_ADMIN_ONLY} regardless
- *       of admin status (the frozen {@code CommandHandler} SPI carries
- *       no inbound caller's contact id in group scope; the
- *       group-admin proceed path is T2-F territory).</li>
+ *       scope requires bot-admin or group-admin: the actor is
+ *       resolved from {@link InboundContext#senderContactId()}
+ *       against {@code users}, then checked against
+ *       {@code user.is_admin} and
+ *       {@code group_membership.is_group_admin}. An unregistered
+ *       actor, unknown group, or non-admin caller gets
+ *       {@link BundleKeys#ERROR_FOLLOW_TAG_GROUP_ADMIN_ONLY}.</li>
  *   <li>Vocabulary validation — the tag must appear in {@code tag.name}.
  *       Unknown tags surface
  *       {@link BundleKeys#ERROR_FOLLOW_TAG_UNKNOWN_TAG} with a

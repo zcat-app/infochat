@@ -18,12 +18,13 @@ import java.util.Set;
  *   the host's own non-loopback interfaces</strong>.
  * </blockquote>
  *
- * <p>The {@code IpBlocklist}'s no-arg constructor snapshots this set at
- * construction time and consults it on every {@link IpBlocklist#isBlocked}
- * call. The snapshot intentionally captures interfaces at JVM start; a
- * cloud VM whose IPs change after startup is treated as an
- * out-of-scope refresh-cadence concern (the spec does not commit to a
- * refresh policy).
+ * <p>The {@code IpBlocklist}'s no-arg constructor wires
+ * {@code HostInterfaceSet::enumerate} as a per-call {@link
+ * java.util.function.Supplier} seam: the host's interfaces are
+ * re-enumerated on every {@link IpBlocklist#isBlocked} call, so a
+ * cloud VM whose IPs change after startup is reflected immediately
+ * (the spec's present-tense "are checked" carries no startup-snapshot
+ * qualifier).
  *
  * <p>The loopback exclusion ({@link InetAddress#isLoopbackAddress()})
  * is explicit because the literal loopback range ({@code 127.0.0.0/8},

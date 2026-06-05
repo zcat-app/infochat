@@ -208,10 +208,6 @@ CREATE INDEX idx_post_status_changed ON post(status_changed_at, id)
 -- holds DELETE on post — Invariant 6 commits TTL to partition drop,
 -- not row delete; partition-drop is operator-only (infochat_admin)
 -- and lives in a later scheduler ticket.
---
--- infochat_listen is the LISTEN/NOTIFY-only role; it gets no
--- privileges on any table created here (it polls the new_post and
--- quarantine_review channels, not the tables).
 -- ---------------------------------------------------------------------
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON source_subscription TO infochat_provider;

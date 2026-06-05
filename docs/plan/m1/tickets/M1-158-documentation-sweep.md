@@ -1,9 +1,9 @@
 ---
 id: M1-158
 title: "Documentation / stale-comment sweep (CT3)"
-status: pending
+status: done
 created: 2026-06-02
-last_updated: 2026-06-02
+last_updated: 2026-06-05
 blocked_by: []
 files_budget: 10
 files_scope:
@@ -34,12 +34,29 @@ test_plan:
 spec_refs:
   - docs/spec/architecture.md §What lives in design notes
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-05
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 11
+      added: 64
+      removed: 61
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-05
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-158: Documentation / stale-comment sweep (CT3)

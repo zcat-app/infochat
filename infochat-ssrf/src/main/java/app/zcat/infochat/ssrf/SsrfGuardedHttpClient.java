@@ -37,13 +37,13 @@ import java.util.function.Function;
  * pipeline:
  *
  * <ol>
- *   <li><strong>Scheme allowlist</strong> — only {@code http} and
- *       {@code https} are dialed. {@code ws} and {@code wss} are
- *       deliberately rejected for now: the WebSocket transport
- *       wrapper for {@code StreamSource} consumes the same
- *       {@link IpBlocklist} policy class but is its own
- *       implementation (carved out per the ticket's
- *       {@code out_of_scope}).</li>
+ *   <li><strong>Scheme allowlist</strong> — {@link #get(URI)} dials
+ *       only {@code http} and {@code https}. {@code ws} and
+ *       {@code wss} run the same policy pipeline through the
+ *       dedicated WebSocket entrypoints
+ *       {@link #checkAndPinForWebSocket(URI)} and
+ *       {@link #resolveForWebSocket(URI)}, which validate and pin
+ *       but leave the dial to the caller.</li>
  *   <li><strong>Userinfo gate</strong> — any URI carrying
  *       {@code user[:password]@} is rejected before the dial.</li>
  *   <li><strong>Host canonicalization (M1-026, Finding 2

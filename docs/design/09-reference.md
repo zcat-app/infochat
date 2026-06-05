@@ -16,24 +16,21 @@ This file is a **reference**, not a design doc. It is normative for module depen
 The codebase ships as six Maven modules. Dependencies are strictly one-directional; the build fails if a cycle is introduced. The module names match [01-architecture.md](01-architecture.md) §1.2 byte-for-byte.
 
 ```
-                              infochat-core
-                /              /         \              \
-               /              /           \              \
-   infochat-ssrf   infochat-llm-adapter   infochat-messaging-adapter
-                \              \           /              /
-                 \              \         /              /
-                  \              \       /              /
-              ┌─────────────────────┴───┴──────────────┐
-              │                                        │
-       infochat-collector              infochat-provider
+ infochat-core   infochat-ssrf   infochat-llm-adapter   infochat-messaging-adapter
+        \               \               /                        /
+         \               \             /                        /
+          \               \           /                        /
+           ┌───────────────┴─────────┴────────────────────────┐
+           │                                                   │
+    infochat-collector                          infochat-provider
 ```
 
 | Module | Depends on | Purpose |
 |---|---|---|
 | `infochat-core` | (none) | Domain entities, schema-level types, shared utilities. Pure Java; no Quarkus, no I/O. |
-| `infochat-ssrf` | `infochat-core` | SSRF-gated outbound HTTP/WS client (allowlist, IP blocklist, DNS-rebind defense, redirect cap, scheme allowlist, timeout caps). Shared by every Collector fetch / `StreamSource` connect and every Provider `/add-source` URL probe. See [04-security.md](04-security.md) §4.2. |
-| `infochat-llm-adapter` | `infochat-core` | `LlmProvider`, `EmbeddingProvider`, `TranslationProvider` SPIs and impls. See [05-llm-and-embeddings.md](05-llm-and-embeddings.md). |
-| `infochat-messaging-adapter` | `infochat-core` | `MessagingAdapter` SPI plus the v1 in-tree implementations: SimpleX, Signal, and the in-memory test adapter (D32, D46). See [06-messaging.md](06-messaging.md). |
+| `infochat-ssrf` | (none) | SSRF-gated outbound HTTP/WS client (allowlist, IP blocklist, DNS-rebind defense, redirect cap, scheme allowlist, timeout caps). Shared by every Collector fetch / `StreamSource` connect and every Provider `/add-source` URL probe. See [04-security.md](04-security.md) §4.2. |
+| `infochat-llm-adapter` | (none) | `LlmProvider`, `EmbeddingProvider`, `TranslationProvider` SPIs and impls. See [05-llm-and-embeddings.md](05-llm-and-embeddings.md). |
+| `infochat-messaging-adapter` | (none) | `MessagingAdapter` SPI plus the v1 in-tree implementations: SimpleX, Signal, and the in-memory test adapter (D32, D46). See [06-messaging.md](06-messaging.md). |
 | `infochat-collector` | `infochat-core`, `infochat-ssrf`, `infochat-llm-adapter` | Fetchers, eval pipeline, schedulers. Headless. No `messaging-adapter` dependency — Collector never talks to users. |
 | `infochat-provider` | `infochat-core`, `infochat-ssrf`, `infochat-llm-adapter`, `infochat-messaging-adapter` | Command router, chat agent, periodic digest, admin commands. |
 

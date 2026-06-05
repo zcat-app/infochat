@@ -66,11 +66,12 @@ CREATE TABLE admin_notification_state (
 -- Per-role GRANTs (aligned with docs/spec/security.md §DB roles and
 -- V7's per-table GRANT-split convention).
 --
--- admin_notification_state is Collector-write: the notifier lives
--- in infochat-collector and UPSERTs on every notifyOnce call.
--- Provider is read-only — future admin commands (e.g. "show
--- notification state") may query the table to surface counters
--- to bot admins.
+-- admin_notification_state is written through the shared
+-- ThrottledAdminNotifier (infochat-core), which UPSERTs on every
+-- notifyOnce call. As of this migration every writing consumer
+-- runs in the Collector, so only infochat_collector gets
+-- INSERT/UPDATE here; Provider is read-only until V21 widens it
+-- for the Provider-side notifier callers.
 --
 -- DELETE is NOT granted to either role. The table is operator-
 -- managed (DBA TRUNCATE if pruning is ever required); the

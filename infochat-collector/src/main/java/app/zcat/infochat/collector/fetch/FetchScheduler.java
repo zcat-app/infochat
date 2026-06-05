@@ -435,9 +435,12 @@ public class FetchScheduler {
 
     /**
      * One enumerated source row. The {@code dispatchKey} is a
-     * monotonically-assigned per-startup token passed to the Fetcher
+     * monotonically-assigned PER-TICK token passed to the Fetcher
      * SPI's {@code long sourceId} parameter; it is NOT the
-     * {@code source.id} UUID and is opaque to the Fetcher.
+     * {@code source.id} UUID, restarts at 1 on every
+     * {@link #enumerateActiveSources()} call, and can name a
+     * different source on the next tick. Opaque to the Fetcher —
+     * do not key any cross-tick state on it.
      */
     public record SourceRow(@NonNull UUID uuid, @NonNull String identifier, long dispatchKey,
                                @NonNull String kind) {

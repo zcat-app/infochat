@@ -14,7 +14,11 @@ import java.util.Map;
  *
  * <h2>Field contract</h2>
  * <ul>
- *   <li>{@code sourceId} — the {@code source.id} this post belongs to.</li>
+ *   <li>{@code sourceId} — the per-tick opaque dispatch token the
+ *       scheduler handed the Fetcher SPI for this fetch; it is NOT
+ *       the {@code source.id} UUID, is not stable across ticks, and
+ *       must not be used to key any persistent or cross-tick
+ *       state.</li>
  *   <li>{@code upstreamIdentifier} — the source-side unique id used by
  *       the dedup column (RSS guid / Bluesky cid / Nostr event id /
  *       Reddit fullname / etc.). Never null.</li>
