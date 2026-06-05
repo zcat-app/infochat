@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.messaging;
 
+import app.zcat.infochat.core.audit.AuditLogWriter;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
@@ -10,10 +11,13 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -61,6 +65,9 @@ class InviteCodeConsumerTest {
     @Inject
     @SeedDataSource
     DataSource dataSource;
+
+    @Inject
+    AuditLogWriter auditLogWriter;
 
     private UUID creatorUserId;
 
@@ -304,6 +311,74 @@ class InviteCodeConsumerTest {
                 consumer.consume(adapter, contactId, "garbage-overflow");
         assertInstanceOf(InviteCodeConsumer.BruteForceThresholdBreached.class, breach,
                 "the (threshold+1)-th non-UUID consume must trip BruteForceThresholdBreached");
+    }
+
+    @Test
+    void staleBreachAuditedEntriesAreEvictedOnConsume() throws Exception {
+        // Plain instance (not the CDI client proxy) so the test can seed
+        // and inspect the package-private breachAudited map directly.
+        InviteCodeConsumer local = newLocalConsumer();
+
+        var staleKey = new InviteCodeConsumer.Key("inmemory", NAMESPACE + "evict-stale");
+        var freshKey = new InviteCodeConsumer.Key("inmemory", NAMESPACE + "evict-fresh");
+        // Stale = last over-threshold observation older than the window
+        // (1h in newLocalConsumer).
+        local.breachAudited.put(staleKey, Instant.now().minus(Duration.ofHours(2)));
+        local.breachAudited.put(freshKey, Instant.now());
+
+        // Any consume triggers the opportunistic sweep; this one is a
+        // plain Rejected from an unrelated contact.
+        local.consume("inmemory", NAMESPACE + "evict-sweeper", UUID.randomUUID().toString());
+
+        assertFalse(local.breachAudited.containsKey(staleKey),
+                "entry older than the brute-force window must be swept");
+        assertTrue(local.breachAudited.containsKey(freshKey),
+                "entry inside the window must survive the sweep");
+    }
+
+    @Test
+    void overThresholdObservationRefreshesBreachTimestamp() throws Exception {
+        // Pins the eviction-vs-re-audit semantics: while a breach event
+        // is ongoing (the key keeps arriving over threshold), the
+        // observation timestamp refreshes, so the sweep cannot evict
+        // mid-event and cause a duplicate INVITE_BRUTE_FORCE_BREACH
+        // audit row.
+        InviteCodeConsumer local = newLocalConsumer();
+        String adapter = "inmemory";
+        String contactId = NAMESPACE + "refresh";
+
+        for (int i = 0; i < BRUTE_FORCE_THRESHOLD; i++) {
+            assertInstanceOf(InviteCodeConsumer.Rejected.class,
+                    local.consume(adapter, contactId, UUID.randomUUID().toString()));
+        }
+        assertInstanceOf(InviteCodeConsumer.BruteForceThresholdBreached.class,
+                local.consume(adapter, contactId, UUID.randomUUID().toString()));
+
+        // Backdate the mark to just inside the window, then observe the
+        // key over threshold again: the timestamp must refresh and no
+        // second audit row may be written.
+        var key = new InviteCodeConsumer.Key(adapter, contactId);
+        Instant backdated = Instant.now().minus(Duration.ofMinutes(59));
+        local.breachAudited.put(key, backdated);
+
+        assertInstanceOf(InviteCodeConsumer.BruteForceThresholdBreached.class,
+                local.consume(adapter, contactId, UUID.randomUUID().toString()));
+
+        Instant refreshed = local.breachAudited.getOrDefault(key, Instant.EPOCH);
+        assertTrue(refreshed.isAfter(backdated),
+                "over-threshold observation must refresh the breach timestamp");
+        assertEquals(1, countAudit(InviteCodeConsumer.INVITE_BRUTE_FORCE_BREACH, contactId),
+                "still exactly one INVITE_BRUTE_FORCE_BREACH audit row");
+    }
+
+    private InviteCodeConsumer newLocalConsumer() {
+        InviteCodeConsumer local = new InviteCodeConsumer();
+        local.dataSource = dataSource;
+        local.auditLogWriter = auditLogWriter;
+        local.bruteForceThreshold = BRUTE_FORCE_THRESHOLD;
+        local.bruteForceWindow = Duration.ofHours(1);
+        local.probationDuration = Duration.ofHours(24);
+        return local;
     }
 
     private long countAttempts(String contactId) throws Exception {

@@ -95,6 +95,65 @@ class RedactingLogFilterTest {
                 "result must contain redaction marker");
     }
 
+    @Test
+    void redactsGenericWithLongSeparatorRun() {
+        // The old {0,5} separator bound let a key padded with a 6+-char
+        // separator run evade the catch-all; the widened {0,64} closes it.
+        String value = "a".repeat(40);
+        String input = "api_key:  ======  ::" + value;
+        String result = Redactor.redact(input);
+        assertFalse(result.contains(value),
+                "value behind a long separator run must be redacted");
+        assertTrue(result.contains(Redactor.REDACTED),
+                "result must contain redaction marker");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"token -> ", "password, ", "api_key | ", "secret=<", "bearer ("})
+    void redactsGenericWithPunctuationSeparators(String prefix) {
+        String value = "a".repeat(40);
+        String result = Redactor.redact(prefix + value);
+        assertFalse(result.contains(value),
+                "value behind punctuation separator '" + prefix + "' must be redacted");
+        assertTrue(result.contains(Redactor.REDACTED),
+                "result must contain redaction marker");
+    }
+
+    @Test
+    void redactsGenericWithNbspSeparator() {
+        // U+00A0 sits in the explicit separator class on both engines; a
+        // bare \s would miss it on the Java side (ASCII-only without
+        // UNICODE_CHARACTER_CLASS).
+        String value = "a".repeat(40);
+        String result = Redactor.redact("password" + (char) 0xA0 + value);
+        assertFalse(result.contains(value),
+                "NBSP-separated value must be redacted");
+        assertTrue(result.contains(Redactor.REDACTED),
+                "result must contain redaction marker");
+    }
+
+    @Test
+    void redactsGenericAtTheSeparatorBound() {
+        // Exactly 64 separator chars: the last in-bound column-aligned
+        // shape.
+        String value = "a".repeat(40);
+        String result = Redactor.redact("api_key" + " ".repeat(64) + value);
+        assertFalse(result.contains(value),
+                "value at the {0,64} bound must be redacted");
+        assertTrue(result.contains(Redactor.REDACTED),
+                "result must contain redaction marker");
+    }
+
+    @Test
+    void overBoundSeparatorRunDeliberatelyNotRedacted() {
+        // 65 separator chars exceed {0,64}: the deliberate cliff. The
+        // finite bound keeps the spec's "adjacent" meaningful and caps
+        // backtracking per position; a pure-separator run this long is
+        // not plausibly a key/value gap.
+        String input = "api_key" + " ".repeat(65) + "a".repeat(40);
+        assertEquals(input, Redactor.redact(input));
+    }
+
     // --- Redactor: non-key strings pass through ---
 
     @Test

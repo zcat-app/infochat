@@ -182,4 +182,22 @@ class AddSourceArgsTest {
         Failure failure = assertInstanceOf(Failure.class, result);
         assertEquals("error.add_source.malformed_url", failure.bundleKey());
     }
+
+    // (f) embedded userinfo
+    @Test
+    void urlWithEmbeddedCredentialsSurfacesUserinfoRejectedBundleKey() {
+        ParseResult result = AddSourceArgs.parse(
+                "/add-source https://user:hunter2@example.com/feed.xml --tags news");
+        Failure failure = assertInstanceOf(Failure.class, result);
+        assertEquals("error.add_source.userinfo_rejected", failure.bundleKey());
+    }
+
+    @Test
+    void urlWithBareUserinfoTokenSurfacesUserinfoRejectedBundleKey() {
+        // getRawUserInfo() is non-null for the user-only form too.
+        ParseResult result = AddSourceArgs.parse(
+                "/add-source https://apitoken@example.com/feed.xml --tags news");
+        Failure failure = assertInstanceOf(Failure.class, result);
+        assertEquals("error.add_source.userinfo_rejected", failure.bundleKey());
+    }
 }

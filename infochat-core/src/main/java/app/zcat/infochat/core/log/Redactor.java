@@ -49,8 +49,20 @@ public final class Redactor implements Filter {
             Pattern.compile("(?:AKIA|ASIA)[0-9A-Z]{16}"),
             Pattern.compile("AIza[0-9A-Za-z_-]{35}"),
             Pattern.compile("xox[abprs]-[A-Za-z0-9-]{10,}"),
+            // Separator class is spelled explicitly — no \s shorthand —
+            // because Java's \s is ASCII-only while PostgreSQL's is
+            // [[:space:]]: only an explicit class (ASCII \s spelled out,
+            // plus NBSP and the punctuation set , | < > ( ) -) makes the
+            // textual identity with the SQL mirror in V33's
+            // redact_secrets_jsonb imply semantic identity too (guarded
+            // by RedactorSqlParityIT). The bound stays finite so the
+            // spec's "adjacent" keeps meaning and backtracking is capped
+            // at 65 retries per position; {0,64} covers column-aligned
+            // config dumps, and a 65+-char pure-separator run is no
+            // longer plausibly a key/value gap — a deliberate cliff,
+            // pinned by negative tests on both engines.
             Pattern.compile(
-                    "(?i)((?:api[_-]?key|secret|token|password|bearer)[\"'\\s:=]{0,5})[A-Za-z0-9+/=_-]{32,}")
+                    "(?i)((?:api[_-]?key|secret|token|password|bearer)[\"' \\t\\n\\x0B\\f\\r\\u00A0:=,|<>()-]{0,64})[A-Za-z0-9+/=_-]{32,}")
     );
 
     /**

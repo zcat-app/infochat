@@ -17,27 +17,29 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Drift guard between the write-side Java secret catalogue
  * ({@link Redactor#CATALOGUE}) and the read-side SQL mirror
- * ({@code redact_secrets_jsonb} in migration V31). The console filter
- * and the audit-write hook share {@code Redactor.redact} structurally,
- * but V31 hand-copies the catalogue as a sequence of
- * {@code regexp_replace} calls kept in sync only by a comment — this
- * IT makes that sync mechanical (docs/spec/security.md §Secrets
- * handling, "cannot drift").
+ * ({@code redact_secrets_jsonb}, latest definition in migration V33).
+ * The console filter and the audit-write hook share
+ * {@code Redactor.redact} structurally, but the migration SQL
+ * hand-copies the catalogue as a sequence of {@code regexp_replace}
+ * calls kept in sync only by a comment — this IT makes that sync
+ * mechanical (docs/spec/security.md §Secrets handling, "cannot
+ * drift").
  *
  * <p>Two chained tripwires: the sample table is pinned to
  * {@code CATALOGUE.size()}, so adding a Java family without adding a
  * sample fails the build (tripwire #1); every sample must then be
  * masked by BOTH {@code Redactor.redact} and
  * {@code redact_secrets_jsonb}, so a family present in Java but
- * missing from V31 fails too (tripwire #2). A negative control guards
- * against an over-broad SQL regex that masks everything and would
- * thereby hide drift behind always-green tripwire-#2 assertions.
+ * missing from the SQL mirror fails too (tripwire #2). A negative
+ * control guards against an over-broad SQL regex that masks
+ * everything and would thereby hide drift behind always-green
+ * tripwire-#2 assertions.
  *
  * <p>Known limit: the Anthropic family is a strict prefix of the
  * OpenAI family ({@code sk-ant-…} vs {@code sk-…}), so dropping ONLY
- * the Anthropic line from V31 is shadowed by the OpenAI pattern and
- * not detectable by sample masking; the size tripwire still covers
- * additions.
+ * the Anthropic line from the SQL mirror is shadowed by the OpenAI
+ * pattern and not detectable by sample masking; the size tripwire
+ * still covers additions.
  *
  * <p>Lives in {@code app.zcat.infochat.core.log} to read the
  * package-private {@code CATALOGUE}; reuses
@@ -71,18 +73,49 @@ class RedactorSqlParityIT extends PostgresSchemaTestBase {
             SecretSample.of("aws", "AKIAFAKEFAKEFAKEFAKE"),
             SecretSample.of("google", "AIzaFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE012"),
             SecretSample.of("slack", "xoxb-FAKEFAKEFAKE"),
+            // Long separator run (12 chars, beyond the original {0,5}
+            // bound) so the parity guard exercises the widened {0,64}
+            // quantifier on both engines, not just the trivial
+            // single-'=' shape. Edge shapes for the widened separator
+            // class live in GENERIC_EDGE_SAMPLES below.
             new SecretSample("generic-keyword-adjacent",
-                    "api_key=" + GENERIC_SECRET_BODY, GENERIC_SECRET_BODY));
+                    "api_key::::====::::" + GENERIC_SECRET_BODY, GENERIC_SECRET_BODY));
 
     private static final String NON_SECRET = "plain non-secret text";
 
     /**
+     * Generic-pattern edge shapes from the M1-156 redteam pass, in a
+     * dedicated list so the one-sample-per-family size tripwire stays
+     * exact. Both engines must agree on every shape: the widened
+     * punctuation separators and NBSP mask, the 65-char run beyond the
+     * {0,64} bound deliberately does not — the cliff is
+     * cross-engine-identical, not a Java-only artifact.
+     */
+    private record GenericEdgeSample(String description, String sample, boolean masked) {
+    }
+
+    private static final char NBSP = (char) 0xA0;
+
+    private static final List<GenericEdgeSample> GENERIC_EDGE_SAMPLES = List.of(
+            new GenericEdgeSample("arrow separator",
+                    "token -> " + GENERIC_SECRET_BODY, true),
+            new GenericEdgeSample("comma/pipe/angle separators",
+                    "api_key,|<" + GENERIC_SECRET_BODY, true),
+            new GenericEdgeSample("NBSP separator",
+                    "password" + NBSP + GENERIC_SECRET_BODY, true),
+            new GenericEdgeSample("column-aligned run at the {0,64} bound",
+                    "secret" + " ".repeat(64) + GENERIC_SECRET_BODY, true),
+            new GenericEdgeSample("65-char run beyond the bound",
+                    "secret" + " ".repeat(65) + GENERIC_SECRET_BODY, false));
+
+    /**
      * Fast canary: a test profile that silently stopped migrating
-     * before V31 would make the SQL-side assertions exercise the V5
-     * RETURN-input stub instead of the real redactor.
+     * before V33 would make the SQL-side assertions exercise a stale
+     * redact_secrets_jsonb — the V5 RETURN-input stub or V31's
+     * narrower pre-widening pattern.
      */
     @Test
-    void migrationCursorReachesV31() throws SQLException {
+    void migrationCursorReachesV33() throws SQLException {
         try (Connection c = newConnection();
              Statement s = c.createStatement();
              ResultSet rs = s.executeQuery(
@@ -91,8 +124,8 @@ class RedactorSqlParityIT extends PostgresSchemaTestBase {
                              + "ORDER BY installed_rank DESC LIMIT 1")) {
             assertTrue(rs.next(), "expected at least one applied Flyway version");
             int maxVersion = Integer.parseInt(rs.getString("version"));
-            assertTrue(maxVersion >= 31,
-                    "expected migration cursor at V31 or later, got V" + maxVersion);
+            assertTrue(maxVersion >= 33,
+                    "expected migration cursor at V33 or later, got V" + maxVersion);
         }
     }
 
@@ -102,7 +135,8 @@ class RedactorSqlParityIT extends PostgresSchemaTestBase {
         assertEquals(Redactor.CATALOGUE.size(), SAMPLES.size(),
                 "Redactor.CATALOGUE and the parity sample table have diverged: "
                         + "add one representative sample per new family "
-                        + "(and mirror the family in V31's redact_secrets_jsonb)");
+                        + "(and mirror the family in redact_secrets_jsonb, "
+                        + "latest definition in V33)");
     }
 
     @Test
@@ -118,7 +152,7 @@ class RedactorSqlParityIT extends PostgresSchemaTestBase {
 
     /**
      * Tripwire #2: read-side SQL mask lags the write-side. Calls the
-     * V31 function directly — no need to route through
+     * migrated function directly — no need to route through
      * {@code audit_log_view}.
      */
     @Test
@@ -144,6 +178,25 @@ class RedactorSqlParityIT extends PostgresSchemaTestBase {
                 "Redactor.redact altered a non-secret string");
         assertEquals(NON_SECRET, sqlRedactedValue(NON_SECRET),
                 "redact_secrets_jsonb altered a non-secret string");
+    }
+
+    @Test
+    void genericEdgeShapesAgreeOnBothEngines() throws SQLException {
+        for (GenericEdgeSample edge : GENERIC_EDGE_SAMPLES) {
+            String javaMasked = Redactor.redact(edge.sample());
+            String sqlMasked = sqlRedactedValue(edge.sample());
+            if (edge.masked()) {
+                assertFalse(javaMasked.contains(GENERIC_SECRET_BODY),
+                        edge.description() + ": secret survived Redactor.redact: " + javaMasked);
+                assertFalse(sqlMasked.contains(GENERIC_SECRET_BODY),
+                        edge.description() + ": secret survived redact_secrets_jsonb: " + sqlMasked);
+            } else {
+                assertEquals(edge.sample(), javaMasked,
+                        edge.description() + ": Redactor.redact must not mask beyond the bound");
+                assertEquals(edge.sample(), sqlMasked,
+                        edge.description() + ": redact_secrets_jsonb must not mask beyond the bound");
+            }
+        }
     }
 
     private static String sqlRedactedValue(String value) throws SQLException {

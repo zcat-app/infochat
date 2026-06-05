@@ -16,9 +16,9 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.Objects;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -52,14 +52,17 @@ import java.util.concurrent.ConcurrentHashMap;
  * for a failed audit.</p>
  *
  * <p><b>Brute-force breach audit (exactly once per breach
- * event).</b> An in-memory {@link Set} of {@code (adapter,
- * contact_id)} keys remembers which keys have already had an
- * {@code INVITE_BRUTE_FORCE_BREACH} audit row written. A key
- * leaves the set when a subsequent consume sees its counter
- * drop below threshold (window expired). A Provider restart
- * resets the set — the spec tolerates a second breach audit if
- * the attacker is patient enough to wait through a Provider
- * restart.</p>
+ * event).</b> An in-memory map of {@code (adapter, contact_id)}
+ * keys remembers which keys have already had an
+ * {@code INVITE_BRUTE_FORCE_BREACH} audit row written; the value
+ * is the last time the key was observed over threshold. A key
+ * leaves the map when a subsequent consume sees its counter
+ * drop below threshold (window expired), or via the opportunistic
+ * stale-entry sweep in {@code evictStaleBreachAudited} (same
+ * semantics — a key quiet for a full window has no attempts left
+ * inside it). A Provider restart resets the map — the spec
+ * tolerates a second breach audit if the attacker is patient
+ * enough to wait through a Provider restart.</p>
  *
  * <p><b>Drop counter.</b> The spec also names a
  * {@code invite_drop_total} Micrometer counter that increments
@@ -72,6 +75,14 @@ import java.util.concurrent.ConcurrentHashMap;
 @ApplicationScoped
 public class InviteCodeConsumer {
 
+    // The brute-force counter is keyed per (adapter, contact_id), NOT
+    // per code — deliberate. Codes are minted via gen_random_uuid()
+    // (CSPRNG UUIDv4, 122 random bits; InviteCommandHandler's
+    // SELECT_NEW_CODE_SQL), so even N colluding contact ids pooling
+    // N× the per-contact budget cannot meaningfully search the 2^122
+    // space, and docs/spec/security.md §Invite-code registration pins
+    // this keying ("prevents a patient brute-force search of the UUID
+    // space"). A per-code counter would add nothing at this entropy.
     private static final String COUNT_ATTEMPTS_SQL =
             "SELECT count(*) FROM invite_code_attempt "
                     + "WHERE adapter = ? AND contact_id = ? AND attempted_at > ?";
@@ -114,12 +125,16 @@ public class InviteCodeConsumer {
     @Inject
     AuditLogWriter auditLogWriter;
 
-    // Sentinel set of (adapter, contact_id) tuples that have ALREADY
+    // Sentinel map of (adapter, contact_id) tuples that have ALREADY
     // had an INVITE_BRUTE_FORCE_BREACH audit row written within the
-    // current breach event. A subsequent consume that observes the
+    // current breach event, valued with the last over-threshold
+    // observation time. A subsequent consume that observes the
     // counter back below threshold removes the key — so a re-breach
-    // after the window expires audits again.
-    private final Set<Key> breachAudited = ConcurrentHashMap.newKeySet();
+    // after the window expires audits again. A breached key whose
+    // attacker simply walks away never travels that remove path; the
+    // stale-entry sweep bounds the map instead. Package-private for
+    // the eviction tests.
+    final ConcurrentHashMap<Key, Instant> breachAudited = new ConcurrentHashMap<>();
 
     public sealed interface Outcome
             permits Accepted, Rejected, BruteForceThresholdBreached {}
@@ -137,6 +152,7 @@ public class InviteCodeConsumer {
         // invite?" so a non-UUID probe also increments the brute-force
         // counter (closes the AUDIT-EVASION redteam finding).
         UUID candidateCode = parseUuid(body);
+        evictStaleBreachAudited();
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
@@ -144,11 +160,11 @@ public class InviteCodeConsumer {
                 Key key = new Key(adapter, contactId);
 
                 if (attempts >= bruteForceThreshold) {
-                    // Rollback-safe breach-audit ordering: contains-check
+                    // Rollback-safe breach-audit ordering: containsKey-check
                     // before insertAudit so a SQL fault on the audit INSERT
                     // does NOT permanently mark the key in the in-memory
-                    // set. The add(key) call moves to AFTER conn.commit()
-                    // so the in-memory mark only fires once the DB row is
+                    // map. The put(key, now) runs AFTER conn.commit() so
+                    // the in-memory mark only fires once the DB row is
                     // durable. If insertAudit OR commit throws, the outer
                     // catch rolls back the DB AND leaves breachAudited
                     // untouched — the next call retries the audit.
@@ -160,14 +176,19 @@ public class InviteCodeConsumer {
                     // once retry artifact in that narrow commit-failure
                     // window. Audit-insert failure (the common mode) is
                     // correctly retried by this ordering.
-                    if (!breachAudited.contains(key)) {
+                    //
+                    // The put also runs when the key is already marked: it
+                    // refreshes the over-threshold observation time, so the
+                    // stale-entry sweep can only evict a key that has been
+                    // quiet for a full window — by which point every attempt
+                    // inside the window has aged out and eviction is
+                    // equivalent to the below-threshold remove path.
+                    if (!breachAudited.containsKey(key)) {
                         insertAudit(conn, contactId, adapter, AuditAction.INVITE_BRUTE_FORCE_BREACH,
                                 contactId, contactId);
-                        conn.commit();
-                        breachAudited.add(key);
-                    } else {
-                        conn.commit();
                     }
+                    conn.commit();
+                    breachAudited.put(key, Instant.now());
                     return new BruteForceThresholdBreached();
                 }
                 // Counter under threshold — clear any stale sentinel for
@@ -209,6 +230,16 @@ public class InviteCodeConsumer {
                             + adapter + " contact_id="
                             + ContactIds.redact(contactId), e);
         }
+    }
+
+    // Opportunistic sweep, once per consume. An entry whose last
+    // over-threshold observation is older than the window is safe to
+    // drop: every attempt inside the window has aged out, so the
+    // counter is below threshold and eviction is equivalent to the
+    // remove path (window expired = breach event ended).
+    private void evictStaleBreachAudited() {
+        Instant cutoff = Instant.now().minus(bruteForceWindow);
+        breachAudited.entrySet().removeIf(entry -> entry.getValue().isBefore(cutoff));
     }
 
     private static @Nullable UUID parseUuid(String body) {
@@ -302,7 +333,9 @@ public class InviteCodeConsumer {
         auditLogWriter.write(conn, row);
     }
 
-    private record Key(String adapter, String contactId) {
+    // Package-private (not private) so the eviction tests can seed
+    // and inspect breachAudited directly.
+    record Key(String adapter, String contactId) {
         Key {
             Objects.requireNonNull(adapter, "adapter");
             Objects.requireNonNull(contactId, "contactId");

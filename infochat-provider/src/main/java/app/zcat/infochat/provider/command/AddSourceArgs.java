@@ -38,7 +38,7 @@ import java.util.Optional;
  * set) remain authoritative — the parser only catches the parse-time
  * shape problems the spec assigns friendly errors to (missing
  * {@code --tags}, unknown {@code --type}, unknown {@code --category},
- * malformed URL).
+ * malformed URL, embedded userinfo).
  */
 public record AddSourceArgs(
         URI url,
@@ -157,6 +157,13 @@ public record AddSourceArgs(
                 url = parseUri(token);
                 if (url == null) {
                     return new Failure("error.add_source.malformed_url");
+                }
+                if (url.getRawUserInfo() != null) {
+                    // Reject embedded credentials at parse time: the fetch
+                    // path never sends userinfo, so accepting it would
+                    // store un-fetchable (and needlessly retained)
+                    // credentials in the source row.
+                    return new Failure("error.add_source.userinfo_rejected");
                 }
                 i++;
             }

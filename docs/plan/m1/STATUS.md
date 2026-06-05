@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 7 |
+| pending | 6 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 198 |
+| done | 199 |
 | deferred | 2 |
 | **total** | **207** |
 
@@ -27,7 +27,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-139 — Kind-6 repost edge resolution (complexity: high, risk: medium)
 - M1-151 — Typed SSRF / error signals (UrlProbe + last-admin SQLSTATE) (complexity: low, risk: low)
 - M1-152 — Schema-hardening migration (stage2_verdict CHECK + V27 audit verb + Nostr index) (complexity: low, risk: medium)
-- M1-156 — Misc security-low hardening (Redactor separator, invite per-code counter, AddSource userinfo) (complexity: low, risk: low)
 - M1-160 — [INVESTIGATE] summary_anchor scope_kind discriminator (complexity: medium, risk: medium)
 - M1-161 — [INVESTIGATE] price_snapshot PK/dedup invariant + new_price_snapshot channel intent (complexity: medium, risk: medium)
 - M1-162 — [INVESTIGATE] confirm-or-drop adapter SPI surfaces vs D47 (complexity: medium, risk: low)
@@ -327,7 +326,7 @@ M1-149 (done)
 M1-150 (done)
 M1-152 (pending) ← runnable
 M1-153 (done)
-M1-156 (pending) ← runnable
+M1-156 (done)
 M1-157 (done)
 M1-158 (done)
 M1-159 (done)
