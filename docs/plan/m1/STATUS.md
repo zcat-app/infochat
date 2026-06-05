@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 8 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 197 |
+| done | 198 |
 | deferred | 2 |
 | **total** | **207** |
 
@@ -31,7 +31,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-160 — [INVESTIGATE] summary_anchor scope_kind discriminator (complexity: medium, risk: medium)
 - M1-161 — [INVESTIGATE] price_snapshot PK/dedup invariant + new_price_snapshot channel intent (complexity: medium, risk: medium)
 - M1-162 — [INVESTIGATE] confirm-or-drop adapter SPI surfaces vs D47 (complexity: medium, risk: low)
-- M1-171 — BanCommandHandler stale M1-041-deferral javadoc (complexity: low, risk: low)
 
 ---
 
@@ -67,6 +66,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-171 | BanCommandHandler stale M1-041-deferral javadoc | 2026-06-05 | round 1 APPROVE |
 | M1-170 | Membership-event hardening (M1-143 redteam findings 2-4) | 2026-06-05 | round 1 APPROVE |
 | M1-169 | Drift guard: V31 audit redactors vs Redactor.CATALOGUE | 2026-06-05 | round 1 APPROVE |
 | M1-168 | Fix stale 3-arg UserSnapshot test call site | 2026-06-05 | round 1 APPROVE |
@@ -76,7 +76,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-164e | Onboard infochat-collector to NullAway + Error Prone | 2026-06-05 | round 2 APPROVE |
 | M1-164 | Adopt NullAway + Error Prone for §7a enforcement (umbrella) | 2026-06-05 | round 1 APPROVE |
 | M1-163 | Shared DB test-seeding seam for the IT suite | 2026-06-05 | round 1 APPROVE |
-| M1-159 | Test-debt (inner-class extraction, truncateAll completeness, delete IngestSpisLoadTest) | 2026-06-05 | round 1 APPROVE |
 
 ---
 
@@ -355,5 +354,5 @@ M1-167 (done)
 M1-168 (done)
 M1-169 (done)
 M1-170 (done)
-M1-171 (pending) ← runnable
+M1-171 (done)
 ```

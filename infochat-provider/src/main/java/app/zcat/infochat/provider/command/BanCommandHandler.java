@@ -79,9 +79,9 @@ import java.util.UUID;
  *   <li>COMMIT.</li>
  * </ol>
  *
- * <p>The handler writes audit rows directly to {@code audit_log} (the
- * M1-036 / M1-039 pattern). The M1-041 AuditLogWriter consolidation is
- * deferred. Every audit row in one dispatch shares one
+ * <p>Audit rows go through the shared infochat-core
+ * {@link AuditLogWriter} on the handler's own transaction connection.
+ * Every audit row in one dispatch shares one
  * {@code UUID.randomUUID().toString()} request id — the BAN +
  * INVITE_REVOKE correlation is the spec's canonical correlated-rows
  * shape.</p>
