@@ -7,6 +7,7 @@ import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.user.UserRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -89,9 +90,6 @@ import java.util.Objects;
 @ApplicationScoped
 public class SaveCommandHandler implements CommandHandler {
 
-    private static final String SELECT_ACTOR_FOR_UPDATE_SQL =
-            "SELECT id, save_count FROM users WHERE adapter = ? AND contact_id = ? FOR UPDATE";
-
     // ORDER BY fetched_at DESC LIMIT 1 picks the most-recent READY row
     // for the given uid. The post table's UNIQUE(uid, fetched_at) lets
     // the same uid appear across partitions (cross-window dedup is the
@@ -138,6 +136,9 @@ public class SaveCommandHandler implements CommandHandler {
     @Inject
     @ConfigProperty(name = "infochat.save.personal-tag-max-count", defaultValue = "20")
     int personalTagMaxCount;
+
+    @Inject
+    UserRepository userRepository;
 
     @Override
     public String name() {
@@ -249,18 +250,8 @@ public class SaveCommandHandler implements CommandHandler {
 
     private Optional<ActorRow> lookupActorForUpdate(Connection conn, String adapter,
                                                     String contactId) throws SQLException {
-        try (PreparedStatement ps = conn.prepareStatement(SELECT_ACTOR_FOR_UPDATE_SQL)) {
-            ps.setString(1, adapter);
-            ps.setString(2, contactId);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (!rs.next()) {
-                    return Optional.empty();
-                }
-                return Optional.of(new ActorRow(
-                        (UUID) rs.getObject("id"),
-                        rs.getInt("save_count")));
-            }
-        }
+        return userRepository.findByAdapterAndContactIdForUpdate(conn, adapter, contactId)
+                .map(u -> new ActorRow(u.id(), u.saveCount()));
     }
 
     private Optional<PostSnapshot> lookupReadyPost(Connection conn, String uid) throws SQLException {

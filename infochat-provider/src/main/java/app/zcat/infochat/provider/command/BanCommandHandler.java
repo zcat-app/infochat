@@ -11,6 +11,7 @@ import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.user.UserRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jspecify.annotations.NonNull;
@@ -88,10 +89,6 @@ import java.util.UUID;
 @ApplicationScoped
 public class BanCommandHandler implements CommandHandler {
 
-    private static final String SELECT_USER_SQL =
-            "SELECT id, contact_id, is_admin, is_banned, registration_state "
-                    + "FROM users WHERE adapter = ? AND contact_id = ?";
-
     private static final String SELECT_PENDING_CONTACT_BOUND_INVITES_SQL =
             "SELECT id FROM invite_code "
                     + "WHERE adapter = ? AND invite_type = 'CONTACT_BOUND' "
@@ -128,6 +125,9 @@ public class BanCommandHandler implements CommandHandler {
 
     @Inject
     ConfirmStateService confirmStateService;
+
+    @Inject
+    UserRepository userRepository;
 
     @Override
     public String name() {
@@ -322,28 +322,9 @@ public class BanCommandHandler implements CommandHandler {
         if (adapter == null || contactId == null) {
             return Optional.empty();
         }
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(SELECT_USER_SQL)) {
-            ps.setString(1, adapter);
-            ps.setString(2, contactId);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (!rs.next()) {
-                    return Optional.empty();
-                }
-                UUID id = (UUID) rs.getObject("id");
-                String resolvedContactId = rs.getString("contact_id");
-                boolean isAdmin = rs.getBoolean("is_admin");
-                boolean isBanned = rs.getBoolean("is_banned");
-                String registrationState = rs.getString("registration_state");
-                return Optional.of(new UserRow(id, resolvedContactId, isAdmin, isBanned,
-                        registrationState));
-            }
-        } catch (SQLException e) {
-            throw new IllegalStateException(
-                    "BanCommandHandler.lookupUser failed for adapter="
-                            + adapter + " contact_id="
-                            + ContactIds.redact(contactId), e);
-        }
+        return userRepository.findByAdapterAndContactId(adapter, contactId)
+                .map(u -> new UserRow(u.id(), u.contactId(), u.isAdmin(), u.isBanned(),
+                        u.registrationState()));
     }
 
     private List<UUID> selectPendingContactBoundInvites(Connection conn,

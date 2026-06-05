@@ -7,6 +7,7 @@ import app.zcat.infochat.provider.chat.CancellationService;
 import app.zcat.infochat.provider.chat.InFlightTracker;
 import app.zcat.infochat.provider.group.GroupRepository;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.user.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -45,7 +46,7 @@ class StopCommandHandlerTest {
 
         handler = new StopCommandHandler();
         handler.bundleLoader = newRealBundleLoader();
-        handler.dataSource = stubUserDataSource(USER_ID);
+        handler.userRepository = new UserRepository(stubUserDataSource(USER_ID));
         handler.cancellationService = cancellationService;
         handler.inFlightTracker = tracker;
         handler.confirmStateService = confirmService;

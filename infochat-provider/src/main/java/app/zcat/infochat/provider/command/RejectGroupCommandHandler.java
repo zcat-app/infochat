@@ -14,6 +14,7 @@ import app.zcat.infochat.provider.group.GroupRepository;
 import app.zcat.infochat.provider.messaging.AdapterRegistry;
 import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.user.UserRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jspecify.annotations.NonNull;
@@ -23,8 +24,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.text.MessageFormat;
@@ -82,10 +81,6 @@ public class RejectGroupCommandHandler implements CommandHandler {
 
     private static final Logger log = LoggerFactory.getLogger(RejectGroupCommandHandler.class);
 
-    private static final String SELECT_ACTOR_FOR_UPDATE_SQL =
-            "SELECT id, contact_id, is_admin, is_banned FROM users "
-                    + "WHERE adapter = ? AND contact_id = ? FOR UPDATE";
-
     @Inject
     BundleLoader bundleLoader;
 
@@ -106,6 +101,9 @@ public class RejectGroupCommandHandler implements CommandHandler {
 
     @Inject
     AdapterRegistry adapterRegistry;
+
+    @Inject
+    UserRepository userRepository;
 
     @Override
     public String name() {
@@ -259,44 +257,15 @@ public class RejectGroupCommandHandler implements CommandHandler {
     }
 
     private Optional<UserRow> lookupActor(String adapter, String contactId) {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(SELECT_ACTOR_FOR_UPDATE_SQL.replace(" FOR UPDATE", ""))) {
-            ps.setString(1, adapter);
-            ps.setString(2, contactId);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (!rs.next()) {
-                    return Optional.empty();
-                }
-                UUID id = (UUID) rs.getObject("id");
-                String resolvedContactId = rs.getString("contact_id");
-                boolean isAdmin = rs.getBoolean("is_admin");
-                boolean isBanned = rs.getBoolean("is_banned");
-                return Optional.of(new UserRow(id, resolvedContactId, isAdmin, isBanned));
-            }
-        } catch (SQLException e) {
-            throw new IllegalStateException(
-                    "RejectGroupCommandHandler.lookupActor failed for adapter="
-                            + adapter, e);
-        }
+        return userRepository.findByAdapterAndContactId(adapter, contactId)
+                .map(u -> new UserRow(u.id(), u.contactId(), u.isAdmin(), u.isBanned()));
     }
 
     private Optional<UserRow> lookupActorForUpdate(Connection conn,
                                                    String adapter,
                                                    String contactId) throws SQLException {
-        try (PreparedStatement ps = conn.prepareStatement(SELECT_ACTOR_FOR_UPDATE_SQL)) {
-            ps.setString(1, adapter);
-            ps.setString(2, contactId);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (!rs.next()) {
-                    return Optional.empty();
-                }
-                UUID id = (UUID) rs.getObject("id");
-                String resolvedContactId = rs.getString("contact_id");
-                boolean isAdmin = rs.getBoolean("is_admin");
-                boolean isBanned = rs.getBoolean("is_banned");
-                return Optional.of(new UserRow(id, resolvedContactId, isAdmin, isBanned));
-            }
-        }
+        return userRepository.findByAdapterAndContactIdForUpdate(conn, adapter, contactId)
+                .map(u -> new UserRow(u.id(), u.contactId(), u.isAdmin(), u.isBanned()));
     }
 
     private void insertAudit(Connection conn, AuditAction action, UserRow actor,

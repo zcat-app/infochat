@@ -10,6 +10,7 @@ import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.user.UserRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jspecify.annotations.NonNull;
@@ -89,16 +90,6 @@ import org.jspecify.annotations.Nullable;
 @ApplicationScoped
 public class VouchCommandHandler implements CommandHandler {
 
-    // FOR UPDATE locks the actor row for the rest of the transaction so
-    // a concurrent /revoke-admin UPDATE on the same row serializes
-    // against this SELECT. If /revoke-admin holds the row lock, this
-    // SELECT blocks until /revoke-admin COMMITs; the subsequent
-    // is_admin read then reflects the post-revoke state and the
-    // handler short-circuits with error.admin_only.
-    private static final String SELECT_ACTOR_FOR_UPDATE_SQL =
-            "SELECT id, contact_id, is_admin FROM users "
-                    + "WHERE adapter = ? AND contact_id = ? FOR UPDATE";
-
     private static final String SELECT_TARGET_SQL =
             "SELECT id, contact_id, probation_until, is_banned "
                     + "FROM users WHERE adapter = ? AND contact_id = ?";
@@ -120,6 +111,9 @@ public class VouchCommandHandler implements CommandHandler {
 
     @Inject
     AuditLogWriter auditLogWriter;
+
+    @Inject
+    UserRepository userRepository;
 
     @Override
     public String name() {
@@ -228,19 +222,8 @@ public class VouchCommandHandler implements CommandHandler {
     private Optional<ActorRow> lookupActorForUpdate(Connection conn,
                                                     String adapter,
                                                     String contactId) throws SQLException {
-        try (PreparedStatement ps = conn.prepareStatement(SELECT_ACTOR_FOR_UPDATE_SQL)) {
-            ps.setString(1, adapter);
-            ps.setString(2, contactId);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (!rs.next()) {
-                    return Optional.empty();
-                }
-                UUID id = (UUID) rs.getObject("id");
-                String resolvedContactId = rs.getString("contact_id");
-                boolean isAdmin = rs.getBoolean("is_admin");
-                return Optional.of(new ActorRow(id, resolvedContactId, isAdmin));
-            }
-        }
+        return userRepository.findByAdapterAndContactIdForUpdate(conn, adapter, contactId)
+                .map(u -> new ActorRow(u.id(), u.contactId(), u.isAdmin()));
     }
 
     private Optional<TargetRow> lookupTargetInTx(Connection conn,

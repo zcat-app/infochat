@@ -21,6 +21,7 @@ import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator.ClusterProse;
 import app.zcat.infochat.provider.translation.TranslationPipeline;
+import app.zcat.infochat.provider.user.UserRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.json.Json;
@@ -60,12 +61,6 @@ import java.util.UUID;
  */
 @ApplicationScoped
 public class RetryCommandHandler implements CommandHandler {
-
-    private static final String SELECT_USER_ID =
-            "SELECT id FROM users WHERE adapter = ? AND contact_id = ?";
-
-    private static final String SELECT_ACTOR_WITH_ADMIN =
-            "SELECT id, is_admin FROM users WHERE adapter = ? AND contact_id = ?";
 
     private static final String SELECT_GROUP_ID =
             "SELECT id FROM groups WHERE adapter = ? AND upstream_group_id = ?";
@@ -107,6 +102,9 @@ public class RetryCommandHandler implements CommandHandler {
 
     @Inject
     InboundContext inboundContext;
+
+    @Inject
+    UserRepository userRepository;
 
     @Inject
     InFlightTracker inFlightTracker;
@@ -328,20 +326,7 @@ public class RetryCommandHandler implements CommandHandler {
         if (!(scope instanceof ScopeRef.Dm dm)) {
             return Optional.empty();
         }
-        String adapterName = inboundContext.adapterName();
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(SELECT_USER_ID)) {
-            ps.setString(1, adapterName);
-            ps.setString(2, dm.contactId());
-            try (ResultSet rs = ps.executeQuery()) {
-                if (!rs.next()) {
-                    return Optional.empty();
-                }
-                return Optional.of((UUID) rs.getObject("id"));
-            }
-        } catch (SQLException e) {
-            throw new IllegalStateException("RetryCommandHandler.resolveUserId failed", e);
-        }
+        return userRepository.resolveUserId(inboundContext.adapterName(), dm.contactId());
     }
 
     private String readScopeLanguage(String scopeKind, UUID scopeId) {
@@ -424,22 +409,9 @@ public class RetryCommandHandler implements CommandHandler {
     }
 
     private @Nullable ActorRow lookupActor(String adapter, String contactId) {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(SELECT_ACTOR_WITH_ADMIN)) {
-            ps.setString(1, adapter);
-            ps.setString(2, contactId);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (!rs.next()) {
-                    return null;
-                }
-                return new ActorRow(
-                        (UUID) rs.getObject("id"),
-                        rs.getBoolean("is_admin"));
-            }
-        } catch (SQLException e) {
-            throw new IllegalStateException(
-                    "RetryCommandHandler.lookupActor failed", e);
-        }
+        return userRepository.findByAdapterAndContactId(adapter, contactId)
+                .map(u -> new ActorRow(u.id(), u.isAdmin()))
+                .orElse(null);
     }
 
     private @Nullable UUID lookupGroupId(String adapterGroupId) {

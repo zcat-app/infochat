@@ -3,11 +3,11 @@ package app.zcat.infochat.provider.command;
 import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
-import app.zcat.infochat.core.log.ContactIds;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.user.UserRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -16,8 +16,6 @@ import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -49,9 +47,6 @@ public class ExportCommandHandler implements CommandHandler {
     /** 32-char header budget per the spec (covers page=N/T + fences). */
     static final int HEADER_BUDGET = 32;
 
-    private static final String USER_ID_SQL =
-            "SELECT id FROM users WHERE adapter = ? AND contact_id = ?";
-
     @Inject
     DataSource dataSource;
 
@@ -63,6 +58,9 @@ public class ExportCommandHandler implements CommandHandler {
 
     @Inject
     ExportDataCollector dataCollector;
+
+    @Inject
+    UserRepository userRepository;
 
     /**
      * Export page cap per hardware profile. The effective page cap for
@@ -112,19 +110,7 @@ public class ExportCommandHandler implements CommandHandler {
     }
 
     private @Nullable UUID lookupUserId(String adapter, String contactId) {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(USER_ID_SQL)) {
-            ps.setString(1, adapter);
-            ps.setString(2, contactId);
-            try (ResultSet rs = ps.executeQuery()) {
-                return rs.next() ? rs.getObject("id", UUID.class) : null;
-            }
-        } catch (SQLException e) {
-            throw new IllegalStateException(
-                    "ExportCommandHandler.lookupUserId failed for adapter="
-                            + adapter + " contact_id="
-                            + ContactIds.redact(contactId), e);
-        }
+        return userRepository.resolveUserId(adapter, contactId).orElse(null);
     }
 
     private void writeAuditRow(UUID userId, String contactId, String adapter) {

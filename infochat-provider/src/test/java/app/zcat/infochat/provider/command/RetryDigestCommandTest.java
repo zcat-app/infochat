@@ -13,6 +13,8 @@ import org.jspecify.annotations.NonNull;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import app.zcat.infochat.provider.user.UserRepository;
+
 import javax.sql.DataSource;
 import java.io.PrintWriter;
 import java.lang.reflect.Method;
@@ -48,7 +50,9 @@ class RetryDigestCommandTest {
         handler.digestRetryService = digestRetryService;
         handler.groupMembershipRepository = new StubGroupMembershipRepository(true);
         handler.auditLogWriter = new AuditLogWriter(row -> row);
-        handler.dataSource = stubDigestDataSource(USER_ID, true, GROUP_ID);
+        DataSource stub = stubDigestDataSource(USER_ID, true, GROUP_ID);
+        handler.dataSource = stub;
+        handler.userRepository = new UserRepository(stub);
 
         InboundContext ctx = new InboundContext();
         ctx.setAdapterName("inmemory");
@@ -69,7 +73,9 @@ class RetryDigestCommandTest {
 
     @Test
     void retryDigest_rejectsNonAdmin() {
-        handler.dataSource = stubDigestDataSource(USER_ID, false, GROUP_ID);
+        DataSource nonAdminStub = stubDigestDataSource(USER_ID, false, GROUP_ID);
+        handler.dataSource = nonAdminStub;
+        handler.userRepository = new UserRepository(nonAdminStub);
         handler.groupMembershipRepository = new StubGroupMembershipRepository(false);
 
         OutboundMessage reply = handler.handle(
@@ -219,6 +225,17 @@ class RetryDigestCommandTest {
                         };
                     }
                     case "getBoolean" -> isAdmin;
+                    // UserRepository's canonical projection reads these
+                    // columns beyond what the handler's ActorRow consumes.
+                    case "getString" -> {
+                        String col = (String) args[0];
+                        yield switch (col) {
+                            case "contact_id" -> "admin-contact-1";
+                            case "registration_state" -> "vouched";
+                            default -> throw new UnsupportedOperationException("col: " + col);
+                        };
+                    }
+                    case "getInt" -> 0;
                     case "close" -> null;
                     default -> throw new UnsupportedOperationException("RS." + method.getName());
                 });

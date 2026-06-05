@@ -12,6 +12,7 @@ import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.chat.ChatSessionRepository;
 import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.user.UserRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jspecify.annotations.NonNull;
@@ -50,9 +51,6 @@ import java.util.UUID;
 public class CompressCommandHandler implements CommandHandler {
 
     private static final Logger log = LoggerFactory.getLogger(CompressCommandHandler.class);
-
-    private static final String SELECT_USER_SQL =
-            "SELECT id FROM users WHERE adapter = ? AND contact_id = ?";
 
     private static final String SELECT_GROUP_SQL =
             "SELECT id FROM groups WHERE adapter = ? AND upstream_group_id = ? "
@@ -94,6 +92,9 @@ public class CompressCommandHandler implements CommandHandler {
 
     @Inject
     LlmRouter llmRouter;
+
+    @Inject
+    UserRepository userRepository;
 
     @Override
     public String name() {
@@ -303,18 +304,7 @@ public class CompressCommandHandler implements CommandHandler {
 
     private Optional<UUID> lookupUserId(String adapter, String contactId) {
         if (adapter == null || contactId == null) return Optional.empty();
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(SELECT_USER_SQL)) {
-            ps.setString(1, adapter);
-            ps.setString(2, contactId);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (!rs.next()) return Optional.empty();
-                return Optional.of((UUID) rs.getObject("id"));
-            }
-        } catch (SQLException e) {
-            throw new IllegalStateException(
-                    "CompressCommandHandler.lookupUserId failed for adapter=" + adapter, e);
-        }
+        return userRepository.resolveUserId(adapter, contactId);
     }
 
     private Optional<UUID> lookupGroupId(String adapter, String upstreamGroupId) {

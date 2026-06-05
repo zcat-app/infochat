@@ -10,6 +10,7 @@ import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.user.UserRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jspecify.annotations.NonNull;
@@ -82,10 +83,6 @@ import java.util.UUID;
 @ApplicationScoped
 public class UnbanCommandHandler implements CommandHandler {
 
-    private static final String SELECT_USER_SQL =
-            "SELECT id, contact_id, is_admin, registration_state "
-                    + "FROM users WHERE adapter = ? AND contact_id = ?";
-
     private static final String SELECT_GROUP_ADMINS_SQL =
             "SELECT g.id, g.display_name "
                     + "FROM group_membership gm "
@@ -119,6 +116,9 @@ public class UnbanCommandHandler implements CommandHandler {
 
     @Inject
     AuditLogWriter auditLogWriter;
+
+    @Inject
+    UserRepository userRepository;
 
     @Override
     public String name() {
@@ -255,27 +255,9 @@ public class UnbanCommandHandler implements CommandHandler {
         if (adapter == null || contactId == null) {
             return Optional.empty();
         }
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(SELECT_USER_SQL)) {
-            ps.setString(1, adapter);
-            ps.setString(2, contactId);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (!rs.next()) {
-                    return Optional.empty();
-                }
-                UUID id = (UUID) rs.getObject("id");
-                String resolvedContactId = rs.getString("contact_id");
-                boolean isAdmin = rs.getBoolean("is_admin");
-                String registrationState = rs.getString("registration_state");
-                return Optional.of(new UserRow(id, resolvedContactId, isAdmin,
-                        registrationState));
-            }
-        } catch (SQLException e) {
-            throw new IllegalStateException(
-                    "UnbanCommandHandler.lookupUser failed for adapter="
-                            + adapter + " contact_id="
-                            + ContactIds.redact(contactId), e);
-        }
+        return userRepository.findByAdapterAndContactId(adapter, contactId)
+                .map(u -> new UserRow(u.id(), u.contactId(), u.isAdmin(),
+                        u.registrationState()));
     }
 
     private List<GroupRow> selectGroupAdminMemberships(Connection conn, UUID userId)

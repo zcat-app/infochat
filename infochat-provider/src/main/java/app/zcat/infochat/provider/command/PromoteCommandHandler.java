@@ -10,6 +10,7 @@ import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.user.UserRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jspecify.annotations.NonNull;
@@ -35,10 +36,6 @@ import java.util.UUID;
 @ApplicationScoped
 public class PromoteCommandHandler implements CommandHandler {
 
-    private static final String SELECT_ACTOR_SQL =
-            "SELECT id, is_admin FROM users "
-                    + "WHERE adapter = ? AND contact_id = ?";
-
     private static final String SELECT_TARGET_SQL =
             "SELECT id, contact_id, is_banned, probation_until FROM users "
                     + "WHERE adapter = ? AND contact_id = ?";
@@ -63,6 +60,7 @@ public class PromoteCommandHandler implements CommandHandler {
     @Inject BundleLoader bundleLoader;
     @Inject InboundContext inboundContext;
     @Inject AuditLogWriter auditLogWriter;
+    @Inject UserRepository userRepository;
 
     @Override
     public String name() {
@@ -156,17 +154,17 @@ public class PromoteCommandHandler implements CommandHandler {
         return reply(scope, replyText);
     }
 
+    // FOR UPDATE locks the actor row for the rest of the transaction so
+    // a concurrent /revoke-admin UPDATE on the same row serializes
+    // against this read — the is_admin value cannot go stale between
+    // the admin gate and the membership UPDATEs below (mirrors the
+    // M1-046 PERM-ESCAL closure on the sibling admin handlers).
     private @Nullable UUID resolveAdmin(Connection conn, String adapter,
                               String contactId) throws SQLException {
-        try (PreparedStatement ps = conn.prepareStatement(SELECT_ACTOR_SQL)) {
-            ps.setString(1, adapter);
-            ps.setString(2, contactId);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (!rs.next()) return null;
-                if (!rs.getBoolean("is_admin")) return null;
-                return (UUID) rs.getObject("id");
-            }
-        }
+        return userRepository.findByAdapterAndContactIdForUpdate(conn, adapter, contactId)
+                .filter(UserRepository.UserRow::isAdmin)
+                .map(UserRepository.UserRow::id)
+                .orElse(null);
     }
 
     private @Nullable TargetRow resolveTarget(Connection conn, String adapter,

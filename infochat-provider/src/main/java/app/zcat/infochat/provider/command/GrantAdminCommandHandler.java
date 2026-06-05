@@ -12,6 +12,7 @@ import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
 import app.zcat.infochat.provider.messaging.ProbationCheck;
+import app.zcat.infochat.provider.user.UserRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jspecify.annotations.NonNull;
@@ -98,17 +99,6 @@ import java.util.UUID;
 @ApplicationScoped
 public class GrantAdminCommandHandler implements CommandHandler {
 
-    // FOR UPDATE locks the actor row for the rest of the transaction
-    // so a concurrent /revoke-admin UPDATE on the same row serializes
-    // against this SELECT. If /revoke-admin holds the row lock, this
-    // SELECT blocks until /revoke-admin COMMITs; the subsequent
-    // is_admin read then reflects the post-revoke state and the
-    // handler short-circuits with error.admin_only. Closes the
-    // M1-046 redteam PERM-ESCAL finding (actor-side TOCTOU).
-    private static final String SELECT_ACTOR_FOR_UPDATE_SQL =
-            "SELECT id, contact_id, is_admin, is_banned FROM users "
-                    + "WHERE adapter = ? AND contact_id = ? FOR UPDATE";
-
     // Target lookup runs INSIDE the same tx but without FOR UPDATE.
     // The target row's mutation is bounded by uniqueness on (adapter,
     // contact_id) plus the V5 trigger (no per-row lock needed beyond
@@ -133,6 +123,9 @@ public class GrantAdminCommandHandler implements CommandHandler {
 
     @Inject
     ProbationCheck probationCheck;
+
+    @Inject
+    UserRepository userRepository;
 
     @Override
     public String name() {
@@ -271,20 +264,8 @@ public class GrantAdminCommandHandler implements CommandHandler {
     private Optional<UserRow> lookupActorForUpdate(Connection conn,
                                                    String adapter,
                                                    String contactId) throws SQLException {
-        try (PreparedStatement ps = conn.prepareStatement(SELECT_ACTOR_FOR_UPDATE_SQL)) {
-            ps.setString(1, adapter);
-            ps.setString(2, contactId);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (!rs.next()) {
-                    return Optional.empty();
-                }
-                UUID id = (UUID) rs.getObject("id");
-                String resolvedContactId = rs.getString("contact_id");
-                boolean isAdmin = rs.getBoolean("is_admin");
-                boolean isBanned = rs.getBoolean("is_banned");
-                return Optional.of(new UserRow(id, resolvedContactId, isAdmin, isBanned));
-            }
-        }
+        return userRepository.findByAdapterAndContactIdForUpdate(conn, adapter, contactId)
+                .map(u -> new UserRow(u.id(), u.contactId(), u.isAdmin(), u.isBanned()));
     }
 
     private Optional<UserRow> lookupTargetInTx(Connection conn,

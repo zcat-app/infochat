@@ -10,6 +10,7 @@ import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.user.UserRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jspecify.annotations.NonNull;
@@ -38,10 +39,6 @@ import java.util.UUID;
 @ApplicationScoped
 public class ForgetCommandHandler implements CommandHandler {
 
-    private static final String SELECT_USER_SQL =
-            "SELECT id, contact_id, is_admin, is_banned FROM users "
-                    + "WHERE adapter = ? AND contact_id = ?";
-
     private static final String SELECT_GROUP_SQL =
             "SELECT id FROM groups WHERE adapter = ? AND upstream_group_id = ? "
                     + "AND removed_at IS NULL";
@@ -63,6 +60,9 @@ public class ForgetCommandHandler implements CommandHandler {
 
     @Inject
     ForgetPurgeService forgetPurgeService;
+
+    @Inject
+    UserRepository userRepository;
 
     @Override
     public String name() {
@@ -178,26 +178,8 @@ public class ForgetCommandHandler implements CommandHandler {
         if (adapter == null || contactId == null) {
             return Optional.empty();
         }
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(SELECT_USER_SQL)) {
-            ps.setString(1, adapter);
-            ps.setString(2, contactId);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (!rs.next()) {
-                    return Optional.empty();
-                }
-                return Optional.of(new UserRow(
-                        (UUID) rs.getObject("id"),
-                        rs.getString("contact_id"),
-                        rs.getBoolean("is_admin"),
-                        rs.getBoolean("is_banned")));
-            }
-        } catch (SQLException e) {
-            throw new IllegalStateException(
-                    "ForgetCommandHandler.lookupUser failed for adapter="
-                            + adapter + " contact_id="
-                            + ContactIds.redact(contactId), e);
-        }
+        return userRepository.findByAdapterAndContactId(adapter, contactId)
+                .map(u -> new UserRow(u.id(), u.contactId(), u.isAdmin(), u.isBanned()));
     }
 
     private Optional<UUID> lookupGroupId(String adapter, String upstreamGroupId) {

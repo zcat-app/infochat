@@ -3,7 +3,6 @@ package app.zcat.infochat.provider.command;
 import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
-import app.zcat.infochat.core.log.ContactIds;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
@@ -13,6 +12,7 @@ import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
 import app.zcat.infochat.provider.source.UrlProbe;
 import app.zcat.infochat.provider.source.UrlProbe.ProbeResult;
+import app.zcat.infochat.provider.user.UserRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jspecify.annotations.NonNull;
@@ -79,9 +79,6 @@ import java.util.UUID;
 @ApplicationScoped
 public class SourceEnableCommandHandler implements CommandHandler {
 
-    private static final String SELECT_USER_SQL =
-            "SELECT id, contact_id, is_admin FROM users WHERE adapter = ? AND contact_id = ?";
-
     private static final String SELECT_GROUP_ID_SQL =
             "SELECT id FROM groups WHERE adapter = ? AND upstream_group_id = ?";
 
@@ -120,6 +117,9 @@ public class SourceEnableCommandHandler implements CommandHandler {
 
     @Inject
     GroupMembershipRepository groupMembershipRepository;
+
+    @Inject
+    UserRepository userRepository;
 
     @Override
     public String name() {
@@ -332,25 +332,8 @@ public class SourceEnableCommandHandler implements CommandHandler {
         if (adapter == null || contactId == null) {
             return Optional.empty();
         }
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(SELECT_USER_SQL)) {
-            ps.setString(1, adapter);
-            ps.setString(2, contactId);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (!rs.next()) {
-                    return Optional.empty();
-                }
-                UUID id = (UUID) rs.getObject("id");
-                String resolvedContactId = rs.getString("contact_id");
-                boolean isAdmin = rs.getBoolean("is_admin");
-                return Optional.of(new UserRow(id, resolvedContactId, isAdmin));
-            }
-        } catch (SQLException e) {
-            throw new IllegalStateException(
-                    "SourceEnableCommandHandler.lookupUser failed for adapter=" + adapter
-                            + " contact_id=" + ContactIds.redact(contactId),
-                    e);
-        }
+        return userRepository.findByAdapterAndContactId(adapter, contactId)
+                .map(u -> new UserRow(u.id(), u.contactId(), u.isAdmin()));
     }
 
     private Optional<SourceRow> lookupSource(UUID sourceId) {

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 9 |
+| pending | 8 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 195 |
+| done | 196 |
 | deferred | 2 |
 | **total** | **206** |
 
@@ -25,7 +25,7 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-139 — Kind-6 repost edge resolution (complexity: high, risk: medium)
-- M1-144 — UserRepository extraction + /promote FOR UPDATE (complexity: medium, risk: medium)
+- M1-151 — Typed SSRF / error signals (UrlProbe + last-admin SQLSTATE) (complexity: low, risk: low)
 - M1-152 — Schema-hardening migration (stage2_verdict CHECK + V27 audit verb + Nostr index) (complexity: low, risk: medium)
 - M1-156 — Misc security-low hardening (Redactor separator, invite per-code counter, AddSource userinfo) (complexity: low, risk: low)
 - M1-159 — Test-debt (inner-class extraction, truncateAll completeness, delete IngestSpisLoadTest) (complexity: low, risk: low)
@@ -48,7 +48,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-151 — blocked_by: M1-144 (pending)
+_(none)_
 
 ---
 
@@ -308,8 +308,8 @@ M1-131 (done)
   └── M1-154 (done)
 M1-132 (done)
 M1-133 (done)
-  ├── M1-144 (pending) ← runnable
-  │     └── M1-151 (pending)
+  ├── M1-144 (done)
+  │     └── M1-151 (pending) ← runnable
   └── M1-146 (done)
 M1-134 (done)
 M1-135 (done)

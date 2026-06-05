@@ -9,15 +9,11 @@ import app.zcat.infochat.provider.chat.InFlightTracker;
 import app.zcat.infochat.provider.group.GroupRepository;
 import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.user.UserRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jspecify.annotations.NonNull;
 
-import javax.sql.DataSource;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.text.MessageFormat;
 import java.time.Instant;
 import java.util.Optional;
@@ -32,14 +28,8 @@ import java.util.UUID;
 @ApplicationScoped
 public class StopCommandHandler implements CommandHandler {
 
-    private static final String SELECT_USER_ID =
-            "SELECT id FROM users WHERE adapter = ? AND contact_id = ?";
-
     @Inject
     BundleLoader bundleLoader;
-
-    @Inject
-    DataSource dataSource;
 
     @Inject
     CancellationService cancellationService;
@@ -55,6 +45,9 @@ public class StopCommandHandler implements CommandHandler {
 
     @Inject
     GroupRepository groupRepository;
+
+    @Inject
+    UserRepository userRepository;
 
     @Override
     public @NonNull String name() {
@@ -114,21 +107,8 @@ public class StopCommandHandler implements CommandHandler {
      * uncancellable.
      */
     private Optional<UUID> resolveUserId() {
-        String adapterName = inboundContext.adapterName();
-        String contactId = inboundContext.senderContactId();
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(SELECT_USER_ID)) {
-            ps.setString(1, adapterName);
-            ps.setString(2, contactId);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (!rs.next()) {
-                    return Optional.empty();
-                }
-                return Optional.of((UUID) rs.getObject("id"));
-            }
-        } catch (SQLException e) {
-            throw new IllegalStateException("StopCommandHandler.resolveUserId failed", e);
-        }
+        return userRepository.resolveUserId(
+                inboundContext.adapterName(), inboundContext.senderContactId());
     }
 
     /**

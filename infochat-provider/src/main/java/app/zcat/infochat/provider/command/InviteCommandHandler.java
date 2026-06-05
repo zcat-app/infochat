@@ -12,6 +12,7 @@ import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.messaging.AdapterRegistry;
 import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.user.UserRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -74,10 +75,6 @@ import java.util.UUID;
  */
 @ApplicationScoped
 public class InviteCommandHandler implements CommandHandler {
-
-    private static final String SELECT_USER_SQL =
-            "SELECT id, is_admin, is_banned, registration_state "
-                    + "FROM users WHERE adapter = ? AND contact_id = ?";
 
     // The open-cap query is scoped to one adapter per spec §Invite-code
     // registration ("per-adapter open cap"). The expires_at filter
@@ -160,6 +157,9 @@ public class InviteCommandHandler implements CommandHandler {
 
     @Inject
     ConfirmStateService confirmStateService;
+
+    @Inject
+    UserRepository userRepository;
 
     @Override
     public String name() {
@@ -645,26 +645,9 @@ public class InviteCommandHandler implements CommandHandler {
         if (adapter == null || contactId == null) {
             return Optional.empty();
         }
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(SELECT_USER_SQL)) {
-            ps.setString(1, adapter);
-            ps.setString(2, contactId);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (!rs.next()) {
-                    return Optional.empty();
-                }
-                UUID id = (UUID) rs.getObject("id");
-                boolean isAdmin = rs.getBoolean("is_admin");
-                boolean isBanned = rs.getBoolean("is_banned");
-                String registrationState = rs.getString("registration_state");
-                return Optional.of(new UserRow(id, contactId, isAdmin, isBanned, registrationState));
-            }
-        } catch (SQLException e) {
-            throw new IllegalStateException(
-                    "InviteCommandHandler.lookupUser failed for adapter="
-                            + adapter + " contact_id="
-                            + ContactIds.redact(contactId), e);
-        }
+        return userRepository.findByAdapterAndContactId(adapter, contactId)
+                .map(u -> new UserRow(u.id(), u.contactId(), u.isAdmin(), u.isBanned(),
+                        u.registrationState()));
     }
 
     private Set<String> enabledAdapterNames() {

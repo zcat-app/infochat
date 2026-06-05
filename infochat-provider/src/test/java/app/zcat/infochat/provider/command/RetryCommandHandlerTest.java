@@ -18,6 +18,8 @@ import app.zcat.infochat.provider.translation.TranslationPipeline;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import app.zcat.infochat.provider.user.UserRepository;
+
 import javax.sql.DataSource;
 import java.io.PrintWriter;
 import java.lang.reflect.Method;
@@ -67,6 +69,8 @@ class RetryCommandHandlerTest {
         handler.bundleLoader = newRealBundleLoader();
         handler.cancellationService = cancellationService;
         handler.dataSource = stubUserAndPostsDataSource(USER_ID, List.of());
+        handler.userRepository = new UserRepository(
+                stubUserAndPostsDataSource(USER_ID, List.of()));
         handler.summaryAnchorRepository = anchorRepo;
         handler.summaryProseGenerator = proseGenerator;
         handler.llmOutputSanitizer = new LlmOutputSanitizer();
