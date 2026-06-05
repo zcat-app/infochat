@@ -679,6 +679,10 @@ CREATE INDEX idx_post_tags_gin       ON post USING gin (tags);
 -- Quarantine-review cursor (post → NEEDS_REVIEW transition):
 CREATE INDEX idx_post_status_changed ON post(status_changed_at, id)
   WHERE status = 'NEEDS_REVIEW';
+-- Repost-edge resolution: "is the event this kind-6 reposts already
+-- stored?" (§2.4.3). The UNIQUE (source_id, upstream_identifier,
+-- fetched_at) constraint is unusable without the leading source_id.
+CREATE INDEX idx_post_upstream_identifier ON post(upstream_identifier);
 ```
 
 **Post status state machine.** `RAW → READY` (clean Stage 1 / Stage 2 BENIGN);
@@ -761,21 +765,43 @@ the absence (`LEFT JOIN` and ignore `NULL`).
 ```sql
 CREATE TABLE post_reference (
   from_post   UUID NOT NULL,
-  to_post     UUID NOT NULL,
+  to_post     UUID,                                    -- NULL = repost edge not yet resolved (V34);
+                                                       --   entity/semantic edges always set
+  to_upstream_identifier TEXT,                         -- original event id, verbatim; set only for
+                                                       --   link_type='repost' edges (V34)
   link_type   TEXT NOT NULL                            -- 'entity','semantic','repost' ('repost' written by Nostr kind-6, M1-100)
     CHECK (link_type IN ('entity','semantic','repost')),
   score       REAL NOT NULL,                           -- shared-entity count or cosine similarity
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (from_post, to_post, link_type, created_at)
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 ) PARTITION BY RANGE (created_at);
+
+-- The V29 PRIMARY KEY (from_post, to_post, link_type, created_at) was
+-- replaced in V34 by a unique index over the same column set: PK columns
+-- are implicitly NOT NULL, which a nullable to_post cannot satisfy. No
+-- INSERT relies on the constraint as an ON CONFLICT arbiter, so only the
+-- enforcement mechanism changed.
+CREATE UNIQUE INDEX idx_post_ref_unique_edge
+    ON post_reference(from_post, to_post, link_type, created_at);
 
 CREATE INDEX idx_post_ref_from ON post_reference(from_post, link_type);
 CREATE INDEX idx_post_ref_to   ON post_reference(to_post);
+-- Resolver lookup: "which unresolved repost edges point at this
+-- newly-persisted original?" Partial — resolved edges leave the index.
+CREATE INDEX idx_post_ref_unresolved_target
+    ON post_reference(to_upstream_identifier) WHERE to_post IS NULL;
 ```
 
-References are directional but always written in both directions by
-LinkingJob (A→B and B→A) to keep cluster-walk queries simple. Cap N=10
-outbound links per post (highest score wins).
+Entity and semantic references are directional but always written in both
+directions by LinkingJob (A→B and B→A) to keep cluster-walk queries
+simple. Cap N=10 outbound links per post (highest score wins).
+
+Repost edges (architecture.md §Ingest SPIs) are written single-direction
+by the Nostr kind-6 handler with `to_post = NULL` and the original event
+id in `to_upstream_identifier` — the stable, protocol-level join key that
+survives the original arriving later or never. If and when the original
+event is stored as a post, the resolver flips `to_post` to its `post.id`;
+this is the one `UPDATE` the collector performs on this table (`DELETE`
+stays revoked per Invariant 6).
 
 ### 2.4.4 Partition lifecycle
 
