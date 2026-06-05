@@ -146,7 +146,6 @@ public class Stage2VerdictHandler {
         TransactionHelper.inTransaction(dataSource, "Stage2VerdictHandler", conn -> {
             updatePostQuarantined(conn, postId, postFetchedAt, /* stage2Failed */ false);
             setStage2Verdict(conn, postId, postFetchedAt, verdict.name());
-            emitQuarantineNotifyForPendingRows(conn, postId);
         });
         LOG.infof("Stage 2 verdict: %s post_id=%s — quarantined (stage2_done=true, status=QUARANTINED)",
             verdict, postId);
@@ -254,27 +253,8 @@ public class Stage2VerdictHandler {
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     UUID quarantineId = (UUID) rs.getObject(1);
-                    quarantineNotifyEmitter.emit(conn, "quarantine", quarantineId, "BENIGN_CLOSED");
-                }
-            }
-        }
-    }
-
-    /**
-     * Emit quarantine_review NOTIFY for each PENDING quarantine row
-     * belonging to this post. Called on INJECTION/MALWARE/UNKNOWN
-     * verdicts to signal that the quarantine decision is finalized
-     * and the admin review queue has a new entry.
-     */
-    private void emitQuarantineNotifyForPendingRows(Connection conn, UUID postId) throws SQLException {
-        final String sql =
-            "SELECT id FROM quarantine WHERE post_id = ? AND status = 'PENDING'";
-        try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setObject(1, postId);
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    UUID quarantineId = (UUID) rs.getObject(1);
-                    quarantineNotifyEmitter.emit(conn, "quarantine", quarantineId, "PENDING");
+                    quarantineNotifyEmitter.emit(conn, QuarantineNotifyEmitter.TargetKind.QUARANTINE,
+                        quarantineId, QuarantineNotifyEmitter.NewStatus.BENIGN_CLOSED);
                 }
             }
         }

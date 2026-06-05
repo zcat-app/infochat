@@ -159,7 +159,8 @@ public class ReEvaluationJob {
                 ps.setTimestamp(2, Timestamp.from(candidate.fetchedAt()));
                 ps.executeUpdate();
             }
-            quarantineNotifyEmitter.emit(conn, "post", candidate.postId(), "NEEDS_REVIEW");
+            quarantineNotifyEmitter.emit(conn, QuarantineNotifyEmitter.TargetKind.POST,
+                candidate.postId(), QuarantineNotifyEmitter.NewStatus.NEEDS_REVIEW);
         });
         throttledAdminNotifier.notifyOnce(
             ERROR_CLASS_REEVAL_CAP_EXHAUSTION,

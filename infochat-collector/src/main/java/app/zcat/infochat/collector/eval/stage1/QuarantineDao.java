@@ -1,9 +1,12 @@
 package app.zcat.infochat.collector.eval.stage1;
 
+import app.zcat.infochat.collector.notify.QuarantineNotifyEmitter;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -58,10 +61,16 @@ import java.util.UUID;
 @ApplicationScoped
 public class QuarantineDao {
 
+    @Inject
+    QuarantineNotifyEmitter quarantineNotifyEmitter;
+
     /**
-     * INSERT one quarantine row on the caller's {@link Connection}.
-     * The caller is responsible for commit/rollback so the insert
-     * groups atomically with the parent {@code post} UPDATE.
+     * INSERT one quarantine row on the caller's {@link Connection}
+     * and emit the PENDING {@code quarantine_review} NOTIFY for it
+     * in the same transaction (the spec's "fires on PENDING insert"
+     * contract — the NOTIFY commits or rolls back together with the
+     * row). The caller is responsible for commit/rollback so the
+     * insert groups atomically with the parent {@code post} UPDATE.
      */
     public void insert(Connection conn, QuarantineRow row) {
         final String sql =
@@ -71,7 +80,7 @@ public class QuarantineDao {
                 + "  original_html, placeholder_id, status"
                 + ") VALUES ("
                 + "  ?, ?, ?, 'stage1', ?, ?, ?, ?, ?, 'PENDING'"
-                + ")";
+                + ") RETURNING id";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setObject(1, row.postId());
             ps.setString(2, row.postUid());
@@ -81,7 +90,13 @@ public class QuarantineDao {
             ps.setInt(6, row.spanEnd());
             ps.setString(7, row.originalHtml());
             ps.setString(8, row.placeholderId());
-            ps.executeUpdate();
+            UUID quarantineId;
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                quarantineId = (UUID) rs.getObject(1);
+            }
+            quarantineNotifyEmitter.emit(conn, QuarantineNotifyEmitter.TargetKind.QUARANTINE,
+                quarantineId, QuarantineNotifyEmitter.NewStatus.PENDING);
         } catch (SQLException e) {
             throw new IllegalStateException(
                 "QuarantineDao.insert: INSERT INTO quarantine failed for post_id="

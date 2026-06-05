@@ -182,14 +182,17 @@ class QuarantineWorkflowIT {
         adapter.reset();
 
         // ---- step (c): new_post cursor advances past approved post's ready_at ----
-        // V21's pg_notify payload uses TIMESTAMPTZ::TEXT (Postgres format)
-        // which Instant.parse rejects, so the live NOTIFY path drops the
-        // payload. Verify the cursor-advance half by driving
-        // NewPostHandler directly with the post's (id, ready_at) — the
-        // same values the listener WOULD pass if the format were correct.
-        // The V21 format bug is a separate defect; this IT pins the
-        // cross-cutting property: approve produces a READY post that the
-        // handler can process and advance the cursor past.
+        // V32's jsonb_build_object payload renders ready_at in ISO-8601,
+        // so the live NOTIFY path works: the always-on @Startup
+        // NewPostListener may process the approve's NOTIFY before this
+        // direct call. Both paths CAS the same provider_state row with a
+        // strict-greater guard, so handle() below may legitimately return
+        // false (duplicate CAS when the listener won the race) — the
+        // invariant under test is the cursor END-STATE, not which path
+        // advanced it. The end-state read is deterministic: both advances
+        // UPDATE the same row, so the second blocks on the first's row
+        // lock, and by the time handle() returns the cursor is at or past
+        // ready_at either way.
         UUID approvedPostId;
         Instant approvedReadyAt;
         try (Connection conn = dataSource.getConnection();
@@ -204,9 +207,7 @@ class QuarantineWorkflowIT {
         }
         assertNotNull(approvedReadyAt, "approved post must have a non-null ready_at");
 
-        boolean advanced = newPostHandler.handle(approvedPostId, approvedReadyAt);
-        assertTrue(advanced, "new_post cursor must advance when the handler "
-                + "processes the approved post");
+        newPostHandler.handle(approvedPostId, approvedReadyAt);
 
         Instant cursorAfter = readNewPostCursorHigh();
         assertTrue(!cursorAfter.isBefore(approvedReadyAt),

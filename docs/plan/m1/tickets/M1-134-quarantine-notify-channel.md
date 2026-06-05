@@ -1,7 +1,7 @@
 ---
 id: M1-134
 title: "quarantine_review NOTIFY channel completeness (CT2)"
-status: pending
+status: done
 created: 2026-06-02
 last_updated: 2026-06-05
 blocked_by: []
@@ -39,7 +39,20 @@ spec_refs:
   - docs/spec/architecture.md §Inter-service communication
   - docs/spec/security.md §Quarantine workflow
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-05
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 11
+      added: 908
+      removed: 55
 escalations:
   - date: 2026-06-05
     reason: outline-fail
@@ -132,7 +145,30 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-05
+    verdict: CLEAN
+    base: 572d336
+    head: m1/M1-134-quarantinereview-notify-channe
+    verdict_file: docs/plan/m1/redteam/M1-134-2026-06-05.md
+    out_of_model_count: 1
+    note: |
+      CLEAN — no threat-model promise left undelivered. NOTIFY payloads
+      use closed enums (Java) / jsonb_build_object (SQL), so no
+      attacker-controlled string reaches them; V32 carries forward the
+      actor-admin check + search_path pin + FOR UPDATE status-guard, and
+      runs restore+audit+NOTIFY atomically. One advisory OUT-OF-MODEL
+      note (V32 audit INSERTs bypass the Java RedactionHook, but write
+      only structured non-free-form fields and are pre-existing behavior)
+      — no remediation ticket required.
+clarity_check:
+  date: 2026-06-05
+  verdict: WARN
+  warnings:
+    - "OUT-OF-SCOPE-SPECIFIC: 'any change to the actionable quarantine review UX' is vague. Name specific files or commands excluded (e.g. QuarantineCommandHandler.java, /quarantine list/approve/reject output formatting) so the implementer has a clear boundary on the Provider side."
+    - "TEST-CHANGES-AUTHORIZED (cosmetic): test_plan.modifies references 'acceptance item 6' but the QuarantineWorkflowIT step (c) change is acceptance item 5 in the final list (the refine introduced an off-by-one from pre-refine numbering). Does not block implementation but may confuse a reviewer comparing test_plan to acceptance."
+  blockers: []
+outline_file: target/m1-tick-outline-M1-134.md
 ---
 
 # M1-134: quarantine_review NOTIFY channel completeness (CT2)

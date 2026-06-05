@@ -123,7 +123,8 @@ public class AdminReviewTtlJob {
                 ps.setTimestamp(2, Timestamp.from(candidate.postFetchedAt()));
                 ps.executeUpdate();
             }
-            quarantineNotifyEmitter.emit(conn, "quarantine", candidate.quarantineId(), "REJECTED");
+            quarantineNotifyEmitter.emit(conn, QuarantineNotifyEmitter.TargetKind.QUARANTINE,
+                candidate.quarantineId(), QuarantineNotifyEmitter.NewStatus.REJECTED);
             RedactionHook.AuditRow auditRow = RedactionHook.AuditRow.builder()
                 .actorContactId("admin_review_ttl_job")
                 .action(AuditAction.QUARANTINE_TTL_REJECT)
