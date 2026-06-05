@@ -106,12 +106,9 @@ public class LlmRouter {
      * code uses the {@link Inject}-annotated overload below.
      */
     public LlmRouter(List<Entry> entries, ConfigReader config) {
-        if (entries == null || entries.isEmpty()) {
+        if (entries.isEmpty()) {
             throw new IllegalArgumentException(
                 "LlmRouter: at least one provider entry must be registered");
-        }
-        if (config == null) {
-            throw new IllegalArgumentException("LlmRouter: ConfigReader must be non-null");
         }
         this.entries = List.copyOf(entries);
         this.config = config;
@@ -334,11 +331,8 @@ public class LlmRouter {
      */
     public record Entry(@NonNull String name, @NonNull LlmProvider provider, @Nullable Set<String> supportedLanguages) {
         public Entry {
-            if (name == null || name.isEmpty()) {
+            if (name.isEmpty()) {
                 throw new IllegalArgumentException("Entry.name must be non-empty");
-            }
-            if (provider == null) {
-                throw new IllegalArgumentException("Entry.provider must be non-null");
             }
             supportedLanguages = supportedLanguages == null
                 ? Set.of()

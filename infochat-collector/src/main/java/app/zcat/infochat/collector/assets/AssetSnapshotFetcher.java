@@ -171,7 +171,17 @@ public class AssetSnapshotFetcher {
             return;
         }
         for (EnabledPair row : rows) {
-            tickOnePair(host, row);
+            try {
+                tickOnePair(host, row);
+            } catch (RuntimeException e) {
+                // Impl bug in a data source or store — NOT an upstream-
+                // fetch failure. Logged with the exception's own class
+                // and kept OUT of the D42 ladder so the failure counters
+                // reflect only genuine upstream health; the loop keeps
+                // ticking so one pair's bug cannot starve sibling pairs.
+                LOG.errorf(e, "AssetSnapshotFetcher: %s while ticking host=%s asset=%s sub_verb=%s; skipping pair",
+                    e.getClass().getSimpleName(), host, row.asset(), row.subVerb());
+            }
         }
     }
 
@@ -186,15 +196,6 @@ public class AssetSnapshotFetcher {
             snapshot = source.fetchSnapshot(row.asset(), row.defaultQuoteCurrency());
         } catch (FetchException e) {
             recordFailure(row, e);
-            return;
-        } catch (RuntimeException e) {
-            // Defensive guard: an impl bug must not break the tick
-            // loop for sibling pairs. Treat as a failure for D42
-            // counter purposes — operator visibility is the priority.
-            LOG.warnf(e, "AssetSnapshotFetcher: %s.fetchSnapshot threw RuntimeException for asset=%s vs=%s",
-                host, row.asset(), row.defaultQuoteCurrency());
-            recordFailure(row, new FetchException(
-                "RuntimeException from " + host + ".fetchSnapshot: " + e.getClass().getSimpleName(), e));
             return;
         }
         try {

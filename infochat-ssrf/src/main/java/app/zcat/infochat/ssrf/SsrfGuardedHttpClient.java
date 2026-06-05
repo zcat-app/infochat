@@ -215,9 +215,6 @@ public final class SsrfGuardedHttpClient {
         if (redirectCap <= 0) {
             throw new IllegalArgumentException("redirect cap must be configured");
         }
-        if (resolverSeam == null) {
-            throw new IllegalArgumentException("resolver seam must be configured");
-        }
         this.blocklist = blocklist;
         this.connectTimeout = connectTimeout;
         this.requestTimeout = requestTimeout;

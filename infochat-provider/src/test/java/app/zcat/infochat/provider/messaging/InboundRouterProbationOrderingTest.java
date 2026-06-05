@@ -78,7 +78,7 @@ class InboundRouterProbationOrderingTest {
     @Test
     void inProbationBlockedCommandShortCircuitsAtStep5() {
         CallLog log = new CallLog();
-        UserSnapshotSeed snapshot = new UserSnapshotSeed(UUID.randomUUID(), false, "invited");
+        UserSnapshotSeed snapshot = new UserSnapshotSeed(UUID.randomUUID(), "invited");
         Instant expiry = Instant.now().plus(2, ChronoUnit.HOURS);
         InboundRouter router = newRouter(log, snapshot, false, true, expiry, false);
         // RecordingCommandHandler wired but MUST NOT be invoked.
@@ -114,7 +114,7 @@ class InboundRouterProbationOrderingTest {
     @Test
     void inProbationAllowedCommandFallsThroughToDispatch() {
         CallLog log = new CallLog();
-        UserSnapshotSeed snapshot = new UserSnapshotSeed(UUID.randomUUID(), false, "invited");
+        UserSnapshotSeed snapshot = new UserSnapshotSeed(UUID.randomUUID(), "invited");
         Instant expiry = Instant.now().plus(2, ChronoUnit.HOURS);
         InboundRouter router = newRouter(log, snapshot, false, true, expiry, true);
         router.commandHandlers = new SingletonInstance<>(new RecordingCommandHandler(log, "help"));
@@ -146,7 +146,7 @@ class InboundRouterProbationOrderingTest {
     @Test
     void pastProbationClearsAndDispatches() {
         CallLog log = new CallLog();
-        UserSnapshotSeed snapshot = new UserSnapshotSeed(UUID.randomUUID(), false, "invited");
+        UserSnapshotSeed snapshot = new UserSnapshotSeed(UUID.randomUUID(), "invited");
         InboundRouter router = newRouter(log, snapshot, false, false, null, true);
         router.commandHandlers = new SingletonInstance<>(new RecordingCommandHandler(log, "add-source"));
         CapturingAdapter target = new CapturingAdapter();
@@ -206,7 +206,7 @@ class InboundRouterProbationOrderingTest {
         // D47 gate #1: a group @mention from a 'preban' contact is
         // dropped the same way as an unregistered one.
         CallLog log = new CallLog();
-        UserSnapshotSeed snapshot = new UserSnapshotSeed(UUID.randomUUID(), false, "preban");
+        UserSnapshotSeed snapshot = new UserSnapshotSeed(UUID.randomUUID(), "preban");
         InboundRouter router = newRouter(log, snapshot, false, false, null, true);
         router.commandHandlers = new SingletonInstance<>(new RecordingCommandHandler(log, "help"));
         CapturingAdapter target = new CapturingAdapter();
@@ -234,7 +234,7 @@ class InboundRouterProbationOrderingTest {
         // still receives error.probation.blocked — proving the step-3
         // drop is scoped to unregistered / preban contacts only.
         CallLog log = new CallLog();
-        UserSnapshotSeed snapshot = new UserSnapshotSeed(UUID.randomUUID(), false, "invited");
+        UserSnapshotSeed snapshot = new UserSnapshotSeed(UUID.randomUUID(), "invited");
         Instant expiry = Instant.now().plus(2, ChronoUnit.HOURS);
         InboundRouter router = newRouter(log, snapshot, false, true, expiry, false);
         router.commandHandlers = new SingletonInstance<>(new RecordingCommandHandler(log, "add-source"));
@@ -270,7 +270,7 @@ class InboundRouterProbationOrderingTest {
     @Test
     void bannedInProbationShortCircuitsAtStep4BeforeProbation() {
         CallLog log = new CallLog();
-        UserSnapshotSeed snapshot = new UserSnapshotSeed(UUID.randomUUID(), true, "invited");
+        UserSnapshotSeed snapshot = new UserSnapshotSeed(UUID.randomUUID(), "invited");
         Instant expiry = Instant.now().plus(2, ChronoUnit.HOURS);
         InboundRouter router = newRouter(log, snapshot, true, true, expiry, true);
         router.commandHandlers = new SingletonInstance<>(new RecordingCommandHandler(log, "help"));
@@ -298,7 +298,7 @@ class InboundRouterProbationOrderingTest {
 
     // ----- helpers ------------------------------------------------------------
 
-    private record UserSnapshotSeed(UUID id, boolean banned, String registrationState) {}
+    private record UserSnapshotSeed(UUID id, String registrationState) {}
 
     private InboundRouter newRouter(
             CallLog log,
@@ -313,7 +313,6 @@ class InboundRouterProbationOrderingTest {
                 log.calls.add("lookupUser");
                 return Optional.of(new UserSnapshot(
                         snapshot.id(),
-                        snapshot.banned(),
                         snapshot.registrationState()));
             }
         };

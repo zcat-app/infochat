@@ -264,7 +264,7 @@ class InboundRouterIntakeOrderingTest {
     void knownBannedDmStopsWithFixedReplyAndNoHandleSlash() {
         CallLog log = new CallLog();
         InboundRouter router = newRouterWithLog(log,
-                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), false, "vouched")));
+                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), "vouched")));
         // BanCheck returns true regardless of the snapshot.is_banned column —
         // step 4 consults the live SQL per spec.
         ((FakeBanCheck) router.banCheck).banned = true;
@@ -322,7 +322,7 @@ class InboundRouterIntakeOrderingTest {
     void registeredGroupSenderDispatchesNormally() {
         CallLog log = new CallLog();
         InboundRouter router = newRouterWithLog(log,
-                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), false, "vouched")));
+                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), "vouched")));
         router.commandHandlers = new SingletonInstance<>(new RecordingCommandHandler(log, "help"));
         CapturingAdapter target = new CapturingAdapter();
         router.setReplyTarget(target);
@@ -362,10 +362,9 @@ class InboundRouterIntakeOrderingTest {
     void bannedRegisteredGroupSenderShortCircuitsAtBanCheckBeforeStep35() {
         CallLog log = new CallLog();
         InboundRouter router = newRouterWithLog(log,
-                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), true, "vouched")));
-        // BanCheck consults the live row per spec; align the fake with
-        // the snapshot column so the production code's step 4 returns
-        // is_banned=true.
+                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), "vouched")));
+        // BanCheck consults the live row per spec; step 4's is_banned=true
+        // comes from the fake.
         ((FakeBanCheck) router.banCheck).banned = true;
         router.commandHandlers = new SingletonInstance<>(new RecordingCommandHandler(log, "help"));
         CapturingAdapter target = new CapturingAdapter();
@@ -403,7 +402,7 @@ class InboundRouterIntakeOrderingTest {
     void replyRoutesThroughInboundAdapterNeverAnotherActivatedAdapter() {
         CallLog log = new CallLog();
         InboundRouter router = newRouterWithLog(log,
-                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), false, "vouched")));
+                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), "vouched")));
         CapturingAdapter inboundAdapter = new CapturingAdapter("inmemory");
         CapturingAdapter otherAdapter = new CapturingAdapter("other");
         router.setReplyTarget(inboundAdapter);
@@ -433,7 +432,7 @@ class InboundRouterIntakeOrderingTest {
     void bannedUserFixedReplyDeliveredThroughInboundAdapterNotDroppedOrCrossRouted() {
         CallLog log = new CallLog();
         InboundRouter router = newRouterWithLog(log,
-                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), false, "vouched")));
+                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), "vouched")));
         ((FakeBanCheck) router.banCheck).banned = true;
         CapturingAdapter inboundAdapter = new CapturingAdapter("inmemory");
         CapturingAdapter otherAdapter = new CapturingAdapter("other");

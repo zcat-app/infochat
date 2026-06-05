@@ -221,7 +221,7 @@ public class InboundRouter {
 
     /** Single users-row lookup feeding steps 2, 3, and 5 from one SELECT. */
     private static final String USER_SNAPSHOT_SQL =
-            "SELECT id, is_banned, registration_state FROM users "
+            "SELECT id, registration_state FROM users "
                     + "WHERE adapter = ? AND contact_id = ?";
 
     private static final String SELECT_GROUP_SQL =
@@ -651,7 +651,6 @@ public class InboundRouter {
                 }
                 return Optional.of(new UserSnapshot(
                         rs.getObject("id", UUID.class),
-                        rs.getBoolean("is_banned"),
                         rs.getString("registration_state")));
             }
         } catch (SQLException e) {
@@ -664,13 +663,13 @@ public class InboundRouter {
     /**
      * Per-dispatch snapshot of one users-row's state. Captures only
      * the columns the splice needs: {@code id} (for downstream audit
-     * hooks if any), {@code is_banned} (TOCTOU-paired with
-     * {@link BanCheck#isBanned} at step 4), and
-     * {@code registration_state} (step 3 group unregistered/preban
-     * drop predicate). Package-private so test subclasses can
-     * construct instances when overriding {@link #lookupUser}.
+     * hooks if any) and {@code registration_state} (step 3 group
+     * unregistered/preban drop predicate). The ban decision is NOT
+     * snapshotted — step 4 consults {@link BanCheck#isBanned} live.
+     * Package-private so test subclasses can construct instances
+     * when overriding {@link #lookupUser}.
      */
-    record UserSnapshot(UUID id, boolean isBanned, String registrationState) {}
+    record UserSnapshot(UUID id, String registrationState) {}
 
     private void sendReply(ScopeRef scope, String body, String adapterName) {
         MessagingAdapter target = replyTargets.get(adapterName);

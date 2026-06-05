@@ -157,7 +157,7 @@ class InboundRouterContactIdRedactionTest {
         InboundRouter router = new InboundRouter() {
             @Override
             Optional<UserSnapshot> lookupUser(String adapter, String contactId) {
-                return Optional.of(new UserSnapshot(UUID.randomUUID(), false, "vouched"));
+                return Optional.of(new UserSnapshot(UUID.randomUUID(), "vouched"));
             }
         };
         router.commandHandlers = new SingletonInstance<>();

@@ -299,12 +299,6 @@ public class BootstrapAssetsLoader {
                 keepSubVerbs.add(sv.id());
             }
         }
-        if (keepAssets.isEmpty()) {
-            // Parser rejects an empty assets[] array, so this branch
-            // is unreachable in practice — guard kept for SQL safety.
-            return 0;
-        }
-
         StringBuilder placeholders = new StringBuilder(keepAssets.size() * 6);
         for (int i = 0; i < keepAssets.size(); i++) {
             if (i > 0) placeholders.append(',');

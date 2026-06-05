@@ -1,12 +1,12 @@
 ---
 id: M1-146
 title: "Defensive-code sweep: remove dead internal null-guards (CT4)"
-status: pending
+status: done
 created: 2026-06-02
-last_updated: 2026-06-03
+last_updated: 2026-06-05
 blocked_by:
   - M1-133
-files_budget: 9
+files_budget: 12
 files_scope:
   - infochat-llm-adapter
   - infochat-ssrf
@@ -27,13 +27,44 @@ acceptance:
   - "mvn -B clean verify from the repo root exits 0"
 test_plan:
   adds: []
+  modifies:
+    - "infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterProbationOrderingTest.java — drop the isBanned argument from new UserSnapshot(...) constructions (and the UserSnapshotSeed helper's banned component if it becomes dead); assertions unchanged"
+    - "infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterNormalizeTest.java — drop the isBanned argument from new UserSnapshot(...); assertions unchanged"
+    - "infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterConfirmCancelTest.java — drop the isBanned argument from new UserSnapshot(...); assertions unchanged"
+    - "infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterContactIdRedactionTest.java — drop the isBanned argument from new UserSnapshot(...); assertions unchanged"
+    - "infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterIntakeOrderingTest.java — drop the isBanned argument from new InboundRouter.UserSnapshot(...) (qualified form, missed by the unqualified-pattern survey); assertions unchanged"
   preserves:
     - all tests currently green on main
 spec_refs:
   - docs/spec/architecture.md §Architectural principles
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-05
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 13
+      added: 87
+      removed: 65
 escalations:
+  - date: 2026-06-05
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A (budget-breach, pre-implementation). Removing the dead
+      UserSnapshot.isBanned record component forces edits to 4 test files that
+      construct the 3-arg record (InboundRouterProbationOrderingTest,
+      InboundRouterNormalizeTest, InboundRouterConfirmCancelTest,
+      InboundRouterContactIdRedactionTest) on top of the 6 named production
+      files (LlmRouter, OpenAiCompatibleProvider, SsrfGuardedHttpClient,
+      AssetSnapshotFetcher, BootstrapAssetsLoader, InboundRouter) — minimum 10
+      files vs files_budget: 9, and test_plan has no modifies list authorizing
+      the test edits (flagged by the 2026-06-05 clarity WARN).
   - date: 2026-06-02
     reason: premise-fail
     reviewer_verdict_excerpt: |
@@ -48,6 +79,22 @@ escalations:
       NullAway/Error Prone adoption (D48); this ticket is refined down to the
       §7 dead-guard sweep, which is orthogonal to the enforcement mechanism.
 revisions:
+  - date: 2026-06-05
+    reason: refine after budget-breach
+    summary: |
+      Pre-implementation file accounting showed minimum 10 files: the 6 named
+      production files plus 4 test files that construct the 3-arg
+      InboundRouter.UserSnapshot record and break compilation when the dead
+      isBanned component is removed. files_budget 9 -> 12 (10 minimum +
+      headroom for ProbationCheck.java and one incidental). Added a
+      test_plan.modifies list authorizing constructor-argument-only edits to
+      the 4 test files (assertions unchanged), resolving the 2026-06-05
+      clarity TEST-CHANGES-AUTHORIZED warning. Acceptance unchanged.
+      Same-day addendum: round-1 mvn verify surfaced a 5th forced test file
+      (InboundRouterIntakeOrderingTest) using the qualified
+      `new InboundRouter.UserSnapshot(...)` form the unqualified grep survey
+      missed; added to modifies with the same constructor-argument-only
+      nature. 11 files total, still within files_budget: 12.
   - date: 2026-06-03
     reason: refine after premise-fail
     summary: |
@@ -63,7 +110,12 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-05
+  verdict: WARN
+  warnings:
+    - "TEST-CHANGES-AUTHORIZED: The ticket removes a record component (UserSnapshot.isBanned) and references \"ProbationCheck call sites\" without a modifies list or explicit statement that no test files reference these sites. If test fixtures construct UserSnapshot or call ProbationCheck with isBanned, those files need authorized modification. Implementer should verify before starting and add a modifies entry if any test files are affected."
+  blockers: []
 ---
 
 # M1-146: Defensive-code sweep — remove dead internal null-guards (CT4)

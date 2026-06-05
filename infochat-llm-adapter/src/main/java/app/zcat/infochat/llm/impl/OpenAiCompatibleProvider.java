@@ -192,7 +192,9 @@ public class OpenAiCompatibleProvider implements LlmProvider {
             .timeout(Duration.ofMillis(cfg.timeoutMs()))
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(body));
-        if (cfg.apiKey() != null && !cfg.apiKey().isEmpty()) {
+        // apiKey is coalesced to "" at the configFor site (orElse("")),
+        // so emptiness is the only "no key configured" signal.
+        if (!cfg.apiKey().isEmpty()) {
             reqBuilder.header("Authorization", "Bearer " + cfg.apiKey());
         }
         HttpRequest request = reqBuilder.build();

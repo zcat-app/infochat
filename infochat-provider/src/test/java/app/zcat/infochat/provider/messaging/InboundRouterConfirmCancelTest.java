@@ -149,7 +149,7 @@ class InboundRouterConfirmCancelTest {
         InboundRouter router = new InboundRouter() {
             @Override
             Optional<UserSnapshot> lookupUser(String adapter, String contactId) {
-                return Optional.of(new UserSnapshot(ACTOR_ID, false, "vouched"));
+                return Optional.of(new UserSnapshot(ACTOR_ID, "vouched"));
             }
         };
         router.commandHandlers = new SingletonInstance<>();
