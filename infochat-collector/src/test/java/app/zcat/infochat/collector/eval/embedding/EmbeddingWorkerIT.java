@@ -1,5 +1,6 @@
 package app.zcat.infochat.collector.eval.embedding;
 
+import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import app.zcat.infochat.llm.EmbeddingProvider;
 import app.zcat.infochat.llm.EmbeddingResult;
 import io.quarkus.test.junit.QuarkusTest;
@@ -74,6 +75,7 @@ class EmbeddingWorkerIT {
     private static final Instant FETCHED_AT = Instant.parse("2026-05-16T10:00:00Z");
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @Inject

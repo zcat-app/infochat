@@ -2,6 +2,7 @@ package app.zcat.infochat.collector.fetch;
 
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -37,6 +38,7 @@ class FetchSchedulerFailureLadderTest {
     SourceRepository sourceRepository;
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @BeforeEach

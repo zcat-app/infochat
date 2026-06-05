@@ -6,6 +6,7 @@ import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.testing.TestLlmProvider;
+import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
@@ -64,7 +65,7 @@ class DigestRoundtripIT {
     // Computed dynamically in the test so windowEnd is always in the future.
     static final int WINDOW_HALF = 30;
 
-    @Inject DataSource dataSource;
+    @Inject @SeedDataSource DataSource dataSource;
     @Inject InMemoryAdapter adapter;
     @Inject DigestScheduler scheduler;
     @Inject DigestWorker worker;

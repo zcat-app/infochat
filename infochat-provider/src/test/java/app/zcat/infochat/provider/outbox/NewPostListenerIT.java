@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.outbox;
 
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -62,6 +63,7 @@ class NewPostListenerIT {
     private static final Instant FETCHED_AT = Instant.parse("2026-05-15T12:00:00Z");
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @Inject

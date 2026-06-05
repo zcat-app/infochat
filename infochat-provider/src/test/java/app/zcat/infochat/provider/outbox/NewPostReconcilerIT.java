@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.outbox;
 
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -63,6 +64,7 @@ class NewPostReconcilerIT {
     private static final Instant READY_AT_BASE = Instant.parse("2026-05-15T13:00:00Z");
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @Inject

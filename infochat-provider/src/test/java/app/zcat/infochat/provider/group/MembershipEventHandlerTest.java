@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.group;
 
 import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.messaging.MembershipEvent;
+import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
@@ -24,7 +25,7 @@ class MembershipEventHandlerTest {
     private static final String TEST_ADAPTER = "inmemory";
     private static final String TEST_UPSTREAM_GROUP_ID = "meh-test-" + UUID.randomUUID();
 
-    @Inject DataSource dataSource;
+    @Inject @SeedDataSource DataSource dataSource;
     @Inject GroupRepository groupRepository;
     @Inject GroupMembershipRepository membershipRepository;
     @Inject MembershipEventHandler handler;

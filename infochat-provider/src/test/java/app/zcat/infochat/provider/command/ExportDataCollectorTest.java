@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.command;
 
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -32,7 +33,7 @@ class ExportDataCollectorTest {
     private static final String ADAPTER = "inmemory";
 
     @Inject ExportDataCollector collector;
-    @Inject DataSource dataSource;
+    @Inject @SeedDataSource DataSource dataSource;
 
     @BeforeEach
     void cleanup() throws Exception {

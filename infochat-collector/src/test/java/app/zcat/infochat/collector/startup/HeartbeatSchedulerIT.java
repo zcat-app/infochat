@@ -3,6 +3,7 @@ package app.zcat.infochat.collector.startup;
 import io.quarkus.scheduler.Scheduler;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -38,6 +39,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class HeartbeatSchedulerIT {
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @Inject

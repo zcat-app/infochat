@@ -2,6 +2,7 @@ package app.zcat.infochat.collector.partition;
 
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -30,6 +31,7 @@ class PartitionInsertIT {
     private static final Instant JUNE_FETCHED_AT = Instant.parse("2026-06-15T12:00:00Z");
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @AfterEach

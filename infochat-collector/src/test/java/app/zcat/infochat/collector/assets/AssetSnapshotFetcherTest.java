@@ -24,6 +24,7 @@ import app.zcat.infochat.collector.assets.source.AssetDataSource.FetchException;
 import app.zcat.infochat.collector.assets.source.BitfinexSnapshotSource;
 import app.zcat.infochat.collector.assets.source.CoingeckoSnapshotSource;
 import app.zcat.infochat.collector.assets.source.KrakenSnapshotSource;
+import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import app.zcat.infochat.core.notifier.AdminNotificationRecord;
 import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import io.quarkus.arc.ClientProxy;
@@ -69,6 +70,7 @@ class AssetSnapshotFetcherTest {
     static final AtomicReference<FetchException> exceptionResponse = new AtomicReference<>();
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @Inject

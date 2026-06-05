@@ -1,9 +1,9 @@
 ---
 id: M1-163
 title: "Shared DB test-seeding seam for the IT suite"
-status: pending
+status: done
 created: 2026-06-02
-last_updated: 2026-06-02
+last_updated: 2026-06-05
 blocked_by: []
 files_budget: 140
 complexity: high
@@ -33,12 +33,30 @@ spec_refs:
 decision_refs: []
 revisions: []
 escalations: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-05
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 128
+      added: 368
+      removed: 70
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-05
+  verdict: PASS
+  warnings: []
+  blockers: []
+outline_file: target/m1-tick-outline-M1-163.md
 ---
 
 # M1-163: Shared DB test-seeding seam for the IT suite

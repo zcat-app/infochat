@@ -2,6 +2,7 @@ package app.zcat.infochat.collector.outbox;
 
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.Test;
 
@@ -54,6 +55,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class OutboxRehydratorPaginationIT {
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @Inject

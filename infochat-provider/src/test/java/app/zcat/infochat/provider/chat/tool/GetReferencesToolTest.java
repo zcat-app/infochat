@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.chat.tool;
 
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -32,6 +33,7 @@ class GetReferencesToolTest {
     private static final Instant FETCHED_AT = Instant.parse("2026-05-22T12:00:00Z");
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @Inject

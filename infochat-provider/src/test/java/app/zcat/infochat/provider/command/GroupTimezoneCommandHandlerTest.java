@@ -6,6 +6,7 @@ import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.group.GroupRepository;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,7 +29,7 @@ class GroupTimezoneCommandHandlerTest {
     private static final String UPSTREAM_GROUP_ID = PREFIX + "group-" + UUID.randomUUID();
 
     @Inject GroupTimezoneCommandHandler handler;
-    @Inject DataSource dataSource;
+    @Inject @SeedDataSource DataSource dataSource;
     @Inject BundleLoader bundleLoader;
     @Inject InboundContext inboundContext;
     @Inject GroupRepository groupRepository;

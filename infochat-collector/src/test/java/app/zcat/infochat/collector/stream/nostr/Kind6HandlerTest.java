@@ -1,6 +1,7 @@
 package app.zcat.infochat.collector.stream.nostr;
 
 import app.zcat.infochat.collector.outbox.TestEvalQueueConsumer;
+import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import app.zcat.infochat.core.ingest.NormalizedPost;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
@@ -52,6 +53,7 @@ class Kind6HandlerTest {
     private static final String UID_PREFIX_PARTIAL = "kind6-handler-test/";
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @Inject

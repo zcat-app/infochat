@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.digest;
 
 import app.zcat.infochat.core.notifier.AdminNotificationRecord;
 import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
+import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
@@ -32,6 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class DigestSchedulerMissedSlotTest {
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @Inject

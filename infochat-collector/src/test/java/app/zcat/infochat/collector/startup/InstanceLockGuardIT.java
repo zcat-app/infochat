@@ -2,6 +2,7 @@ package app.zcat.infochat.collector.startup;
 
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
@@ -37,6 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class InstanceLockGuardIT {
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @Inject

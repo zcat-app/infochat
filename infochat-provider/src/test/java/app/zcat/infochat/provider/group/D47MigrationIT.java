@@ -4,6 +4,7 @@ import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
+import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -35,7 +36,7 @@ class D47MigrationIT {
     private static final String ADAPTER = "inmemory";
     private static final String UPSTREAM_PREFIX = "d47-migration-it-";
 
-    @Inject DataSource dataSource;
+    @Inject @SeedDataSource DataSource dataSource;
 
     @BeforeEach
     void cleanTestGroups() throws Exception {

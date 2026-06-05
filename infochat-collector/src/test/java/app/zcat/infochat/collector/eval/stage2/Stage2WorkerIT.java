@@ -2,6 +2,7 @@ package app.zcat.infochat.collector.eval.stage2;
 
 import app.zcat.infochat.collector.eval.stage1.Stage1Pipeline;
 import app.zcat.infochat.collector.eval.testing.StubLlmProvider;
+import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import app.zcat.infochat.llm.LlmProvider;
 import io.quarkus.arc.ClientProxy;
 import io.quarkus.test.junit.QuarkusTest;
@@ -62,6 +63,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class Stage2WorkerIT {
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @Inject

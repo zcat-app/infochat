@@ -1,6 +1,7 @@
 package app.zcat.infochat.collector.eval.tagger;
 
 import app.zcat.infochat.collector.eval.testing.StubLlmProvider;
+import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import app.zcat.infochat.llm.LlmProvider;
 import io.quarkus.test.junit.QuarkusTest;
@@ -33,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class TaggerWorkerTest {
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @Inject

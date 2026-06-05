@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.group;
 
 import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,7 +26,7 @@ class GroupAutoPromoteServiceTest {
     private static final String TEST_ADAPTER = "inmemory";
     private static final String TEST_UPSTREAM_ID = "autopromote-test-" + UUID.randomUUID();
 
-    @Inject DataSource dataSource;
+    @Inject @SeedDataSource DataSource dataSource;
     @Inject GroupRepository groupRepository;
     @Inject GroupMembershipRepository membershipRepository;
     @Inject GroupAutoPromoteService service;

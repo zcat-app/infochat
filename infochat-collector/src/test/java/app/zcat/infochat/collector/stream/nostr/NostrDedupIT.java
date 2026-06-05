@@ -4,6 +4,7 @@ import app.zcat.infochat.collector.outbox.EvalQueueProducer;
 import app.zcat.infochat.collector.outbox.PostPersister;
 import app.zcat.infochat.collector.outbox.TestEvalQueueConsumer;
 import app.zcat.infochat.collector.stream.StreamSourceSupervisor;
+import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import app.zcat.infochat.core.ingest.NormalizedPost;
 import app.zcat.infochat.ssrf.IpBlocklist;
 import app.zcat.infochat.ssrf.SsrfGuardedHttpClient;
@@ -49,6 +50,7 @@ class NostrDedupIT {
     private static final Duration FIVE_SECONDS = Duration.ofSeconds(5);
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @Inject

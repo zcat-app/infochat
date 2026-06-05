@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.summary;
 
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Result;
+import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
@@ -41,7 +42,7 @@ class EligiblePostQueryIT {
 
     private static final String PREFIX = "m1-037q-";
 
-    @Inject DataSource dataSource;
+    @Inject @SeedDataSource DataSource dataSource;
 
     @Inject EligiblePostQuery query;
 

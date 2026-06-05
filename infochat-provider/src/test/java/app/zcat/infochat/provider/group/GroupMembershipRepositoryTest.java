@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.group;
 
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -23,7 +24,7 @@ class GroupMembershipRepositoryTest {
     private static final String TEST_ADAPTER = "inmemory";
     private static final String TEST_UPSTREAM_ID = "mem-test-" + UUID.randomUUID();
 
-    @Inject DataSource dataSource;
+    @Inject @SeedDataSource DataSource dataSource;
     @Inject GroupRepository groupRepository;
     @Inject GroupMembershipRepository repository;
 

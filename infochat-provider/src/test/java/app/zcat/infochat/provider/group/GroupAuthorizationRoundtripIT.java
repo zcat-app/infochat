@@ -6,6 +6,7 @@ import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
@@ -77,7 +78,7 @@ class GroupAuthorizationRoundtripIT {
     private static final String GUARDIAN = "guardian-m1-114-d47-it-permanent";
 
     @Inject InMemoryAdapter adapter;
-    @Inject DataSource dataSource;
+    @Inject @SeedDataSource DataSource dataSource;
     @Inject BundleLoader bundleLoader;
     @Inject ThrottledAdminNotifier throttledAdminNotifier;
 

@@ -7,6 +7,7 @@ import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.messaging.InboundContext;
 import app.zcat.infochat.provider.source.UrlProbe;
 import app.zcat.infochat.provider.source.UrlProbe.ProbeResult;
+import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
@@ -50,7 +51,7 @@ class SourceEnableCommandHandlerTest {
     private static final String ADAPTER = "inmemory";
 
     @Inject SourceEnableCommandHandler handler;
-    @Inject DataSource dataSource;
+    @Inject @SeedDataSource DataSource dataSource;
     @Inject BundleLoader bundleLoader;
     @Inject InboundContext inboundContext;
     @Inject ConfirmStateService confirmStateService;

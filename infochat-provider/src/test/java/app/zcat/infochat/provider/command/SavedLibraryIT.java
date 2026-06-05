@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.command;
 
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
+import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
@@ -40,7 +41,7 @@ class SavedLibraryIT {
     private static final String UID = PREFIX + "uid";
 
     @Inject InMemoryAdapter adapter;
-    @Inject DataSource dataSource;
+    @Inject @SeedDataSource DataSource dataSource;
 
     @BeforeEach
     void cleanup() throws Exception {

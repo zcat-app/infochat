@@ -4,6 +4,7 @@ import app.zcat.infochat.core.notifier.AdminNotificationRecord;
 import app.zcat.infochat.core.notifier.NotifyOutcome;
 import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import app.zcat.infochat.provider.bundle.BundleKeys;
+import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -53,6 +54,7 @@ class GroupApprovalServiceTest {
     private static final String REDACTED_CONTACT = "abcdef12...wxyz";
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @Inject

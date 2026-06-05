@@ -4,6 +4,7 @@ import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
+import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
@@ -92,6 +93,7 @@ class Stage1WatchdogIT {
     }
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @Inject

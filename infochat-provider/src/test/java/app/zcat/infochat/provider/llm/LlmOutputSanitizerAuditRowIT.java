@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.llm;
 
 import app.zcat.infochat.core.audit.AuditLogWriter;
+import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
@@ -52,6 +53,7 @@ class LlmOutputSanitizerAuditRowIT {
     LlmOutputSanitizer sanitizer;
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @Inject

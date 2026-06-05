@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.messaging;
 
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -54,6 +55,7 @@ class ProbationCheckTest {
     ProbationCheck probationCheck;
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @BeforeEach

@@ -6,6 +6,7 @@ import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.AfterEach;
@@ -49,7 +50,7 @@ class ApproveGroupCommandHandlerTest {
     private static final String ADAPTER = "inmemory";
 
     @Inject ApproveGroupCommandHandler handler;
-    @Inject DataSource dataSource;
+    @Inject @SeedDataSource DataSource dataSource;
     @Inject BundleLoader bundleLoader;
     @Inject InboundContext inboundContext;
     @Inject InMemoryAdapter inMemoryAdapter;

@@ -1,6 +1,7 @@
 package app.zcat.infochat.collector.eval.entity;
 
 import app.zcat.infochat.collector.eval.testing.StubLlmProvider;
+import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import app.zcat.infochat.llm.LlmProvider;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
@@ -36,6 +37,7 @@ class EntityExtractorWorkerIT {
     private static final String UID_PREFIX = "entity-it/";
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @Inject

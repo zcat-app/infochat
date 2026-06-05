@@ -5,6 +5,7 @@ import app.zcat.infochat.collector.fetcher.rss.RssFeedParser;
 import app.zcat.infochat.collector.fetcher.rss.RssFetcher;
 import app.zcat.infochat.collector.outbox.PostPersister;
 import app.zcat.infochat.collector.outbox.TestEvalQueueConsumer;
+import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import app.zcat.infochat.core.ingest.NormalizedPost;
 import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
@@ -65,6 +66,7 @@ class FetchSchedulerIT {
         Paths.get("src/test/resources/fixtures/outbox/feed-fixture.xml");
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @Inject

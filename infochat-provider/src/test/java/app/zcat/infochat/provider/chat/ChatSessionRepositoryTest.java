@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.chat;
 
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -23,7 +24,7 @@ class ChatSessionRepositoryTest {
     private static final UUID SCOPE_ID = UUID.randomUUID();
     private static final String SCOPE_KIND = "dm";
 
-    @Inject DataSource dataSource;
+    @Inject @SeedDataSource DataSource dataSource;
     @Inject ChatSessionRepository repository;
 
     @BeforeEach

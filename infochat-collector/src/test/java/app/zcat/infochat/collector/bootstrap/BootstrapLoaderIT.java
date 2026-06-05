@@ -3,6 +3,7 @@ package app.zcat.infochat.collector.bootstrap;
 import io.quarkus.arc.ClientProxy;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -40,6 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class BootstrapLoaderIT {
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @Inject

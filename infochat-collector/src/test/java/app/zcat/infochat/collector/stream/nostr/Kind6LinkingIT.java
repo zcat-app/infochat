@@ -3,6 +3,7 @@ package app.zcat.infochat.collector.stream.nostr;
 import app.zcat.infochat.collector.outbox.EvalQueueProducer;
 import app.zcat.infochat.collector.outbox.PostPersister;
 import app.zcat.infochat.collector.outbox.TestEvalQueueConsumer;
+import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import app.zcat.infochat.core.ingest.NormalizedPost;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
@@ -51,6 +52,7 @@ class Kind6LinkingIT {
     private static final String UPSTREAM_PREFIX = "kind6-linking-it/";
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @Inject

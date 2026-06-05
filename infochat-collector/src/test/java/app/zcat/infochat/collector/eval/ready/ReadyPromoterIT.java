@@ -2,6 +2,7 @@ package app.zcat.infochat.collector.eval.ready;
 
 import app.zcat.infochat.collector.eval.embedding.EmbeddingMetadataDao;
 import app.zcat.infochat.collector.eval.embedding.EmbeddingMetadataStartupGuard;
+import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import io.quarkus.arc.ClientProxy;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
@@ -64,6 +65,7 @@ class ReadyPromoterIT {
     private static final String UID_PREFIX = "ready-it/";
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @Inject

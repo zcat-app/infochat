@@ -6,6 +6,7 @@ import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.messaging.InboundContext;
 import app.zcat.infochat.provider.messaging.RateCapBucket;
+import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.AfterEach;
@@ -37,7 +38,7 @@ class QuarantineCommandHandlerTest {
             OffsetDateTime.parse("2026-05-15T00:00:00Z");
 
     @Inject QuarantineCommandHandler handler;
-    @Inject DataSource dataSource;
+    @Inject @SeedDataSource DataSource dataSource;
     @Inject BundleLoader bundleLoader;
     @Inject InboundContext inboundContext;
     @Inject RateCapBucket rateCapBucket;

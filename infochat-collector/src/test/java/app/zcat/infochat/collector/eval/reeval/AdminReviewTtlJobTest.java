@@ -2,6 +2,7 @@ package app.zcat.infochat.collector.eval.reeval;
 
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
@@ -20,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class AdminReviewTtlJobTest {
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @Inject

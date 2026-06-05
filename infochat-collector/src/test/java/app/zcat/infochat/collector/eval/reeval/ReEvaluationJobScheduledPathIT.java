@@ -1,5 +1,6 @@
 package app.zcat.infochat.collector.eval.reeval;
 
+import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
@@ -39,6 +40,7 @@ class ReEvaluationJobScheduledPathIT {
     private static final Instant FETCHED_AT = Instant.parse("2026-05-23T09:00:00Z");
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @Inject

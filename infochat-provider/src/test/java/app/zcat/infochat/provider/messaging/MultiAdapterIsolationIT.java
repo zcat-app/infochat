@@ -6,6 +6,7 @@ import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.command.GrantAdminCommandHandler;
+import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
@@ -79,7 +80,7 @@ class MultiAdapterIsolationIT {
     private static final String ADAPTER_A = "adapter-a";
     private static final String ADAPTER_B = "adapter-b";
 
-    @Inject DataSource dataSource;
+    @Inject @SeedDataSource DataSource dataSource;
     @Inject BundleLoader bundleLoader;
     @Inject InboundContext inboundContext;
     @Inject GrantAdminCommandHandler grantHandler;

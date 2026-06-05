@@ -23,6 +23,7 @@ import org.postgresql.PGConnection;
 import org.postgresql.PGNotification;
 
 import app.zcat.infochat.collector.assets.PriceSnapshot;
+import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import io.quarkus.arc.ClientProxy;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
@@ -46,6 +47,7 @@ class PriceSnapshotStoreTest {
     private static final String TEST_ASSET_PREFIX = "snapshot-test-";
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @Inject

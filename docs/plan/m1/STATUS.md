@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 20 |
+| pending | 19 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 180 |
+| done | 181 |
 | deferred | 3 |
 | **total** | **203** |
 
@@ -42,7 +42,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-160 — [INVESTIGATE] summary_anchor scope_kind discriminator (complexity: medium, risk: medium)
 - M1-161 — [INVESTIGATE] price_snapshot PK/dedup invariant + new_price_snapshot channel intent (complexity: medium, risk: medium)
 - M1-162 — [INVESTIGATE] confirm-or-drop adapter SPI surfaces vs D47 (complexity: medium, risk: low)
-- M1-163 — Shared DB test-seeding seam for the IT suite (complexity: high, risk: low)
 
 ---
 
@@ -83,11 +82,11 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-164f | Onboard infochat-provider to NullAway + Error Prone | 2026-06-05 | round 1 APPROVE |
 | M1-164e | Onboard infochat-collector to NullAway + Error Prone | 2026-06-05 | round 2 APPROVE |
 | M1-164 | Adopt NullAway + Error Prone for §7a enforcement (umbrella) | 2026-06-05 | round 1 APPROVE |
+| M1-163 | Shared DB test-seeding seam for the IT suite | 2026-06-05 | round 1 APPROVE |
 | M1-166 | Fix SimpleXSubprocess FAILED-before-notify race (flaky test) | 2026-06-04 | round 1 APPROVE |
 | M1-164d | Onboard infochat-messaging-adapter to NullAway + Error Prone | 2026-06-04 | round 1 APPROVE |
 | M1-164c | Onboard infochat-llm-adapter to NullAway + Error Prone | 2026-06-04 | round 1 APPROVE |
 | M1-164b | Onboard infochat-ssrf to NullAway + Error Prone | 2026-06-04 | round 1 APPROVE |
-| M1-164a | NullAway/Error Prone build wiring + onboard infochat-core | 2026-06-04 | round 1 APPROVE |
 
 ---
 
@@ -349,7 +348,7 @@ M1-159 (pending) ← runnable
 M1-160 (pending) ← runnable
 M1-161 (pending) ← runnable
 M1-162 (pending) ← runnable
-M1-163 (pending) ← runnable
+M1-163 (done)
   └── M1-127 (deferred)
 M1-164a (done)
   ├── M1-164 (done)

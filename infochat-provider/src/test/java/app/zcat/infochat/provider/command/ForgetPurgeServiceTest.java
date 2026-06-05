@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.command;
 
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -33,6 +34,7 @@ class ForgetPurgeServiceTest {
     ForgetPurgeService purgeService;
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @BeforeEach

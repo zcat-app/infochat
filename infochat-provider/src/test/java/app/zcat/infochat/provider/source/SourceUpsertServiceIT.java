@@ -3,6 +3,7 @@ package app.zcat.infochat.provider.source;
 import app.zcat.infochat.provider.source.KindResolver.SourceKind;
 import app.zcat.infochat.provider.source.SourceUpsertService.Outcome;
 import app.zcat.infochat.provider.source.SourceUpsertService.UpsertResult;
+import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,6 +48,7 @@ class SourceUpsertServiceIT {
     SourceUpsertService service;
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @BeforeEach

@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.outbox;
 
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -37,7 +38,7 @@ class QuarantineReviewListenerTest {
     private static final String TEST_UID_PREFIX = "qrl-it/";
     private static final Instant FETCHED_AT = Instant.parse("2026-05-15T12:00:00Z");
 
-    @Inject DataSource dataSource;
+    @Inject @SeedDataSource DataSource dataSource;
     @Inject QuarantineReviewListener listener;
     @Inject QuarantineReviewReconciler reconciler;
     @Inject ProviderStateDao providerStateDao;

@@ -2,6 +2,7 @@ package app.zcat.infochat.collector.eval.stage1;
 
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -80,6 +81,7 @@ class Stage1PipelineIT {
         Pattern.compile("\\[REDACTED:[A-Z2-7]{26}\\]");
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @Inject

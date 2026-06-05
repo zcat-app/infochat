@@ -1,5 +1,6 @@
 package app.zcat.infochat.collector.outbox;
 
+import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import app.zcat.infochat.core.ingest.NormalizedPost;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
@@ -46,6 +47,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class PostPersisterIT {
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @Inject

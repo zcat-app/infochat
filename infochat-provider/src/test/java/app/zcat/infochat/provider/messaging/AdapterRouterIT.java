@@ -4,6 +4,7 @@ import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import io.quarkus.test.junit.QuarkusTestProfile;
@@ -80,7 +81,7 @@ class AdapterRouterIT {
 
     @Inject BundleLoader bundleLoader;
 
-    @Inject DataSource dataSource;
+    @Inject @SeedDataSource DataSource dataSource;
 
     @BeforeEach
     void resetAdapterAndCleanMvpContacts() throws Exception {

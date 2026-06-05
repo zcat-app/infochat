@@ -3,6 +3,7 @@ package app.zcat.infochat.collector.linking;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
+import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -33,6 +34,7 @@ class LinkingJobIT {
     private static final String UID_PREFIX = "linking-it/";
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @Inject

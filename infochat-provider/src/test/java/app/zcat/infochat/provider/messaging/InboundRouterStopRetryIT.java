@@ -5,6 +5,7 @@ import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import app.zcat.infochat.provider.testing.TestLlmProvider;
+import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
@@ -33,7 +34,7 @@ class InboundRouterStopRetryIT {
     private static final String GUARDIAN = "stop-retry-it-guardian-permanent";
 
     @Inject InMemoryAdapter adapter;
-    @Inject DataSource dataSource;
+    @Inject @SeedDataSource DataSource dataSource;
     @Inject BundleLoader bundleLoader;
     @Inject TestLlmProvider testLlmProvider;
     @Inject SummaryAnchorRepository summaryAnchorRepository;

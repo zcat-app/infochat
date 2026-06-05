@@ -1,6 +1,7 @@
 package app.zcat.infochat.collector.fetch;
 
 import app.zcat.infochat.collector.fetcher.rss.RssFetcher;
+import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import app.zcat.infochat.core.ingest.NormalizedPost;
 import app.zcat.infochat.core.notifier.AdminNotificationRecord;
 import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
@@ -61,6 +62,7 @@ class FetchSchedulerFailureLadderIT {
     FetchScheduler fetchScheduler;
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @Inject

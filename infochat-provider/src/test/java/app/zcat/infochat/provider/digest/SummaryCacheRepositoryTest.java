@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.digest;
 
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -22,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class SummaryCacheRepositoryTest {
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @Inject

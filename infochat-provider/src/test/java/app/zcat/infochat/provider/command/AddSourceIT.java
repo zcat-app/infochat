@@ -5,6 +5,7 @@ import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
 import app.zcat.infochat.provider.source.UrlProbe;
 import app.zcat.infochat.provider.source.UrlProbe.ProbeResult;
+import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import app.zcat.infochat.ssrf.IpBlocklist;
 import app.zcat.infochat.ssrf.SsrfGuardedHttpClient;
 import io.quarkus.test.junit.QuarkusTest;
@@ -75,7 +76,7 @@ class AddSourceIT {
 
     @Inject InMemoryAdapter adapter;
 
-    @Inject DataSource dataSource;
+    @Inject @SeedDataSource DataSource dataSource;
 
     @BeforeAll
     static void startServer() throws IOException {

@@ -6,6 +6,7 @@ import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.chat.ChatSessionRepository;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
@@ -31,6 +32,7 @@ class CompressCommandHandlerTest {
     CompressCommandHandler handler;
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @Inject

@@ -5,6 +5,7 @@ import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.arc.ClientProxy;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
@@ -55,7 +56,7 @@ class VouchCommandHandlerTest {
     private static final String ADAPTER = "inmemory";
 
     @Inject VouchCommandHandler handler;
-    @Inject DataSource dataSource;
+    @Inject @SeedDataSource DataSource dataSource;
     @Inject BundleLoader bundleLoader;
     @Inject InboundContext inboundContext;
 

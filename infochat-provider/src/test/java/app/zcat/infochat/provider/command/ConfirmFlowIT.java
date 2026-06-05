@@ -3,6 +3,7 @@ package app.zcat.infochat.provider.command;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
+import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
@@ -50,7 +51,7 @@ class ConfirmFlowIT {
     private static final String ADAPTER = "inmemory";
 
     @Inject InMemoryAdapter adapter;
-    @Inject DataSource dataSource;
+    @Inject @SeedDataSource DataSource dataSource;
     @Inject ConfirmStateService confirmStateService;
 
     @BeforeEach

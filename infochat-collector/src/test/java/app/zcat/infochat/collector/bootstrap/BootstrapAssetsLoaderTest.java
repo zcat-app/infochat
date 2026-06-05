@@ -2,6 +2,7 @@ package app.zcat.infochat.collector.bootstrap;
 
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -47,6 +48,7 @@ class BootstrapAssetsLoaderTest {
         "src/test/resources/bootstrap/bootstrap-assets-fixture.json");
 
     @Inject
+    @SeedDataSource
     DataSource dataSource;
 
     @Inject
