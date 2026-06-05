@@ -453,6 +453,35 @@ class InboundRouterIntakeOrderingTest {
                         + otherAdapter.captured);
     }
 
+    // ----- (l) vanished group row → silent drop, never an exception --------
+    //
+    // lookupGroupId returns Optional.empty() when the groups row is
+    // absent (removed between the step-3.5 approval read and a later
+    // lookup). The chat-mode dispatch must silently drop — no reply,
+    // no exception — closing the timing oracle the former
+    // IllegalStateException throw opened on group existence.
+
+    @Test
+    void groupChatMessageWithVanishedGroupRowIsSilentlyDroppedNotThrown() {
+        CallLog log = new CallLog();
+        InboundRouter router = newRouterWithLog(log,
+                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), false, "vouched")),
+                Optional.empty());
+        // The two chat-mode config fields default to 0 outside CDI;
+        // lift them so the non-slash body passes the chat-mode body
+        // cap and the LLM rate cap and reaches scope resolution.
+        router.chatBodyCap = 2048;
+        router.llmRateCapPerMinute = 10;
+        CapturingAdapter target = new CapturingAdapter();
+        router.setReplyTarget(target);
+
+        router.onMessage(groupInbound(GROUP_ID, GROUP_CONTACT, "hello there"), ADAPTER);
+
+        assertTrue(target.captured.isEmpty(),
+                "vanished group row must silent-drop the chat dispatch (no reply, no throw); got: "
+                        + target.captured);
+    }
+
     // ----- helpers + fakes ------------------------------------------------
 
     /**
@@ -466,6 +495,16 @@ class InboundRouterIntakeOrderingTest {
      * is stateless.
      */
     private InboundRouter newRouterWithLog(CallLog log, Optional<InboundRouter.UserSnapshot> snapshot) {
+        return newRouterWithLog(log, snapshot, Optional.of(UUID.randomUUID()));
+    }
+
+    /**
+     * Variant with an explicit {@code lookupGroupId} result —
+     * {@code Optional.empty()} simulates a groups row that vanished
+     * (removed) between the step-3.5 approval read and a later lookup.
+     */
+    private InboundRouter newRouterWithLog(CallLog log, Optional<InboundRouter.UserSnapshot> snapshot,
+                                           Optional<UUID> groupRowId) {
         InboundRouter router = new InboundRouter() {
             @Override
             Optional<UserSnapshot> lookupUser(String adapter, String contactId) {
@@ -474,8 +513,8 @@ class InboundRouterIntakeOrderingTest {
             }
 
             @Override
-            UUID lookupGroupId(String adapter, String upstreamGroupId) {
-                return UUID.randomUUID();
+            Optional<UUID> lookupGroupId(String adapter, String upstreamGroupId) {
+                return groupRowId;
             }
         };
         router.commandHandlers = new SingletonInstance<>();

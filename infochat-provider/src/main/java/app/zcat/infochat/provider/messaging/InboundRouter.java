@@ -102,6 +102,16 @@ import java.util.concurrent.atomic.AtomicLong;
  *       Pending/rejected groups never reach step 4.1 auto-promote — the
  *       gate is the boundary between "is this a group the bot processes"
  *       and "what does the bot do with this message";</li>
+ *   <li>chat-mode body cap: a non-slash body longer than
+ *       {@code infochat.chat.body-cap} gets the fixed
+ *       {@code error.chat.body_too_large} reply and stops here —
+ *       AFTER the authorization gates (so the invite flow, D47
+ *       invisibility, the ban reply, and the per-group reply rate
+ *       bucket keep their spec'd precedence over the cap reply) and
+ *       BEFORE the membership write (4.1), the probation lazy-clear
+ *       (5), the confirm drain (4.5), and the anchor clear (4.6) —
+ *       {@code commands.md} §Input length caps forbids any DB write
+ *       for an oversized chat-mode message;</li>
  *   <li>5 slow-start probation gate (M1-045): if {@link ProbationCheck}
  *       reports {@code inProbation == true} AND the command is NOT in
  *       {@link CommandPermissions}'s allowed-during-probation set, the
@@ -465,6 +475,20 @@ public class InboundRouter {
             }
         }
 
+        // Chat-mode body cap (commands.md §Input length caps): beyond
+        // the cap → friendly error, no chat-agent invocation, no LLM
+        // call, and no DB write. The check fires BEFORE the membership
+        // write (4.1), the probation lazy-clear (5), the confirm drain
+        // (4.5), and the anchor clear (4.6) — all forbidden for an
+        // oversized message — and AFTER the authorization gates
+        // (2/3/4/3.5) so the invite flow, D47 invisibility, the ban
+        // reply, and the per-group reply rate bucket keep their spec'd
+        // precedence over the cap reply.
+        if (!normalized.startsWith("/") && normalized.length() > chatBodyCap) {
+            sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_CHAT_BODY_TOO_LARGE), adapterName);
+            return;
+        }
+
         // Step 4.1 — Group membership + auto-promote (M1-079c).
         // Placed AFTER the ban check (step 4) so banned users never
         // get a membership row written. For every non-banned group-
@@ -475,10 +499,19 @@ public class InboundRouter {
         // CDI fields.
         if (msg.scope() instanceof ScopeRef.Group group && snapshot.isPresent()
                 && groupAutoPromoteService != null) {
-            UUID groupId = lookupGroupId(adapterName, group.adapterGroupId());
+            Optional<UUID> groupId = lookupGroupId(adapterName, group.adapterGroupId());
+            if (groupId.isEmpty()) {
+                // Group row vanished between the step-3.5 approval read
+                // and here (concurrent removal). Silent drop with a
+                // specific debug log — throwing here was a timing
+                // oracle distinguishing removed-group state.
+                log.debug("InboundRouter: no active groups row for adapter={} group={}; dropping",
+                        adapterName, ContactIds.redact(group.adapterGroupId()));
+                return;
+            }
             UUID senderId = snapshot.get().id();
-            groupAutoPromoteService.tryAutoPromote(groupId, senderId, adapterName, contactId);
-            ensureGroupMembership(groupId, senderId);
+            groupAutoPromoteService.tryAutoPromote(groupId.get(), senderId, adapterName, contactId);
+            ensureGroupMembership(groupId.get(), senderId);
         }
 
         // Step 5 — slow-start probation gate (M1-045) per spec
@@ -543,8 +576,11 @@ public class InboundRouter {
         // /retry itself) and all chat-mode messages.
         if (!"retry".equals(commandName)) {
             UUID anchorActorId = snapshot.get().id();
-            UUID anchorScopeId = resolveChatScopeId(msg.scope(), anchorActorId, adapterName);
-            summaryAnchorRepository.clear(anchorActorId, anchorScopeId);
+            // Empty scope (group row vanished mid-dispatch) → nothing
+            // to clear; the chat dispatch below silent-drops the same
+            // case.
+            resolveChatScopeId(msg.scope(), anchorActorId, adapterName)
+                    .ifPresent(anchorScopeId -> summaryAnchorRepository.clear(anchorActorId, anchorScopeId));
         }
 
         // Step 6 — Parse + dispatch (slash-command resolver or
@@ -554,22 +590,27 @@ public class InboundRouter {
             if (normalized.startsWith("/")) {
                 body = handleSlash(msg.scope(), normalized);
             } else {
-                // Chat-mode dispatch: enforce body cap, then LLM rate cap,
-                // then delegate to ChatAgent. scope_kind is "dm" or "group";
-                // scope_id is the user's UUID for DM, the group's UUID for
-                // group scope (per-scope isolation, schema §Invariants).
-                if (normalized.length() > chatBodyCap) {
-                    body = bundleLoader.get(BundleKeys.ERROR_CHAT_BODY_TOO_LARGE);
+                // Chat-mode dispatch: enforce LLM rate cap, then delegate
+                // to ChatAgent (the chat-mode body cap already fired
+                // before step 4.1 — see the intake-step order above).
+                // scope_kind is "dm" or "group"; scope_id is the user's
+                // UUID for DM, the group's UUID for group scope
+                // (per-scope isolation, schema §Invariants).
+                UUID actorId = snapshot.get().id();
+                if (!tryAcquireLlmRateCap(actorId)) {
+                    body = bundleLoader.get(BundleKeys.ERROR_CHAT_LLM_RATE_CAP);
                 } else {
-                    UUID actorId = snapshot.get().id();
-                    if (!tryAcquireLlmRateCap(actorId)) {
-                        body = bundleLoader.get(BundleKeys.ERROR_CHAT_LLM_RATE_CAP);
-                    } else {
-                        String scopeKind = chatModeScopeKindOf(msg.scope());
-                        UUID scopeId = resolveChatScopeId(
-                                msg.scope(), actorId, adapterName);
-                        body = chatAgent.handle(actorId, scopeKind, scopeId, normalized);
+                    String scopeKind = chatModeScopeKindOf(msg.scope());
+                    Optional<UUID> scopeId = resolveChatScopeId(
+                            msg.scope(), actorId, adapterName);
+                    if (scopeId.isEmpty()) {
+                        // Group row vanished mid-dispatch — silent drop,
+                        // mirroring the step-4.1 empty branch.
+                        log.debug("InboundRouter: no active groups row for chat scope adapter={} scope={}; dropping",
+                                adapterName, ContactIds.redact(scopeIdOf(msg.scope())));
+                        return;
                     }
+                    body = chatAgent.handle(actorId, scopeKind, scopeId.get(), normalized);
                 }
             }
         } catch (RuntimeException e) {
@@ -770,30 +811,39 @@ public class InboundRouter {
         };
     }
 
-    // DM scope → actorId; group scope → group UUID from the groups table.
-    // For a group sender, step 4.1 already called lookupGroupId (which
-    // throws if the group row is absent), so the row is guaranteed to
-    // exist by the time chat-mode scope resolution reaches here.
-    private UUID resolveChatScopeId(@NonNull ScopeRef scope,
-                                    @NonNull UUID actorId,
-                                    @NonNull String adapterName) {
+    // DM scope → actorId; group scope → group UUID from the groups
+    // table, empty when the group row is absent (removed mid-dispatch).
+    // Callers skip the anchor clear / silent-drop the chat dispatch on
+    // empty rather than throwing.
+    private Optional<UUID> resolveChatScopeId(@NonNull ScopeRef scope,
+                                              @NonNull UUID actorId,
+                                              @NonNull String adapterName) {
         return switch (scope) {
-            case ScopeRef.Dm ignored -> actorId;
+            case ScopeRef.Dm ignored -> Optional.of(actorId);
             case ScopeRef.Group group -> lookupGroupId(adapterName, group.adapterGroupId());
         };
     }
 
-    UUID lookupGroupId(@NonNull String adapter, @NonNull String upstreamGroupId) {
+    /**
+     * Resolve the {@code groups.id} for an active (not removed) group
+     * row, or empty when no such row exists. A missing row is a normal
+     * race outcome (group removed between the step-3.5 approval read
+     * and a later lookup), NOT an error: callers silent-drop or skip
+     * instead of throwing, so an attacker cannot use the
+     * exception-vs-reply difference as a timing oracle on group
+     * existence. The {@link SQLException} branch (infrastructure
+     * failure) still throws.
+     */
+    Optional<UUID> lookupGroupId(@NonNull String adapter, @NonNull String upstreamGroupId) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(SELECT_GROUP_SQL)) {
             ps.setString(1, adapter);
             ps.setString(2, upstreamGroupId);
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) {
-                    throw new IllegalStateException(
-                            "InboundRouter: group not found for adapter=" + adapter);
+                    return Optional.empty();
                 }
-                return (UUID) rs.getObject("id");
+                return Optional.of((UUID) rs.getObject("id"));
             }
         } catch (SQLException e) {
             throw new IllegalStateException(
@@ -1006,7 +1056,12 @@ public class InboundRouter {
     }
 
     private static boolean isBidiControl(int cp) {
-        return (cp >= 0x202A && cp <= 0x202E)   // LRE, RLE, PDF, LRO, RLO
+        // The implicit directional marks (ALM, LRM, RLM) are bidi
+        // controls NFKC does NOT remove, so the explicit strip must
+        // cover them alongside the embedding/override/isolate sets.
+        return cp == 0x061C                        // ALM
+                || cp == 0x200E || cp == 0x200F    // LRM, RLM
+                || (cp >= 0x202A && cp <= 0x202E)  // LRE, RLE, PDF, LRO, RLO
                 || (cp >= 0x2066 && cp <= 0x2069); // LRI, RLI, FSI, PDI
     }
 

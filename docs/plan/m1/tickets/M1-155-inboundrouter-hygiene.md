@@ -1,9 +1,9 @@
 ---
 id: M1-155
 title: "InboundRouter hygiene (chat body-cap ordering, bidi-control gap, lookupGroupId Optional)"
-status: pending
+status: done
 created: 2026-06-02
-last_updated: 2026-06-02
+last_updated: 2026-06-05
 blocked_by:
   - M1-125
 files_budget: 5
@@ -33,12 +33,30 @@ spec_refs:
   - docs/spec/security.md §Ingest pipeline (security side)
   - docs/spec/security.md §Authorization model
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-05
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 227
+      removed: 46
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-05
+  verdict: WARN
+  warnings:
+    - "SECURITY-FLAG-CONSISTENT: security_relevant is false but acceptance items 2 and 3 directly address security-spec invariants (bidi normalization in §Authorization model step 1.7 and timing-oracle closure on group lookup). Consider setting security_relevant: true so the redteam skill is triggered on this ticket."
+  blockers: []
 ---
 
 # M1-155: InboundRouter hygiene

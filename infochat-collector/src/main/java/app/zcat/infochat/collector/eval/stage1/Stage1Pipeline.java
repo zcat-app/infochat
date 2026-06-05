@@ -45,8 +45,8 @@ import java.util.regex.Matcher;
  *       eventually emit. See {@code docs/plan/m1/redteam/M1-032-2026-05-16.md}
  *       Finding 1 for the documented attack vector.</li>
  *   <li><b>Unicode normalize unconditionally</b> — NFKC over the
- *       entire body; bidi-control strip (U+202A..U+202E,
- *       U+2066..U+2069); zero-width strip
+ *       entire body; bidi-control strip (U+061C, U+200E/U+200F,
+ *       U+202A..U+202E, U+2066..U+2069); zero-width strip
  *       (U+200B/U+200C/U+200D/U+FEFF). The Provider chat-intake
  *       carve-out ({@code docs/spec/security.md} §Ingest pipeline
  *       parenthetical) does NOT apply on the ingest path; the
@@ -274,7 +274,8 @@ public class Stage1Pipeline {
 
     /**
      * Unicode normalize: NFKC then strip bidi-control codepoints
-     * \\u202A..\\u202E and \\u2066..\\u2069, plus zero-width
+     * \\u061C, \\u200E/\\u200F, \\u202A..\\u202E and \\u2066..\\u2069,
+     * plus zero-width
      * codepoints \\u200B/\\u200C/\\u200D/\\uFEFF. UNCONDITIONAL on
      * the whole body — the Provider chat-intake carve-out does NOT
      * apply on the ingest path (per docs/spec/security.md §Ingest
@@ -285,6 +286,11 @@ public class Stage1Pipeline {
         StringBuilder out = new StringBuilder(nfkc.length());
         for (int i = 0; i < nfkc.length(); i++) {
             char c = nfkc.charAt(i);
+            // implicit directional marks U+061C (ALM), U+200E/U+200F
+            // (LRM, RLM) — bidi controls NFKC does NOT remove
+            if (c == '\u061C' || c == '\u200E' || c == '\u200F') {
+                continue;
+            }
             // bidi controls U+202A..U+202E (LRE, RLE, PDF, LRO, RLO)
             if (c >= '\u202A' && c <= '\u202E') {
                 continue;

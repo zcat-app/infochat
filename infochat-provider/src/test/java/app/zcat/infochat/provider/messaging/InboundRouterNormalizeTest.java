@@ -68,6 +68,20 @@ class InboundRouterNormalizeTest {
         assertEquals("/help:tag", got);
     }
 
+    /**
+     * The implicit directional marks U+061C (ARABIC LETTER MARK),
+     * U+200E (LEFT-TO-RIGHT MARK), U+200F (RIGHT-TO-LEFT MARK) are
+     * stripped outside fences. NFKC does not remove them, so only the
+     * explicit bidi-control strip covers them — a disguised {@code /}
+     * prefix must not survive via these marks.
+     */
+    @Test
+    void implicitDirectionalMarksAreStrippedOutsideFences() {
+        String body = "؜/he‎lp‏";
+        String got = InboundRouter.normalize(body);
+        assertEquals("/help", got);
+    }
+
     // ----- (b) U+FB01 LATIN SMALL LIGATURE FI inside a fence ------------
 
     /**

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 17 |
+| pending | 16 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 183 |
+| done | 184 |
 | deferred | 3 |
 | **total** | **203** |
 
@@ -33,7 +33,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-150 — Digest hygiene (concurrency guard, timezone WARN, broad-catch narrow) (complexity: low, risk: low)
 - M1-152 — Schema-hardening migration (stage2_verdict CHECK + V27 audit verb + Nostr index) (complexity: low, risk: medium)
 - M1-154 — Provider chat/sanitizer hygiene (pattern caching, closed-list whitespace, dispatcher completeness) (complexity: low, risk: low)
-- M1-155 — InboundRouter hygiene (chat body-cap ordering, bidi-control gap, lookupGroupId Optional) (complexity: medium, risk: medium)
 - M1-156 — Misc security-low hardening (Redactor separator, invite per-code counter, AddSource userinfo) (complexity: low, risk: low)
 - M1-158 — Documentation / stale-comment sweep (CT3) (complexity: low, risk: low)
 - M1-159 — Test-debt (inner-class extraction, truncateAll completeness, delete IngestSpisLoadTest) (complexity: low, risk: low)
@@ -82,9 +81,9 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-164 | Adopt NullAway + Error Prone for §7a enforcement (umbrella) | 2026-06-05 | round 1 APPROVE |
 | M1-163 | Shared DB test-seeding seam for the IT suite | 2026-06-05 | round 1 APPROVE |
 | M1-157 | Explicit connection-pool sizing per profile | 2026-06-05 | round 1 APPROVE |
+| M1-155 | InboundRouter hygiene (chat body-cap ordering, bidi-control gap, lookupGroupId Optional) | 2026-06-05 | round 1 APPROVE |
 | M1-142 | NewPostListener reconcile after reconnect | 2026-06-05 | round 1 APPROVE |
 | M1-166 | Fix SimpleXSubprocess FAILED-before-notify race (flaky test) | 2026-06-04 | round 1 APPROVE |
-| M1-164d | Onboard infochat-messaging-adapter to NullAway + Error Prone | 2026-06-04 | round 1 APPROVE |
 
 ---
 
@@ -310,7 +309,7 @@ M1-122 (done)
 M1-123 (done)
 M1-124 (done)
 M1-125 (done)
-  └── M1-155 (pending) ← runnable
+  └── M1-155 (done)
 M1-126 (done)
 M1-128 (done)
 M1-129 (done)

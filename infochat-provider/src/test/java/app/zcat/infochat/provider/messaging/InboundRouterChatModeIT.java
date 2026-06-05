@@ -116,6 +116,70 @@ class InboundRouterChatModeIT {
     }
 
     @Test
+    void oversizedChatMessageDoesNotClearDmAnchor() throws Exception {
+        UUID userId = seedVouchedUserReturningId("user-oversize-anchor");
+        // Seed a DM-scope anchor (scope_id == actor UUID for DM)
+        try (Connection conn = dataSource.getConnection()) {
+            exec(conn,
+                    "INSERT INTO summary_anchor "
+                  + "(user_id, scope_id, command_kind, command_name, arg_hash, post_uids) "
+                  + "VALUES (?, ?, 'personal', 'summary', 'hash1', '{}'::text[]) "
+                  + "ON CONFLICT (user_id, scope_id, command_kind) "
+                  + "  WHERE user_id IS NOT NULL "
+                  + "  DO NOTHING",
+                    userId, userId);
+        }
+
+        adapter.deliverDm(CONTACT_PREFIX + "user-oversize-anchor", "x".repeat(300));
+
+        assertEquals(bundleLoader.get("error.chat.body_too_large"), lastReply().text());
+        // The cap fires BEFORE the step-4.6 anchor clear — the spec
+        // forbids any DB write for an oversized chat-mode message, so
+        // the anchor row must survive.
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT 1 FROM summary_anchor "
+                   + "WHERE user_id = ? AND scope_id = ? AND command_kind = 'personal'")) {
+            ps.setObject(1, userId);
+            ps.setObject(2, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(),
+                        "oversized chat message must NOT clear the anchor (no DB write past the cap)");
+            }
+        }
+    }
+
+    @Test
+    void oversizedGroupChatMessageWritesNoMembershipRow() throws Exception {
+        UUID userId = seedVouchedUserReturningId("user-oversize-group");
+        UUID groupId = seedGroup("group-oversize");
+
+        deliverGroup(CONTACT_PREFIX + "user-oversize-group",
+                GROUP_PREFIX + "group-oversize", "x".repeat(300));
+
+        assertEquals(bundleLoader.get("error.chat.body_too_large"), lastReply().text());
+        assertEquals(0, testLlmProvider.callCount(),
+                "LLM should NOT be called for oversized body");
+        // The cap fires BEFORE the step-4.1 membership write.
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT 1 FROM group_membership WHERE group_id = ? AND user_id = ?")) {
+            ps.setObject(1, groupId);
+            ps.setObject(2, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertFalse(rs.next(),
+                        "oversized group chat message must NOT write a group_membership row");
+            }
+        }
+    }
+
+    @Test
+    void lookupGroupIdReturnsEmptyForUnknownGroupInsteadOfThrowing() {
+        assertTrue(router.lookupGroupId(ADAPTER, GROUP_PREFIX + "never-created").isEmpty(),
+                "missing group row must yield Optional.empty(), not IllegalStateException");
+    }
+
+    @Test
     void probationUserBlockedFromChatMode() throws Exception {
         seedProbationUser("user-3");
 
