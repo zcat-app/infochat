@@ -4,6 +4,7 @@ import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.core.log.ContactIds;
+import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.messaging.MembershipEvent;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -85,21 +86,47 @@ public class MembershipEventHandler {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                // Check admin status before markMemberRemoved — the V5
+                // Read admin status before markMemberRemoved — the V5
                 // trigger clears is_group_admin during the UPDATE, so
-                // querying after would always return false.
-                boolean wasGroupAdmin = membershipRepository.isGroupAdmin(conn, groupId, userId);
+                // querying after would always return false. The FOR UPDATE
+                // row lock is held until this transaction's commit, so a
+                // concurrent /promote or /demote cannot invalidate the
+                // audited was_group_admin value between read and UPDATE.
+                GroupMembershipRepository.MembershipState state =
+                        membershipRepository.lockMembership(conn, groupId, userId);
+                if (state == null || state.removed()) {
+                    // Verified no-op against current state: the row is
+                    // absent or already removed, so the event implies no
+                    // mutation — skip the audit row too. Leave events are
+                    // attacker-repeatable; minting one MEMBER_LEFT row per
+                    // repeat would grow audit_log without bound (the
+                    // security.md §Invite-code registration suppression
+                    // principle). Invariant 7 holds: no mutation, no audit
+                    // duty.
+                    conn.rollback();
+                    log.debug("UserLeft: no-op, membership absent or already removed group={} user={}",
+                            groupId, userId);
+                    return;
+                }
                 writeAudit(conn, AuditAction.MEMBER_LEFT, userId, event.contactId(), adapter,
                         "user", userId.toString(), groupId,
-                        "{\"was_group_admin\":" + wasGroupAdmin + "}");
+                        "{\"was_group_admin\":" + state.groupAdmin() + "}");
                 membershipRepository.markMemberRemoved(conn, groupId, userId);
                 conn.commit();
             } catch (SQLException e) {
                 conn.rollback();
+                // Operator signal for a stranded removal: a member that
+                // failed to be marked removed can be a phantom admin
+                // occupying the one_admin_per_group slot. UUIDs only;
+                // SafeLog drops the SQLException message body.
+                SafeLog.error(log, "UserLeft transaction failed group=" + groupId
+                        + " user=" + userId, e);
                 throw sanitizedFailure("UserLeft transaction failed group=" + groupId
                         + " user=" + userId, e);
             }
         } catch (SQLException e) {
+            SafeLog.error(log, "UserLeft connection failed group=" + groupId
+                    + " user=" + userId, e);
             throw sanitizedFailure("UserLeft connection failed group=" + groupId
                     + " user=" + userId, e);
         }
@@ -124,9 +151,13 @@ public class MembershipEventHandler {
                 conn.commit();
             } catch (SQLException e) {
                 conn.rollback();
+                // Same operator-signal convention as UserLeft: UUIDs only,
+                // SafeLog drops the SQLException message body.
+                SafeLog.error(log, "BotRemoved transaction failed group=" + groupId, e);
                 throw sanitizedFailure("BotRemoved transaction failed group=" + groupId, e);
             }
         } catch (SQLException e) {
+            SafeLog.error(log, "BotRemoved connection failed group=" + groupId, e);
             throw sanitizedFailure("BotRemoved connection failed group=" + groupId, e);
         }
         log.info("BotRemoved: marked group removed group={}", groupId);

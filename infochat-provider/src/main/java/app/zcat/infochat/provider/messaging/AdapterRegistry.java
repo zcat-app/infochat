@@ -1,7 +1,9 @@
 package app.zcat.infochat.provider.messaging;
 
+import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.messaging.AdapterTrustLevel;
 import app.zcat.infochat.messaging.CapabilityFlags;
+import app.zcat.infochat.messaging.MembershipEvent;
 import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
 import app.zcat.infochat.provider.group.MembershipEventHandler;
@@ -278,7 +280,7 @@ public class AdapterRegistry {
             inboundRouter.setReplyTarget(adapter);
             String adapterName = adapter.name();
             adapter.setInboundHandler(msg -> inboundRouter.onMessage(msg, adapterName));
-            adapter.setMembershipEventHandler(event -> membershipEventHandler.handle(event, adapterName));
+            adapter.setMembershipEventHandler(event -> dispatchMembershipEvent(event, adapterName));
             log.info("activating adapter: {} (trust={}{})",
                     adapterName,
                     adapter.trustLevel(),
@@ -292,6 +294,24 @@ public class AdapterRegistry {
     /** Immutable snapshot of activated adapters for {@link MessagingStartup} and tests. */
     public List<MessagingAdapter> activatedAdapters() {
         return List.copyOf(activatedAdapters);
+    }
+
+    /**
+     * Per-event isolation on the wired membership-event path: one
+     * failing event must not abort the adapter's dispatch of the
+     * remaining membership events in the same group update. The
+     * handler's failures are already sanitized, but
+     * {@code resolveGroup}/{@code resolveUser} throw
+     * {@code IllegalStateException} carrying the raw SQLException as
+     * cause — only SafeLog (class-name chain, no message bodies) may
+     * touch them. RuntimeException, not Throwable: Errors propagate.
+     */
+    void dispatchMembershipEvent(MembershipEvent event, String adapterName) {
+        try {
+            membershipEventHandler.handle(event, adapterName);
+        } catch (RuntimeException e) {
+            SafeLog.error(log, "membership event dispatch failed adapter=" + adapterName, e);
+        }
     }
 
     /**

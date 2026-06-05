@@ -3,6 +3,7 @@ package app.zcat.infochat.provider.group;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -38,6 +39,13 @@ public class GroupMembershipRepository {
     private static final String MARK_REMOVED =
             "UPDATE group_membership SET removed_at = now() "
           + "WHERE group_id = ? AND user_id = ? AND removed_at IS NULL";
+
+    // No removed_at filter: an already-removed row must stay visible so
+    // the caller can detect a verified no-op (repeated leave events) and
+    // skip both the audit row and the mutation.
+    private static final String LOCK_MEMBERSHIP =
+            "SELECT is_group_admin, removed_at FROM group_membership "
+          + "WHERE group_id = ? AND user_id = ? FOR UPDATE";
 
     private final DataSource dataSource;
 
@@ -75,6 +83,34 @@ public class GroupMembershipRepository {
             ps.setObject(2, userId);
             try (ResultSet rs = ps.executeQuery()) {
                 return rs.next() && rs.getBoolean("is_group_admin");
+            }
+        }
+    }
+
+    /**
+     * Snapshot of one membership row read under {@code FOR UPDATE}.
+     * {@code removed} is true when {@code removed_at} is set — the row
+     * exists but the member already left.
+     */
+    public record MembershipState(boolean groupAdmin, boolean removed) {}
+
+    // Locking read on the caller's connection: the row lock held until
+    // the caller's commit serializes against concurrent /promote and
+    // /demote UPDATEs, so the is_group_admin value read here cannot be
+    // invalidated between the read and markMemberRemoved (the audited
+    // was_group_admin provenance). Returns null when no row exists.
+    public @Nullable MembershipState lockMembership(Connection conn, UUID groupId,
+                                                    UUID userId) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(LOCK_MEMBERSHIP)) {
+            ps.setObject(1, groupId);
+            ps.setObject(2, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return null;
+                }
+                return new MembershipState(
+                        rs.getBoolean("is_group_admin"),
+                        rs.getTimestamp("removed_at") != null);
             }
         }
     }

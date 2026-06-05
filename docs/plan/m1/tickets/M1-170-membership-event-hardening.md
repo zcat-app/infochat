@@ -1,7 +1,7 @@
 ---
 id: M1-170
 title: "Membership-event hardening (M1-143 redteam findings 2-4)"
-status: pending
+status: done
 created: 2026-06-05
 last_updated: 2026-06-05
 blocked_by: []
@@ -40,12 +40,49 @@ spec_refs:
   - docs/spec/security.md §Invite-code registration
   - docs/spec/schema.md §Invariants
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-05
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 601
+      removed: 12
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-05
+    verdict: CLEAN
+    base: main
+    head: m1/M1-170-membership-event-hardening
+    verdict_file: docs/plan/m1/redteam/M1-170-2026-06-05.md
+    findings_count: 0
+    out_of_model_count: 1
+    note: |
+      Branch-form audit (opted into the --in-progress path at user
+      confirmation; the commit had not yet merged to main). CLEAN — the
+      diff strengthens audit-before-effect, bounds attacker-repeatable
+      audit-row growth, and tightens log hygiene; no gap against a
+      security.md commitment. One advisory OUT-OF-MODEL note on
+      membership-event authenticity (admin-slot reclaim via spoofed
+      UserLeft + auto-promote), outside the documented threat model and
+      not changed by this diff — left for the user to decide whether to
+      bring membership-event spoofing into the model. No remediation
+      ticket required.
+outline_file: target/m1-tick-outline-M1-170.md
+clarity_check:
+  date: 2026-06-05
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-170: Membership-event hardening (M1-143 redteam findings 2-4)

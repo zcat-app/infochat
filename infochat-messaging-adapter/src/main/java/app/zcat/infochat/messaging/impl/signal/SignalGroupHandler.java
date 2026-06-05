@@ -184,7 +184,18 @@ final class SignalGroupHandler {
             MembershipEvent event = joined
                     ? new MembershipEvent.UserJoined(groupId, aci)
                     : new MembershipEvent.UserLeft(groupId, aci);
-            handler.onEvent(event);
+            try {
+                handler.onEvent(event);
+            } catch (RuntimeException e) {
+                // Per-event isolation: one failing event must not drop
+                // the sibling entries in the same member-delta array.
+                // Class name only (the SafeLog pattern — this module has
+                // no infochat-core dependency): no ACI (it is a contact
+                // id), no exception message, no throwable object may
+                // reach the log.
+                LOG.errorf("Signal membership event dispatch failed group=%s exception=%s",
+                        groupId, e.getClass().getName());
+            }
         }
         return true;
     }
