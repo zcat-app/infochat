@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 6 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 199 |
 | deferred | 2 |
-| **total** | **207** |
+| **total** | **208** |
 
 ---
 
@@ -30,6 +30,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-160 — [INVESTIGATE] summary_anchor scope_kind discriminator (complexity: medium, risk: medium)
 - M1-161 — [INVESTIGATE] price_snapshot PK/dedup invariant + new_price_snapshot channel intent (complexity: medium, risk: medium)
 - M1-162 — [INVESTIGATE] confirm-or-drop adapter SPI surfaces vs D47 (complexity: medium, risk: low)
+- M1-172 — InviteCodeConsumer advisories: stale reply javadoc + sweep gating (complexity: low, risk: low)
 
 ---
 
@@ -354,4 +355,5 @@ M1-168 (done)
 M1-169 (done)
 M1-170 (done)
 M1-171 (done)
+M1-172 (pending) ← runnable
 ```
