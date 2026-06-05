@@ -6,8 +6,10 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -67,11 +69,25 @@ public class DigestWorker {
     @Inject
     DataSource dataSource;
 
+    // In-flight guard (ConcurrentHashMap-backed, keyed groupId+slotKind): a
+    // scheduler tick overrun re-fires a slot whose previous execution is
+    // still running; overlapping same-group processing would double-deliver.
+    private final Set<String> inFlightSlots = ConcurrentHashMap.newKeySet();
+
     public void execute(@Observes @NonNull DigestSlot slot) {
+        String inFlightKey = slot.groupId() + ":" + slot.slotKind();
+        if (!inFlightSlots.add(inFlightKey)) {
+            LOG.warnf("Digest already in flight for group %s slot %s — skipping overlapping execution",
+                    slot.groupId(), slot.slotKind());
+            return;
+        }
         try {
             executeSlot(slot);
-        } catch (Exception e) {
+        } catch (SQLException | MessagingException e) {
+            // Expected operational failures only — programming errors propagate
             LOG.errorf(e, "Digest failed for group %s slot %s", slot.groupId(), slot.slotKind());
+        } finally {
+            inFlightSlots.remove(inFlightKey);
         }
     }
 

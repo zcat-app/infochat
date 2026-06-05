@@ -9,6 +9,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Event;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.jboss.logging.Logger;
 import org.jspecify.annotations.NonNull;
 
 import javax.sql.DataSource;
@@ -18,6 +19,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Clock;
+import java.time.DateTimeException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -26,7 +28,9 @@ import java.time.ZonedDateTime;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -44,8 +48,14 @@ import org.jspecify.annotations.Nullable;
 @ApplicationScoped
 public class DigestScheduler {
 
+    private static final Logger LOG = Logger.getLogger(DigestScheduler.class);
+
     private static final String SLOT_MORNING = "morning";
     private static final String SLOT_EVENING = "evening";
+
+    // WARN once per (group, offending value), not per tick — the scheduler
+    // fires every minute and an unfixed timezone would flood the log.
+    private final Set<String> warnedTimezones = ConcurrentHashMap.newKeySet();
 
     @Inject
     DataSource dataSource;
@@ -83,7 +93,7 @@ public class DigestScheduler {
     void tickAt(Instant now) {
         List<GroupRow> groups = queryActiveGroups();
         for (GroupRow group : groups) {
-            ZoneId tz = parseTimezone(group.timezone);
+            ZoneId tz = parseTimezone(group.id, group.timezone);
             if (tz == null) continue;
             processSlot(now, group, tz, SLOT_MORNING, morningSlotHour);
             processSlot(now, group, tz, SLOT_EVENING, eveningSlotHour);
@@ -128,8 +138,9 @@ public class DigestScheduler {
         }
     }
 
-    private void recordMissedSlot(UUID groupId, String slotKind,
-                                  Instant windowStart, Instant windowEnd) throws SQLException {
+    // Package-private: called directly by tests to verify audit+sentinel atomicity
+    void recordMissedSlot(UUID groupId, String slotKind,
+                          Instant windowStart, Instant windowEnd) throws SQLException {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
@@ -140,16 +151,19 @@ public class DigestScheduler {
                         null, groupId, null,
                         "{\"slot_kind\":\"" + slotKind
                                 + "\",\"window_start\":\"" + windowStart + "\"}"));
+                // Sentinel in the SAME transaction as the audit row: a crash
+                // or unique-index conflict between the two writes must not
+                // leave a committed audit row without its sentinel — the next
+                // tick would re-detect the miss and duplicate the audit row.
+                summaryCacheRepository.insert(conn,
+                        groupId, slotKind, windowStart,
+                        0L, 0L, "", true, windowEnd);
                 conn.commit();
             } catch (SQLException e) {
                 conn.rollback();
                 throw e;
             }
         }
-        // Insert sentinel so subsequent ticks don't re-detect the miss
-        summaryCacheRepository.insert(
-                groupId, slotKind, windowStart,
-                0L, 0L, "", true, windowEnd);
         // Throttle key: one notification per unique missed slot, not per tick
         String date = windowStart.toString().substring(0, 10);
         throttledAdminNotifier.notifyOnce(
@@ -188,11 +202,25 @@ public class DigestScheduler {
         return groups;
     }
 
-    private static @Nullable ZoneId parseTimezone(String timezone) {
+    // Package-private: tests exercise the null branch directly —
+    // groups.timezone is NOT NULL in the schema, so tickAt cannot reach it.
+    @Nullable ZoneId parseTimezone(UUID groupId, @Nullable String timezone) {
+        if (timezone == null) {
+            warnBadTimezoneOnce(groupId, "null");
+            return null;
+        }
         try {
             return ZoneId.of(timezone);
-        } catch (Exception e) {
+        } catch (DateTimeException e) {
+            warnBadTimezoneOnce(groupId, timezone);
             return null;
+        }
+    }
+
+    private void warnBadTimezoneOnce(UUID groupId, String timezone) {
+        if (warnedTimezones.add(groupId + ":" + timezone)) {
+            LOG.warnf("Group %s has invalid timezone '%s' — digest slots skipped until it is fixed",
+                    groupId, timezone);
         }
     }
 

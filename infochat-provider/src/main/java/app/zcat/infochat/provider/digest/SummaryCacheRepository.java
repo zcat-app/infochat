@@ -38,8 +38,30 @@ public class SummaryCacheRepository {
                        @NonNull String content,
                        boolean isDegraded,
                        @NonNull Instant expiresAt) throws SQLException {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(
+        try (Connection conn = dataSource.getConnection()) {
+            insert(conn, groupId, slotKind, slotFiredAt,
+                    tagSubscriptionVersion, sourceSubscriptionVersion,
+                    content, isDegraded, expiresAt);
+        }
+    }
+
+    /**
+     * Connection-accepting variant for callers whose insert must
+     * participate in an enclosing transaction (the missed-slot sentinel
+     * in {@link DigestScheduler} commits atomically with its audit row).
+     * Does not commit or roll back — transaction control stays with the
+     * caller that owns the connection.
+     */
+    public void insert(@NonNull Connection conn,
+                       @NonNull UUID groupId,
+                       @NonNull String slotKind,
+                       @NonNull Instant slotFiredAt,
+                       long tagSubscriptionVersion,
+                       long sourceSubscriptionVersion,
+                       @NonNull String content,
+                       boolean isDegraded,
+                       @NonNull Instant expiresAt) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
                      "INSERT INTO summary_cache"
                              + " (group_id, slot_kind, slot_fired_at,"
                              + "  tag_subscription_version, source_subscription_version,"

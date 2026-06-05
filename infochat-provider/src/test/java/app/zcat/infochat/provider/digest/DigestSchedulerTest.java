@@ -3,6 +3,8 @@ package app.zcat.infochat.provider.digest;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
+import org.jboss.logmanager.LogContext;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -10,6 +12,7 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -19,9 +22,16 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.SimpleFormatter;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @QuarkusTest
@@ -40,6 +50,10 @@ class DigestSchedulerTest {
     @Inject
     SummaryCacheRepository summaryCacheRepository;
 
+    private CapturingHandler logCapture;
+    private org.jboss.logmanager.Logger jbossLogger;
+    private java.util.logging.Logger julLogger;
+
     @BeforeEach
     void setUp() throws Exception {
         observer.clear();
@@ -48,6 +62,21 @@ class DigestSchedulerTest {
              PreparedStatement ps = conn.prepareStatement("DELETE FROM summary_cache")) {
             ps.executeUpdate();
         }
+        // Attach to BOTH the jboss-logmanager Logger and the JUL Logger so
+        // the scheduler's WARN records are captured regardless of which
+        // context resolves the named logger (precedent:
+        // InboundRouterContactIdRedactionTest).
+        logCapture = new CapturingHandler();
+        jbossLogger = LogContext.getLogContext().getLogger(DigestScheduler.class.getName());
+        jbossLogger.addHandler(logCapture);
+        julLogger = java.util.logging.Logger.getLogger(DigestScheduler.class.getName());
+        julLogger.addHandler(logCapture);
+    }
+
+    @AfterEach
+    void detachLogHandler() {
+        jbossLogger.removeHandler(logCapture);
+        julLogger.removeHandler(logCapture);
     }
 
     @Test
@@ -192,6 +221,64 @@ class DigestSchedulerTest {
         assertFalse(emittedForGroup, "removed group must not emit a DigestSlot");
     }
 
+    @Test
+    void tick_unparseableTimezone_warnsOnceAndSkipsGroup() throws Exception {
+        UUID groupId = insertGroup("Not/AZone");
+
+        Instant now = todayAt(8, 0, "UTC");
+        scheduler.tickAt(now);
+        scheduler.tickAt(now.plusSeconds(60));
+
+        boolean emitted = observer.getCaptured().stream()
+                .anyMatch(s -> s.groupId().equals(groupId));
+        assertFalse(emitted, "group with unparseable timezone must not emit slots");
+
+        assertEquals(1, logCapture.warnCountMentioning(groupId.toString()),
+                "unparseable timezone must WARN exactly once, not once per tick");
+    }
+
+    @Test
+    void parseTimezone_nullTimezone_returnsNullAndWarnsOnce() {
+        UUID groupId = UUID.randomUUID();
+
+        assertNull(scheduler.parseTimezone(groupId, null));
+        assertNull(scheduler.parseTimezone(groupId, null));
+
+        assertEquals(1, logCapture.warnCountMentioning(groupId.toString()),
+                "null timezone must WARN exactly once");
+    }
+
+    @Test
+    void recordMissedSlot_rollsBackAuditRowWhenSentinelInsertFails() throws Exception {
+        UUID groupId = insertGroup("UTC");
+        Instant windowStart = todayAt(7, 45, "UTC");
+        Instant windowEnd = todayAt(8, 15, "UTC");
+
+        // A pre-existing row for the slot (a concurrent tick won the race):
+        // the unique index on (group_id, slot_kind, slot_fired_at) makes the
+        // sentinel INSERT inside recordMissedSlot fail.
+        summaryCacheRepository.insert(groupId, "morning", windowStart,
+                0L, 0L, "", true, windowEnd);
+
+        assertThrows(SQLException.class,
+                () -> scheduler.recordMissedSlot(groupId, "morning", windowStart, windowEnd));
+
+        // Audit-and-sentinel span one transaction: the failed sentinel insert
+        // must roll back the audit row, otherwise the next tick re-detects
+        // the miss and writes a duplicate audit row.
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT count(*) FROM audit_log "
+                             + "WHERE action = 'DIGEST_SLOT_MISSED' AND target_id = ?")) {
+            ps.setString(1, groupId.toString());
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                assertEquals(0, rs.getLong(1),
+                        "audit row must roll back when the sentinel insert fails");
+            }
+        }
+    }
+
     private UUID insertGroup(String timezone) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
@@ -211,5 +298,53 @@ class DigestSchedulerTest {
         ZoneId tz = ZoneId.of(timezone);
         LocalDate today = LocalDate.now(tz);
         return ZonedDateTime.of(today, LocalTime.of(hour, minute), tz).toInstant();
+    }
+
+    /**
+     * JUL capturing handler — SLF4J in Quarkus routes through
+     * jboss-logmanager, which IS a JUL implementation, so attaching to
+     * the {@link DigestScheduler} JUL logger captures the records the
+     * production code emits.
+     */
+    private static final class CapturingHandler extends Handler {
+        // addIfAbsent dedupes the same LogRecord instance delivered twice
+        // when the JUL logger and the LogContext logger resolve to the
+        // same object (both attach calls then hit one logger).
+        private final CopyOnWriteArrayList<LogRecord> records = new CopyOnWriteArrayList<>();
+        private final SimpleFormatter formatter = new SimpleFormatter();
+
+        CapturingHandler() {
+            setLevel(Level.ALL);
+        }
+
+        @Override
+        public void publish(LogRecord record) {
+            records.addIfAbsent(record);
+        }
+
+        @Override
+        public void flush() {}
+
+        @Override
+        public void close() {}
+
+        long warnCountMentioning(String needle) {
+            return records.stream()
+                    .filter(r -> r.getLevel().intValue() >= Level.WARNING.intValue())
+                    .filter(r -> text(r).contains(needle))
+                    .count();
+        }
+
+        private String text(LogRecord r) {
+            // Append raw parameters too — the formatter may not render
+            // printf-style substitution for jboss-logging records.
+            StringBuilder sb = new StringBuilder(formatter.format(r));
+            if (r.getParameters() != null) {
+                for (Object p : r.getParameters()) {
+                    sb.append(" param=").append(p);
+                }
+            }
+            return sb.toString();
+        }
     }
 }

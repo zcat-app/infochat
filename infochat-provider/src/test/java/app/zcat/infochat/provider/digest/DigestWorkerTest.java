@@ -28,10 +28,14 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -147,6 +151,63 @@ class DigestWorkerTest {
         assertEquals(12L, cacheRepository.lastSrcSubVer());
     }
 
+    @Test
+    void execute_skipsOverlappingSameGroupSlot() throws Exception {
+        postCollector.seed(testPosts(), 1, 1);
+        CountDownLatch renderEntered = new CountDownLatch(1);
+        CountDownLatch renderRelease = new CountDownLatch(1);
+        digestRenderer.setBlocking(renderEntered, renderRelease);
+        digestRenderer.setResponse("prose");
+        DigestSlot slot = futureSlot();
+
+        Thread firstExecution = new Thread(() -> worker.execute(slot));
+        firstExecution.start();
+        assertTrue(renderEntered.await(5, TimeUnit.SECONDS),
+                "first execution must reach the renderer");
+
+        // Same group+slot while the first execution is still rendering
+        worker.execute(slot);
+        assertEquals(0, cacheRepository.insertCount(),
+                "overlapping same-group execution must be skipped, not processed");
+
+        renderRelease.countDown();
+        firstExecution.join(5_000);
+        assertEquals(1, cacheRepository.insertCount(),
+                "only the first execution inserts");
+
+        // Guard must be released after completion: the slot processes again
+        worker.execute(slot);
+        assertEquals(2, cacheRepository.insertCount(),
+                "guard must be released once the in-flight execution finishes");
+    }
+
+    @Test
+    void execute_propagatesProgrammingErrors() {
+        postCollector.failWith(new IllegalStateException("group not found"));
+        DigestSlot slot = futureSlot();
+
+        assertThrows(IllegalStateException.class, () -> worker.execute(slot),
+                "programming errors must not be suppressed by the digest catch");
+
+        // The guard must be released even when the error propagates
+        postCollector.seed(testPosts(), 1, 1);
+        digestRenderer.setResponse("prose");
+        worker.execute(slot);
+        assertEquals(1, cacheRepository.insertCount(),
+                "guard must be released after a propagated error");
+    }
+
+    @Test
+    void execute_logsExpectedSqlFailureWithoutRethrow() {
+        postCollector.seed(testPosts(), 1, 1);
+        digestRenderer.setResponse("prose");
+        cacheRepository.failNextInsert(new SQLException("connection refused"));
+        DigestSlot slot = futureSlot();
+
+        assertDoesNotThrow(() -> worker.execute(slot),
+                "SQLException is an expected operational failure — logged, not rethrown");
+    }
+
     // ----- helpers ----------------------------------------------------------
 
     private DigestSlot futureSlot() {
@@ -177,15 +238,24 @@ class DigestWorkerTest {
         private List<Post> posts = List.of();
         private long tagVer;
         private long srcVer;
+        private RuntimeException failure;
 
         void seed(List<Post> posts, long tagVer, long srcVer) {
             this.posts = posts;
             this.tagVer = tagVer;
             this.srcVer = srcVer;
+            this.failure = null;
+        }
+
+        void failWith(RuntimeException failure) {
+            this.failure = failure;
         }
 
         @Override
         public CollectionResult collectForGroup(UUID groupId, Instant since) {
+            if (failure != null) {
+                throw failure;
+            }
             return new CollectionResult(posts, tagVer, srcVer);
         }
     }
@@ -193,13 +263,29 @@ class DigestWorkerTest {
     private static final class RecordingDigestRenderer extends DigestRenderer {
         private String response = "default prose";
         private int calls;
+        private CountDownLatch entered;
+        private CountDownLatch release;
 
         void setResponse(String r) { this.response = r; }
         int callCount() { return calls; }
 
+        /** Make render() signal entry then block until released. */
+        void setBlocking(CountDownLatch entered, CountDownLatch release) {
+            this.entered = entered;
+            this.release = release;
+        }
+
         @Override
         public String render(List<Post> posts, String langCode) {
             calls++;
+            if (entered != null) {
+                entered.countDown();
+                try {
+                    release.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
             return response;
         }
     }
@@ -224,6 +310,7 @@ class DigestWorkerTest {
         private boolean lastIsDegraded;
         private long lastTagSubVer;
         private long lastSrcSubVer;
+        private SQLException nextFailure;
 
         int insertCount() { return inserts; }
         String lastContent() { return lastContent; }
@@ -231,10 +318,20 @@ class DigestWorkerTest {
         long lastTagSubVer() { return lastTagSubVer; }
         long lastSrcSubVer() { return lastSrcSubVer; }
 
+        void failNextInsert(SQLException failure) {
+            this.nextFailure = failure;
+        }
+
         @Override
         public void insert(UUID groupId, String slotKind, Instant slotFiredAt,
                            long tagSubscriptionVersion, long sourceSubscriptionVersion,
-                           String content, boolean isDegraded, Instant expiresAt) {
+                           String content, boolean isDegraded, Instant expiresAt)
+                throws SQLException {
+            if (nextFailure != null) {
+                SQLException failure = nextFailure;
+                nextFailure = null;
+                throw failure;
+            }
             inserts++;
             lastContent = content;
             lastIsDegraded = isDegraded;
