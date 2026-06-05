@@ -1,9 +1,9 @@
 ---
 id: M1-154
 title: "Provider chat/sanitizer hygiene (pattern caching, closed-list whitespace, dispatcher completeness)"
-status: pending
+status: done
 created: 2026-06-02
-last_updated: 2026-06-02
+last_updated: 2026-06-05
 blocked_by:
   - M1-131
 files_budget: 6
@@ -32,12 +32,30 @@ test_plan:
 spec_refs:
   - docs/spec/security.md §LLM output sanitizer
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-05
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 107
+      removed: 15
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-05
+  verdict: WARN
+  warnings:
+    - "SECURITY-FLAG-CONSISTENT: security_relevant: false may be under-claimed. ChatToolDispatcher touches the LLM tool-call wiring surface and acceptance item 2 patches an evasion in LlmOutputSanitizer. Consider changing to security_relevant: true."
+  blockers: []
 ---
 
 # M1-154: Provider chat/sanitizer hygiene

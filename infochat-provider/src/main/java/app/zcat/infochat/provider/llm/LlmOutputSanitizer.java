@@ -12,9 +12,11 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * Sanitizer applied to LLM-authored output before it lands in an
@@ -118,6 +120,29 @@ public class LlmOutputSanitizer {
             "/unfollow-tag"
     );
 
+    /**
+     * Precompiled match patterns for {@link #CLOSED_LIST}, index-aligned
+     * (pattern {@code i} matches entry {@code i}). Compiled once at class
+     * load so the closed-list pass does not re-compile every entry's
+     * pattern on each {@link #sanitize(String)} call — the markdown pass's
+     * {@link #MARKDOWN_LINK} is already static. Each word is quoted
+     * literally; in multi-word entries the separating space matches as
+     * {@code \s+} so extra internal whitespace ({@code /invite  create})
+     * cannot evade the strip. The trailing lookahead is the word-boundary
+     * contract: a match must end the string or be followed by a
+     * non-token character.
+     */
+    static final List<Pattern> CLOSED_LIST_PATTERNS = CLOSED_LIST.stream()
+            .map(LlmOutputSanitizer::compileClosedListPattern)
+            .toList();
+
+    private static Pattern compileClosedListPattern(String token) {
+        String quotedWords = Arrays.stream(token.split(" "))
+                .map(Pattern::quote)
+                .collect(Collectors.joining("\\s+"));
+        return Pattern.compile(quotedWords + "(?=$|[^a-zA-Z0-9\\-])");
+    }
+
     /** {@code [text](url)} → {@code text (url)} per acceptance item 14. */
     private static final Pattern MARKDOWN_LINK = Pattern.compile("\\[([^\\]]+)\\]\\(([^)]+)\\)");
 
@@ -160,8 +185,9 @@ public class LlmOutputSanitizer {
 
     /**
      * Closed-list strip pass. Each {@link #CLOSED_LIST} entry is
-     * matched literally (Pattern.quote) and every occurrence is
-     * replaced with {@value #REDACTED_COMMAND_REPLACEMENT}. Emits one
+     * matched via its precompiled {@link #CLOSED_LIST_PATTERNS} pattern
+     * (literal words, internal whitespace as {@code \s+}) and every
+     * occurrence is replaced with {@value #REDACTED_COMMAND_REPLACEMENT}. Emits one
      * WARN log line per match. Used by tests that want the rewrite
      * without driving the audit emission; the production path is
      * {@link #applyClosedListStripWithMatches(String)} which also
@@ -188,9 +214,9 @@ public class LlmOutputSanitizer {
     static ClosedListStripResult applyClosedListStripWithMatches(String input) {
         String current = input;
         List<String> matches = new ArrayList<>();
-        for (String token : CLOSED_LIST) {
-            Pattern p = Pattern.compile(Pattern.quote(token) + "(?=$|[^a-zA-Z0-9\\-])");
-            Matcher m = p.matcher(current);
+        for (int i = 0; i < CLOSED_LIST.size(); i++) {
+            String token = CLOSED_LIST.get(i);
+            Matcher m = CLOSED_LIST_PATTERNS.get(i).matcher(current);
             StringBuilder rewritten = null;
             while (m.find()) {
                 if (rewritten == null) {

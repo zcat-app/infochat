@@ -237,6 +237,43 @@ class LlmOutputSanitizerTest {
                 "/ban must be absent from output. Got: " + output);
     }
 
+    // ----- multi-word internal-whitespace matching -----------------------
+
+    @Test
+    void multiWordTokenWithDoubleSpaceIsStripped() {
+        String output = LlmOutputSanitizer.applyClosedListStrip("Try /invite  create now.");
+        assertTrue(output.contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
+                "/invite  create (two spaces) must be redacted. Got: " + output);
+        assertFalse(output.contains("/invite"),
+                "/invite  create must be absent from output. Got: " + output);
+    }
+
+    @Test
+    void multiWordTokenWithTabIsStripped() {
+        String output = LlmOutputSanitizer.applyClosedListStrip("Run /quarantine\tapprove please.");
+        assertTrue(output.contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
+                "/quarantine<TAB>approve must be redacted. Got: " + output);
+        assertFalse(output.contains("/quarantine"),
+                "/quarantine\\tapprove must be absent from output. Got: " + output);
+    }
+
+    @Test
+    void multiWordTokenDoesNotMatchAcrossInterveningWords() {
+        String output = LlmOutputSanitizer.applyClosedListStrip(
+                "an /invite to create things");
+        assertFalse(output.contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
+                "intervening non-whitespace words must not bridge a multi-word token. Got: "
+                        + output);
+        assertTrue(output.contains("/invite to create"));
+    }
+
+    @Test
+    void closedListPatternsIndexAlignedWithClosedList() {
+        assertEquals(LlmOutputSanitizer.CLOSED_LIST.size(),
+                LlmOutputSanitizer.CLOSED_LIST_PATTERNS.size(),
+                "precompiled pattern list must carry exactly one pattern per CLOSED_LIST entry");
+    }
+
     // ----- markdown-link strip pass -------------------------------------
 
     @Test

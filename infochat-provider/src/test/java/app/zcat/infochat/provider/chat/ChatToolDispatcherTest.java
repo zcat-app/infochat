@@ -10,6 +10,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ChatToolDispatcherTest {
@@ -46,6 +47,20 @@ class ChatToolDispatcherTest {
             tools.put(name, NO_OP);
         }
         return tools;
+    }
+
+    // --- Construction-time registry completeness ---
+
+    @Test
+    void constructionFailsWhenAdvertisedToolLacksHandler() {
+        Map<String, ChatToolRegistry.ChatTool> tools = allToolsNoOp();
+        tools.remove("recallMemory");
+
+        IllegalStateException e = assertThrows(IllegalStateException.class,
+                () -> new ChatToolDispatcher(
+                        new ChatToolRegistry(), tools, 500, 200, 20));
+        assertTrue(e.getMessage().contains("recallMemory"),
+                "the exception must name the unhandled tool. Got: " + e.getMessage());
     }
 
     // --- Acceptance item 2: unknown tool name ---

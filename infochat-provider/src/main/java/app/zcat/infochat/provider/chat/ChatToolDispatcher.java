@@ -76,6 +76,7 @@ public class ChatToolDispatcher {
                 "recallMemory", recallMemoryTool,
                 "listSaves", listSavesTool
         );
+        requireHandlerForEveryAdvertisedTool(registry, this.tools);
     }
 
     // Package-private for testing with fake tool implementations
@@ -87,8 +88,18 @@ public class ChatToolDispatcher {
         this.inputMaxLength = inputMaxLength;
         this.limitCap = limitCap;
         this.listMaxSize = listMaxSize;
+        requireHandlerForEveryAdvertisedTool(registry, this.tools);
+    }
+
+    // Construction-time completeness check: every tool the system prompt
+    // advertises (the ChatToolRegistry allowlist, mirrored by the prompt's
+    // tool instructions) must have a registered handler, so a
+    // registry-vs-wiring drift fails at startup rather than as a
+    // mid-conversation dispatch miss.
+    private static void requireHandlerForEveryAdvertisedTool(
+            ChatToolRegistry registry, Map<String, ChatToolRegistry.ChatTool> tools) {
         for (String name : registry.toolNames()) {
-            if (!this.tools.containsKey(name)) {
+            if (!tools.containsKey(name)) {
                 throw new IllegalStateException("Missing tool implementation: " + name);
             }
         }
