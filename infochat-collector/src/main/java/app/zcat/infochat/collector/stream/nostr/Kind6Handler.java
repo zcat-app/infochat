@@ -9,7 +9,6 @@ import jakarta.inject.Inject;
 import org.jspecify.annotations.NonNull;
 
 import javax.sql.DataSource;
-import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
@@ -36,14 +35,18 @@ import java.util.UUID;
  *     <ul>
  *       <li>{@code from_post} = the kind-6 post's real
  *         {@code post.id} UUID (from the persister)</li>
- *       <li>{@code to_post} =
- *         {@code UUID.nameUUIDFromBytes(originalEventId.getBytes(UTF_8))} —
- *         a deterministic UUID v3 derived from ONLY the original event
- *         id. Source-independent so any future relay arrival of the
- *         original re-derives the same to_post UUID, allowing downstream
- *         resolution by re-derivation (architecture.md §Ingest SPIs:
- *         "the upstream_identifier is the stable, protocol-level key
- *         that survives this ordering").</li>
+ *       <li>{@code to_upstream_identifier} = the original event id,
+ *         verbatim — architecture.md §Ingest SPIs: the link is written
+ *         as "(kind-6 post UID) →repost→ (original upstream_identifier)",
+ *         and "Implementations MUST NOT use the derived UID as the
+ *         join key".</li>
+ *       <li>{@code to_post} = NULL at write time; resolved to the
+ *         original's real {@code post.id} if and when the original
+ *         event is also seen and stored. Both arrival orders resolve:
+ *         the handler sweeps for an already-present original right
+ *         after the edge INSERT (original-first), and the Registrar
+ *         invokes {@link RepostEdgeResolver#resolveEdgesPointingTo}
+ *         after every successful Nostr persist (repost-first).</li>
  *       <li>{@code link_type} = {@code 'repost'} (V29 CHECK constraint
  *         already admits this value)</li>
  *       <li>{@code score} = {@code 1.0f} — repost has no natural scalar;
@@ -51,11 +54,12 @@ import java.util.UUID;
  *         per-link_type; callers do not compare scores across link types").</li>
  *     </ul>
  *     The edge is unidirectional, matching architecture.md's directional
- *     "kind-6 post UID →repost→ original" language. Downstream queries
- *     resolve by computing the same derivation from any newly-arriving
- *     post's upstream_identifier (the inverse leg is not needed because
- *     the to_post derivation is deterministic and re-derivable from
- *     either endpoint).</li>
+ *     "kind-6 post UID →repost→ original" language. The INSERT runs
+ *     strictly before the original lookup: insert-then-resolve on this
+ *     side plus persist-then-resolve on the original's side means the
+ *     two orderings cannot both miss, whatever the cross-source
+ *     interleaving (a lookup-before-insert would leave a permanent-miss
+ *     race with no retry path).</li>
  *   <li>Emit the persisted post's {@code PersistedPostKey} to the
  *     {@code eval-queue} so Stage 1 / Stage 2 / tagger / embedding run
  *     on the commentary body — kind-6 events go through the same
@@ -73,8 +77,8 @@ import java.util.UUID;
  *   <li><b>Kind-6 referencing a disallowed-kind original (kind 4, 7,
  *     etc.).</b> The handler does NOT know the original's kind (it
  *     would require auto-resolution, forbidden by D38). It writes the
- *     edge unconditionally. The edge stores a deterministic UUID derived
- *     from a cryptographic event id hash — it reveals no content about
+ *     edge unconditionally. The edge stores the original's event id
+ *     verbatim — a cryptographic hash that reveals no content about
  *     the original event. security.md §Repost handling: "The reference
  *     is a cryptographic event id (a hash) and reveals no content about
  *     the original event."</li>
@@ -82,11 +86,9 @@ import java.util.UUID;
  *     {@link NostrDedupFilter} drops duplicates upstream of the deliver
  *     lambda, so this handler sees each kind-6 event at most once per
  *     source lifetime. Even if dedup were bypassed, PostPersister's
- *     ON CONFLICT silently no-ops; the post_reference INSERT would
- *     succeed (its PK includes created_at, so two writes at slightly
- *     different timestamps land as separate rows — acceptable for the
- *     'repost' link type since the per-direction dedup the LinkingJob
- *     uses for entity/semantic does not apply here).</li>
+ *     ON CONFLICT silently no-ops the persist; the empty-Optional
+ *     return then skips the edge write and the eval-queue emit
+ *     entirely.</li>
  * </ul>
  */
 @ApplicationScoped
@@ -101,10 +103,15 @@ public class Kind6Handler {
     @Inject
     EvalQueueProducer evalQueueProducer;
 
+    @Inject
+    RepostEdgeResolver repostEdgeResolver;
+
     /**
      * Process one kind-6 NormalizedPost: persist, write the
      * {@code post_reference} edge if the rawMetadata carries the
-     * repost target, emit the persisted key onto the eval queue.
+     * repost target (resolving {@code to_post} immediately when the
+     * original is already stored), emit the persisted key onto the
+     * eval queue.
      *
      * @param post the NormalizedPost emitted by
      *             {@link NostrEvent#toNormalizedPost(long, java.time.Instant)}
@@ -112,8 +119,13 @@ public class Kind6Handler {
      *             {@code rawMetadata.get(NostrEvent.META_KIND).equals("6")}.
      * @param sourceUuid the {@code source.id} UUID for this Nostr source,
      *                   passed by the Registrar from the source row.
+     * @return the persisted post's key, or empty on the ON CONFLICT
+     *         duplicate branch — the Registrar uses the key to resolve
+     *         repost edges that name this kind-6 post as their target
+     *         (a kind-6 can itself be reposted).
      */
-    public void handle(@NonNull NormalizedPost post, @NonNull UUID sourceUuid) {
+    public Optional<PostPersister.PersistedPostKey> handle(@NonNull NormalizedPost post,
+                                                           @NonNull UUID sourceUuid) {
         Optional<PostPersister.PersistedPostKey> persisted = postPersister.persist(sourceUuid, post);
         if (persisted.isEmpty()) {
             // ON CONFLICT branch: duplicate (source_id, upstream_identifier,
@@ -121,7 +133,7 @@ public class Kind6Handler {
             // tick of this same fetched_at second. Do NOT write a fresh
             // post_reference row (it would duplicate the prior one) and
             // do NOT re-emit to the eval queue (the prior delivery already did).
-            return;
+            return persisted;
         }
         PostPersister.PersistedPostKey key = persisted.get();
         String repostTarget = post.rawMetadata().get(NostrEvent.META_REPOST_TARGET);
@@ -129,40 +141,35 @@ public class Kind6Handler {
             writeRepostEdge(key.id(), repostTarget);
         }
         evalQueueProducer.emit(key);
+        return persisted;
     }
 
     /**
-     * Insert one {@code post_reference} row keyed by the deterministic
-     * UUID derivation of the original event id. The transaction wraps
-     * a single INSERT — TransactionHelper is the project convention for
+     * Insert one unresolved {@code post_reference} row carrying the
+     * original event id verbatim, then resolve it in place if the
+     * original is already persisted. The transaction wraps a single
+     * INSERT — TransactionHelper is the project convention for
      * raw-JDBC writes; using it here keeps the SQL-failure surface
      * consistent with LinkingJob.
      */
     private void writeRepostEdge(UUID fromPostId, String originalEventId) {
-        UUID toPostUuid = deriveToPostUuid(originalEventId);
         TransactionHelper.inTransaction(dataSource, "Kind6Handler", conn -> {
             final String sql =
-                "INSERT INTO post_reference (from_post, to_post, link_type, score) "
-                    + "VALUES (?, ?, 'repost', 1.0)";
+                "INSERT INTO post_reference (from_post, to_post, to_upstream_identifier, link_type, score) "
+                    + "VALUES (?, NULL, ?, 'repost', 1.0)";
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
                 ps.setObject(1, fromPostId);
-                ps.setObject(2, toPostUuid);
+                ps.setString(2, originalEventId);
                 ps.executeUpdate();
             }
         });
-    }
-
-    /**
-     * Derive the {@code post_reference.to_post} UUID for a kind-6 repost
-     * edge from the original event id. Source-independent (does NOT
-     * incorporate {@code source_id}) so the original event arriving
-     * later from any relay re-derives the same UUID — the architecture
-     * contract that lets downstream code resolve the link without an
-     * UPDATE on post_reference. Package-private so the tests can pin
-     * the derivation against a known fixture.
-     */
-    @NonNull
-    static UUID deriveToPostUuid(@NonNull String originalEventId) {
-        return UUID.nameUUIDFromBytes(originalEventId.getBytes(StandardCharsets.UTF_8));
+        // Original-first arrival order: the original is already stored,
+        // so the edge resolves right away. The resolver's UPDATE (not a
+        // resolved-at-INSERT value) keeps this side symmetric with the
+        // repost-first order and closes the cross-source race — see the
+        // class javadoc.
+        repostEdgeResolver.findNostrOriginalPostId(originalEventId)
+            .ifPresent(originalPostId ->
+                repostEdgeResolver.resolveEdgesPointingTo(originalPostId, originalEventId));
     }
 }

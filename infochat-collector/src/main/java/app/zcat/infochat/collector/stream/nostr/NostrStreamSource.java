@@ -262,6 +262,9 @@ public final class NostrStreamSource implements StreamSource {
         Kind6Handler kind6Handler;
 
         @Inject
+        RepostEdgeResolver repostEdgeResolver;
+
+        @Inject
         ThrottledAdminNotifier adminNotifier;
 
         @Inject
@@ -334,15 +337,22 @@ public final class NostrStreamSource implements StreamSource {
                 // Dispatch by NormalizedPost.rawMetadata's NostrEvent.META_KIND key
                 // per M1-100. NostrEvent.toNormalizedPost populates the key for
                 // kind-6 events; kind-1 events emit an empty rawMetadata and follow
-                // the existing persist→eval-queue path unchanged. Reading the kind
+                // the existing persist→eval-queue path. Reading the kind
                 // here (rather than threading Kind6Handler through NostrStreamSource's
-                // constructor) leaves the SPI surface untouched and keeps the
-                // existing Nostr tests off this ticket's files_scope.
+                // constructor) leaves the SPI surface untouched. Both branches
+                // resolve repost edges naming the new post as their target after a
+                // successful persist — a kind-6 can itself be a repost target —
+                // covering the repost-arrived-first order (the handler's own
+                // original lookup covers original-arrived-first).
                 Consumer<NormalizedPost> deliver = post -> {
                     if ("6".equals(post.rawMetadata().get(NostrEvent.META_KIND))) {
-                        kind6Handler.handle(post, sourceUuid);
+                        kind6Handler.handle(post, sourceUuid).ifPresent(key ->
+                                repostEdgeResolver.resolveEdgesPointingTo(key.id(), post.upstreamIdentifier()));
                     } else {
-                        postPersister.persist(sourceUuid, post).ifPresent(evalQueueProducer::emit);
+                        postPersister.persist(sourceUuid, post).ifPresent(key -> {
+                            evalQueueProducer.emit(key);
+                            repostEdgeResolver.resolveEdgesPointingTo(key.id(), post.upstreamIdentifier());
+                        });
                     }
                 };
                 supervisor.register(dispatchKey, row.identifier(), worker, deliver);

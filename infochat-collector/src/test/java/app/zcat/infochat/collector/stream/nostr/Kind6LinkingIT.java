@@ -7,6 +7,7 @@ import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import app.zcat.infochat.core.ingest.NormalizedPost;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -21,6 +22,7 @@ import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -38,10 +40,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @Priority(460)} which has already run before any test method executes,
  * and re-wiring it inline would require a fresh CDI context. The contract
  * the IT pins is: {@code rawMetadata.get(NostrEvent.META_KIND).equals("6")}
- * → {@code kind6Handler.handle(post, sourceUuid)}, exactly as the
- * production Registrar's deliver lambda does (verbatim copy of the
- * dispatch predicate so any divergence in the production wiring shows up
- * as an IT failure).
+ * → {@code kind6Handler.handle(post, sourceUuid)} followed by the
+ * repost-edge resolution sweep on the persisted key, exactly as the
+ * production Registrar's deliver lambda does (verbatim copy so any
+ * divergence in the production wiring shows up as an IT failure).
  */
 @QuarkusTest
 class Kind6LinkingIT {
@@ -63,6 +65,9 @@ class Kind6LinkingIT {
 
     @Inject
     Kind6Handler kind6Handler;
+
+    @Inject
+    RepostEdgeResolver repostEdgeResolver;
 
     @Inject
     TestEvalQueueConsumer evalConsumer;
@@ -95,13 +100,17 @@ class Kind6LinkingIT {
 
         NormalizedPost post = kind6.toNormalizedPost(0L, FETCHED_AT);
 
-        // Verbatim copy of the Registrar's deliver lambda dispatch
-        // predicate from NostrStreamSource.Registrar.registerNostrSources.
+        // Verbatim copy of the Registrar's deliver lambda from
+        // NostrStreamSource.Registrar.registerNostrSources.
         Consumer<NormalizedPost> deliver = p -> {
             if ("6".equals(p.rawMetadata().get(NostrEvent.META_KIND))) {
-                kind6Handler.handle(p, sourceUuid);
+                kind6Handler.handle(p, sourceUuid).ifPresent(key ->
+                        repostEdgeResolver.resolveEdgesPointingTo(key.id(), p.upstreamIdentifier()));
             } else {
-                postPersister.persist(sourceUuid, p).ifPresent(evalQueueProducer::emit);
+                postPersister.persist(sourceUuid, p).ifPresent(key -> {
+                    evalQueueProducer.emit(key);
+                    repostEdgeResolver.resolveEdgesPointingTo(key.id(), p.upstreamIdentifier());
+                });
             }
         };
 
@@ -115,8 +124,10 @@ class Kind6LinkingIT {
         RepostEdge edge = querySingleRepostEdge(postId);
         assertEquals(postId, edge.fromPost(),
                 "from_post is the kind-6 post's own UUID");
-        assertEquals(Kind6Handler.deriveToPostUuid(originalEventId), edge.toPost(),
-                "to_post is UUID.nameUUIDFromBytes(originalEventId.getBytes(UTF_8))");
+        assertEquals(originalEventId, edge.toUpstreamIdentifier(),
+                "to_upstream_identifier stores the original event id verbatim");
+        assertNull(edge.toPost(),
+                "to_post is NULL — the original event is not ingested in this IT");
         assertEquals("repost", edge.linkType());
 
         // The eval-queue must receive the persisted post's key so the
@@ -172,7 +183,7 @@ class Kind6LinkingIT {
     private RepostEdge querySingleRepostEdge(UUID fromPost) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                 "SELECT from_post, to_post, link_type, score "
+                 "SELECT from_post, to_post, to_upstream_identifier, link_type, score "
                      + "FROM post_reference "
                      + "WHERE from_post = ? AND link_type = 'repost'")) {
             ps.setObject(1, fromPost);
@@ -182,7 +193,8 @@ class Kind6LinkingIT {
                         (UUID) rs.getObject(1),
                         (UUID) rs.getObject(2),
                         rs.getString(3),
-                        rs.getFloat(4));
+                        rs.getString(4),
+                        rs.getFloat(5));
                 assertTrue(!rs.next(), "expected exactly one repost edge, found additional rows");
                 return edge;
             }
@@ -218,6 +230,7 @@ class Kind6LinkingIT {
         return evalConsumer.size() >= expected;
     }
 
-    private record RepostEdge(UUID fromPost, UUID toPost, String linkType, float score) {
+    private record RepostEdge(UUID fromPost, @Nullable UUID toPost,
+                              String toUpstreamIdentifier, String linkType, float score) {
     }
 }

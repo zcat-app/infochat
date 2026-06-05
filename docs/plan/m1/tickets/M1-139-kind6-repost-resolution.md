@@ -1,7 +1,7 @@
 ---
 id: M1-139
 title: "Kind-6 repost edge resolution"
-status: pending
+status: done
 created: 2026-06-02
 last_updated: 2026-06-05
 blocked_by: []
@@ -39,7 +39,20 @@ spec_refs:
   - docs/spec/architecture.md §Ingest SPIs
   - docs/spec/schema.md §Posts and derivatives
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-05
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 9
+      added: 550
+      removed: 124
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -73,7 +86,12 @@ revisions:
       out_of_scope_at_snapshot:
         - the broader Nostr ingest pipeline beyond the repost-edge resolution path
         - changing post.id semantics for non-Nostr posts
-clarity_check: {}
+outline_file: target/m1-tick-outline-M1-139.md
+clarity_check:
+  date: 2026-06-05
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-139: Kind-6 repost edge resolution

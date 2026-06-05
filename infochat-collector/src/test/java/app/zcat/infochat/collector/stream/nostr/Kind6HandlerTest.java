@@ -5,11 +5,11 @@ import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import app.zcat.infochat.core.ingest.NormalizedPost;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
-import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -20,6 +20,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -34,10 +35,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *     commentary stores body + post_reference edge with link_type='repost'.</li>
  *   <li>{@link #emptyContent_storesEmptyBodyAndReference} — kind-6 with
  *     empty content stores empty body + post_reference edge.</li>
- *   <li>{@link #joinKeyIsUpstreamIdentifier} — post_reference.to_post
- *     equals {@code UUID.nameUUIDFromBytes(originalEventId.getBytes(UTF_8))},
- *     deterministic and source-independent.</li>
  * </ul>
+ *
+ * <p>Both tests pin the unresolved-edge shape: to_upstream_identifier
+ * carries the original event id verbatim and to_post is NULL (no
+ * original is seeded here — resolution is covered by
+ * {@link Kind6RepostResolutionIT}).</p>
  *
  * <p>Reused fixture {@code UID_PREFIX} keeps the per-test cleanup query
  * scoped to this class's seeded rows; the test runs concurrently in the
@@ -69,10 +72,11 @@ class Kind6HandlerTest {
     }
 
     /**
-     * Acceptance items 1 and 6: a kind-6 event with non-empty content
-     * stores the commentary text as the post body and writes one
-     * post_reference row with link_type='repost' whose to_post is the
-     * deterministic derivation of the referenced original's event id.
+     * A kind-6 event with non-empty content stores the commentary text
+     * as the post body and writes one post_reference row with
+     * link_type='repost' carrying the referenced original's event id
+     * verbatim in to_upstream_identifier and NULL in to_post (the
+     * original is not stored, so the edge is unresolved).
      */
     @Test
     void nonEmptyContent_storesBodyAndReference() throws Exception {
@@ -93,8 +97,10 @@ class Kind6HandlerTest {
         RepostEdge edge = edges.get(0);
         assertEquals(postId, edge.fromPost(),
                 "from_post is the kind-6's own post.id UUID");
-        assertEquals(Kind6Handler.deriveToPostUuid(originalEventId), edge.toPost(),
-                "to_post is the deterministic derivation of the original event id");
+        assertEquals(originalEventId, edge.toUpstreamIdentifier(),
+                "to_upstream_identifier stores the original event id verbatim");
+        assertNull(edge.toPost(),
+                "to_post is NULL while the original event is not stored (unresolved edge)");
         assertEquals(1.0f, edge.score(),
                 "repost edge score is 1.0 (per-link_type unit, no scalar to vary)");
 
@@ -104,10 +110,10 @@ class Kind6HandlerTest {
     }
 
     /**
-     * Acceptance items 2 and 7: a kind-6 event with empty content stores
-     * an empty post body AND still writes the post_reference edge —
-     * empty-content reposts are a valid NIP-18 shape (the original event
-     * is the entire message, with no added commentary).
+     * A kind-6 event with empty content stores an empty post body AND
+     * still writes the post_reference edge — empty-content reposts are
+     * a valid NIP-18 shape (the original event is the entire message,
+     * with no added commentary).
      */
     @Test
     void emptyContent_storesEmptyBodyAndReference() throws Exception {
@@ -125,42 +131,10 @@ class Kind6HandlerTest {
         List<RepostEdge> edges = queryRepostEdges(postId);
         assertEquals(1, edges.size(),
                 "the post_reference edge is still written when commentary is empty");
-        assertEquals(Kind6Handler.deriveToPostUuid(originalEventId), edges.get(0).toPost(),
-                "to_post is still the deterministic derivation of the original event id");
-    }
-
-    /**
-     * Acceptance items 3, 4, and 8: the join key for kind-6 reposts is
-     * the original event's upstream_identifier, encoded as
-     * {@code UUID.nameUUIDFromBytes(eventId.getBytes(UTF_8))}. The
-     * derivation is source-independent: the same event id produces the
-     * same UUID regardless of which Nostr source / relay observes it,
-     * so a future arrival of the original event from any source can
-     * re-derive the same UUID to resolve the link.
-     */
-    @Test
-    void joinKeyIsUpstreamIdentifier() {
-        String originalEventId = "0011223344556677889900112233445566778899001122334455667788990011";
-        UUID derived = Kind6Handler.deriveToPostUuid(originalEventId);
-        UUID expected = UUID.nameUUIDFromBytes(originalEventId.getBytes(StandardCharsets.UTF_8));
-        assertEquals(expected, derived,
-                "deriveToPostUuid uses UUID.nameUUIDFromBytes(eventId.getBytes(UTF_8)) verbatim");
-
-        // Source-independence: the derivation depends ONLY on the event id,
-        // not on any other input. Calling twice with the same event id
-        // produces the same UUID (deterministic). Acceptance item 3:
-        // "NOT the derived post UID" — PostPersister.deriveUid uses
-        // sha256(source_id || '|' || upstream_identifier), so derivations
-        // that incorporate source_id are forbidden. The to_post UUID
-        // depends solely on the event id.
-        UUID derivedAgain = Kind6Handler.deriveToPostUuid(originalEventId);
-        assertEquals(derived, derivedAgain, "derivation is deterministic per event id");
-
-        // A different event id derives a different UUID.
-        UUID different = Kind6Handler.deriveToPostUuid(
-                "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
-        assertEquals(false, derived.equals(different),
-                "distinct event ids derive distinct to_post UUIDs (no collision on these fixtures)");
+        assertEquals(originalEventId, edges.get(0).toUpstreamIdentifier(),
+                "to_upstream_identifier still stores the original event id verbatim");
+        assertNull(edges.get(0).toPost(),
+                "to_post is still NULL while the original event is not stored");
     }
 
     // ---------- helpers ----------
@@ -228,7 +202,7 @@ class Kind6HandlerTest {
         List<RepostEdge> out = new ArrayList<>();
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                 "SELECT from_post, to_post, link_type, score "
+                 "SELECT from_post, to_post, to_upstream_identifier, link_type, score "
                      + "FROM post_reference "
                      + "WHERE from_post = ? AND link_type = 'repost'")) {
             ps.setObject(1, fromPost);
@@ -238,7 +212,8 @@ class Kind6HandlerTest {
                             (UUID) rs.getObject(1),
                             (UUID) rs.getObject(2),
                             rs.getString(3),
-                            rs.getFloat(4)));
+                            rs.getString(4),
+                            rs.getFloat(5)));
                 }
             }
         }
@@ -277,6 +252,7 @@ class Kind6HandlerTest {
         return evalConsumer.size() >= expected;
     }
 
-    private record RepostEdge(UUID fromPost, UUID toPost, String linkType, float score) {
+    private record RepostEdge(UUID fromPost, @Nullable UUID toPost,
+                              String toUpstreamIdentifier, String linkType, float score) {
     }
 }
