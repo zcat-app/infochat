@@ -146,8 +146,10 @@ final class SignalSubprocess {
         reader.start();
         // onExit fires on the JDK's process-reaper thread; we hand off to
         // the scheduler before doing anything expensive so the reaper is
-        // not stalled.
-        p.onExit().thenAccept(exited -> scheduler.execute(() -> onProcessExit(exited)));
+        // not stalled. The completion stage is intentionally not awaited —
+        // it completes exceptionally only on a shutdown-race rejection from
+        // the scheduler, which the STOPPED/STOPPING state transitions absorb.
+        var unused = p.onExit().thenAccept(exited -> scheduler.execute(() -> onProcessExit(exited)));
         // CAS so a sub-millisecond exit that fires onProcessExit BEFORE
         // this line runs (already setting state to RESTARTING) is not
         // overwritten back to RUNNING.

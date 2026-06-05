@@ -180,7 +180,10 @@ final class SimpleXWebSocketClient {
         CompletableFuture<String> future = new CompletableFuture<>();
         pending.put(corrId, future);
         try {
-            ws.sendText(envelopeJson, true);
+            // The send's own CompletableFuture is intentionally not awaited —
+            // a send failure surfaces as the ack future timing out below, which
+            // the caller already handles as TRANSIENT.
+            var unused = ws.sendText(envelopeJson, true);
             return future.get(ackTimeout.toMillis(), TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -229,7 +232,10 @@ final class SimpleXWebSocketClient {
             return;
         }
         try {
-            ws.sendText(envelopeJson, true);
+            // Best-effort send: the returned CompletableFuture is intentionally
+            // not awaited (see the method contract above); a synchronous reject
+            // is caught below and an async failure is absorbed by design.
+            var unused = ws.sendText(envelopeJson, true);
         } catch (RuntimeException e) {
             LOG.debug("fire-and-forget send failed: {}", e.getClass().getSimpleName());
         }

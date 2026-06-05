@@ -163,7 +163,7 @@
                                  contract). -XepExcludedPaths drops generated
                                  sources (Quarkus build output) from analysis.
                             -->
-                            <arg>-Xplugin:ErrorProne -XepOpt:NullAway:AnnotatedPackages=app.zcat.infochat -XepOpt:NullAway:ExcludedFieldAnnotations=jakarta.inject.Inject,jakarta.annotation.PostConstruct,org.eclipse.microprofile.config.inject.ConfigProperty -XepExcludedPaths:.*/target/generated-sources/.* -Xep:NullAway:ERROR</arg>
+                            <arg>-Xplugin:ErrorProne -XepOpt:NullAway:AnnotatedPackages=app.zcat.infochat -XepOpt:NullAway:ExcludedFieldAnnotations=jakarta.inject.Inject,jakarta.annotation.PostConstruct,org.eclipse.microprofile.config.inject.ConfigProperty -XepExcludedPaths:.*/target/generated-sources/.* -Xep:NullAway:ERROR -Xep:MissingOverride:ERROR -Xep:ReferenceEquality:ERROR -Xep:FallThrough:ERROR -Xep:MissingCasesInEnumSwitch:ERROR -Xep:DefaultCharset:ERROR -Xep:JdkObsolete:ERROR -Xep:FutureReturnValueIgnored:ERROR</arg>
                             <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED</arg>
                             <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED</arg>
                             <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.main=ALL-UNNAMED</arg>

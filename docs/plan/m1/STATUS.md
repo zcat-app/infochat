@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 21 |
+| pending | 20 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 179 |
+| done | 180 |
 | deferred | 3 |
 | **total** | **203** |
 
@@ -43,7 +43,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-161 — [INVESTIGATE] price_snapshot PK/dedup invariant + new_price_snapshot channel intent (complexity: medium, risk: medium)
 - M1-162 — [INVESTIGATE] confirm-or-drop adapter SPI surfaces vs D47 (complexity: medium, risk: low)
 - M1-163 — Shared DB test-seeding seam for the IT suite (complexity: high, risk: low)
-- M1-165 — Promote Tier-1 Error Prone checks to ERROR (repo-wide) (complexity: medium, risk: low)
 
 ---
 
@@ -80,6 +79,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-167 | Fix residual EscapedEntity javadoc findings in provider | 2026-06-05 | round 1 APPROVE |
+| M1-165 | Promote Tier-1 Error Prone checks to ERROR (repo-wide) | 2026-06-05 | round 1 APPROVE |
 | M1-164f | Onboard infochat-provider to NullAway + Error Prone | 2026-06-05 | round 1 APPROVE |
 | M1-164e | Onboard infochat-collector to NullAway + Error Prone | 2026-06-05 | round 2 APPROVE |
 | M1-164 | Adopt NullAway + Error Prone for §7a enforcement (umbrella) | 2026-06-05 | round 1 APPROVE |
@@ -88,7 +88,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-164c | Onboard infochat-llm-adapter to NullAway + Error Prone | 2026-06-04 | round 1 APPROVE |
 | M1-164b | Onboard infochat-ssrf to NullAway + Error Prone | 2026-06-04 | round 1 APPROVE |
 | M1-164a | NullAway/Error Prone build wiring + onboard infochat-core | 2026-06-04 | round 1 APPROVE |
-| M1-153 | Collector worker hygiene (dead semaphores, interrupt, backoff Random, dup counter, timeouts) | 2026-06-02 | round 1 APPROVE |
 
 ---
 
@@ -354,7 +353,7 @@ M1-163 (pending) ← runnable
   └── M1-127 (deferred)
 M1-164a (done)
   ├── M1-164 (done)
-  │     └── M1-165 (pending) ← runnable
+  │     └── M1-165 (done)
   ├── M1-164b (done)
   │     └── M1-164 (done) [see above]
   ├── M1-164c (done)
