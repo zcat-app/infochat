@@ -1,7 +1,7 @@
 ---
 id: M1-169
 title: "Drift guard: V31 audit redactors vs Redactor.CATALOGUE"
-status: pending
+status: done
 created: 2026-06-05
 last_updated: 2026-06-05
 blocked_by: []
@@ -36,12 +36,29 @@ spec_refs:
   - docs/spec/security.md §LLM output sanitizer
   - docs/spec/security.md §DB roles
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-05
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 3
+      added: 170
+      removed: 8
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-05
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-169: Drift guard: V31 audit redactors vs Redactor.CATALOGUE

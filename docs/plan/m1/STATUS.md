@@ -14,9 +14,9 @@
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 189 |
+| done | 190 |
 | deferred | 2 |
-| **total** | **205** |
+| **total** | **206** |
 
 ---
 
@@ -36,7 +36,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-160 — [INVESTIGATE] summary_anchor scope_kind discriminator (complexity: medium, risk: medium)
 - M1-161 — [INVESTIGATE] price_snapshot PK/dedup invariant + new_price_snapshot channel intent (complexity: medium, risk: medium)
 - M1-162 — [INVESTIGATE] confirm-or-drop adapter SPI surfaces vs D47 (complexity: medium, risk: low)
-- M1-169 — Drift guard: V31 audit redactors vs Redactor.CATALOGUE (complexity: medium, risk: low)
+- M1-170 — Membership-event hardening (M1-143 redteam findings 2-4) (complexity: high, risk: medium)
 
 ---
 
@@ -72,6 +72,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-169 | Drift guard: V31 audit redactors vs Redactor.CATALOGUE | 2026-06-05 | round 1 APPROVE |
 | M1-168 | Fix stale 3-arg UserSnapshot test call site | 2026-06-05 | round 1 APPROVE |
 | M1-167 | Fix residual EscapedEntity javadoc findings in provider | 2026-06-05 | round 1 APPROVE |
 | M1-165 | Promote Tier-1 Error Prone checks to ERROR (repo-wide) | 2026-06-05 | round 1 APPROVE |
@@ -81,7 +82,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-163 | Shared DB test-seeding seam for the IT suite | 2026-06-05 | round 1 APPROVE |
 | M1-157 | Explicit connection-pool sizing per profile | 2026-06-05 | round 1 APPROVE |
 | M1-155 | InboundRouter hygiene (chat body-cap ordering, bidi-control gap, lookupGroupId Optional) | 2026-06-05 | round 1 APPROVE |
-| M1-148 | MessagingAdapter SPI lifecycle (finalize→finalizeMessage, start/stop) + low-level cleanup | 2026-06-05 | round 1 APPROVE |
 
 ---
 
@@ -358,5 +358,6 @@ M1-164a (done)
 M1-166 (done)
 M1-167 (done)
 M1-168 (done)
-M1-169 (pending) ← runnable
+M1-169 (done)
+M1-170 (pending) ← runnable
 ```
