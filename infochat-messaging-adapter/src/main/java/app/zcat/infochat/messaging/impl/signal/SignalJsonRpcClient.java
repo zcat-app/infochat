@@ -32,6 +32,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 
 import jakarta.json.JsonObject;
 
@@ -51,9 +52,12 @@ import jakarta.json.JsonObject;
  * ErrorResponse complete the per-{@code rpcId} pending future;
  * Notification {@code method="receive"} is translated to an
  * {@link InboundMessage} and delivered to the registered
- * {@link MessagingAdapter.InboundHandler}. Group-scope notifications
- * (filtered by {@link SignalMessageCodec#extractDm} returning empty)
- * are dropped — group + mention recognition lands in M1-108.</p>
+ * {@link MessagingAdapter.InboundHandler}. Receive notifications that
+ * are not DM-scope ({@link SignalMessageCodec#extractDm} returning
+ * empty) are routed raw to the registered group-notification handler
+ * — the adapter's {@code SignalGroupHandler}, whose own decode
+ * filters group-scope envelopes from the typing / receipt / sync
+ * notifications that also land on this route.</p>
  *
  * <p>Failure-classification policy at the JSON-RPC error layer:
  * code {@code -32603} ({@code "Internal error"}) is treated as
@@ -125,6 +129,7 @@ final class SignalJsonRpcClient {
     private final AtomicLong handleIdGen = new AtomicLong();
 
     private volatile MessagingAdapter.@Nullable InboundHandler inboundHandler;
+    private volatile @Nullable Consumer<JsonObject> groupNotificationHandler;
     @Nullable private volatile Socket socket;
     @Nullable private volatile BufferedWriter writer;
     @Nullable private volatile Thread readerThread;
@@ -157,6 +162,16 @@ final class SignalJsonRpcClient {
 
     void setInboundHandler(MessagingAdapter.@NonNull InboundHandler handler) {
         this.inboundHandler = handler;
+    }
+
+    /**
+     * Register the route for receive notifications that are not
+     * DM-scope. The handler receives the raw {@code params} object of
+     * the JSON-RPC notification ({@code SignalGroupHandler}'s
+     * {@code handleReceive} input shape).
+     */
+    void setGroupNotificationHandler(@NonNull Consumer<JsonObject> handler) {
+        this.groupNotificationHandler = handler;
     }
 
     void connect() throws IOException {
@@ -502,6 +517,12 @@ final class SignalJsonRpcClient {
         }
         Optional<SignalMessageCodec.ReceivedDm> dm = codec.extractDm(n.params());
         if (dm.isEmpty()) {
+            // Not a DM — group-scope envelopes, typing, receipts, and
+            // sync notifications all land here. The group route's own
+            // decode (SignalGroupHandler.handleReceive) keeps only the
+            // group-scope shapes, so handing it every non-DM receive
+            // notification is safe.
+            dispatchGroupNotification(n.params());
             return;
         }
         MessagingAdapter.InboundHandler handler = inboundHandler;
@@ -527,6 +548,23 @@ final class SignalJsonRpcClient {
             // exception class only — the Throwable's message may carry inbound
             // chat-mode bytes.
             LOG.warnf("inbound Signal handler threw %s; dropping message, reader continues",
+                    e.getClass().getSimpleName());
+        }
+    }
+
+    private void dispatchGroupNotification(JsonObject receiveParams) {
+        Consumer<JsonObject> route = groupNotificationHandler;
+        if (route == null) {
+            return;
+        }
+        try {
+            route.accept(receiveParams);
+        } catch (RuntimeException e) {
+            // Same reader-survival invariant as the DM path above: a
+            // throw from group translation or a Provider-side handler
+            // must not kill the reader thread. D37: class name only —
+            // the Throwable's message may carry inbound group bytes.
+            LOG.warnf("Signal group-route handler threw %s; dropping notification, reader continues",
                     e.getClass().getSimpleName());
         }
     }

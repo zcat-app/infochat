@@ -154,27 +154,19 @@ public interface MessagingAdapter {
      * events. Parallel to {@link #setInboundHandler}: Provider sets
      * exactly one handler per adapter instance at startup; replacing a
      * handler is undefined for v1. Adapters that support membership
-     * events override this to store the handler and dispatch via
-     * {@link #onMembershipEvent}. Default is no-op so adapters without
-     * group support are unaffected.
+     * events override this to store the handler and dispatch events by
+     * invoking {@link MembershipHandler#onEvent} directly — the same
+     * direct-invocation shape the inbound path uses; there is
+     * deliberately no interface-level dispatch method, so every
+     * adapter delivers through this one registered-handler path
+     * (D47 requires uniform membership semantics across adapters).
+     * Default is no-op so adapters without group support are
+     * unaffected.
      *
      * @param handler the membership-event callback; never null.
      */
     default void setMembershipEventHandler(@NonNull MembershipHandler handler) {
         // No-op — overridden by adapters that fire membership events.
-    }
-
-    /**
-     * Receive a group-membership lifecycle signal from the adapter.
-     * Default is no-op so adapters that do not support groups (or
-     * whose group wiring is not yet implemented) are unaffected.
-     * Once Provider calls {@link #setMembershipEventHandler}, the
-     * adapter dispatches events through the registered handler.
-     *
-     * @param event the membership event; never null.
-     */
-    default void onMembershipEvent(@NonNull MembershipEvent event) {
-        // No-op — adapters surface events; Provider consumes them.
     }
 
     /**

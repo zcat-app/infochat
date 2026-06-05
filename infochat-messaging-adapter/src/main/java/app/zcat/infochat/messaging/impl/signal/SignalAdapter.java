@@ -26,8 +26,10 @@ import java.time.Duration;
  * Signal production adapter. Spawns signal-cli as a TCP-JSON-RPC
  * daemon child process via {@link SignalSubprocess}, demultiplexes
  * the daemon's wire protocol via {@link SignalJsonRpcClient}, and
- * delivers inbound DM messages through the SPI's
- * {@link MessagingAdapter.InboundHandler}.
+ * delivers inbound DM and group-mention messages through the SPI's
+ * {@link MessagingAdapter.InboundHandler} and membership events
+ * through the registered {@link MessagingAdapter.MembershipHandler}
+ * (group-scope envelopes route via {@link SignalGroupHandler}).
  *
  * <p>Signal's contact id is the ACI (Account Credential Identifier),
  * the UUID signal-cli surfaces as {@code mentionUuid} — the D10 trust
@@ -230,11 +232,7 @@ public final class SignalAdapter implements MessagingAdapter {
             this.subprocess = null;
             throw new IllegalStateException("Failed to connect SignalJsonRpcClient", e);
         }
-        this.client = c;
-        InboundHandler current = handler;
-        if (current != null) {
-            c.setInboundHandler(current);
-        }
+        attachClient(c);
         LOG.infof("Signal adapter started; daemon endpoint=%s", daemonEndpoint);
     }
 
@@ -313,13 +311,34 @@ public final class SignalAdapter implements MessagingAdapter {
      * layer (capability flag {@code supportsMembershipEvents=true}),
      * so the adapter surfaces these events directly rather than
      * synthesising them from delivery failures. The dispatch path is
-     * built by {@link #groupHandler()} once Provider has registered
-     * both callbacks; the upstream JSON-RPC reader wiring that drives
-     * the dispatch lands with the multi-adapter integration (M1-109).
+     * built by {@link #groupHandler()}, which the JSON-RPC client's
+     * group-notification route drives (wired in {@link #attachClient}).
      */
     @Override
     public void setMembershipEventHandler(@NonNull MembershipHandler handler) {
         this.membershipHandler = handler;
+    }
+
+    /**
+     * Wire a connected JSON-RPC client into this adapter: store it,
+     * register the currently-set inbound handler, and route non-DM
+     * receive notifications into a {@link SignalGroupHandler}. The
+     * group route builds a fresh handler per notification so callbacks
+     * registered after {@link #start()} are still seen — mirrors
+     * {@link #setInboundHandler}'s live re-wire, and
+     * {@link #groupHandler()} is stateless so the allocation is cheap.
+     *
+     * <p>Package-private seam: the FakeSignalCli-driven tests exercise
+     * this exact production wiring without {@link #start()}, which
+     * requires a real signal-cli subprocess.</p>
+     */
+    void attachClient(SignalJsonRpcClient c) {
+        this.client = c;
+        InboundHandler current = handler;
+        if (current != null) {
+            c.setInboundHandler(current);
+        }
+        c.setGroupNotificationHandler(params -> groupHandler().handleReceive(params));
     }
 
     /**

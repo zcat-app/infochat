@@ -22,10 +22,10 @@ import java.util.Locale;
  * Translates signal-cli group-scope notifications into the
  * {@link MessagingAdapter} SPI's inbound and membership-event surfaces.
  * Pure dispatch — no I/O, no threading; the {@link SignalJsonRpcClient}
- * reader (M1-107) is the upstream that drives this class once the
- * production wiring lands (M1-109 integration). The handler is testable
- * standalone by feeding JSON envelopes directly into
- * {@link #handleReceive}.
+ * reader is the upstream that drives this class through its
+ * group-notification route ({@code SignalAdapter.attachClient} wires
+ * it). The handler is testable standalone by feeding JSON envelopes
+ * directly into {@link #handleReceive}.
  *
  * <p>Bot mention is the D10 trust anchor for group mode per
  * {@code docs/spec/messaging.md} §Required SPI surface — Receive: a

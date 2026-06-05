@@ -167,14 +167,6 @@ public final class InMemoryAdapter implements MessagingAdapter {
         this.membershipHandler = handler;
     }
 
-    @Override
-    public void onMembershipEvent(@NonNull MembershipEvent event) {
-        MembershipHandler current = membershipHandler;
-        if (current != null) {
-            current.onEvent(event);
-        }
-    }
-
     /**
      * Test helper: synthesise a DM-scope {@link InboundMessage} from
      * the given contact id and text, and synchronously invoke the
@@ -229,16 +221,28 @@ public final class InMemoryAdapter implements MessagingAdapter {
                     "Group not registered: " + groupId);
         }
         members.remove(contactId);
-        var event = new MembershipEvent.UserLeft(groupId, contactId);
-        membershipEvents.add(event);
-        onMembershipEvent(event);
+        dispatchMembershipEvent(new MembershipEvent.UserLeft(groupId, contactId));
     }
 
     /** Remove the bot from a group and fire a {@link MembershipEvent.BotRemoved}. */
     public void removeBot(@NonNull String groupId) {
-        var event = new MembershipEvent.BotRemoved(groupId);
+        dispatchMembershipEvent(new MembershipEvent.BotRemoved(groupId));
+    }
+
+    /**
+     * Record the event, then deliver it by invoking the registered
+     * {@link MembershipHandler} directly — the one membership dispatch
+     * shape the SPI commits to (see {@code setMembershipEventHandler}
+     * javadoc); the same shape SignalGroupHandler uses. A null handler
+     * skips delivery but still records: membership-event tests may
+     * assert via {@link #membershipEvents()} without registering one.
+     */
+    private void dispatchMembershipEvent(MembershipEvent event) {
         membershipEvents.add(event);
-        onMembershipEvent(event);
+        MembershipHandler current = membershipHandler;
+        if (current != null) {
+            current.onEvent(event);
+        }
     }
 
     /**

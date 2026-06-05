@@ -1051,3 +1051,21 @@
   2. **SimpleX `user_left_group` event availability.** SimpleX's bot API exposes `memberJoined` but the existence of a per-user `memberLeft` (or equivalent) at the chat-CLI / WebSocket layer is not yet confirmed against the current SimpleX release. The v1 design ships with `supportsMembershipEvents = false` for SimpleX (§6.4.2) and relies on permanent-delivery-failure-driven cleanup (§6.3.6 + spec/messaging.md §Failure handling — "User left group"). If a native left-group event is verified in a later SimpleX release, flipping the flag to `true` and surfacing the event via `InboundHandler.onUserLeftGroup` is a localized adapter change with no SPI or schema impact.
 
   ---
+
+  ## SPI surface decisions (D47/D31 reconciliation)
+
+  Three adapter SPI surfaces were structurally inconsistent with the as-built adapters; each entry below records the reconciliation verdict and rationale (per the inlined §Contract block in ticket M1-162).
+
+  ### (a) `MessagingAdapter.onMembershipEvent` dispatch shape — verdict: **remove**
+
+  The SPI carried two membership-event dispatch shapes: `InMemoryAdapter` routed events through the interface's no-op `onMembershipEvent` default, while `SignalGroupHandler` invoked the registered `MembershipHandler` directly — so the default was dead surface on Signal and had zero external callers. D47's group-authorization invariants (departing-admin soft-clear + `is_group_admin` clear in one transaction; `removed_at IS NOT NULL` excluded from first-mention auto-promote) hold only if every adapter delivers membership events to Provider through the same registered-handler path, so exactly one shape survives: adapters invoke the handler registered via `setMembershipEventHandler` directly, mirroring the inbound path (`setInboundHandler` + direct `onMessage` — there is no interface-level inbound dispatch method either). The `onMembershipEvent` default is removed; the per-event isolation in `SignalGroupHandler`'s membership dispatch loop is unchanged.
+
+  ### (b) `SignalGroupHandler` unwired producer / group-envelope decode — verdict: **wire**
+
+  Per spec/messaging.md §Required SPI surface — Membership events, Signal exposes member-joined / member-left natively (`memberJoined`/`memberLeft` ACI arrays in `groupV2` update envelopes) and declares `supportsMembershipEvents = true`, so its group path is spec-live, not vestigial. `SignalJsonRpcClient` routes every `receive` notification that is not DM-scope to a group-notification route, which `SignalAdapter` wires to its `groupHandler()` factory when attaching the connected client. The envelope decode is split, not duplicated: `SignalMessageCodec.extractDm` keeps only DM-scope envelopes and `SignalGroupHandler.handleReceive` keeps only group-scope ones — complementary filters over the same notification stream.
+
+  ### (c) `ProgressNotifier` — verdict: **keep-as-seam**
+
+  spec/messaging.md §Progress notifications (D31; §6.3.8 above) mandates the surface: long-running handlers (`/summary`, periodic digest, chat agent) publish stage events to a cross-cutting `ProgressNotifier`. Zero implementations therefore means an unshipped v1 surface, not dead code. The interface is retained as the v1 seam; wiring a concrete notifier into the provider handlers is follow-up work, and removing the surface would require a spec amendment.
+
+  ---

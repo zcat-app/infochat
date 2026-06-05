@@ -1,7 +1,7 @@
 ---
 id: M1-162
 title: "[INVESTIGATE] confirm-or-drop adapter SPI surfaces vs D47"
-status: pending
+status: done
 created: 2026-06-02
 last_updated: 2026-06-05
 blocked_by: []
@@ -39,7 +39,20 @@ spec_refs:
 decision_refs:
   - D47
   - D31
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-05
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 399
+      removed: 54
 escalations:
   - date: 2026-06-05
     reason: clarity-fail
@@ -76,7 +89,11 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-05
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-162: [INVESTIGATE] confirm-or-drop adapter SPI surfaces vs D47
