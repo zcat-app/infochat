@@ -20,15 +20,7 @@ import org.junit.jupiter.api.Test;
 
 import app.zcat.infochat.provider.translation.TranslationCache;
 
-import javax.sql.DataSource;
-import java.io.PrintWriter;
 import java.lang.reflect.Method;
-import java.lang.reflect.Proxy;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.SQLFeatureNotSupportedException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -37,7 +29,6 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -53,8 +44,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * loaded by hand), {@link RecordingEligiblePostQuery},
  * {@link RecordingSummaryProseGenerator}, {@link LlmOutputSanitizer}
  * (real), real {@link ClusterTraversal}, {@link InboundContext}
- * (constructed), and {@link StubUserDataSource} for the DM-scope
- * users-id lookup.
+ * (constructed), and {@link FixedUserAndLanguageDataSource} for the
+ * DM-scope users-id lookup.
  *
  * <p>Asserted invariants (one {@code @Test} per behavioral branch):
  * <ul>
@@ -93,7 +84,7 @@ class SummaryCommandHandlerTest {
         anchorRepository = new RecordingSummaryAnchorRepository();
         handler = new SummaryCommandHandler();
         handler.bundleLoader = bundleLoader;
-        handler.dataSource = StubUserDataSource.userExists(UUID.randomUUID());
+        handler.dataSource = new FixedUserAndLanguageDataSource(UUID.randomUUID());
         handler.eligiblePostQuery = eligiblePostQuery;
         handler.clusterTraversal = new ClusterTraversal(new EmptyEdgeSource(), 3);
         handler.summaryProseGenerator = proseGenerator;
@@ -404,164 +395,6 @@ class SummaryCommandHandlerTest {
 
         int callCount() {
             return callCount.get();
-        }
-    }
-
-    /**
-     * Hand-rolled JDBC stub: returns the seeded {@code users} row id
-     * for {@code SummaryCommandHandler.resolveScopeId}'s single SELECT.
-     * Mockito is intentionally absent from the Provider classpath.
-     */
-    private static class StubUserDataSource extends UnsupportedDataSource {
-        private final UUID userId;
-
-        static StubUserDataSource userExists(UUID userId) {
-            return new StubUserDataSource(userId);
-        }
-
-        static StubUserDataSource neverCalled() {
-            return new StubUserDataSource(null) {
-                @Override
-                public Connection getConnection() {
-                    throw new AssertionError(
-                            "DataSource.getConnection() called on neverCalled() stub");
-                }
-            };
-        }
-
-        private StubUserDataSource(UUID userId) {
-            this.userId = userId;
-        }
-
-        @Override
-        public Connection getConnection() {
-            return (Connection) Proxy.newProxyInstance(
-                    Connection.class.getClassLoader(),
-                    new Class<?>[] { Connection.class },
-                    (proxy, method, methodArgs) -> switch (method.getName()) {
-                        case "prepareStatement" -> {
-                            String sql = (String) methodArgs[0];
-                            yield newPreparedStatement(sql);
-                        }
-                        case "close" -> null;
-                        case "toString" -> "StubConnection";
-                        case "hashCode" -> System.identityHashCode(proxy);
-                        case "equals" -> proxy == methodArgs[0];
-                        default -> throw new UnsupportedOperationException(
-                                "Connection." + method.getName() + " not stubbed");
-                    });
-        }
-
-        private PreparedStatement newPreparedStatement(String sql) {
-            boolean isScopePrefsQuery = sql.contains("scope_preferences");
-            return (PreparedStatement) Proxy.newProxyInstance(
-                    PreparedStatement.class.getClassLoader(),
-                    new Class<?>[] { PreparedStatement.class },
-                    (proxy, method, methodArgs) -> switch (method.getName()) {
-                        case "setString", "setObject" -> null;
-                        case "executeQuery" ->
-                                isScopePrefsQuery ? newLanguageResultSet() : newUserIdResultSet();
-                        case "close" -> null;
-                        case "toString" -> "StubPreparedStatement";
-                        case "hashCode" -> System.identityHashCode(proxy);
-                        case "equals" -> proxy == methodArgs[0];
-                        default -> throw new UnsupportedOperationException(
-                                "PreparedStatement." + method.getName() + " not stubbed");
-                    });
-        }
-
-        private ResultSet newUserIdResultSet() {
-            boolean[] consumed = { false };
-            return (ResultSet) Proxy.newProxyInstance(
-                    ResultSet.class.getClassLoader(),
-                    new Class<?>[] { ResultSet.class },
-                    (proxy, method, methodArgs) -> switch (method.getName()) {
-                        case "next" -> {
-                            if (consumed[0]) yield false;
-                            consumed[0] = true;
-                            yield true;
-                        }
-                        case "getObject" -> userId;
-                        case "close" -> null;
-                        case "toString" -> "StubResultSet(userId)";
-                        case "hashCode" -> System.identityHashCode(proxy);
-                        case "equals" -> proxy == methodArgs[0];
-                        default -> throw new UnsupportedOperationException(
-                                "ResultSet." + method.getName() + " not stubbed");
-                    });
-        }
-
-        private ResultSet newLanguageResultSet() {
-            boolean[] consumed = { false };
-            return (ResultSet) Proxy.newProxyInstance(
-                    ResultSet.class.getClassLoader(),
-                    new Class<?>[] { ResultSet.class },
-                    (proxy, method, methodArgs) -> switch (method.getName()) {
-                        case "next" -> {
-                            if (consumed[0]) yield false;
-                            consumed[0] = true;
-                            yield true;
-                        }
-                        case "getString" -> "en";
-                        case "close" -> null;
-                        case "toString" -> "StubResultSet(language)";
-                        case "hashCode" -> System.identityHashCode(proxy);
-                        case "equals" -> proxy == methodArgs[0];
-                        default -> throw new UnsupportedOperationException(
-                                "ResultSet." + method.getName() + " not stubbed");
-                    });
-        }
-    }
-
-    /**
-     * Base implementation of {@link DataSource} that throws
-     * {@link UnsupportedOperationException} for everything except
-     * {@link #getConnection()}.
-     */
-    private static class UnsupportedDataSource implements DataSource {
-        @Override
-        public Connection getConnection() throws SQLException {
-            throw new UnsupportedOperationException("getConnection() not stubbed");
-        }
-
-        @Override
-        public Connection getConnection(String username, String password) {
-            throw new UnsupportedOperationException("getConnection(String,String) not stubbed");
-        }
-
-        @Override
-        public PrintWriter getLogWriter() {
-            throw new UnsupportedOperationException("getLogWriter not stubbed");
-        }
-
-        @Override
-        public void setLogWriter(PrintWriter out) {
-            throw new UnsupportedOperationException("setLogWriter not stubbed");
-        }
-
-        @Override
-        public void setLoginTimeout(int seconds) {
-            throw new UnsupportedOperationException("setLoginTimeout not stubbed");
-        }
-
-        @Override
-        public int getLoginTimeout() {
-            throw new UnsupportedOperationException("getLoginTimeout not stubbed");
-        }
-
-        @Override
-        public Logger getParentLogger() throws SQLFeatureNotSupportedException {
-            throw new SQLFeatureNotSupportedException();
-        }
-
-        @Override
-        public <T> T unwrap(Class<T> iface) {
-            throw new UnsupportedOperationException("unwrap not stubbed");
-        }
-
-        @Override
-        public boolean isWrapperFor(Class<?> iface) {
-            return false;
         }
     }
 

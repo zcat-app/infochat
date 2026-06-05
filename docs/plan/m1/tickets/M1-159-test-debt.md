@@ -1,7 +1,7 @@
 ---
 id: M1-159
 title: "Test-debt (inner-class extraction, truncateAll completeness, delete IngestSpisLoadTest)"
-status: pending
+status: done
 created: 2026-06-02
 last_updated: 2026-06-05
 blocked_by: []
@@ -34,7 +34,20 @@ test_plan:
 spec_refs:
   - docs/spec/verification.md §Test layers
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-05
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 38
+      added: 1098
+      removed: 1670
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -66,7 +79,10 @@ revisions:
       out_of_scope_at_snapshot:
         - production source files (test-only ticket)
         - the tests' behavioral assertions (extraction is mechanical; assertions unchanged)
-clarity_check: {}
+clarity_check:
+  date: 2026-06-05
+  verdict: PASS
+  warnings: []
 ---
 
 # M1-159: Test-debt

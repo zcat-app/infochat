@@ -7,8 +7,11 @@ import org.testcontainers.utility.DockerImageName;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Shared Testcontainers + Flyway fixture for the §2.1 identity/audit
@@ -67,20 +70,43 @@ public abstract class PostgresSchemaTestBase {
     }
 
     /**
-     * Reset the §2.1 tables to empty state. TRUNCATE skips row-level
-     * triggers, so the last-admin / append-only guards are bypassed
-     * for the fixture reset — exactly the intent. RESTART IDENTITY
-     * rolls the {@code audit_log_id_seq} back to 1 so each test
-     * starts with predictable id values. CASCADE handles the
-     * {@code users.banned_by} self-reference and the foreign keys
-     * from {@code group_membership}, {@code invite_code},
-     * {@code audit_log.actor_user_id}.
+     * Reset all migration-created tables to empty state. The table
+     * list is derived at runtime from {@code pg_tables} so a future
+     * {@code CREATE TABLE} migration cannot silently reintroduce
+     * cross-test pollution by being absent from a hand-maintained
+     * list. TRUNCATE skips row-level triggers, so the last-admin /
+     * append-only guards are bypassed for the fixture reset —
+     * exactly the intent. RESTART IDENTITY rolls sequences (e.g.
+     * {@code audit_log_id_seq}) back to 1 so each test starts with
+     * predictable id values. CASCADE handles self-references and
+     * cross-table foreign keys.
      */
     @BeforeEach
     void truncateAll() throws SQLException {
         try (Connection c = newConnection(); Statement s = c.createStatement()) {
-            s.execute("TRUNCATE TABLE audit_log, invite_code, group_membership, groups, users "
-                    + "RESTART IDENTITY CASCADE");
+            // Excluded from truncation:
+            //  - flyway_schema_history: Flyway's own migration ledger;
+            //    the schema is migrated once per JVM and must stay
+            //    recorded as applied.
+            //  - embedding_metadata: V11 seeds the reference row
+            //    ('nomic-embed-text', 768) that the embedding-dimension
+            //    startup check reads; truncating would erase a
+            //    migration-established invariant, not test data.
+            //  - provider_state: V9/V21 seed the per-channel cursor rows
+            //    ('new_post', 'quarantine_review') whose existence the
+            //    provider relies on; same migration-seeded-reference
+            //    rationale.
+            List<String> tables = new ArrayList<>();
+            try (ResultSet tableNames = s.executeQuery(
+                    "SELECT tablename FROM pg_tables WHERE schemaname = 'public' "
+                            + "AND tablename NOT IN "
+                            + "('flyway_schema_history', 'embedding_metadata', 'provider_state')")) {
+                while (tableNames.next()) {
+                    tables.add(tableNames.getString(1));
+                }
+            }
+            s.execute("TRUNCATE TABLE " + String.join(", ", tables)
+                    + " RESTART IDENTITY CASCADE");
         }
     }
 }

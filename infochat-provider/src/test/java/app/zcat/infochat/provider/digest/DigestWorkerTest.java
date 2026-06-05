@@ -9,28 +9,19 @@ import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
-import app.zcat.infochat.provider.digest.DigestPostCollector.CollectionResult;
 import app.zcat.infochat.provider.messaging.AdapterRegistry;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import javax.sql.DataSource;
-import java.io.PrintWriter;
 import java.lang.reflect.Method;
-import java.lang.reflect.Proxy;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.SQLFeatureNotSupportedException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -234,112 +225,6 @@ class DigestWorkerTest {
 
     // ----- recording/stub collaborators -------------------------------------
 
-    private static final class RecordingPostCollector extends DigestPostCollector {
-        private List<Post> posts = List.of();
-        private long tagVer;
-        private long srcVer;
-        private RuntimeException failure;
-
-        void seed(List<Post> posts, long tagVer, long srcVer) {
-            this.posts = posts;
-            this.tagVer = tagVer;
-            this.srcVer = srcVer;
-            this.failure = null;
-        }
-
-        void failWith(RuntimeException failure) {
-            this.failure = failure;
-        }
-
-        @Override
-        public CollectionResult collectForGroup(UUID groupId, Instant since) {
-            if (failure != null) {
-                throw failure;
-            }
-            return new CollectionResult(posts, tagVer, srcVer);
-        }
-    }
-
-    private static final class RecordingDigestRenderer extends DigestRenderer {
-        private String response = "default prose";
-        private int calls;
-        private CountDownLatch entered;
-        private CountDownLatch release;
-
-        void setResponse(String r) { this.response = r; }
-        int callCount() { return calls; }
-
-        /** Make render() signal entry then block until released. */
-        void setBlocking(CountDownLatch entered, CountDownLatch release) {
-            this.entered = entered;
-            this.release = release;
-        }
-
-        @Override
-        public String render(List<Post> posts, String langCode) {
-            calls++;
-            if (entered != null) {
-                entered.countDown();
-                try {
-                    release.await();
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-            }
-            return response;
-        }
-    }
-
-    private static final class RecordingDegradedRenderer extends DegradedDigestRenderer {
-        private String response = "default headlines";
-        private int calls;
-
-        void setResponse(String r) { this.response = r; }
-        int callCount() { return calls; }
-
-        @Override
-        public String render(List<Post> posts) {
-            calls++;
-            return response;
-        }
-    }
-
-    private static final class RecordingCacheRepository extends SummaryCacheRepository {
-        private int inserts;
-        private String lastContent;
-        private boolean lastIsDegraded;
-        private long lastTagSubVer;
-        private long lastSrcSubVer;
-        private SQLException nextFailure;
-
-        int insertCount() { return inserts; }
-        String lastContent() { return lastContent; }
-        boolean lastIsDegraded() { return lastIsDegraded; }
-        long lastTagSubVer() { return lastTagSubVer; }
-        long lastSrcSubVer() { return lastSrcSubVer; }
-
-        void failNextInsert(SQLException failure) {
-            this.nextFailure = failure;
-        }
-
-        @Override
-        public void insert(UUID groupId, String slotKind, Instant slotFiredAt,
-                           long tagSubscriptionVersion, long sourceSubscriptionVersion,
-                           String content, boolean isDegraded, Instant expiresAt)
-                throws SQLException {
-            if (nextFailure != null) {
-                SQLException failure = nextFailure;
-                nextFailure = null;
-                throw failure;
-            }
-            inserts++;
-            lastContent = content;
-            lastIsDegraded = isDegraded;
-            lastTagSubVer = tagSubscriptionVersion;
-            lastSrcSubVer = sourceSubscriptionVersion;
-        }
-    }
-
     private static final class StubBundleLoader extends BundleLoader {
         static final String NO_POSTS_TEXT = "No posts yet for this period.";
 
@@ -388,83 +273,5 @@ class DigestWorkerTest {
         public List<MessagingAdapter> activatedAdapters() {
             return adapters;
         }
-    }
-
-    /**
-     * JDBC stub for the group-metadata query ({@code DigestWorker.readGroupMetadata}).
-     */
-    private static final class StubGroupDataSource implements DataSource {
-        private final String adapter;
-        private final String upstreamGroupId;
-        private final String language;
-
-        StubGroupDataSource(String adapter, String upstreamGroupId, String language) {
-            this.adapter = adapter;
-            this.upstreamGroupId = upstreamGroupId;
-            this.language = language;
-        }
-
-        @Override
-        public Connection getConnection() {
-            return (Connection) Proxy.newProxyInstance(
-                    Connection.class.getClassLoader(),
-                    new Class<?>[]{Connection.class},
-                    (proxy, method, args) -> switch (method.getName()) {
-                        case "prepareStatement" -> newPs();
-                        case "close" -> null;
-                        default -> throw new UnsupportedOperationException(
-                                "Connection." + method.getName());
-                    });
-        }
-
-        private PreparedStatement newPs() {
-            return (PreparedStatement) Proxy.newProxyInstance(
-                    PreparedStatement.class.getClassLoader(),
-                    new Class<?>[]{PreparedStatement.class},
-                    (proxy, method, args) -> switch (method.getName()) {
-                        case "setObject", "setString" -> null;
-                        case "executeQuery" -> groupResultSet();
-                        case "close" -> null;
-                        default -> throw new UnsupportedOperationException(
-                                "PreparedStatement." + method.getName());
-                    });
-        }
-
-        private ResultSet groupResultSet() {
-            boolean[] consumed = {false};
-            return (ResultSet) Proxy.newProxyInstance(
-                    ResultSet.class.getClassLoader(),
-                    new Class<?>[]{ResultSet.class},
-                    (proxy, method, args) -> switch (method.getName()) {
-                        case "next" -> {
-                            if (consumed[0]) yield false;
-                            consumed[0] = true;
-                            yield true;
-                        }
-                        case "getString" -> {
-                            String col = (String) args[0];
-                            yield switch (col) {
-                                case "adapter" -> adapter;
-                                case "upstream_group_id" -> upstreamGroupId;
-                                case "language" -> language;
-                                default -> null;
-                            };
-                        }
-                        case "close" -> null;
-                        default -> throw new UnsupportedOperationException(
-                                "ResultSet." + method.getName());
-                    });
-        }
-
-        @Override public Connection getConnection(String u, String p) { return getConnection(); }
-        @Override public PrintWriter getLogWriter() { return null; }
-        @Override public void setLogWriter(PrintWriter out) {}
-        @Override public void setLoginTimeout(int s) {}
-        @Override public int getLoginTimeout() { return 0; }
-        @Override public Logger getParentLogger() throws SQLFeatureNotSupportedException {
-            throw new SQLFeatureNotSupportedException();
-        }
-        @Override public <T> T unwrap(Class<T> i) { throw new UnsupportedOperationException(); }
-        @Override public boolean isWrapperFor(Class<?> i) { return false; }
     }
 }

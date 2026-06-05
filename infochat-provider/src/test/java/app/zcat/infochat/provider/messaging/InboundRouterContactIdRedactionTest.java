@@ -9,19 +9,13 @@ import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
-import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
-import app.zcat.infochat.provider.command.ConfirmStateService;
-import jakarta.enterprise.inject.Instance;
-import jakarta.enterprise.util.TypeLiteral;
 import org.jboss.logmanager.LogContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.lang.annotation.Annotation;
 import java.time.Instant;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -191,74 +185,6 @@ class InboundRouterContactIdRedactionTest {
         return router;
     }
 
-    /** Always admits — the redaction tests do not exercise the rate-cap branch. */
-    private static final class NoopRateCapBucket extends RateCapBucket {
-        @Override
-        public boolean tryAcquire(String adapter, String contactId) {
-            return true;
-        }
-    }
-
-    /** Never invoked — the vouched-user lookup override means step 2 does not fire. */
-    private static final class NoopInviteCodeConsumer extends InviteCodeConsumer {
-        @Override
-        public Outcome consume(String adapter, String contactId, String body) {
-            throw new UnsupportedOperationException(
-                    "inviteCodeConsumer should not be invoked when the user is known (vouched)");
-        }
-    }
-
-    /** Always reports {@code is_banned=false} — the redaction tests do not exercise the ban branch. */
-    private static final class NoopBanCheck extends BanCheck {
-        @Override
-        public boolean isBanned(String adapter, String contactId) {
-            return false;
-        }
-    }
-
-    /**
-     * Returns a stub value if asked. The redaction tests do not assert
-     * on outbound bodies — they assert on log contents — but the
-     * router calls {@code bundleLoader.get(ERROR_BAN_FIXED)} only when
-     * the ban gate fires (it does not, thanks to NoopBanCheck), and
-     * {@code ERROR_INVITE_REQUIRED} only when step 7 DM-gate fires (it
-     * does not, thanks to the vouched-user lookup override). So this
-     * fake exists purely to avoid a null-field NPE if a future refactor
-     * starts consulting BundleLoader unconditionally.
-     */
-    private static final class NoopBundleLoader extends BundleLoader {
-        @Override
-        public String get(String key) {
-            return "noop:" + key;
-        }
-    }
-
-    /**
-     * No-op {@link ConfirmStateService} (M1-051): the redaction tests
-     * exercise the dispatch path (which reaches step 4.5); a Noop
-     * peek returning empty keeps the sweep silent so the dispatch
-     * still proceeds to handleSlash where the log-redaction sites
-     * fire.
-     */
-    private static final class NoopConfirmStateService extends ConfirmStateService {
-        @Override
-        public Optional<ConfirmStateService.PendingConfirm> peek(java.util.UUID actor, ScopeRef scope) {
-            return Optional.empty();
-        }
-        @Override
-        public Optional<ConfirmStateService.PendingConfirm> takeAny(java.util.UUID actor, ScopeRef scope) {
-            return Optional.empty();
-        }
-        @Override
-        public Optional<ConfirmStateService.PendingConfirm> takeMatching(java.util.UUID actor, ScopeRef scope, String commandName) {
-            return Optional.empty();
-        }
-        @Override
-        public void remember(java.util.UUID actor, ScopeRef scope, ConfirmStateService.PendingConfirm pending) {
-            // no-op
-        }
-    }
-
     private static InboundMessage inboundDm(String contactId, String text) {
         return new InboundMessage(
                 new Identity(contactId, "Alice", Instant.now()),
@@ -349,123 +275,6 @@ class InboundRouterContactIdRedactionTest {
 
         @Override
         public void setInboundHandler(InboundHandler handler) {
-            throw new UnsupportedOperationException();
-        }
-    }
-
-    /** Adapter that swallows {@link #send} without throwing — used to isolate the dispatch-exception path. */
-    private static final class NoopAdapter implements MessagingAdapter {
-        // Reports the inbound adapterName ("inmemory") this test delivers
-        // so the router's name-keyed reply resolution binds this fake as
-        // the reply target on the dispatch-exception path (M1-125). The
-        // redaction assertions are unchanged.
-        @Override
-        public String name() {
-            return "inmemory";
-        }
-
-        @Override
-        public CapabilityFlags capabilities() {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public app.zcat.infochat.messaging.AdapterTrustLevel trustLevel() {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public Identity assertIdentity(InboundMessage msg) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public MessageHandle send(OutboundMessage msg) {
-            return null;
-        }
-
-        @Override
-        public void update(MessageHandle handle, String body) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public void finalizeMessage(MessageHandle handle, String body) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public void setTyping(ScopeRef scope, boolean typing) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public void setInboundHandler(InboundHandler handler) {
-            throw new UnsupportedOperationException();
-        }
-    }
-
-    /**
-     * Minimal {@link Instance} backed by a fixed list. The router only
-     * iterates the instance; the other CDI accessors are unused and
-     * throw {@link UnsupportedOperationException} to fail loudly if a
-     * future change starts consuming them.
-     */
-    private static final class SingletonInstance<T> implements Instance<T> {
-        private final List<T> items;
-
-        @SafeVarargs
-        SingletonInstance(T... items) {
-            this.items = List.of(items);
-        }
-
-        @Override
-        public Iterator<T> iterator() {
-            return items.iterator();
-        }
-
-        @Override
-        public T get() {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public Instance<T> select(Annotation... qualifiers) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public <U extends T> Instance<U> select(Class<U> subtype, Annotation... qualifiers) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public <U extends T> Instance<U> select(TypeLiteral<U> subtype, Annotation... qualifiers) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public boolean isUnsatisfied() {
-            return items.isEmpty();
-        }
-
-        @Override
-        public boolean isAmbiguous() {
-            return items.size() > 1;
-        }
-
-        @Override
-        public void destroy(T instance) {
-            // no-op
-        }
-
-        @Override
-        public Handle<T> getHandle() {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public Iterable<? extends Handle<T>> handles() {
             throw new UnsupportedOperationException();
         }
     }

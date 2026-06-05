@@ -1,15 +1,9 @@
 package app.zcat.infochat.provider.messaging;
 
-import app.zcat.infochat.messaging.CapabilityFlags;
 import app.zcat.infochat.messaging.Identity;
 import app.zcat.infochat.messaging.InboundMessage;
-import app.zcat.infochat.messaging.MessagingAdapter;
-import app.zcat.infochat.messaging.MessageHandle;
-import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
-import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
-import app.zcat.infochat.provider.command.ConfirmStateService;
 import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.util.TypeLiteral;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,7 +11,6 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.annotation.Annotation;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
@@ -315,60 +308,6 @@ class InboundRouterNormalizeTest {
         }
     }
 
-    /** Captures outbound messages the router sends. */
-    private static final class CapturingAdapter implements MessagingAdapter {
-        final List<OutboundMessage> captured = new ArrayList<>();
-
-        // Reports the inbound adapterName the test delivers ("inmemory")
-        // so the router's name-keyed reply resolution finds this fake
-        // (M1-125). The assertions below are unchanged.
-        @Override
-        public String name() {
-            return "inmemory";
-        }
-
-        @Override
-        public CapabilityFlags capabilities() {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public app.zcat.infochat.messaging.AdapterTrustLevel trustLevel() {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public Identity assertIdentity(InboundMessage msg) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public MessageHandle send(OutboundMessage msg) {
-            captured.add(msg);
-            return null;
-        }
-
-        @Override
-        public void update(MessageHandle handle, String body) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public void finalizeMessage(MessageHandle handle, String body) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public void setTyping(ScopeRef scope, boolean typing) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public void setInboundHandler(InboundHandler handler) {
-            throw new UnsupportedOperationException();
-        }
-    }
-
     /**
      * Helper for {@link #bodyAtExactlyTheCapIsAcceptedAndNormalizeRuns}
      * (the one M1-035b @Test method that calls {@code onMessage} on
@@ -417,64 +356,5 @@ class InboundRouterNormalizeTest {
         // dataSource intentionally left null — lookupUser is overridden
         // above so the DataSource field is never accessed.
         return router;
-    }
-
-    /** No-op {@link RateCapBucket} — always admits ({@code tryAcquire} = true). */
-    private static final class NoopRateCapBucket extends RateCapBucket {
-        @Override
-        public boolean tryAcquire(String adapter, String contactId) {
-            return true;
-        }
-    }
-
-    /** No-op {@link InviteCodeConsumer} — never invoked because the test router's lookupUser returns non-empty. */
-    private static final class NoopInviteCodeConsumer extends InviteCodeConsumer {
-        @Override
-        public Outcome consume(String adapter, String contactId, String body) {
-            throw new UnsupportedOperationException(
-                    "inviteCodeConsumer should not run when the user is known (vouched)");
-        }
-    }
-
-    /** No-op {@link BanCheck} — always reports {@code is_banned=false}. */
-    private static final class NoopBanCheck extends BanCheck {
-        @Override
-        public boolean isBanned(String adapter, String contactId) {
-            return false;
-        }
-    }
-
-    /** No-op {@link BundleLoader} — returns a stub value if asked (the at-cap test does not consume any bundle key). */
-    private static final class NoopBundleLoader extends BundleLoader {
-        @Override
-        public String get(String key) {
-            return "noop:" + key;
-        }
-    }
-
-    /**
-     * No-op {@link ConfirmStateService} — always reports no pending
-     * confirm state. The at-cap test does not exercise the step 4.5
-     * branch behavior, but step 4.5's peek call still fires; this
-     * fake keeps the call safe (no NPE on a null @Inject field) and
-     * cheap (no clock / map work).
-     */
-    private static final class NoopConfirmStateService extends ConfirmStateService {
-        @Override
-        public Optional<ConfirmStateService.PendingConfirm> peek(java.util.UUID actor, ScopeRef scope) {
-            return Optional.empty();
-        }
-        @Override
-        public Optional<ConfirmStateService.PendingConfirm> takeAny(java.util.UUID actor, ScopeRef scope) {
-            return Optional.empty();
-        }
-        @Override
-        public Optional<ConfirmStateService.PendingConfirm> takeMatching(java.util.UUID actor, ScopeRef scope, String commandName) {
-            return Optional.empty();
-        }
-        @Override
-        public void remember(java.util.UUID actor, ScopeRef scope, ConfirmStateService.PendingConfirm pending) {
-            // no-op
-        }
     }
 }

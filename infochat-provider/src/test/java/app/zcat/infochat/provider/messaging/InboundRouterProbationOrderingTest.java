@@ -1,28 +1,16 @@
 package app.zcat.infochat.provider.messaging;
 
-import app.zcat.infochat.messaging.CapabilityFlags;
 import app.zcat.infochat.messaging.Identity;
 import app.zcat.infochat.messaging.InboundMessage;
-import app.zcat.infochat.messaging.MessageHandle;
-import app.zcat.infochat.messaging.MessagingAdapter;
-import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
-import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.command.AssetCommandFamilyOracle;
 import app.zcat.infochat.provider.command.CommandPermissions;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
-import app.zcat.infochat.provider.command.ConfirmStateService;
-import app.zcat.infochat.provider.group.GroupApprovalCheck;
-import jakarta.enterprise.inject.Instance;
-import jakarta.enterprise.util.TypeLiteral;
 import org.junit.jupiter.api.Test;
 
-import java.lang.annotation.Annotation;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -392,105 +380,6 @@ class InboundRouterProbationOrderingTest {
         return router;
     }
 
-    private static final class CallLog {
-        final List<String> calls = new ArrayList<>();
-    }
-
-    private static final class RecordingInboundContext extends InboundContext {
-        private final CallLog log;
-        RecordingInboundContext(CallLog log) { this.log = log; }
-        @Override
-        public void setAdapterName(String adapterName) {
-            log.calls.add("setAdapterName");
-            super.setAdapterName(adapterName);
-        }
-    }
-
-    private static final class CountingRateCapBucket extends RateCapBucket {
-        private final CallLog log;
-        CountingRateCapBucket(CallLog log) { this.log = log; }
-        @Override
-        public boolean tryAcquire(String adapter, String contactId) {
-            log.calls.add("rateCapBucket.tryAcquire");
-            return true;
-        }
-    }
-
-    private static final class FakeInviteCodeConsumer extends InviteCodeConsumer {
-        private final CallLog log;
-        FakeInviteCodeConsumer(CallLog log) { this.log = log; }
-        @Override
-        public Outcome consume(String adapter, String contactId, String body) {
-            log.calls.add("inviteCodeConsumer.consume");
-            return new Rejected();
-        }
-    }
-
-    private static final class FakeBanCheck extends BanCheck {
-        private final CallLog log;
-        private final boolean banned;
-        FakeBanCheck(CallLog log, boolean banned) { this.log = log; this.banned = banned; }
-        @Override
-        public boolean isBanned(String adapter, String contactId) {
-            log.calls.add("banCheck.isBanned");
-            return banned;
-        }
-    }
-
-    /**
-     * Records {@code groupApprovalCheck.check} (M1-112). Returns
-     * {@link GroupApprovalCheck.Outcome.Approved} so dispatch falls
-     * through to step 4. The recording variant lives here because the
-     * package-level {@link NoopGroupApprovalCheck} is deliberately
-     * log-silent — scenario (g)
-     * (registeredGroupSenderInProbationStillHitsProbationGate) pins
-     * the precise sequence including the new step-3.5 entry.
-     */
-    private static final class RecordingGroupApprovalCheck extends GroupApprovalCheck {
-        private final CallLog log;
-
-        RecordingGroupApprovalCheck(CallLog log) {
-            this.log = log;
-        }
-
-        @Override
-        public Outcome check(String adapter, String upstreamGroupId,
-                             UUID activatorUserId, String activatorRedactedContactId) {
-            log.calls.add("groupApprovalCheck.check");
-            return new Outcome.Approved();
-        }
-    }
-
-    private static final class FakeBundleLoader extends BundleLoader {
-        private final CallLog log;
-        FakeBundleLoader(CallLog log) { this.log = log; }
-        @Override
-        public String get(String key) {
-            log.calls.add("bundleLoader.get(" + key + ")");
-            return stubFor(key);
-        }
-        static String stubFor(String key) { return "bundle:" + key; }
-    }
-
-    private static final class NoopConfirmStateService extends ConfirmStateService {
-        @Override
-        public Optional<ConfirmStateService.PendingConfirm> peek(UUID actor, ScopeRef scope) {
-            return Optional.empty();
-        }
-        @Override
-        public Optional<ConfirmStateService.PendingConfirm> takeAny(UUID actor, ScopeRef scope) {
-            return Optional.empty();
-        }
-        @Override
-        public Optional<ConfirmStateService.PendingConfirm> takeMatching(UUID actor, ScopeRef scope, String commandName) {
-            return Optional.empty();
-        }
-        @Override
-        public void remember(UUID actor, ScopeRef scope, ConfirmStateService.PendingConfirm pending) {
-            // no-op
-        }
-    }
-
     /**
      * Records step 5 probation reads/UPDATEs into the {@link CallLog}.
      * The three knobs ({@code inProbation}, {@code probationExpiry},
@@ -539,54 +428,5 @@ class InboundRouterProbationOrderingTest {
             log.calls.add("commandPermissions.allowedDuringProbation(" + slashCommand + ")");
             return allowed;
         }
-    }
-
-    private static final class RecordingCommandHandler implements CommandHandler {
-        private final CallLog log;
-        private final String name;
-        RecordingCommandHandler(CallLog log, String name) {
-            this.log = log;
-            this.name = name;
-        }
-        @Override
-        public String name() { return name; }
-        @Override
-        public OutboundMessage handle(ScopeRef scope, String rawText) {
-            log.calls.add("handler.handle(" + name + ")");
-            return new OutboundMessage(
-                    scope, "handler-reply:" + name, Instant.now(), UUID.randomUUID().toString());
-        }
-    }
-
-    private static final class CapturingAdapter implements MessagingAdapter {
-        final List<OutboundMessage> captured = new ArrayList<>();
-        // Reports the inbound adapterName the test delivers ("inmemory")
-        // so the router's name-keyed reply resolution finds this fake
-        // (M1-125). The assertions below are unchanged.
-        @Override public String name() { return "inmemory"; }
-        @Override public CapabilityFlags capabilities() { throw new UnsupportedOperationException(); }
-        @Override public app.zcat.infochat.messaging.AdapterTrustLevel trustLevel() { throw new UnsupportedOperationException(); }
-        @Override public Identity assertIdentity(InboundMessage msg) { throw new UnsupportedOperationException(); }
-        @Override public MessageHandle send(OutboundMessage msg) { captured.add(msg); return null; }
-        @Override public void update(MessageHandle handle, String body) { throw new UnsupportedOperationException(); }
-        @Override public void finalizeMessage(MessageHandle handle, String body) { throw new UnsupportedOperationException(); }
-        @Override public void setTyping(ScopeRef scope, boolean typing) { throw new UnsupportedOperationException(); }
-        @Override public void setInboundHandler(InboundHandler handler) { throw new UnsupportedOperationException(); }
-    }
-
-    private static final class SingletonInstance<T> implements Instance<T> {
-        private final List<T> items;
-        @SafeVarargs
-        SingletonInstance(T... items) { this.items = List.of(items); }
-        @Override public Iterator<T> iterator() { return items.iterator(); }
-        @Override public T get() { throw new UnsupportedOperationException(); }
-        @Override public Instance<T> select(Annotation... qualifiers) { throw new UnsupportedOperationException(); }
-        @Override public <U extends T> Instance<U> select(Class<U> subtype, Annotation... qualifiers) { throw new UnsupportedOperationException(); }
-        @Override public <U extends T> Instance<U> select(TypeLiteral<U> subtype, Annotation... qualifiers) { throw new UnsupportedOperationException(); }
-        @Override public boolean isUnsatisfied() { return items.isEmpty(); }
-        @Override public boolean isAmbiguous() { return items.size() > 1; }
-        @Override public void destroy(T instance) { /* no-op */ }
-        @Override public Handle<T> getHandle() { throw new UnsupportedOperationException(); }
-        @Override public Iterable<? extends Handle<T>> handles() { throw new UnsupportedOperationException(); }
     }
 }
