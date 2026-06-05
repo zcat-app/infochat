@@ -14,9 +14,9 @@
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 185 |
+| done | 186 |
 | deferred | 3 |
-| **total** | **203** |
+| **total** | **204** |
 
 ---
 
@@ -73,6 +73,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-168 | Fix stale 3-arg UserSnapshot test call site | 2026-06-05 | round 1 APPROVE |
 | M1-167 | Fix residual EscapedEntity javadoc findings in provider | 2026-06-05 | round 1 APPROVE |
 | M1-165 | Promote Tier-1 Error Prone checks to ERROR (repo-wide) | 2026-06-05 | round 1 APPROVE |
 | M1-164f | Onboard infochat-provider to NullAway + Error Prone | 2026-06-05 | round 1 APPROVE |
@@ -82,7 +83,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-157 | Explicit connection-pool sizing per profile | 2026-06-05 | round 1 APPROVE |
 | M1-155 | InboundRouter hygiene (chat body-cap ordering, bidi-control gap, lookupGroupId Optional) | 2026-06-05 | round 1 APPROVE |
 | M1-146 | Defensive-code sweep: remove dead internal null-guards (CT4) | 2026-06-05 | round 1 APPROVE |
-| M1-142 | NewPostListener reconcile after reconnect | 2026-06-05 | round 1 APPROVE |
 
 ---
 
@@ -361,4 +361,5 @@ M1-164a (done)
         └── M1-164 (done) [see above]
 M1-166 (done)
 M1-167 (done)
+M1-168 (done)
 ```

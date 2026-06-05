@@ -464,7 +464,7 @@ class InboundRouterIntakeOrderingTest {
     void groupChatMessageWithVanishedGroupRowIsSilentlyDroppedNotThrown() {
         CallLog log = new CallLog();
         InboundRouter router = newRouterWithLog(log,
-                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), false, "vouched")),
+                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), "vouched")),
                 Optional.empty());
         // The two chat-mode config fields default to 0 outside CDI;
         // lift them so the non-slash body passes the chat-mode body
