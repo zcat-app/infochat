@@ -191,13 +191,26 @@ ticket. Reasons preserved so they are not re-raised:
   cache key.
 - **DUP-MSG-DEP** — the "duplicate" pom entry is the `test-jar` classifier (canonical idiom).
 - **STAGE1-BACKTRACK** — mitigated by the Stage-1 wall-clock watchdog.
-- **CIRCUIT-BREAKERS** — D42 failure-counter is the v1 mechanism; adding a library is a v2
-  decision + a dependency-approval matter.
+- **CIRCUIT-BREAKERS** — every v1 external boundary already has a bounded-failure
+  mechanism: D42 failure-counter for fetchers (incl. asset fetchers), D38 per-relay
+  mark-bad/cooldown for Nostr, M1-132/M1-148 adapter isolation+backoff, M1-141 LLM
+  body cap + Retry-After. A breaker library (Resilience4j/MP-FT) would duplicate
+  those state machines and is a dependency-approval matter. Raise narrowly only if
+  a specific path is shown to need breaker semantics — no "v2" commitment implied.
 - **CONN-CHURN** (structural refactor) — deliberate per-step isolation for the fresh-ban-check
   TOCTOU closure; WATCH only. (Pool sizing is the actionable part → M1-157.)
-- **MISSING-V20** — Flyway tolerates version gaps; at most a one-line doc note (folded into M1-158).
+- **MISSING-V20** — Flyway tolerates version gaps. Resolved by git history
+  (re-eval 2026-06-05): no `V20__*` file was ever committed on any branch — M1-079a
+  planned a V20 that landed under later numbers (D47 group work is V26/V27), so the
+  number was simply never claimed. Not an intentional skip; no doc note needed (the
+  "folded into M1-158" fold never happened and is dropped).
 - **BOOTSTRAP-PATH-TRAVERSAL** — operator-supplied config path is not a privilege boundary.
 - **Perf tail** (FetchScheduler/DigestScheduler unbounded selects, NostrDedupFilter size,
   Levenshtein recompute) — WATCH; no current symptom at v1 cadence.
-- **AUDIT-INSERT-DUP** — already tracked under the existing M1-041 `AuditLogWriter` deferral.
+- **AUDIT-INSERT-DUP** — RESOLVED, not merely tracked (re-eval 2026-06-05): M1-041
+  was reopened and is done; the single `INSERT INTO audit_log` site lives in
+  `infochat-core` `AuditLogWriter` with 33 consumer files and zero direct-insert
+  sites left in provider/collector main source. Residue: `BanCommandHandler` class
+  javadoc still claims the consolidation is deferred — stale-comment micro-ticket
+  filed.
 - **Stage1WatchdogIT 50ms flake** — tracked in project memory, not an audit finding.
