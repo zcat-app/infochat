@@ -246,6 +246,45 @@ class InboundRouterIntakeOrderingTest {
                         + "consulted; got: " + log.calls);
     }
 
+    // ----- (e2) DM unknown contact + breached threshold → SAME reply -------
+    //
+    // Pins the no-brute-force-oracle property from docs/spec/security.md
+    // §Invite-code registration ("it does not change the per-failure
+    // user-visible reply"): the BruteForceThresholdBreached outcome must
+    // produce a reply byte-identical to the Rejected outcome's, so an
+    // attacker cannot observe from the reply text whether the threshold
+    // has been crossed.
+
+    @Test
+    void breachedThresholdRepliesIdenticallyToRejected() {
+        CallLog rejectedLog = new CallLog();
+        InboundRouter rejectedRouter = newRouterWithLog(rejectedLog, Optional.empty());
+        ((FakeInviteCodeConsumer) rejectedRouter.inviteCodeConsumer).outcome =
+                new InviteCodeConsumer.Rejected();
+        CapturingAdapter rejectedTarget = new CapturingAdapter();
+        rejectedRouter.setReplyTarget(rejectedTarget);
+        rejectedRouter.onMessage(dmInbound(DM_CONTACT, UUID.randomUUID().toString()), ADAPTER);
+
+        CallLog breachedLog = new CallLog();
+        InboundRouter breachedRouter = newRouterWithLog(breachedLog, Optional.empty());
+        ((FakeInviteCodeConsumer) breachedRouter.inviteCodeConsumer).outcome =
+                new InviteCodeConsumer.BruteForceThresholdBreached();
+        CapturingAdapter breachedTarget = new CapturingAdapter();
+        breachedRouter.setReplyTarget(breachedTarget);
+        breachedRouter.onMessage(dmInbound(DM_CONTACT, UUID.randomUUID().toString()), ADAPTER);
+
+        assertEquals(1, breachedTarget.captured.size(),
+                "breached-threshold path must produce exactly one reply; got: "
+                        + breachedTarget.captured);
+        assertEquals(FakeBundleLoader.stubFor(BundleKeys.ERROR_INVITE_REQUIRED),
+                breachedTarget.captured.get(0).text(),
+                "breached-threshold reply body must equal the error.invite.required bundle entry");
+        assertEquals(rejectedTarget.captured.get(0).text(),
+                breachedTarget.captured.get(0).text(),
+                "breached-threshold reply must be byte-identical to the Rejected-path reply — "
+                        + "no brute-force oracle in the reply text");
+    }
+
     // ----- (f) DM known is_banned=true → ban-fixed reply -------------------
 
     @Test

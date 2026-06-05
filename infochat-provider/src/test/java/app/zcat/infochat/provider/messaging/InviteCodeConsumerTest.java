@@ -337,6 +337,27 @@ class InviteCodeConsumerTest {
     }
 
     @Test
+    void secondConsumeInsideGateDoesNotReSweep() throws Exception {
+        // Pins the sweep time-gate: the full-map removeIf in
+        // evictStaleBreachAudited runs at most once per gate interval,
+        // not on every consume. A fresh consumer starts with
+        // lastSweep = EPOCH, so the first consume sweeps and closes the
+        // gate; a stale entry seeded after that must survive a second
+        // consume inside the gate.
+        InviteCodeConsumer local = newLocalConsumer();
+
+        local.consume("inmemory", NAMESPACE + "gate-sweeper", UUID.randomUUID().toString());
+
+        var staleKey = new InviteCodeConsumer.Key("inmemory", NAMESPACE + "gate-stale");
+        local.breachAudited.put(staleKey, Instant.now().minus(Duration.ofHours(2)));
+
+        local.consume("inmemory", NAMESPACE + "gate-sweeper", UUID.randomUUID().toString());
+
+        assertTrue(local.breachAudited.containsKey(staleKey),
+                "a second consume inside the gate interval must not re-sweep the map");
+    }
+
+    @Test
     void overThresholdObservationRefreshesBreachTimestamp() throws Exception {
         // Pins the eviction-vs-re-audit semantics: while a breach event
         // is ongoing (the key keeps arriving over threshold), the

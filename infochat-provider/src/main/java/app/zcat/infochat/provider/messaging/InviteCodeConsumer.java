@@ -33,9 +33,12 @@ import java.util.concurrent.ConcurrentHashMap;
  * probe also increments the brute-force counter (M1-044e
  * AUDIT-EVASION fix). The Outcome drives the splice's branch:
  * {@link Accepted} registers the contact and proceeds; {@link
- * Rejected} drops the inbound with the "invalid or already-used
- * code" fixed reply; {@link BruteForceThresholdBreached} drops
- * the inbound with the "too many attempts" fixed reply.
+ * Rejected} and {@link BruteForceThresholdBreached} both drop
+ * the inbound with the same fixed {@code error.invite.required}
+ * reply at the InboundRouter outcome dispatch — per
+ * docs/spec/security.md §Invite-code registration the brute-force
+ * limit "does not change the per-failure user-visible reply", so
+ * a threshold breach is not observable as a distinct reply.
  *
  * <p><b>Race-safe consume.</b> The conditional
  * {@code UPDATE invite_code SET status='USED' ... RETURNING id}
@@ -136,6 +139,11 @@ public class InviteCodeConsumer {
     // the eviction tests.
     final ConcurrentHashMap<Key, Instant> breachAudited = new ConcurrentHashMap<>();
 
+    // Time-gate for the stale-entry sweep in evictStaleBreachAudited.
+    // Package-private + volatile so the gating test can preset it the
+    // same way it seeds breachAudited directly.
+    volatile Instant lastSweep = Instant.EPOCH;
+
     public sealed interface Outcome
             permits Accepted, Rejected, BruteForceThresholdBreached {}
 
@@ -232,13 +240,28 @@ public class InviteCodeConsumer {
         }
     }
 
-    // Opportunistic sweep, once per consume. An entry whose last
-    // over-threshold observation is older than the window is safe to
-    // drop: every attempt inside the window has aged out, so the
-    // counter is below threshold and eviction is equivalent to the
-    // remove path (window expired = breach event ended).
+    // Opportunistic sweep, time-gated to at most once per window. An
+    // entry whose last over-threshold observation is older than the
+    // window is safe to drop: every attempt inside the window has aged
+    // out, so the counter is below threshold and eviction is equivalent
+    // to the remove path (window expired = breach event ended).
+    //
+    // The gate amortizes the full-map removeIf so an adapter with free
+    // identity minting cannot make every unknown-contact consume pay an
+    // O(N) scan. Per-key correctness never depends on the sweep — the
+    // below-threshold path removes its own key inline — so gating only
+    // stretches how long an abandoned key lingers: at most one window
+    // (staleness) plus one gate interval (next sweep opportunity) after
+    // the breach event ends. The check-then-set on the volatile is
+    // deliberately not atomic: two racing consumes may both sweep,
+    // which is benign (removeIf is idempotent) and cheaper than a CAS.
     private void evictStaleBreachAudited() {
-        Instant cutoff = Instant.now().minus(bruteForceWindow);
+        Instant now = Instant.now();
+        if (now.isBefore(lastSweep.plus(bruteForceWindow))) {
+            return;
+        }
+        lastSweep = now;
+        Instant cutoff = now.minus(bruteForceWindow);
         breachAudited.entrySet().removeIf(entry -> entry.getValue().isBefore(cutoff));
     }
 
