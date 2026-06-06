@@ -70,6 +70,18 @@ public enum AuditAction {
     BOOTSTRAP_SOURCE_LOAD,
     BOOTSTRAP_ASSET_LOAD,
     GRANT_ADMIN,
+    // GRANT_ADMIN_INTENT is the audit-on-intent row written on a
+    // separate auto-commit connection BEFORE the grant transaction's
+    // is_admin=TRUE UPDATE (security.md §Authorization model: step 8
+    // "Audit-log the intent" precedes step 9 "Execute"). Unlike
+    // BAN_INTENT / INVITE_*_INTENT (first-call leg of confirm-gated
+    // commands), /grant-admin is single-shot — and unlike
+    // REVOKE_ADMIN_INTENT there is no trigger rollback to survive
+    // (the V5 last-admin trigger guards revocation, not grants): the
+    // row's job is purely probe visibility, so the unknown-contact,
+    // banned-target and already-admin refusal legs no longer roll
+    // back row-less.
+    GRANT_ADMIN_INTENT,
     REVOKE_ADMIN,
     // REVOKE_ADMIN_INTENT is the audit-on-intent row written on a
     // separate auto-commit connection BEFORE the revoke transaction's

@@ -93,7 +93,7 @@ class GrantAdminCommandHandlerTest {
     void grantByNonAdminReturnsAdminOnly() throws Exception {
         String actor = PREFIX + "nonAdmin-actor";
         String target = PREFIX + "nonAdmin-target";
-        seedUser(ADAPTER, actor, /* isAdmin */ false, false);
+        UUID actorId = seedUser(ADAPTER, actor, /* isAdmin */ false, false);
         seedUser(ADAPTER, target, false, false);
         long auditBefore = countAuditUnderTargetPrefix(PREFIX + "nonAdmin-");
 
@@ -107,12 +107,23 @@ class GrantAdminCommandHandlerTest {
                 "target's is_admin must remain false on the admin-gate reject");
         assertEquals(auditBefore, countAuditUnderTargetPrefix(PREFIX + "nonAdmin-"),
                 "non-admin /grant-admin must not write any audit row");
+        assertEquals(0L, countAuditByActor(actorId),
+                "the non-admin dispatch must write zero audit rows of ANY action — "
+                        + "the permission check fails at spec step 7, so the step-8 "
+                        + "intent write is never reached");
     }
 
     // ----- (b) Unknown contact → error.contact_not_registered ---------------
+    // The reply is unchanged, but the admin-authorized dispatch passes
+    // the spec step-7 permission check, so the step-8 GRANT_ADMIN_INTENT
+    // row survives the step-5c rollback — an admin probing for
+    // registered contacts is no longer invisible to the audit log
+    // (the M1-151/M1-173 /revoke-admin AUDIT-EVASION class on the
+    // mirror command), and the row's target_registered=false marks
+    // its synthetic target_id.
 
     @Test
-    void grantUnknownContactReturnsContactNotRegistered() throws Exception {
+    void grantUnknownContactWritesIntentRow() throws Exception {
         String actor = PREFIX + "unknown-actor";
         String unknown = PREFIX + "unknown-target";
         seedUser(ADAPTER, actor, /* isAdmin */ true, false);
@@ -124,14 +135,30 @@ class GrantAdminCommandHandlerTest {
 
         assertEquals(bundleLoader.get(BundleKeys.ERROR_CONTACT_NOT_REGISTERED), reply.text(),
                 "unknown contact must surface error.contact_not_registered");
-        assertEquals(auditBefore, countAuditUnderTargetPrefix(PREFIX + "unknown-"),
-                "unknown-contact path must not write any audit row");
+        assertEquals(auditBefore + 1, countAuditUnderTargetPrefix(PREFIX + "unknown-"),
+                "exactly one audit row survives the unknown-contact refusal");
+        assertEquals(1L, countAuditByActionAndTarget("GRANT_ADMIN_INTENT", unknown),
+                "the admin-authorized probe against an unregistered contact must leave "
+                        + "a surviving GRANT_ADMIN_INTENT row");
+        assertEquals(0L, countAuditByActionAndTarget("GRANT_ADMIN", unknown),
+                "no GRANT_ADMIN effect row may exist for the refused attempt");
+        // jsonb canonicalizes details_json on read-back (one space
+        // after each colon), so the assertion matches that form.
+        String detailsJson = detailsJsonOfIntentRow(unknown);
+        assertTrue(detailsJson.contains("\"target_registered\": false"),
+                "the intent row against an unregistered contact must mark its synthetic "
+                        + "target_id with target_registered=false; got: " + detailsJson);
     }
 
     // ----- (c) Banned target → error.grant_admin.banned_target --------------
+    // The reply is unchanged, but the admin-authorized dispatch passes
+    // the spec step-7 permission check, so the step-8 GRANT_ADMIN_INTENT
+    // row survives the step-5d rollback — an admin probing for ban
+    // state is no longer invisible to the audit log. The registered
+    // target's intent row carries target_registered=true.
 
     @Test
-    void grantBannedTargetReturnsBannedTarget() throws Exception {
+    void grantBannedTargetWritesIntentRow() throws Exception {
         String actor = PREFIX + "banned-actor";
         String target = PREFIX + "banned-target";
         seedUser(ADAPTER, actor, /* isAdmin */ true, false);
@@ -146,14 +173,30 @@ class GrantAdminCommandHandlerTest {
                 "banned target must surface error.grant_admin.banned_target");
         assertFalse(isAdmin(ADAPTER, target),
                 "banned-target reject must not flip is_admin");
-        assertEquals(auditBefore, countAuditUnderTargetPrefix(PREFIX + "banned-"),
-                "banned-target reject must not write any audit row");
+        assertEquals(auditBefore + 1, countAuditUnderTargetPrefix(PREFIX + "banned-"),
+                "exactly one audit row survives the banned-target refusal");
+        assertEquals(1L, countAuditByActionAndTarget("GRANT_ADMIN_INTENT", target),
+                "the admin-authorized probe against a banned contact must leave "
+                        + "a surviving GRANT_ADMIN_INTENT row");
+        assertEquals(0L, countAuditByActionAndTarget("GRANT_ADMIN", target),
+                "no GRANT_ADMIN effect row may exist for the refused attempt");
+        // jsonb canonical form — see the spacing note in test (b).
+        String detailsJson = detailsJsonOfIntentRow(target);
+        assertTrue(detailsJson.contains("\"target_registered\": true"),
+                "the intent row against a registered target must carry "
+                        + "target_registered=true; got: " + detailsJson);
     }
 
     // ----- (d) Already admin → error.grant_admin.already_admin (no-op) ------
+    // The users-table no-op keeps its reply, but the admin-authorized
+    // dispatch passes the spec step-7 permission check, so the step-8
+    // GRANT_ADMIN_INTENT row survives the step-5e rollback — an admin
+    // probing for who holds the admin bit is no longer invisible to
+    // the audit log. The registered target's intent row carries
+    // target_registered=true.
 
     @Test
-    void grantAlreadyAdminReturnsAlreadyAdminNoAudit() throws Exception {
+    void grantAlreadyAdminWritesIntentRow() throws Exception {
         String actor = PREFIX + "already-actor";
         String target = PREFIX + "already-target";
         seedUser(ADAPTER, actor, /* isAdmin */ true, false);
@@ -168,8 +211,18 @@ class GrantAdminCommandHandlerTest {
                 "already-admin target must surface error.grant_admin.already_admin");
         assertTrue(isAdmin(ADAPTER, target),
                 "target's is_admin must remain true (no-op)");
-        assertEquals(auditBefore, countAuditUnderTargetPrefix(PREFIX + "already-"),
-                "already-admin no-op must write no audit row");
+        assertEquals(auditBefore + 1, countAuditUnderTargetPrefix(PREFIX + "already-"),
+                "exactly one audit row survives the already-admin no-op");
+        assertEquals(1L, countAuditByActionAndTarget("GRANT_ADMIN_INTENT", target),
+                "the admin-authorized probe against an already-admin target must leave "
+                        + "a surviving GRANT_ADMIN_INTENT row");
+        assertEquals(0L, countAuditByActionAndTarget("GRANT_ADMIN", target),
+                "no GRANT_ADMIN effect row may exist for the refused no-op attempt");
+        // jsonb canonical form — see the spacing note in test (b).
+        String detailsJson = detailsJsonOfIntentRow(target);
+        assertTrue(detailsJson.contains("\"target_registered\": true"),
+                "the intent row against a registered target must carry "
+                        + "target_registered=true; got: " + detailsJson);
     }
 
     // ----- (e) Happy path: UPDATE + GRANT_ADMIN audit row -------------------
@@ -192,10 +245,12 @@ class GrantAdminCommandHandlerTest {
 
         // GRANT_ADMIN audit row: actor + target identities, target_kind='user',
         // target_id = target.id::text, details_json carries target_adapter.
+        String effectRequestId;
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "SELECT actor_user_id, actor_contact_id, actor_adapter, "
-                             + "target_kind, target_id, target_contact_id, details_json "
+                             + "target_kind, target_id, target_contact_id, details_json, "
+                             + "request_id "
                              + "FROM audit_log WHERE action = 'GRANT_ADMIN' "
                              + "  AND target_contact_id = ?")) {
             ps.setString(1, target);
@@ -213,10 +268,15 @@ class GrantAdminCommandHandlerTest {
                         "details_json must carry target_adapter key; got: " + detailsJson);
                 assertTrue(detailsJson.contains(ADAPTER),
                         "details_json must carry the inbound adapter value; got: " + detailsJson);
+                effectRequestId = rs.getString("request_id");
                 assertFalse(rs.next(),
                         "no second GRANT_ADMIN audit row may exist for the target");
             }
         }
+        assertNotNull(effectRequestId, "the GRANT_ADMIN effect row must carry a request_id");
+        assertEquals(1L, countAuditByActionAndRequestId("GRANT_ADMIN_INTENT", effectRequestId),
+                "the committed GRANT_ADMIN effect row must share its request_id with "
+                        + "exactly one GRANT_ADMIN_INTENT row (intent↔effect correlation)");
     }
 
     // ----- (f) Per-adapter scoping isolation --------------------------------
@@ -291,6 +351,57 @@ class GrantAdminCommandHandlerTest {
              PreparedStatement ps = conn.prepareStatement(
                      "SELECT count(*) FROM audit_log WHERE target_contact_id LIKE ?")) {
             ps.setString(1, subPrefix + "%");
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getLong(1);
+            }
+        }
+    }
+
+    private long countAuditByActionAndTarget(String action, String targetContactId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT count(*) FROM audit_log WHERE action = ? AND target_contact_id = ?")) {
+            ps.setString(1, action);
+            ps.setString(2, targetContactId);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getLong(1);
+            }
+        }
+    }
+
+    private long countAuditByActionAndRequestId(String action, String requestId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT count(*) FROM audit_log WHERE action = ? AND request_id = ?")) {
+            ps.setString(1, action);
+            ps.setString(2, requestId);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getLong(1);
+            }
+        }
+    }
+
+    private String detailsJsonOfIntentRow(String targetContactId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT details_json FROM audit_log WHERE action = 'GRANT_ADMIN_INTENT' "
+                             + "  AND target_contact_id = ?")) {
+            ps.setString(1, targetContactId);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getString("details_json");
+            }
+        }
+    }
+
+    private long countAuditByActor(UUID actorUserId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT count(*) FROM audit_log WHERE actor_user_id = ?")) {
+            ps.setObject(1, actorUserId);
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return rs.getLong(1);

@@ -44,6 +44,46 @@ import java.util.UUID;
  *       §Admin (bot admin).</li>
  *   <li>Parse one positional {@code <contact>} argument — fail fast
  *       before opening the transaction.</li>
+ *   <li>Permission pre-check (spec §Authorization model step 7) —
+ *       refusing and NON-LOCKING: resolve the actor by
+ *       (adapter, contact_id); absent or non-admin →
+ *       {@code error.admin_only}; in probation →
+ *       {@code error.probation_blocked}. Mirrors
+ *       RevokeAdminCommandHandler's step-3 gate. The step-5a
+ *       {@code FOR UPDATE} gate stays authoritative for EXECUTION
+ *       (M1-046 PERM-ESCAL closure): an actor revoked between this
+ *       read and the transaction is refused in-tx; one granted admin
+ *       in that window is refused here once and succeeds on retry —
+ *       so execution can never happen without the step-4 intent row.
+ *       Refusal-before-intent keeps unauthorized senders from growing
+ *       the append-only audit_log.</li>
+ *   <li>Audit-on-intent — write the GRANT_ADMIN_INTENT row on a
+ *       separate auto-commit connection (BAN_INTENT pattern) BEFORE
+ *       the locking transaction below opens, unconditionally for
+ *       every dispatch that passes step 3 and BEFORE any
+ *       execution-semantics check: per spec §Authorization model
+ *       steps 7→8→9 the intent row covers every permission-passing
+ *       dispatch regardless of the execution outcome, so the
+ *       unknown-contact, banned-target and already-admin refusal
+ *       legs all leave a surviving row — without it {@code
+ *       /grant-admin} lets a bot admin enumerate registration state,
+ *       ban state and the admin bit with zero audit trace (the same
+ *       probe-enumeration AUDIT-EVASION class as the M1-151/M1-173
+ *       {@code /revoke-admin} findings). The row's target_id is the
+ *       target's users id when registered, a synthetic UUID
+ *       otherwise; target_contact_id carries the identity either
+ *       way, and details_json records target_registered so a
+ *       synthetic id is distinguishable from a
+ *       real-but-since-deleted user id. The pre-transaction
+ *       placement is load-bearing: the
+ *       {@code audit_log.actor_user_id} FK takes FOR KEY SHARE on
+ *       the actor row, which deadlocks against the step-5a FOR
+ *       UPDATE if the write happens while that lock is held —
+ *       undetectably, because this connection would be waiting in
+ *       application code, not in the database. Remaining benign
+ *       race: an actor revoked between step 3 and the transaction
+ *       leaves a spurious intent row for an attempt the transaction
+ *       then refuses.</li>
  *   <li>Open the transaction ({@code autoCommit=false}). All
  *       authorization-sensitive reads and the audit/UPDATE run
  *       inside this one transaction:
@@ -87,7 +127,19 @@ import java.util.UUID;
  * freshly-demoted admin still complete a grant. Moving the admin
  * check INSIDE the transaction with {@code FOR UPDATE} on the actor
  * row closes that window (the row lock blocks the concurrent
- * {@code /revoke-admin}'s UPDATE until this transaction commits).</p>
+ * {@code /revoke-admin}'s UPDATE until this transaction commits).
+ * The step-3 pre-check reintroduces an outside-the-tx read, but only
+ * ever REFUSES on it — execution authorization still happens
+ * exclusively at the in-tx locked read, so the window stays
+ * closed.</p>
+ *
+ * <p>Audit-before-effect transactionally — the GRANT_ADMIN audit
+ * INSERT and the users UPDATE run in one transaction; the
+ * separately-committed GRANT_ADMIN_INTENT row from step 4 is what
+ * survives the rolled-back refusal legs (spec §Authorization model
+ * step 8 "Audit-log the intent" precedes step 9 "Execute"). Both
+ * rows share one request id, so a successful grant's intent + effect
+ * pair is correlated.</p>
  *
  * <p>Per spec §Per-adapter admin threat profile: the
  * {@code <contact>} argument resolves against the INBOUND adapter
@@ -142,9 +194,7 @@ public class GrantAdminCommandHandler implements CommandHandler {
         String callerContactId = contactIdOf(scope);
 
         // DM-only convention. Short-circuit with error.admin_only so
-        // we do not open a transaction just to immediately roll it
-        // back when lookupActorForUpdate(null) inside the tx returns
-        // empty.
+        // the step-3 pre-check never sees a null contact id.
         if (callerContactId == null) {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
         }
@@ -159,27 +209,67 @@ public class GrantAdminCommandHandler implements CommandHandler {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
         }
 
-        // Step 3 — audit-before-effect transaction. All
-        // authorization-sensitive reads (admin gate, probation,
+        // Step 3 — permission pre-check (spec §Authorization model
+        // step 7), refusing and NON-LOCKING (plain MVCC read; mirrors
+        // RevokeAdminCommandHandler's step-3 gate). Refusing here
+        // keeps unauthorized senders from growing the append-only
+        // audit_log at step 4. The in-tx FOR UPDATE gate (step 5a)
+        // stays authoritative for EXECUTION: an actor revoked between
+        // this read and the transaction is still refused in-tx
+        // (M1-046 PERM-ESCAL closure); one granted admin inside that
+        // window is refused here once and succeeds on retry — so
+        // execution can never happen without the step-4 intent row.
+        Optional<UserRow> actorPre = lookupUser(adapter, callerContactId);
+        if (actorPre.isEmpty() || !actorPre.get().isAdmin) {
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+        }
+        UserRow actor = actorPre.get();
+        if (probationCheck.inProbation(actor.id)) {
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_PROBATION_BLOCKED));
+        }
+
+        // Step 4 — audit-on-intent (spec step 8) on a separate
+        // auto-commit connection (BAN_INTENT pattern), unconditional
+        // once step 3 passes and BEFORE every execution-semantics
+        // check, so the unknown-contact, banned-target and
+        // already-admin probes all leave a surviving intent row
+        // regardless of the execution outcome (the M1-151/M1-173
+        // /revoke-admin AUDIT-EVASION class on the mirror command).
+        // Pre-transaction placement is mandatory, not stylistic: the
+        // audit_log.actor_user_id FK takes FOR KEY SHARE on the actor
+        // row, which deadlocks against executeGrant's FOR UPDATE
+        // admin gate if written while that lock is held (PostgreSQL
+        // cannot detect it — this connection would wait in application
+        // code, not in the database). The shared requestId correlates
+        // the intent row with the GRANT_ADMIN effect row.
+        String requestId = UUID.randomUUID().toString();
+        insertIntentAudit(adapter, targetContactId, actor, requestId);
+
+        // Step 5 — audit-before-effect transaction. All execution-
+        // sensitive reads (authoritative admin gate, probation,
         // target lookup) and the audit/UPDATE run inside this one
         // transaction so a concurrent /revoke-admin against the
         // caller serializes on the FOR UPDATE row lock on the actor
         // row (M1-046 redteam PERM-ESCAL closure).
-        return executeGrant(scope, adapter, callerContactId, targetContactId);
+        return executeGrant(scope, adapter, callerContactId, targetContactId, requestId);
     }
 
     private OutboundMessage executeGrant(ScopeRef scope, String adapter,
                                          String callerContactId,
-                                         String targetContactId) {
-        String requestId = UUID.randomUUID().toString();
+                                         String targetContactId,
+                                         String requestId) {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                // Step 3a — admin gate INSIDE the tx via SELECT FOR
-                // UPDATE on the actor row. The lock blocks any
-                // concurrent /revoke-admin UPDATE on this row until
-                // the tx commits; the is_admin read therefore reflects
-                // the actor's current state, not a stale snapshot.
+                // Step 5a — admin gate INSIDE the tx via SELECT FOR
+                // UPDATE on the actor row, authoritative for
+                // execution (the step-3 pre-check already refused
+                // other unauthorized callers; this branch fires when
+                // the caller was revoked between that read and this
+                // lock). The lock blocks any concurrent /revoke-admin
+                // UPDATE on this row until the tx commits; the
+                // is_admin read therefore reflects the actor's
+                // current state, not a stale snapshot.
                 Optional<UserRow> actorOpt =
                         lookupActorForUpdate(conn, adapter, callerContactId);
                 if (actorOpt.isEmpty() || !actorOpt.get().isAdmin) {
@@ -191,7 +281,7 @@ public class GrantAdminCommandHandler implements CommandHandler {
                     st.execute("SET LOCAL infochat.actor_id = '" + actor.id + "'");
                 }
 
-                // Step 3b — probation guard (defense-in-depth).
+                // Step 5b — probation guard (defense-in-depth).
                 // M1-045's intake-side step-5 gate is the primary
                 // defense; this check survives future changes that
                 // might decouple probation from is_admin.
@@ -200,7 +290,7 @@ public class GrantAdminCommandHandler implements CommandHandler {
                     return reply(scope, bundleLoader.get(BundleKeys.ERROR_PROBATION_BLOCKED));
                 }
 
-                // Step 3c — target lookup, inbound-adapter-scoped,
+                // Step 5c — target lookup, inbound-adapter-scoped,
                 // INSIDE the tx for snapshot consistency with the
                 // actor read.
                 Optional<UserRow> targetOpt =
@@ -211,27 +301,29 @@ public class GrantAdminCommandHandler implements CommandHandler {
                 }
                 UserRow target = targetOpt.get();
 
-                // Step 3d — banned-target reject.
+                // Step 5d — banned-target reject.
                 if (target.isBanned) {
                     conn.rollback();
                     return reply(scope, bundleLoader.get(BundleKeys.ERROR_GRANT_ADMIN_BANNED_TARGET));
                 }
 
-                // Step 3e — already-admin no-op.
+                // Step 5e — already-admin no-op.
                 if (target.isAdmin) {
                     conn.rollback();
                     return reply(scope, bundleLoader.get(BundleKeys.ERROR_GRANT_ADMIN_ALREADY_ADMIN));
                 }
 
-                // Step 3f — pre-write GRANT_ADMIN audit row BEFORE
+                // Step 5f — pre-write GRANT_ADMIN audit row BEFORE
                 // the UPDATE. Invariant 7 (audit-before-effect): if
                 // the UPDATE raises, the audit row's INSERT rolls
-                // back too.
+                // back too; the separately-committed
+                // GRANT_ADMIN_INTENT row from step 4 is what
+                // survives.
                 insertAudit(conn, AuditAction.GRANT_ADMIN, "user",
                         target.id.toString(), target.contactId, actor,
                         adapter, requestId, grantAdminDetailsJson(adapter));
 
-                // Step 3g — UPDATE users SET is_admin = TRUE WHERE id = ?
+                // Step 5g — UPDATE users SET is_admin = TRUE WHERE id = ?
                 try (PreparedStatement ps = conn.prepareStatement(UPDATE_GRANT_ADMIN_SQL)) {
                     ps.setObject(1, target.id);
                     ps.executeUpdate();
@@ -261,6 +353,18 @@ public class GrantAdminCommandHandler implements CommandHandler {
         }
     }
 
+    /**
+     * Non-locking lookup used by the step-3 permission pre-check and
+     * the step-4 intent row's target_id resolution. Plain MVCC SELECT
+     * — takes no row lock, so it can never participate in the
+     * FK-vs-FOR-UPDATE deadlock the pre-transaction intent placement
+     * exists to avoid.
+     */
+    private Optional<UserRow> lookupUser(String adapter, String contactId) {
+        return userRepository.findByAdapterAndContactId(adapter, contactId)
+                .map(u -> new UserRow(u.id(), u.contactId(), u.isAdmin(), u.isBanned()));
+    }
+
     private Optional<UserRow> lookupActorForUpdate(Connection conn,
                                                    String adapter,
                                                    String contactId) throws SQLException {
@@ -284,6 +388,35 @@ public class GrantAdminCommandHandler implements CommandHandler {
                 boolean isBanned = rs.getBoolean("is_banned");
                 return Optional.of(new UserRow(id, resolvedContactId, isAdmin, isBanned));
             }
+        }
+    }
+
+    /**
+     * Write the GRANT_ADMIN_INTENT row on its own auto-commit
+     * connection (BAN_INTENT pattern). The target lookup here resolves
+     * ONLY the row's target_id — the target's users id when registered,
+     * a synthetic UUID otherwise (target_contact_id carries the
+     * resolved identity either way) — and the details_json
+     * target_registered flag that makes a synthetic id distinguishable
+     * from a real-but-since-deleted user id; target state never gates
+     * the write. A failure here surfaces before the mutation runs —
+     * preferable to a privilege-granting UPDATE that lands no intent
+     * trail.
+     */
+    private void insertIntentAudit(String adapter, String targetContactId, UserRow actor,
+                                   String requestId) {
+        Optional<UserRow> targetPre = lookupUser(adapter, targetContactId);
+        UUID targetUserIdForIntent = targetPre.map(u -> u.id).orElse(UUID.randomUUID());
+        try (Connection conn = dataSource.getConnection()) {
+            insertAudit(conn, AuditAction.GRANT_ADMIN_INTENT, "user",
+                    targetUserIdForIntent.toString(), targetContactId, actor,
+                    adapter, requestId,
+                    grantAdminIntentDetailsJson(adapter, targetPre.isPresent()));
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "GrantAdminCommandHandler intent-audit write failed for adapter="
+                            + adapter + " contact_id="
+                            + ContactIds.redact(targetContactId), e);
         }
     }
 
@@ -346,6 +479,18 @@ public class GrantAdminCommandHandler implements CommandHandler {
      */
     private static String grantAdminDetailsJson(String adapter) {
         return "{\"target_adapter\":" + quoteJsonString(adapter) + "}";
+    }
+
+    /**
+     * Intent rows additionally record whether the target had a users
+     * row at intent time: {@code target_registered=false} marks the
+     * row's target_id as synthetic. Effect rows omit the key — their
+     * targets are registered by construction (the in-tx lookup
+     * succeeded).
+     */
+    private static String grantAdminIntentDetailsJson(String adapter, boolean targetRegistered) {
+        return "{\"target_adapter\":" + quoteJsonString(adapter)
+                + ",\"target_registered\":" + targetRegistered + "}";
     }
 
     private static String quoteJsonString(String s) {

@@ -1,7 +1,7 @@
 ---
 id: M1-174
 title: "Grant-admin intent-row coverage (probe-visibility parity)"
-status: pending
+status: done
 created: 2026-06-06
 last_updated: 2026-06-06
 blocked_by: [M1-173]
@@ -40,12 +40,45 @@ test_plan:
 spec_refs:
   - docs/spec/security.md §Authorization model
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-06
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 310
+      removed: 40
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-06
+    verdict: CLEAN
+    base: main (69b4cc6)
+    head: working tree of branch m1/M1-174-grant-admin-intent-coverage (pre-commit, --in-progress)
+    verdict_file: docs/plan/m1/redteam/M1-174-2026-06-06.md
+    out_of_model_count: 1
+    note: |
+      Pre-commit audit after round-1 APPROVE. CLEAN: intent-row
+      coverage complete on all three state-disclosing refusal legs,
+      fail-closed (intent write throws before any probe reply or
+      UPDATE), M1-046 FOR UPDATE gate unweakened, no
+      effect-without-intent path, no new injection surface. One
+      out-of-model advisory: audit_log growth now includes surviving
+      GRANT_ADMIN_INTENT rows per refused probe — the ticket's
+      intended trade-off, operator-awareness only, no action.
+clarity_check:
+  date: 2026-06-06
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-174: Grant-admin intent-row coverage (probe-visibility parity)
