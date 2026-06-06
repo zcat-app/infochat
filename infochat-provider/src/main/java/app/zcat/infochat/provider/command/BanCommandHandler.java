@@ -205,18 +205,19 @@ public class BanCommandHandler implements CommandHandler {
         // because the prompt path mutates no other state. A failure
         // here surfaces as SQLException and the prompt is never sent
         // — preferable to a silent intent that lands no audit trail.
-        // The intent row's target_id is a synthetic UUID when the
-        // target user row doesn't exist yet (pre-ban case): we never
-        // SELECT the target on the prompt leg, so the row's
-        // target_user_id is always a fresh UUID; the
-        // target_contact_id field carries the resolved identity.
+        // The intent row's target_id is the target's users id when
+        // registered, a synthetic UUID otherwise (pre-ban case);
+        // target_contact_id carries the resolved identity either way,
+        // and details_json records target_registered so a synthetic id
+        // is distinguishable from a real-but-since-deleted user id.
         Optional<UserRow> targetOpt = lookupUser(adapter, targetContactId);
         UUID targetUserIdForIntent = targetOpt.map(u -> u.id).orElse(UUID.randomUUID());
         String intentRequestId = UUID.randomUUID().toString();
         try (Connection conn = dataSource.getConnection()) {
             insertAudit(conn, AuditAction.BAN_INTENT, "user",
                     targetUserIdForIntent.toString(), targetContactId, actor,
-                    adapter, intentRequestId, banDetailsJson(args.reason));
+                    adapter, intentRequestId,
+                    banDetailsJson(args.reason, targetOpt.isPresent()));
         } catch (SQLException e) {
             throw new RuntimeException("Failed to write BAN_INTENT audit row", e);
         }
@@ -262,10 +263,13 @@ public class BanCommandHandler implements CommandHandler {
                 List<UUID> pendingInviteIds = selectPendingContactBoundInvites(
                         conn, adapter, targetContactId);
 
-                // Step 1.5a — pre-write the BAN audit row.
+                // Step 1.5a — pre-write the BAN audit row. The BAN
+                // effect row can carry a synthetic target_id too (the
+                // pre-ban path mints the users row only at step 5), so
+                // it records target_registered like the intent row.
                 insertAudit(conn, AuditAction.BAN, "user", targetUserId.toString(),
                         targetContactId, actor, adapter, requestId,
-                        banDetailsJson(reason));
+                        banDetailsJson(reason, targetOpt.isPresent()));
 
                 // Step 1.5b — pre-write one INVITE_REVOKE audit row per
                 // pending CONTACT_BOUND invite, sharing the same
@@ -428,15 +432,20 @@ public class BanCommandHandler implements CommandHandler {
     }
 
     /**
-     * Build the BAN audit row's {@code details_json}. Carries the
-     * caller-supplied {@code --reason} verbatim when present (escaped
-     * for safe JSON embedding); empty object otherwise.
+     * Build the BAN / BAN_INTENT audit row's {@code details_json}.
+     * Carries the caller-supplied {@code --reason} verbatim when
+     * present (escaped for safe JSON embedding), plus
+     * {@code target_registered}: {@code false} marks the row's
+     * target_id as synthetic (no users row existed at write time —
+     * pre-ban case), distinguishable from a real-but-since-deleted
+     * user id.
      */
-    private static String banDetailsJson(@Nullable String reason) {
+    private static String banDetailsJson(@Nullable String reason, boolean targetRegistered) {
         if (reason == null) {
-            return "{}";
+            return "{\"target_registered\":" + targetRegistered + "}";
         }
-        return "{\"reason\":" + quoteJsonString(reason) + "}";
+        return "{\"reason\":" + quoteJsonString(reason)
+                + ",\"target_registered\":" + targetRegistered + "}";
     }
 
     private static String inviteRevokeOnBanDetailsJson() {

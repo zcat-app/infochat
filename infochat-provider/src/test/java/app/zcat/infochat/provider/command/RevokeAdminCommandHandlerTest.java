@@ -86,7 +86,7 @@ class RevokeAdminCommandHandlerTest {
     void revokeByNonAdminReturnsAdminOnly() throws Exception {
         String actor = PREFIX + "nonAdmin-actor";
         String target = PREFIX + "nonAdmin-target";
-        seedUser(actor, /* isAdmin */ false, false);
+        UUID actorId = seedUser(actor, /* isAdmin */ false, false);
         seedUser(target, /* isAdmin */ true, false);
         long auditBefore = countAuditUnderTargetPrefix(PREFIX + "nonAdmin-");
 
@@ -100,15 +100,24 @@ class RevokeAdminCommandHandlerTest {
                 "non-admin /revoke-admin must not flip target's is_admin");
         assertEquals(auditBefore, countAuditUnderTargetPrefix(PREFIX + "nonAdmin-"),
                 "non-admin /revoke-admin must write no audit row");
+        assertEquals(0L, countAuditByActor(actorId),
+                "the non-admin dispatch must write zero audit rows of ANY action — "
+                        + "the permission check fails at spec step 7, so the step-8 "
+                        + "intent write is never reached");
     }
 
     // ----- (b) Self-revoke → error.revoke_admin.cannot_revoke_self ---------
-    // The handler short-circuits BEFORE the SQL: the V5 trigger is the
-    // LAST line of defense, not the only one. Verified by counting
-    // post-state users mutations + audit rows.
+    // Permission check (spec step 7) and audit-on-intent (step 8) run
+    // BEFORE the guard, so an authorized admin's self-revoke leaves a
+    // surviving REVOKE_ADMIN_INTENT row (M1-173 redteam finding 1)
+    // while the guard still short-circuits before the transaction: no
+    // users mutation, no effect row. The V5 trigger stays the LAST
+    // line of defense, not the only one. A non-admin self-revoke is
+    // refused at step 7 itself — the guard is never reached and no
+    // row is written.
 
     @Test
-    void revokeSelfShortCircuitsBeforeSql() throws Exception {
+    void revokeSelfByAdminWritesIntentRowWithoutEffect() throws Exception {
         String actor = PREFIX + "self-actor";
         seedUser(actor, /* isAdmin */ true, false);
         long auditBefore = countAuditUnderTargetPrefix(PREFIX + "self-");
@@ -120,15 +129,42 @@ class RevokeAdminCommandHandlerTest {
         assertEquals(bundleLoader.get(BundleKeys.ERROR_REVOKE_ADMIN_CANNOT_REVOKE_SELF), reply.text(),
                 "self-revoke must surface error.revoke_admin.cannot_revoke_self");
         assertTrue(isAdmin(actor),
-                "self-revoke must NOT touch users.is_admin (handler short-circuits before the SQL)");
-        assertEquals(auditBefore, countAuditUnderTargetPrefix(PREFIX + "self-"),
-                "self-revoke must write no audit row (handler short-circuits before the transaction)");
+                "self-revoke must NOT touch users.is_admin (guard short-circuits before the transaction)");
+        assertEquals(auditBefore + 1, countAuditUnderTargetPrefix(PREFIX + "self-"),
+                "exactly one audit row survives the refused self-revoke");
+        assertEquals(1L, countAuditByActionAndTarget("REVOKE_ADMIN_INTENT", actor),
+                "the authorized self-revoke attempt must leave a surviving REVOKE_ADMIN_INTENT row");
+        assertEquals(0L, countAuditByActionAndTarget("REVOKE_ADMIN", actor),
+                "no REVOKE_ADMIN effect row may exist for the refused self-revoke");
+    }
+
+    @Test
+    void revokeSelfByNonAdminReturnsAdminOnlyNoAudit() throws Exception {
+        String actor = PREFIX + "selfNonAdmin-actor";
+        UUID actorId = seedUser(actor, /* isAdmin */ false, false);
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/revoke-admin " + actor);
+
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY), reply.text(),
+                "the permission check (spec step 7) precedes the self-revoke guard: "
+                        + "a non-admin self-revoke surfaces error.admin_only");
+        assertEquals(0L, countAuditByActor(actorId),
+                "the permission-refused dispatch must write zero audit rows of any action");
     }
 
     // ----- (c) Unknown contact → error.contact_not_registered --------------
+    // The reply is unchanged, but the admin-authorized dispatch passes
+    // the spec step-7 permission check, so the step-8 REVOKE_ADMIN_INTENT
+    // row survives the step-6c rollback — an admin probing for
+    // registered contacts is no longer invisible to the audit log
+    // (M1-151 redteam finding 1, target-unknown leg), and the row's
+    // target_registered=false marks its synthetic target_id (M1-173
+    // redteam finding 3).
 
     @Test
-    void revokeUnknownContactReturnsContactNotRegistered() throws Exception {
+    void revokeUnknownContactWritesIntentRow() throws Exception {
         String actor = PREFIX + "unknown-actor";
         String unknown = PREFIX + "unknown-target";
         seedUser(actor, /* isAdmin */ true, false);
@@ -140,14 +176,31 @@ class RevokeAdminCommandHandlerTest {
 
         assertEquals(bundleLoader.get(BundleKeys.ERROR_CONTACT_NOT_REGISTERED), reply.text(),
                 "unknown contact must surface error.contact_not_registered");
-        assertEquals(auditBefore, countAuditUnderTargetPrefix(PREFIX + "unknown-"),
-                "unknown-contact path must write no audit row");
+        assertEquals(auditBefore + 1, countAuditUnderTargetPrefix(PREFIX + "unknown-"),
+                "exactly one audit row survives the unknown-contact refusal");
+        assertEquals(1L, countAuditByActionAndTarget("REVOKE_ADMIN_INTENT", unknown),
+                "the admin-authorized probe against an unregistered contact must leave "
+                        + "a surviving REVOKE_ADMIN_INTENT row");
+        assertEquals(0L, countAuditByActionAndTarget("REVOKE_ADMIN", unknown),
+                "no REVOKE_ADMIN effect row may exist for the refused attempt");
+        // jsonb canonicalizes details_json on read-back (one space
+        // after each colon), so the assertion matches that form.
+        String detailsJson = detailsJsonOfIntentRow(unknown);
+        assertTrue(detailsJson.contains("\"target_registered\": false"),
+                "the intent row against an unregistered contact must mark its synthetic "
+                        + "target_id with target_registered=false; got: " + detailsJson);
     }
 
     // ----- (d) Target not admin → error.revoke_admin.not_admin (no-op) -----
+    // The users-table no-op keeps its reply, but the admin-authorized
+    // dispatch passes the spec step-7 permission check, so the step-8
+    // REVOKE_ADMIN_INTENT row survives the step-6d rollback — an admin
+    // probing for who holds the admin bit is no longer invisible to the
+    // audit log (M1-151 redteam finding 1, target-not-admin leg). The
+    // registered target's intent row carries target_registered=true.
 
     @Test
-    void revokeTargetNotAdminReturnsNotAdminNoAudit() throws Exception {
+    void revokeTargetNotAdminWritesIntentRow() throws Exception {
         String actor = PREFIX + "notAdmin-actor";
         String target = PREFIX + "notAdmin-target";
         seedUser(actor, /* isAdmin */ true, false);
@@ -162,8 +215,18 @@ class RevokeAdminCommandHandlerTest {
                 "already-non-admin target must surface error.revoke_admin.not_admin");
         assertFalse(isAdmin(target),
                 "target's is_admin must remain false (no-op)");
-        assertEquals(auditBefore, countAuditUnderTargetPrefix(PREFIX + "notAdmin-"),
-                "no-op path must write no audit row");
+        assertEquals(auditBefore + 1, countAuditUnderTargetPrefix(PREFIX + "notAdmin-"),
+                "exactly one audit row survives the not-admin refusal");
+        assertEquals(1L, countAuditByActionAndTarget("REVOKE_ADMIN_INTENT", target),
+                "the admin-authorized probe against a registered non-admin must leave "
+                        + "a surviving REVOKE_ADMIN_INTENT row");
+        assertEquals(0L, countAuditByActionAndTarget("REVOKE_ADMIN", target),
+                "no REVOKE_ADMIN effect row may exist for the refused no-op attempt");
+        // jsonb canonical form — see the spacing note in test (c).
+        String detailsJson = detailsJsonOfIntentRow(target);
+        assertTrue(detailsJson.contains("\"target_registered\": true"),
+                "the intent row against a registered target must carry "
+                        + "target_registered=true; got: " + detailsJson);
     }
 
     // ----- (e) Trigger-fire path: V5 last-admin protection -----------------
@@ -261,10 +324,12 @@ class RevokeAdminCommandHandlerTest {
         assertTrue(isAdminOnAdapter(otherAdapter, PREFIX + "twoAdmins-otherAdapterAdmin"),
                 "the OTHER adapter's admin row must be UNCHANGED");
 
+        String effectRequestId;
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "SELECT actor_user_id, actor_contact_id, actor_adapter, "
-                             + "target_kind, target_id, target_contact_id, details_json "
+                             + "target_kind, target_id, target_contact_id, details_json, "
+                             + "request_id "
                              + "FROM audit_log WHERE action = 'REVOKE_ADMIN' "
                              + "  AND target_contact_id = ?")) {
             ps.setString(1, target);
@@ -280,8 +345,13 @@ class RevokeAdminCommandHandlerTest {
                 assertNotNull(detailsJson, "details_json must be non-null");
                 assertTrue(detailsJson.contains("\"target_adapter\""),
                         "details_json must carry target_adapter key; got: " + detailsJson);
+                effectRequestId = rs.getString("request_id");
             }
         }
+        assertNotNull(effectRequestId, "the REVOKE_ADMIN effect row must carry a request_id");
+        assertEquals(1L, countAuditByActionAndRequestId("REVOKE_ADMIN_INTENT", effectRequestId),
+                "the committed REVOKE_ADMIN effect row must share its request_id with "
+                        + "exactly one REVOKE_ADMIN_INTENT row (intent↔effect correlation)");
     }
 
     // ----- helpers ---------------------------------------------------------
@@ -388,6 +458,44 @@ class RevokeAdminCommandHandlerTest {
                      "SELECT count(*) FROM audit_log WHERE action = ? AND target_contact_id = ?")) {
             ps.setString(1, action);
             ps.setString(2, targetContactId);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getLong(1);
+            }
+        }
+    }
+
+    private long countAuditByActionAndRequestId(String action, String requestId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT count(*) FROM audit_log WHERE action = ? AND request_id = ?")) {
+            ps.setString(1, action);
+            ps.setString(2, requestId);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getLong(1);
+            }
+        }
+    }
+
+    private String detailsJsonOfIntentRow(String targetContactId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT details_json FROM audit_log WHERE action = 'REVOKE_ADMIN_INTENT' "
+                             + "  AND target_contact_id = ?")) {
+            ps.setString(1, targetContactId);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getString("details_json");
+            }
+        }
+    }
+
+    private long countAuditByActor(UUID actorUserId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT count(*) FROM audit_log WHERE actor_user_id = ?")) {
+            ps.setObject(1, actorUserId);
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return rs.getLong(1);

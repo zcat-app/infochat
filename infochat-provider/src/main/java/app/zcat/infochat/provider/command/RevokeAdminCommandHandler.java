@@ -43,34 +43,57 @@ import java.util.UUID;
  *       per-adapter and have no group-scope semantic per spec
  *       §Admin (bot admin).</li>
  *   <li>Parse one positional {@code <contact>} argument.</li>
- *   <li>Self-revoke guard — if {@code callerContactId.equals(
- *       targetContactId)} (both scoped to the same inbound adapter,
- *       so a contact-id match implies identity), return
+ *   <li>Permission pre-check (spec §Authorization model step 7) —
+ *       refusing and NON-LOCKING: resolve the actor by
+ *       (adapter, contact_id); absent or non-admin →
+ *       {@code error.admin_only}; in probation →
+ *       {@code error.probation_blocked}. Mirrors BanCommandHandler's
+ *       step-1 admin gate. The step-6a {@code FOR UPDATE} gate stays
+ *       authoritative for EXECUTION (M1-046 PERM-ESCAL closure): an
+ *       actor revoked between this read and the transaction is
+ *       refused in-tx; one granted admin in that window is refused
+ *       here once and succeeds on retry — so execution can never
+ *       happen without the step-4 intent row. Refusal-before-intent
+ *       keeps unauthorized senders from growing the append-only
+ *       audit_log.</li>
+ *   <li>Audit-on-intent — write the REVOKE_ADMIN_INTENT row on a
+ *       separate auto-commit connection (BAN_INTENT pattern) BEFORE
+ *       the locking transaction below opens, unconditionally for
+ *       every dispatch that passes step 3 and BEFORE any
+ *       execution-semantics check: per spec §Authorization model
+ *       steps 7→8→9 the intent row covers every permission-passing
+ *       dispatch regardless of the execution outcome, so
+ *       self-revoke, target-unknown, target-not-admin and
+ *       trigger-refused attempts all leave a surviving row, and a
+ *       target is_admin flip between this write and the transaction
+ *       cannot skip it (M1-151 + M1-173 redteam findings). The
+ *       row's target_id is the target's users id when registered, a
+ *       synthetic UUID otherwise; target_contact_id carries the
+ *       identity either way, and details_json records
+ *       target_registered so a synthetic id is distinguishable from
+ *       a real-but-since-deleted user id. The pre-transaction
+ *       placement is load-bearing: the
+ *       {@code audit_log.actor_user_id} FK takes FOR KEY SHARE on
+ *       the actor row, which deadlocks against the step-6a FOR
+ *       UPDATE if the write happens while that lock is held —
+ *       undetectably, because this connection would be waiting in
+ *       application code, not in the database. Remaining benign
+ *       race: an actor revoked between step 3 and the transaction
+ *       leaves a spurious intent row for an attempt the transaction
+ *       then refuses.</li>
+ *   <li>Self-revoke guard — first execution-semantics check (spec
+ *       step 9): if {@code callerContactId.equals(targetContactId)}
+ *       (both scoped to the same inbound adapter, so a contact-id
+ *       match implies identity), return
  *       {@code error.revoke_admin.cannot_revoke_self}. This is the
  *       first-line UX defense; the V5
  *       {@code trg_last_admin_protection_update} trigger is the
  *       last-line invariant. The trigger has no signal of which
  *       connection issued the UPDATE (M1-008a red-team finding), so
- *       the handler is the load-bearing self-revoke check. The check
- *       runs OUTSIDE the tx so a self-revoke against an unknown
- *       contact surfaces the self-revoke error rather than opening a
- *       throwaway transaction.</li>
- *   <li>Audit-on-intent — write the REVOKE_ADMIN_INTENT row on a
- *       separate auto-commit connection (BAN_INTENT pattern) BEFORE
- *       the locking transaction below opens, gated by NON-LOCKING
- *       pre-checks mirroring the in-transaction guards (actor
- *       exists, is admin, not in probation; target exists, is
- *       admin). The pre-transaction placement is load-bearing: the
- *       {@code audit_log.actor_user_id} FK takes FOR KEY SHARE on
- *       the actor row, which deadlocks against the step-5a FOR
- *       UPDATE if the write happens while that lock is held —
- *       undetectably, because this connection would be waiting in
- *       application code, not in the database. The pre-checks gate
- *       ONLY this write; the in-transaction guards stay
- *       authoritative for authorization and replies. Races between
- *       pre-check and transaction are tolerated as BAN_INTENT
- *       tolerates its prompt-leg gap: at worst a spurious intent
- *       row for an attempt the transaction then refuses.</li>
+ *       the handler is the load-bearing self-revoke check. Runs
+ *       OUTSIDE the tx so a self-revoke never opens a throwaway
+ *       transaction; the step-4 intent row already covers the
+ *       refused attempt.</li>
  *   <li>Open the transaction ({@code autoCommit=false}). All
  *       authorization-sensitive reads and the audit/UPDATE run
  *       inside this one transaction:
@@ -114,7 +137,10 @@ import java.util.UUID;
  * admin check and the UPDATE, letting a freshly-demoted admin still
  * complete a revoke against a co-admin. Moving the admin check
  * INSIDE the transaction with {@code FOR UPDATE} on the actor row
- * closes that window.</p>
+ * closes that window. The step-3 pre-check reintroduces an
+ * outside-the-tx read, but only ever REFUSES on it — execution
+ * authorization still happens exclusively at the in-tx locked read,
+ * so the window stays closed.</p>
  *
  * <p>Audit-before-effect transactionally — the REVOKE_ADMIN audit
  * INSERT and the users UPDATE run in one transaction. If the trigger
@@ -171,9 +197,7 @@ public class RevokeAdminCommandHandler implements CommandHandler {
         String callerContactId = contactIdOf(scope);
 
         // DM-only convention. Short-circuit with error.admin_only so
-        // we do not open a transaction just to immediately roll it
-        // back when lookupActorForUpdate(null) inside the tx returns
-        // empty.
+        // the step-3 pre-check never sees a null contact id.
         if (callerContactId == null) {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
         }
@@ -184,41 +208,55 @@ public class RevokeAdminCommandHandler implements CommandHandler {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
         }
 
-        // Step 3 — self-revoke guard (first-line UX defense). The
-        // (adapter, contact_id) identity is sufficient: actor and
-        // target are scoped to the same inbound adapter, so a
-        // contact_id match implies identity. The check runs BEFORE
-        // opening the transaction so a self-revoke surfaces the
-        // self-revoke error without a throwaway tx.
-        if (callerContactId.equals(targetContactId)) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_REVOKE_ADMIN_CANNOT_REVOKE_SELF));
+        // Step 3 — permission pre-check (spec §Authorization model
+        // step 7), refusing and NON-LOCKING (plain MVCC read; mirrors
+        // BanCommandHandler's step-1 admin gate). Refusing here keeps
+        // unauthorized senders from growing the append-only audit_log
+        // at step 4. The in-tx FOR UPDATE gate (step 6a) stays
+        // authoritative for EXECUTION: an actor revoked between this
+        // read and the transaction is still refused in-tx (M1-046
+        // PERM-ESCAL closure); one granted admin inside that window
+        // is refused here once and succeeds on retry — so execution
+        // can never happen without the step-4 intent row (M1-173
+        // redteam finding 2).
+        Optional<UserRow> actorPre = lookupUser(adapter, callerContactId);
+        if (actorPre.isEmpty() || !actorPre.get().isAdmin) {
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+        }
+        UserRow actor = actorPre.get();
+        if (probationCheck.inProbation(actor.id)) {
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_PROBATION_BLOCKED));
         }
 
-        // Step 4 — audit-on-intent (spec §Authorization model step 8)
-        // BEFORE the locking transaction opens, on a separate
-        // auto-commit connection (BAN_INTENT pattern). Pre-transaction
-        // placement is mandatory, not stylistic: the
+        // Step 4 — audit-on-intent (spec step 8) on a separate
+        // auto-commit connection (BAN_INTENT pattern), unconditional
+        // once step 3 passes and BEFORE every execution-semantics
+        // check — self-revoke included — so every permission-passing
+        // dispatch leaves a surviving intent row regardless of the
+        // execution outcome (M1-151 finding 1 + M1-173 finding 1).
+        // Pre-transaction placement is mandatory, not stylistic: the
         // audit_log.actor_user_id FK takes FOR KEY SHARE on the actor
         // row, which deadlocks against executeRevoke's FOR UPDATE
         // admin gate if written while that lock is held (PostgreSQL
         // cannot detect it — this connection would wait in application
-        // code, not in the database). The NON-LOCKING pre-checks below
-        // mirror the in-transaction guards so guard-failing probes and
-        // no-op paths write no row; they gate ONLY the intent write —
-        // the in-transaction guards remain authoritative for
-        // authorization and replies. The shared requestId correlates
+        // code, not in the database). The shared requestId correlates
         // the intent row with the REVOKE_ADMIN effect row.
         String requestId = UUID.randomUUID().toString();
-        Optional<UserRow> actorPre = lookupUser(adapter, callerContactId);
-        Optional<UserRow> targetPre = lookupUser(adapter, targetContactId);
-        if (actorPre.isPresent() && actorPre.get().isAdmin
-                && !probationCheck.inProbation(actorPre.get().id)
-                && targetPre.isPresent() && targetPre.get().isAdmin) {
-            insertIntentAudit(targetPre.get(), actorPre.get(), adapter, requestId);
+        insertIntentAudit(adapter, targetContactId, actor, requestId);
+
+        // Step 5 — self-revoke guard, first execution-semantics check
+        // (spec step 9). The (adapter, contact_id) identity is
+        // sufficient: actor and target are scoped to the same inbound
+        // adapter, so a contact_id match implies identity. Runs
+        // OUTSIDE the tx so a self-revoke never opens a throwaway
+        // transaction; the step-4 intent row already covers this
+        // refused attempt.
+        if (callerContactId.equals(targetContactId)) {
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_REVOKE_ADMIN_CANNOT_REVOKE_SELF));
         }
 
-        // Step 5 — audit-before-effect transaction. All
-        // authorization-sensitive reads (admin gate, probation,
+        // Step 6 — audit-before-effect transaction. All execution-
+        // sensitive reads (authoritative admin gate, probation,
         // target lookup) and the audit/UPDATE run inside this one
         // transaction; the actor row is SELECT ... FOR UPDATE-locked
         // so a concurrent /revoke-admin against the caller
@@ -233,11 +271,14 @@ public class RevokeAdminCommandHandler implements CommandHandler {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                // Step 5a — admin gate INSIDE the tx via SELECT FOR
-                // UPDATE on the actor row. The row lock blocks a
-                // concurrent /revoke-admin against this caller; the
-                // subsequent is_admin read reflects the caller's
-                // current state. The trigger-fire path (V5
+                // Step 6a — admin gate INSIDE the tx via SELECT FOR
+                // UPDATE on the actor row, authoritative for
+                // execution (the step-3 pre-check already refused
+                // other unauthorized callers; this branch fires when
+                // the caller was revoked between that read and this
+                // lock). The row lock blocks a concurrent
+                // /revoke-admin against this caller; the subsequent
+                // is_admin read reflects the caller's current state. The trigger-fire path (V5
                 // last_admin_protection) requires the target to be
                 // the sole qualifying admin, which is unreachable
                 // through this handler when the actor itself
@@ -256,13 +297,13 @@ public class RevokeAdminCommandHandler implements CommandHandler {
                     st.execute("SET LOCAL infochat.actor_id = '" + actor.id + "'");
                 }
 
-                // Step 5b — probation guard (defense-in-depth).
+                // Step 6b — probation guard (defense-in-depth).
                 if (probationCheck.inProbation(actor.id)) {
                     conn.rollback();
                     return reply(scope, bundleLoader.get(BundleKeys.ERROR_PROBATION_BLOCKED));
                 }
 
-                // Step 5c — target lookup INSIDE the tx.
+                // Step 6c — target lookup INSIDE the tx.
                 Optional<UserRow> targetOpt =
                         lookupTargetInTx(conn, adapter, targetContactId);
                 if (targetOpt.isEmpty()) {
@@ -271,13 +312,13 @@ public class RevokeAdminCommandHandler implements CommandHandler {
                 }
                 UserRow target = targetOpt.get();
 
-                // Step 5d — not-admin no-op.
+                // Step 6d — not-admin no-op.
                 if (!target.isAdmin) {
                     conn.rollback();
                     return reply(scope, bundleLoader.get(BundleKeys.ERROR_REVOKE_ADMIN_NOT_ADMIN));
                 }
 
-                // Step 5e — pre-write REVOKE_ADMIN audit row BEFORE
+                // Step 6e — pre-write REVOKE_ADMIN audit row BEFORE
                 // the UPDATE. If the V5 trigger raises, the audit
                 // INSERT rolls back with the failed UPDATE; the
                 // separately-committed REVOKE_ADMIN_INTENT row from
@@ -286,7 +327,7 @@ public class RevokeAdminCommandHandler implements CommandHandler {
                         target.id.toString(), target.contactId, actor,
                         adapter, requestId, revokeAdminDetailsJson(adapter));
 
-                // Step 5f — UPDATE users SET is_admin = FALSE WHERE id = ?
+                // Step 6f — UPDATE users SET is_admin = FALSE WHERE id = ?
                 try (PreparedStatement ps = conn.prepareStatement(UPDATE_REVOKE_ADMIN_SQL)) {
                     ps.setObject(1, target.id);
                     ps.executeUpdate();
@@ -321,10 +362,11 @@ public class RevokeAdminCommandHandler implements CommandHandler {
     }
 
     /**
-     * Non-locking lookup used by the step-4 intent pre-checks. Plain
-     * MVCC SELECT — takes no row lock, so it can never participate in
-     * the FK-vs-FOR-UPDATE deadlock the pre-transaction intent
-     * placement exists to avoid.
+     * Non-locking lookup used by the step-3 permission pre-check and
+     * the step-4 intent row's target_id resolution. Plain MVCC SELECT
+     * — takes no row lock, so it can never participate in the
+     * FK-vs-FOR-UPDATE deadlock the pre-transaction intent placement
+     * exists to avoid.
      */
     private Optional<UserRow> lookupUser(String adapter, String contactId) {
         return userRepository.findByAdapterAndContactId(adapter, contactId)
@@ -359,21 +401,29 @@ public class RevokeAdminCommandHandler implements CommandHandler {
 
     /**
      * Write the REVOKE_ADMIN_INTENT row on its own auto-commit
-     * connection (BAN_INTENT pattern). A failure here surfaces before
-     * the mutation runs — preferable to a destructive UPDATE that
-     * lands no intent trail.
+     * connection (BAN_INTENT pattern). The target lookup here resolves
+     * ONLY the row's target_id — the target's users id when registered,
+     * a synthetic UUID otherwise (target_contact_id carries the
+     * resolved identity either way) — and the details_json
+     * target_registered flag that makes a synthetic id distinguishable
+     * from a real-but-since-deleted user id; target state never gates
+     * the write. A failure here surfaces before the mutation runs —
+     * preferable to a destructive UPDATE that lands no intent trail.
      */
-    private void insertIntentAudit(UserRow target, UserRow actor, String adapter,
+    private void insertIntentAudit(String adapter, String targetContactId, UserRow actor,
                                    String requestId) {
+        Optional<UserRow> targetPre = lookupUser(adapter, targetContactId);
+        UUID targetUserIdForIntent = targetPre.map(u -> u.id).orElse(UUID.randomUUID());
         try (Connection conn = dataSource.getConnection()) {
             insertAudit(conn, AuditAction.REVOKE_ADMIN_INTENT, "user",
-                    target.id.toString(), target.contactId, actor,
-                    adapter, requestId, revokeAdminDetailsJson(adapter));
+                    targetUserIdForIntent.toString(), targetContactId, actor,
+                    adapter, requestId,
+                    revokeAdminIntentDetailsJson(adapter, targetPre.isPresent()));
         } catch (SQLException e) {
             throw new IllegalStateException(
                     "RevokeAdminCommandHandler intent-audit write failed for adapter="
                             + adapter + " contact_id="
-                            + ContactIds.redact(target.contactId), e);
+                            + ContactIds.redact(targetContactId), e);
         }
     }
 
@@ -423,6 +473,18 @@ public class RevokeAdminCommandHandler implements CommandHandler {
 
     private static String revokeAdminDetailsJson(String adapter) {
         return "{\"target_adapter\":" + quoteJsonString(adapter) + "}";
+    }
+
+    /**
+     * Intent rows additionally record whether the target had a users
+     * row at intent time: {@code target_registered=false} marks the
+     * row's target_id as synthetic. Effect rows omit the key — their
+     * targets are registered by construction (the in-tx lookup
+     * succeeded).
+     */
+    private static String revokeAdminIntentDetailsJson(String adapter, boolean targetRegistered) {
+        return "{\"target_adapter\":" + quoteJsonString(adapter)
+                + ",\"target_registered\":" + targetRegistered + "}";
     }
 
     private static String quoteJsonString(String s) {

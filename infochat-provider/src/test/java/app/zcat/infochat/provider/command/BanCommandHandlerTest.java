@@ -216,6 +216,20 @@ class BanCommandHandlerTest {
                         "ban_reason must equal the --reason flag value");
             }
         }
+
+        // Both audit rows were written while no users row existed for
+        // the target (the preban row is minted only by the mutation
+        // step), so both carry synthetic target_ids and must mark them.
+        // jsonb canonicalizes details_json on read-back (one space
+        // after each colon), so the assertions match that form.
+        assertTrue(detailsJsonByActionAndTarget("BAN_INTENT", unknown)
+                        .contains("\"target_registered\": false"),
+                "the BAN_INTENT row against a then-unregistered contact must carry "
+                        + "target_registered=false (synthetic target_id marker)");
+        assertTrue(detailsJsonByActionAndTarget("BAN", unknown)
+                        .contains("\"target_registered\": false"),
+                "the BAN effect row pre-dates the preban users row inside the tx and "
+                        + "must carry target_registered=false");
     }
 
     // ----- (5) Known user: UPDATE flips is_banned --------------------------
@@ -330,6 +344,10 @@ class BanCommandHandlerTest {
                 "first /ban writes exactly ONE audit row (the BAN_INTENT step-8 row)");
         assertEquals(1, countAuditByActionAndTarget("BAN_INTENT", target),
                 "first /ban writes a BAN_INTENT audit row");
+        assertTrue(detailsJsonByActionAndTarget("BAN_INTENT", target)
+                        .contains("\"target_registered\": true"),
+                "the BAN_INTENT row against a registered target must carry "
+                        + "target_registered=true (jsonb-canonical spacing)");
 
         handler.handle(new ScopeRef.Dm(actor), "/ban confirm");
 
@@ -703,6 +721,20 @@ class BanCommandHandlerTest {
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return rs.getLong(1);
+            }
+        }
+    }
+
+    private String detailsJsonByActionAndTarget(String action, String targetContactId)
+            throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT details_json FROM audit_log WHERE action = ? AND target_contact_id = ?")) {
+            ps.setString(1, action);
+            ps.setString(2, targetContactId);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getString("details_json");
             }
         }
     }
