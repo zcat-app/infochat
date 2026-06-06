@@ -25,7 +25,11 @@ import jakarta.transaction.Transactional;
  * the NOTIFY commit together; a rollback suppresses the NOTIFY
  * (Postgres semantics: NOTIFY fires at COMMIT, not at statement
  * execution). Mirrors {@code ReadyPromoter.promoteOne} for the
- * INSERT-then-NOTIFY pattern.
+ * INSERT-then-NOTIFY pattern. A duplicate
+ * {@code (asset, sub_verb, captured_at)} is dropped by
+ * {@code ON CONFLICT DO NOTHING} (V38 UNIQUE, spec schema.md
+ * §Operational "one row per") and suppresses the NOTIFY too — no new
+ * row, nothing to invalidate.
  *
  * The NOTIFY payload is the spec-committed
  * {@code {"asset":"<asset>","source":"<sub_verb>"}} JSON shape per
@@ -40,16 +44,26 @@ import jakarta.transaction.Transactional;
 @ApplicationScoped
 public class PriceSnapshotStore {
 
-    /** NOTIFY channel name; M1-055c's listener subscribes to this. */
+    /**
+     * NOTIFY channel name — best-effort cache-invalidation seam
+     * (spec commands.md §Asset commands); no production consumer yet,
+     * the Provider's in-process snapshot cache will subscribe. The
+     * table read is the correctness guarantee.
+     */
     public static final String NEW_PRICE_SNAPSHOT_CHANNEL = "new_price_snapshot";
 
+    // ON CONFLICT DO NOTHING enforces the spec's one-row-per-
+    // (asset, sub_verb, captured_at) invariant against the V38 UNIQUE:
+    // the table is INSERT-only (spec: "no updates"), so a duplicate
+    // write is dropped, never updated.
     private static final String INSERT_SQL =
         "INSERT INTO price_snapshot ("
         + "  asset, sub_verb, vs_currency, price,"
         + "  volume_24h, high_24h, low_24h,"
         + "  change_1h_pct, change_24h_pct, change_7d_pct,"
         + "  captured_at, source_url, raw_payload"
-        + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::JSONB)";
+        + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::JSONB)"
+        + " ON CONFLICT (asset, sub_verb, captured_at) DO NOTHING";
 
     @Inject
     DataSource dataSource;
@@ -69,6 +83,7 @@ public class PriceSnapshotStore {
     @Transactional
     public void store(@NonNull PriceSnapshot snapshot) {
         try (Connection conn = dataSource.getConnection()) {
+            int inserted;
             try (PreparedStatement ps = conn.prepareStatement(INSERT_SQL)) {
                 ps.setString(1, snapshot.asset());
                 ps.setString(2, snapshot.subVerb());
@@ -87,10 +102,18 @@ public class PriceSnapshotStore {
                 } else {
                     ps.setString(13, snapshot.rawPayload());
                 }
-                ps.executeUpdate();
+                inserted = ps.executeUpdate();
             }
 
             afterInsertHook.run();
+
+            // The NOTIFY is a row-landed signal: it already commits or
+            // rolls back with the INSERT, so symmetrically a duplicate
+            // (asset, sub_verb, captured_at) dropped by ON CONFLICT
+            // emits nothing — no new row means nothing to invalidate.
+            if (inserted == 0) {
+                return;
+            }
 
             // NOTIFY payload — literal key "source" per spec
             // commands.md §Asset commands. The value is the sub_verb

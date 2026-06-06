@@ -117,6 +117,38 @@ class PriceSnapshotStoreTest {
     }
 
     @Test
+    void duplicateTripleInsertsExactlyOneRowAndNoSecondNotify() throws Exception {
+        String asset = TEST_ASSET_PREFIX + "dedup";
+        PriceSnapshot first = newSnapshot(asset, "coingecko", "usd", new BigDecimal("123.456"));
+        // Same (asset, sub_verb, captured_at) triple — CAPTURED_AT is a
+        // shared constant — with a divergent price: ON CONFLICT DO
+        // NOTHING must drop it, never update the first row.
+        PriceSnapshot duplicate = newSnapshot(asset, "coingecko", "usd", new BigDecimal("999.0"));
+
+        try (Connection listenConn = dataSource.getConnection()) {
+            listenConn.setAutoCommit(true);
+            try (Statement s = listenConn.createStatement()) {
+                s.execute("LISTEN new_price_snapshot");
+            }
+            PGConnection pg = listenConn.unwrap(PGConnection.class);
+            drainQueuedNotifications(pg);
+
+            store.store(first);
+            PGNotification[] firstNotify = awaitNotifications(pg, 1);
+            assertNotNull(firstNotify, "the first insert must emit NOTIFY");
+
+            store.store(duplicate);
+            PGNotification[] dupNotify = pg.getNotifications(500);
+            assertTrue(dupNotify == null || dupNotify.length == 0,
+                "a duplicate (asset, sub_verb, captured_at) must not emit NOTIFY; got: "
+                    + java.util.Arrays.toString(dupNotify));
+        }
+
+        assertEquals(1, countRowsByAsset("price_snapshot", asset),
+            "exactly one row for the duplicate triple (V38 UNIQUE + ON CONFLICT DO NOTHING)");
+    }
+
+    @Test
     void transactionRollbackSuppressesNotify() throws Exception {
         String asset = TEST_ASSET_PREFIX + "rollback";
         PriceSnapshot snap = newSnapshot(asset, "bitfinex", "usd", new BigDecimal("99.0"));

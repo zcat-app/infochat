@@ -1,9 +1,9 @@
 ---
 id: M1-161
 title: "[INVESTIGATE] price_snapshot PK/dedup invariant + new_price_snapshot channel intent"
-status: pending
+status: done
 created: 2026-06-02
-last_updated: 2026-06-05
+last_updated: 2026-06-06
 blocked_by: []
 files_budget: 8
 files_scope:
@@ -40,7 +40,20 @@ spec_refs:
   - docs/spec/commands.md §Asset commands
   - docs/spec/schema.md §Operational
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-06
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 163
+      removed: 13
 revisions:
   - date: 2026-06-05
     reason: pre-start clarity hardening (M1-162 clarity-fail precedent — 'Decide intent' / 'Record decision' had no pinned artifact; Option A/B bundled two independent gaps into one forced pairing; files_scope omitted test dirs and the spec files an amendment would touch; test_plan.adds was empty while acceptance demanded a test)
@@ -58,7 +71,11 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-06
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-161: [INVESTIGATE] price_snapshot PK/dedup + new_price_snapshot channel intent

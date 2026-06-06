@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 209 |
+| done | 210 |
 | deferred | 2 |
 | **total** | **212** |
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-161 — [INVESTIGATE] price_snapshot PK/dedup invariant + new_price_snapshot channel intent (complexity: medium, risk: medium)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -64,12 +64,12 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-175 | Ban intent-row parity and transaction hygiene (M1-173 audit-2 findings) | 2026-06-06 | round 1 APPROVE |
 | M1-174 | Grant-admin intent-row coverage (probe-visibility parity) | 2026-06-06 | round 1 APPROVE |
 | M1-173 | Revoke-admin intent-row coverage (M1-151 redteam findings) | 2026-06-06 | round 1 APPROVE |
+| M1-161 | [INVESTIGATE] price_snapshot PK/dedup invariant + new_price_snapshot channel intent | 2026-06-06 | round 1 APPROVE |
 | M1-160 | [INVESTIGATE] summary_anchor scope_kind discriminator | 2026-06-06 | round 1 APPROVE |
 | M1-152 | Schema-hardening migration (stage2_verdict CHECK + V27 audit verb + Nostr index) | 2026-06-06 | round 1 APPROVE |
 | M1-151 | Typed SSRF / error signals (UrlProbe + last-admin SQLSTATE) | 2026-06-06 | round 2 OVERRIDE-APPROVE |
 | M1-172 | InviteCodeConsumer advisories: stale reply javadoc + sweep gating | 2026-06-05 | round 1 APPROVE |
 | M1-171 | BanCommandHandler stale M1-041-deferral javadoc | 2026-06-05 | round 1 APPROVE |
-| M1-170 | Membership-event hardening (M1-143 redteam findings 2-4) | 2026-06-05 | round 1 APPROVE |
 
 ---
 
@@ -326,7 +326,7 @@ M1-157 (done)
 M1-158 (done)
 M1-159 (done)
 M1-160 (done)
-M1-161 (pending) ← runnable
+M1-161 (done)
 M1-162 (done)
 M1-163 (done)
   └── M1-127 (done)
