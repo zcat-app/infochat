@@ -42,8 +42,10 @@ public record NostrEvent(
     /**
      * Map this event onto the outbox-input shape. {@code upstream_identifier}
      * is the Nostr event {@code id}; {@code body} is {@code content};
-     * {@code published_at} is the event {@code created_at} (Unix seconds).
-     * Nostr text events have no title or canonical web URL, so both are null.
+     * {@code published_at} is the event {@code created_at} (Unix seconds),
+     * clamped to {@code fetchedAt} so a future-dated event cannot push it
+     * past receipt time. Nostr text events have no title or canonical web
+     * URL, so both are null.
      *
      * <p>{@code rawMetadata} carries Nostr-specific side-channel information
      * that the Registrar's deliver lambda reads to dispatch:
@@ -76,13 +78,21 @@ public record NostrEvent(
         } else {
             rawMetadata = Map.of();
         }
+        // Clamp published_at to LEAST(created_at, now()) with fetchedAt as
+        // "now" (wall-clock receipt time per the param contract). created_at
+        // is relay-supplied: one future-dated event would otherwise push the
+        // per-source reconnect cursor (MAX(published_at)) past now, making
+        // the since filter exclude every genuine event and blinding the bot
+        // to that source.
+        Instant createdAtInstant = Instant.ofEpochSecond(createdAt);
+        Instant publishedAt = createdAtInstant.isAfter(fetchedAt) ? fetchedAt : createdAtInstant;
         return new NormalizedPost(
                 sourceId,
                 id,
                 null,
                 content,
                 null,
-                Instant.ofEpochSecond(createdAt),
+                publishedAt,
                 fetchedAt,
                 rawMetadata);
     }

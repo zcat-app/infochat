@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 207 |
+| done | 208 |
 | deferred | 2 |
 | **total** | **212** |
 
@@ -26,7 +26,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-160 — [INVESTIGATE] summary_anchor scope_kind discriminator (complexity: medium, risk: medium)
 - M1-161 — [INVESTIGATE] price_snapshot PK/dedup invariant + new_price_snapshot channel intent (complexity: medium, risk: medium)
-- M1-176 — Clamp Nostr created_at to now() before it becomes published_at (complexity: low, risk: medium)
 
 ---
 
@@ -62,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-176 | Clamp Nostr created_at to now() before it becomes published_at | 2026-06-06 | round 1 APPROVE |
 | M1-175 | Ban intent-row parity and transaction hygiene (M1-173 audit-2 findings) | 2026-06-06 | round 1 APPROVE |
 | M1-174 | Grant-admin intent-row coverage (probe-visibility parity) | 2026-06-06 | round 1 APPROVE |
 | M1-173 | Revoke-admin intent-row coverage (M1-151 redteam findings) | 2026-06-06 | round 1 APPROVE |
@@ -71,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-171 | BanCommandHandler stale M1-041-deferral javadoc | 2026-06-05 | round 1 APPROVE |
 | M1-170 | Membership-event hardening (M1-143 redteam findings 2-4) | 2026-06-05 | round 1 APPROVE |
 | M1-169 | Drift guard: V31 audit redactors vs Redactor.CATALOGUE | 2026-06-05 | round 1 APPROVE |
-| M1-168 | Fix stale 3-arg UserSnapshot test call site | 2026-06-05 | round 1 APPROVE |
 
 ---
 
@@ -355,5 +354,5 @@ M1-172 (done)
 M1-173 (done)
   ├── M1-174 (done)
   └── M1-175 (done)
-M1-176 (pending) ← runnable
+M1-176 (done)
 ```

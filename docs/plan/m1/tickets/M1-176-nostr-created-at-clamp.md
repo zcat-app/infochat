@@ -1,7 +1,7 @@
 ---
 id: M1-176
 title: "Clamp Nostr created_at to now() before it becomes published_at"
-status: pending
+status: done
 created: 2026-06-06
 last_updated: 2026-06-06
 blocked_by: []
@@ -31,12 +31,42 @@ test_plan:
 spec_refs:
   - docs/spec/security.md §Failure handling
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-06
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 69
+      removed: 11
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-06
+    verdict: CLEAN
+    base: ba7550a (fork point of m1/M1-176-nostr-created-at-clamp)
+    head: m1/M1-176-nostr-created-at-clamp working tree (pre-commit)
+    verdict_file: docs/plan/m1/redteam/M1-176-2026-06-06.md
+    out_of_model_count: 1
+    note: |
+      Pre-commit audit on this security_relevant ticket (run between review
+      APPROVE and commit). CLEAN — the LEAST(created_at, now()) clamp closes the
+      MAX(published_at) cursor-poisoning availability gap and adds no new
+      auth/isolation/injection/audit/leak surface. One advisory OUT-OF-MODEL note
+      (lower-bound-only clamp) needs no action.
+clarity_check:
+  date: 2026-06-06
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-176: Clamp Nostr created_at to now() before it becomes published_at
