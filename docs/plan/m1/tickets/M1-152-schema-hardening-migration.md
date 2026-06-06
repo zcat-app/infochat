@@ -1,19 +1,44 @@
 ---
 id: M1-152
 title: "Schema-hardening migration (stage2_verdict CHECK + V27 audit verb + Nostr index)"
-status: pending
+status: done
+revisions:
+  - date: 2026-06-06
+    reason: budget-breach rework — acceptance item 2's enum addition requires touching AuditAction.java in infochat-core, which the original files_scope did not cover; widened files_scope by one path
+    prior_values: |
+      files_scope:
+        - infochat-core/src/main/resources/db/migration
+        - infochat-collector/src/main/java/app/zcat/infochat/collector
+        - infochat-collector/src/test/java/app/zcat/infochat/collector
+      The AuditAction closed set named by acceptance item 2 lives at
+      infochat-core/src/main/java/app/zcat/infochat/core/audit/AuditAction.java;
+      the or-branch ("correct the migration to an existing verb") has no
+      semantically valid target verb, so the enum path is the only correct
+      implementation and must be in scope.
 created: 2026-06-02
-last_updated: 2026-06-02
+last_updated: 2026-06-06
+escalations:
+  - date: 2026-06-06
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A (pre-implementation files_scope conflict): acceptance item 2 requires
+      adding the V27 verb D47_GROUP_ONLY_PREBAN_CONVERSION to the AuditAction
+      closed set, but the enum lives at
+      infochat-core/src/main/java/app/zcat/infochat/core/audit/AuditAction.java,
+      outside files_scope (which covers only infochat-core/.../db/migration and
+      the collector main/test trees). The or-branch ("correct the migration to
+      an existing verb") has no semantically valid target verb.
 blocked_by: []
 files_budget: 5
 files_scope:
   - infochat-core/src/main/resources/db/migration
+  - infochat-core/src/main/java/app/zcat/infochat/core/audit
   - infochat-collector/src/main/java/app/zcat/infochat/collector
   - infochat-collector/src/test/java/app/zcat/infochat/collector
 complexity: low
 risk: medium
 round_cap: 2
-security_relevant: false
+security_relevant: true
 migration_touch: true
 out_of_scope:
   - rewriting the already-applied V22/V27 migrations (use a new successor migration)
@@ -32,12 +57,45 @@ spec_refs:
   - docs/spec/schema.md §Posts and derivatives
   - docs/spec/schema.md §Operational
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-06
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 234
+      removed: 10
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-06
+    verdict: CLEAN
+    base: 0dcf13b (fork point of m1/M1-152-schema-hardening-migration)
+    head: working tree of m1/M1-152-schema-hardening-migration (pre-commit, post-APPROVE)
+    verdict_file: docs/plan/m1/redteam/M1-152-2026-06-06.md
+    out_of_model_count: 1
+    note: |
+      CLEAN. stage2_verdict CHECK, AuditAction closure member, and the
+      composite index all tighten or are read-neutral; none opens a hole.
+      One OUT-OF-MODEL advisory (Nostr since-cursor poisoning via
+      attacker-controlled published_at) is pre-existing behavior outside
+      this diff and unguaranteed by the threat model — recommend a separate
+      ticket to clamp Nostr created_at in the NostrEvent/PostPersister path,
+      not this migration. No action required for M1-152.
+clarity_check:
+  date: 2026-06-06
+  verdict: WARN
+  warnings:
+    - "SECURITY-FLAG-CONSISTENT: security_relevant: false may be under-claimed. The ticket enforces the stage2_verdict security-classification closed set at the DB layer and fixes an audit_log action-verb gap (V27). Both surfaces are audit-integrity adjacent. Consider flipping to security_relevant: true before start."
+  blockers: []
 ---
 
 # M1-152: Schema-hardening migration

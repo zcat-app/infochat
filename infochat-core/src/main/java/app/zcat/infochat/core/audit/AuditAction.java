@@ -120,6 +120,13 @@ public enum AuditAction {
     APPROVE_GROUP,
     REJECT_GROUP,
     REJECT_GROUP_INTENT,
+    // D47_GROUP_ONLY_PREBAN_CONVERSION is written directly in SQL by
+    // the V27 migration: one row recording the bulk group_only →
+    // preban conversion when the group_only registration path was
+    // removed. Same represented-here pattern as the SECURITY DEFINER
+    // verbs — no application code writes it, but the closure stays
+    // complete so read-paths can reference one symbol.
+    D47_GROUP_ONLY_PREBAN_CONVERSION,
     // LIST_GROUPS records the bot-admin-only /list-groups read — a
     // deployment-wide enumeration of every groups row (id,
     // approval_status, activated_by contact id (redacted),
