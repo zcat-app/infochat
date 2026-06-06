@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 206 |
 | deferred | 2 |
-| **total** | **211** |
+| **total** | **212** |
 
 ---
 
@@ -27,6 +27,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-160 — [INVESTIGATE] summary_anchor scope_kind discriminator (complexity: medium, risk: medium)
 - M1-161 — [INVESTIGATE] price_snapshot PK/dedup invariant + new_price_snapshot channel intent (complexity: medium, risk: medium)
 - M1-175 — Ban intent-row parity and transaction hygiene (M1-173 audit-2 findings) (complexity: medium, risk: medium)
+- M1-176 — Clamp Nostr created_at to now() before it becomes published_at (complexity: low, risk: medium)
 
 ---
 
@@ -355,4 +356,5 @@ M1-172 (done)
 M1-173 (done)
   ├── M1-174 (done)
   └── M1-175 (pending) ← runnable
+M1-176 (pending) ← runnable
 ```
