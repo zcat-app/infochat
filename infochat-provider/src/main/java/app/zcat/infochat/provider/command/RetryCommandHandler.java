@@ -139,10 +139,12 @@ public class RetryCommandHandler implements CommandHandler {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_NO_ANCHOR));
         }
 
-        // v1 DM scope: scopeId = userId
+        // v1 DM scope: scopeId = userId; resolveUserId already rejected
+        // non-DM scopes, so the anchor key's scope_kind is 'dm' here.
         UUID scopeId = userId.get();
 
-        Optional<AnchorRow> anchorOpt = summaryAnchorRepository.read(userId.get(), scopeId);
+        Optional<AnchorRow> anchorOpt =
+                summaryAnchorRepository.read(userId.get(), "dm", scopeId);
         if (anchorOpt.isEmpty()) {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_NO_ANCHOR));
         }
@@ -160,7 +162,8 @@ public class RetryCommandHandler implements CommandHandler {
         }
 
         // Enforce profile-driven retry cap
-        int retryCount = summaryAnchorRepository.incrementAndGetRetryCount(userId.get(), scopeId);
+        int retryCount = summaryAnchorRepository.incrementAndGetRetryCount(
+                userId.get(), "dm", scopeId);
         if (retryCount > retryCap) {
             return reply(scope, MessageFormat.format(
                     bundleLoader.get(BundleKeys.ERROR_RETRY_CAP_EXHAUSTED),

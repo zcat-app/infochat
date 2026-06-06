@@ -49,7 +49,7 @@ class SummaryAnchorRepositoryTest {
         List<String> postUids = List.of("p-test-uid-1", "p-test-uid-2");
         String clusterMapJson = "[{\"topicId\":\"t-abc\",\"postUids\":[]}]";
 
-        repo.write(USER_A, SCOPE_A, "summary", "hash123", postUids, clusterMapJson);
+        repo.write(USER_A, "dm", SCOPE_A, "summary", "hash123", postUids, clusterMapJson);
 
         assertEquals(1, dataSource.executedUpdateCount,
                 "write must issue one SQL update (UPSERT)");
@@ -57,7 +57,7 @@ class SummaryAnchorRepositoryTest {
                 "write must use the UPSERT SQL. Got: " + dataSource.lastSql);
 
         dataSource.resetCounters();
-        repo.clear(USER_A, SCOPE_A);
+        repo.clear(USER_A, "dm", SCOPE_A);
 
         assertEquals(1, dataSource.executedUpdateCount,
                 "clear must issue one SQL update (DELETE)");
@@ -67,39 +67,39 @@ class SummaryAnchorRepositoryTest {
 
     @Test
     void retryCountTracking() {
-        assertEquals(1, repo.incrementAndGetRetryCount(USER_A, SCOPE_A),
+        assertEquals(1, repo.incrementAndGetRetryCount(USER_A, "dm", SCOPE_A),
                 "first increment returns 1");
-        assertEquals(2, repo.incrementAndGetRetryCount(USER_A, SCOPE_A),
+        assertEquals(2, repo.incrementAndGetRetryCount(USER_A, "dm", SCOPE_A),
                 "second increment returns 2");
-        assertEquals(3, repo.incrementAndGetRetryCount(USER_A, SCOPE_A),
+        assertEquals(3, repo.incrementAndGetRetryCount(USER_A, "dm", SCOPE_A),
                 "third increment returns 3");
 
-        repo.clearRetryCount(USER_A, SCOPE_A);
+        repo.clearRetryCount(USER_A, "dm", SCOPE_A);
 
-        assertEquals(1, repo.incrementAndGetRetryCount(USER_A, SCOPE_A),
+        assertEquals(1, repo.incrementAndGetRetryCount(USER_A, "dm", SCOPE_A),
                 "after clear, first increment returns 1 again");
     }
 
     @Test
     void writeResetsRetryCount() {
-        repo.incrementAndGetRetryCount(USER_A, SCOPE_A);
-        repo.incrementAndGetRetryCount(USER_A, SCOPE_A);
+        repo.incrementAndGetRetryCount(USER_A, "dm", SCOPE_A);
+        repo.incrementAndGetRetryCount(USER_A, "dm", SCOPE_A);
 
         List<String> postUids = List.of("p-test-uid-3");
-        repo.write(USER_A, SCOPE_A, "summary", "hash", postUids, null);
+        repo.write(USER_A, "dm", SCOPE_A, "summary", "hash", postUids, null);
 
-        assertEquals(1, repo.incrementAndGetRetryCount(USER_A, SCOPE_A),
+        assertEquals(1, repo.incrementAndGetRetryCount(USER_A, "dm", SCOPE_A),
                 "write must reset the retry count");
     }
 
     @Test
     void clearResetsRetryCount() {
-        repo.incrementAndGetRetryCount(USER_A, SCOPE_A);
-        repo.incrementAndGetRetryCount(USER_A, SCOPE_A);
+        repo.incrementAndGetRetryCount(USER_A, "dm", SCOPE_A);
+        repo.incrementAndGetRetryCount(USER_A, "dm", SCOPE_A);
 
-        repo.clear(USER_A, SCOPE_A);
+        repo.clear(USER_A, "dm", SCOPE_A);
 
-        assertEquals(1, repo.incrementAndGetRetryCount(USER_A, SCOPE_A),
+        assertEquals(1, repo.incrementAndGetRetryCount(USER_A, "dm", SCOPE_A),
                 "clear must reset the retry count");
     }
 
@@ -107,12 +107,12 @@ class SummaryAnchorRepositoryTest {
     void independentScopesHaveIndependentRetryCounts() {
         UUID scopeB = UUID.randomUUID();
 
-        repo.incrementAndGetRetryCount(USER_A, SCOPE_A);
-        repo.incrementAndGetRetryCount(USER_A, SCOPE_A);
+        repo.incrementAndGetRetryCount(USER_A, "dm", SCOPE_A);
+        repo.incrementAndGetRetryCount(USER_A, "dm", SCOPE_A);
 
-        assertEquals(1, repo.incrementAndGetRetryCount(USER_A, scopeB),
+        assertEquals(1, repo.incrementAndGetRetryCount(USER_A, "dm", scopeB),
                 "different scope must have independent retry count");
-        assertEquals(3, repo.incrementAndGetRetryCount(USER_A, SCOPE_A),
+        assertEquals(3, repo.incrementAndGetRetryCount(USER_A, "dm", SCOPE_A),
                 "original scope count must be unaffected");
     }
 

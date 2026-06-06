@@ -1206,6 +1206,8 @@ and `next_seq`. It does NOT touch `chat_memory` (D25).
 ```sql
 CREATE TABLE summary_anchor (
   user_id      UUID,                                     -- NULL for digest rows
+  scope_kind   TEXT NOT NULL                             -- added by successor migration
+    CHECK (scope_kind IN ('dm','group')),                -- (see decision below)
   scope_id     UUID NOT NULL,
   command_kind TEXT NOT NULL
     CHECK (command_kind IN ('personal','digest')),
@@ -1222,12 +1224,14 @@ CREATE TABLE summary_anchor (
 );
 
 -- Two partial unique indexes so the personal vs. digest row shapes do not
--- collide (spec §Per-scope state — Summary anchor):
+-- collide (spec §Per-scope state — Summary anchor); both carry scope_kind
+-- so a DM anchor and a group anchor never alias even if a users.id and a
+-- groups.id collide (see decision below):
 CREATE UNIQUE INDEX summary_anchor_personal
-  ON summary_anchor(user_id, scope_id, command_kind)
+  ON summary_anchor(user_id, scope_kind, scope_id, command_kind)
   WHERE user_id IS NOT NULL;
 CREATE UNIQUE INDEX summary_anchor_digest
-  ON summary_anchor(scope_id, command_kind)
+  ON summary_anchor(scope_kind, scope_id, command_kind)
   WHERE user_id IS NULL AND command_kind = 'digest';
 
 CREATE INDEX idx_summary_anchor_generated_at
@@ -1241,6 +1245,63 @@ anchors behind indefinitely.
 
 `/retry --digest` from a group admin or bot admin matches the digest row
 by `(scope_id, command_kind = 'digest')` without referencing `user_id`.
+
+### summary_anchor scope_kind decision
+
+**Verdict: add-scope_kind** — a successor migration adds the
+`scope_kind` discriminator that the original `summary_anchor` DDL
+omitted, restoring parity with every other per-(user, scope) table
+(`joins_post`, `saved_post`, `chat_memory`/`chat_session`/`chat_message`)
+and making the Invariant 1 enforcement-table row for `summary_anchor`
+(§2.11) true structurally rather than probabilistically.
+
+**How the two scope_id populations are generated.** DM `scope_id` is the
+actor's own `users.id` (`InboundRouter.resolveChatScopeId`:
+`ScopeRef.Dm → actorId`); group `scope_id` is `groups.id`
+(`InboundRouter.lookupGroupId`). Auditing the id generation at the
+INSERT sites:
+
+- `users.id` is minted by **two** generators: the column default
+  `gen_random_uuid()` (invite-redemption INSERT omits `id`) and
+  app-side `UUID.randomUUID()` (the preban `/ban` INSERT supplies an
+  explicit `id` so the pre-written audit row can reference it).
+- `groups.id` is minted only by the column default `gen_random_uuid()`
+  (both group INSERTs omit `id`).
+
+**Can the populations structurally collide? Yes.** All three generators
+produce uniform random UUIDv4 values; no namespace, version bit, or
+range split separates a `users.id` from a `groups.id`. Non-collision is
+therefore probabilistic (~2⁻¹²² per pair), not structural — there is no
+id-generation disjointness to record, which forecloses the confirm-safe
+branch. A collision would alias the *same user's* DM and group anchors
+(personal keys are `(user_id, scope_id, command_kind)`, so cross-user
+aliasing is impossible): `/forget` in one scope would delete the other
+scope's anchor, `/summary` would overwrite it, `/retry` would replay it
+across the DM/group boundary — an Invariant 1 breach.
+
+**Do existing queries depend on the discriminator? Yes — four sites
+discriminate DM-vs-group by scope_id value alone:**
+
+- `SummaryAnchorRepository` UPSERT/SELECT/DELETE key on
+  `(user_id, scope_id, command_kind)` with no scope discrimination
+  beyond the scope_id value (including the in-memory retry-count key).
+- `ForgetPurgeService` per-scope anchor DELETE relies on "scope_id
+  alone discriminates" (its own comment said so).
+- `ForgetPurgeService` remaining-scopes count UNIONs `scope_id` across
+  `chat_memory`/`chat_session`/`summary_anchor`, relying on global UUID
+  uniqueness (also self-commented).
+- `ExportDataCollector` anchor export selects by
+  `(user_id, scope_id)` — a collision would merge two scopes' rows
+  into one scope's export.
+
+`ChatMemoryPruner` is discriminator-independent (age-based DELETE on
+`generated_at` only) and needs no change. Digest rows are written only
+for group scopes, so `scope_kind = 'group'` is implied for
+`command_kind = 'digest'`; the migration backfills existing personal
+rows with `CASE WHEN user_id = scope_id THEN 'dm' ELSE 'group' END`,
+which is exact under the derivation above (anchors are ephemeral replay
+state, cleared by any non-`/retry` input, so the negligible-probability
+misclassification of a pre-existing colliding row is acceptable).
 
 ---
 

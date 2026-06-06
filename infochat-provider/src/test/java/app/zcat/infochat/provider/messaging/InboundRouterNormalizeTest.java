@@ -351,7 +351,7 @@ class InboundRouterNormalizeTest {
         router.commandPermissions = new NoopCommandPermissions();
         router.probationCheck = new NoopProbationCheck();
         router.summaryAnchorRepository = new SummaryAnchorRepository() {
-            @Override public void clear(UUID userId, UUID scopeId) {}
+            @Override public void clear(UUID userId, String scopeKind, UUID scopeId) {}
         };
         // dataSource intentionally left null — lookupUser is overridden
         // above so the DataSource field is never accessed.

@@ -180,7 +180,7 @@ class InboundRouterContactIdRedactionTest {
         router.commandPermissions = new NoopCommandPermissions();
         router.probationCheck = new NoopProbationCheck();
         router.summaryAnchorRepository = new SummaryAnchorRepository() {
-            @Override public void clear(UUID userId, UUID scopeId) {}
+            @Override public void clear(UUID userId, String scopeKind, UUID scopeId) {}
         };
         return router;
     }

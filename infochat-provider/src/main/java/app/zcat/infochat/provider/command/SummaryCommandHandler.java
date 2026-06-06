@@ -172,7 +172,8 @@ public class SummaryCommandHandler implements CommandHandler {
         String argHash = computeArgHash(rawText);
         String clusterMapJson = serializeClusterMap(clusters);
         summaryAnchorRepository.write(
-                scopeId.get(), scopeId.get(), "summary", argHash, postUids, clusterMapJson);
+                scopeId.get(), scopeKind, scopeId.get(), "summary",
+                argHash, postUids, clusterMapJson);
 
         StringBuilder out = new StringBuilder();
 

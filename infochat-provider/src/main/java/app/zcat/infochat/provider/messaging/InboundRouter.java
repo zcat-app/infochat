@@ -580,7 +580,8 @@ public class InboundRouter {
             // to clear; the chat dispatch below silent-drops the same
             // case.
             resolveChatScopeId(msg.scope(), anchorActorId, adapterName)
-                    .ifPresent(anchorScopeId -> summaryAnchorRepository.clear(anchorActorId, anchorScopeId));
+                    .ifPresent(anchorScopeId -> summaryAnchorRepository.clear(
+                            anchorActorId, chatModeScopeKindOf(msg.scope()), anchorScopeId));
         }
 
         // Step 6 — Parse + dispatch (slash-command resolver or

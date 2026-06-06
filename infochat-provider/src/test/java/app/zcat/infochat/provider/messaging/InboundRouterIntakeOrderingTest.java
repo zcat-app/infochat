@@ -575,7 +575,7 @@ class InboundRouterIntakeOrderingTest {
         // log entry in those cases.
         router.groupApprovalCheck = new RecordingGroupApprovalCheck(log);
         router.summaryAnchorRepository = new SummaryAnchorRepository() {
-            @Override public void clear(UUID userId, UUID scopeId) {}
+            @Override public void clear(UUID userId, String scopeKind, UUID scopeId) {}
         };
         router.maxInboundBodyBytes = 65536;
         return router;

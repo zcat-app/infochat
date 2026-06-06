@@ -122,9 +122,9 @@ class InboundRouterChatModeIT {
         try (Connection conn = dataSource.getConnection()) {
             exec(conn,
                     "INSERT INTO summary_anchor "
-                  + "(user_id, scope_id, command_kind, command_name, arg_hash, post_uids) "
-                  + "VALUES (?, ?, 'personal', 'summary', 'hash1', '{}'::text[]) "
-                  + "ON CONFLICT (user_id, scope_id, command_kind) "
+                  + "(user_id, scope_kind, scope_id, command_kind, command_name, arg_hash, post_uids) "
+                  + "VALUES (?, 'dm', ?, 'personal', 'summary', 'hash1', '{}'::text[]) "
+                  + "ON CONFLICT (user_id, scope_kind, scope_id, command_kind) "
                   + "  WHERE user_id IS NOT NULL "
                   + "  DO NOTHING",
                     userId, userId);
@@ -261,9 +261,9 @@ class InboundRouterChatModeIT {
         try (Connection conn = dataSource.getConnection()) {
             exec(conn,
                     "INSERT INTO summary_anchor "
-                  + "(user_id, scope_id, command_kind, command_name, arg_hash, post_uids) "
-                  + "VALUES (?, ?, 'personal', 'summary', 'hash1', '{}'::text[]) "
-                  + "ON CONFLICT (user_id, scope_id, command_kind) "
+                  + "(user_id, scope_kind, scope_id, command_kind, command_name, arg_hash, post_uids) "
+                  + "VALUES (?, 'group', ?, 'personal', 'summary', 'hash1', '{}'::text[]) "
+                  + "ON CONFLICT (user_id, scope_kind, scope_id, command_kind) "
                   + "  WHERE user_id IS NOT NULL "
                   + "  DO NOTHING",
                     userId, groupId);

@@ -31,7 +31,8 @@ public class ForgetPurgeService {
 
     private static final String COUNT_SUMMARY_ANCHOR_SQL =
             "SELECT COUNT(*) FROM summary_anchor "
-                    + "WHERE user_id = ? AND scope_id = ? AND command_kind = 'personal'";
+                    + "WHERE user_id = ? AND scope_kind = ? AND scope_id = ? "
+                    + "  AND command_kind = 'personal'";
 
     private static final String COUNT_SAVED_POST_SQL =
             "SELECT COUNT(*) FROM saved_post WHERE user_id = ?";
@@ -45,13 +46,13 @@ public class ForgetPurgeService {
     private static final String DELETE_CHAT_SESSION_SQL =
             "DELETE FROM chat_session WHERE user_id = ? AND scope_kind = ? AND scope_id = ?";
 
-    // Per-scope: personal summary_anchor rows only.
-    // summary_anchor has no scope_kind column; scope_id alone
-    // discriminates. Digest anchors (user_id IS NULL) are excluded
-    // by the user_id = ? predicate plus the command_kind guard.
+    // Per-scope: personal summary_anchor rows only. Digest anchors
+    // (user_id IS NULL) are excluded by the user_id = ? predicate plus
+    // the command_kind guard.
     private static final String DELETE_SUMMARY_ANCHOR_SQL =
             "DELETE FROM summary_anchor "
-                    + "WHERE user_id = ? AND scope_id = ? AND command_kind = 'personal'";
+                    + "WHERE user_id = ? AND scope_kind = ? AND scope_id = ? "
+                    + "  AND command_kind = 'personal'";
 
     // Global: saved_post rows for the caller regardless of scope (D13).
     private static final String DELETE_SAVED_POST_SQL =
@@ -59,19 +60,21 @@ public class ForgetPurgeService {
 
     // Remaining-scopes count: distinct scopes (other than the calling
     // scope) where the user still has chat-tier rows AFTER the purge.
-    // Uses scope_id alone (UUIDs are globally unique; summary_anchor
-    // lacks scope_kind). Runs inside the same transaction so the
-    // count reflects the post-purge state.
+    // A scope is the (scope_kind, scope_id) pair — all three tables
+    // carry the discriminator, so a DM scope and a group scope whose
+    // UUIDs collide count as two scopes. Runs inside the same
+    // transaction so the count reflects the post-purge state.
     private static final String COUNT_REMAINING_SCOPES_SQL =
-            "SELECT COUNT(DISTINCT scope_id) FROM ("
-                    + "  SELECT scope_id FROM chat_memory"
-                    + "    WHERE user_id = ? AND scope_id != ?"
+            "SELECT COUNT(DISTINCT (scope_kind, scope_id)) FROM ("
+                    + "  SELECT scope_kind, scope_id FROM chat_memory"
+                    + "    WHERE user_id = ? AND NOT (scope_kind = ? AND scope_id = ?)"
                     + "  UNION ALL"
-                    + "  SELECT scope_id FROM chat_session"
-                    + "    WHERE user_id = ? AND scope_id != ?"
+                    + "  SELECT scope_kind, scope_id FROM chat_session"
+                    + "    WHERE user_id = ? AND NOT (scope_kind = ? AND scope_id = ?)"
                     + "  UNION ALL"
-                    + "  SELECT scope_id FROM summary_anchor"
-                    + "    WHERE user_id = ? AND scope_id != ? AND command_kind = 'personal'"
+                    + "  SELECT scope_kind, scope_id FROM summary_anchor"
+                    + "    WHERE user_id = ? AND NOT (scope_kind = ? AND scope_id = ?)"
+                    + "      AND command_kind = 'personal'"
                     + ") remaining";
 
     /**
@@ -86,7 +89,8 @@ public class ForgetPurgeService {
                 userId, scopeKind, scopeId);
         int chatSessionCount = countScoped(conn, COUNT_CHAT_SESSION_SQL,
                 userId, scopeKind, scopeId);
-        int summaryAnchorCount = countSummaryAnchor(conn, userId, scopeId);
+        int summaryAnchorCount = countScoped(conn, COUNT_SUMMARY_ANCHOR_SQL,
+                userId, scopeKind, scopeId);
         int savedPostCount = countSavedPost(conn, userId);
         return new PurgeResult(chatMemoryCount, chatSessionCount,
                 summaryAnchorCount, savedPostCount);
@@ -104,7 +108,8 @@ public class ForgetPurgeService {
                 userId, scopeKind, scopeId);
         int chatSessionCount = deleteScoped(conn, DELETE_CHAT_SESSION_SQL,
                 userId, scopeKind, scopeId);
-        int summaryAnchorCount = deleteSummaryAnchor(conn, userId, scopeId);
+        int summaryAnchorCount = deleteScoped(conn, DELETE_SUMMARY_ANCHOR_SQL,
+                userId, scopeKind, scopeId);
         int savedPostCount = deleteSavedPost(conn, userId);
         return new PurgeResult(chatMemoryCount, chatSessionCount,
                 summaryAnchorCount, savedPostCount);
@@ -117,14 +122,18 @@ public class ForgetPurgeService {
      */
     public int countRemainingScopes(@NonNull Connection conn,
                                     @NonNull UUID userId,
+                                    @NonNull String scopeKind,
                                     @NonNull UUID scopeId) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(COUNT_REMAINING_SCOPES_SQL)) {
             ps.setObject(1, userId);
-            ps.setObject(2, scopeId);
-            ps.setObject(3, userId);
-            ps.setObject(4, scopeId);
-            ps.setObject(5, userId);
+            ps.setString(2, scopeKind);
+            ps.setObject(3, scopeId);
+            ps.setObject(4, userId);
+            ps.setString(5, scopeKind);
             ps.setObject(6, scopeId);
+            ps.setObject(7, userId);
+            ps.setString(8, scopeKind);
+            ps.setObject(9, scopeId);
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return rs.getInt(1);
@@ -139,18 +148,6 @@ public class ForgetPurgeService {
             ps.setObject(1, userId);
             ps.setString(2, scopeKind);
             ps.setObject(3, scopeId);
-            try (ResultSet rs = ps.executeQuery()) {
-                rs.next();
-                return rs.getInt(1);
-            }
-        }
-    }
-
-    private int countSummaryAnchor(Connection conn, UUID userId, UUID scopeId)
-            throws SQLException {
-        try (PreparedStatement ps = conn.prepareStatement(COUNT_SUMMARY_ANCHOR_SQL)) {
-            ps.setObject(1, userId);
-            ps.setObject(2, scopeId);
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return rs.getInt(1);
@@ -176,16 +173,6 @@ public class ForgetPurgeService {
             ps.setObject(1, userId);
             ps.setString(2, scopeKind);
             ps.setObject(3, scopeId);
-            return ps.executeUpdate();
-        }
-    }
-
-    private int deleteSummaryAnchor(Connection conn,
-                                    UUID userId, UUID scopeId)
-            throws SQLException {
-        try (PreparedStatement ps = conn.prepareStatement(DELETE_SUMMARY_ANCHOR_SQL)) {
-            ps.setObject(1, userId);
-            ps.setObject(2, scopeId);
             return ps.executeUpdate();
         }
     }

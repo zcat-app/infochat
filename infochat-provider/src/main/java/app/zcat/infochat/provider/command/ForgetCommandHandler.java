@@ -123,7 +123,7 @@ public class ForgetCommandHandler implements CommandHandler {
                 forgetPurgeService.purge(conn, actor.id, scopeKind, scopeId);
 
                 int remainingScopes = forgetPurgeService.countRemainingScopes(
-                        conn, actor.id, scopeId);
+                        conn, actor.id, scopeKind, scopeId);
 
                 conn.commit();
 

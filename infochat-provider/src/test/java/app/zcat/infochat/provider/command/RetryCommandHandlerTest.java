@@ -118,9 +118,9 @@ class RetryCommandHandlerTest {
         handler.dataSource = stubUserAndPostsDataSource(USER_ID, List.of(readyPost));
 
         // Exhaust the cap (3 retries)
-        anchorRepo.incrementAndGetRetryCount(USER_ID, USER_ID);
-        anchorRepo.incrementAndGetRetryCount(USER_ID, USER_ID);
-        anchorRepo.incrementAndGetRetryCount(USER_ID, USER_ID);
+        anchorRepo.incrementAndGetRetryCount(USER_ID, "dm", USER_ID);
+        anchorRepo.incrementAndGetRetryCount(USER_ID, "dm", USER_ID);
+        anchorRepo.incrementAndGetRetryCount(USER_ID, "dm", USER_ID);
 
         OutboundMessage reply = handler.handle(
                 new ScopeRef.Dm(PREFIX + "cap"), "/retry");
@@ -227,28 +227,28 @@ class RetryCommandHandlerTest {
         }
 
         @Override
-        public int incrementAndGetRetryCount(UUID userId, UUID scopeId) {
+        public int incrementAndGetRetryCount(UUID userId, String scopeKind, UUID scopeId) {
             incrementCallCount++;
-            return super.incrementAndGetRetryCount(userId, scopeId);
+            return super.incrementAndGetRetryCount(userId, scopeKind, scopeId);
         }
 
         @Override
-        public void write(UUID userId, UUID scopeId, String commandName,
+        public void write(UUID userId, String scopeKind, UUID scopeId, String commandName,
                           String argHash, List<String> postUids, String clusterMapJson) {
             seeded = new AnchorRow(userId, scopeId, commandName, argHash,
                     postUids, clusterMapJson, Instant.now());
-            clearRetryCount(userId, scopeId);
+            clearRetryCount(userId, scopeKind, scopeId);
         }
 
         @Override
-        public Optional<AnchorRow> read(UUID userId, UUID scopeId) {
+        public Optional<AnchorRow> read(UUID userId, String scopeKind, UUID scopeId) {
             return Optional.ofNullable(seeded);
         }
 
         @Override
-        public void clear(UUID userId, UUID scopeId) {
+        public void clear(UUID userId, String scopeKind, UUID scopeId) {
             seeded = null;
-            clearRetryCount(userId, scopeId);
+            clearRetryCount(userId, scopeKind, scopeId);
         }
     }
 

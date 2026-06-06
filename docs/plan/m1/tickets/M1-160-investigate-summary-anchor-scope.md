@@ -1,11 +1,11 @@
 ---
 id: M1-160
 title: "[INVESTIGATE] summary_anchor scope_kind discriminator"
-status: pending
+status: done
 created: 2026-06-02
-last_updated: 2026-06-05
+last_updated: 2026-06-06
 blocked_by: []
-files_budget: 12
+files_budget: 23
 files_scope:
   - infochat-core/src/main/resources/db/migration
   - infochat-provider/src/main/java/app/zcat/infochat/provider
@@ -14,7 +14,7 @@ files_scope:
 complexity: medium
 risk: medium
 round_cap: 2
-security_relevant: false
+security_relevant: true
 migration_touch: true
 out_of_scope:
   - the other scope_kind-carrying tables (V7__joins_post.sql, V15__saved_post.sql, V18__chat_tables.sql) — their schema and queries are unchanged
@@ -37,8 +37,26 @@ spec_refs:
 decision_refs:
   - D19
   - D36
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-06
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 23
+      added: 314
+      removed: 152
 revisions:
+  - date: 2026-06-06
+    reason: budget-breach refine (add-scope_kind repository signature change ripples into 12 test files — recording stubs, anonymous clear() overrides in 5 InboundRouter unit tests, raw summary_anchor INSERTs hitting the new NOT NULL column; 21 files touched + coexistence test to come; the 2026-06-05 sweep covered main-code call sites but not test doubles)
+    snapshot:
+      status: escalated
+      files_budget_at_snapshot: 12
   - date: 2026-06-05
     reason: pre-start clarity hardening (M1-162 clarity-fail precedent — prose-verb acceptance with no pinned artifact; decision target 'ticket Notes / a design note' was unpinned; files_budget 4 did not cover the add-branch ripple; files_scope omitted the design-note artifact)
     snapshot:
@@ -51,11 +69,40 @@ revisions:
         - "mvn -B clean verify from the repo root exits 0"
       out_of_scope_at_snapshot:
         - implementing a migration before the collision question is decided
+escalations:
+  - date: 2026-06-06
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A (budget-breach: add-scope_kind verdict ripples the repository
+      signature change into 12 test files — recording stubs, anonymous
+      clear() overrides in 5 InboundRouter tests, and raw summary_anchor
+      INSERTs that now need the NOT NULL scope_kind column; 21 files
+      touched vs files_budget: 12, before the new coexistence test lands)
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-06
+    verdict: CLEAN
+    base: 66929dc
+    head: working tree @ m1/M1-160-investigate-summaryanchor-scop (pre-commit)
+    verdict_file: docs/plan/m1/redteam/M1-160-2026-06-06.md
+    out_of_model_count: 0
+    note: |
+      Pre-commit audit of the V37 scope_kind isolation fix (run between
+      review APPROVE and commit so the audit artifacts fold into the
+      ticket commit). Adversary verified write-path/backfill consistency,
+      read/clear/key parity incl. the in-memory RetryKey, no stale call
+      sites, and the DB CHECK/index backstop; residuals (backfill
+      misclassification ~2^-122, retryCounts growth, String scopeKind
+      inside the trust boundary) considered and rejected as findings.
+clarity_check:
+  date: 2026-06-06
+  verdict: WARN
+  warnings:
+    - "SECURITY-FLAG-CONSISTENT: body frames a scope-collision as 'an isolation breach, not just a convention drift'; if the verdict is add-scope_kind and a migration lands, security_relevant: true would ensure /redteam reviews the isolation fix — defensible as false for the investigation phase, revisit if the add-branch is chosen"
+  blockers: []
 ---
 
 # M1-160: [INVESTIGATE] summary_anchor scope_kind discriminator
@@ -83,7 +130,9 @@ verdict is **FIX (verify first)** — decide before adding the column.
 clear keyed `(user_id, scope_id, command_kind)`), plus raw-SQL touchers
 `ForgetCommandHandler`, `ForgetPurgeService`, `ExportDataCollector`,
 `ChatMemoryPruner`. The add-branch ripples through those callers — hence
-`files_budget: 12` (was 4).
+`files_budget: 12` (was 4), widened to 23 on 2026-06-06: the repository
+signature change also ripples through 12 test files (stubs, anonymous
+overrides, raw INSERTs hitting the new NOT NULL column).
 
 ## Contract (inlined — the ticket is self-contained)
 

@@ -320,7 +320,7 @@ class InboundRouterProbationOrderingTest {
         // scenarios bypass step 3.5, so no spurious log entry appears.
         router.groupApprovalCheck = new RecordingGroupApprovalCheck(log);
         router.summaryAnchorRepository = new SummaryAnchorRepository() {
-            @Override public void clear(UUID userId, UUID scopeId) {}
+            @Override public void clear(UUID userId, String scopeKind, UUID scopeId) {}
         };
         router.maxInboundBodyBytes = 65536;
         return router;
@@ -374,7 +374,7 @@ class InboundRouterProbationOrderingTest {
         // scenarios bypass step 3.5, so no spurious log entry appears.
         router.groupApprovalCheck = new RecordingGroupApprovalCheck(log);
         router.summaryAnchorRepository = new SummaryAnchorRepository() {
-            @Override public void clear(UUID userId, UUID scopeId) {}
+            @Override public void clear(UUID userId, String scopeKind, UUID scopeId) {}
         };
         router.maxInboundBodyBytes = 65536;
         return router;

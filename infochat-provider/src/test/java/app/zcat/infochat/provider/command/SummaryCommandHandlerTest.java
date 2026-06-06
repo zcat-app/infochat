@@ -407,7 +407,7 @@ class SummaryCommandHandlerTest {
         private volatile List<String> lastPostUids = List.of();
 
         @Override
-        public void write(UUID userId, UUID scopeId,
+        public void write(UUID userId, String scopeKind, UUID scopeId,
                           String commandName, String argHash,
                           List<String> postUids, String clusterMapJson) {
             writes.incrementAndGet();
@@ -415,12 +415,12 @@ class SummaryCommandHandlerTest {
         }
 
         @Override
-        public Optional<AnchorRow> read(UUID userId, UUID scopeId) {
+        public Optional<AnchorRow> read(UUID userId, String scopeKind, UUID scopeId) {
             return Optional.empty();
         }
 
         @Override
-        public void clear(UUID userId, UUID scopeId) {
+        public void clear(UUID userId, String scopeKind, UUID scopeId) {
             // no-op in test
         }
 

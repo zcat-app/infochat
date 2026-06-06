@@ -71,7 +71,7 @@ class ForgetPurgeServiceTest {
 
         seedChatSession(userId, scopeKind, scopeId);
         seedChatMemory(userId, scopeKind, scopeId);
-        seedSummaryAnchor(userId, scopeId, "personal");
+        seedSummaryAnchor(userId, scopeKind, scopeId, "personal");
         seedSavedPost(userId, "post-1");
         seedSavedPost(userId, "post-2");
 
@@ -151,7 +151,7 @@ class ForgetPurgeServiceTest {
         UUID groupScopeId = UUID.randomUUID();
 
         // Personal anchor (should be purged).
-        seedSummaryAnchor(userId, groupScopeId, "personal");
+        seedSummaryAnchor(userId, "group", groupScopeId, "personal");
         // Digest anchor (should be preserved — user_id IS NULL).
         seedDigestAnchor(groupScopeId);
 
@@ -188,11 +188,42 @@ class ForgetPurgeServiceTest {
             conn.setAutoCommit(false);
             purgeService.purge(conn, userId, "dm", dmScopeId);
             int remaining = purgeService.countRemainingScopes(
-                    conn, userId, dmScopeId);
+                    conn, userId, "dm", dmScopeId);
             conn.commit();
 
             assertEquals(2, remaining);
         }
+    }
+
+    /**
+     * A DM anchor and a group anchor with the SAME scope_id coexist:
+     * scope_kind discriminates them (V37). Pre-V37 the second INSERT
+     * would have violated the (user_id, scope_id, command_kind) unique
+     * index, and a DM /forget would have deleted the group anchor.
+     */
+    @Test
+    void dmAndGroupAnchorsWithSameScopeIdCoexist() throws Exception {
+        UUID userId = seedUser(PREFIX + "collide-actor");
+        // Simulate a groups.id colliding with the user's own UUID — the
+        // DM scope_id IS the user's id, so the group anchor below shares
+        // its scope_id with the DM anchor.
+        UUID scopeId = userId;
+
+        seedSummaryAnchor(userId, "dm", scopeId, "personal");
+        seedSummaryAnchor(userId, "group", scopeId, "personal");
+
+        assertEquals(2, countRows("summary_anchor", "user_id", userId));
+
+        // DM purge deletes only the DM anchor; the group anchor survives.
+        try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            ForgetPurgeService.PurgeResult result =
+                    purgeService.purge(conn, userId, "dm", scopeId);
+            conn.commit();
+
+            assertEquals(1, result.summaryAnchorCount());
+        }
+        assertEquals(1, countRows("summary_anchor", "user_id", userId));
     }
 
     // ---- seeding helpers --------------------------------------------------
@@ -237,16 +268,17 @@ class ForgetPurgeServiceTest {
         }
     }
 
-    private void seedSummaryAnchor(UUID userId, UUID scopeId, String commandKind)
-            throws Exception {
+    private void seedSummaryAnchor(UUID userId, String scopeKind, UUID scopeId,
+                                   String commandKind) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                     "INSERT INTO summary_anchor (user_id, scope_id, command_kind, "
+                     "INSERT INTO summary_anchor (user_id, scope_kind, scope_id, command_kind, "
                              + "command_name, arg_hash, post_uids) "
-                             + "VALUES (?, ?, ?, 'summary', 'hash', '{}')")) {
+                             + "VALUES (?, ?, ?, ?, 'summary', 'hash', '{}')")) {
             ps.setObject(1, userId);
-            ps.setObject(2, scopeId);
-            ps.setString(3, commandKind);
+            ps.setString(2, scopeKind);
+            ps.setObject(3, scopeId);
+            ps.setString(4, commandKind);
             ps.executeUpdate();
         }
     }
@@ -254,9 +286,9 @@ class ForgetPurgeServiceTest {
     private void seedDigestAnchor(UUID scopeId) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                     "INSERT INTO summary_anchor (user_id, scope_id, command_kind, "
+                     "INSERT INTO summary_anchor (user_id, scope_kind, scope_id, command_kind, "
                              + "command_name, arg_hash, post_uids) "
-                             + "VALUES (NULL, ?, 'digest', 'digest', 'hash', '{}')")) {
+                             + "VALUES (NULL, 'group', ?, 'digest', 'digest', 'hash', '{}')")) {
             ps.setObject(1, scopeId);
             ps.executeUpdate();
         }

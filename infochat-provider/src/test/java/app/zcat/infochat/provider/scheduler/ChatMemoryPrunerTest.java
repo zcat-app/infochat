@@ -134,8 +134,8 @@ class ChatMemoryPrunerTest {
     private void insertSummaryAnchor(Connection conn, UUID uid, UUID sid, String tsExpr)
             throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(
-                "INSERT INTO summary_anchor (user_id, scope_id, command_kind, command_name, arg_hash, post_uids, generated_at)"
-                    + " VALUES (?, ?, 'personal', '/summary', 'abc123', '{}', " + tsExpr + ")")) {
+                "INSERT INTO summary_anchor (user_id, scope_kind, scope_id, command_kind, command_name, arg_hash, post_uids, generated_at)"
+                    + " VALUES (?, 'dm', ?, 'personal', '/summary', 'abc123', '{}', " + tsExpr + ")")) {
             ps.setObject(1, uid);
             ps.setObject(2, sid);
             ps.executeUpdate();

@@ -106,7 +106,7 @@ public class ExportDataCollector {
             "SELECT command_kind, command_name, arg_hash,"
                     + " post_uids, cluster_map, generated_at"
                     + " FROM summary_anchor"
-                    + " WHERE user_id = ? AND scope_id = ?"
+                    + " WHERE user_id = ? AND scope_kind = ? AND scope_id = ?"
                     + " ORDER BY generated_at DESC";
 
     // Global regardless of calling scope (D13).
@@ -170,7 +170,7 @@ public class ExportDataCollector {
             collectTable(tables, truncated, "source_subscription",
                     querySourceSubscriptions(conn, scopeKind, scopeId));
             collectTable(tables, truncated, "summary_anchor",
-                    querySummaryAnchors(conn, userId, scopeId));
+                    querySummaryAnchors(conn, userId, scopeKind, scopeId));
             collectTable(tables, truncated, "saved_post",
                     querySavedPosts(conn, userId));
             collectTable(tables, truncated, "users",
@@ -251,11 +251,12 @@ public class ExportDataCollector {
     }
 
     private List<String> querySummaryAnchors(
-            Connection conn, UUID userId, UUID scopeId)
+            Connection conn, UUID userId, String scopeKind, UUID scopeId)
             throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(withLimit(SUMMARY_ANCHOR_SQL))) {
             ps.setObject(1, userId);
-            ps.setObject(2, scopeId);
+            ps.setString(2, scopeKind);
+            ps.setObject(3, scopeId);
             return collectRows(ps);
         }
     }
