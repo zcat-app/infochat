@@ -42,14 +42,23 @@ import java.util.UUID;
  *       non-admin → {@code error.admin_only}, no DB write.</li>
  *   <li>Parse the positional {@code <contact>} argument plus the
  *       optional {@code --reason "..."} flag.</li>
+ *   <li>Audit-on-intent — write the {@code BAN_INTENT} row (spec
+ *       §Authorization model step 8) before any execution-semantics
+ *       guard; the confirm-leg transaction reuses its
+ *       {@code request_id} for intent↔effect correlation.</li>
  *   <li>Self-ban guard — if the resolved {@code actor.contact_id} equals
  *       the parsed target contact id on the same inbound adapter, return
- *       {@code error.ban.cannot_ban_self} and write no row. The trigger
+ *       {@code error.ban.cannot_ban_self}; the BAN_INTENT row above
+ *       survives, but no users row is touched. The trigger
  *       has no signal of which connection issued the UPDATE per the
  *       M1-008a red-team finding; the in-handler check is the only line
  *       of defense.</li>
  *   <li>(1.5) Open one application-side transaction
- *       ({@code autoCommit=false}). PRE-WRITE the BAN audit row INSIDE
+ *       ({@code autoCommit=false}). Re-run the admin gate INSIDE the
+ *       transaction via {@code SELECT ... FOR UPDATE} on the actor row
+ *       (authoritative for execution — closes the M1-046-class TOCTOU)
+ *       and resolve the target row on the same connection. PRE-WRITE
+ *       the BAN audit row INSIDE
  *       the transaction BEFORE any mutation per Invariant 7
  *       (audit-before-effect). For every CONTACT_BOUND pending invite
  *       for {@code (adapter, target_contact_id)} that step 7 below will
@@ -82,8 +91,8 @@ import java.util.UUID;
  *
  * <p>Audit rows go through the shared infochat-core
  * {@link AuditLogWriter} on the handler's own transaction connection.
- * Every audit row in one dispatch shares one
- * {@code UUID.randomUUID().toString()} request id — the BAN +
+ * Every audit row in one prompt→confirm pair shares the request id
+ * minted for the prompt-leg BAN_INTENT row — the BAN_INTENT + BAN +
  * INVITE_REVOKE correlation is the spec's canonical correlated-rows
  * shape.</p>
  */
@@ -168,8 +177,9 @@ public class BanCommandHandler implements CommandHandler {
                 return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONFIRM_NO_PENDING));
             }
             BanConfirm pendingBan = (BanConfirm) taken.get();
-            return executeBan(scope, actor, adapter,
-                    pendingBan.targetContactId(), pendingBan.reason());
+            return executeBan(scope, adapter, actor.contactId,
+                    pendingBan.targetContactId(), pendingBan.reason(),
+                    pendingBan.intentRequestId());
         }
 
         // First-call path — parse `<contact>` + optional `--reason "..."`.
@@ -183,33 +193,25 @@ public class BanCommandHandler implements CommandHandler {
         }
         String targetContactId = args.contact;
 
-        // Self-ban guard. The (adapter, contact_id) identity is
-        // sufficient: actor and target are scoped to the same inbound
-        // adapter, so a contact_id match implies identity.
-        if (callerContactId != null && callerContactId.equals(targetContactId)) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_BAN_CANNOT_BAN_SELF));
-        }
-
-        // Pre-flight validation passed — store pending args and prompt
-        // for confirm. Last-admin protection is NOT pre-flighted here;
-        // the V5 trg_last_admin_protection_update trigger remains the
-        // canonical enforcement inside executeBan's transaction. A
-        // confirm that arrives within the window re-runs the trigger
-        // and surfaces error.ban.last_admin if the state changed
-        // between prompt and confirm.
-        //
         // Audit-on-intent (spec §Authorization model step 8): write
-        // ONE BAN_INTENT row BEFORE remember() / prompt. The row is
-        // an atomic single-statement INSERT with autoCommit=true; it
-        // is intentionally NOT in a multi-statement transaction
-        // because the prompt path mutates no other state. A failure
-        // here surfaces as SQLException and the prompt is never sent
-        // — preferable to a silent intent that lands no audit trail.
-        // The intent row's target_id is the target's users id when
-        // registered, a synthetic UUID otherwise (pre-ban case);
-        // target_contact_id carries the resolved identity either way,
-        // and details_json records target_registered so a synthetic id
-        // is distinguishable from a real-but-since-deleted user id.
+        // ONE BAN_INTENT row immediately after the step-7 permission
+        // check, BEFORE the execution-semantics guards (self-ban) and
+        // remember() / prompt — the spec's 7 → 8 → 9 ordering and the
+        // M1-173 /revoke-admin shape: a permission-passing dispatch
+        // leaves an intent row even when an execution guard refuses
+        // it. The row is an atomic single-statement INSERT with
+        // autoCommit=true; it is intentionally NOT in a
+        // multi-statement transaction because the prompt path mutates
+        // no other state. A failure here surfaces as SQLException and
+        // the prompt is never sent — preferable to a silent intent
+        // that lands no audit trail. The intent row's target_id is
+        // the target's users id when registered, a synthetic UUID
+        // otherwise (pre-ban case); target_contact_id carries the
+        // resolved identity either way, and details_json records
+        // target_registered so a synthetic id is distinguishable from
+        // a real-but-since-deleted user id. The intent's request_id
+        // travels in the BanConfirm payload; executeBan reuses it so
+        // the BAN + INVITE_REVOKE effect rows correlate with this row.
         Optional<UserRow> targetOpt = lookupUser(adapter, targetContactId);
         UUID targetUserIdForIntent = targetOpt.map(u -> u.id).orElse(UUID.randomUUID());
         String intentRequestId = UUID.randomUUID().toString();
@@ -221,8 +223,25 @@ public class BanCommandHandler implements CommandHandler {
         } catch (SQLException e) {
             throw new RuntimeException("Failed to write BAN_INTENT audit row", e);
         }
+
+        // Self-ban guard — refused at execution semantics AFTER the
+        // intent write, so an admin's self-ban leaves its audit row.
+        // The (adapter, contact_id) identity is sufficient: actor and
+        // target are scoped to the same inbound adapter, so a
+        // contact_id match implies identity.
+        if (callerContactId != null && callerContactId.equals(targetContactId)) {
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_BAN_CANNOT_BAN_SELF));
+        }
+
+        // Pre-flight validation passed — store pending args and prompt
+        // for confirm. Last-admin protection is NOT pre-flighted here;
+        // the V5 trg_last_admin_protection_update trigger remains the
+        // canonical enforcement inside executeBan's transaction. A
+        // confirm that arrives within the window re-runs the trigger
+        // and surfaces error.ban.last_admin if the state changed
+        // between prompt and confirm.
         confirmStateService.remember(actor.id, scope,
-                new BanConfirm(targetContactId, args.reason));
+                new BanConfirm(targetContactId, args.reason, intentRequestId));
         String prompt = MessageFormat.format(
                 bundleLoader.get(BundleKeys.REPLY_CONFIRM_PROMPT_BAN),
                 Long.toString(confirmStateService.timeoutSeconds()),
@@ -231,29 +250,54 @@ public class BanCommandHandler implements CommandHandler {
     }
 
     /**
-     * Run the existing M1-044c audit-before-effect ban transaction with
-     * the {@code targetContactId} + {@code reason} captured from the
-     * pending-confirm payload. The transaction body is byte-for-byte
-     * unchanged from the M1-044c shape — only the call shape (called
-     * from the confirm path, not the first-call path) changed for
-     * M1-051.
+     * Run the M1-044c audit-before-effect ban transaction with the
+     * {@code targetContactId} + {@code reason} captured from the
+     * pending-confirm payload and the prompt-leg BAN_INTENT row's
+     * {@code requestId}, so the BAN + INVITE_REVOKE effect rows
+     * correlate with the intent row that authorized them. The
+     * transaction opens with the authoritative actor admin gate —
+     * {@code SELECT ... FOR UPDATE} on the actor row, the M1-046
+     * TOCTOU-closure shape shared with /grant-admin and /revoke-admin
+     * — and every execution-sensitive read (actor gate, target
+     * lookup, pending-invite list) runs on the transaction connection.
      */
-    private OutboundMessage executeBan(ScopeRef scope, UserRow actor, String adapter,
-                                       String targetContactId, @Nullable String reason) {
-        // Step 1.5 + 4..7 — open the transaction and run the
-        // audit-first / mutate-after sequence. Reads of the target row
-        // and the pending-invite list happen inside the transaction so
-        // their results are consistent with the writes that follow.
-        Optional<UserRow> targetOpt = lookupUser(adapter, targetContactId);
-        UUID targetUserId = targetOpt.map(u -> u.id).orElse(UUID.randomUUID());
-        String requestId = UUID.randomUUID().toString();
-
+    private OutboundMessage executeBan(ScopeRef scope, String adapter,
+                                       String callerContactId, String targetContactId,
+                                       @Nullable String reason, String requestId) {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
+                // In-tx admin gate — SELECT ... FOR UPDATE on the
+                // actor row, authoritative for execution (the
+                // dispatch-time gate re-ran at confirm time; this
+                // locked read closes the window where the actor is
+                // demoted between that MVCC read and the mutation).
+                // Checks is_admin only, mirroring the dispatch-time
+                // gate — a banned admin is blocked at intake, and the
+                // V5 last-admin trigger stays the backstop for that
+                // bypass case. The FK FOR KEY SHARE the audit INSERTs
+                // below take on this row is held by the SAME
+                // transaction — self-compatible, no deadlock.
+                Optional<UserRow> actorOpt =
+                        lookupUserForUpdate(conn, adapter, callerContactId);
+                if (actorOpt.isEmpty() || !actorOpt.get().isAdmin) {
+                    conn.rollback();
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+                }
+                UserRow actor = actorOpt.get();
                 try (Statement st = conn.createStatement()) {
                     st.execute("SET LOCAL infochat.actor_id = '" + actor.id + "'");
                 }
+
+                // Target lookup INSIDE the transaction, after the
+                // actor gate — feeds target_registered on the BAN
+                // effect row and the preban-INSERT-vs-UPDATE branch
+                // from the same snapshot the writes below use (no
+                // out-of-transaction read). FOR UPDATE also holds a
+                // known target row for the step-5/6 mutation.
+                Optional<UserRow> targetOpt =
+                        lookupUserForUpdate(conn, adapter, targetContactId);
+                UUID targetUserId = targetOpt.map(u -> u.id).orElse(UUID.randomUUID());
                 // Lock + fetch the contact-bound pending invite ids the
                 // step-7 UPDATE will revoke. FOR UPDATE holds the rows
                 // for the rest of the transaction so the pre-written
@@ -331,6 +375,18 @@ public class BanCommandHandler implements CommandHandler {
             return Optional.empty();
         }
         return userRepository.findByAdapterAndContactId(adapter, contactId)
+                .map(u -> new UserRow(u.id(), u.contactId(), u.isAdmin(), u.isBanned(),
+                        u.registrationState()));
+    }
+
+    /**
+     * {@code SELECT ... FOR UPDATE} lookup on the transaction
+     * connection — the row lock is authoritative for the rest of the
+     * transaction (the M1-046 shape).
+     */
+    private Optional<UserRow> lookupUserForUpdate(Connection conn, String adapter,
+                                                  String contactId) throws SQLException {
+        return userRepository.findByAdapterAndContactIdForUpdate(conn, adapter, contactId)
                 .map(u -> new UserRow(u.id(), u.contactId(), u.isAdmin(), u.isBanned(),
                         u.registrationState()));
     }

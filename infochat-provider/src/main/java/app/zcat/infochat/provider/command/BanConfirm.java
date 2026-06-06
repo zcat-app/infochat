@@ -13,8 +13,14 @@ import org.jspecify.annotations.Nullable;
  * {@code takeMatching} call both depend on — neither return string may
  * change without coordinated edits in {@link BanCommandHandler} and
  * {@link app.zcat.infochat.provider.messaging.InboundRouter}.</p>
+ *
+ * <p>{@code intentRequestId} carries the prompt-leg BAN_INTENT audit
+ * row's {@code request_id} across to the confirm leg, which reuses it
+ * for the BAN + INVITE_REVOKE effect rows — one request-id mint per
+ * prompt→confirm pair, so intent and effect correlate.</p>
  */
-public record BanConfirm(String targetContactId, @Nullable String reason)
+public record BanConfirm(String targetContactId, @Nullable String reason,
+                         String intentRequestId)
         implements ConfirmStateService.PendingConfirm {
 
     @Override

@@ -40,7 +40,7 @@ class ConfirmStateServiceTest {
         UUID actor = UUID.randomUUID();
         ScopeRef scope = new ScopeRef.Dm("actor-contact");
         BanConfirm payload =
-                new BanConfirm("target-contact", "spam");
+                new BanConfirm("target-contact", "spam", "intent-req");
 
         service.remember(actor, scope, payload);
 
@@ -64,7 +64,7 @@ class ConfirmStateServiceTest {
         UUID actor = UUID.randomUUID();
         ScopeRef scope = new ScopeRef.Dm("actor-contact");
         BanConfirm payload =
-                new BanConfirm("target-contact", null);
+                new BanConfirm("target-contact", null, "intent-req");
 
         service.remember(actor, scope, payload);
 
@@ -93,7 +93,7 @@ class ConfirmStateServiceTest {
         UUID actor = UUID.randomUUID();
         ScopeRef scope = new ScopeRef.Dm("actor-contact");
         service.remember(actor, scope,
-                new BanConfirm("target-contact", "spam"));
+                new BanConfirm("target-contact", "spam", "intent-req"));
 
         // Advance fake clock past the deadline (deadline = T0 + 60s; pick T0 + 61s).
         service.setClock(fixedAt(T0.plus(TIMEOUT).plusSeconds(1)));
@@ -138,7 +138,7 @@ class ConfirmStateServiceTest {
         ScopeRef scope = new ScopeRef.Dm("actor-contact");
 
         BanConfirm first =
-                new BanConfirm("first-target", null);
+                new BanConfirm("first-target", null, "intent-req");
         InviteCreateOpenConfirm second =
                 new InviteCreateOpenConfirm("inmemory");
 
@@ -173,9 +173,9 @@ class ConfirmStateServiceTest {
         // isolation is verified inline by the ScopeRef record equality.
 
         BanConfirm payloadA =
-                new BanConfirm("target-a", null);
+                new BanConfirm("target-a", null, "intent-req");
         BanConfirm payloadB =
-                new BanConfirm("target-b", null);
+                new BanConfirm("target-b", null, "intent-req");
         service.remember(actorA, scope, payloadA);
         service.remember(actorB, scope, payloadB);
 

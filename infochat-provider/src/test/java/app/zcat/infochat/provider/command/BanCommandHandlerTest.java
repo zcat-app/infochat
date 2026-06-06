@@ -149,14 +149,19 @@ class BanCommandHandlerTest {
                 "non-admin /ban must not write any audit row");
     }
 
-    // ----- (3) Self-ban → error.ban.cannot_ban_self, no DB write -----------
+    // ----- (3) Self-ban → error.ban.cannot_ban_self, intent row only -------
+    // M1-175: the BAN_INTENT write moved BEFORE the self-ban guard
+    // (spec §Authorization model ordering: 7 permission check →
+    // 8 audit the intent → 9 execute), so a permission-passing
+    // self-ban dispatch leaves exactly one intent row. Supersedes the
+    // former banSelfReturnsCannotBanSelf no-DB-write pin (same reply
+    // assertion; authorized modification).
 
     @Test
-    void banSelfReturnsCannotBanSelf() throws Exception {
+    void banSelfWritesIntentRowWithoutPrompt() throws Exception {
         String actor = PREFIX + "self-actor";
-        seedUser(actor, /* isAdmin */ true, false, "vouched");
+        UUID actorId = seedUser(actor, /* isAdmin */ true, false, "vouched");
         long usersBefore = countUsersUnderPrefix();
-        long auditBefore = countAuditUnderTargetPrefix(PREFIX + "self-");
 
         OutboundMessage reply = handler.handle(
                 new ScopeRef.Dm(actor),
@@ -165,9 +170,19 @@ class BanCommandHandlerTest {
         assertEquals(bundleLoader.get(BundleKeys.ERROR_BAN_CANNOT_BAN_SELF), reply.text(),
                 "self-ban must surface error.ban.cannot_ban_self");
         assertEquals(usersBefore, countUsersUnderPrefix(),
-                "self-ban must not touch users");
-        assertEquals(auditBefore, countAuditUnderTargetPrefix(PREFIX + "self-"),
-                "self-ban must not write any audit row");
+                "self-ban must not mint or delete any users row");
+        assertFalse(isBanned(actor),
+                "self-ban must not mutate the actor's users row");
+        assertFalse(confirmStateService.peek(actorId, new ScopeRef.Dm(actor)).isPresent(),
+                "self-ban must store no pending confirm (no prompt leg)");
+        assertEquals(1, countAuditByActionAndTarget("BAN_INTENT", actor),
+                "exactly one BAN_INTENT row must survive the refused self-ban");
+        assertEquals(0, countAuditByActionAndTarget("BAN", actor),
+                "a refused self-ban must write zero BAN effect rows");
+        assertTrue(detailsJsonByActionAndTarget("BAN_INTENT", actor)
+                        .contains("\"target_registered\": true"),
+                "the self-ban BAN_INTENT row must carry target_registered=true "
+                        + "(jsonb-canonical spacing; the actor is a registered user)");
     }
 
     // ----- (4) Unknown contact mints a preban row --------------------------
@@ -377,6 +392,11 @@ class BanCommandHandlerTest {
         assertEquals(1, requestIds.size(),
                 "BAN + INVITE_REVOKE audit rows from the same /ban dispatch must "
                         + "share one request_id; got: " + requestIds);
+        // M1-175: the shared effect request_id is the prompt-leg
+        // BAN_INTENT row's request_id (intent↔effect correlation).
+        assertTrue(requestIds.contains(requestIdByActionAndTarget("BAN_INTENT", target)),
+                "the shared BAN/INVITE_REVOKE request_id must match the BAN_INTENT "
+                        + "row written on the prompt leg");
     }
 
     // ----- (8) Last-admin protection: trigger rolls back the transaction ---
@@ -527,6 +547,60 @@ class BanCommandHandlerTest {
                 confirmStateService.peek(actorId, new ScopeRef.Dm(actor));
         assertFalse(peeked.isPresent(),
                 "ConfirmStateService.peek must be empty after the confirm executes (entry cleared)");
+
+        // M1-175 intent↔effect correlation: the confirm-leg transaction
+        // reuses the prompt-leg BAN_INTENT request_id instead of
+        // minting a fresh one.
+        String banRequestId = requestIdByActionAndTarget("BAN", target);
+        assertEquals(requestIdByActionAndTarget("BAN_INTENT", target), banRequestId,
+                "the committed BAN effect row must share its request_id with the "
+                        + "prompt-leg BAN_INTENT row");
+        assertEquals(1, countAuditByActionAndTarget("BAN_INTENT", target),
+                "exactly one BAN_INTENT row carries the shared request_id "
+                        + "(one mint per prompt→confirm pair)");
+    }
+
+    // ----- M1-175: in-tx authoritative admin gate ------------------------
+
+    @Test
+    void banConfirmByDemotedAdminRefusedWithoutMutation() throws Exception {
+        String actor = PREFIX + "demoted-actor";
+        String target = PREFIX + "demoted-target";
+        seedUser(actor, /* isAdmin */ true, false, "vouched");
+        seedUser(target, false, false, "invited");
+
+        OutboundMessage promptReply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/ban " + target);
+        assertEquals(expectedBanPrompt(target), promptReply.text(),
+                "first /ban call by a then-admin must return the confirm prompt");
+
+        // Demote the actor between prompt and confirm. The committed
+        // demotion is caught deterministically by the dispatch-time
+        // admin gate re-running on the confirm dispatch; the in-tx
+        // SELECT ... FOR UPDATE gate added by M1-175 is the
+        // authoritative backstop for the sub-millisecond demotion race
+        // a test cannot drive deterministically (the M1-046 argument).
+        try (Connection conn = dataSource.getConnection()) {
+            exec(conn,
+                    "UPDATE users SET is_admin = FALSE WHERE adapter = ? AND contact_id = ?",
+                    ADAPTER, actor);
+        }
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/ban confirm");
+
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY), reply.text(),
+                "a demoted admin's /ban confirm must surface error.admin_only");
+        assertFalse(isBanned(target),
+                "the refused confirm must not mutate the target users row");
+        assertEquals(0, countAuditByActionAndTarget("BAN", target),
+                "the refused confirm must commit no BAN effect row");
+        assertEquals(0, countAuditByActionAndTarget("INVITE_REVOKE", target),
+                "the refused confirm must commit no INVITE_REVOKE effect row");
+        assertEquals(1, countAuditByActionAndTarget("BAN_INTENT", target),
+                "the prompt-leg BAN_INTENT row must stand after the refusal");
     }
 
     @Test
@@ -735,6 +809,20 @@ class BanCommandHandlerTest {
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return rs.getString("details_json");
+            }
+        }
+    }
+
+    private String requestIdByActionAndTarget(String action, String targetContactId)
+            throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT request_id FROM audit_log WHERE action = ? AND target_contact_id = ?")) {
+            ps.setString(1, action);
+            ps.setString(2, targetContactId);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getString("request_id");
             }
         }
     }

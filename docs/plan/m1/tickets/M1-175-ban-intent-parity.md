@@ -1,15 +1,17 @@
 ---
 id: M1-175
 title: "Ban intent-row parity and transaction hygiene (M1-173 audit-2 findings)"
-status: pending
+status: done
 created: 2026-06-06
 last_updated: 2026-06-06
 blocked_by: [M1-173]
-files_budget: 3
+files_budget: 5
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/BanCommandHandler.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/BanConfirm.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/BanCommandHandlerTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/ConfirmStateServiceTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterConfirmCancelTest.java
 complexity: medium
 risk: medium
 round_cap: 2
@@ -25,6 +27,7 @@ out_of_scope:
   - moving the prompt-leg BAN_INTENT write inside any transaction (the audit_log.actor_user_id FK FOR KEY SHARE vs FOR UPDATE deadlock documented on RevokeAdminCommandHandler applies once executeBan takes the actor row lock)
   - the non-admin and parse-failure short-circuits (handle steps 1-2) — they return before/at the permission check, so spec step 8 is never reached and they stay row-less
   - any change to user-visible replies or bundle keys
+  - ConfirmStateServiceTest and InboundRouterConfirmCancelTest beyond the mechanical 2-arg→3-arg BanConfirm constructor-arg updates (a fixed test string for intentRequestId; no assertion or other behavioral change in either file)
 acceptance:
   - "BanCommandHandlerTest.banSelfWritesIntentRowWithoutPrompt passes: an admin's /ban <own-contact-id> still replies error.ban.cannot_ban_self, stores no pending confirm, mutates no users row, and exactly one BAN_INTENT audit row survives (zero BAN effect rows) with target_registered=true — the first-call intent write moves BEFORE the self-ban guard, closing M1-173 audit-2 finding 1 (the /ban analog of the self-revoke leg fixed on /revoke-admin); per docs/spec/security.md §Authorization model the row coverage matches the spec ordering verbatim: '7. **Permission check** against the matrix.' then '8. Audit-log the intent.' then '9. Execute.' — supersedes banSelfReturnsCannotBanSelf's no-DB-write pin (authorized modification, see §Out-of-scope)"
   - "BanConfirm carries the prompt-leg intent request_id, and executeBan reuses it instead of minting a fresh one: BanCommandHandlerTest.banConfirmWithinWindowExecutesBanTransaction passes extended with the assertion that the committed BAN effect row shares its request_id with exactly one BAN_INTENT row (intent↔effect correlation, M1-173 audit-2 finding 2)"
@@ -41,12 +44,80 @@ test_plan:
 spec_refs:
   - docs/spec/security.md §Authorization model
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-06
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 268
+      removed: 75
+revisions:
+  - date: 2026-06-06
+    reason: budget-breach refine (pre-round-1) — acceptance item 2's new BanConfirm record component breaks eight 2-arg construction sites in two test files outside files_scope; widen scope and authorize the mechanical constructor-arg updates
+    snapshot: |
+      files_budget (pre-refine): 3
+      files_scope (pre-refine):
+        - infochat-provider/src/main/java/app/zcat/infochat/provider/command/BanCommandHandler.java
+        - infochat-provider/src/main/java/app/zcat/infochat/provider/command/BanConfirm.java
+        - infochat-provider/src/test/java/app/zcat/infochat/provider/command/BanCommandHandlerTest.java
+      out_of_scope carried no entry for the two compile-impacted test files; the
+      body §Out-of-scope stated "No other pre-existing test changes are
+      authorized; in particular banOfOnlyAdminSurfacesLastAdminError and
+      banByNonAdminReturnsAdminOnly must pass unmodified." Verified on disk:
+      ConfirmStateServiceTest.java holds six 2-arg `new BanConfirm(...)`
+      construction sites (:43 :67 :96 :141 :176 :178) and
+      InboundRouterConfirmCancelTest.java holds two (:53 :82); a third record
+      component fails their compilation, and a 2-arg delegating constructor kept
+      solely for out-of-scope tests would be a forbidden backwards-compatibility
+      shim.
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-06
+    verdict: CLEAN
+    base: main
+    head: m1/M1-175-ban-intent-parity (working tree, pre-commit)
+    verdict_file: docs/plan/m1/redteam/M1-175-2026-06-06.md
+    out_of_model_count: 1
+    note: |
+      Pre-commit (in-review) audit of the M1-175 remediation diff. CLEAN: the
+      step 7→8→9 audit ordering, the in-tx FOR UPDATE actor re-gate, the
+      PreparedStatement binds, and the admin-gated BAN_INTENT write all uphold
+      the threat-model commitments the diff touches. One pre-existing
+      OUT-OF-MODEL advisory, investigated and closed: (a) --reason in
+      audit_log.details_json is a deliberate admin-only DB record, not a logger
+      emission, so the §"User content in exceptions" obligation does not apply;
+      (b) the executeBan exception is logged via SafeLog at InboundRouter.java:617
+      (body dropped, cause chain truncated to class names), so the obligation is
+      met at the sink. Pre-existing, not introduced by this diff. No code change.
+escalations:
+  - date: 2026-06-06
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A — pre-implementation files_scope breach. Acceptance item 2 adds an
+      intentRequestId component to the BanConfirm record; two pre-existing test
+      files OUTSIDE files_scope construct BanConfirm with the 2-arg shape and
+      stop compiling the moment the record gains the field:
+        - infochat-provider/src/test/java/app/zcat/infochat/provider/command/ConfirmStateServiceTest.java (6 sites)
+        - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterConfirmCancelTest.java (2 sites)
+      The ticket authorizes no test changes beyond BanCommandHandlerTest, and a
+      2-arg delegating constructor kept solely for out-of-scope tests would be a
+      backwards-compatibility shim (forbidden).
+clarity_check:
+  date: 2026-06-06
+  verdict: WARN
+  warnings:
+    - "risk: medium may be understated for a ticket that closes a TOCTOU in the admin gate, fixes ban audit-evasion on the self-ban guard, and moves target reads into a transaction — three surfaces the heuristics identify as risk: high. The 3-file narrow scope is mitigating, but implementers should treat this as high-sensitivity work regardless of the label."
+  blockers: []
 ---
 
 # M1-175: Ban intent-row parity and transaction hygiene (M1-173 audit-2 findings)
@@ -129,7 +200,12 @@ See frontmatter. Authorized pre-existing-test modifications:
 intent-row + no-pending-confirm expectations).
 `banConfirmWithinWindowExecutesBanTransaction` and
 `banAndInviteRevokeAuditRowsShareRequestId` are extended with the
-correlation assertions. No other pre-existing test changes are
+correlation assertions. `BanConfirm`'s new `intentRequestId` component
+mechanically breaks the eight 2-arg `new BanConfirm(...)` construction
+sites in `ConfirmStateServiceTest` (6) and
+`InboundRouterConfirmCancelTest` (2); updating those call sites to
+pass a fixed test string is authorized — no assertion or other
+behavioral change in either file. No other pre-existing test changes are
 authorized; in particular `banOfOnlyAdminSurfacesLastAdminError` and
 `banByNonAdminReturnsAdminOnly` must pass unmodified.
 

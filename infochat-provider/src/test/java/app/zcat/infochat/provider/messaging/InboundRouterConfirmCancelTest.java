@@ -50,7 +50,7 @@ class InboundRouterConfirmCancelTest {
         // Pending /ban exists; user sends /help (any other input) →
         // sweep takeAny + cancellation reply sent BEFORE dispatch.
         FakeConfirmStateService confirmState = new FakeConfirmStateService(
-                Optional.of(new BanConfirm("target-1", null)));
+                Optional.of(new BanConfirm("target-1", null, "intent-req")));
         CapturingAdapter capture = new CapturingAdapter();
         InboundRouter router = newRouter(confirmState, capture);
 
@@ -79,7 +79,7 @@ class InboundRouterConfirmCancelTest {
         // confirm-shape) → sweep does NOT takeAny, no cancellation
         // reply, dispatch proceeds.
         FakeConfirmStateService confirmState = new FakeConfirmStateService(
-                Optional.of(new BanConfirm("target-2", "spam")));
+                Optional.of(new BanConfirm("target-2", "spam", "intent-req")));
         CapturingAdapter capture = new CapturingAdapter();
         CountingCommandHandler banHandler = new CountingCommandHandler("ban", "ban-dispatched");
         InboundRouter router = newRouter(confirmState, capture);
