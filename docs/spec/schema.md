@@ -416,8 +416,10 @@ coordinated change.
   `/follow-tag` / `/unfollow-tag`); this row does not duplicate them.
 - **Summary anchor.** Captures the last summary-producing command's
   deterministic payload: command name, argument hash, post UIDs
-  (ordered), cluster mapping, `generated_at`, and a `command_kind`
-  discriminator (`personal` / `digest`). Read by `/retry` to replay
+  (ordered), cluster mapping, `generated_at`, a `scope_kind`
+  discriminator (`dm` / `group` — the same scope discriminator every
+  other user-state row carries), and a `command_kind` discriminator
+  (`personal` / `digest`). Read by `/retry` to replay
   deterministic post selection and clustering (decision D19, D36).
   Cleared by any non-`/retry` input from the same `(user, scope)`.
   Survives Provider restart for the bounded retry window — this is
@@ -438,27 +440,29 @@ coordinated change.
   **Keying by `command_kind`.** The two kinds of anchor row have
   different actor semantics:
   - `command_kind = 'personal'` — written by a user-issued
-    `/summary` (DM or group). Carries `(user_id, scope_id,
-    command_kind = 'personal')`. Per-(user, scope) isolation
-    applies (invariant 1).
+    `/summary` (DM or group). Carries `(user_id, scope_kind,
+    scope_id, command_kind = 'personal')`. Per-(user, scope)
+    isolation applies (invariant 1).
   - `command_kind = 'digest'` — written by the periodic-digest
     scheduler (a group-wide cached digest, decision D17). Has
     **no actor user**: digest rows carry `user_id IS NULL` and
-    `(scope_id, command_kind = 'digest')` is the logical key.
+    `(scope_kind, scope_id, command_kind = 'digest')` is the
+    logical key.
     The bot itself has no `users` row (not a registered contact
     on any adapter), so synthesizing a sentinel id would be
     misleading; NULL is the structural marker for "scheduler
     actor." `/retry --digest` from a group admin or bot admin
-    matches this row by `(scope_id, command_kind = 'digest')`
-    without referencing `user_id`.
+    matches this row by `(scope_kind, scope_id, command_kind =
+    'digest')` without referencing `user_id`.
 
   Uniqueness is enforced by **two partial unique indexes** so the
   two row shapes do not collide:
-  - `UNIQUE (user_id, scope_id, command_kind) WHERE user_id IS
-    NOT NULL` — at most one personal anchor per `(user, scope)`.
-  - `UNIQUE (scope_id, command_kind) WHERE user_id IS NULL AND
-    command_kind = 'digest'` — at most one digest anchor per
-    scope.
+  - `UNIQUE (user_id, scope_kind, scope_id, command_kind) WHERE
+    user_id IS NOT NULL` — at most one personal anchor per
+    `(user, scope)`.
+  - `UNIQUE (scope_kind, scope_id, command_kind) WHERE user_id
+    IS NULL AND command_kind = 'digest'` — at most one digest
+    anchor per scope.
   Splitting `summary_anchor` into two tables would duplicate the
   retention/cleanup machinery for no semantic gain; the partial
   indexes are the v1 commitment.
