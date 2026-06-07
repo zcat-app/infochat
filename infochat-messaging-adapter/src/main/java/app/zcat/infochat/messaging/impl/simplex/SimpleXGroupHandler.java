@@ -7,6 +7,8 @@ import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.ScopeRef;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Translates SimpleX group-scope candidates into {@link InboundMessage}
@@ -77,9 +79,51 @@ final class SimpleXGroupHandler {
         InboundMessage msg = new InboundMessage(
                 sender,
                 new ScopeRef.Group(gc.adapterGroupId()),
-                gc.text(),
+                stripBotMentions(gc),
                 now,
                 gc.adapterMessageId());
         inboundHandler.onMessage(msg);
+    }
+
+    /**
+     * Remove the bot's own mention span(s) from the text before
+     * delivery, per {@code docs/spec/messaging.md} §Required SPI surface
+     * ("the mention is stripped before delivery"). Anchored to the
+     * protocol mention segments the codec located inside the text —
+     * never display-name text search, so a body that merely contains
+     * the bot's name as plain text is left intact. The codec's
+     * reconstruction guard ({@link SimpleXMessageCodec.GroupCandidate})
+     * means {@code mentionSpans} may be empty on a degenerate frame even
+     * though recognition fired; the text is then delivered unstripped —
+     * no span data exists that could locate the mention honestly.
+     */
+    private String stripBotMentions(SimpleXMessageCodec.GroupCandidate gc) {
+        String text = gc.text();
+        List<SimpleXMessageCodec.MentionSpan> botSpans = new ArrayList<>();
+        for (SimpleXMessageCodec.MentionSpan span : gc.mentionSpans()) {
+            if (span.queueAddress().equals(botIdentity.queueAddress())) {
+                botSpans.add(span);
+            }
+        }
+        if (botSpans.isEmpty()) {
+            return text;
+        }
+        // Delete right-to-left so earlier spans' offsets stay valid.
+        botSpans.sort((a, b) -> Integer.compare(b.start(), a.start()));
+        StringBuilder stripped = new StringBuilder(text);
+        for (SimpleXMessageCodec.MentionSpan span : botSpans) {
+            stripped.delete(span.start(), span.start() + span.length());
+            // Whitespace normalization at the removal junction: a
+            // mid-text mention leaves the spaces on both of its sides
+            // adjacent — collapse them to one so "hey @bot do x"
+            // becomes "hey do x", not "hey  do x".
+            int junction = span.start();
+            if (junction > 0 && junction < stripped.length()
+                    && Character.isWhitespace(stripped.charAt(junction - 1))
+                    && Character.isWhitespace(stripped.charAt(junction))) {
+                stripped.deleteCharAt(junction);
+            }
+        }
+        return stripped.toString().strip();
     }
 }

@@ -58,8 +58,98 @@ class SignalGroupHandlerTest {
                 "group id MUST be the signal-cli groupV2.id (base64)");
         assertEquals("aabbccdd-1111-2222-3333-444455556666", msg.sender().contactId(),
                 "sender ACI must be canonicalized to lowercase");
-        assertEquals("@bot summarise this", msg.text());
+        assertEquals("summarise this", msg.text(),
+                "bot mention span must be stripped before delivery");
         assertEquals(0, membership.events.size(), "no membership events for a regular message");
+    }
+
+    @Test
+    void mentionSpanStripIsAnchoredToProtocolEntry_plainTextBotNameKept() {
+        // The body contains the bot's display name as plain text AFTER
+        // the real mention. Only the protocol mention span ([0,4) per
+        // the mentions entry) may be removed — a display-name text
+        // search would also eat the trailing "bot".
+        RecordingInbound inbound = new RecordingInbound();
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, new RecordingMembership());
+
+        handler.handleReceive(parse("""
+                {
+                  "envelope": {
+                    "sourceUuid": "AABBCCDD-1111-2222-3333-444455556666",
+                    "timestamp": 1700000009000,
+                    "dataMessage": {
+                      "timestamp": 1700000009000,
+                      "message": "@bot say hello to bot",
+                      "groupV2": {"id": "Z3JvdXBJZEJhc2U2NEVuY29kZWQ="},
+                      "mentions": [
+                        {"uuid": "11112222-3333-4444-5555-666677778888", "start": 0, "length": 4}
+                      ]
+                    }
+                  }
+                }
+                """));
+
+        assertEquals(1, inbound.messages.size());
+        assertEquals("say hello to bot", inbound.messages.get(0).text(),
+                "only the actual mention span is removed; plain-text 'bot' stays");
+    }
+
+    @Test
+    void groupSlashCommandParseableAfterStrip() {
+        RecordingInbound inbound = new RecordingInbound();
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, new RecordingMembership());
+
+        handler.handleReceive(parse("""
+                {
+                  "envelope": {
+                    "sourceUuid": "AABBCCDD-1111-2222-3333-444455556666",
+                    "timestamp": 1700000010000,
+                    "dataMessage": {
+                      "timestamp": 1700000010000,
+                      "message": "@bot /summary",
+                      "groupV2": {"id": "Z3JvdXBJZEJhc2U2NEVuY29kZWQ="},
+                      "mentions": [
+                        {"uuid": "11112222-3333-4444-5555-666677778888", "start": 0, "length": 4}
+                      ]
+                    }
+                  }
+                }
+                """));
+
+        assertEquals(1, inbound.messages.size());
+        String delivered = inbound.messages.get(0).text();
+        assertTrue(delivered.startsWith("/"),
+                "delivered text must start with the slash so the command parser sees it");
+        assertEquals("/summary", delivered);
+    }
+
+    @Test
+    void midTextMentionStripNormalizesWhitespace() {
+        // Mention in the middle of the body: removing the span must not
+        // leave the surrounding spaces doubled.
+        RecordingInbound inbound = new RecordingInbound();
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, new RecordingMembership());
+
+        handler.handleReceive(parse("""
+                {
+                  "envelope": {
+                    "sourceUuid": "AABBCCDD-1111-2222-3333-444455556666",
+                    "timestamp": 1700000011000,
+                    "dataMessage": {
+                      "timestamp": 1700000011000,
+                      "message": "hey @bot summarise",
+                      "groupV2": {"id": "Z3JvdXBJZEJhc2U2NEVuY29kZWQ="},
+                      "mentions": [
+                        {"uuid": "11112222-3333-4444-5555-666677778888", "start": 4, "length": 4}
+                      ]
+                    }
+                  }
+                }
+                """));
+
+        assertEquals(1, inbound.messages.size());
+        assertEquals("hey summarise", inbound.messages.get(0).text(),
+                "junction whitespace collapses to a single space");
     }
 
     @Test

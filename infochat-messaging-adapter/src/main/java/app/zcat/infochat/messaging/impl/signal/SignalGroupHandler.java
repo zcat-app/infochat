@@ -15,6 +15,8 @@ import jakarta.json.JsonString;
 import jakarta.json.JsonValue;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 
 /**
@@ -160,10 +162,65 @@ final class SignalGroupHandler {
         InboundMessage inbound = new InboundMessage(
                 sender,
                 new ScopeRef.Group(groupId),
-                body,
+                stripBotMentions(dataMessage, body),
                 Instant.ofEpochMilli(timestamp),
                 "signal-" + timestamp);
         handler.onMessage(inbound);
+    }
+
+    /**
+     * Remove the bot's own mention span(s) from the body before delivery,
+     * per {@code docs/spec/messaging.md} §Required SPI surface ("the
+     * mention is stripped before delivery"). Anchored to the same
+     * protocol mention entries the D10 gate reads — never display-name
+     * text search, so a body that merely contains the bot's name as
+     * plain text is left intact. Span {@code start}/{@code length} are
+     * UTF-16 code-unit offsets into the body (Signal protocol
+     * convention, matching Java string indexing). The entries are
+     * untrusted wire data: a non-bot, malformed, or out-of-range span
+     * is skipped rather than risking a corrupted delivery.
+     */
+    private String stripBotMentions(JsonObject dataMessage, String body) {
+        JsonArray mentions = dataMessage.getJsonArray("mentions");
+        // botMentioned gated this path, so mentions is present; each
+        // entry's span fields are still validated individually.
+        List<int[]> spans = new ArrayList<>();
+        for (JsonValue entry : mentions) {
+            if (entry.getValueType() != JsonValue.ValueType.OBJECT) {
+                continue;
+            }
+            JsonObject mention = (JsonObject) entry;
+            String uuid = mention.getString("uuid", null);
+            if (uuid == null || !botAci.equals(uuid.toLowerCase(Locale.ROOT))) {
+                continue;
+            }
+            int start = mention.getInt("start", -1);
+            int length = mention.getInt("length", -1);
+            if (start < 0 || length <= 0 || start + length > body.length()) {
+                continue;
+            }
+            spans.add(new int[] {start, start + length});
+        }
+        if (spans.isEmpty()) {
+            return body;
+        }
+        // Delete right-to-left so earlier spans' offsets stay valid.
+        spans.sort((a, b) -> Integer.compare(b[0], a[0]));
+        StringBuilder stripped = new StringBuilder(body);
+        for (int[] span : spans) {
+            stripped.delete(span[0], span[1]);
+            // Whitespace normalization at the removal junction: a
+            // mid-text mention leaves the spaces on both of its sides
+            // adjacent — collapse them to one so "hey @bot do x"
+            // becomes "hey do x", not "hey  do x".
+            int junction = span[0];
+            if (junction > 0 && junction < stripped.length()
+                    && Character.isWhitespace(stripped.charAt(junction - 1))
+                    && Character.isWhitespace(stripped.charAt(junction))) {
+                stripped.deleteCharAt(junction);
+            }
+        }
+        return stripped.toString().strip();
     }
 
     private boolean dispatchMembership(String groupId, @Nullable JsonArray acis, boolean joined) {

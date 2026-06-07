@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import app.zcat.infochat.messaging.CapabilityFlags;
 import app.zcat.infochat.messaging.InboundMessage;
@@ -258,6 +259,94 @@ class SimpleXGroupHandlerTest {
                 "handler is never invoked when decode drops the frame");
     }
 
+    /**
+     * Spec promise (docs/spec/messaging.md §Required SPI surface): "the
+     * mention is stripped before delivery". A realistic frame whose
+     * formattedText decomposes the message text — the mention segment
+     * "@bot" followed by the rest — delivers with the mention span
+     * removed and surrounding whitespace normalized.
+     */
+    @Test
+    void mentionSpanStrippedBeforeDelivery() {
+        var candidate = decodeGroupFrame(groupFrame(
+                "group-7",
+                "alice-queue-addr",
+                "Alice",
+                "@bot summarise this",
+                decomposingBotMention("@bot", " summarise this"),
+                "msg-strip-1"));
+
+        handler.onGroupCandidate(candidate);
+
+        assertEquals(1, delivered.size());
+        assertEquals("summarise this", delivered.get(0).text(),
+                "bot mention span must be stripped before delivery");
+    }
+
+    @Test
+    void mentionSpanStripIsAnchoredToProtocolEntry_plainTextBotNameKept() {
+        // The body contains the bot's name as plain text after the real
+        // mention segment. Only the protocol mention span may be removed
+        // — a display-name text search would also eat the trailing "bot".
+        var candidate = decodeGroupFrame(groupFrame(
+                "group-7",
+                "alice-queue-addr",
+                "Alice",
+                "@bot say hello to bot",
+                decomposingBotMention("@bot", " say hello to bot"),
+                "msg-strip-2"));
+
+        handler.onGroupCandidate(candidate);
+
+        assertEquals(1, delivered.size());
+        assertEquals("say hello to bot", delivered.get(0).text(),
+                "only the actual mention span is removed; plain-text 'bot' stays");
+    }
+
+    @Test
+    void groupSlashCommandParseableAfterStrip() {
+        var candidate = decodeGroupFrame(groupFrame(
+                "group-7",
+                "alice-queue-addr",
+                "Alice",
+                "@bot /summary",
+                decomposingBotMention("@bot", " /summary"),
+                "msg-strip-3"));
+
+        handler.onGroupCandidate(candidate);
+
+        assertEquals(1, delivered.size());
+        String text = delivered.get(0).text();
+        assertTrue(text.startsWith("/"),
+                "delivered text must start with the slash so the command parser sees it");
+        assertEquals("/summary", text);
+    }
+
+    /**
+     * Reconstruction guard: when the formattedText segments do NOT
+     * reconstruct the message text (the mention segment "@m" never
+     * appears in the body), no protocol span can be located inside the
+     * text — recognition still fires (D10 reads the mention list, not
+     * the spans) but the text is delivered unstripped rather than
+     * guessed at by display-name search.
+     */
+    @Test
+    void nonReconstructingFormattedText_deliveredUnstripped() {
+        var candidate = decodeGroupFrame(groupFrame(
+                "group-7",
+                "alice-queue-addr",
+                "Alice",
+                "hi @bot",
+                mentions(BOT_QUEUE_ADDR),
+                "msg-strip-4"));
+
+        handler.onGroupCandidate(candidate);
+
+        assertEquals(1, delivered.size());
+        assertEquals("hi @bot", delivered.get(0).text(),
+                "no locatable span → delivered as-is, never text-searched");
+    }
+
     // -- helpers -------------------------------------------------------------
 
     private static SimpleXMessageCodec.GroupCandidate decodeGroupFrame(String frame) {
@@ -336,6 +425,19 @@ class SimpleXGroupHandlerTest {
         }
         sb.append(']');
         return sb.toString();
+    }
+
+    /**
+     * Build a {@code formattedText} array that DECOMPOSES the message
+     * text the way real simplex-chat frames do: the bot-mention segment
+     * first, then one plain segment carrying the rest. The frame's
+     * {@code msgContent.text} must equal {@code mentionText + rest} or
+     * the codec's reconstruction guard discards the spans.
+     */
+    private static String decomposingBotMention(String mentionText, String rest) {
+        return """
+                [{"text":"%s","format":{"type":"mention","memberRef":"%s"}},{"text":"%s"}]"""
+                .formatted(jsonEscape(mentionText), BOT_QUEUE_ADDR, jsonEscape(rest));
     }
 
     /**

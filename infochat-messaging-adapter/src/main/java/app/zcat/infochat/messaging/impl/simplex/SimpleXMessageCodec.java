@@ -486,6 +486,7 @@ final class SimpleXMessageCodec {
                 senderDisplayName,
                 text,
                 List.copyOf(mentions),
+                extractMentionSpans(itemBody.get("formattedText"), text),
                 adapterMessageId);
     }
 
@@ -518,6 +519,52 @@ final class SimpleXMessageCodec {
             mentions.add(memberRef);
         }
         return mentions;
+    }
+
+    /**
+     * Compute the [start, length) span of every mention segment as an
+     * offset into {@code text}, so {@link SimpleXGroupHandler} can strip
+     * the bot's own mention before delivery. simplex-chat's
+     * {@code formattedText} decomposes {@code msgContent.text}: on real
+     * frames the concatenation of the segments' {@code text} fields
+     * equals the full text, which makes each segment's cumulative offset
+     * a valid index into it.
+     *
+     * <p>Reconstruction guard: the offsets are trusted only when every
+     * segment matches {@code text} at its computed position AND the
+     * segments cover the text exactly. A frame that fails the guard
+     * (degenerate or hostile — the wire is untrusted) yields the empty
+     * list: no protocol span can be located, the handler delivers the
+     * text unstripped, and D10 recognition (which reads the separate
+     * {@link #extractMentionQueueAddresses} list) is unaffected.</p>
+     */
+    private static List<MentionSpan> extractMentionSpans(@Nullable JsonNode formattedText,
+                                                         String text) {
+        if (formattedText == null || !formattedText.isArray()) {
+            return List.of();
+        }
+        List<MentionSpan> spans = new ArrayList<>();
+        int offset = 0;
+        for (JsonNode element : formattedText) {
+            String segmentText = optText(element, "text");
+            if (segmentText == null
+                    || !text.regionMatches(offset, segmentText, 0, segmentText.length())) {
+                return List.of();
+            }
+            JsonNode format = element.get("format");
+            if (format != null && format.isObject()
+                    && "mention".equals(optText(format, "type"))) {
+                String memberRef = optText(format, "memberRef");
+                if (memberRef != null && isValidQueueAddressId(memberRef)) {
+                    spans.add(new MentionSpan(memberRef, offset, segmentText.length()));
+                }
+            }
+            offset += segmentText.length();
+        }
+        if (offset != text.length()) {
+            return List.of();
+        }
+        return List.copyOf(spans);
     }
 
     private static DecodedFrame decodeSendAck(@Nullable String corrId, JsonNode resp) {
@@ -638,6 +685,13 @@ final class SimpleXMessageCodec {
      * address. The {@code mentionQueueAddresses} list carries queue
      * addresses extracted from the simplex-chat formatted-text mention
      * format, validated through {@link #isValidQueueAddressId}.
+     *
+     * <p>{@code mentionSpans} carries each mention segment's position
+     * inside {@code text} (see {@link #extractMentionSpans} for the
+     * reconstruction guard) so the handler can strip the bot's own
+     * mention before delivery. It may be empty even when
+     * {@code mentionQueueAddresses} is not — recognition and stripping
+     * have different trust requirements.</p>
      */
     record GroupCandidate(
             String adapterGroupId,
@@ -645,7 +699,17 @@ final class SimpleXMessageCodec {
             @Nullable String senderDisplayName,
             String text,
             List<String> mentionQueueAddresses,
+            List<MentionSpan> mentionSpans,
             String adapterMessageId) implements DecodedFrame {
+    }
+
+    /**
+     * One mention segment's location inside a {@link GroupCandidate}'s
+     * text: {@code start} is the UTF-16 offset of the segment, {@code
+     * length} its extent. Produced only when the formatted-text segments
+     * reconstruct the message text exactly.
+     */
+    record MentionSpan(String queueAddress, int start, int length) {
     }
 
     /** Response to a command we previously issued, carrying the chat-item id. */

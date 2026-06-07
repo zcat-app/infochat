@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 27 |
+| pending | 26 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 229 |
+| done | 230 |
 | deferred | 2 |
 | **total** | **258** |
 
@@ -26,7 +26,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-184 — Signal reader/codec hardening against malformed frames (complexity: low, risk: medium)
 - M1-186 — Signal group outbound send path (complexity: medium, risk: medium)
-- M1-187 — Strip bot-mention span in group inbound delivery (complexity: medium, risk: medium)
 - M1-193 — /stop wiring: pg backend pid + statement timeouts + tool conns (complexity: high, risk: medium)
 - M1-197 — Tool JSON ready_at value + /export paged replies and truncation flag (complexity: medium, risk: medium)
 - M1-198 — Group-scope bot-admin commands: resolve caller via InboundContext (complexity: medium, risk: medium)
@@ -393,7 +392,7 @@ M1-183 (done)
   └── M1-222 (pending) ← runnable
 M1-185 (done)
 M1-186 (pending) ← runnable
-M1-187 (pending) ← runnable
+M1-187 (done)
 M1-188 (done)
 M1-189 (done)
   └── M1-207 (pending) ← runnable

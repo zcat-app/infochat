@@ -80,7 +80,8 @@ class SignalGroupEndToEndTest {
                 assertEquals(GROUP_V2_ID, scope.adapterGroupId());
                 assertEquals("aabbccdd-1111-2222-3333-444455556666", msg.sender().contactId(),
                         "sender ACI must be canonicalized to lowercase");
-                assertEquals("@bot summarise this", msg.text());
+                assertEquals("summarise this", msg.text(),
+                        "bot mention span must be stripped before delivery");
 
                 // Group update → MembershipEvent through the registered handler.
                 fake.pushNotification("receive", parse("""
@@ -152,13 +153,16 @@ class SignalGroupEndToEndTest {
     }
 
     private static JsonObject groupMention(String body, long timestamp) {
+        // The mention span [0,4) covers the "@bot" prefix, so the
+        // handler's strip delivers exactly the given body — keeping the
+        // fixture self-consistent with the protocol span it declares.
         return Json.createObjectBuilder()
                 .add("envelope", Json.createObjectBuilder()
                         .add("sourceUuid", "AABBCCDD-1111-2222-3333-444455556666")
                         .add("timestamp", timestamp)
                         .add("dataMessage", Json.createObjectBuilder()
                                 .add("timestamp", timestamp)
-                                .add("message", body)
+                                .add("message", "@bot " + body)
                                 .add("groupV2", Json.createObjectBuilder()
                                         .add("id", GROUP_V2_ID))
                                 .add("mentions", Json.createArrayBuilder()
