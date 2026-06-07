@@ -32,7 +32,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-187 — Strip bot-mention span in group inbound delivery (complexity: medium, risk: medium)
 - M1-193 — /stop wiring: pg backend pid + statement timeouts + tool conns (complexity: high, risk: medium)
 - M1-194 — EligiblePostQuery SQL LIMIT + chat tool result budgets (complexity: medium, risk: medium)
-- M1-195 — Audit correctness: auto-promote guard, /unban no-op, intent-row parity (complexity: medium, risk: medium)
+- M1-195 — Audit correctness: auto-promote guard, /unban no-op, intent-row parity (complexity: medium, risk: high)
 - M1-196 — Digest scheduler: no missed-slot records for pre-approval windows + async slot dispatch (complexity: medium, risk: medium)
 - M1-197 — Tool JSON ready_at value + /export paged replies and truncation flag (complexity: medium, risk: medium)
 - M1-198 — Group-scope bot-admin commands: resolve caller via InboundContext (complexity: medium, risk: medium)
