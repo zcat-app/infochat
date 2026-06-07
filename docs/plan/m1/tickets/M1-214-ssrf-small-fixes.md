@@ -1,9 +1,9 @@
 ---
 id: M1-214
 title: "SSRF small fixes: Location-resolve exception contract, fec0::/10, scheme case-fold, reason()-based test assertions"
-status: pending
+status: done
 created: 2026-06-07
-last_updated: 2026-06-07
+last_updated: 2026-06-08
 blocked_by: []
 files_budget: 6
 files_scope:
@@ -39,11 +39,44 @@ spec_refs:
 decision_refs:
   - D20
   - D38
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-08
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 134
+      removed: 42
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-06-08
+    verdict: CLEAN
+    base: ea400e18b8fa1579e7d38b1b28fdeab08d13bfa6
+    head: "working-tree @ m1/M1-214-ssrf-small-fixes-location-reso (uncommitted; review-time diff)"
+    verdict_file: docs/plan/m1/redteam/M1-214-2026-06-08.md
+    out_of_model_count: 2
+    note: |
+      Pre-commit audit on the round-1 APPROVED diff: CLEAN, no
+      promise/delivery gap. Two advisory out-of-model notes: (1) IPv4
+      special-purpose ranges (192.0.0.0/24, 198.18.0.0/15, 240.0.0.0/4)
+      absent from the spec's committed category list — candidate for a
+      future hardening ticket / design-note edit; (2) SsrfPolicyException
+      messages embed attacker-controlled strings, neutralized by SafeLog
+      and by the reason()-based caller contract this ticket strengthens.
+clarity_check:
+  date: 2026-06-08
+  verdict: WARN
+  warnings: ["FILES-BUDGET-PLAUSIBLE: budget 6 is plausible but tight. The test rewrite (13 existing assertions) plus 4-5 new named tests may span 3-4 test classes. If the implementer discovers tests are spread across more files than the budget allows, escalate via the standard path rather than quietly expanding scope."]
+  blockers: []
 ---
 
 # M1-214: SSRF small fixes

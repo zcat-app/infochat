@@ -63,23 +63,47 @@ class SsrfGuardedHttpClientTest {
         SsrfGuardedHttpClient client = testModeClient();
         SsrfPolicyException ex = assertThrows(SsrfPolicyException.class,
             () -> client.get(URI.create("ftp://example.com/")));
-        assertTrue(ex.getMessage().contains("scheme not allowed"),
-            "non-http(s) scheme must be rejected with the literal "
-            + "\"scheme not allowed\" prefix");
+        assertEquals(SsrfPolicyException.Reason.SCHEME_NOT_ALLOWED, ex.reason(),
+            "non-http(s) scheme must be rejected with SCHEME_NOT_ALLOWED");
     }
 
     @Test
-    void rejectsWebsocketSchemeForNow() {
-        // ws/wss are spec-allowed but carved out of this ticket per
-        // out_of_scope. The wrapper must reject them with the same
-        // literal so the future StreamSource ticket can widen the
-        // allowlist without contradicting committed test text.
+    void getEntrypointRejectsWebsocketScheme() {
+        // ws/wss are spec-allowed but run through the dedicated
+        // WebSocket entrypoints (checkAndPinForWebSocket /
+        // resolveForWebSocket) — the JDK's HttpClient.send cannot dial
+        // ws/wss, so a WebSocket URI reaching get() is a misroute the
+        // scheme gate must reject.
         SsrfGuardedHttpClient client = testModeClient();
         SsrfPolicyException ex = assertThrows(SsrfPolicyException.class,
             () -> client.get(URI.create("wss://example.com/relay")));
-        assertTrue(ex.getMessage().contains("scheme not allowed"),
-            "ws/wss is rejected by this wrapper; the StreamSource "
-            + "ticket lands a separate WebSocket-aware wrapper");
+        assertEquals(SsrfPolicyException.Reason.SCHEME_NOT_ALLOWED, ex.reason(),
+            "ws/wss on the get() entrypoint must be rejected with "
+            + "SCHEME_NOT_ALLOWED; the WebSocket entrypoints accept them");
+    }
+
+    @Test
+    void checkAndPinForWebSocketAcceptsWssScheme() throws Exception {
+        // The WS-scheme acceptance path: wss:// passes the WebSocket
+        // entrypoint's scheme gate and proceeds through the IP checks
+        // to a successful pin. The seam supplies the address set so no
+        // real DNS lookup runs.
+        InetAddress loopback = InetAddress.getByName("127.0.0.1");
+        SsrfGuardedHttpClient client = new SsrfGuardedHttpClient(
+            new LoopbackPermitting(),
+            Duration.ofSeconds(2),
+            Duration.ofSeconds(5),
+            Duration.ofSeconds(5),
+            Duration.ofSeconds(5),
+            10L * 1024,
+            3,
+            host -> List.of(loopback));
+
+        try (SsrfGuardedHttpClient.PinnedDial dial =
+                 client.checkAndPinForWebSocket(URI.create("wss://relay.example.test/"))) {
+            assertEquals(List.of(loopback), dial.addresses(),
+                "the validated address set must be the seam-supplied one");
+        }
     }
 
     @Test
@@ -87,9 +111,8 @@ class SsrfGuardedHttpClientTest {
         SsrfGuardedHttpClient client = testModeClient();
         SsrfPolicyException ex = assertThrows(SsrfPolicyException.class,
             () -> client.get(URI.create("https://user:pw@example.com/")));
-        assertTrue(ex.getMessage().contains("userinfo segment not allowed"),
-            "URIs carrying user:pw@ must be rejected with the literal "
-            + "\"userinfo segment not allowed\" prefix");
+        assertEquals(SsrfPolicyException.Reason.USERINFO_NOT_ALLOWED, ex.reason(),
+            "URIs carrying user:pw@ must be rejected with USERINFO_NOT_ALLOWED");
     }
 
     @Test
@@ -101,9 +124,8 @@ class SsrfGuardedHttpClientTest {
         SsrfGuardedHttpClient strict = new SsrfGuardedHttpClient();
         SsrfPolicyException ex = assertThrows(SsrfPolicyException.class,
             () -> strict.get(URI.create("http://127.0.0.1:" + port + "/never-dialed")));
-        assertTrue(ex.getMessage().contains("blocked IP"),
-            "strict-mode wrapper must reject 127.0.0.1 with the literal "
-            + "\"blocked IP\" prefix");
+        assertEquals(SsrfPolicyException.Reason.BLOCKED_IP, ex.reason(),
+            "strict-mode wrapper must reject 127.0.0.1 with BLOCKED_IP");
     }
 
     @Test
@@ -133,8 +155,8 @@ class SsrfGuardedHttpClientTest {
 
         SsrfPolicyException ex = assertThrows(SsrfPolicyException.class,
             () -> client.get(URI.create("http://127.0.0.1:" + port + "/big")));
-        assertTrue(ex.getMessage().contains("response body exceeded"),
-            "oversize body must surface the literal \"response body exceeded\" prefix");
+        assertEquals(SsrfPolicyException.Reason.BODY_CAP_EXCEEDED, ex.reason(),
+            "oversize body must surface BODY_CAP_EXCEEDED");
     }
 
     @Test
@@ -171,9 +193,8 @@ class SsrfGuardedHttpClientTest {
         SsrfGuardedHttpClient client = testModeClient();
         SsrfPolicyException ex = assertThrows(SsrfPolicyException.class,
             () -> client.get(URI.create("http://127.0.0.1:" + port + "/loop")));
-        assertTrue(ex.getMessage().contains("redirect cap exceeded"),
-            "exceeding the redirect cap must surface the literal "
-            + "\"redirect cap exceeded\" prefix");
+        assertEquals(SsrfPolicyException.Reason.REDIRECT_CAP_EXCEEDED, ex.reason(),
+            "exceeding the redirect cap must surface REDIRECT_CAP_EXCEEDED");
         assertEquals(4, hits.get(),
             "the wrapper must allow the initial dial + 3 redirect hops "
             + "before raising; the 4th hop triggers the cap");
@@ -193,9 +214,46 @@ class SsrfGuardedHttpClientTest {
         SsrfGuardedHttpClient client = testModeClient();
         SsrfPolicyException ex = assertThrows(SsrfPolicyException.class,
             () -> client.get(URI.create("http://127.0.0.1:" + port + "/rebind")));
-        assertTrue(ex.getMessage().contains("blocked IP"),
+        assertEquals(SsrfPolicyException.Reason.BLOCKED_IP, ex.reason(),
             "redirect target whose IP is on the strict blocklist must "
-            + "be rejected on the second hop's re-resolution");
+            + "be rejected on the second hop's re-resolution with BLOCKED_IP");
+    }
+
+    @Test
+    void malformedRedirectLocationRaisesPolicyException() {
+        // The Location header is attacker-controlled; a value that
+        // URI.resolve cannot parse (the space is illegal in a URI)
+        // must surface through the wrapper's documented
+        // SsrfPolicyException contract, not as a raw
+        // IllegalArgumentException escaping the hop loop.
+        server.createContext("/badlocation", exchange -> {
+            exchange.getResponseHeaders().add("Location", "/bad path");
+            exchange.sendResponseHeaders(302, -1);
+            exchange.close();
+        });
+
+        SsrfGuardedHttpClient client = testModeClient();
+        SsrfPolicyException ex = assertThrows(SsrfPolicyException.class,
+            () -> client.get(URI.create("http://127.0.0.1:" + port + "/badlocation")));
+        assertEquals(SsrfPolicyException.Reason.REDIRECT_LOCATION_INVALID, ex.reason(),
+            "a syntactically malformed Location must surface "
+            + "REDIRECT_LOCATION_INVALID through the policy-exception "
+            + "contract, not a raw IllegalArgumentException");
+    }
+
+    @Test
+    void upperCaseSchemePassesSchemeGateAndProceedsToIpChecks() {
+        // RFC 3986 schemes are case-insensitive; isCrossOrigin already
+        // case-folds. The strict blocklist rejects 127.0.0.1, so a
+        // BLOCKED_IP rejection (not SCHEME_NOT_ALLOWED) proves the
+        // upper-cased scheme passed the scheme gate and the pipeline
+        // reached the IP checks.
+        SsrfGuardedHttpClient strict = new SsrfGuardedHttpClient();
+        SsrfPolicyException ex = assertThrows(SsrfPolicyException.class,
+            () -> strict.get(URI.create("HTTP://127.0.0.1:" + port + "/never-dialed")));
+        assertEquals(SsrfPolicyException.Reason.BLOCKED_IP, ex.reason(),
+            "HTTP:// must pass the case-folded scheme allowlist and be "
+            + "rejected at the IP check, not at the scheme gate");
     }
 
     @Test
@@ -355,9 +413,8 @@ class SsrfGuardedHttpClientTest {
             () -> client.get(URI.create("http://127.0.0.1:" + port + "/slow")));
         long elapsed = System.currentTimeMillis() - start;
 
-        assertTrue(ex.getMessage().startsWith("body read timeout"),
-            "must surface the literal \"body read timeout\" prefix; "
-            + "got: " + ex.getMessage());
+        assertEquals(SsrfPolicyException.Reason.BODY_READ_TIMEOUT, ex.reason(),
+            "must surface BODY_READ_TIMEOUT; got: " + ex.reason());
         assertTrue(elapsed < requestTimeout.toMillis(),
             "per-read watchdog must fire before the request-level "
             + "timeout (" + requestTimeout.toSeconds() + "s) — if elapsed "
@@ -426,9 +483,8 @@ class SsrfGuardedHttpClientTest {
             () -> client.get(URI.create("http://127.0.0.1:" + port + "/drip")));
         long elapsed = System.currentTimeMillis() - start;
 
-        assertTrue(ex.getMessage().startsWith("body read deadline exceeded"),
-            "must surface the literal \"body read deadline exceeded\" "
-            + "prefix; got: " + ex.getMessage());
+        assertEquals(SsrfPolicyException.Reason.BODY_READ_DEADLINE_EXCEEDED, ex.reason(),
+            "must surface BODY_READ_DEADLINE_EXCEEDED; got: " + ex.reason());
         assertTrue(elapsed >= bodyReadDeadline.toMillis(),
             "deadline must not fire BEFORE the configured "
             + "bodyReadDeadline; elapsed=" + elapsed + "ms, "

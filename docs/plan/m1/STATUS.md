@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 20 |
+| pending | 19 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 236 |
+| done | 237 |
 | deferred | 2 |
 | **total** | **258** |
 
@@ -39,7 +39,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-211 — MessagingAdapter.assertIdentity: wire the spec-mandated surface or remove it (complexity: medium, risk: medium)
 - M1-212 — ProgressNotifier pipeline: implement minimally, defer by amendment, or remove (complexity: medium, risk: medium)
 - M1-213 — TranslationProvider module placement: move to the LLM adapter or amend the spec (complexity: low, risk: low)
-- M1-214 — SSRF small fixes: Location-resolve exception contract, fec0::/10, scheme case-fold, reason()-based test assertions (complexity: medium, risk: medium)
 - M1-215 — Core hygiene: sanitized key in getState WARN, full-C0 sanitize, single AuditLogWriter constructor (complexity: low, risk: low)
 - M1-216 — Collector lows: TTL-job partition independence, saturation counter, sha256 dedup, zero-width escapes (complexity: medium, risk: medium)
 - M1-218 — Provider lows: /retry in-flight reply, /invite list-vs-revoke code identity, handle-keyed slot release (complexity: low, risk: medium)
@@ -78,6 +77,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-214 | SSRF small fixes: Location-resolve exception contract, fec0::/10, scheme case-fold, reason()-based test assertions | 2026-06-08 | round 1 APPROVE |
 | M1-201 | Ops hardening: drop infochat-dev password fallbacks + readiness probes | 2026-06-08 | round 1 APPROVE |
 | M1-222 | Per-group LLM rate cap (D47) on the group chat path | 2026-06-07 | round 2 OVERRIDE-APPROVE |
 | M1-221 | LLM retry-once backoff: sleep before the single retry (M1-192 redteam F2) | 2026-06-07 | round 2 OVERRIDE-APPROVE |
@@ -87,7 +87,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-203 | Nostr /add-source: StreamSource-shaped relay probe instead of guaranteed SSRF rejection | 2026-06-07 | round 1 APPROVE |
 | M1-200 | Chat persistence: seq atomicity, pruner truncation, V42 duplicate-index drop | 2026-06-07 | round 1 APPROVE |
 | M1-199 | /save visibility sentence: adjudicate the scope-visibility reading | 2026-06-07 | round 1 APPROVE |
-| M1-196 | Digest scheduler: no missed-slot records for pre-approval windows + async slot dispatch | 2026-06-07 | round 1 APPROVE |
 
 ---
 
@@ -412,7 +411,7 @@ M1-210 (pending) ← runnable
 M1-211 (pending) ← runnable
 M1-212 (pending) ← runnable
 M1-213 (pending) ← runnable
-M1-214 (pending) ← runnable
+M1-214 (done)
 M1-215 (pending) ← runnable
 M1-216 (pending) ← runnable
 M1-218 (pending) ← runnable

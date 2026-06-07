@@ -390,7 +390,19 @@ public final class SsrfGuardedHttpClient {
                             .orElseThrow(() -> new SsrfPolicyException(
                                 SsrfPolicyException.Reason.REDIRECT_LOCATION_MISSING,
                                 "redirect response missing Location header"));
-                        URI next = current.resolve(location);
+                        // URI.resolve raises IllegalArgumentException on a
+                        // syntactically malformed Location; wrap it so the
+                        // attacker-controlled header cannot escape the
+                        // wrapper's SsrfPolicyException/IOException contract
+                        // (matching the INVALID_HOST wrapping of IDN.toASCII).
+                        URI next;
+                        try {
+                            next = current.resolve(location);
+                        } catch (IllegalArgumentException e) {
+                            throw new SsrfPolicyException(
+                                SsrfPolicyException.Reason.REDIRECT_LOCATION_INVALID,
+                                "invalid redirect Location: " + location, e);
+                        }
                         if (isCrossOrigin(current, next)) {
                             hopHeaders.keySet().removeIf(SsrfGuardedHttpClient::isCredentialHeader);
                         }
@@ -449,8 +461,12 @@ public final class SsrfGuardedHttpClient {
     }
 
     private ResolvedHost resolveAndValidate(URI uri, Set<String> allowedSchemes) {
+        // RFC 3986 §3.1: schemes are case-insensitive. Case-fold before
+        // the allowlist check, consistent with isCrossOrigin (which
+        // already compares schemes via equalsIgnoreCase) — the allowlist
+        // sets hold the lowercase canonical forms.
         String scheme = uri.getScheme();
-        if (scheme == null || !allowedSchemes.contains(scheme)) {
+        if (scheme == null || !allowedSchemes.contains(scheme.toLowerCase(Locale.ROOT))) {
             throw new SsrfPolicyException(
                 SsrfPolicyException.Reason.SCHEME_NOT_ALLOWED, "scheme not allowed: " + scheme);
         }
@@ -687,7 +703,8 @@ public final class SsrfGuardedHttpClient {
     /**
      * Raised on any policy violation in the wrapper pipeline:
      * disallowed scheme, userinfo in URI, blocked IP, oversize
-     * body, exceeded redirect cap, body-read timeout, body-read
+     * body, exceeded redirect cap, missing or unresolvable redirect
+     * {@code Location}, body-read timeout, body-read
      * deadline exceeded. {@link #reason()} carries the typed
      * failure mode — callers branch on it, never on message text
      * (the message is human-facing and free to reword).
@@ -704,6 +721,7 @@ public final class SsrfGuardedHttpClient {
             BLOCKED_IP,
             REDIRECT_CAP_EXCEEDED,
             REDIRECT_LOCATION_MISSING,
+            REDIRECT_LOCATION_INVALID,
             BODY_CAP_EXCEEDED,
             BODY_READ_TIMEOUT,
             BODY_READ_DEADLINE_EXCEEDED

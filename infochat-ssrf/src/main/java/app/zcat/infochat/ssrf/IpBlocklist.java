@@ -32,6 +32,10 @@ import java.util.function.Supplier;
  *   <li>IPv6 unspecified {@code ::} — the IPv6 analog of
  *       {@code 0.0.0.0}; kernel-level bypass of loopback.</li>
  *   <li>IPv6 link-local {@code fe80::/10}</li>
+ *   <li>IPv6 site-local {@code fec0::/10} — deprecated by RFC 3879
+ *       but still routed like private space by legacy resolvers and
+ *       OS stacks; the spec's "IPv6 equivalents" of private ranges
+ *       covers it.</li>
  *   <li>IPv6 unique-local {@code fc00::/7}</li>
  *   <li>IPv6 multicast {@code ff00::/8}</li>
  *   <li>IPv6 IPv4-mapped form ({@code ::ffff:0:0/96}) of every blocked
@@ -112,7 +116,7 @@ public class IpBlocklist {
             return isBlockedV4(raw);
         }
         // length == 16: IPv6. Native blocked ranges (::, ::1,
-        // fe80::/10, fc00::/7, ff00::/8) are checked first; if none
+        // fe80::/10, fec0::/10, fc00::/7, ff00::/8) are checked first; if none
         // match, decode any embedded IPv4 (IPv4-mapped or one of the
         // transition formats) and route it through isBlockedV4 so an
         // attacker cannot reach a blocked v4 range by spelling it as an
@@ -208,6 +212,10 @@ public class IpBlocklist {
         int b1 = raw[1] & 0xFF;
         // fe80::/10 — link-local.
         if (b0 == 0xFE && (b1 & 0xC0) == 0x80) {
+            return true;
+        }
+        // fec0::/10 — deprecated site-local (RFC 3879).
+        if (b0 == 0xFE && (b1 & 0xC0) == 0xC0) {
             return true;
         }
         // fc00::/7 — unique-local.

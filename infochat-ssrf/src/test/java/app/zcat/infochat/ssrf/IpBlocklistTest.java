@@ -88,6 +88,13 @@ class IpBlocklistTest {
     }
 
     @Test
+    void blocksIpv6SiteLocal() throws UnknownHostException {
+        assertTrue(blocklist.isBlocked(InetAddress.getByName("fec0::1")),
+            "fec0::/10 is the deprecated (RFC 3879) IPv6 site-local range — "
+            + "a private-space equivalent per spec's \"IPv6 equivalents\" clause");
+    }
+
+    @Test
     void blocksIpv6UniqueLocal() throws UnknownHostException {
         assertTrue(blocklist.isBlocked(InetAddress.getByName("fc00::1")),
             "fc00::/7 is IPv6 unique-local");
