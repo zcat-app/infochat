@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 16 |
+| pending | 15 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 240 |
+| done | 241 |
 | deferred | 2 |
 | **total** | **258** |
 
@@ -38,7 +38,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-212 — ProgressNotifier pipeline: implement minimally, defer by amendment, or remove (complexity: medium, risk: medium)
 - M1-213 — TranslationProvider module placement: move to the LLM adapter or amend the spec (complexity: low, risk: low)
 - M1-215 — Core hygiene: sanitized key in getState WARN, full-C0 sanitize, single AuditLogWriter constructor (complexity: low, risk: low)
-- M1-216 — Collector lows: TTL-job partition independence, saturation counter, sha256 dedup, zero-width escapes (complexity: medium, risk: medium)
 - M1-219 — searchPosts window/ordering semantics: bind the spec to a timestamp column (complexity: low, risk: low)
 
 ---
@@ -76,6 +75,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-218 | Provider lows: /retry in-flight reply, /invite list-vs-revoke code identity, handle-keyed slot release | 2026-06-08 | round 1 APPROVE |
+| M1-216 | Collector lows: TTL-job partition independence, saturation counter, sha256 dedup, zero-width escapes | 2026-06-08 | round 1 APPROVE |
 | M1-214 | SSRF small fixes: Location-resolve exception contract, fec0::/10, scheme case-fold, reason()-based test assertions | 2026-06-08 | round 1 APPROVE |
 | M1-206 | Parameterize SET LOCAL infochat.actor_id (drop UUID string concat) | 2026-06-08 | round 1 APPROVE |
 | M1-201 | Ops hardening: drop infochat-dev password fallbacks + readiness probes | 2026-06-08 | round 1 APPROVE |
@@ -84,7 +84,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-221 | LLM retry-once backoff: sleep before the single retry (M1-192 redteam F2) | 2026-06-07 | round 2 OVERRIDE-APPROVE |
 | M1-220 | [INVESTIGATE] Bluesky source identifier: URL (per D38) vs bare DID/handle (per the fetcher) | 2026-06-07 | round 1 APPROVE |
 | M1-217 | LLM-adapter lows: Entry nullability contradiction, joinPath/preview dedup, Anthropic multi-block content | 2026-06-07 | round 1 APPROVE |
-| M1-209 | Remove hand-written @NonNull made redundant by D48 null-marked packages | 2026-06-07 | round 1 APPROVE |
 
 ---
 
@@ -411,7 +410,7 @@ M1-212 (pending) ← runnable
 M1-213 (pending) ← runnable
 M1-214 (done)
 M1-215 (pending) ← runnable
-M1-216 (pending) ← runnable
+M1-216 (done)
 M1-218 (done)
 M1-220 (done)
 M1-221 (done)

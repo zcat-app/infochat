@@ -1,5 +1,6 @@
 package app.zcat.infochat.collector.fetch;
 
+import app.zcat.infochat.collector.fetcher.PaginationSaturationTracker;
 import app.zcat.infochat.collector.outbox.EvalQueueProducer;
 import app.zcat.infochat.collector.outbox.PostPersister;
 import app.zcat.infochat.core.ingest.Fetcher;
@@ -95,6 +96,15 @@ import org.jspecify.annotations.Nullable;
  * SOURCE_ENABLE handler's UPDATE already sets
  * {@code consecutive_failures = 0} so a re-enabled row does not
  * immediately re-trip the threshold).
+ *
+ * <h2>Pagination-cap saturation (spec §Ingest SPIs)</h2>
+ * <p>After each successful fetch the scheduler consumes the
+ * {@link PaginationSaturationTracker} thread-local cap-hit signal a
+ * paginating Fetcher may have raised, and records the tick outcome.
+ * When a source saturates its per-tick page cap for
+ * {@code infochat.fetch.saturation-threshold} consecutive ticks,
+ * {@link ThrottledAdminNotifier#notifyOnce} fires once on the
+ * transition tick, keyed on the source UUID.
  */
 @Startup
 @Priority(400)
@@ -122,6 +132,9 @@ public class FetchScheduler {
 
     @Inject
     ThrottledAdminNotifier throttledAdminNotifier;
+
+    @Inject
+    PaginationSaturationTracker saturationTracker;
 
     // Single-global tunable (no per-profile branching), so inline
     // defaultValue is allowed per the AssetSnapshotFetcher convention.
@@ -227,6 +240,11 @@ public class FetchScheduler {
         }
         try {
             List<NormalizedPost> posts = fetcher.fetch(row.dispatchKey(), row.identifier());
+            // Consume the thread-local cap-hit signal immediately after
+            // fetch() returns — the flag is set on this thread inside
+            // the fetcher's pagination loop and must not survive into
+            // the next dispatch.
+            boolean capHit = saturationTracker.consumeCapHit();
             for (NormalizedPost post : posts) {
                 Optional<PostPersister.PersistedPostKey> key =
                     postPersister.persist(row.uuid(), post);
@@ -249,6 +267,21 @@ public class FetchScheduler {
                 LOG.warnf(sqlE,
                     "FetchScheduler: failed to record success for source uuid=%s",
                     row.uuid());
+            }
+            // Spec §Ingest SPIs saturation counter: when the source
+            // has saturated its per-tick pagination cap for N
+            // consecutive ticks, fire the throttled notification once
+            // on the transition tick. uuid + kind only — never the
+            // identifier URL (M1-023 INFO-LEAK precedent).
+            if (saturationTracker.recordTick(row.uuid(), capHit)) {
+                throttledAdminNotifier.notifyOnce(
+                    "fetch_saturation:" + row.uuid(),
+                    "fetch_saturation",
+                    "Source uuid=" + row.uuid() + " kind=" + row.kind()
+                        + " saturated its per-tick pagination cap for "
+                        + saturationTracker.saturationThreshold()
+                        + " consecutive ticks; consider raising the per-source"
+                        + " page cap or increasing fetch frequency");
             }
         } catch (Exception e) {
             // Log the numeric dispatch key + UUID; NEVER the
@@ -281,6 +314,10 @@ public class FetchScheduler {
                     "FetchScheduler: failed to record failure for source uuid=%s",
                     row.uuid());
             }
+            // A failed tick did not saturate the cap — it breaks the
+            // consecutive-saturation streak ("consistently saturates
+            // ... across multiple ticks" reads consecutive).
+            saturationTracker.recordTick(row.uuid(), false);
         }
     }
 

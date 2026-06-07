@@ -301,9 +301,9 @@ public class Stage1Pipeline {
             if (c >= '\u2066' && c <= '\u2069') {
                 continue;
             }
-            // zero-width: ​ (ZWSP), ‌ (ZWNJ),
-            // ‍ (ZWJ), ﻿ (BOM / ZWNBSP)
-            if (c == '​' || c == '‌' || c == '‍' || c == '﻿') {
+            // zero-width: U+200B (ZWSP), U+200C (ZWNJ), U+200D (ZWJ),
+            // U+FEFF (BOM / ZWNBSP)
+            if (c == '\u200B' || c == '\u200C' || c == '\u200D' || c == '\uFEFF') {
                 continue;
             }
             out.append(c);

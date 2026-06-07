@@ -4,6 +4,7 @@ import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.core.util.JsonEscaper;
+import app.zcat.infochat.core.util.Sha256;
 import io.quarkus.runtime.Startup;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Priority;
@@ -16,8 +17,6 @@ import javax.sql.DataSource;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -144,7 +143,7 @@ public class BootstrapAssetsLoader {
                 "BootstrapAssetsLoader: could not read bootstrap-assets file at "
                     + path.toAbsolutePath(), e);
         }
-        String sha256 = sha256Hex(bytes);
+        String sha256 = Sha256.hex(bytes);
 
         BootstrapAssetsParser parser = new BootstrapAssetsParser();
         List<BootstrapAssetsEntry> entries = parser.parse(path);
@@ -353,21 +352,6 @@ public class BootstrapAssetsLoader {
                 "BootstrapAssetsLoader: unsupported sub_verb '" + sv.id()
                     + "' has no attribution-URL template (extend §10.7 first)");
         };
-    }
-
-    private static String sha256Hex(byte[] data) {
-        MessageDigest md;
-        try {
-            md = MessageDigest.getInstance("SHA-256");
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 unavailable in this JRE", e);
-        }
-        byte[] digest = md.digest(data);
-        StringBuilder hex = new StringBuilder(digest.length * 2);
-        for (byte b : digest) {
-            hex.append(String.format("%02x", b & 0xff));
-        }
-        return hex.toString();
     }
 
 }

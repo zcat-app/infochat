@@ -57,6 +57,33 @@ class AdminReviewTtlJobTest {
     }
 
     @Test
+    void pendingPastTtl_postPartitionDropped_stillEnumeratedAndRejected() throws Exception {
+        // A PENDING quarantine row whose post row no longer exists
+        // (partition dropped) must still be enumerated — via the
+        // denormalized post_fetched_at, not a join on post — and must
+        // still transition to REJECTED. The post-side UPDATE inside
+        // rejectExpired legitimately no-ops.
+        UUID orphanPostId = UUID.randomUUID();
+        Instant fetchedAt = Instant.parse("2026-05-18T12:00:00Z");
+        Instant flaggedAt = Instant.now().minus(Duration.ofHours(48));
+        UUID quarantineId = seedQuarantineRowWithoutPost(orphanPostId, fetchedAt, flaggedAt);
+
+        var candidates = ttlJob.enumerateExpired();
+        var match = candidates.stream()
+            .filter(c -> c.quarantineId().equals(quarantineId))
+            .findFirst();
+        assertTrue(match.isPresent(),
+            "a PENDING row past TTL must be enumerated even when its post row is gone");
+        assertEquals(fetchedAt, match.get().postFetchedAt(),
+            "postFetchedAt must come from the denormalized quarantine column");
+
+        ttlJob.rejectExpired(match.get());
+
+        assertQuarantineStatus(quarantineId, "REJECTED");
+        assertAuditRowExists(quarantineId, "QUARANTINE_TTL_REJECT", "admin_review_ttl_job");
+    }
+
+    @Test
     void quarantineReviewNotify_emittedOnTtlReject() throws Exception {
         // TTL auto-reject emits NOTIFY quarantine_review with payload
         // ('quarantine', quarantine_id, 'REJECTED'). The observable effect
@@ -178,6 +205,32 @@ class AdminReviewTtlJobTest {
         }
 
         return new SeededData(postId, quarantineId, fetchedAt);
+    }
+
+    /**
+     * Insert a PENDING quarantine row pointing at a post id with NO
+     * matching post row — the on-disk shape left behind by a dropped
+     * post partition (quarantine carries no FK to post by design).
+     */
+    private UUID seedQuarantineRowWithoutPost(UUID postId, Instant fetchedAt, Instant flaggedAt)
+            throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "INSERT INTO quarantine ("
+                     + "  id, post_id, post_uid, post_fetched_at, flagged_at, flagged_by,"
+                     + "  rule_id, placeholder_id, original_html, status"
+                     + ") VALUES ("
+                     + "  gen_random_uuid(), ?, 'uid', ?, ?, 'stage1',"
+                     + "  'regex-test', 'ttl-drop-ph', 'original', 'PENDING'"
+                     + ") RETURNING id")) {
+            ps.setObject(1, postId);
+            ps.setTimestamp(2, Timestamp.from(fetchedAt));
+            ps.setTimestamp(3, Timestamp.from(flaggedAt));
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return (UUID) rs.getObject(1);
+            }
+        }
     }
 
     private UUID seedSource(String slug) throws Exception {

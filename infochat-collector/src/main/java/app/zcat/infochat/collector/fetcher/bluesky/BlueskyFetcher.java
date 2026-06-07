@@ -1,6 +1,7 @@
 package app.zcat.infochat.collector.fetcher.bluesky;
 
 import app.zcat.infochat.collector.fetch.FetcherKind;
+import app.zcat.infochat.collector.fetcher.PaginationSaturationTracker;
 import app.zcat.infochat.core.ingest.Fetcher;
 import app.zcat.infochat.core.ingest.NormalizedPost;
 import app.zcat.infochat.ssrf.SsrfGuardedHttpClient;
@@ -98,6 +99,12 @@ public class BlueskyFetcher implements Fetcher {
             if (cursor == null) {
                 break;
             }
+        }
+        if (cursor != null) {
+            // Cap exhausted with a cursor still outstanding — the
+            // source produced more pages than one tick may drain
+            // (spec §Ingest SPIs saturation counter).
+            PaginationSaturationTracker.signalCapHit();
         }
 
         return Collections.unmodifiableList(allPosts);

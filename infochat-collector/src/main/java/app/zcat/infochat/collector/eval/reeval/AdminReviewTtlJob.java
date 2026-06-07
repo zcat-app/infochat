@@ -79,10 +79,15 @@ public class AdminReviewTtlJob {
 
     List<TtlCandidate> enumerateExpired() throws SQLException {
         Instant cutoff = Instant.now().minus(adminReviewTtl);
+        // No join on post: q.post_fetched_at is the denormalized copy of
+        // p.fetched_at carried so TTL processing survives post-partition
+        // drops — joining would silently exempt a dropped partition's
+        // PENDING rows from Invariant 6's auto-reject. The post-side
+        // UPDATE in rejectExpired tolerates the missing row (0-row
+        // no-op).
         final String sql =
-            "SELECT q.id, q.post_id, p.fetched_at "
+            "SELECT q.id, q.post_id, q.post_fetched_at "
                 + "FROM quarantine q "
-                + "JOIN post p ON p.id = q.post_id AND p.fetched_at = q.post_fetched_at "
                 + "WHERE q.status = 'PENDING' "
                 + "  AND q.flagged_at <= ? "
                 + "ORDER BY q.flagged_at "

@@ -1,6 +1,7 @@
 package app.zcat.infochat.collector.fetcher.reddit;
 
 import app.zcat.infochat.collector.fetch.FetcherKind;
+import app.zcat.infochat.collector.fetcher.PaginationSaturationTracker;
 import app.zcat.infochat.core.ingest.Fetcher;
 import app.zcat.infochat.core.ingest.NormalizedPost;
 import app.zcat.infochat.ssrf.SsrfGuardedHttpClient;
@@ -103,6 +104,12 @@ public class RedditFetcher implements Fetcher {
             if (afterCursor == null) {
                 break;
             }
+        }
+        if (afterCursor != null) {
+            // Cap exhausted with a cursor still outstanding — the
+            // source produced more pages than one tick may drain
+            // (spec §Ingest SPIs saturation counter).
+            PaginationSaturationTracker.signalCapHit();
         }
         return allPosts;
     }

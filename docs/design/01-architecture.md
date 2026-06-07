@@ -588,7 +588,11 @@ high-water mark.
   ([`spec/architecture.md`](../spec/architecture.md) §Ingest SPIs); the
   exact numbers are design and may be retuned without a spec amendment. The
   Fetcher exposes a per-tick "pagination cap hit per source" counter; a
-  throttled admin notification fires once per saturation transition.
+  throttled admin notification fires once per saturation transition. The
+  saturation threshold (consecutive saturated ticks before the
+  notification fires) is `infochat.fetch.saturation-threshold`, default
+  3 — single global tunable, operator-overridable; a non-saturated or
+  failed tick resets the streak.
 - **Asset Fetcher cadence**: per-`(asset, sub_verb)` refresh interval,
   defaults: CoinGecko free 60s (the free tier's documented rate cap),
   Kraken/Bitfinex public 30s. Operators can override via

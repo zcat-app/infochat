@@ -1,9 +1,15 @@
 ---
 id: M1-216
 title: "Collector lows: TTL-job partition independence, saturation counter, sha256 dedup, zero-width escapes"
-status: pending
+status: done
 created: 2026-06-07
-last_updated: 2026-06-07
+last_updated: 2026-06-08
+clarity_check:
+  date: 2026-06-08
+  verdict: WARN
+  warnings:
+    - "SECURITY-FLAG-CONSISTENT: AdminReviewTtlJob's TTL auto-reject is part of the quarantine enforcement path (Invariant 6). The K10 fix closes a gap where partition-dropped posts silently exempted their PENDING quarantine rows from TTL rejection. Consider security_relevant: true. Not a blocker; the existing false setting is defensible since the security policy itself is unchanged."
+  blockers: []
 blocked_by: []
 files_budget: 12
 files_scope:
@@ -45,11 +51,38 @@ spec_refs:
   - docs/spec/architecture.md §Ingest SPIs
 decision_refs:
   - D42
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-08
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 13
+      added: 480
+      removed: 32
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-06-08
+    verdict: CLEAN
+    base: cd72ce9^ (ea400e1)
+    head: cd72ce9
+    verdict_file: docs/plan/m1/redteam/M1-216-2026-06-08.md
+    out_of_model_count: 1
+    note: |
+      CLEAN. K10 TTL-job change strengthens Invariant-6 enforcement
+      (partition-dropped PENDING quarantine rows now rejected, not
+      exempted); saturation counter leaks no identifier URL and is
+      throttle-bounded; sha256/zero-width changes are behavior-
+      identical. One advisory OUT-OF-MODEL note (latent ThreadLocal
+      cap-hit coupling, future-fetcher only) — no action this ticket.
 ---
 
 # M1-216: Collector lows
