@@ -1,14 +1,14 @@
 package app.zcat.infochat.ssrf;
 
-import org.jspecify.annotations.Nullable;
-
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.net.spi.InetAddressResolver;
 import java.net.spi.InetAddressResolverProvider;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
 
 /**
@@ -33,13 +33,13 @@ import java.util.stream.Stream;
  * per-call scoping. Per-call pinning effect is achieved by the
  * {@link Provider} nested class — a JVM-wide forwarding resolver
  * registered via {@code META-INF/services/java.net.spi.InetAddressResolverProvider}
- * that consults a static pin slot guarded by a {@link ReentrantLock}.
- * Wrapper callers ({@link SsrfGuardedHttpClient#get}) acquire the
- * lock for the duration of one {@code get(uri)} call, install the
- * pin map, send the request (which routes its DNS through this
- * provider), clear the pin in {@code finally}, and release the lock.
- * Concurrent wrapper calls serialize on the lock — acceptable for
- * v1's RSS cadence.
+ * that consults a refcounted per-host pin map. Wrapper callers
+ * ({@link SsrfGuardedHttpClient#get}) pin the validated addresses
+ * for one canonical host before the dial, send the request (which
+ * routes its DNS through this provider), and release the pin once
+ * the connection is established. Calls touching DIFFERENT hosts
+ * proceed independently; there is no global mutual exclusion, so a
+ * slow or adversarial host cannot stall the JVM's outbound plane.
  *
  * <p>Production callers never instantiate this class directly; the
  * forwarding resolver inside {@link Provider} constructs an ephemeral
@@ -103,18 +103,21 @@ public final class PinnedDnsResolver implements InetAddressResolver {
      * resource. {@link #get(Configuration)} is called exactly once
      * per JVM by the SPI machinery; it captures the builtin resolver
      * (so non-pinned lookups still see the JDK default) and returns
-     * a forwarding resolver that consults the static pin slot.
+     * a forwarding resolver that consults the per-host pin map.
      */
     public static final class Provider extends InetAddressResolverProvider {
 
-        private static final ReentrantLock LOCK = new ReentrantLock();
-
-        // ACTIVE_PINS is mutated only while LOCK is held; reads are
-        // unsynchronized but volatile, so the JDK's DNS-lookup
-        // threads see a consistent snapshot (either null or a fully
-        // populated immutable map). @Nullable: the slot is empty
-        // (null) whenever no wrapper call holds a pin.
-        private static volatile @Nullable Map<String, List<InetAddress>> ACTIVE_PINS;
+        // Pin entries keyed by canonical host (see
+        // SsrfGuardedHttpClient.canonicalizeHost). Each entry pairs the
+        // validated address list with a holder refcount so overlapping
+        // pins of the SAME host are independent acquisitions: the
+        // entry is removed only when the LAST holder releases. All
+        // mutations go through ConcurrentHashMap.compute, which is
+        // atomic per key — there is no check-then-act window on
+        // increment, decrement, or remove-at-zero — and operations on
+        // different hosts never contend.
+        private static final ConcurrentHashMap<String, PinEntry> PINS =
+            new ConcurrentHashMap<>();
 
         // BUILTIN is captured once during get(Configuration) — the
         // JDK contract guarantees get() is invoked before any lookup
@@ -138,36 +141,97 @@ public final class PinnedDnsResolver implements InetAddressResolver {
         }
 
         /**
-         * Acquire the JVM-wide lock that serializes wrapper pinning.
-         * Callers MUST release via {@link ReentrantLock#unlock()} in
-         * a {@code finally} block.
+         * Pin {@code addresses} as the answer the JVM-wide resolver
+         * serves for {@code canonicalHost}, and return the handle that
+         * releases this acquisition. Overlapping pins of the same host
+         * stack via the refcount: the host stays pinned until every
+         * holder has released.
+         *
+         * <p>When overlapping holders of the same host validated
+         * DIVERGENT address sets, the most recent pin's set is served
+         * (latest-wins). Every address served has passed the
+         * {@link IpBlocklist} in some still-active holder's
+         * validation, and the freshest validation is the one closest
+         * to its connect — the strongest TOCTOU posture available
+         * without per-call resolver scoping.
+         *
+         * <p>{@code canonicalHost} must already be canonical (the
+         * install side canonicalizes in
+         * {@code SsrfGuardedHttpClient.resolveAndValidate}); the
+         * lookup side canonicalizes the JDK-supplied host before
+         * consulting the map, so the keys match.
          */
-        static ReentrantLock lock() {
-            return LOCK;
+        static PinHandle pin(String canonicalHost, List<InetAddress> addresses) {
+            List<InetAddress> pinned = List.copyOf(addresses);
+            PINS.compute(canonicalHost, (host, entry) -> entry == null
+                ? new PinEntry(pinned, 1)
+                : new PinEntry(pinned, entry.holders() + 1));
+            return new PinHandle(canonicalHost);
         }
 
         /**
-         * Install the per-call pin map. Caller must hold {@link #LOCK}.
+         * Snapshot of the hosts currently pinned → their validated
+         * addresses, in the {@code Map} shape
+         * {@link PinnedDnsResolver} consumes. The forwarding resolver
+         * composes an ephemeral {@link PinnedDnsResolver} over this
+         * snapshot per lookup so the canonicalize-before-get logic
+         * (M1-026 Finding 2) lives in exactly one place. Weakly
+         * consistent like the underlying map — but a caller's own pin
+         * is always visible to its own dial's lookup, because the pin
+         * is installed happens-before the send that needs it.
          */
-        static void installPins(Map<String, List<InetAddress>> pins) {
-            ACTIVE_PINS = Map.copyOf(pins);
-        }
-
-        /**
-         * Clear the pin slot. Caller must hold {@link #LOCK}.
-         */
-        static void clearPins() {
-            ACTIVE_PINS = null;
+        static Map<String, List<InetAddress>> activePinsSnapshot() {
+            Map<String, List<InetAddress>> snapshot = new HashMap<>();
+            PINS.forEach((host, entry) -> snapshot.put(host, entry.addresses()));
+            return snapshot;
         }
 
         /**
          * The JDK-default resolver captured at JVM startup. Exposed
          * package-privately for tests that want to compose a
          * {@link PinnedDnsResolver} on top of the real builtin
-         * without installing into the JVM-wide slot.
+         * without installing into the JVM-wide pin map.
          */
         static InetAddressResolver builtin() {
             return BUILTIN;
+        }
+
+        /** Validated addresses plus the number of active holders. */
+        private record PinEntry(List<InetAddress> addresses, int holders) {}
+
+        /**
+         * Release handle for one {@link #pin} acquisition. Idempotent:
+         * {@link #release()} decrements the host's holder count
+         * exactly once no matter how many times it is called, so a
+         * double release can neither throw nor release a concurrent
+         * same-host holder's pin early. Callable from any thread —
+         * release carries no thread affinity.
+         */
+        static final class PinHandle {
+
+            private final String canonicalHost;
+
+            private final AtomicBoolean released = new AtomicBoolean();
+
+            private PinHandle(String canonicalHost) {
+                this.canonicalHost = canonicalHost;
+            }
+
+            void release() {
+                if (!released.compareAndSet(false, true)) {
+                    return;
+                }
+                PINS.compute(canonicalHost, (host, entry) -> {
+                    // entry == null cannot happen while the refcount
+                    // invariant holds (this handle's acquisition is
+                    // still counted); the arm exists because compute's
+                    // contract supplies null for an absent key.
+                    if (entry == null || entry.holders() == 1) {
+                        return null;
+                    }
+                    return new PinEntry(entry.addresses(), entry.holders() - 1);
+                });
+            }
         }
 
         private static final class ForwardingResolver implements InetAddressResolver {
@@ -175,12 +239,14 @@ public final class PinnedDnsResolver implements InetAddressResolver {
             @Override
             public Stream<InetAddress> lookupByName(String host, LookupPolicy lookupPolicy)
                     throws UnknownHostException {
-                Map<String, List<InetAddress>> pins = ACTIVE_PINS;
-                if (pins != null) {
-                    return new PinnedDnsResolver(pins, BUILTIN)
-                        .lookupByName(host, lookupPolicy);
+                // Fast path: every lookup in the JVM (DB, LLM
+                // endpoints, ...) routes through this provider; skip
+                // the snapshot allocation when no pin is active.
+                if (PINS.isEmpty()) {
+                    return BUILTIN.lookupByName(host, lookupPolicy);
                 }
-                return BUILTIN.lookupByName(host, lookupPolicy);
+                return new PinnedDnsResolver(activePinsSnapshot(), BUILTIN)
+                    .lookupByName(host, lookupPolicy);
             }
 
             @Override

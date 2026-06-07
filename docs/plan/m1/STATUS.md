@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 37 |
+| pending | 36 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 218 |
+| done | 219 |
 | deferred | 2 |
 | **total** | **257** |
 
@@ -32,7 +32,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-186 — Signal group outbound send path (complexity: medium, risk: medium)
 - M1-187 — Strip bot-mention span in group inbound delivery (complexity: medium, risk: medium)
 - M1-190 — Scope the last-admin LOCK TABLE to admin-relevant updates (complexity: medium, risk: medium)
-- M1-191 — SSRF: replace the JVM-wide pin lock with a per-host pin map (complexity: high, risk: high)
 - M1-193 — /stop wiring: pg backend pid + statement timeouts + tool conns (complexity: high, risk: medium)
 - M1-194 — EligiblePostQuery SQL LIMIT + chat tool result budgets (complexity: medium, risk: medium)
 - M1-195 — Audit correctness: auto-promote guard, /unban no-op, intent-row parity (complexity: medium, risk: medium)
@@ -97,6 +96,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 |---|---|---|---|
 | M1-209 | Remove hand-written @NonNull made redundant by D48 null-marked packages | 2026-06-07 | round 1 APPROVE |
 | M1-192 | LLM per-task config completion (configFor, remote-llm, guard) | 2026-06-07 | round 1 APPROVE |
+| M1-191 | SSRF: replace the JVM-wide pin lock with a per-host pin map | 2026-06-07 | round 1 APPROVE |
 | M1-189 | DB grants: revoke PUBLIC on quarantine procs + price_snapshot UPDATE | 2026-06-07 | round 1 APPROVE |
 | M1-188 | Serialize SimpleX WS sends + bound Signal handle map | 2026-06-07 | round 1 APPROVE |
 | M1-182 | Re-evaluation verdict handling: re-hide, NOTIFYs, pipeline | 2026-06-07 | round 2 OVERRIDE-APPROVE |
@@ -104,7 +104,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-178 | Implement the bootstrap-admin startup bean | 2026-06-07 | round 1 APPROVE |
 | M1-177 | Move inbound dispatch off the transport read thread | 2026-06-07 | round 1 APPROVE |
 | M1-176 | Clamp Nostr created_at to now() before it becomes published_at | 2026-06-06 | round 1 APPROVE |
-| M1-175 | Ban intent-row parity and transaction hygiene (M1-173 audit-2 findings) | 2026-06-06 | round 1 APPROVE |
 
 ---
 
@@ -407,7 +406,7 @@ M1-188 (done)
 M1-189 (done)
   └── M1-207 (pending) ← runnable
 M1-190 (pending) ← runnable
-M1-191 (pending) ← runnable
+M1-191 (done)
 M1-192 (done)
   └── M1-217 (pending) ← runnable
 M1-193 (pending) ← runnable

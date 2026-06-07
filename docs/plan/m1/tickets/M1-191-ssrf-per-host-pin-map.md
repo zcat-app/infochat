@@ -1,7 +1,7 @@
 ---
 id: M1-191
 title: "SSRF: replace the JVM-wide pin lock with a per-host pin map"
-status: pending
+status: done
 created: 2026-06-07
 last_updated: 2026-06-07
 blocked_by: []
@@ -38,7 +38,20 @@ spec_refs:
 decision_refs:
   - D20
   - D38
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-07
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 630
+      removed: 118
 escalations:
   - date: 2026-06-07
     reason: clarity-fail
@@ -77,6 +90,28 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-06-07
+    verdict: CLEAN
+    base: 7cef606^
+    head: 7cef606
+    verdict_file: docs/plan/m1/redteam/M1-191-2026-06-07.md
+    out_of_model_count: 3
+    note: |
+      CLEAN on the post-commit, pre-merge implementation commit. Three
+      advisory out-of-model notes, none requiring action on this ticket:
+      a cosmetic javadoc-precision nit on Provider.pin's "still-active
+      holder" phrasing under latest-wins overlap; the pre-existing
+      DNS-vs-DNS (not socket-peer) comparison in the peer-IP-change
+      watcher pattern (candidate input for a future Nostr StreamSource
+      hardening decision); and the pre-existing JDK InetAddress
+      positive cache above the resolver SPI (bypassed-but-equivalent).
+clarity_check:
+  date: 2026-06-07
+  verdict: PASS
+  warnings: []
+  blockers: []
+outline_file: target/m1-tick-outline-M1-191.md
 ---
 
 # M1-191: SSRF: replace the JVM-wide pin lock with a per-host pin map

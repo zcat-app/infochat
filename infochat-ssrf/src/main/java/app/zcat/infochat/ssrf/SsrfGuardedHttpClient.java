@@ -26,7 +26,6 @@ import java.util.concurrent.FutureTask;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
 
 /**
@@ -58,16 +57,16 @@ import java.util.function.Function;
  *       host; every entry is checked against {@link IpBlocklist};
  *       ANY blocked address rejects the request.</li>
  *   <li><strong>DNS pinning</strong> — the IP set just validated is
- *       installed in the JVM-wide {@link PinnedDnsResolver.Provider}
- *       pin slot, keyed by the canonical host, so the subsequent
- *       JDK {@code HttpClient.send} resolves the host to those same
- *       IPs. The wrapper holds the provider's {@link ReentrantLock}
- *       across the redirect loop + the terminal hop's
- *       {@code httpClient.send} (which returns when headers are
- *       received) and RELEASES the lock BEFORE the body-read phase
- *       (M1-026 Finding 1 lock-starvation arm). The JDK does not
- *       re-resolve DNS during body read on an already-established
- *       connection, so releasing the lock there is safe.</li>
+ *       pinned in the JVM-wide {@link PinnedDnsResolver.Provider}
+ *       per-host pin map, keyed by the canonical host, so the
+ *       subsequent JDK {@code HttpClient.send} resolves the host to
+ *       those same IPs. The wrapper holds its pin across the
+ *       redirect loop + the terminal hop's {@code httpClient.send}
+ *       (which returns when headers are received) and RELEASES it
+ *       BEFORE the body-read phase (M1-026 Finding 1). The JDK does
+ *       not re-resolve DNS during body read on an already-established
+ *       connection, so a pin held there would only be stale
+ *       state.</li>
  *   <li><strong>HTTP send</strong> via a per-call
  *       {@link HttpClient} with non-zero connect + request timeouts,
  *       {@code Redirect.NEVER}, a per-read length- AND wall-clock-
@@ -76,16 +75,18 @@ import java.util.function.Function;
  *       remediation).</li>
  *   <li><strong>Redirect handling</strong> — on 3xx the wrapper
  *       parses the {@code Location} header, increments a per-call
- *       counter, and re-enters the pipeline from step 1, REPLACING
- *       the pin slot (still under the same lock).</li>
+ *       counter, and re-enters the pipeline from step 1,
+ *       release-then-pin: the prior hop's pin is released and the
+ *       freshly re-validated target pinned, so each hop's
+ *       re-resolution REPLACES the previous one (the TOCTOU defense
+ *       re-applies per hop).</li>
  * </ol>
  *
- * <p>This class is NOT itself thread-safe for the pinning surface
- * — the static pin slot is JVM-wide. Concurrent {@link #get(URI)}
- * calls serialize on the {@link PinnedDnsResolver.Provider} lock
- * for the connection-establishment phase. The body-read phase runs
- * unlocked, so concurrent fetches to different hosts can interleave
- * their body reads.
+ * <p>Thread-safe: the JVM-wide pin map is per-host and refcounted,
+ * so concurrent {@link #get(URI)} calls and WebSocket dials proceed
+ * independently — a slow connect to one host does not stall fetches
+ * to any other host, and overlapping pins of the SAME host stack
+ * rather than disturb each other.
  */
 public final class SsrfGuardedHttpClient {
 
@@ -311,7 +312,7 @@ public final class SsrfGuardedHttpClient {
      * pipeline runs identically to {@link #get(URI)} — scheme
      * allowlist, userinfo gate, host canonicalization, DNS
      * resolution + {@link IpBlocklist} check, DNS pinning, redirect
-     * loop with per-hop re-validation, lock-released body read with
+     * loop with per-hop re-validation, pin-released body read with
      * the same bounds. The extra headers are attached on every
      * redirect hop (matching how the default {@code Accept} /
      * {@code User-Agent} propagate).
@@ -343,15 +344,24 @@ public final class SsrfGuardedHttpClient {
                 .connectTimeout(connectTimeout)
                 .followRedirects(HttpClient.Redirect.NEVER)
                 .build()) {
-            ReentrantLock lock = PinnedDnsResolver.Provider.lock();
-            lock.lock();
+            // One pin handle per hop: each hop's freshly validated
+            // host REPLACES the previous hop's pin (release-then-pin),
+            // and the finally releases whichever pin is held when the
+            // loop exits or throws — in particular BEFORE readBounded
+            // (M1-026 Finding 1: the JDK does not re-resolve DNS on an
+            // established connection, so the body-read phase needs no
+            // pin).
+            PinnedDnsResolver.Provider.PinHandle hopPin = null;
             try {
                 URI current = uri;
                 int redirectCount = 0;
                 while (true) {
                     ResolvedHost resolved = resolveAndValidate(current, HTTP_SCHEMES);
-                    PinnedDnsResolver.Provider.installPins(
-                        Map.of(resolved.canonicalHost(), resolved.addresses()));
+                    if (hopPin != null) {
+                        hopPin.release();
+                    }
+                    hopPin = PinnedDnsResolver.Provider.pin(
+                        resolved.canonicalHost(), resolved.addresses());
 
                     HttpRequest.Builder reqBuilder = HttpRequest.newBuilder()
                         .uri(current)
@@ -392,8 +402,9 @@ public final class SsrfGuardedHttpClient {
                     break;
                 }
             } finally {
-                PinnedDnsResolver.Provider.clearPins();
-                lock.unlock();
+                if (hopPin != null) {
+                    hopPin.release();
+                }
             }
 
             byte[] body = readBounded(terminalResponse);
@@ -572,11 +583,11 @@ public final class SsrfGuardedHttpClient {
      * Validate {@code uri} against the WebSocket SSRF policy (scheme
      * allowlist {@code {ws, wss}} + userinfo gate + host
      * canonicalization + DNS resolution + {@link IpBlocklist} check),
-     * install the resolved IPs in the JVM-wide
-     * {@link PinnedDnsResolver.Provider} pin slot under the same
-     * cross-call lock that {@link #get(URI)} uses, and return a
+     * pin the resolved IPs in the JVM-wide
+     * {@link PinnedDnsResolver.Provider} per-host pin map — the same
+     * map {@link #get(URI)} pins through — and return a
      * {@link PinnedDial} handle whose {@link PinnedDial#close()}
-     * releases the pin and the lock.
+     * releases the pin.
      *
      * <p>The caller dials the WebSocket (e.g. {@code
      * HttpClient.newWebSocketBuilder().buildAsync(uri, listener)}) and
@@ -584,37 +595,28 @@ public final class SsrfGuardedHttpClient {
      * {@code WebSocket} handshake routes its DNS lookup through the
      * pinned resolver, so the TCP connection lands on a validated IP)
      * INSIDE the try-with-resources block, then exits the block so the
-     * pin and lock are released for the next dial. The connection
-     * itself survives close-of-the-PinnedDial; only the JVM-wide
-     * pin/lock state is wound down.
+     * host's pin is released. The connection itself survives
+     * close-of-the-PinnedDial; only the pin entry is wound down.
      *
-     * <p>The blocking semantics match {@link #get(URI)}: concurrent
-     * SSRF-checked dials (HTTP and WebSocket) serialize on the same
-     * {@link PinnedDnsResolver.Provider} lock during their
-     * connection-establishment phase. The WebSocket post-handshake
-     * data path then runs lock-released, like {@link #get}'s body
-     * read.
+     * <p>Concurrency: the pin is per-host and refcounted, so an open
+     * dial blocks NO other outbound call — concurrent SSRF-checked
+     * dials (HTTP and WebSocket, different hosts or the same) proceed
+     * independently.
+     *
+     * <p>A policy violation raises {@link SsrfPolicyException} BEFORE
+     * any pin is installed, so a thrown check leaves no stale pin
+     * behind.
      */
     public PinnedDial checkAndPinForWebSocket(URI uri) {
-        ReentrantLock lock = PinnedDnsResolver.Provider.lock();
-        lock.lock();
-        try {
-            ResolvedHost resolved = resolveAndValidate(uri, WEBSOCKET_SCHEMES);
-            PinnedDnsResolver.Provider.installPins(
-                Map.of(resolved.canonicalHost(), resolved.addresses()));
-            return new PinnedDial(lock, resolved.addresses());
-        } catch (RuntimeException | Error e) {
-            // Release the lock if the validation or pin install threw —
-            // a thrown checkAndPinForWebSocket must not leave the
-            // JVM-wide lock held.
-            lock.unlock();
-            throw e;
-        }
+        ResolvedHost resolved = resolveAndValidate(uri, WEBSOCKET_SCHEMES);
+        return new PinnedDial(
+            PinnedDnsResolver.Provider.pin(resolved.canonicalHost(), resolved.addresses()),
+            resolved.addresses());
     }
 
     /**
      * Run the WebSocket SSRF check {@link #checkAndPinForWebSocket}
-     * runs, BUT without pinning and without taking the JVM-wide lock.
+     * runs, BUT without pinning.
      * Returns the validated address set. Callers use this for
      * mid-session peer-IP-change detection on already-established
      * WebSocket connections (per {@code security.md} §SSRF: "any
@@ -641,35 +643,36 @@ public final class SsrfGuardedHttpClient {
 
     /**
      * Handle returned by {@link #checkAndPinForWebSocket(URI)}. Holds
-     * the JVM-wide {@link PinnedDnsResolver.Provider} lock and the
-     * installed pin until {@link #close()} runs, so the WebSocket
-     * dial executed inside a try-with-resources block sees the
-     * validated IPs from {@link PinnedDnsResolver}'s SPI lookups.
-     * Carries the validated address set for the caller's
+     * one refcounted acquisition of the host's entry in the JVM-wide
+     * {@link PinnedDnsResolver.Provider} pin map until {@link #close()}
+     * runs, so the WebSocket dial executed inside a try-with-resources
+     * block sees the validated IPs from {@link PinnedDnsResolver}'s
+     * SPI lookups. Carries the validated address set for the caller's
      * peer-IP-change watcher (compare against
      * {@link SsrfGuardedHttpClient#resolveForWebSocket(URI)} on
      * subsequent ticks).
      *
-     * <p>Single-shot: {@link #close()} clears the pin and releases
-     * the lock exactly once. Re-{@code close()} would unlock an
-     * already-released {@link ReentrantLock} and throw; standard
-     * try-with-resources usage does not re-close.
+     * <p>{@link #close()} is idempotent: it releases this handle's
+     * acquisition exactly once, so a stray re-{@code close()} can
+     * neither throw nor release a concurrent same-host holder's pin
+     * early.
      */
     public static final class PinnedDial implements AutoCloseable {
 
-        private final ReentrantLock lock;
+        private final PinnedDnsResolver.Provider.PinHandle pin;
 
         private final List<InetAddress> addresses;
 
-        PinnedDial(ReentrantLock lock, List<InetAddress> addresses) {
-            this.lock = lock;
+        PinnedDial(PinnedDnsResolver.Provider.PinHandle pin, List<InetAddress> addresses) {
+            this.pin = pin;
             this.addresses = List.copyOf(addresses);
         }
 
         /**
-         * The validated IP set that {@link PinnedDnsResolver.Provider}
-         * is currently serving for the host. Stable across the life
-         * of this handle.
+         * The IP set this dial validated and pinned. Stable across
+         * the life of this handle (a concurrent same-host pin may
+         * update what the resolver serves — latest-wins — but never
+         * what this handle captured at validation time).
          */
         public List<InetAddress> addresses() {
             return addresses;
@@ -677,8 +680,7 @@ public final class SsrfGuardedHttpClient {
 
         @Override
         public void close() {
-            PinnedDnsResolver.Provider.clearPins();
-            lock.unlock();
+            pin.release();
         }
     }
 
