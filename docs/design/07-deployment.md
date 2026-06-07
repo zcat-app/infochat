@@ -92,6 +92,7 @@ Values that other design files forward-reference. The spec commits to the existe
 | Periodic-digest evening slot — center hour (24h, group-local) | 19:00 | 19:00 | 19:00 | 19:00 | [../spec/deployment.md](../spec/deployment.md) §Configuration surface — Groups |
 | Periodic-digest slot-window width | ±15 min | ±15 min | ±30 min | ±15 min | [../spec/deployment.md](../spec/deployment.md) §Configuration surface — Groups |
 | `chat_memory` TTL (D40) | 30 d | 30 d | 14 d | 30 d | [../spec/llm.md](../spec/llm.md), [02-schema.md](02-schema.md) |
+| `post` partition retention (`infochat.partitions.retention-days.post`) | 30 d | 30 d | 14 d | 30 d | [02-schema.md §2.4.4](02-schema.md) |
 
 These are the values bound at startup unless an operator override fires. Forward references from other design files (e.g., 06-messaging.md §6.2.2 / §6.3.6) point here.
 
@@ -219,7 +220,16 @@ infochat.adapters.signal.bootstrap-admin-contact-id=${INFOCHAT_SIGNAL_ADMIN_CONT
 # ── Scheduler ──────────────────────────────────────────────────────────
 infochat.collector.fetch-interval=PT5M           # per-source default
 infochat.collector.linking-interval=PT5M
-infochat.collector.partition-prune-cron=0 30 3 * * ?
+infochat.partitions.check-interval=24h           # PartitionCreator: current+next month
+infochat.partitions.prune-interval=24h           # PartitionPruner: aged-partition drop
+# Per-table partition retention horizons in days (02-schema.md §2.4.4);
+# post is profile-driven (30 laptop/vps/remote-llm, 14 pi). The pruner's
+# floor guard keeps the current and next month regardless of these values.
+infochat.partitions.retention-days.post=30
+infochat.partitions.retention-days.post-embedding=4
+infochat.partitions.retention-days.post-entity=4
+infochat.partitions.retention-days.post-reference=4
+infochat.partitions.retention-days.price-snapshot=7
 infochat.collector.ttl-prune-cron=0 0 4 * * ?
 infochat.provider.digest-tick-cron=0 * * * * ?   # checks every minute for due groups
 

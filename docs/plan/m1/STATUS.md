@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 31 |
+| pending | 30 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 211 |
+| done | 212 |
 | deferred | 2 |
 | **total** | **244** |
 
@@ -26,7 +26,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-178 — Implement the bootstrap-admin startup bean (complexity: medium, risk: medium)
 - M1-179 — Cross-tick UID dedup in the fetch persist path (complexity: medium, risk: high)
-- M1-180 — Partition lifecycle: provision current month + drop pruner (complexity: medium, risk: high)
 - M1-181 — quarantine_review listener correctness cluster (complexity: high, risk: medium)
 - M1-182 — Re-evaluation verdict handling: re-hide, NOTIFYs, pipeline (complexity: high, risk: medium)
 - M1-183 — LLM rate-cap + in-flight coverage for /summary and /retry (complexity: medium, risk: medium)
@@ -89,6 +88,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-180 | Partition lifecycle: provision current month + drop pruner | 2026-06-07 | round 1 APPROVE |
 | M1-177 | Move inbound dispatch off the transport read thread | 2026-06-07 | round 1 APPROVE |
 | M1-176 | Clamp Nostr created_at to now() before it becomes published_at | 2026-06-06 | round 1 APPROVE |
 | M1-175 | Ban intent-row parity and transaction hygiene (M1-173 audit-2 findings) | 2026-06-06 | round 1 APPROVE |
@@ -98,7 +98,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-160 | [INVESTIGATE] summary_anchor scope_kind discriminator | 2026-06-06 | round 1 APPROVE |
 | M1-152 | Schema-hardening migration (stage2_verdict CHECK + V27 audit verb + Nostr index) | 2026-06-06 | round 1 APPROVE |
 | M1-151 | Typed SSRF / error signals (UrlProbe + last-admin SQLSTATE) | 2026-06-06 | round 2 OVERRIDE-APPROVE |
-| M1-172 | InviteCodeConsumer advisories: stale reply javadoc + sweep gating | 2026-06-05 | round 1 APPROVE |
 
 ---
 
@@ -390,7 +389,7 @@ M1-177 (done)
 M1-178 (pending) ← runnable
   └── M1-208 (pending)
 M1-179 (pending) ← runnable
-M1-180 (pending) ← runnable
+M1-180 (done)
 M1-181 (pending) ← runnable
 M1-182 (pending) ← runnable
 M1-183 (pending) ← runnable

@@ -1,9 +1,16 @@
 ---
 id: M1-180
 title: "Partition lifecycle: provision current month + drop pruner"
-status: pending
+status: done
 created: 2026-06-07
 last_updated: 2026-06-07
+clarity_check:
+  date: 2026-06-07
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE item 5: doc-update criterion is verifiable only by reading the two design files post-implementation; reviewer should explicitly diff §2.4.4 and 07-deployment.md against the implemented property keys and cadence"
+    - "SELF-CONTAINED-CHECK: implementer must read docs/design/02-schema.md §2.4.4 and docs/design/07-deployment.md (~line 222) to update them per acceptance item 5 — expected for a doc-update task, judgment-tier only"
+  blockers: []
 blocked_by: []
 files_budget: 8
 files_scope:
@@ -40,7 +47,20 @@ spec_refs:
   - docs/spec/schema.md §Invariants
 decision_refs:
   - D33
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-07
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 499
+      removed: 44
 overrides: []
 aborted_attempts: []
 reopens: []

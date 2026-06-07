@@ -2,6 +2,7 @@ package app.zcat.infochat.collector.partition;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
 import java.time.YearMonth;
 import java.util.List;
 
@@ -9,10 +10,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Unit test for the DDL builder behind {@link PartitionCreator}. Asserts the
- * emitted {@code CREATE TABLE … PARTITION OF} statements — one per partitioned
- * table, with the correct per-table partition name and half-open FROM/TO month
- * bounds — without touching a database.
+ * Unit test for the DDL builder and month logic behind {@link PartitionCreator}
+ * and {@link PartitionPruner}. Asserts the emitted
+ * {@code CREATE TABLE … PARTITION OF} statements — one per partitioned table,
+ * with the correct per-table partition name and half-open FROM/TO month bounds
+ * — plus the provisioning-month coverage and retention-horizon prune selection
+ * (including the active-month floor guard), without touching a database.
  */
 class PartitionCreatorTest {
 
@@ -60,5 +63,52 @@ class PartitionCreatorTest {
             "CREATE TABLE IF NOT EXISTS post_202612 PARTITION OF post "
                 + "FOR VALUES FROM ('2026-12-01 00:00:00+00') TO ('2027-01-01 00:00:00+00')",
             december);
+    }
+
+    @Test
+    void monthsToProvisionCoverBothCurrentAndNextMonth() {
+        assertEquals(List.of(YearMonth.of(2026, 6), YearMonth.of(2026, 7)),
+            PartitionDdl.monthsToProvision(YearMonth.of(2026, 6)),
+            "the active month must be provisioned by code, not only by V30's one-shot");
+    }
+
+    @Test
+    void prunableSelectsOnlyPartitionsOlderThanTheRetentionHorizon() {
+        // 30-day horizon at 2026-06-15: cutoff 2026-05-16. April ends
+        // 2026-05-01 (aged); May ends 2026-06-01 (in horizon).
+        List<String> prunable = PartitionDdl.prunablePartitions(
+            PartitionDdl.PartitionedTable.POST,
+            List.of("post_202604", "post_202605", "post_202606", "post_202607"),
+            YearMonth.of(2026, 6), 30, Instant.parse("2026-06-15T00:00:00Z"));
+        assertEquals(List.of("post_202604"), prunable);
+    }
+
+    @Test
+    void floorGuardKeepsActiveAndNextMonthEvenWhenHorizonIsShorterThanOneMonth() {
+        // 1-day horizon at 2026-06-15: cutoff 2026-06-14. May ends 2026-06-01
+        // (aged, drops) — but the active and next month must survive any
+        // horizon, however misconfigured.
+        List<String> prunable = PartitionDdl.prunablePartitions(
+            PartitionDdl.PartitionedTable.POST,
+            List.of("post_202605", "post_202606", "post_202607"),
+            YearMonth.of(2026, 6), 1, Instant.parse("2026-06-15T00:00:00Z"));
+        assertEquals(List.of("post_202605"), prunable);
+
+        List<String> pathological = PartitionDdl.prunablePartitions(
+            PartitionDdl.PartitionedTable.POST,
+            List.of("post_202606", "post_202607"),
+            YearMonth.of(2026, 6), -3650, Instant.parse("2026-06-15T00:00:00Z"));
+        assertTrue(pathological.isEmpty(),
+            "even a negative retention horizon must not select the active or next month");
+    }
+
+    @Test
+    void prunableSkipsChildNamesOutsideThePartitionNamingConvention() {
+        List<String> prunable = PartitionDdl.prunablePartitions(
+            PartitionDdl.PartitionedTable.POST,
+            List.of("post_default", "post_2020", "post_archive_202001"),
+            YearMonth.of(2026, 6), 30, Instant.parse("2026-06-15T00:00:00Z"));
+        assertTrue(prunable.isEmpty(),
+            "only convention-named monthly partitions may ever be dropped");
     }
 }

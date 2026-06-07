@@ -664,7 +664,7 @@ CREATE TABLE post (
                                                      --   stable upstream identifiers
 ) PARTITION BY RANGE (fetched_at);
 
--- Daily partitions, created by partition_pruner (see §2.4.4).
+-- Monthly partitions, created by PartitionCreator (see §2.4.4).
 -- Indexes are created on the parent and propagated to partitions.
 CREATE INDEX idx_post_status_fetched ON post(status, fetched_at DESC);
 CREATE INDEX idx_post_source         ON post(source_id, fetched_at DESC);
@@ -805,15 +805,26 @@ stays revoked per Invariant 6).
 
 ### 2.4.4 Partition lifecycle
 
-A nightly `partition_pruner` job:
+Two scheduled Collector jobs, both on the owner datasource (CREATE/DROP of
+a partition requires parent-table ownership):
 
-1. Creates `_yyyymmdd` partitions for tomorrow on `post`, `post_entity`,
-   `post_embedding`, `post_reference`, and `price_snapshot` (§2.7.2).
-2. `DROP PARTITION` on partitions whose end date is older than the
-   per-table retention horizon:
+1. `PartitionCreator` — at startup and on every
+   `infochat.partitions.check-interval` tick (24h default), creates the
+   monthly `_yyyymm` partitions for the current and next UTC month on
+   `post`, `post_entity`, `post_embedding`, `post_reference`, and
+   `price_snapshot` (§2.7.2) via `CREATE TABLE IF NOT EXISTS`. Startup
+   provisioning repairs the active month for an instance that was down
+   across a month boundary, before inserts can fail.
+2. `PartitionPruner` — on every `infochat.partitions.prune-interval` tick
+   (24h default), `DROP TABLE` on partitions whose end date is older than
+   the per-table retention horizon
+   (`infochat.partitions.retention-days.<table>`):
    - `post` — 30 days (laptop/vps/remote-llm), 14 days (pi)
    - `post_entity`, `post_embedding`, `post_reference` — 4 days (all profiles)
    - `price_snapshot` — 7 days (all profiles)
+
+   A floor guard never drops the current or next month's partition,
+   regardless of how short a misconfigured horizon is.
 
 No row-level deletes. Drop is O(1), no index bloat. Saved posts survive
 partition drop because their bodies are snapshotted in `saved_post`
