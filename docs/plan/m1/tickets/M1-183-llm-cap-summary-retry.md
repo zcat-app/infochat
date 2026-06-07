@@ -5,12 +5,18 @@ status: pending
 created: 2026-06-07
 last_updated: 2026-06-07
 blocked_by: []
-files_budget: 7
+files_budget: 10
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/SummaryCommandHandler.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/InboundRouter.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/LlmRateCap.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryCommandHandlerTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/RetryCommandHandlerTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/RetryDigestCommandTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterIntakeOrderingTest.java
 complexity: medium
 risk: medium
 round_cap: 2
@@ -33,7 +39,11 @@ test_plan:
   adds:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/command
   modifies:
-    - infochat-provider/src/test/java/app/zcat/infochat/provider/command
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryCommandHandlerTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/command/RetryCommandHandlerTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/command/RetryDigestCommandTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/InboundRouterIntakeOrderingTest.java
   preserves:
     - all tests currently green on main
 spec_refs:
@@ -47,6 +57,35 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+revisions:
+  - date: 2026-06-07
+    reason: clarity-fail rework (TEST-CHANGES-AUTHORIZED blocker; latent files_scope/files_budget gap found during escalation grounding — cap-helper extraction forces changes to two messaging test files outside the original scope)
+    snapshot:
+      status: escalated
+      escalation_reason: clarity-fail
+      files_budget_at_snapshot: 7
+      files_scope_at_snapshot:
+        - infochat-provider/src/main/java/app/zcat/infochat/provider/command/SummaryCommandHandler.java
+        - infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java
+        - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/InboundRouter.java
+        - infochat-provider/src/test/java/app/zcat/infochat/provider/command
+      test_plan_at_snapshot:
+        adds:
+          - infochat-provider/src/test/java/app/zcat/infochat/provider/command
+        modifies:
+          - infochat-provider/src/test/java/app/zcat/infochat/provider/command
+        preserves:
+          - all tests currently green on main
+escalations:
+  - date: 2026-06-07
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      CLARITY VERDICT: FAIL
+      TEST-CHANGES-AUTHORIZED: FAIL — test_plan.modifies lists
+      infochat-provider/src/test/java/app/zcat/infochat/provider/command
+      (same directory as test_plan.adds) but the ticket body has no
+      "Authorized test changes" section enumerating which existing test
+      classes change, why, or what new expected behavior replaces old.
 ---
 
 # M1-183: LLM rate-cap + in-flight coverage for /summary and /retry
@@ -77,13 +116,44 @@ See frontmatter. M1-193 owns the /stop cancellation plumbing; the two
 tickets share SummaryCommandHandler and should land with awareness of each
 other, but neither blocks the other.
 
+## Authorized test changes
+
+Pre-existing test classes change for two mechanical reasons. No assertion
+weakening, deletion, or expected-value change is authorized — every change
+below preserves the behavior the existing tests pin.
+
+1. **New-collaborator wiring.** The handlers are CDI field-injected; the
+   existing tests construct them bare (`new SummaryCommandHandler()`) and
+   assign fields by hand, so every new injected field must be wired in test
+   setup or existing tests NPE:
+   - `SummaryCommandHandlerTest` — setup gains wiring for the LLM rate-cap
+     collaborator and `InFlightTracker`; existing assertions unchanged.
+   - `RetryCommandHandlerTest` — setup gains wiring for the LLM rate-cap
+     collaborator; existing assertions unchanged.
+   - `RetryDigestCommandTest` — setup gains wiring for the LLM rate-cap
+     collaborator; existing assertions unchanged.
+2. **Cap-helper extraction.** `tryAcquireLlmRateCap` (and its sliding-window
+   state, config knob, and idle-entry sweep) moves off `InboundRouter` to the
+   shared collaborator; no delegating shim stays behind:
+   - `InboundRouterTest` — the `tryAcquireLlmRateCap` window/cap assertions
+     repoint at the extracted collaborator; same scenarios, same expected
+     values.
+   - `InboundRouterIntakeOrderingTest` — the `router.llmRateCapPerMinute = 10`
+     test wiring repoints to the collaborator equivalent; ordering assertions
+     unchanged.
+
 ## Notes
 
 - Source: `UNIFIED.md` §3 T7 under `deep-code-review/v2/` (opus-47 prov F1,
   kimi-folder prov F1).
 - `tryAcquireLlmRateCap` currently lives on InboundRouter as a
-  package-private method; reusing it from the two handlers may mean
-  extracting it to a shared collaborator — InboundRouter is in files_scope
-  for exactly that, not for chat-path behavior changes.
+  package-private method; the handlers live in a different package and
+  injecting the router into handlers it dispatches to would be a dependency
+  cycle, so reuse means extracting it to a shared collaborator —
+  InboundRouter is in files_scope for exactly that, not for chat-path
+  behavior changes. The files_scope entry
+  `provider/chat/LlmRateCap.java` pins the location (alongside
+  InFlightTracker, which the same surfaces consume); the exact class name is
+  the implementer's call within that path.
 - RetryCommandHandler's existing InFlightTracker registration is correct;
   only the rate bucket is missing there.
