@@ -1,7 +1,7 @@
 ---
 id: M1-200
 title: "Chat persistence: seq atomicity, pruner truncation, V42 duplicate-index drop"
-status: pending
+status: done
 created: 2026-06-07
 last_updated: 2026-06-07
 blocked_by: []
@@ -40,11 +40,29 @@ spec_refs:
   - docs/spec/commands.md §Conversation control
 decision_refs:
   - D37
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-07
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 251
+      removed: 19
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+clarity_check:
+  date: 2026-06-07
+  verdict: WARN
+  warnings: ["ACCEPTANCE-RUNNABLE item 5 (LRU trigger race): the accept-and-document branch of the fork is not mechanically verifiable — 'rationale argued in the commit message' cannot be checked by mvn verify; reviewer must manually inspect the commit message on that path"]
+  blockers: []
 ---
 
 # M1-200: Chat persistence: seq atomicity, pruner truncation, V42 duplicate-index drop

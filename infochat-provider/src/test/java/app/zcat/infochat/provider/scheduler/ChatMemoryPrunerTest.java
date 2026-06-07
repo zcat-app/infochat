@@ -11,6 +11,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Duration;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -62,6 +63,40 @@ class ChatMemoryPrunerTest {
             assertEquals(0, count(conn, "chat_session"));
             assertEquals(0, count(conn, "chat_message"));
             assertEquals(0, count(conn, "summary_anchor"));
+        }
+    }
+
+    @Test
+    void subDayRetentionPrunesOnlyRowsOlderThanConfiguredDuration() throws SQLException {
+        // PT12H once truncated to 0 days and deleted everything; the pruner
+        // must now bind whole seconds, so 6-hour-old rows survive a 12-hour
+        // horizon while 13-hour-old rows are pruned.
+        ChatMemoryPruner subDayPruner = new ChatMemoryPruner();
+        subDayPruner.dataSource = dataSource;
+        subDayPruner.retention = Duration.ofHours(12);
+
+        UUID oldScopeId = UUID.randomUUID();
+        try (Connection conn = dataSource.getConnection()) {
+            insertChatMemory(conn, userId, oldScopeId, "now() - interval '13 hours'");
+            insertChatSession(conn, userId, oldScopeId, "now() - interval '13 hours'");
+            insertChatMessage(conn, userId, oldScopeId, 0, "now() - interval '13 hours'");
+            resetSessionUpdatedAt(conn, userId, oldScopeId, "now() - interval '13 hours'");
+            insertSummaryAnchor(conn, userId, oldScopeId, "now() - interval '13 hours'");
+
+            insertChatMemory(conn, userId, scopeId, "now() - interval '6 hours'");
+            insertChatSession(conn, userId, scopeId, "now() - interval '6 hours'");
+            insertChatMessage(conn, userId, scopeId, 0, "now() - interval '6 hours'");
+            resetSessionUpdatedAt(conn, userId, scopeId, "now() - interval '6 hours'");
+            insertSummaryAnchor(conn, userId, scopeId, "now() - interval '6 hours'");
+        }
+
+        subDayPruner.prune();
+
+        try (Connection conn = dataSource.getConnection()) {
+            assertEquals(1, count(conn, "chat_memory"));
+            assertEquals(1, count(conn, "chat_session"));
+            assertEquals(1, count(conn, "chat_message"));
+            assertEquals(1, count(conn, "summary_anchor"));
         }
     }
 

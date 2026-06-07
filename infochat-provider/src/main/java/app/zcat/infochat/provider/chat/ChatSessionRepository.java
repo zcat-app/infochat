@@ -22,9 +22,14 @@ public class ChatSessionRepository {
           + "VALUES (?, ?, ?) "
           + "ON CONFLICT (user_id, scope_kind, scope_id) DO NOTHING";
 
+    // FOR UPDATE serializes concurrent persistTurn callers on the session
+    // row: without it two writers read the same next_seq and the second
+    // INSERT collides on the chat_message PK. The lock also serializes
+    // against /clear and /compress resetting next_seq = 0 directly.
     private static final String SELECT_NEXT_SEQ =
             "SELECT next_seq FROM chat_session "
-          + "WHERE user_id = ? AND scope_kind = ? AND scope_id = ?";
+          + "WHERE user_id = ? AND scope_kind = ? AND scope_id = ? "
+          + "FOR UPDATE";
 
     private static final String INSERT_MESSAGE =
             "INSERT INTO chat_message (user_id, scope_kind, scope_id, seq, role, content, tokens) "
@@ -58,7 +63,7 @@ public class ChatSessionRepository {
                     ps.executeUpdate();
                 }
 
-                // Read current next_seq
+                // Read current next_seq, locking the session row until commit
                 int seq;
                 try (PreparedStatement ps = conn.prepareStatement(SELECT_NEXT_SEQ)) {
                     ps.setObject(1, userId);

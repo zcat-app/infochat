@@ -31,29 +31,31 @@ public class ChatMemoryPruner {
 
     @Scheduled(every = "{infochat.chat.pruner.interval:24h}")
     void prune() throws SQLException {
-        int days = (int) retention.toDays();
+        // Bind whole seconds, not toDays(): a sub-day retention (e.g. PT12H)
+        // truncated to 0 days would make the cutoff "now()" and delete every row.
+        long seconds = retention.toSeconds();
         int total = 0;
         try (Connection conn = dataSource.getConnection()) {
             total += deleteOlderThan(conn,
-                "DELETE FROM chat_memory WHERE created_at < now() - make_interval(days => ?)",
-                days);
+                "DELETE FROM chat_memory WHERE created_at < now() - make_interval(secs => ?)",
+                seconds);
             // chat_session ON DELETE CASCADE removes chat_message rows automatically.
             total += deleteOlderThan(conn,
-                "DELETE FROM chat_session WHERE updated_at < now() - make_interval(days => ?)",
-                days);
+                "DELETE FROM chat_session WHERE updated_at < now() - make_interval(secs => ?)",
+                seconds);
             total += deleteOlderThan(conn,
-                "DELETE FROM summary_anchor WHERE generated_at < now() - make_interval(days => ?)",
-                days);
+                "DELETE FROM summary_anchor WHERE generated_at < now() - make_interval(secs => ?)",
+                seconds);
         }
         if (total > 0) {
-            LOG.infof("Chat-memory pruner removed %d rows (horizon=%d days)", total, days);
+            LOG.infof("Chat-memory pruner removed %d rows (horizon=%s)", total, retention);
         }
     }
 
-    private int deleteOlderThan(Connection conn, String sql, int days)
+    private int deleteOlderThan(Connection conn, String sql, long seconds)
             throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setInt(1, days);
+            ps.setLong(1, seconds);
             return ps.executeUpdate();
         }
     }
