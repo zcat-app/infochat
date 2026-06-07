@@ -19,7 +19,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Optional;
@@ -206,8 +205,10 @@ public class VouchCommandHandler implements CommandHandler {
                     return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
                 }
                 ActorRow actor = actorOpt.get();
-                try (Statement st = conn.createStatement()) {
-                    st.execute("SET LOCAL infochat.actor_id = '" + actor.id + "'");
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "SELECT set_config('infochat.actor_id', ?, true)")) {
+                    ps.setString(1, actor.id.toString());
+                    ps.execute();
                 }
 
                 Optional<TargetRow> targetOpt =

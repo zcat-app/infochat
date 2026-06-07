@@ -21,7 +21,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.sql.Types;
 import java.text.MessageFormat;
 import java.time.Instant;
@@ -284,8 +283,10 @@ public class BanCommandHandler implements CommandHandler {
                     return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
                 }
                 UserRow actor = actorOpt.get();
-                try (Statement st = conn.createStatement()) {
-                    st.execute("SET LOCAL infochat.actor_id = '" + actor.id + "'");
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "SELECT set_config('infochat.actor_id', ?, true)")) {
+                    ps.setString(1, actor.id.toString());
+                    ps.execute();
                 }
 
                 // Target lookup INSIDE the transaction, after the

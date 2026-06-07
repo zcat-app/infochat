@@ -20,7 +20,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.text.MessageFormat;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -114,8 +113,10 @@ public class QuarantineCommandHandler implements CommandHandler {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                try (Statement st = conn.createStatement()) {
-                    st.execute("SET LOCAL infochat.actor_id = '" + actor.id + "'");
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "SELECT set_config('infochat.actor_id', ?, true)")) {
+                    ps.setString(1, actor.id.toString());
+                    ps.execute();
                 }
                 RedactionHook.AuditRow auditRow = RedactionHook.AuditRow.builder()
                         .actorUserId(actor.id)
@@ -207,8 +208,10 @@ public class QuarantineCommandHandler implements CommandHandler {
 
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
-            try (Statement st = conn.createStatement()) {
-                st.execute("SET LOCAL infochat.actor_id = '" + actor.id + "'");
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT set_config('infochat.actor_id', ?, true)")) {
+                ps.setString(1, actor.id.toString());
+                ps.execute();
             }
             try (PreparedStatement ps = conn.prepareStatement(
                     "SELECT approve_quarantine(?, ?)")) {
@@ -247,8 +250,10 @@ public class QuarantineCommandHandler implements CommandHandler {
 
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
-            try (Statement st = conn.createStatement()) {
-                st.execute("SET LOCAL infochat.actor_id = '" + actor.id + "'");
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT set_config('infochat.actor_id', ?, true)")) {
+                ps.setString(1, actor.id.toString());
+                ps.execute();
             }
             try (PreparedStatement ps = conn.prepareStatement(
                     "SELECT reject_quarantine(?, ?)")) {

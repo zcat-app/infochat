@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 19 |
+| pending | 18 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 237 |
+| done | 238 |
 | deferred | 2 |
 | **total** | **258** |
 
@@ -32,7 +32,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-202 — Collector fetch hygiene: tracker predicates/keys, Bluesky encoding+parse, Registrar CDI, poller overlap (complexity: medium, risk: medium)
 - M1-204 — Messaging SPI conformance: setTyping no-op, start() exception type, constants drift, jitter, dead stubs (complexity: medium, risk: medium)
 - M1-205 — Adapter rate-limit enforcement: implement §6.3.7 + capability caps, or design-amend (complexity: high, risk: medium)
-- M1-206 — Parameterize SET LOCAL infochat.actor_id (drop UUID string concat) (complexity: low, risk: low)
 - M1-207 — infochat_admin role: resolve the paper-principal contradiction (decision) (complexity: low, risk: medium)
 - M1-208 — Per-adapter bootstrap-admin contact-id parse validation (SPI surface decision) (complexity: medium, risk: medium)
 - M1-210 — Module-DAG enforcement + doc/config-truth sweep (docs say what the build does) (complexity: medium, risk: medium)
@@ -78,6 +77,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-214 | SSRF small fixes: Location-resolve exception contract, fec0::/10, scheme case-fold, reason()-based test assertions | 2026-06-08 | round 1 APPROVE |
+| M1-206 | Parameterize SET LOCAL infochat.actor_id (drop UUID string concat) | 2026-06-08 | round 1 APPROVE |
 | M1-201 | Ops hardening: drop infochat-dev password fallbacks + readiness probes | 2026-06-08 | round 1 APPROVE |
 | M1-222 | Per-group LLM rate cap (D47) on the group chat path | 2026-06-07 | round 2 OVERRIDE-APPROVE |
 | M1-221 | LLM retry-once backoff: sleep before the single retry (M1-192 redteam F2) | 2026-06-07 | round 2 OVERRIDE-APPROVE |
@@ -86,7 +86,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-209 | Remove hand-written @NonNull made redundant by D48 null-marked packages | 2026-06-07 | round 1 APPROVE |
 | M1-203 | Nostr /add-source: StreamSource-shaped relay probe instead of guaranteed SSRF rejection | 2026-06-07 | round 1 APPROVE |
 | M1-200 | Chat persistence: seq atomicity, pruner truncation, V42 duplicate-index drop | 2026-06-07 | round 1 APPROVE |
-| M1-199 | /save visibility sentence: adjudicate the scope-visibility reading | 2026-06-07 | round 1 APPROVE |
 
 ---
 
@@ -405,7 +404,7 @@ M1-200 (done)
 M1-201 (done)
 M1-202 (pending) ← runnable
 M1-203 (done)
-M1-206 (pending) ← runnable
+M1-206 (done)
 M1-209 (done)
 M1-210 (pending) ← runnable
 M1-211 (pending) ← runnable

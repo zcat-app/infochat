@@ -23,8 +23,8 @@ import org.slf4j.LoggerFactory;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.text.MessageFormat;
 import java.time.Instant;
 import java.util.Optional;
@@ -209,8 +209,10 @@ public class RejectGroupCommandHandler implements CommandHandler {
                     return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
                 }
                 UserRow reActor = reActorOpt.get();
-                try (Statement st = conn.createStatement()) {
-                    st.execute("SET LOCAL infochat.actor_id = '" + reActor.id + "'");
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "SELECT set_config('infochat.actor_id', ?, true)")) {
+                    ps.setString(1, reActor.id.toString());
+                    ps.execute();
                 }
 
                 // Re-look up the group inside the tx — the row could

@@ -20,7 +20,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.text.MessageFormat;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -53,8 +52,8 @@ import java.util.UUID;
  *       contact with no {@code users} row is distinct from the preban
  *       carve-out below).</li>
  *   <li>Preban path — when the target row's {@code registration_state =
- *       'preban'}, {@code SET LOCAL infochat.request_id = <uuid>} on the
- *       same Connection (so the V5
+ *       'preban'}, {@code set_config('infochat.request_id', <uuid>,
+ *       true)} on the same Connection (so the V5
  *       {@code current_setting('infochat.request_id', TRUE)} read inside
  *       the procedure picks up our dispatch's request_id) and then
  *       {@code CALL delete_preban_user(target.id, actor.id)} via JDBC
@@ -85,16 +84,14 @@ import java.util.UUID;
  *       {@code reply.unban.plain} otherwise.</li>
  * </ol>
  *
- * <p><b>SET LOCAL parameterization caveat.</b> Postgres'
+ * <p><b>Session-GUC parameterization.</b> Postgres'
  * {@code SET LOCAL <name> = <value>} is a meta-command, not a normal
  * DML, and does NOT accept JDBC bind parameters for the value. The
- * handler interpolates the request id as a quoted string literal into
- * the SQL text. This is safe because the request id is the output of
- * {@code UUID.randomUUID().toString()} — well-formed, no injection
- * surface. The alternative
- * {@code SELECT set_config('infochat.request_id', ?, true)} accepts a
- * bind parameter but would not match the acceptance item 10 grep
- * predicate {@code SET LOCAL.*infochat[._]request_id}.</p>
+ * handler therefore sets the per-transaction GUCs via
+ * {@code SELECT set_config('<name>', ?, true)} — the function form of
+ * SET LOCAL ({@code is_local=true} scopes the value to the current
+ * transaction) — so the actor and request ids reach the SQL session
+ * as bind parameters, never interpolated into SQL text.</p>
  */
 @ApplicationScoped
 public class UnbanCommandHandler implements CommandHandler {
@@ -200,8 +197,10 @@ public class UnbanCommandHandler implements CommandHandler {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                try (Statement st = conn.createStatement()) {
-                    st.execute("SET LOCAL infochat.actor_id = '" + actor.id + "'");
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "SELECT set_config('infochat.actor_id', ?, true)")) {
+                    ps.setString(1, actor.id.toString());
+                    ps.execute();
                 }
                 restored = selectGroupAdminMemberships(conn, target.id);
 
@@ -244,24 +243,26 @@ public class UnbanCommandHandler implements CommandHandler {
                                          String requestId) {
         // The V5 procedure manages its own audit-INSERT + DELETE pair
         // atomically (SECURITY DEFINER). The handler's responsibility
-        // here is the request_id propagation: SET LOCAL on the same
+        // here is the request_id propagation: set the GUC on the same
         // Connection before the CALL so the procedure's
         // current_setting('infochat.request_id', TRUE) read picks up
         // our dispatch's request_id and the procedure-written
         // UNBAN_PREBAN_DELETE row shares it with any other rows the
         // handler would write for the same dispatch.
         //
-        // SET LOCAL is a Postgres meta-command and does NOT accept JDBC
-        // bind parameters for the value; we interpolate the UUID
-        // literal directly. UUID.randomUUID().toString() is well-formed
-        // (16 hex chars + 4 dashes; characters drawn from [0-9a-f-])
-        // so no injection surface exists.
+        // set_config(name, value, true) is the function form of SET
+        // LOCAL (is_local=true scopes the value to this transaction);
+        // unlike the SET LOCAL meta-command it accepts bind parameters,
+        // so the ids never appear in SQL text.
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                try (Statement st = conn.createStatement()) {
-                    st.execute("SET LOCAL infochat.actor_id = '" + actorId + "'");
-                    st.execute("SET LOCAL infochat.request_id = '" + requestId + "'");
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "SELECT set_config('infochat.actor_id', ?, true), "
+                                + "set_config('infochat.request_id', ?, true)")) {
+                    ps.setString(1, actorId.toString());
+                    ps.setString(2, requestId);
+                    ps.execute();
                 }
                 try (PreparedStatement cs = conn.prepareStatement(CALL_DELETE_PREBAN_USER_SQL)) {
                     cs.setObject(1, targetId);

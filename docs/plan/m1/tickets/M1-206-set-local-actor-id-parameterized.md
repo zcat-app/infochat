@@ -1,9 +1,15 @@
 ---
 id: M1-206
 title: "Parameterize SET LOCAL infochat.actor_id (drop UUID string concat)"
-status: pending
+status: done
 created: 2026-06-07
-last_updated: 2026-06-07
+last_updated: 2026-06-08
+clarity_check:
+  date: 2026-06-08
+  verdict: WARN
+  warnings:
+    - "SECURITY-FLAG-CONSISTENT: The justification for security_relevant: false (internal UUIDs, not attacker-controlled) is buried inside acceptance item 1's parenthetical. Consider promoting it to the Notes section so a reviewer scanning the frontmatter doesn't have to parse acceptance prose to understand why the flag is false. Not a blocker."
+  blockers: []
 blocked_by: []
 files_budget: 9
 files_scope:
@@ -35,7 +41,20 @@ test_plan:
 spec_refs:
   - docs/spec/security.md §Authorization model
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-08
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 73
+      removed: 55
 overrides: []
 aborted_attempts: []
 reopens: []
