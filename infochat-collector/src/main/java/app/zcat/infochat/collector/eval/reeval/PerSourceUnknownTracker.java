@@ -1,11 +1,13 @@
 package app.zcat.infochat.collector.eval.reeval;
 
+import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jboss.logging.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -30,7 +32,7 @@ public class PerSourceUnknownTracker {
 
     static final String ERROR_CLASS_SOURCE_UNKNOWN_AUTO_DISABLE = "source-unknown-auto-disable";
 
-    private static final Logger LOG = Logger.getLogger(PerSourceUnknownTracker.class);
+    private static final Logger LOG = LoggerFactory.getLogger(PerSourceUnknownTracker.class);
 
     @Inject
     DataSource dataSource;
@@ -52,7 +54,9 @@ public class PerSourceUnknownTracker {
         try {
             checkAllSources();
         } catch (SQLException e) {
-            LOG.warn("PerSourceUnknownTracker: failed to check sources; skipping tick", e);
+            // SafeLog, never the raw Throwable (docs/spec/security.md
+            // §Secrets handling — User content in exceptions).
+            SafeLog.warn(LOG, "PerSourceUnknownTracker: failed to check sources; skipping tick", e);
         }
     }
 
@@ -103,11 +107,14 @@ public class PerSourceUnknownTracker {
                     "Source " + sourceId + " auto-disabled: UNKNOWN rate "
                         + String.format("%.2f", observedRate)
                         + " exceeds threshold " + unknownRateThreshold);
-                LOG.warnf("PerSourceUnknownTracker: disabled source %s (rate=%.2f threshold=%.2f)",
-                    sourceId, observedRate, unknownRateThreshold);
+                LOG.warn("PerSourceUnknownTracker: disabled source {} (rate={} threshold={})",
+                    sourceId, String.format("%.2f", observedRate),
+                    String.format("%.2f", unknownRateThreshold));
             }
         } catch (SQLException e) {
-            LOG.errorf(e, "PerSourceUnknownTracker: failed to disable source %s", sourceId);
+            // SafeLog, never the raw Throwable (docs/spec/security.md
+            // §Secrets handling — User content in exceptions).
+            SafeLog.error(LOG, "PerSourceUnknownTracker: failed to disable source " + sourceId, e);
         }
     }
 }

@@ -1,6 +1,8 @@
 package app.zcat.infochat.collector.eval.stage2;
 
+import app.zcat.infochat.collector.eval.RetryBackoff;
 import app.zcat.infochat.collector.eval.stage1.Stage1Pipeline;
+import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.llm.LlmProvider;
 import app.zcat.infochat.llm.LlmResponse;
 import app.zcat.infochat.llm.ModelTask;
@@ -9,8 +11,9 @@ import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jboss.logging.Logger;
 import org.jspecify.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -56,7 +59,10 @@ import java.util.concurrent.Semaphore;
  *       {@code docs/spec/security.md} §Failure handling.</li>
  *   <li>On unparseable/exception/timeout, retry exactly ONCE with
  *       the SAME prompt (no fallback prompt for Stage 2 — that
- *       exists only for the Tagger in M1-034). After the retry
+ *       exists only for the Tagger in M1-034). An exception-shaped
+ *       failure (the rate-limited 429/503 case) sleeps the
+ *       configured {@link RetryBackoff} delay before the retry; an
+ *       unparseable reply retries immediately. After the retry
  *       exhausts, the outcome is
  *       {@link Stage2VerdictHandler.Verdict#INFRA_FAILURE}.</li>
  *   <li>Dispatch to {@link Stage2VerdictHandler}.</li>
@@ -94,13 +100,16 @@ public class Stage2Worker {
     /** Classpath resource path for the security-judge prompt template. */
     public static final String PROMPT_RESOURCE = "prompts/security-judge.md";
 
-    private static final Logger LOG = Logger.getLogger(Stage2Worker.class);
+    private static final Logger LOG = LoggerFactory.getLogger(Stage2Worker.class);
 
     @Inject
     LlmRouter llmRouter;
 
     @Inject
     Stage2VerdictHandler verdictHandler;
+
+    @Inject
+    RetryBackoff retryBackoff;
 
     @ConfigProperty(name = "infochat.llm.security.max-concurrency")
     int maxConcurrency;
@@ -168,15 +177,26 @@ public class Stage2Worker {
      * {@code docs/spec/security.md} §Failure handling. The SAME
      * prompt is used on both attempts; on second exhaustion the
      * outcome is {@link Stage2VerdictHandler.Verdict#INFRA_FAILURE}.
+     * An exception-shaped first failure (the rate-limited 429/503
+     * case) sleeps the configured backoff before the single retry;
+     * an unparseable reply retries immediately — the endpoint
+     * answered, so there is nothing to wait out.
      */
     private Stage2VerdictHandler.Verdict invokeWithRetryOnce(UUID postId, String originalBody) {
-        Stage2VerdictHandler.Verdict first = tryOnce(postId, originalBody, /* attempt */ 1);
-        if (first != null) {
-            return first;
+        Attempt first = tryOnce(postId, originalBody, /* attempt */ 1);
+        if (first.verdict() != null) {
+            return first.verdict();
         }
-        Stage2VerdictHandler.Verdict retry = tryOnce(postId, originalBody, /* attempt */ 2);
-        if (retry != null) {
-            return retry;
+        if (first.infraFailure()) {
+            // The concurrency permit stays held while sleeping —
+            // intentional back-pressure: during a rate-limit window
+            // the queue should slow down, not fan out fresh calls
+            // into the same window.
+            retryBackoff.sleepBeforeRetry();
+        }
+        Attempt retry = tryOnce(postId, originalBody, /* attempt */ 2);
+        if (retry.verdict() != null) {
+            return retry.verdict();
         }
         return Stage2VerdictHandler.Verdict.INFRA_FAILURE;
     }
@@ -184,10 +204,11 @@ public class Stage2Worker {
     /**
      * One attempt: build prompt with a FRESH per-call UUID, call
      * the provider, parse the reply. Returns the parsed verdict, or
-     * {@code null} on exception / unparseable reply so the caller
-     * can decide whether to retry.
+     * a no-verdict {@link Attempt} on exception / unparseable reply
+     * whose {@code infraFailure} flag tells the caller whether to
+     * back off before the retry.
      */
-    private Stage2VerdictHandler.@Nullable Verdict tryOnce(UUID postId, String originalBody, int attempt) {
+    private Attempt tryOnce(UUID postId, String originalBody, int attempt) {
         // Fresh UUID per individual prompt assembly per
         // docs/design/04-security.md §4.3 "The {uuid} is a fresh
         // UUID.randomUUID() per call (not per process, not per
@@ -200,12 +221,26 @@ public class Stage2Worker {
         try {
             LlmProvider provider = llmRouter.forTask(ModelTask.SECURITY_JUDGE, "en");
             LlmResponse response = provider.generate(ModelTask.SECURITY_JUDGE, "", userPrompt);
-            return parseVerdict(response == null ? null : response.text());
+            return new Attempt(parseVerdict(response == null ? null : response.text()), false);
         } catch (RuntimeException e) {
-            LOG.warnf(e, "Stage 2 LLM call attempt %d failed for post_id=%s (error_class=%s)",
-                attempt, postId, Stage2VerdictHandler.ERROR_CLASS_STAGE2_INFRA_FAILURE);
-            return null;
+            // SafeLog, never the raw Throwable: the provider exception
+            // can echo its request context, which embeds the
+            // pre-redaction post body woven into the prompt
+            // (docs/spec/security.md §Secrets handling — User content
+            // in exceptions).
+            SafeLog.warn(LOG, "Stage 2 LLM call attempt " + attempt + " failed for post_id="
+                + postId + " (error_class=" + Stage2VerdictHandler.ERROR_CLASS_STAGE2_INFRA_FAILURE + ")", e);
+            return new Attempt(null, true);
         }
+    }
+
+    /**
+     * Per-attempt outcome: a parsed verdict (success), or no verdict
+     * with {@code infraFailure} distinguishing the exception-shaped
+     * failure (back off, then retry) from an unparseable reply
+     * (retry immediately).
+     */
+    private record Attempt(Stage2VerdictHandler.@Nullable Verdict verdict, boolean infraFailure) {
     }
 
     /**

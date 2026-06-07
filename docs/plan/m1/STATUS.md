@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 25 |
+| pending | 24 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 231 |
+| done | 232 |
 | deferred | 2 |
 | **total** | **258** |
 
@@ -46,7 +46,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-215 — Core hygiene: sanitized key in getState WARN, full-C0 sanitize, single AuditLogWriter constructor (complexity: low, risk: low)
 - M1-216 — Collector lows: TTL-job partition independence, saturation counter, sha256 dedup, zero-width escapes (complexity: medium, risk: medium)
 - M1-218 — Provider lows: /retry in-flight reply, /invite list-vs-revoke code identity, handle-keyed slot release (complexity: low, risk: medium)
-- M1-221 — LLM retry-once backoff: sleep before the single retry (M1-192 redteam F2) (complexity: medium, risk: low)
 - M1-222 — Per-group LLM rate cap (D47) on the group chat path (complexity: medium, risk: medium)
 
 ---
@@ -83,6 +82,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-221 | LLM retry-once backoff: sleep before the single retry (M1-192 redteam F2) | 2026-06-07 | round 2 OVERRIDE-APPROVE |
 | M1-220 | [INVESTIGATE] Bluesky source identifier: URL (per D38) vs bare DID/handle (per the fetcher) | 2026-06-07 | round 1 APPROVE |
 | M1-217 | LLM-adapter lows: Entry nullability contradiction, joinPath/preview dedup, Anthropic multi-block content | 2026-06-07 | round 1 APPROVE |
 | M1-209 | Remove hand-written @NonNull made redundant by D48 null-marked packages | 2026-06-07 | round 1 APPROVE |
@@ -92,7 +92,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-194 | EligiblePostQuery SQL LIMIT + chat tool result budgets | 2026-06-07 | round 1 APPROVE |
 | M1-192 | LLM per-task config completion (configFor, remote-llm, guard) | 2026-06-07 | round 1 APPROVE |
 | M1-191 | SSRF: replace the JVM-wide pin lock with a per-host pin map | 2026-06-07 | round 1 APPROVE |
-| M1-190 | Scope the last-admin LOCK TABLE to admin-relevant updates | 2026-06-07 | round 1 APPROVE |
 
 ---
 
@@ -422,5 +421,5 @@ M1-215 (pending) ← runnable
 M1-216 (pending) ← runnable
 M1-218 (pending) ← runnable
 M1-220 (done)
-M1-221 (pending) ← runnable
+M1-221 (done)
 ```

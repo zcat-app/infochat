@@ -1,9 +1,11 @@
 package app.zcat.infochat.collector.eval.ready;
 
+import app.zcat.infochat.core.log.SafeLog;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jboss.logging.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -83,7 +85,7 @@ public class ReadyPromoter {
     /** The LISTEN/NOTIFY channel name (matches M1-027's NewPostListener). */
     public static final String NEW_POST_CHANNEL = "new_post";
 
-    private static final Logger LOG = Logger.getLogger(ReadyPromoter.class);
+    private static final Logger LOG = LoggerFactory.getLogger(ReadyPromoter.class);
 
     /**
      * Cap on the number of posts promoted per @Scheduled tick. Same
@@ -119,16 +121,17 @@ public class ReadyPromoter {
         try {
             pending = enumeratePending(PROMOTION_BATCH_LIMIT);
         } catch (SQLException e) {
-            LOG.warn("ReadyPromoter: failed to enumerate pending posts; skipping tick", e);
+            // SafeLog, never the raw Throwable (docs/spec/security.md
+            // §Secrets handling — User content in exceptions).
+            SafeLog.warn(LOG, "ReadyPromoter: failed to enumerate pending posts; skipping tick", e);
             return;
         }
         for (PromotionCandidate post : pending) {
             try {
                 promoteOne(post.id(), post.fetchedAt());
             } catch (RuntimeException e) {
-                LOG.warnf(e,
-                    "ReadyPromoter: promotion failed for post_id=%s; will retry next tick",
-                    post.id());
+                SafeLog.warn(LOG, "ReadyPromoter: promotion failed for post_id=" + post.id()
+                    + "; will retry next tick", e);
             }
         }
     }

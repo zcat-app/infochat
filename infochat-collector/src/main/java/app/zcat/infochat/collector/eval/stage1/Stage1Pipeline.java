@@ -1,14 +1,16 @@
 package app.zcat.infochat.collector.eval.stage1;
 
 import app.zcat.infochat.collector.eval.TransactionHelper;
+import app.zcat.infochat.core.log.SafeLog;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.apache.commons.text.StringEscapeUtils;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jboss.logging.Logger;
 import org.jspecify.annotations.Nullable;
 import org.owasp.html.PolicyFactory;
 import org.owasp.html.Sanitizers;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -174,7 +176,7 @@ import java.util.regex.Matcher;
 @ApplicationScoped
 public class Stage1Pipeline {
 
-    private static final Logger LOG = Logger.getLogger(Stage1Pipeline.class);
+    private static final Logger LOG = LoggerFactory.getLogger(Stage1Pipeline.class);
 
     /** Canonical error_class for the throttled admin notifier (T2-G). */
     public static final String ERROR_CLASS_REGEX_TIMEOUT = "stage1.regex_timeout";
@@ -441,7 +443,7 @@ public class Stage1Pipeline {
      */
     private Stage1Result handleWatchdogAbort(UUID postId, String postUid, Instant postFetchedAt,
                                              String normalized) {
-        LOG.warnf("Stage 1 watchdog fired on post_id=%s (rule_id=%s, error_class=%s, cap_ms=%d)",
+        LOG.warn("Stage 1 watchdog fired on post_id={} (rule_id={}, error_class={}, cap_ms={})",
             postId, REGEX_TIMEOUT_RULE_ID, ERROR_CLASS_REGEX_TIMEOUT, regexTimeoutMs);
 
         String placeholderId = PlaceholderIds.next();
@@ -493,10 +495,20 @@ public class Stage1Pipeline {
      */
     private Stage1Result handleSanitizerException(UUID postId, String postUid, Instant postFetchedAt,
                                                   String normalized, @Nullable Throwable cause) {
-        LOG.warnf(cause,
-            "Stage 1 sanitizer exception on post_id=%s (rule_id=%s, error_class=%s, cause=%s)",
-            postId, SANITIZER_EXCEPTION_RULE_ID, ERROR_CLASS_SANITIZER_EXCEPTION,
-            cause == null ? "<none>" : cause.getClass().getName());
+        // SafeLog, never the raw Throwable: sanitizer/parser exceptions
+        // routinely quote the offending input — here the
+        // upstream-untrusted, pre-vetting feed body
+        // (docs/spec/security.md §Secrets handling — User content in
+        // exceptions). SafeLog appends the exception class name, which
+        // replaces the old explicit cause=%s field.
+        String message = "Stage 1 sanitizer exception on post_id=" + postId
+            + " (rule_id=" + SANITIZER_EXCEPTION_RULE_ID
+            + ", error_class=" + ERROR_CLASS_SANITIZER_EXCEPTION + ")";
+        if (cause == null) {
+            LOG.warn(message);
+        } else {
+            SafeLog.warn(LOG, message, cause);
+        }
 
         String placeholderId = PlaceholderIds.next();
         String placeholderMarker = PlaceholderIds.marker(placeholderId);

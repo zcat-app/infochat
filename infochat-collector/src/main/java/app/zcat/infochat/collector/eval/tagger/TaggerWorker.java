@@ -2,6 +2,8 @@ package app.zcat.infochat.collector.eval.tagger;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import app.zcat.infochat.collector.eval.RetryBackoff;
+import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import app.zcat.infochat.core.util.TagNormalizer;
 import app.zcat.infochat.llm.LlmProvider;
@@ -13,8 +15,9 @@ import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jboss.logging.Logger;
 import org.jspecify.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.sql.DataSource;
 import java.io.IOException;
@@ -68,9 +71,11 @@ import java.util.regex.Pattern;
  *       content issue, not a prompt-shape issue, so the same prompt
  *       may produce a different (and valid) tag set.</li>
  *   <li><b>LLM unreachable</b> — {@code provider.generate} threw or
- *       timed out. Retry once with the SAME primary prompt —
- *       unreachability is transient infrastructure, unrelated to
- *       prompt shape.</li>
+ *       timed out. Retry once with the SAME primary prompt, after
+ *       the configured {@link RetryBackoff} sleep — unreachability
+ *       is transient infrastructure, unrelated to prompt shape, and
+ *       an immediate retry against a rate-limited endpoint is
+ *       near-certain to fail again.</li>
  * </ol>
  *
  * <p>On second failure of any path:
@@ -135,7 +140,7 @@ public class TaggerWorker {
     /** Canonical error class emitted by the bootstrap-fallback path. */
     public static final String ERROR_CLASS_TAGGER_FALLBACK = "tagger.fallback_to_bootstrap";
 
-    private static final Logger LOG = Logger.getLogger(TaggerWorker.class);
+    private static final Logger LOG = LoggerFactory.getLogger(TaggerWorker.class);
 
     /**
      * Marker that brackets the controlled-vocabulary iteration block
@@ -157,6 +162,9 @@ public class TaggerWorker {
 
     @Inject
     ThrottledAdminNotifier throttledAdminNotifier;
+
+    @Inject
+    RetryBackoff retryBackoff;
 
     @ConfigProperty(name = "infochat.llm.tagger.max-concurrency")
     int maxConcurrency;
@@ -190,7 +198,9 @@ public class TaggerWorker {
         try {
             pending = enumeratePending(maxConcurrency);
         } catch (SQLException e) {
-            LOG.warn("TaggerWorker: failed to enumerate pending posts; skipping tick", e);
+            // SafeLog, never the raw Throwable (docs/spec/security.md
+            // §Secrets handling — User content in exceptions).
+            SafeLog.warn(LOG, "TaggerWorker: failed to enumerate pending posts; skipping tick", e);
             return;
         }
         for (PostRow row : pending) {
@@ -200,9 +210,8 @@ public class TaggerWorker {
                 // A processing error on one post must not abort the
                 // tick. Log and keep going so the rest of the batch
                 // gets its chance.
-                LOG.warnf(e,
-                    "TaggerWorker: processing failed for post_id=%s; will retry next tick",
-                    row.id());
+                SafeLog.warn(LOG, "TaggerWorker: processing failed for post_id=" + row.id()
+                    + "; will retry next tick", e);
             }
         }
     }
@@ -241,9 +250,18 @@ public class TaggerWorker {
                 // Different prompt — line-oriented fallback.
                 second = tryOnce(provider, row, fallbackPromptTemplate, /* attempt */ 2);
             }
-            case ZERO_VALID, UNREACHABLE -> {
-                // Same prompt — content/infrastructure issue, not
-                // prompt-shape.
+            case ZERO_VALID -> {
+                // Same prompt — content issue, not prompt-shape; the
+                // endpoint answered, so retry immediately.
+                second = tryOnce(provider, row, primaryPromptTemplate, /* attempt */ 2);
+            }
+            case UNREACHABLE -> {
+                // Same prompt — transient infrastructure. Sleep first:
+                // an immediate retry against a rate-limited endpoint
+                // is near-certain to fail again. No DB connection is
+                // open here, so the sleep holds nothing but this
+                // worker's tick.
+                retryBackoff.sleepBeforeRetry();
                 second = tryOnce(provider, row, primaryPromptTemplate, /* attempt */ 2);
             }
             default -> {
@@ -260,9 +278,9 @@ public class TaggerWorker {
 
         // Second failure on any path → bootstrap-fallback audit log +
         // throttled admin notification coalesced on error_class.
-        LOG.warnf(
-            "TaggerWorker: tagger fallback to bootstrap for post_id=%s "
-                + "(first_kind=%s second_kind=%s error_class=%s)",
+        LOG.warn(
+            "TaggerWorker: tagger fallback to bootstrap for post_id={} "
+                + "(first_kind={} second_kind={} error_class={})",
             row.id(), first.kind(), second.kind(), ERROR_CLASS_TAGGER_FALLBACK);
         throttledAdminNotifier.notifyOnce(
             ERROR_CLASS_TAGGER_FALLBACK,
@@ -289,9 +307,12 @@ public class TaggerWorker {
         try {
             response = provider.generate(ModelTask.TAGGER, "", userPrompt);
         } catch (RuntimeException e) {
-            LOG.warnf(e,
-                "TaggerWorker: LLM call attempt %d failed for post_id=%s (error_class=tagger.unreachable)",
-                attempt, row.id());
+            // SafeLog, never the raw Throwable: the provider exception
+            // can echo its request context, which embeds the post body
+            // woven into the prompt (docs/spec/security.md §Secrets
+            // handling — User content in exceptions).
+            SafeLog.warn(LOG, "TaggerWorker: LLM call attempt " + attempt + " failed for post_id="
+                + row.id() + " (error_class=tagger.unreachable)", e);
             return AttemptResult.unreachable();
         }
 
@@ -306,8 +327,8 @@ public class TaggerWorker {
         // we got past parsing so observability has the data even
         // when zero passed (the zero-valid path is the most useful
         // signal for vocabulary drift).
-        LOG.infof(
-            "TaggerWorker: post_id=%s attempt=%d tagger_partial_valid valid tags=%d invalid=%d",
+        LOG.info(
+            "TaggerWorker: post_id={} attempt={} tagger_partial_valid valid tags={} invalid={}",
             row.id(), attempt, validated.valid().size(), validated.invalidCount());
 
         if (validated.valid().isEmpty()) {

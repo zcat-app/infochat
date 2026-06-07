@@ -5,11 +5,13 @@ import app.zcat.infochat.collector.notify.QuarantineNotifyEmitter;
 import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
+import app.zcat.infochat.core.log.SafeLog;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jboss.logging.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -37,7 +39,7 @@ import java.util.UUID;
 @ApplicationScoped
 public class AdminReviewTtlJob {
 
-    private static final Logger LOG = Logger.getLogger(AdminReviewTtlJob.class);
+    private static final Logger LOG = LoggerFactory.getLogger(AdminReviewTtlJob.class);
 
     @Inject
     DataSource dataSource;
@@ -60,15 +62,17 @@ public class AdminReviewTtlJob {
         try {
             candidates = enumerateExpired();
         } catch (SQLException e) {
-            LOG.warn("AdminReviewTtlJob: failed to enumerate expired rows; skipping tick", e);
+            // SafeLog, never the raw Throwable (docs/spec/security.md
+            // §Secrets handling — User content in exceptions).
+            SafeLog.warn(LOG, "AdminReviewTtlJob: failed to enumerate expired rows; skipping tick", e);
             return;
         }
         for (TtlCandidate candidate : candidates) {
             try {
                 rejectExpired(candidate);
             } catch (RuntimeException e) {
-                LOG.warnf(e, "AdminReviewTtlJob: failed to reject quarantine_id=%s; will retry next tick",
-                    candidate.quarantineId());
+                SafeLog.warn(LOG, "AdminReviewTtlJob: failed to reject quarantine_id="
+                    + candidate.quarantineId() + "; will retry next tick", e);
             }
         }
     }
@@ -134,7 +138,7 @@ public class AdminReviewTtlJob {
                 .build();
             auditLogWriter.write(conn, auditRow);
         });
-        LOG.infof("AdminReviewTtlJob: TTL expired for quarantine_id=%s — auto-rejected",
+        LOG.info("AdminReviewTtlJob: TTL expired for quarantine_id={} — auto-rejected",
             candidate.quarantineId());
     }
 

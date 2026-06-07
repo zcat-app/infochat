@@ -1,7 +1,9 @@
 package app.zcat.infochat.collector.eval.entity;
 
+import app.zcat.infochat.collector.eval.RetryBackoff;
 import app.zcat.infochat.collector.eval.TransactionHelper;
 import app.zcat.infochat.collector.eval.entity.EntityExtractionResult.Entity;
+import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import app.zcat.infochat.llm.LlmProvider;
 import app.zcat.infochat.llm.LlmResponse;
@@ -14,8 +16,9 @@ import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jboss.logging.Logger;
 import org.jspecify.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.sql.DataSource;
 import java.io.IOException;
@@ -60,7 +63,11 @@ import java.util.UUID;
  * retry on a failed attempt, then release without entities. A failed
  * attempt is either an exception from
  * {@link LlmProvider#generate} (UNREACHABLE) or a response that does
- * not parse as the structured entity array (SCHEMA_VIOLATING). On the
+ * not parse as the structured entity array (SCHEMA_VIOLATING). An
+ * UNREACHABLE first attempt sleeps the configured
+ * {@link RetryBackoff} delay before the single retry (an immediate
+ * retry against a rate-limited endpoint is near-certain to fail
+ * again); a SCHEMA_VIOLATING attempt retries immediately. On the
  * second consecutive failure the post advances
  * {@code entity_done=TRUE} with NO {@code post_entity} rows and a
  * throttled admin notification fires (coalesced on
@@ -114,7 +121,7 @@ public class EntityExtractorWorker {
     static final Set<String> VALID_ENTITY_TYPES =
         Set.of("cve", "product", "org", "person", "location", "project");
 
-    private static final Logger LOG = Logger.getLogger(EntityExtractorWorker.class);
+    private static final Logger LOG = LoggerFactory.getLogger(EntityExtractorWorker.class);
 
     /**
      * Inline extraction prompt. The {@code {{id}}} delimiter rotates per
@@ -153,6 +160,9 @@ public class EntityExtractorWorker {
     @Inject
     ThrottledAdminNotifier throttledAdminNotifier;
 
+    @Inject
+    RetryBackoff retryBackoff;
+
     @ConfigProperty(name = "infochat.llm.entity.max-concurrency")
     int maxConcurrency;
 
@@ -180,16 +190,17 @@ public class EntityExtractorWorker {
         try {
             pending = enumeratePending(maxConcurrency);
         } catch (SQLException e) {
-            LOG.warn("EntityExtractorWorker: failed to enumerate pending posts; skipping tick", e);
+            // SafeLog, never the raw Throwable (docs/spec/security.md
+            // §Secrets handling — User content in exceptions).
+            SafeLog.warn(LOG, "EntityExtractorWorker: failed to enumerate pending posts; skipping tick", e);
             return;
         }
         for (PostRow row : pending) {
             try {
                 processOne(row);
             } catch (RuntimeException e) {
-                LOG.warnf(e,
-                    "EntityExtractorWorker: processing failed for post_id=%s; will retry next tick",
-                    row.id());
+                SafeLog.warn(LOG, "EntityExtractorWorker: processing failed for post_id="
+                    + row.id() + "; will retry next tick", e);
             }
         }
     }
@@ -205,9 +216,18 @@ public class EntityExtractorWorker {
         LlmProvider provider = llmRouter.forTask(ModelTask.ENTITY, "en");
 
         AttemptResult first = tryOnce(provider, row, 1);
-        AttemptResult chosen = first.kind() == AttemptKind.PARSED
-            ? first
-            : tryOnce(provider, row, 2);
+        AttemptResult chosen = first;
+        if (first.kind() != AttemptKind.PARSED) {
+            if (first.kind() == AttemptKind.UNREACHABLE) {
+                // Transient infrastructure — sleep before the single
+                // retry: an immediate retry against a rate-limited
+                // endpoint is near-certain to fail again. No DB
+                // connection or transaction is open here (both
+                // persistence paths start after the attempts).
+                retryBackoff.sleepBeforeRetry();
+            }
+            chosen = tryOnce(provider, row, 2);
+        }
 
         EntityExtractionResult result = chosen.result();
         if (result != null) {
@@ -231,22 +251,26 @@ public class EntityExtractorWorker {
         try {
             response = provider.generate(ModelTask.ENTITY, "", userPrompt);
         } catch (RuntimeException e) {
-            LOG.warnf(e,
-                "EntityExtractorWorker: LLM call attempt %d failed for post_id=%s (error_class=%s)",
-                attempt, row.id(), ERROR_CLASS_ENTITY_EXTRACTION_FAILURE);
+            // SafeLog, never the raw Throwable: the provider exception
+            // can echo its request context, which embeds the post body
+            // woven into the prompt (docs/spec/security.md §Secrets
+            // handling — User content in exceptions).
+            SafeLog.warn(LOG, "EntityExtractorWorker: LLM call attempt " + attempt
+                + " failed for post_id=" + row.id()
+                + " (error_class=" + ERROR_CLASS_ENTITY_EXTRACTION_FAILURE + ")", e);
             return AttemptResult.unreachable();
         }
 
         String text = response == null ? null : response.text();
         EntityExtractionResult parsed = parseEntities(text);
         if (parsed == null) {
-            LOG.warnf(
-                "EntityExtractorWorker: schema-violating response on attempt %d for post_id=%s",
+            LOG.warn(
+                "EntityExtractorWorker: schema-violating response on attempt {} for post_id={}",
                 attempt, row.id());
             return AttemptResult.schemaViolating();
         }
-        LOG.infof(
-            "EntityExtractorWorker: post_id=%s attempt=%d extracted %d entities",
+        LOG.info(
+            "EntityExtractorWorker: post_id={} attempt={} extracted {} entities",
             row.id(), attempt, parsed.entities().size());
         return AttemptResult.parsed(parsed);
     }
@@ -336,9 +360,9 @@ public class EntityExtractorWorker {
      * coverage is degraded for it.
      */
     private void releaseWithoutEntities(PostRow row, AttemptKind first, AttemptKind second) {
-        LOG.warnf(
-            "EntityExtractorWorker: releasing post_id=%s without entities after two failed attempts "
-                + "(error_class=%s first=%s second=%s)",
+        LOG.warn(
+            "EntityExtractorWorker: releasing post_id={} without entities after two failed attempts "
+                + "(error_class={} first={} second={})",
             row.id(), ERROR_CLASS_ENTITY_EXTRACTION_FAILURE, first, second);
         TransactionHelper.inTransaction(dataSource, "EntityExtractorWorker",
             conn -> advanceEntityDone(conn, row));

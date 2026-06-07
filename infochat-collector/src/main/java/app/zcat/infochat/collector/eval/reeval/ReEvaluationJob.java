@@ -8,12 +8,14 @@ import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
+import app.zcat.infochat.core.log.SafeLog;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jboss.logging.Logger;
 import org.jspecify.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -69,7 +71,7 @@ public class ReEvaluationJob {
     static final String ERROR_CLASS_REEVAL_RELEASED = "re-eval-released";
     static final String ERROR_CLASS_NEEDS_REVIEW_DEPTH = "needs-review-depth";
 
-    private static final Logger LOG = Logger.getLogger(ReEvaluationJob.class);
+    private static final Logger LOG = LoggerFactory.getLogger(ReEvaluationJob.class);
 
     @Inject
     DataSource dataSource;
@@ -104,15 +106,22 @@ public class ReEvaluationJob {
         try {
             candidates = enumerateCandidates();
         } catch (SQLException e) {
-            LOG.warn("ReEvaluationJob: failed to enumerate candidates; skipping tick", e);
+            // SafeLog, never the raw Throwable (docs/spec/security.md
+            // §Secrets handling — User content in exceptions).
+            SafeLog.warn(LOG, "ReEvaluationJob: failed to enumerate candidates; skipping tick", e);
             return;
         }
         for (ReEvalCandidate candidate : candidates) {
             try {
                 processOne(candidate);
             } catch (RuntimeException e) {
-                LOG.warnf(e, "ReEvaluationJob: processing failed for post_id=%s; will retry next tick",
-                    candidate.postId());
+                // SafeLog, never the raw Throwable: processOne weaves
+                // the reconstructed pre-redaction body into the Stage 2
+                // prompt, and the provider exception can echo its
+                // request context (docs/spec/security.md §Secrets
+                // handling — User content in exceptions).
+                SafeLog.warn(LOG, "ReEvaluationJob: processing failed for post_id="
+                    + candidate.postId() + "; will retry next tick", e);
             }
         }
         checkNeedsReviewDepth();
@@ -134,7 +143,7 @@ public class ReEvaluationJob {
         } else if (verdict == Stage2VerdictHandler.Verdict.INFRA_FAILURE) {
             // Transient LLM outage — do not consume an attempt.
             // The spec limits counter increments to INJECTION/MALWARE/UNKNOWN.
-            LOG.infof("ReEvaluationJob: INFRA_FAILURE for post_id=%s — skipping attempt increment",
+            LOG.info("ReEvaluationJob: INFRA_FAILURE for post_id={} — skipping attempt increment",
                 candidate.postId());
         } else {
             applyNonBenignReEval(candidate, verdict);
@@ -167,7 +176,7 @@ public class ReEvaluationJob {
             ERROR_CLASS_REEVAL_RELEASED,
             "Re-eval released post_id=" + candidate.postId()
                 + " prior_verdict=" + priorVerdict);
-        LOG.infof("ReEvaluationJob: BENIGN re-eval for post_id=%s (prior=%s) — released",
+        LOG.info("ReEvaluationJob: BENIGN re-eval for post_id={} (prior={}) — released",
             candidate.postId(), priorVerdict);
     }
 
@@ -189,7 +198,7 @@ public class ReEvaluationJob {
         // notifier, and one transition must produce exactly one page
         // (docs/spec/architecture.md §Inter-service communication,
         // Consumer behavior). Paging here too would double-notify.
-        LOG.infof("ReEvaluationJob: cap exhausted for post_id=%s — transitioned to NEEDS_REVIEW",
+        LOG.info("ReEvaluationJob: cap exhausted for post_id={} — transitioned to NEEDS_REVIEW",
             candidate.postId());
     }
 
@@ -216,7 +225,7 @@ public class ReEvaluationJob {
                 reAnnouncePendingQuarantineRows(conn, candidate.postId());
             }
         });
-        LOG.infof("ReEvaluationJob: %s re-eval for post_id=%s — verdict recorded, counter incremented%s",
+        LOG.info("ReEvaluationJob: {} re-eval for post_id={} — verdict recorded, counter incremented{}",
             verdict, candidate.postId(), reHidden[0] ? ", post re-hidden to QUARANTINED" : "");
     }
 
@@ -475,7 +484,9 @@ public class ReEvaluationJob {
                 }
             }
         } catch (SQLException e) {
-            LOG.warn("ReEvaluationJob: failed to check NEEDS_REVIEW depth", e);
+            // SafeLog, never the raw Throwable (docs/spec/security.md
+            // §Secrets handling — User content in exceptions).
+            SafeLog.warn(LOG, "ReEvaluationJob: failed to check NEEDS_REVIEW depth", e);
         }
     }
 

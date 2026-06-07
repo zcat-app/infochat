@@ -1,6 +1,7 @@
 package app.zcat.infochat.collector.eval.embedding;
 
 import app.zcat.infochat.collector.eval.TransactionHelper;
+import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.llm.EmbeddingProvider;
 import app.zcat.infochat.llm.EmbeddingResult;
 import io.quarkus.scheduler.Scheduled;
@@ -8,9 +9,10 @@ import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jboss.logging.Logger;
 import org.jspecify.annotations.Nullable;
 import org.postgresql.util.PGobject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -103,7 +105,7 @@ public class EmbeddingWorker {
     /** Canonical error class emitted on the no-vector release path. */
     public static final String ERROR_CLASS_EMBEDDING_BATCH_FAILURE = "embedding.batch_failure";
 
-    private static final Logger LOG = Logger.getLogger(EmbeddingWorker.class);
+    private static final Logger LOG = LoggerFactory.getLogger(EmbeddingWorker.class);
 
     /**
      * The {@code title + "\n\n" + (body_summary OR first 800 chars of
@@ -167,7 +169,9 @@ public class EmbeddingWorker {
         try {
             pending = enumeratePending(batchSize);
         } catch (SQLException e) {
-            LOG.warn("EmbeddingWorker: failed to enumerate pending posts; skipping tick", e);
+            // SafeLog, never the raw Throwable (docs/spec/security.md
+            // §Secrets handling — User content in exceptions).
+            SafeLog.warn(LOG, "EmbeddingWorker: failed to enumerate pending posts; skipping tick", e);
             return;
         }
         if (pending.isEmpty()) {
@@ -221,9 +225,9 @@ public class EmbeddingWorker {
                     // pick them up; no post_embedding row is
                     // inserted. The WARN line names the canonical
                     // error_class for the future T2-G notifier.
-                    LOG.warnf(
-                        "EmbeddingWorker: batch of %d posts failed embed twice; releasing without vectors "
-                            + "(error_class=%s; first=%s second=%s)",
+                    LOG.warn(
+                        "EmbeddingWorker: batch of {} posts failed embed twice; releasing without vectors "
+                            + "(error_class={}; first={} second={})",
                         batch.size(), ERROR_CLASS_EMBEDDING_BATCH_FAILURE,
                         attempt.failureReason(), retry.failureReason());
                     TransactionHelper.inTransaction(dataSource, "EmbeddingWorker", conn ->
@@ -264,15 +268,19 @@ public class EmbeddingWorker {
         try {
             results = embeddingProvider.embed(inputs);
         } catch (RuntimeException e) {
-            LOG.warnf(e, "EmbeddingWorker: embed call attempt %d threw", attempt);
+            // SafeLog, never the raw Throwable: the provider exception
+            // can echo its request context, which embeds the post
+            // bodies in the embed input list (docs/spec/security.md
+            // §Secrets handling — User content in exceptions).
+            SafeLog.warn(LOG, "EmbeddingWorker: embed call attempt " + attempt + " threw", e);
             return AttemptResult.failure("exception: " + e.getClass().getSimpleName());
         }
         if (results.size() != inputs.size()) {
             // Wrong-shape response: per spec, "any per-element error
             // the Collector cannot map back to a specific post"
             // triggers the same one-failure-fails-batch retry path.
-            LOG.warnf(
-                "EmbeddingWorker: embed call attempt %d returned wrong shape (expected %d got %d)",
+            LOG.warn(
+                "EmbeddingWorker: embed call attempt {} returned wrong shape (expected {} got {})",
                 attempt, inputs.size(), results.size());
             return AttemptResult.failure("wrong-shape: expected=" + inputs.size() + " got=" + results.size());
         }
