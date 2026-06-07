@@ -29,8 +29,8 @@ acceptance:
   - "Per docs/spec/security.md §Failure handling — \"**Admin notifications** are coalesced per `(channel, error_class)` for a short window so an outage produces one summary message, not 200 individual alerts.\" — PENDING and NEEDS_REVIEW events coalesce under distinct error classes: a named test asserts a NEEDS_REVIEW notification is not suppressed by the throttle window a recent PENDING notification opened (today both share the constant key quarantine-review-actionable)"
   - "After the LISTEN connection drops and is re-established, quarantine_review events that fired during the gap are caught up — cursor advanced and actionable ones notified — a named IT mirroring NewPostListenerReconcileOnReconnectIT (today ensureListenConnection re-LISTENs without catch-up)"
   - "An actionable event that arrives after a newer event has already advanced the cursor still reaches the admin notifier (throttling may coalesce it, but it is not silently dropped by the CAS-advance gate) — a named test delivers two events out of timestamp order and asserts the older actionable one notifies"
-  - "QuarantineReviewListener's class javadoc and QuarantineReviewReconciler's behavior agree: today the javadoc claims the reconciler invokes handleEvent during startup catch-up while the reconciler only calls advanceCursor directly"
-  - "Per docs/spec/architecture.md §Inter-service communication — \"**Consumer behavior:** the Provider drives the throttled admin notifier (`security.md` §Failure handling) on `PENDING` inserts and on `→ NEEDS_REVIEW` transitions — these are the two transitions that require admin attention.\" — a re-eval cap-exhaustion event produces exactly ONE admin notification across both services: a named IT asserts the Collector's notifyOnce(re-eval-cap-exhaustion) and the Provider's NEEDS_REVIEW NOTIFY handling no longer both page for the same transition"
+  - "QuarantineReviewReconciler's startup catch-up routes actionable missed events through the same handling path as the live listener (mirroring NewPostReconciler, which invokes its handler — making QuarantineReviewListener's javadoc claim that the reconciler invokes handleEvent true): a named IT seeds an actionable quarantine_review event beyond the stored cursor before startup and asserts catch-up both advances the cursor and produces the admin notification (throttling may coalesce it, not drop it)"
+  - "Per docs/spec/architecture.md §Inter-service communication — \"**Consumer behavior:** the Provider drives the throttled admin notifier (`security.md` §Failure handling) on `PENDING` inserts and on `→ NEEDS_REVIEW` transitions — these are the two transitions that require admin attention.\" — a re-eval cap-exhaustion event produces exactly ONE admin notification across both services: a named IT asserts the Collector's notifyOnce(re-eval-cap-exhaustion) and the Provider's NEEDS_REVIEW NOTIFY handling no longer both page for the same transition (resolved direction: the Collector's notifyOnce call is the side removed; the Provider's page is the keeper)"
   - "mvn -B clean verify from the repo root exits 0"
 test_plan:
   adds:
@@ -45,10 +45,38 @@ spec_refs:
   - docs/spec/security.md §Failure handling
 decision_refs: []
 reviews: []
+revisions:
+  - date: 2026-06-07
+    reason: clarity-fail rework — authorize collector re-eval test changes (TEST-CHANGES-AUTHORIZED blocker), make acceptance item 6 testable (reconciler-notifies direction), resolve leg-6 keeper to the Provider side
+    prior_values: |
+      acceptance[5]: "QuarantineReviewListener's class javadoc and
+        QuarantineReviewReconciler's behavior agree: today the javadoc claims
+        the reconciler invokes handleEvent during startup catch-up while the
+        reconciler only calls advanceCursor directly"
+      acceptance[6]: ended at "...no longer both page for the same
+        transition" (no resolved-direction clause)
+      body §Notes leg-6: left the keeper choice to the implementer ("If the
+        implementer judges the Collector-side page the safer keeper, dropping
+        the Provider side instead also satisfies the exactly-one acceptance
+        item; pick one and say why in the commit message.")
+      body §Out-of-scope: authorized only QuarantineReviewListenerTest; no
+        authorization for collector re-eval test changes
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+escalations:
+  - date: 2026-06-07
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      TEST-CHANGES-AUTHORIZED: FAIL
+      test_plan.modifies lists two directories of pre-existing tests; the body
+      authorizes one pre-existing test class (QuarantineReviewListenerTest) but
+      no authorization is given for modifications to the collector re-eval test
+      package (infochat-collector/src/test/java/app/zcat/infochat/collector/eval/reeval).
+      Acceptance item 7 implies changes to ReEvaluationJob that will require
+      updating its tests, but the body never names the affected test class(es)
+      nor states the new expected behavior that replaces the old assertions.
 ---
 
 # M1-181: quarantine_review listener correctness cluster
@@ -97,18 +125,30 @@ each other, but neither blocks the other. QuarantineReviewListenerTest pins
 current behavior (payload-driven actionability, split-connection flow); this
 ticket is AUTHORIZED to rewrite it to the new contract.
 
+On the Collector side, `ReEvaluationJobScheduledPathIT` and
+`ReEvaluationJobTest` are AUTHORIZED to change their cap-exhaustion
+admin-notification assertions: the assertion that
+`notifyOnce(re-eval-cap-exhaustion)` fires
+(`ReEvaluationJobScheduledPathIT.capExhaustedRowReachesNeedsReviewThroughScheduledTick`,
+and any `ReEvaluationJobTest` assertion on that error class) is replaced by
+an assertion that the Collector does NOT page for cap exhaustion, while the
+NEEDS_REVIEW status transition and the quarantine NOTIFY emission remain
+asserted. The other `notifyOnce` call sites in ReEvaluationJob
+(`re-eval-released`, NEEDS_REVIEW queue depth) keep their assertions
+unchanged.
+
 ## Notes
 
 - Source: `UNIFIED.md` §3 T5 under `deep-code-review/v2/` (opus-47 A-F2/F3,
   P-F7; opus-48 A-F2/F3; kimi-folder A-F2).
-- On leg 6, the spec is read as assigning admin paging to the Provider
-  (architecture.md Consumer-behavior sentence), making the Collector's
-  notifyOnce the duplicate to drop — but note the trade-off: the
-  Provider-side page depends on Provider liveness and the reconciler
-  deliberately does not page for missed events. If the implementer judges
-  the Collector-side page the safer keeper, dropping the Provider side
-  instead also satisfies the exactly-one acceptance item; pick one and say
-  why in the commit message.
+- On leg 6 the direction is RESOLVED (refine 2026-06-07): the Collector's
+  notifyOnce(re-eval-cap-exhaustion) is the duplicate to drop. Rationale:
+  acceptance item 3 mandates a working Provider NEEDS_REVIEW page (it must
+  escape a PENDING throttle window), so the Provider side cannot be the one
+  removed without gutting items 1–5; and the Provider-liveness concern that
+  previously favored the Collector page is addressed by item 6's direction —
+  startup catch-up now notifies actionable missed events (mirroring
+  NewPostReconciler), closing the Provider-down page-loss window.
 - The NewPostListener/NewPostHandler pair is the documented-correct pattern
   for legs 1 and 4 (same-transaction handling; reconcile-on-reconnect).
 
