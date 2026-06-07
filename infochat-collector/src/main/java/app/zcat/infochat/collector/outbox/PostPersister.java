@@ -54,10 +54,13 @@ import java.util.UUID;
  * explicitly. {@code status} is the literal {@code 'RAW'}; every
  * per-stage {@code *_done} / {@code *_flagged} / {@code *_failed} /
  * {@code *_fallback} flag defaults FALSE; {@code tags} is the empty
- * array. {@code ON CONFLICT (source_id, upstream_identifier,
- * fetched_at) DO NOTHING} silently dedups duplicate refetches in the
- * same partition (the belt-and-suspenders UNIQUE constraint per
- * {@code docs/design/02-schema.md} §2.3.1).
+ * array. A {@code WHERE NOT EXISTS} uid pre-filter dedups re-fetches
+ * of the same item across ticks and partitions (the uid is the
+ * cross-refetch dedup key per {@code docs/spec/schema.md} §UID
+ * derivation, decision D38); {@code ON CONFLICT (source_id,
+ * upstream_identifier, fetched_at) DO NOTHING} remains as
+ * belt-and-suspenders for same-partition races (the UNIQUE
+ * constraint per {@code docs/design/02-schema.md} §2.3.1).
  */
 @ApplicationScoped
 public class PostPersister {
@@ -76,10 +79,13 @@ public class PostPersister {
      *                   {@code upstreamIdentifier} MUST be non-null
      *                   per the M1-007a SPI contract.
      * @return the persisted row's {@code (id, fetched_at)} composite
-     *         key wrapped in {@link Optional}, or empty when the
-     *         {@code ON CONFLICT} branch fired (same
-     *         {@code (source_id, upstream_identifier, fetched_at)}
-     *         was already persisted on a prior tick).
+     *         key wrapped in {@link Optional}, or empty when the row
+     *         was deduplicated — a post with the same uid already
+     *         exists (re-fetch on a later tick, uid pre-filter) or
+     *         the same {@code (source_id, upstream_identifier,
+     *         fetched_at)} raced in concurrently ({@code ON CONFLICT}
+     *         branch). Callers treat empty as "already persisted and
+     *         enqueued; do not enqueue again".
      * @throws IllegalArgumentException if
      *         {@code normalized.upstreamIdentifier} is null or empty
      *         (SPI contract violation).
@@ -103,16 +109,29 @@ public class PostPersister {
 
         String uid = deriveUid(sourceUuid, upstreamIdentifier);
 
+        // Cross-tick dedup: the NOT EXISTS pre-filter checks the uid
+        // (stable across re-fetches per docs/spec/schema.md §UID
+        // derivation, decision D38) against ALL partitions, so a
+        // re-fetched item with a fresh fetched_at never creates a
+        // second row. The lookup is index-backed — UNIQUE
+        // (uid, fetched_at) gives each partition a btree with uid as
+        // the leading column. No table-level UNIQUE on uid alone is
+        // possible (the partition key must participate in every
+        // unique constraint), so under concurrently-overlapping
+        // scheduler ticks the pre-filter is advisory; within the
+        // single-instance Collector's non-overlapping ticks it is
+        // deterministic. ON CONFLICT stays as belt-and-suspenders for
+        // exactly that same-partition race window.
         final String sql =
             "INSERT INTO post ("
                 + "  id, uid, source_id, upstream_identifier, url, title, body, "
                 + "  author, published_at, fetched_at, status, "
                 + "  stage1_done, stage2_done, tagger_done, embedding_done, "
                 + "  stage1_flagged, stage2_failed, tagger_fallback, tags"
-                + ") VALUES ("
+                + ") SELECT "
                 + "  gen_random_uuid(), ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RAW', "
-                + "  FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, '{}'"
-                + ") "
+                + "  FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, '{}'::text[] "
+                + "WHERE NOT EXISTS (SELECT 1 FROM post WHERE uid = ?) "
                 + "ON CONFLICT (source_id, upstream_identifier, fetched_at) DO NOTHING "
                 + "RETURNING id, fetched_at";
 
@@ -134,6 +153,8 @@ public class PostPersister {
             Instant publishedAt = normalized.publishedAt();
             ps.setTimestamp(8, publishedAt == null ? null : Timestamp.from(publishedAt));
             ps.setTimestamp(9, Timestamp.from(normalized.fetchedAt()));
+            // The NOT EXISTS pre-filter's uid probe.
+            ps.setString(10, uid);
 
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
@@ -141,7 +162,9 @@ public class PostPersister {
                     Instant insertedFetchedAt = rs.getTimestamp(2).toInstant();
                     return Optional.of(new PersistedPostKey(insertedId, insertedFetchedAt));
                 }
-                // ON CONFLICT branch fired — silent dedup.
+                // Silent dedup: the uid pre-filter matched an
+                // existing row (cross-tick re-fetch) or the ON
+                // CONFLICT branch fired (same-partition race).
                 return Optional.empty();
             }
         } catch (SQLException e) {

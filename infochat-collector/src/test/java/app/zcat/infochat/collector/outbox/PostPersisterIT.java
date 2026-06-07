@@ -39,6 +39,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *       the NormalizedPost</li>
  * </ul>
  *
+ * <p>Also pins the dedup contract: same-tick duplicates (same
+ * {@code fetched_at}) and cross-tick re-fetches of the same uid
+ * (distinct {@code fetched_at}, including a later partition) each
+ * yield exactly one row and an empty persist result.
+ *
  * <p>Method order is fixed because the cases share DB state and each
  * builds on the previous.
  */
@@ -160,8 +165,9 @@ class PostPersisterIT {
         Optional<PostPersister.PersistedPostKey> second =
             postPersister.persist(sourceUuid, normalized);
         assertFalse(second.isPresent(),
-            "second persist must be a no-op (ON CONFLICT (source_id, "
-            + "upstream_identifier, fetched_at) DO NOTHING)");
+            "second persist of the same (source_id, upstream_identifier, "
+            + "fetched_at) must be a no-op (uid pre-filter; ON CONFLICT "
+            + "belt-and-suspenders)");
 
         // Assert there's exactly one post row for this (source_id,
         // upstream_identifier).
@@ -221,6 +227,106 @@ class PostPersisterIT {
             () -> postPersister.persist(sourceUuid, emptyId));
         assertTrue(emptyEx.getMessage().contains("upstreamIdentifier"),
             "empty-string upstreamIdentifier must also raise");
+    }
+
+    @Test
+    @Order(4)
+    void persistDedupsSameUidAcrossTicks() throws Exception {
+        // Per docs/spec/schema.md §UID derivation: "The post UID is
+        // stable globally across Collectors and across re-fetches; it
+        // is the dedup key for refetches and cross-relay redelivery
+        // (decision D38)." Fetchers stamp a fresh fetched_at per tick,
+        // so a re-fetched item arrives with the same uid but a
+        // distinct fetched_at — the uid pre-filter must drop it.
+        UUID sourceUuid = seedRssSource(
+            "https://persister-it.example.test/feed-4.xml",
+            "Persister IT source 4");
+
+        NormalizedPost tickOne =
+            crossTickPost("urn:persister-it:post:cross-tick", FETCHED_AT);
+        NormalizedPost tickTwo =
+            crossTickPost("urn:persister-it:post:cross-tick", FETCHED_AT.plusSeconds(60));
+
+        Optional<PostPersister.PersistedPostKey> first =
+            postPersister.persist(sourceUuid, tickOne);
+        assertTrue(first.isPresent(), "first tick's persist must INSERT");
+
+        Optional<PostPersister.PersistedPostKey> second =
+            postPersister.persist(sourceUuid, tickTwo);
+        assertFalse(second.isPresent(),
+            "re-fetch on a later tick (distinct fetched_at) must report no new "
+            + "row — the same signal the same-tick skip produces, so the "
+            + "duplicate is never enqueued for Stage 1 a second time");
+
+        assertEquals(1,
+            countPosts(sourceUuid, "urn:persister-it:post:cross-tick"),
+            "exactly one post row must exist after two ticks of the same uid");
+    }
+
+    @Test
+    @Order(5)
+    void batchMixingPersistedAndNewItemPersistsOnlyTheNewItem() throws Exception {
+        UUID sourceUuid = seedRssSource(
+            "https://persister-it.example.test/feed-5.xml",
+            "Persister IT source 5");
+
+        // Tick 1 persists item A alone.
+        Optional<PostPersister.PersistedPostKey> tickOneA = postPersister.persist(
+            sourceUuid, crossTickPost("urn:persister-it:post:batch-dup", FETCHED_AT));
+        assertTrue(tickOneA.isPresent(), "tick 1 must INSERT item A");
+
+        // Tick 2 re-fetches A alongside a genuinely new item B. The
+        // second tick's fetched_at lands in the NEXT month's partition
+        // — the cross-window redelivery case the uid key exists for.
+        Instant tickTwoFetchedAt = Instant.parse("2026-06-15T12:00:00Z");
+        Optional<PostPersister.PersistedPostKey> tickTwoA = postPersister.persist(
+            sourceUuid, crossTickPost("urn:persister-it:post:batch-dup", tickTwoFetchedAt));
+        Optional<PostPersister.PersistedPostKey> tickTwoB = postPersister.persist(
+            sourceUuid, crossTickPost("urn:persister-it:post:batch-new", tickTwoFetchedAt));
+
+        assertFalse(tickTwoA.isPresent(),
+            "the already-persisted item must be filtered on tick 2");
+        assertTrue(tickTwoB.isPresent(),
+            "the genuinely new item in the same tick-2 batch must persist — "
+            + "dedup filters per item, not per batch");
+
+        assertEquals(1, countPosts(sourceUuid, "urn:persister-it:post:batch-dup"),
+            "the re-fetched item must still have exactly one row");
+        assertEquals(1, countPosts(sourceUuid, "urn:persister-it:post:batch-new"),
+            "the new item must have exactly one row");
+    }
+
+    /**
+     * Builds the fixture NormalizedPost for the cross-tick dedup
+     * cases: same upstream identifier ⇒ same uid; the per-tick
+     * {@code fetchedAt} is the only varying field.
+     */
+    private static NormalizedPost crossTickPost(String upstreamIdentifier, Instant fetchedAt) {
+        return new NormalizedPost(
+            1L,
+            upstreamIdentifier,
+            "Cross-tick fixture title",
+            "Cross-tick fixture body",
+            "https://persister-it.example.test/posts/cross-tick",
+            PUBLISHED_AT,
+            fetchedAt,
+            Map.of()
+        );
+    }
+
+    /** Counts post rows for one (source_id, upstream_identifier). */
+    private int countPosts(UUID sourceUuid, String upstreamIdentifier) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT count(*) FROM post "
+                 + "WHERE source_id = ? AND upstream_identifier = ?")) {
+            ps.setObject(1, sourceUuid);
+            ps.setString(2, upstreamIdentifier);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getInt(1);
+            }
+        }
     }
 
     /**

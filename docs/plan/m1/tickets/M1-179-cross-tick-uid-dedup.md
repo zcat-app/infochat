@@ -1,9 +1,14 @@
 ---
 id: M1-179
 title: "Cross-tick UID dedup in the fetch persist path"
-status: pending
+status: done
 created: 2026-06-07
 last_updated: 2026-06-07
+clarity_check:
+  date: 2026-06-07
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
 files_budget: 4
 files_scope:
@@ -38,11 +43,41 @@ spec_refs:
   - docs/spec/schema.md §UID derivation
 decision_refs:
   - D38
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-07
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 153
+      removed: 21
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-06-07
+    verdict: CLEAN
+    base: 8a4a585
+    head: m1/M1-179-cross-tick-uid-dedup (working tree, pre-commit)
+    verdict_file: docs/plan/m1/redteam/M1-179-2026-06-07.md
+    out_of_model_count: 1
+    note: |
+      CLEAN — no threat-model gap. SQL is fully bound (uid probe is the
+      10th PreparedStatement parameter), the pre-filter only suppresses a
+      second INSERT (never UPDATE/DELETE, so no cross-source post
+      suppression), and Optional.empty() only skips a re-enqueue without
+      bypassing Stage 1/Stage 2. The single OUT-OF-MODEL note (dedup is
+      advisory under overlapping ticks) is already documented in code +
+      ticket §Notes and is gated by the single-instance scheduler
+      assumption; poller-overlap hardening stays out_of_scope (UNIFIED.md
+      T25). No remediation ticket needed.
 ---
 
 # M1-179: Cross-tick UID dedup in the fetch persist path

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 34 |
+| pending | 33 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 222 |
+| done | 223 |
 | deferred | 2 |
 | **total** | **258** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-179 — Cross-tick UID dedup in the fetch persist path (complexity: medium, risk: high)
 - M1-181 — quarantine_review listener correctness cluster (complexity: high, risk: medium)
 - M1-184 — Signal reader/codec hardening against malformed frames (complexity: low, risk: medium)
 - M1-186 — Signal group outbound send path (complexity: medium, risk: medium)
@@ -392,7 +391,7 @@ M1-177 (done)
   └── M1-205 (pending) ← runnable
 M1-178 (done)
   └── M1-208 (pending) ← runnable
-M1-179 (pending) ← runnable
+M1-179 (done)
 M1-180 (done)
 M1-181 (pending) ← runnable
 M1-182 (done)
