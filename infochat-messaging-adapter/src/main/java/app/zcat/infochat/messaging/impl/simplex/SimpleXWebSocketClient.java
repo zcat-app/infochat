@@ -57,6 +57,12 @@ final class SimpleXWebSocketClient {
     // peer cannot OOM the adapter. Mirrors NostrRelayConnection's bound.
     static final int MAX_FRAME_BYTES = 1_048_576;
 
+    // Bound on ONE frame's transmission (the sendText future completing),
+    // not the ack round-trip. Transmission to the loopback simplex-chat
+    // process is sub-millisecond when healthy; hitting this means the
+    // socket is wedged and the supervisor restart is the recovery path.
+    static final Duration TRANSMIT_TIMEOUT = Duration.ofSeconds(10);
+
     /**
      * Receives decoded inbound chat messages on the client's dedicated
      * inbound-dispatch thread (never the WS listener thread — the
@@ -102,6 +108,12 @@ final class SimpleXWebSocketClient {
     // Null until connect() completes the handshake; every read copies to a
     // local and guards on null before use.
     private volatile @Nullable WebSocket webSocket;
+    // Serializes frame transmission: the JDK WebSocket permits only ONE
+    // outstanding text send per connection, so transmit() holds this
+    // monitor from sendText() until the returned future completes.
+    // Concurrent senders queue here instead of racing into the JDK's
+    // IllegalStateException rejection, which silently drops the frame.
+    private final Object sendLock = new Object();
     private volatile boolean closed = false;
 
     SimpleXWebSocketClient(@NonNull URI uri,
@@ -208,10 +220,7 @@ final class SimpleXWebSocketClient {
         CompletableFuture<String> future = new CompletableFuture<>();
         pending.put(corrId, future);
         try {
-            // The send's own CompletableFuture is intentionally not awaited —
-            // a send failure surfaces as the ack future timing out below, which
-            // the caller already handles as TRANSIENT.
-            var unused = ws.sendText(envelopeJson, true);
+            transmit(ws, corrId, envelopeJson);
             return future.get(ackTimeout.toMillis(), TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -236,7 +245,10 @@ final class SimpleXWebSocketClient {
             // close() can abort the WebSocket between the `closed` check above
             // and ws.sendText() here; the JDK WebSocket then rejects the send
             // with an IllegalStateException (a RuntimeException) that would
-            // otherwise escape sendCommand raw and uncategorised. Classify as
+            // otherwise escape sendCommand raw and uncategorised. A send
+            // COLLISION cannot raise this — transmit() serializes senders —
+            // so a synchronous IllegalStateException is unambiguously the
+            // aborted-socket case. Classify as
             // PERMANENT — the socket is gone and retrying on it cannot succeed;
             // the caller must rebuild via start(), the same category close()
             // stamps on the pending futures it drains.
@@ -260,12 +272,64 @@ final class SimpleXWebSocketClient {
             return;
         }
         try {
-            // Best-effort send: the returned CompletableFuture is intentionally
-            // not awaited (see the method contract above); a synchronous reject
-            // is caught below and an async failure is absorbed by design.
-            var unused = ws.sendText(envelopeJson, true);
+            // Best-effort, but still serialized through transmit(): an
+            // unserialized fire-and-forget colliding with a command send
+            // would get the command's frame silently dropped by the JDK's
+            // one-outstanding-send rule. Failures are absorbed by design.
+            transmit(ws, "fire-and-forget", envelopeJson);
+        } catch (MessagingException e) {
+            // The message is a fixed string plus the corrId label — no
+            // envelope bytes — so logging it is D37-safe.
+            LOG.debug("fire-and-forget send failed: {}", e.getMessage());
         } catch (RuntimeException e) {
             LOG.debug("fire-and-forget send failed: {}", e.getClass().getSimpleName());
+        }
+    }
+
+    /**
+     * Transmit one text frame, holding {@link #sendLock} from
+     * {@code sendText} until the JDK confirms the frame left the
+     * socket (the returned future completes). The JDK WebSocket
+     * permits only one outstanding text send per connection; a second
+     * {@code sendText} while the prior send's future is incomplete is
+     * rejected with {@link IllegalStateException} and its frame is
+     * never transmitted. Awaiting the future INSIDE the lock makes
+     * concurrent senders queue at the monitor instead of hitting that
+     * rejection, so a collision can never fail a send.
+     *
+     * <p>Every failure here is {@link FailureCategory#TRANSIENT}: a
+     * timed-out or failed transmission means the socket is wedged or
+     * mid-teardown, and the supervisor restart recovers it — the same
+     * category the previous fire-and-discard shape surfaced via the
+     * ack timeout. (A transmit timeout releases the lock with the
+     * send still outstanding; the next transmit is then rejected
+     * asynchronously and lands in the {@code ExecutionException} arm
+     * below, still TRANSIENT — never PERMANENT for a collision.)
+     * A synchronous {@link RuntimeException} from {@code sendText}
+     * (the concurrently-aborted-socket case) propagates raw for the
+     * caller to classify.</p>
+     */
+    private void transmit(WebSocket ws, String corrId, String envelopeJson)
+            throws MessagingException {
+        synchronized (sendLock) {
+            try {
+                ws.sendText(envelopeJson, true)
+                        .get(TRANSMIT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new MessagingException(FailureCategory.TRANSIENT,
+                        "interrupted while transmitting corrId=" + corrId, e);
+            } catch (TimeoutException e) {
+                throw new MessagingException(FailureCategory.TRANSIENT,
+                        "frame for corrId=" + corrId + " not transmitted within "
+                                + TRANSMIT_TIMEOUT, e);
+            } catch (ExecutionException e) {
+                // A future completed exceptionally always carries a cause.
+                Throwable cause = Objects.requireNonNull(e.getCause());
+                throw new MessagingException(FailureCategory.TRANSIENT,
+                        "WebSocket transmit for corrId=" + corrId + " failed: "
+                                + cause.getClass().getSimpleName(), cause);
+            }
         }
     }
 

@@ -23,6 +23,8 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -128,13 +130,32 @@ final class SignalJsonRpcClient {
 
     private final ConcurrentMap<String, CompletableFuture<SignalMessageCodec.JsonRpcMessage>> pending =
             new ConcurrentHashMap<>();
+
+    /**
+     * Upper bound on tracked send-handles, mirroring SimpleXAdapter's
+     * MAX_TRACKED_HANDLES. Eviction-on-finalize alone does not bound
+     * the map: fire-once replies — the common case — are never
+     * finalized and would accumulate for the life of the connection.
+     * Access-order LRU keeps the hot tail; an evicted handle behaves
+     * exactly like an unknown one (PERMANENT "not open"), the same
+     * outcome a Provider restart produces — handles are
+     * in-process-only by the {@link MessageHandle} contract.
+     */
+    static final int MAX_TRACKED_HANDLES = 1_024;
+
     // Open-window handle registry: a handle lives here from send() until
-    // finalizeHandle() removes it. Both "unknown handle" and "already
-    // finalized" therefore resolve to a missing key — both are
-    // PERMANENT per the SPI invariant, so the lookup collapses to a
-    // single check and the map's size is naturally bounded by the count
-    // of in-flight (sent-but-not-yet-finalized) messages.
-    private final ConcurrentMap<String, SignalMessageHandle> handles = new ConcurrentHashMap<>();
+    // finalizeHandle() removes it or LRU eviction reclaims the slot.
+    // "Unknown handle", "already finalized", and "evicted" all resolve
+    // to a missing key — all PERMANENT per the SPI invariant, so the
+    // lookup collapses to a single check.
+    /** Guarded by its own monitor — LinkedHashMap is not thread-safe. */
+    private final Map<String, SignalMessageHandle> handles =
+            new LinkedHashMap<>(64, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<String, SignalMessageHandle> eldest) {
+                    return size() > MAX_TRACKED_HANDLES;
+                }
+            };
     private final AtomicLong rpcIdGen = new AtomicLong();
     private final AtomicLong handleIdGen = new AtomicLong();
 
@@ -241,7 +262,9 @@ final class SignalJsonRpcClient {
         // fresh registry; stale handles from before the disconnect
         // resolve to PERMANENT on the next update attempt, which is
         // correct (the original send was on a now-dead connection).
-        handles.clear();
+        synchronized (handles) {
+            handles.clear();
+        }
     }
 
     @NonNull
@@ -253,7 +276,9 @@ final class SignalJsonRpcClient {
         long timestamp = extractLong(response.result(), "timestamp", "send");
         long handleSerial = handleIdGen.incrementAndGet();
         MessageHandle handle = new MessageHandle(OPAQUE_PREFIX + handleSerial);
-        handles.put(handle.opaqueValue(), new SignalMessageHandle(timestamp, recipient, msg));
+        synchronized (handles) {
+            handles.put(handle.opaqueValue(), new SignalMessageHandle(timestamp, recipient, msg));
+        }
         return handle;
     }
 
@@ -269,7 +294,9 @@ final class SignalJsonRpcClient {
         // update() on this handle resolves to a missing key in
         // lookupOpen, which throws PERMANENT — same category the SPI
         // requires for "already finalized", so no behavioral change.
-        handles.remove(handle.opaqueValue());
+        synchronized (handles) {
+            handles.remove(handle.opaqueValue());
+        }
     }
 
     void setTyping(@NonNull ScopeRef scope, boolean typing) {
@@ -306,7 +333,12 @@ final class SignalJsonRpcClient {
     }
 
     private SignalMessageHandle lookupOpen(MessageHandle handle) throws MessagingException {
-        SignalMessageHandle internal = handles.get(handle.opaqueValue());
+        // The access-order get() bumps the handle's recency, so handles
+        // still being updated stay clear of the LRU eviction tail.
+        SignalMessageHandle internal;
+        synchronized (handles) {
+            internal = handles.get(handle.opaqueValue());
+        }
         if (internal == null) {
             // Missing key collapses two cases — never-existed and
             // already-finalized — both of which the SPI classifies as
@@ -553,7 +585,9 @@ final class SignalJsonRpcClient {
      * functional effect on send/update/finalize.
      */
     int openHandleCount() {
-        return handles.size();
+        synchronized (handles) {
+            return handles.size();
+        }
     }
 
     private void completePending(String id, SignalMessageCodec.JsonRpcMessage msg) {

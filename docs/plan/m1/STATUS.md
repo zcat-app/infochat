@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 41 |
+| pending | 40 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 213 |
+| done | 214 |
 | deferred | 2 |
 | **total** | **256** |
 
@@ -32,7 +32,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-185 — Reconnect transport after supervised subprocess restart (complexity: high, risk: high)
 - M1-186 — Signal group outbound send path (complexity: medium, risk: medium)
 - M1-187 — Strip bot-mention span in group inbound delivery (complexity: medium, risk: medium)
-- M1-188 — Serialize SimpleX WS sends + bound Signal handle map (complexity: medium, risk: medium)
 - M1-189 — DB grants: revoke PUBLIC on quarantine procs + price_snapshot UPDATE (complexity: medium, risk: medium)
 - M1-190 — Scope the last-admin LOCK TABLE to admin-relevant updates (complexity: medium, risk: medium)
 - M1-191 — SSRF: replace the JVM-wide pin lock with a per-host pin map (complexity: high, risk: high)
@@ -99,6 +98,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-188 | Serialize SimpleX WS sends + bound Signal handle map | 2026-06-07 | round 1 APPROVE |
 | M1-180 | Partition lifecycle: provision current month + drop pruner | 2026-06-07 | round 1 APPROVE |
 | M1-178 | Implement the bootstrap-admin startup bean | 2026-06-07 | round 1 APPROVE |
 | M1-177 | Move inbound dispatch off the transport read thread | 2026-06-07 | round 1 APPROVE |
@@ -108,7 +108,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-173 | Revoke-admin intent-row coverage (M1-151 redteam findings) | 2026-06-06 | round 1 APPROVE |
 | M1-161 | [INVESTIGATE] price_snapshot PK/dedup invariant + new_price_snapshot channel intent | 2026-06-06 | round 1 APPROVE |
 | M1-160 | [INVESTIGATE] summary_anchor scope_kind discriminator | 2026-06-06 | round 1 APPROVE |
-| M1-152 | Schema-hardening migration (stage2_verdict CHECK + V27 audit verb + Nostr index) | 2026-06-06 | round 1 APPROVE |
 
 ---
 
@@ -407,7 +406,7 @@ M1-183 (pending) ← runnable
 M1-185 (pending) ← runnable
 M1-186 (pending) ← runnable
 M1-187 (pending) ← runnable
-M1-188 (pending) ← runnable
+M1-188 (done)
 M1-189 (pending) ← runnable
   └── M1-207 (pending)
 M1-190 (pending) ← runnable
