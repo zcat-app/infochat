@@ -1,9 +1,18 @@
 ---
 id: M1-189
 title: "DB grants: revoke PUBLIC on quarantine procs + price_snapshot UPDATE"
-status: pending
+status: done
 created: 2026-06-07
 last_updated: 2026-06-07
+clarity_check:
+  date: 2026-06-07
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE item 3: \"the wording is reconciled\" is an inspection-only criterion; sharpen to a diff assertion or a grep/test that confirms the removed phrase."
+    - "ACCEPTANCE-RUNNABLE item 4: the \"either...or, choice argued in commit message\" formulation is not a verifiable acceptance criterion; split into two conditional acceptance items (one for each branch) with a concrete verifiable postcondition for each, or narrow the ticket to one chosen branch."
+    - "COMPLEXITY-RISK-CALIBRATED: consider risk: high given that this is a security-surface persistence migration (REVOKE on a running production role); risk: medium is not wrong but errs toward under-statement."
+    - "TEST-CHANGES-AUTHORIZED: clarify whether DbRoleMatrixIT is modified (add a named test method) or a new class is created; if modified, add an explicit \"Authorized test changes\" section naming the class and the new test methods."
+  blockers: []
 blocked_by: []
 files_budget: 5
 files_scope:
@@ -38,11 +47,43 @@ spec_refs:
   - docs/spec/schema.md §Operational
 decision_refs:
   - D34
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-07
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 232
+      removed: 12
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-06-07
+    verdict: CLEAN
+    base: 4f2f86d
+    head: "worktree (uncommitted branch m1/M1-189-db-grants-revoke-public-on-qua)"
+    verdict_file: docs/plan/m1/redteam/M1-189-2026-06-07.md
+    findings_count: 0
+    out_of_model_count: 1
+    note: |
+      CLEAN — V39's PUBLIC-EXECUTE revoke on the quarantine SECURITY
+      DEFINER functions and the price_snapshot UPDATE revoke fully
+      deliver the §DB roles least-privilege promise; the adversary swept
+      every SECURITY DEFINER function and confirmed the two quarantine
+      procs were the only ones still carrying default PUBLIC EXECUTE. One
+      OUT-OF-MODEL advisory: V39 is numbered below the already-committed
+      V41, so a non-greenfield DB already past V41 would hit a Flyway
+      out-of-order validation failure (fail-safe boot refusal, not a
+      silent privilege gap). M1 is greenfield; surfaced for an operator
+      decision before merge.
 ---
 
 # M1-189: DB grants: revoke PUBLIC on quarantine procs + price_snapshot UPDATE

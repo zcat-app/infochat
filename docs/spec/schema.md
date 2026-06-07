@@ -581,8 +581,12 @@ coordinated change.
   (c) surface stale-data warnings when `last_success_at` is too
   old per the freshness contract.
 - **Price snapshot.** One row per `(asset, sub_verb, captured_at)`
-  (decision D39). Columns: `asset` (FK to `asset_config`),
-  `sub_verb`, `captured_at`, `price`, `currency`, `source_url`,
+  (decision D39). Columns: `asset` (matches `asset_config.asset` by
+  convention; deliberately **no FK** — `asset_config`'s key is the
+  composite `(asset, sub_verb)`, so a single-column FK has no unique
+  target, and snapshots are immutable history that must survive
+  config edits), `sub_verb`, `captured_at`, `price`, `vs_currency`
+  (the quote currency the price is denominated in), `source_url`,
   `raw_payload` (JSONB — exactly the upstream response's relevant
   fragment, kept for forensic replay). **INSERT-only**; no updates.
   Partitioned on `captured_at` and aged out by partition drop

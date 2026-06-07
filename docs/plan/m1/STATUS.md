@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 38 |
+| pending | 37 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 217 |
+| done | 218 |
 | deferred | 2 |
 | **total** | **257** |
 
@@ -31,7 +31,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-185 — Reconnect transport after supervised subprocess restart (complexity: high, risk: high)
 - M1-186 — Signal group outbound send path (complexity: medium, risk: medium)
 - M1-187 — Strip bot-mention span in group inbound delivery (complexity: medium, risk: medium)
-- M1-189 — DB grants: revoke PUBLIC on quarantine procs + price_snapshot UPDATE (complexity: medium, risk: medium)
 - M1-190 — Scope the last-admin LOCK TABLE to admin-relevant updates (complexity: medium, risk: medium)
 - M1-191 — SSRF: replace the JVM-wide pin lock with a per-host pin map (complexity: high, risk: high)
 - M1-193 — /stop wiring: pg backend pid + statement timeouts + tool conns (complexity: high, risk: medium)
@@ -48,6 +47,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-204 — Messaging SPI conformance: setTyping no-op, start() exception type, constants drift, jitter, dead stubs (complexity: medium, risk: medium)
 - M1-205 — Adapter rate-limit enforcement: implement §6.3.7 + capability caps, or design-amend (complexity: high, risk: medium)
 - M1-206 — Parameterize SET LOCAL infochat.actor_id (drop UUID string concat) (complexity: low, risk: low)
+- M1-207 — infochat_admin role: resolve the paper-principal contradiction (decision) (complexity: low, risk: medium)
 - M1-208 — Per-adapter bootstrap-admin contact-id parse validation (SPI surface decision) (complexity: medium, risk: medium)
 - M1-210 — Module-DAG enforcement + doc/config-truth sweep (docs say what the build does) (complexity: medium, risk: medium)
 - M1-211 — MessagingAdapter.assertIdentity: wire the spec-mandated surface or remove it (complexity: medium, risk: medium)
@@ -76,7 +76,6 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-207 — blocked_by: M1-189 (pending)
 - M1-219 — blocked_by: M1-197 (pending)
 
 ---
@@ -98,6 +97,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 |---|---|---|---|
 | M1-209 | Remove hand-written @NonNull made redundant by D48 null-marked packages | 2026-06-07 | round 1 APPROVE |
 | M1-192 | LLM per-task config completion (configFor, remote-llm, guard) | 2026-06-07 | round 1 APPROVE |
+| M1-189 | DB grants: revoke PUBLIC on quarantine procs + price_snapshot UPDATE | 2026-06-07 | round 1 APPROVE |
 | M1-188 | Serialize SimpleX WS sends + bound Signal handle map | 2026-06-07 | round 1 APPROVE |
 | M1-182 | Re-evaluation verdict handling: re-hide, NOTIFYs, pipeline | 2026-06-07 | round 2 OVERRIDE-APPROVE |
 | M1-180 | Partition lifecycle: provision current month + drop pruner | 2026-06-07 | round 1 APPROVE |
@@ -105,7 +105,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-177 | Move inbound dispatch off the transport read thread | 2026-06-07 | round 1 APPROVE |
 | M1-176 | Clamp Nostr created_at to now() before it becomes published_at | 2026-06-06 | round 1 APPROVE |
 | M1-175 | Ban intent-row parity and transaction hygiene (M1-173 audit-2 findings) | 2026-06-06 | round 1 APPROVE |
-| M1-174 | Grant-admin intent-row coverage (probe-visibility parity) | 2026-06-06 | round 1 APPROVE |
 
 ---
 
@@ -405,8 +404,8 @@ M1-185 (pending) ← runnable
 M1-186 (pending) ← runnable
 M1-187 (pending) ← runnable
 M1-188 (done)
-M1-189 (pending) ← runnable
-  └── M1-207 (pending)
+M1-189 (done)
+  └── M1-207 (pending) ← runnable
 M1-190 (pending) ← runnable
 M1-191 (pending) ← runnable
 M1-192 (done)

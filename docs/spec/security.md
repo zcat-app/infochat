@@ -1030,8 +1030,10 @@ Exact numbers are profile-driven (decision D27) and live in
 Three Postgres roles, least-privilege (decision D34):
 
 - **Collector role** — `INSERT/UPDATE` on ingest-owned tables
-  (including `price_snapshot` and `asset_config`); `SELECT` on the
-  rest; `INSERT`-only on `audit_log`; `LISTEN/NOTIFY`.
+  (including `asset_config`); **`INSERT`-only on `price_snapshot`**
+  (snapshots are immutable once written, `schema.md` §Operational —
+  no `UPDATE`); `SELECT` on the rest; `INSERT`-only on `audit_log`;
+  `LISTEN/NOTIFY`.
 - **Provider role** — write access on user-state tables; `SELECT` on
   collector-owned tables (including **`SELECT`-only on
   `price_snapshot`** and **`SELECT`-only on `asset_config`**: the
