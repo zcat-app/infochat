@@ -73,7 +73,11 @@ class OpenAiCompatibleEmbeddingProviderTest {
     }
 
     @Test
-    void embedParsesRetryAfterHeaderOn503() {
+    void embedThrowsOn503RegardlessOfRetryAfterHeader() {
+        // The Retry-After machinery was deleted (no consumer ever slept on
+        // it). Surviving behavior: an unavailable 503 — header or not — is
+        // a plain EmbeddingCallFailedException naming the status; no retry
+        // advice is parsed or surfaced.
         mockServer.createContext("/embeddings", exchange -> {
             byte[] resp = "{\"error\":\"unavailable\"}".getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Retry-After", "3");
@@ -88,8 +92,8 @@ class OpenAiCompatibleEmbeddingProviderTest {
 
         EmbeddingCallFailedException ex = assertThrows(EmbeddingCallFailedException.class,
             () -> provider.embed(List.of("text")));
-        assertEquals(3000L, ex.retryAfterMs(),
-            "Retry-After: 3 on a 503 must surface as 3000ms on the exception");
+        assertTrue(ex.getMessage().contains("503"),
+            "exception must name the unavailable status; got: " + ex.getMessage());
     }
 
     private void respondWith(String json) {

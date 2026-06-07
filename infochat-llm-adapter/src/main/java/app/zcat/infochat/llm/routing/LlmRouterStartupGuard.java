@@ -29,8 +29,9 @@ import java.util.Set;
  * {@code infochat.llm.local-only=true} is set alongside ANY off-host
  * LLM or embedding route: a per-task {@code base-url} or the
  * {@code infochat.embeddings.base-url} that resolves to a non-loopback
- * host, OR a per-task provider override naming a cloud-only provider
- * (e.g. {@code anthropic}). When local-only is NOT set, a remote
+ * host, OR a per-task provider override or the
+ * {@code infochat.llm.default.provider} default naming a cloud-only
+ * provider (e.g. {@code anthropic}). When local-only is NOT set, a remote
  * embedding endpoint instead emits the spec-promised confirmation log
  * line so operators see when post title+summary start leaving the host.
  * Per {@code docs/spec/llm.md} §Per-task routing rules: "Local-only
@@ -197,6 +198,15 @@ public class LlmRouterStartupGuard {
         }
 
         List<String> offenders = new ArrayList<>();
+        // The default provider is the route every task without a per-task
+        // override resolves to — a cloud-only default under local-only is
+        // the same conflict as a cloud-only per-task override.
+        String defaultProvider = stripOrEmpty(snapshot.get(LlmRouter.CONFIG_KEY_DEFAULT_PROVIDER))
+            .toLowerCase(Locale.ROOT);
+        if (REMOTE_PROVIDER_NAMES.contains(defaultProvider)) {
+            offenders.add("default key=" + LlmRouter.CONFIG_KEY_DEFAULT_PROVIDER
+                + " provider=" + defaultProvider);
+        }
         for (Map.Entry<ModelTask, String> kv : PER_TASK_BASE_URL_KEYS.entrySet()) {
             String baseUrl = stripOrEmpty(snapshot.get(kv.getValue()));
             if (!baseUrl.isEmpty() && !isLoopback(baseUrl)) {
@@ -291,8 +301,8 @@ public class LlmRouterStartupGuard {
      * Materialize the keys the guard cares about into a small map
      * so {@link #validateLocalOnlyConfiguration(Map)} can run as a
      * pure function. Includes the master switch, the embedding
-     * endpoint base-url, and every per-task base-url + provider
-     * override the guard knows about.
+     * endpoint base-url, the default-provider key, and every per-task
+     * base-url + provider override the guard knows about.
      */
     private static Map<String, String> snapshotConfig(Config config) {
         Map<String, String> snap = new LinkedHashMap<>();
@@ -300,6 +310,8 @@ public class LlmRouterStartupGuard {
             config.getOptionalValue(CONFIG_KEY_LOCAL_ONLY, String.class).orElse(""));
         snap.put(CONFIG_KEY_EMBEDDINGS_BASE_URL,
             config.getOptionalValue(CONFIG_KEY_EMBEDDINGS_BASE_URL, String.class).orElse(""));
+        snap.put(LlmRouter.CONFIG_KEY_DEFAULT_PROVIDER,
+            config.getOptionalValue(LlmRouter.CONFIG_KEY_DEFAULT_PROVIDER, String.class).orElse(""));
         for (String key : PER_TASK_BASE_URL_KEYS.values()) {
             snap.put(key, config.getOptionalValue(key, String.class).orElse(""));
             String providerKey = providerKeyFor(key);

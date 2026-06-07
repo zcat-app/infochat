@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 39 |
+| pending | 38 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 215 |
+| done | 216 |
 | deferred | 2 |
 | **total** | **256** |
 
@@ -34,7 +34,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-189 — DB grants: revoke PUBLIC on quarantine procs + price_snapshot UPDATE (complexity: medium, risk: medium)
 - M1-190 — Scope the last-admin LOCK TABLE to admin-relevant updates (complexity: medium, risk: medium)
 - M1-191 — SSRF: replace the JVM-wide pin lock with a per-host pin map (complexity: high, risk: high)
-- M1-192 — LLM per-task config completion (configFor, remote-llm, guard) (complexity: medium, risk: medium)
 - M1-193 — /stop wiring: pg backend pid + statement timeouts + tool conns (complexity: high, risk: medium)
 - M1-194 — EligiblePostQuery SQL LIMIT + chat tool result budgets (complexity: medium, risk: medium)
 - M1-195 — Audit correctness: auto-promote guard, /unban no-op, intent-row parity (complexity: medium, risk: medium)
@@ -58,6 +57,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-214 — SSRF small fixes: Location-resolve exception contract, fec0::/10, scheme case-fold, reason()-based test assertions (complexity: medium, risk: medium)
 - M1-215 — Core hygiene: sanitized key in getState WARN, full-C0 sanitize, single AuditLogWriter constructor (complexity: low, risk: low)
 - M1-216 — Collector lows: TTL-job partition independence, saturation counter, sha256 dedup, zero-width escapes (complexity: medium, risk: medium)
+- M1-217 — LLM-adapter lows: Entry nullability contradiction, joinPath/preview dedup, Anthropic multi-block content (complexity: low, risk: low)
 - M1-218 — Provider lows: /retry in-flight reply, /invite list-vs-revoke code identity, handle-keyed slot release (complexity: low, risk: medium)
 - M1-220 — [INVESTIGATE] Bluesky source identifier: URL (per D38) vs bare DID/handle (per the fetcher) (complexity: low, risk: medium)
 
@@ -77,7 +77,6 @@ _(none)_
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
 - M1-207 — blocked_by: M1-189 (pending)
-- M1-217 — blocked_by: M1-192 (pending)
 - M1-219 — blocked_by: M1-197 (pending)
 
 ---
@@ -97,6 +96,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-192 | LLM per-task config completion (configFor, remote-llm, guard) | 2026-06-07 | round 1 APPROVE |
 | M1-188 | Serialize SimpleX WS sends + bound Signal handle map | 2026-06-07 | round 1 APPROVE |
 | M1-182 | Re-evaluation verdict handling: re-hide, NOTIFYs, pipeline | 2026-06-07 | round 2 OVERRIDE-APPROVE |
 | M1-180 | Partition lifecycle: provision current month + drop pruner | 2026-06-07 | round 1 APPROVE |
@@ -106,7 +106,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-175 | Ban intent-row parity and transaction hygiene (M1-173 audit-2 findings) | 2026-06-06 | round 1 APPROVE |
 | M1-174 | Grant-admin intent-row coverage (probe-visibility parity) | 2026-06-06 | round 1 APPROVE |
 | M1-173 | Revoke-admin intent-row coverage (M1-151 redteam findings) | 2026-06-06 | round 1 APPROVE |
-| M1-161 | [INVESTIGATE] price_snapshot PK/dedup invariant + new_price_snapshot channel intent | 2026-06-06 | round 1 APPROVE |
 
 ---
 
@@ -410,8 +409,8 @@ M1-189 (pending) ← runnable
   └── M1-207 (pending)
 M1-190 (pending) ← runnable
 M1-191 (pending) ← runnable
-M1-192 (pending) ← runnable
-  └── M1-217 (pending)
+M1-192 (done)
+  └── M1-217 (pending) ← runnable
 M1-193 (pending) ← runnable
 M1-194 (pending) ← runnable
 M1-195 (pending) ← runnable

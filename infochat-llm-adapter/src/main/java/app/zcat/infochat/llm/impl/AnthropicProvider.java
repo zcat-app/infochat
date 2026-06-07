@@ -101,6 +101,16 @@ public class AnthropicProvider implements LlmProvider {
         return doCall(cfg, systemPrompt, userPrompt);
     }
 
+    /**
+     * Runs {@link #configFor} for its throw-on-missing-key effect and
+     * discards the result, so the startup scan fails boot on the same
+     * resolution the first {@link #generate} call would perform.
+     */
+    @Override
+    public void assertTaskConfigResolvable(@NonNull ModelTask task) {
+        configFor(task);
+    }
+
     private TaskConfig configFor(ModelTask task) {
         String prefix = "infochat.llm." + task.keySegment() + ".";
         String baseUrl = config.getValue(prefix + "base-url", String.class);
@@ -163,13 +173,12 @@ public class AnthropicProvider implements LlmProvider {
         }
 
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            long retryAfterMs = LlmHttpSupport.retryAfterMsFor(response);
             String errorMsg = extractErrorMessage(response.body());
             LOG.warnf("AnthropicProvider: non-2xx %d from %s; error: %s",
                 response.statusCode(), uri, errorMsg);
             throw new LlmCallFailedException(
                 "AnthropicProvider: non-2xx status " + response.statusCode()
-                    + " from " + uri + ": " + errorMsg, retryAfterMs);
+                    + " from " + uri + ": " + errorMsg);
         }
 
         return parseContentText(response.body(), uri);

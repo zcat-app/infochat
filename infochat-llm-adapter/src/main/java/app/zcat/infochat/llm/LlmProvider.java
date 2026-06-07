@@ -36,6 +36,22 @@ public interface LlmProvider {
     LlmResponse generate(@NonNull ModelTask task, @NonNull String systemPrompt, @NonNull String userPrompt);
 
     /**
+     * Startup-time assertion that this provider can serve the given
+     * task under the current configuration. Providers that resolve
+     * per-task config lazily (per call) MUST override this to run the
+     * same config resolution their {@link #generate} path uses, so a
+     * missing or typoed required property fails boot — via
+     * {@code LlmRouter.assertAllTasksResolve()} — instead of throwing
+     * at the first live call, where callers' retry-then-fallback
+     * machinery would swallow the misconfiguration as a permanent
+     * "transient" outage. The default is a no-op so providers with no
+     * per-task config requirements (notably test stubs) remain valid
+     * without overriding.
+     */
+    default void assertTaskConfigResolvable(@NonNull ModelTask task) {
+    }
+
+    /**
      * Stable, operator-facing name the router registers this provider
      * under. The router resolves a per-task override property (e.g.
      * {@code infochat.llm.security.provider=openai-compatible}) and the

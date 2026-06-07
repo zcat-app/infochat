@@ -1,40 +1,24 @@
 package app.zcat.infochat.llm.impl;
 
-import org.jspecify.annotations.NonNull;
-
 import java.io.IOException;
 import java.net.http.HttpResponse;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
-import java.time.ZonedDateTime;
-import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Flow;
 
 /**
- * Shared response-hardening helpers for the LLM / embedding HTTP
- * provider impls in this package. Two concerns, both keyed off the raw
- * {@link HttpResponse} the JDK {@code HttpClient} produces:
- *
- * <ul>
- *   <li><b>Bounded body read</b> — {@link #boundedStringHandler(long)}
- *       replaces {@code BodyHandlers.ofString()} (unbounded) so a
- *       pathological multi-GB reply from a misbehaving or hostile
- *       endpoint cannot OOM the JVM. The LLM endpoint is operator-
- *       configured (semi-trusted), so this is hygiene, not an
- *       SSRF-grade target — these calls do not pass through the
- *       {@code infochat-ssrf} guard's {@code readBounded}.</li>
- *   <li><b>Retry-After</b> — {@link #retryAfterMsFor(HttpResponse)}
- *       extracts the server-advised back-off on a 429/503 so the
- *       caller can sleep before its single retry instead of
- *       immediately re-hitting the rate limit.</li>
- * </ul>
+ * Shared response-hardening helper for the LLM / embedding HTTP
+ * provider impls in this package: a <b>bounded body read</b> —
+ * {@link #boundedStringHandler(long)} replaces
+ * {@code BodyHandlers.ofString()} (unbounded) so a pathological
+ * multi-GB reply from a misbehaving or hostile endpoint cannot OOM
+ * the JVM. The LLM endpoint is operator-configured (semi-trusted),
+ * so this is hygiene, not an SSRF-grade target — these calls do not
+ * pass through the {@code infochat-ssrf} guard's {@code readBounded}.
  *
  * <p>Package-private: the three providers ({@link OpenAiCompatibleProvider},
  * {@link AnthropicProvider}, {@link OpenAiCompatibleEmbeddingProvider})
@@ -88,50 +72,6 @@ final class LlmHttpSupport {
      */
     static HttpResponse.BodyHandler<String> boundedStringHandler(long maxBytes) {
         return responseInfo -> new BoundedStringSubscriber(maxBytes);
-    }
-
-    /**
-     * Server-advised retry delay in milliseconds for a rate-limited or
-     * unavailable response. Returns 0 for any status other than 429 or
-     * 503, and 0 when those carry no parseable {@code Retry-After}
-     * header — 0 means "no server-advised delay; the caller falls back
-     * to its own policy".
-     */
-    static long retryAfterMsFor(@NonNull HttpResponse<?> response) {
-        int status = response.statusCode();
-        if (status != 429 && status != 503) {
-            return 0L;
-        }
-        return parseRetryAfterMs(response.headers().firstValue("Retry-After"));
-    }
-
-    /**
-     * Parse a {@code Retry-After} header value into milliseconds.
-     * Supports both wire forms per RFC 9110 §10.2.3: delta-seconds (a
-     * non-negative integer) and an HTTP-date. A blank, negative, past,
-     * or unparseable value yields 0.
-     */
-    private static long parseRetryAfterMs(Optional<String> headerValue) {
-        if (headerValue.isEmpty()) {
-            return 0L;
-        }
-        String raw = headerValue.get().trim();
-        if (raw.isEmpty()) {
-            return 0L;
-        }
-        try {
-            long seconds = Long.parseLong(raw);
-            return seconds <= 0 ? 0L : seconds * 1000L;
-        } catch (NumberFormatException notDeltaSeconds) {
-            // Not an integer — fall through to the HTTP-date form.
-        }
-        try {
-            ZonedDateTime when = ZonedDateTime.parse(raw, DateTimeFormatter.RFC_1123_DATE_TIME);
-            long deltaMs = Duration.between(ZonedDateTime.now(when.getZone()), when).toMillis();
-            return deltaMs <= 0 ? 0L : deltaMs;
-        } catch (DateTimeParseException notHttpDate) {
-            return 0L;
-        }
     }
 
     /**

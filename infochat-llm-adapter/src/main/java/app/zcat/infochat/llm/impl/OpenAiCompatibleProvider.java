@@ -11,7 +11,7 @@ import app.zcat.infochat.llm.LlmResponse;
 import app.zcat.infochat.llm.ModelTask;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.eclipse.microprofile.config.Config;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
@@ -20,7 +20,6 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.util.Optional;
 
 /**
  * The first concrete {@link LlmProvider} impl, per
@@ -49,13 +48,13 @@ import java.util.Optional;
  *
  * <h2>Per-task config</h2>
  * <p>Reads {@code (base-url, api-key, model, timeout-ms)} per
- * {@link ModelTask}. v1 wires {@code SECURITY_JUDGE} only — Tagger,
- * summarizer, chat-agent, and translator land their own per-task
- * property blocks as their tickets ship. The dispatch in
- * {@link #generate(ModelTask, String, String)} routes to the matching
- * task's config; missing-task tasks throw to surface mis-configured
- * router lookups loudly rather than silently issuing requests with
- * the wrong endpoint.
+ * {@link ModelTask} for all six tasks, dynamically via {@link Config}
+ * — the same pattern as {@link AnthropicProvider}. The property key
+ * pattern is {@code infochat.llm.<taskKeySegment>.<property>}. A task
+ * whose required keys ({@code base-url}, {@code model}) are absent
+ * fails the call with the config system's missing-property error,
+ * surfacing a mis-configured route at the call rather than silently
+ * issuing requests against the wrong endpoint.
  *
  * <h2>HTTP client</h2>
  * <p>{@link HttpClient} from {@code java.net.http} — built into JDK
@@ -113,33 +112,11 @@ public class OpenAiCompatibleProvider implements LlmProvider {
      */
     private final HttpClient http;
 
-    @ConfigProperty(name = "infochat.llm.security.base-url")
-    String securityBaseUrl;
+    private final Config config;
 
-    /**
-     * Optional injection so an empty {@code api-key=} property maps
-     * to {@link Optional#empty()} (SmallRye Config's default
-     * converter treats {@code ""} as absent rather than empty).
-     * Local Ollama is the canonical empty-key case.
-     */
-    @ConfigProperty(name = "infochat.llm.security.api-key")
-    Optional<String> securityApiKey;
-
-    @ConfigProperty(name = "infochat.llm.security.model")
-    String securityModel;
-
-    @ConfigProperty(name = "infochat.llm.security.timeout-ms", defaultValue = "30000")
-    long securityTimeoutMs;
-
-    /**
-     * Operator-configurable response-body cap. {@code "8388608"} is
-     * 8 MiB ({@link LlmHttpSupport#DEFAULT_BODY_CAP_BYTES}); the value is
-     * clamped into {@code [1 MiB, 8 MiB]} before use.
-     */
-    @ConfigProperty(name = "infochat.llm.max-response-bytes", defaultValue = "8388608")
-    long maxResponseBytes;
-
-    public OpenAiCompatibleProvider() {
+    @Inject
+    public OpenAiCompatibleProvider(@NonNull Config config) {
+        this.config = config;
         this.http = HttpClient.newHttpClient();
     }
 
@@ -154,15 +131,34 @@ public class OpenAiCompatibleProvider implements LlmProvider {
         return doCall(cfg, systemPrompt, userPrompt);
     }
 
+    /**
+     * Runs {@link #configFor} for its throw-on-missing-key effect and
+     * discards the result, so the startup scan fails boot on the same
+     * resolution the first {@link #generate} call would perform.
+     */
+    @Override
+    public void assertTaskConfigResolvable(@NonNull ModelTask task) {
+        configFor(task);
+    }
+
+    /**
+     * Dynamic per-call config read, same shape as
+     * {@link AnthropicProvider#configFor}. A cached snapshot was
+     * considered (per-call lookups are a known perf nit) and rejected:
+     * the lookup is a map read measured in microseconds against an LLM
+     * HTTP call measured in seconds, and caching would freeze values
+     * the rest of the config surface treats as runtime-resolvable.
+     * {@code api-key} uses optional lookup so an empty {@code api-key=}
+     * property maps to absent (SmallRye Config treats {@code ""} as
+     * absent) — local Ollama is the canonical empty-key case.
+     */
     private TaskConfig configFor(ModelTask task) {
-        return switch (task) {
-            case SECURITY_JUDGE -> new TaskConfig(
-                securityBaseUrl, securityApiKey.orElse(""), securityModel, securityTimeoutMs);
-            case TAGGER, ENTITY, SUMMARIZER, CHAT_AGENT, TRANSLATOR ->
-                throw new UnsupportedOperationException(
-                    "OpenAiCompatibleProvider: no per-task config wired for " + task
-                        + " yet (M1-033 wires SECURITY_JUDGE only)");
-        };
+        String prefix = "infochat.llm." + task.keySegment() + ".";
+        String baseUrl = config.getValue(prefix + "base-url", String.class);
+        String apiKey = config.getOptionalValue(prefix + "api-key", String.class).orElse("");
+        String model = config.getValue(prefix + "model", String.class);
+        long timeoutMs = config.getOptionalValue(prefix + "timeout-ms", Long.class).orElse(30000L);
+        return new TaskConfig(baseUrl, apiKey, model, timeoutMs);
     }
 
     private LlmResponse doCall(TaskConfig cfg, String systemPrompt, String userPrompt) {
@@ -199,10 +195,14 @@ public class OpenAiCompatibleProvider implements LlmProvider {
         }
         HttpRequest request = reqBuilder.build();
 
+        // Operator-configurable response-body cap, clamped into
+        // [1 MiB, 8 MiB] before use — same dynamic read as AnthropicProvider.
+        long cap = LlmHttpSupport.clampBodyCapBytes(
+            config.getOptionalValue("infochat.llm.max-response-bytes", Long.class)
+                .orElse(LlmHttpSupport.DEFAULT_BODY_CAP_BYTES));
         HttpResponse<String> response;
         try {
-            response = http.send(request,
-                LlmHttpSupport.boundedStringHandler(LlmHttpSupport.clampBodyCapBytes(maxResponseBytes)));
+            response = http.send(request, LlmHttpSupport.boundedStringHandler(cap));
         } catch (IOException e) {
             throw new LlmCallFailedException(
                 "OpenAiCompatibleProvider: HTTP call failed for " + uri, e);
@@ -213,13 +213,12 @@ public class OpenAiCompatibleProvider implements LlmProvider {
         }
 
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            long retryAfterMs = LlmHttpSupport.retryAfterMsFor(response);
             String preview = preview(response.body());
             LOG.warnf("OpenAiCompatibleProvider: non-2xx %d from %s; body preview: %s",
                 response.statusCode(), uri, preview);
             throw new LlmCallFailedException(
                 "OpenAiCompatibleProvider: non-2xx status " + response.statusCode()
-                    + " from " + uri, retryAfterMs);
+                    + " from " + uri);
         }
 
         return parseChoiceText(response.body(), uri);
@@ -285,31 +284,13 @@ public class OpenAiCompatibleProvider implements LlmProvider {
      * uniformly per {@code docs/spec/security.md} §Failure handling.
      */
     public static final class LlmCallFailedException extends RuntimeException {
-        private final long retryAfterMs;
 
         public LlmCallFailedException(String message) {
-            this(message, 0L);
-        }
-
-        public LlmCallFailedException(@NonNull String message, long retryAfterMs) {
             super(message);
-            this.retryAfterMs = retryAfterMs;
         }
 
         public LlmCallFailedException(String message, Throwable cause) {
             super(message, cause);
-            this.retryAfterMs = 0L;
-        }
-
-        /**
-         * Server-advised retry delay in milliseconds parsed from a
-         * 429/503 {@code Retry-After} header, or 0 when the response
-         * carried no such advice. The Stage 2 worker's retry-once
-         * harness sleeps this long before re-issuing the call instead of
-         * immediately re-hitting the rate limit.
-         */
-        public long retryAfterMs() {
-            return retryAfterMs;
         }
     }
 }

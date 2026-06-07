@@ -157,13 +157,12 @@ public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
         }
 
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            long retryAfterMs = LlmHttpSupport.retryAfterMsFor(response);
             String preview = preview(response.body());
             LOG.warnf("OpenAiCompatibleEmbeddingProvider: non-2xx %d from %s; body preview: %s",
                 response.statusCode(), uri, preview);
             throw new EmbeddingCallFailedException(
                 "OpenAiCompatibleEmbeddingProvider: non-2xx status " + response.statusCode()
-                    + " from " + uri, retryAfterMs);
+                    + " from " + uri);
         }
 
         return parseEmbeddings(response.body(), uri, texts.size());
@@ -245,31 +244,13 @@ public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
      * catches this type uniformly.
      */
     public static final class EmbeddingCallFailedException extends RuntimeException {
-        private final long retryAfterMs;
 
         public EmbeddingCallFailedException(String message) {
-            this(message, 0L);
-        }
-
-        public EmbeddingCallFailedException(@NonNull String message, long retryAfterMs) {
             super(message);
-            this.retryAfterMs = retryAfterMs;
         }
 
         public EmbeddingCallFailedException(String message, Throwable cause) {
             super(message, cause);
-            this.retryAfterMs = 0L;
-        }
-
-        /**
-         * Server-advised retry delay in milliseconds parsed from a
-         * 429/503 {@code Retry-After} header, or 0 when the response
-         * carried no such advice. The EmbeddingWorker's retry-once
-         * harness sleeps this long before re-submitting the same batch
-         * instead of immediately re-hitting the rate limit.
-         */
-        public long retryAfterMs() {
-            return retryAfterMs;
         }
     }
 }

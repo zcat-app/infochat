@@ -108,6 +108,28 @@ class LlmRouterStartupGuardLocalOnlyTest {
     }
 
     @Test
+    void localOnlyTrueWithRemoteDefaultProviderRefusesStartup() {
+        // The default provider is the route every task without a per-task
+        // override resolves to — a cloud-only default under local-only
+        // must produce the same conflict error as a per-task override.
+        Map<String, String> conflict = new LinkedHashMap<>();
+        conflict.put(LlmRouterStartupGuard.CONFIG_KEY_LOCAL_ONLY, "true");
+        conflict.put(LlmRouter.CONFIG_KEY_DEFAULT_PROVIDER, AnthropicProvider.PROVIDER_NAME);
+
+        LlmRouterStartupGuard.LocalOnlyConflictException ex = assertThrows(
+            LlmRouterStartupGuard.LocalOnlyConflictException.class,
+            () -> LlmRouterStartupGuard.validateLocalOnlyConfiguration(conflict),
+            "remote default provider under local-only=true must throw");
+        String msg = ex.getMessage();
+        assertTrue(msg.contains(LlmRouter.CONFIG_KEY_DEFAULT_PROVIDER),
+            "fatal message must name the default-provider key; got: " + msg);
+        assertTrue(msg.contains(AnthropicProvider.PROVIDER_NAME),
+            "fatal message must name the offending provider; got: " + msg);
+        assertTrue(msg.contains("local-only"),
+            "fatal message must mention local-only; got: " + msg);
+    }
+
+    @Test
     void localOnlyTrueAllOnHostDoesNotThrow() {
         // Loopback embedding + loopback base-url + the host-neutral
         // openai-compatible provider — nothing leaves the host.

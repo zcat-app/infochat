@@ -218,17 +218,23 @@ public class LlmRouter {
 
     /**
      * Startup-time assertion that every {@link ModelTask} resolves to a
-     * registered provider under the current config. A per-task provider
+     * registered provider under the current config, AND that the
+     * resolved provider's per-task config resolves. A per-task provider
      * override naming a provider with no registered {@link Entry} throws
      * {@link IllegalStateException} from {@link #forTask} here — at
      * startup — instead of at the first Stage 2 / digest call that
-     * routes that task. Tasks with no override fall through to the
-     * priority-3 default and never throw, so the scan surfaces exactly
-     * the misroute case. Driven by {@link LlmRouterStartupGuard}.
+     * routes that task. The
+     * {@link LlmProvider#assertTaskConfigResolvable} leg makes a
+     * missing or typoed required per-task property (e.g. an absent
+     * {@code infochat.llm.security.model}) throw here too; without it,
+     * the lazy per-call config read would surface only at the first
+     * live call, where workers' retry-then-fallback catch converts the
+     * permanent misconfiguration into an indefinite silent fallback.
+     * Driven by {@link LlmRouterStartupGuard}.
      */
     public void assertAllTasksResolve() {
         for (ModelTask task : ModelTask.values()) {
-            forTask(task, "en");
+            forTask(task, "en").assertTaskConfigResolvable(task);
         }
     }
 

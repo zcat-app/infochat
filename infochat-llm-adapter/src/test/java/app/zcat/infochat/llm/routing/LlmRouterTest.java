@@ -308,6 +308,22 @@ class LlmRouterTest {
     }
 
     /**
+     * A provider that does not override the default no-op
+     * {@code assertTaskConfigResolvable} must pass the startup scan —
+     * test stubs (e.g. Stage2WorkerIT's) have no per-task config
+     * requirements and must keep booting their host modules.
+     */
+    @Test
+    void assertAllTasksResolvePassesWhenProviderDoesNotOverrideConfigCheck() {
+        LlmRouter router = new LlmRouter(
+            List.of(new LlmRouter.Entry(NAME_DEFAULT, new StubProvider(), Set.of("en"))),
+            LlmRouter.ConfigReader.fromMap(Map.of()));
+
+        assertDoesNotThrow(router::assertAllTasksResolve,
+            "the default no-op config check must keep config-free providers bootable");
+    }
+
+    /**
      * Minimal MicroProfile {@link Config} stub backed by a fixed map.
      * Only {@link #getOptionalValue(String, Class)} is implemented —
      * the router's {@code supportedLanguagesFor} helper uses that

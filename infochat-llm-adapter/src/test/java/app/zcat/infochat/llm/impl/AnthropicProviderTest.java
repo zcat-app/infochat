@@ -23,6 +23,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -233,7 +234,11 @@ class AnthropicProviderTest {
     }
 
     @Test
-    void generateParsesRetryAfterHeaderOn429() throws Exception {
+    void generateThrowsOn429RegardlessOfRetryAfterHeader() throws Exception {
+        // The Retry-After machinery was deleted (no consumer ever slept on
+        // it). Surviving behavior: a rate-limited 429 — header or not — is
+        // a plain LlmCallFailedException naming the status; no retry
+        // advice is parsed or surfaced.
         String errorBody = """
             {"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}""";
         mockServer.createContext("/messages", exchange -> {
@@ -250,8 +255,54 @@ class AnthropicProviderTest {
 
         LlmCallFailedException ex = assertThrows(LlmCallFailedException.class,
             () -> provider.generate(ModelTask.SUMMARIZER, "sys", "usr"));
-        assertEquals(2000L, ex.retryAfterMs(),
-            "Retry-After: 2 on a 429 must surface as 2000ms on the exception");
+        assertTrue(ex.getMessage().contains("429"),
+            "exception must name the rate-limited status; got: " + ex.getMessage());
+    }
+
+    @Test
+    void remoteLlmShapedConfigResolvesChatAgentAndSummarizer() throws Exception {
+        // Mirrors the %remote-llm property block (base-url, max-tokens,
+        // model — api-key arrives via environment in production,
+        // timeout-ms falls back to its default): per-task resolution for
+        // CHAT_AGENT and SUMMARIZER must succeed end-to-end with each
+        // task's own model on the wire.
+        AtomicReference<String> lastModel = new AtomicReference<>();
+        mockServer.createContext("/messages", exchange -> {
+            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            lastModel.set(JSON.readTree(body).get("model").asText());
+            byte[] resp = successResponse("ok").getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, resp.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(resp);
+            }
+        });
+        mockServer.start();
+
+        Config cfg = new StubConfig(Map.of(
+            "infochat.llm.chat.base-url", baseUrl,
+            "infochat.llm.chat.max-tokens", "2048",
+            "infochat.llm.chat.model", "claude-sonnet-4-6",
+            "infochat.llm.chat.api-key", API_KEY,
+            "infochat.llm.summarizer.base-url", baseUrl,
+            "infochat.llm.summarizer.max-tokens", "4096",
+            "infochat.llm.summarizer.model", "claude-opus-4-8",
+            "infochat.llm.summarizer.api-key", API_KEY
+        ));
+        AnthropicProvider provider = new AnthropicProvider(cfg, HttpClient.newHttpClient());
+
+        LlmResponse chatReply = assertDoesNotThrow(
+            () -> provider.generate(ModelTask.CHAT_AGENT, "sys", "usr"),
+            "CHAT_AGENT config resolution under remote-llm-shaped properties must succeed");
+        assertEquals("ok", chatReply.text());
+        assertEquals("claude-sonnet-4-6", lastModel.get(),
+            "CHAT_AGENT must resolve the chat model key");
+
+        LlmResponse summaryReply = assertDoesNotThrow(
+            () -> provider.generate(ModelTask.SUMMARIZER, "sys", "usr"),
+            "SUMMARIZER config resolution under remote-llm-shaped properties must succeed");
+        assertEquals("ok", summaryReply.text());
+        assertEquals("claude-opus-4-8", lastModel.get(),
+            "SUMMARIZER must resolve the summarizer model key");
     }
 
     private AnthropicProvider providerFor(ModelTask task, String apiKey) {
