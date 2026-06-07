@@ -59,7 +59,8 @@ import java.util.UUID;
  * QUARANTINED per {@code docs/spec/security.md} §Re-evaluation job —
  * a post the judge now classifies hostile must not stay user-visible
  * for the rest of the attempt budget. Cap exhaustion transitions to
- * NEEDS_REVIEW with a throttled admin notification.
+ * NEEDS_REVIEW and emits the quarantine_review NOTIFY; the Provider's
+ * consumer owns the throttled admin page for that transition.
  */
 @ApplicationScoped
 public class ReEvaluationJob {
@@ -183,10 +184,11 @@ public class ReEvaluationJob {
             quarantineNotifyEmitter.emit(conn, QuarantineNotifyEmitter.TargetKind.POST,
                 candidate.postId(), QuarantineNotifyEmitter.NewStatus.NEEDS_REVIEW);
         });
-        throttledAdminNotifier.notifyOnce(
-            ERROR_CLASS_REEVAL_CAP_EXHAUSTION,
-            ERROR_CLASS_REEVAL_CAP_EXHAUSTION,
-            "Re-eval cap exhausted for post_id=" + candidate.postId());
+        // No Collector-side admin page here: the NEEDS_REVIEW NOTIFY
+        // emitted above is what drives the Provider's throttled admin
+        // notifier, and one transition must produce exactly one page
+        // (docs/spec/architecture.md §Inter-service communication,
+        // Consumer behavior). Paging here too would double-notify.
         LOG.infof("ReEvaluationJob: cap exhausted for post_id=%s — transitioned to NEEDS_REVIEW",
             candidate.postId());
     }

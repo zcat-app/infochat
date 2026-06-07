@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 32 |
+| pending | 31 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 224 |
+| done | 225 |
 | deferred | 2 |
 | **total** | **258** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-181 — quarantine_review listener correctness cluster (complexity: high, risk: medium)
 - M1-184 — Signal reader/codec hardening against malformed frames (complexity: low, risk: medium)
 - M1-186 — Signal group outbound send path (complexity: medium, risk: medium)
 - M1-187 — Strip bot-mention span in group inbound delivery (complexity: medium, risk: medium)
@@ -392,7 +391,7 @@ M1-178 (done)
   └── M1-208 (pending) ← runnable
 M1-179 (done)
 M1-180 (done)
-M1-181 (pending) ← runnable
+M1-181 (done)
 M1-182 (done)
 M1-183 (done)
   └── M1-222 (pending) ← runnable

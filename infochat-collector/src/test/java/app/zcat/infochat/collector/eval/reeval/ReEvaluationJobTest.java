@@ -465,15 +465,14 @@ class ReEvaluationJobTest {
     }
 
     private void assertNotifyEmitted(String channel) throws Exception {
-        // The NOTIFY was emitted inside a committed transaction. We
-        // verify it fired by checking a side effect: the admin
-        // notification state (throttled notifier was called for
-        // cap-exhaustion which transitions to NEEDS_REVIEW).
-        // For tests that specifically assert NOTIFY, the transition
-        // to NEEDS_REVIEW IS the observable effect since NOTIFY
-        // without a listener only leaves the post-status change.
-        // The post-status assertion in the calling test method already
-        // covers this; this helper is a semantic anchor.
+        // The NOTIFY was emitted inside a committed transaction. NOTIFY
+        // without a listener leaves no observable row in this Collector
+        // test instance, so the post-status transition asserted by the
+        // calling test method IS the observable effect; this helper is
+        // a semantic anchor. The Collector deliberately does not page
+        // the admin notifier for cap exhaustion — the Provider's
+        // quarantine_review consumer owns that page (exactly one admin
+        // notification per transition).
     }
 
     private void assertAdminNotification(String errorClass) throws Exception {

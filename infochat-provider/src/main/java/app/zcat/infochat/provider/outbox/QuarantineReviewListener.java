@@ -1,12 +1,13 @@
 package app.zcat.infochat.provider.outbox;
 
+import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import io.quarkus.runtime.Startup;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.annotation.Priority;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
+import jakarta.transaction.Transactional;
 import org.jboss.logging.Logger;
 import org.postgresql.PGConnection;
 import org.postgresql.PGNotification;
@@ -17,11 +18,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.sql.Timestamp;
-import java.time.Duration;
 import java.time.Instant;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -32,13 +29,43 @@ import java.util.Objects;
  * LISTEN/NOTIFY consumer for the {@code quarantine_review} channel.
  * Parallel to {@link NewPostListener} — dedicated long-lived connection,
  * virtual-thread worker, reconnect-resilient backoff. Routes actionable
- * events (PENDING, NEEDS_REVIEW) to a throttled admin notification;
- * routes terminal transitions (BENIGN_CLOSED, APPROVED, REJECTED) to
- * cursor-advance only.
+ * events (row status PENDING, NEEDS_REVIEW) to a throttled admin
+ * notification; routes terminal transitions (BENIGN_CLOSED, APPROVED,
+ * REJECTED) to cursor-advance only.
+ *
+ * <p><b>Row truth, not payload truth.</b> The NOTIFY payload is purely
+ * the wake-up signal (docs/spec/architecture.md §Inter-service
+ * communication): {@link #handleEvent} re-reads the row's current
+ * status and event time from quarantine_review_view / post and decides
+ * actionability from the ROW — the payload's {@code new_status} is
+ * shape-validated at the wire boundary but never drives a decision.
+ *
+ * <p><b>Same-transaction invariant.</b> {@code handleEvent} is
+ * {@code @Transactional(rollbackOn = SQLException.class)}: the cursor
+ * advance and the admin-notification persistence commit atomically
+ * ("the high-water mark advances both fields in the same DB
+ * transaction as the side effect it triggers"). {@code rollbackOn} is
+ * load-bearing — JTA does NOT roll back on checked exceptions by
+ * default, so without it a notification-write {@link SQLException}
+ * would commit the cursor advance anyway. The live dispatch path
+ * invokes the handler through the injected {@code self} client proxy
+ * because a plain {@code this.handleEvent(...)} call would bypass the
+ * interceptor and silently lose the transaction boundary.
  *
  * <p>The handler method {@link #handleEvent} is package-private so
  * {@link QuarantineReviewReconciler} can invoke it during startup
- * catch-up without duplicating cursor-advance / notification logic.
+ * catch-up without duplicating cursor-advance / notification logic;
+ * the reconnect path here symmetrically invokes the reconciler's
+ * catch-up. Both beans are normal-scoped, so ArC resolves the cycle
+ * via client proxies — with the consequence that the reconciler's
+ * {@code @PostConstruct} (priority 250) touching the listener proxy
+ * instantiates this bean EARLY whenever a missed event exists. That
+ * is benign for this channel: the CAS cursor advance and the
+ * throttle-coalesced notification make concurrent live dispatch and
+ * catch-up idempotent, and out-of-order handling is tolerated by
+ * design (an older actionable event still notifies; see
+ * {@code handleEvent}). Do not copy the new_post ordered-replay
+ * priority reasoning here.
  */
 @Startup
 @Priority(260)
@@ -60,49 +87,23 @@ public class QuarantineReviewListener {
     private static final Pattern NEW_STATUS_PATTERN =
             Pattern.compile("\"new_status\"\\s*:\\s*\"([^\"]+)\"");
 
-    // Throttled admin notification — inline UPSERT following the
-    // Collector's ThrottledAdminNotifier pattern. The V21 migration
-    // grants INSERT/UPDATE on admin_notification_state to infochat_provider.
-    private static final String ADMIN_NOTIFY_KEY = "quarantine-review-actionable";
-    private static final String SUPPRESSED_BUMP_SQL =
-            "UPDATE admin_notification_state SET suppressed_count = suppressed_count + 1 "
-                    + "WHERE notification_key = ?";
-
     @Inject DataSource dataSource;
     @Inject ProviderStateDao providerStateDao;
+    @Inject ThrottledAdminNotifier throttledAdminNotifier;
+    @Inject QuarantineReviewReconciler reconciler;
 
-    @Inject
-    @ConfigProperty(name = "infochat.admin-notifier.throttle-window", defaultValue = "1h")
-    Duration throttleWindow;
+    // Client-proxy self-reference: dispatch() must route handleEvent
+    // through the proxy so the @Transactional interceptor applies —
+    // a direct this-call would run the handler without a transaction
+    // while proxy-routed tests keep passing (see class javadoc).
+    @Inject QuarantineReviewListener self;
 
-    // upsertSql is computed lazily on first use; listenConnection and
-    // workerThread are (re)assigned across the LISTEN lifecycle and reset to
-    // null on close/shutdown — all three are genuinely nullable.
-    private volatile @Nullable String upsertSql;
+    // listenConnection and workerThread are (re)assigned across the
+    // LISTEN lifecycle and reset to null on close/shutdown — both are
+    // genuinely nullable.
     private @Nullable Connection listenConnection;
     private @Nullable Thread workerThread;
     private volatile boolean stopRequested;
-
-    private String getUpsertSql() {
-        String sql = upsertSql;
-        if (sql == null) {
-            long ms = throttleWindow.toMillis();
-            String interval = "INTERVAL '" + ms + " milliseconds'";
-            sql = "INSERT INTO admin_notification_state "
-                    + "(notification_key, error_class, last_notified_at, notification_count, "
-                    + "suppressed_count, first_seen_at) "
-                    + "VALUES (?, ?, ?, 1, 0, ?) "
-                    + "ON CONFLICT (notification_key) DO UPDATE SET "
-                    + "last_notified_at = EXCLUDED.last_notified_at, "
-                    + "notification_count = admin_notification_state.notification_count + 1, "
-                    + "error_class = EXCLUDED.error_class "
-                    + "WHERE admin_notification_state.last_notified_at + " + interval
-                    + " <= EXCLUDED.last_notified_at "
-                    + "RETURNING notification_key";
-            upsertSql = sql;
-        }
-        return sql;
-    }
 
     @PostConstruct
     void onStartup() {
@@ -133,19 +134,46 @@ public class QuarantineReviewListener {
     }
 
     /**
-     * Shared handler for both live NOTIFY dispatch and reconciler catch-up.
-     * Routes actionable statuses to admin notification; advances the cursor
-     * for all events.
+     * Shared handler for both live NOTIFY dispatch and reconciler
+     * catch-up. Reads the row's current state from the base table,
+     * advances the cursor, and routes actionable statuses to the
+     * throttled admin notifier — all inside one JTA transaction (class
+     * javadoc §Same-transaction invariant).
+     *
+     * <p>The notification is deliberately NOT gated on the cursor
+     * advance: an actionable event arriving after a newer event has
+     * already advanced the cursor is a CAS no-op on the cursor but
+     * must still reach the admin (throttling may coalesce it, never
+     * silently drop it). The throttle key encodes the per-row error
+     * class, so a PENDING page cannot suppress a following
+     * NEEDS_REVIEW page (docs/spec/security.md §Failure handling —
+     * coalescing is per {@code (channel, error_class)}).
      *
      * @return {@code true} if the cursor advanced
      */
-    boolean handleEvent(String targetKind, UUID targetId,
-                        String newStatus, Instant eventTime) throws SQLException {
-        boolean advanced = providerStateDao.advanceCursor(
-                CHANNEL, eventTime, targetKind, targetId.toString());
+    @Transactional(rollbackOn = SQLException.class)
+    boolean handleEvent(String targetKind, UUID targetId) throws SQLException {
+        RowState row = lookupRowState(targetKind, targetId);
+        if (row == null) {
+            LOG.warnf("QuarantineReviewListener: no matching row for %s/%s (dropped)",
+                    targetKind, targetId);
+            return false;
+        }
 
-        if (advanced && isActionable(newStatus)) {
-            fireAdminNotification(targetKind, targetId, newStatus);
+        boolean advanced = providerStateDao.advanceCursor(
+                CHANNEL, row.eventTime(), targetKind, targetId.toString());
+
+        if (isActionable(row.status())) {
+            String errorClass = "quarantine_review." + row.status().toLowerCase();
+            String message = "Quarantine review action needed: " + targetKind + " "
+                    + targetId + " → " + row.status();
+            // The notifier runs on a connection enlisted in this
+            // method's transaction and propagates SQLException, so a
+            // failed notification write rolls back the cursor advance
+            // above instead of being swallowed after it committed.
+            try (Connection conn = dataSource.getConnection()) {
+                throttledAdminNotifier.notifyOnce(conn, errorClass, errorClass, message);
+            }
         }
         return advanced;
     }
@@ -154,37 +182,31 @@ public class QuarantineReviewListener {
         return "PENDING".equals(status) || "NEEDS_REVIEW".equals(status);
     }
 
-    private void fireAdminNotification(String targetKind, UUID targetId, String newStatus) {
-        OffsetDateTime now = OffsetDateTime.ofInstant(Instant.now(), ZoneOffset.UTC);
-        String errorClass = "quarantine_review." + newStatus.toLowerCase();
-        String message = "Quarantine review action needed: " + targetKind + " "
-                + targetId + " → " + newStatus;
-
-        try (Connection conn = dataSource.getConnection()) {
-            boolean emitted;
-            try (PreparedStatement ps = conn.prepareStatement(getUpsertSql())) {
-                ps.setString(1, ADMIN_NOTIFY_KEY);
-                ps.setString(2, errorClass);
-                ps.setObject(3, now);
-                ps.setObject(4, now);
-                try (ResultSet rs = ps.executeQuery()) {
-                    emitted = rs.next();
-                }
+    /**
+     * Reads the row's current status and event time from the base
+     * table — quarantine_review_view (the redacted Provider view) for
+     * quarantine events, post for post events. The NOTIFY payload
+     * carries neither field authoritatively: NOTIFY is the wake-up
+     * signal, the row is the data (docs/spec/architecture.md
+     * §Inter-service communication). Both timestamp columns are
+     * NOT NULL by schema, so a present row always yields a full state.
+     */
+    private @Nullable RowState lookupRowState(String targetKind, UUID targetId) throws SQLException {
+        String sql = "quarantine".equals(targetKind)
+                ? "SELECT updated_at, status FROM quarantine_review_view WHERE id = ?"
+                : "SELECT status_changed_at, status FROM post WHERE id = ?";
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setObject(1, targetId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) return null;
+                return new RowState(rs.getString(2), rs.getTimestamp(1).toInstant());
             }
-            if (emitted) {
-                LOG.warnf("ADMIN-NOTIFY key=%s error=%s message=%s",
-                        ADMIN_NOTIFY_KEY, errorClass, message);
-            } else {
-                try (PreparedStatement bump = conn.prepareStatement(SUPPRESSED_BUMP_SQL)) {
-                    bump.setString(1, ADMIN_NOTIFY_KEY);
-                    bump.executeUpdate();
-                }
-            }
-        } catch (SQLException e) {
-            LOG.warnf(e, "ADMIN-NOTIFY key=%s error=%s message=persistence failed",
-                    ADMIN_NOTIFY_KEY, errorClass);
         }
     }
+
+    /** Current row state read from the base table. */
+    record RowState(String status, Instant eventTime) {}
 
     // ---- LISTEN/NOTIFY loop (mirrors NewPostListener) ----
 
@@ -197,8 +219,8 @@ public class QuarantineReviewListener {
             } catch (SQLException e) {
                 if (stopRequested) return;
                 LOG.errorf(e,
-                        "QuarantineReviewListener: cannot (re)acquire LISTEN connection; "
-                                + "backing off %dms", backoffMs);
+                        "QuarantineReviewListener: reconnect sequence failed "
+                                + "(acquire/LISTEN/catch-up); backing off %dms", backoffMs);
                 if (!sleepBackoff(backoffMs)) return;
                 backoffMs = Math.min(backoffMs * 2, MAX_BACKOFF_MS);
                 continue;
@@ -235,15 +257,10 @@ public class QuarantineReviewListener {
             return;
         }
         try {
-            // Look up event timestamp from DB
-            Instant eventTime = lookupEventTime(payload.targetKind(), payload.targetId());
-            if (eventTime == null) {
-                LOG.warnf("QuarantineReviewListener: no matching row for %s/%s (dropped)",
-                        payload.targetKind(), payload.targetId());
-                return;
-            }
-            handleEvent(payload.targetKind(), payload.targetId(),
-                    payload.newStatus(), eventTime);
+            // Through the CDI client proxy, NOT this.handleEvent —
+            // the @Transactional interceptor only intercepts
+            // proxy-routed calls (class javadoc).
+            self.handleEvent(payload.targetKind(), payload.targetId());
         } catch (SQLException e) {
             LOG.errorf(e, "QuarantineReviewListener: handler failed for %s/%s",
                     payload.targetKind(), payload.targetId());
@@ -251,26 +268,11 @@ public class QuarantineReviewListener {
     }
 
     /**
-     * Reads the event timestamp from the DB. The NOTIFY payload does not
-     * carry a timestamp, so the listener must look it up. For quarantine
-     * events: quarantine_review_view.updated_at. For post events:
-     * post.status_changed_at.
+     * Validates the wire shape: all three payload fields must be
+     * present and well-formed (the emit side's closed contract). The
+     * parsed {@code new_status} is retained for shape validation only
+     * — actionability comes from the row (class javadoc §Row truth).
      */
-    private @Nullable Instant lookupEventTime(String targetKind, UUID targetId) throws SQLException {
-        String sql = "quarantine".equals(targetKind)
-                ? "SELECT updated_at FROM quarantine_review_view WHERE id = ?"
-                : "SELECT status_changed_at FROM post WHERE id = ?";
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setObject(1, targetId);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (!rs.next()) return null;
-                Timestamp ts = rs.getTimestamp(1);
-                return ts != null ? ts.toInstant() : null;
-            }
-        }
-    }
-
     static Payload parsePayload(String json) {
         Matcher kindMatcher = TARGET_KIND_PATTERN.matcher(json);
         Matcher idMatcher = TARGET_ID_PATTERN.matcher(json);
@@ -289,18 +291,50 @@ public class QuarantineReviewListener {
     record Payload(String targetKind, UUID targetId, String newStatus) {}
 
     // ---- LISTEN connection management ----
+    //
+    // The lifecycle methods below are synchronized: the worker's
+    // check-reopen-catch-up sequence races against a concurrent close
+    // (the @PreDestroy shutdown path, or the test hook) — an
+    // unsynchronized close landing between the reopen and the field
+    // read would null out the FRESH connection and NPE-kill the worker
+    // thread. The poll itself (getNotifications in runLoop) stays
+    // outside the monitor so a close is never blocked for the full
+    // notification timeout.
 
-    private PGConnection ensureListenConnection() throws SQLException {
+    private synchronized PGConnection ensureListenConnection() throws SQLException {
         if (listenConnection == null || listenConnection.isClosed()) {
             closeListenConnectionQuietly();
             openListenConnection();
             LOG.info("QuarantineReviewListener: (re)acquired LISTEN connection "
                     + "and re-issued LISTEN " + CHANNEL);
+            reconcileAfterReconnect();
         }
         return Objects.requireNonNull(listenConnection).unwrap(PGConnection.class);
     }
 
-    private void openListenConnection() throws SQLException {
+    /**
+     * Post-reconnect catch-up (mirrors {@link NewPostListener}):
+     * NOTIFYs fired between the connection loss and the re-LISTEN
+     * above were dropped by Postgres, so the reconciler replays
+     * quarantine_review events past the cursor — advancing the cursor
+     * AND notifying actionable ones through the same
+     * {@link #handleEvent} path. A catch-up failure closes the fresh
+     * connection and rethrows so the caller's backoff path retries
+     * the full reconnect-plus-reconcile sequence — otherwise a live
+     * connection with an unreconciled gap would short-circuit future
+     * {@link #ensureListenConnection()} calls and the gap would
+     * persist silently.
+     */
+    private void reconcileAfterReconnect() throws SQLException {
+        try {
+            reconciler.runCatchUp();
+        } catch (SQLException e) {
+            closeListenConnectionQuietly();
+            throw e;
+        }
+    }
+
+    private synchronized void openListenConnection() throws SQLException {
         listenConnection = dataSource.getConnection();
         listenConnection.setAutoCommit(true);
         try (Statement stmt = listenConnection.createStatement()) {
@@ -308,7 +342,7 @@ public class QuarantineReviewListener {
         }
     }
 
-    private void closeListenConnectionQuietly() {
+    private synchronized void closeListenConnectionQuietly() {
         if (listenConnection != null) {
             try {
                 listenConnection.close();

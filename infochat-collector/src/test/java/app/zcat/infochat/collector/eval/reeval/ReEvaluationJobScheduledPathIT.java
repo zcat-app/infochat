@@ -64,20 +64,25 @@ class ReEvaluationJobScheduledPathIT {
     void capExhaustedRowReachesNeedsReviewThroughScheduledTick() throws Exception {
         UUID postId = seedQuarantinedStage2Post("scheduled-cap", "UNKNOWN", unknownCap);
         // Establish a known precondition for the cap-exhaustion notifier
-        // key: ReEvaluationJobTest shares this Quarkus instance and may
-        // have already recorded (and thus throttled) this key. Clearing
-        // the row guarantees this tick's notifyOnce takes the fresh-INSERT
-        // (EMITTED) branch rather than being suppressed inside the window.
+        // key: clearing any residue from earlier runs guarantees the
+        // absence assertion below observes THIS tick, not a stale row.
         resetCapExhaustionNotifier();
 
         reEvaluationJob.onTick();
 
+        // The NEEDS_REVIEW transition (with its quarantine_review NOTIFY,
+        // pinned by ReEvalVerdictNotifyIT and the emit call inside the
+        // same transaction) is the Collector's whole contribution; the
+        // Provider's quarantine_review consumer owns the single throttled
+        // admin page for this transition. A Collector-side notifyOnce
+        // here would double-page the admin for one event.
         assertPostStatus(postId, "NEEDS_REVIEW");
         var state = throttledAdminNotifier.getState(
             ReEvaluationJob.ERROR_CLASS_REEVAL_CAP_EXHAUSTION);
-        assertTrue(state.isPresent(),
-            "cap-exhaustion admin notification must fire when the scheduled tick "
-                + "transitions a cap-reached row to NEEDS_REVIEW");
+        assertFalse(state.isPresent(),
+            "the Collector must NOT page the admin notifier for cap "
+                + "exhaustion — the Provider's NEEDS_REVIEW NOTIFY handling "
+                + "is the single admin page for this transition");
     }
 
     @Test

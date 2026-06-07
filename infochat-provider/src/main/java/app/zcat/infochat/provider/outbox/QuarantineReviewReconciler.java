@@ -25,10 +25,19 @@ import java.util.UUID;
  * quarantine_review_view and the post table for events that arrived
  * while the Provider was down.
  *
- * <p>Unlike the live listener, the reconciler only advances the cursor
- * — it does not fire admin notifications for missed events. Admin
- * notifications are best-effort and the admin will see the quarantine
- * queue on the next {@code /quarantine list} invocation regardless.
+ * <p>Each missed event routes through
+ * {@link QuarantineReviewListener#handleEvent} — the same per-row JTA
+ * transaction the live dispatch path uses (mirroring how
+ * {@link NewPostReconciler} funnels rows into {@code NewPostHandler}),
+ * so catch-up both advances the cursor and produces the throttled
+ * admin notification for actionable missed events. A Provider outage
+ * therefore cannot silently swallow a PENDING / NEEDS_REVIEW page:
+ * throttling may coalesce it, never drop it.
+ *
+ * <p>The {@code listener} injection is the reconciler→listener half of
+ * a deliberate normal-scope cycle (the listener injects the reconciler
+ * for reconnect catch-up); see the listener's class javadoc for why
+ * the early instantiation this can trigger is benign on this channel.
  */
 @Startup
 @Priority(250)
@@ -52,6 +61,7 @@ public class QuarantineReviewReconciler {
 
     @Inject DataSource dataSource;
     @Inject ProviderStateDao providerStateDao;
+    @Inject QuarantineReviewListener listener;
 
     @Inject
     @ConfigProperty(name = "infochat.provider.catchup.quarantine-page-size", defaultValue = "500")
@@ -89,16 +99,15 @@ public class QuarantineReviewReconciler {
         // Phase 1: quarantine events (all statuses — advance cursor past them)
         caughtUpCount += scanQuarantineEvents(cursorHigh, cursorKind, cursorId);
 
-        // Re-read cursor after quarantine scan (it may have advanced)
-        Optional<ProviderStateDao.Cursor> updated =
-                providerStateDao.readCursor(QuarantineReviewListener.CHANNEL);
-        if (updated.isPresent()) {
-            cursorHigh = updated.get().cursorHigh();
-            cursorKind = updated.get().cursorLowKind();
-            cursorId = updated.get().cursorLowId();
-        }
-
-        // Phase 2: post NEEDS_REVIEW events
+        // Phase 2: post NEEDS_REVIEW events, scanned against the SAME
+        // snapshot phase 1 started from — never a post-phase re-read.
+        // Phase 1's handleEvent calls advance the shared cursor to the
+        // newest quarantine event; re-reading it here would move the
+        // post scan's baseline past any NEEDS_REVIEW post older than
+        // that event, and because the cursor only moves forward, no
+        // later catch-up could ever recover the skipped admin page.
+        // Re-scanning rows handleEvent already saw is harmless: the
+        // CAS advance no-ops and the throttle coalesces.
         caughtUpCount += scanPostEvents(cursorHigh, cursorKind, cursorId);
 
         LOG.infof("QuarantineReviewReconciler: caught up %d events in %d page(s)",
@@ -124,9 +133,11 @@ public class QuarantineReviewReconciler {
                     while (rs.next()) {
                         UUID id = rs.getObject("id", UUID.class);
                         Instant updatedAt = rs.getTimestamp("updated_at").toInstant();
-                        providerStateDao.advanceCursor(
-                                QuarantineReviewListener.CHANNEL,
-                                updatedAt, "quarantine", id.toString());
+                        // Per-row handling through the listener's client
+                        // proxy: one JTA transaction per row, cursor
+                        // advance + actionable-event notification
+                        // committing atomically (listener javadoc).
+                        listener.handleEvent("quarantine", id);
                         pagingHigh = updatedAt;
                         pagingKind = "quarantine";
                         pagingId = id.toString();
@@ -160,9 +171,7 @@ public class QuarantineReviewReconciler {
                     while (rs.next()) {
                         UUID id = rs.getObject("id", UUID.class);
                         Instant statusChangedAt = rs.getTimestamp("status_changed_at").toInstant();
-                        providerStateDao.advanceCursor(
-                                QuarantineReviewListener.CHANNEL,
-                                statusChangedAt, "post", id.toString());
+                        listener.handleEvent("post", id);
                         pagingHigh = statusChangedAt;
                         pagingKind = "post";
                         pagingId = id.toString();

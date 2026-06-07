@@ -10,7 +10,6 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
-import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -29,6 +28,14 @@ import static org.junit.jupiter.api.Assertions.fail;
  * {@link QuarantineReviewReconciler}. Emits real
  * {@code pg_notify('quarantine_review', …)} from a separate JDBC
  * connection and asserts the live listener dispatches correctly.
+ *
+ * <p>Pins the row-truth contract: actionability comes from the row's
+ * current status (quarantine_review_view / post), never from the
+ * payload's {@code new_status}; the throttle key is per error class
+ * ({@code quarantine_review.pending} / {@code
+ * quarantine_review.needs_review}) so the two actionable classes
+ * cannot suppress each other; and an actionable event is never
+ * silently dropped by the CAS-advance gate.
  */
 @QuarkusTest
 class QuarantineReviewListenerTest {
@@ -37,6 +44,9 @@ class QuarantineReviewListenerTest {
     private static final Duration AWAIT_POLL = Duration.ofMillis(50);
     private static final String TEST_UID_PREFIX = "qrl-it/";
     private static final Instant FETCHED_AT = Instant.parse("2026-05-15T12:00:00Z");
+
+    private static final String PENDING_KEY = "quarantine_review.pending";
+    private static final String NEEDS_REVIEW_KEY = "quarantine_review.needs_review";
 
     @Inject @SeedDataSource DataSource dataSource;
     @Inject QuarantineReviewListener listener;
@@ -65,10 +75,10 @@ class QuarantineReviewListenerTest {
                              + "WHERE channel = 'quarantine_review'")) {
             ps.executeUpdate();
         }
-        // Reset admin_notification_state for the test key
+        // Reset admin_notification_state for every per-error-class key
         try (Connection conn = dataSource.getConnection()) {
-            exec(conn, "DELETE FROM admin_notification_state WHERE notification_key = ?",
-                    "quarantine-review-actionable");
+            exec(conn, "DELETE FROM admin_notification_state WHERE notification_key LIKE ?",
+                    "quarantine_review.%");
         }
         testSourceId = ensureTestSource();
     }
@@ -82,8 +92,9 @@ class QuarantineReviewListenerTest {
         awaitCursor(c -> quarantineId.toString().equals(c.cursorLowId()),
                 "cursor must advance to the quarantine row");
 
-        assertTrue(adminNotificationExists(),
-                "PENDING quarantine event must fire admin notification");
+        assertTrue(adminNotificationExists(PENDING_KEY),
+                "PENDING quarantine event must fire admin notification under "
+                        + PENDING_KEY);
     }
 
     @Test
@@ -95,34 +106,104 @@ class QuarantineReviewListenerTest {
         awaitCursor(c -> postId.toString().equals(c.cursorLowId()),
                 "cursor must advance to the post row");
 
-        assertTrue(adminNotificationExists(),
-                "NEEDS_REVIEW post event must fire admin notification");
+        assertTrue(adminNotificationExists(NEEDS_REVIEW_KEY),
+                "NEEDS_REVIEW post event must fire admin notification under "
+                        + NEEDS_REVIEW_KEY);
     }
 
     @Test
     void terminalTransition_advancesCursor_noNotification() throws Exception {
-        // Reset admin notification state so we can test it stays empty
         UUID quarantineId = seedQuarantineRow("BENIGN_CLOSED",
                 TEST_UID_PREFIX + "bc1");
 
-        // First process a PENDING to create a notification state
-        // Then test BENIGN_CLOSED, APPROVED, REJECTED
-
-        // For BENIGN_CLOSED: emit and verify cursor advances
         emitQuarantineReviewNotify("quarantine", quarantineId, "BENIGN_CLOSED");
 
         awaitCursor(c -> quarantineId.toString().equals(c.cursorLowId()),
                 "cursor must advance for BENIGN_CLOSED");
 
-        // The terminal event should not create a NEW notification entry beyond
-        // what the cursor advance implies. We verify by checking the event
-        // was processed (cursor advanced) without a new ADMIN-NOTIFY log.
-        // Since admin notification uses a throttle key, we check the cursor
-        // advanced which is the primary contract.
+        // The per-error-class keys make the negative assertion direct:
+        // a terminal transition must leave no quarantine_review.* row.
+        assertFalse(anyQuarantineReviewNotificationExists(),
+                "terminal transition must not fire any admin notification");
+    }
+
+    @Test
+    void rowStateOverridesForgedPayloadStatus() throws Exception {
+        // Forged escalation: payload claims PENDING, the row is
+        // BENIGN_CLOSED. Behavior must follow the row — cursor
+        // advances, no notification (NOTIFY is purely the wake-up
+        // signal; the row is the data).
+        UUID closedId = seedQuarantineRow("BENIGN_CLOSED", TEST_UID_PREFIX + "forged1");
+
+        emitQuarantineReviewNotify("quarantine", closedId, "PENDING");
+
+        awaitCursor(c -> closedId.toString().equals(c.cursorLowId()),
+                "cursor must advance to the BENIGN_CLOSED row");
+        assertFalse(anyQuarantineReviewNotificationExists(),
+                "a forged PENDING payload over a BENIGN_CLOSED row must not "
+                        + "fire an admin notification — actionability follows the row");
+
+        // Forged downgrade: payload claims BENIGN_CLOSED, the row is
+        // PENDING. The admin page must fire regardless of the payload.
+        UUID pendingId = seedQuarantineRowWithDelay("PENDING", TEST_UID_PREFIX + "forged2");
+
+        emitQuarantineReviewNotify("quarantine", pendingId, "BENIGN_CLOSED");
+
+        awaitCursor(c -> pendingId.toString().equals(c.cursorLowId()),
+                "cursor must advance to the PENDING row");
+        assertTrue(adminNotificationExists(PENDING_KEY),
+                "a forged BENIGN_CLOSED payload over a PENDING row must still "
+                        + "fire the admin notification — actionability follows the row");
+    }
+
+    @Test
+    void needsReviewNotSuppressedByPendingThrottleWindow() throws Exception {
+        // A PENDING page opens its throttle window first…
+        UUID quarantineId = seedQuarantineRow("PENDING", TEST_UID_PREFIX + "throttle-p");
+        emitQuarantineReviewNotify("quarantine", quarantineId, "PENDING");
+        awaitCursor(c -> quarantineId.toString().equals(c.cursorLowId()),
+                "cursor must advance to the PENDING quarantine row");
+        assertTrue(adminNotificationExists(PENDING_KEY),
+                "PENDING event must open its own throttle window");
+
+        // …and a NEEDS_REVIEW event inside that window must still page:
+        // coalescing is per (channel, error_class), so the two
+        // actionable classes throttle independently.
+        UUID postId = seedPostWithStatus("NEEDS_REVIEW", TEST_UID_PREFIX + "throttle-nr");
+        emitQuarantineReviewNotify("post", postId, "NEEDS_REVIEW");
+        awaitCursor(c -> postId.toString().equals(c.cursorLowId()),
+                "cursor must advance to the NEEDS_REVIEW post row");
+        assertTrue(adminNotificationExists(NEEDS_REVIEW_KEY),
+                "a NEEDS_REVIEW notification must not be suppressed by the "
+                        + "throttle window a recent PENDING notification opened");
+    }
+
+    @Test
+    void olderActionableEventAfterNewerCursorStillNotifies() throws Exception {
+        // Older actionable quarantine event; newer post event. The two
+        // land on distinct throttle keys so the older event's page is a
+        // row-presence check, not a suppressed-count delta.
+        UUID olderQuarantineId = seedQuarantineRow("PENDING", TEST_UID_PREFIX + "ooo-old");
+        Thread.sleep(10); // ensure distinct event timestamps
+        UUID newerPostId = seedPostWithStatus("NEEDS_REVIEW", TEST_UID_PREFIX + "ooo-new");
+
+        // Deliver the NEWER event first — cursor advances past the older.
+        emitQuarantineReviewNotify("post", newerPostId, "NEEDS_REVIEW");
+        awaitCursor(c -> newerPostId.toString().equals(c.cursorLowId()),
+                "cursor must advance to the newer post event");
+
+        // The older actionable event is a CAS no-op on the cursor but
+        // must still reach the admin notifier.
+        emitQuarantineReviewNotify("quarantine", olderQuarantineId, "PENDING");
+        awaitNotification(PENDING_KEY,
+                "an actionable event arriving after a newer event already "
+                        + "advanced the cursor must still reach the admin notifier");
+
         Optional<ProviderStateDao.Cursor> cursor =
                 providerStateDao.readCursor(QuarantineReviewListener.CHANNEL);
         assertTrue(cursor.isPresent());
-        assertEquals("quarantine", cursor.get().cursorLowKind());
+        assertEquals(newerPostId.toString(), cursor.get().cursorLowId(),
+                "cursor must not move backwards to the older event");
     }
 
     @Test
@@ -171,6 +252,57 @@ class QuarantineReviewListenerTest {
         assertTrue(cursor.isPresent());
         assertFalse(cursor.get().cursorLowId().isEmpty(),
                 "cursor must have advanced past epoch");
+    }
+
+    @Test
+    void reconcilerCatchUpNotifiesActionableMissedEvents() throws Exception {
+        // An actionable event beyond the stored cursor, never NOTIFYed —
+        // the missed-while-down shape. Catch-up must route it through the
+        // same handling path as live dispatch: cursor advance AND admin
+        // notification (throttling may coalesce it, never drop it).
+        UUID qId = seedQuarantineRow("PENDING", TEST_UID_PREFIX + "reconcile-notify");
+
+        reconciler.runCatchUp();
+
+        Optional<ProviderStateDao.Cursor> cursor =
+                providerStateDao.readCursor(QuarantineReviewListener.CHANNEL);
+        assertTrue(cursor.isPresent());
+        assertEquals(qId.toString(), cursor.get().cursorLowId(),
+                "catch-up must advance the cursor to the missed event");
+        assertTrue(adminNotificationExists(PENDING_KEY),
+                "catch-up must produce the admin notification for an "
+                        + "actionable missed event");
+    }
+
+    @Test
+    void reconcilerCatchUpPagesPostEventOlderThanNewestQuarantineEvent() throws Exception {
+        // A NEEDS_REVIEW post event at T1 and a quarantine event at
+        // T2 > T1, both beyond the stored cursor. Phase 1 (quarantine
+        // scan) advances the cursor to T2; the post scan must still run
+        // from the snapshot taken at catch-up start — a baseline re-read
+        // after phase 1 would skip the post event permanently, because
+        // the cursor only moves forward and no later catch-up could
+        // recover the lost admin page.
+        seedPostWithStatus("NEEDS_REVIEW", TEST_UID_PREFIX + "older-post");
+        UUID quarantineId = seedQuarantineRowWithDelay("PENDING", TEST_UID_PREFIX + "newer-q");
+
+        reconciler.runCatchUp();
+
+        assertTrue(adminNotificationExists(NEEDS_REVIEW_KEY),
+                "a NEEDS_REVIEW post event older than the newest quarantine "
+                        + "event in the same catch-up window must still page the "
+                        + "admin — the post scan must use the cursor snapshot from "
+                        + "catch-up start, not a re-read after the quarantine phase");
+        assertTrue(adminNotificationExists(PENDING_KEY),
+                "the newer PENDING quarantine event must page under its own key");
+
+        Optional<ProviderStateDao.Cursor> cursor =
+                providerStateDao.readCursor(QuarantineReviewListener.CHANNEL);
+        assertTrue(cursor.isPresent());
+        assertEquals(quarantineId.toString(), cursor.get().cursorLowId(),
+                "cursor must end at the newest event (the quarantine row); the "
+                        + "older post event is a CAS no-op on the cursor, notified "
+                        + "but never moving it backwards");
     }
 
     // ---- Helpers ----
@@ -248,11 +380,22 @@ class QuarantineReviewListenerTest {
         }
     }
 
-    private boolean adminNotificationExists() throws Exception {
+    private boolean adminNotificationExists(String key) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "SELECT 1 FROM admin_notification_state WHERE notification_key = ?")) {
-            ps.setString(1, "quarantine-review-actionable");
+            ps.setString(1, key);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+
+    private boolean anyQuarantineReviewNotificationExists() throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT 1 FROM admin_notification_state WHERE notification_key LIKE ?")) {
+            ps.setString(1, "quarantine_review.%");
             try (ResultSet rs = ps.executeQuery()) {
                 return rs.next();
             }
@@ -292,6 +435,17 @@ class QuarantineReviewListenerTest {
             Optional<ProviderStateDao.Cursor> cursor =
                     providerStateDao.readCursor(QuarantineReviewListener.CHANNEL);
             if (cursor.isPresent() && predicate.test(cursor.get())) {
+                return;
+            }
+            Thread.sleep(AWAIT_POLL.toMillis());
+        }
+        fail(failMsg);
+    }
+
+    private void awaitNotification(String key, String failMsg) throws Exception {
+        Instant deadline = Instant.now().plus(AWAIT_TIMEOUT);
+        while (Instant.now().isBefore(deadline)) {
+            if (adminNotificationExists(key)) {
                 return;
             }
             Thread.sleep(AWAIT_POLL.toMillis());

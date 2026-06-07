@@ -24,7 +24,8 @@ import java.util.Optional;
  * ("Admin notification state — backing store for the throttled admin
  * notifier (decision D22)") and docs/spec/security.md §Failure
  * handling (decision D42's per-source failure-coalescing). Callers
- * invoke {@link #notifyOnce} on every failure occurrence; the
+ * invoke {@link #notifyOnce(String, String, String)} on every
+ * failure occurrence; the
  * notifier emits at most one WARN log line per
  * {@code (notification_key, throttle-window)} pair, persists row-
  * level counters to {@code admin_notification_state}, and routes
@@ -221,38 +222,8 @@ public class ThrottledAdminNotifier {
         String safeKey = sanitize(key, MAX_KEY_LENGTH);
         String safeErrorClass = sanitize(errorClass, MAX_ERROR_CLASS_LENGTH);
         String safeMessage = sanitize(message, MAX_MESSAGE_LENGTH);
-        Instant now = clock.instant();
-        OffsetDateTime nowOdt = OffsetDateTime.ofInstant(now, ZoneOffset.UTC);
         try (Connection conn = dataSource.getConnection()) {
-            boolean emitted;
-            try (PreparedStatement ps = conn.prepareStatement(upsertSql)) {
-                ps.setString(1, safeKey);
-                ps.setString(2, safeErrorClass);
-                ps.setObject(3, nowOdt);
-                ps.setObject(4, nowOdt);
-                try (ResultSet rs = ps.executeQuery()) {
-                    // RETURNING produces a row iff the INSERT
-                    // succeeded OR the DO UPDATE WHERE matched —
-                    // either way an emit happened. No row → CONFLICT
-                    // but WHERE filtered out the UPDATE → suppressed.
-                    emitted = rs.next();
-                }
-            }
-            if (emitted) {
-                // Canonical WARN format pinned for operator log
-                // scraping per the ticket's acceptance contract.
-                LOG.warnf("ADMIN-NOTIFY key=%s error=%s message=%s", safeKey, safeErrorClass, safeMessage);
-                return NotifyOutcome.EMITTED;
-            }
-            // Within-window: bump suppressed_count on the row that
-            // already exists. The follow-up UPDATE is atomic at the
-            // row level so N concurrent SUPPRESSED callers produce
-            // exactly N increments.
-            try (PreparedStatement bump = conn.prepareStatement(SUPPRESSED_BUMP_SQL)) {
-                bump.setString(1, safeKey);
-                bump.executeUpdate();
-            }
-            return NotifyOutcome.SUPPRESSED;
+            return runNotify(conn, safeKey, safeErrorClass, safeMessage);
         } catch (SQLException e) {
             // Degraded-DB fallback. A DB failure inside the notifier
             // must not propagate — the notifier IS the failure-
@@ -273,6 +244,71 @@ public class ThrottledAdminNotifier {
                 sanitize(exceptionMessage, MAX_MESSAGE_LENGTH));
             return NotifyOutcome.SUPPRESSED;
         }
+    }
+
+    /**
+     * Transaction-participating variant of
+     * {@link #notifyOnce(String, String, String)}: runs the UPSERT on
+     * the supplied {@code conn} and PROPAGATES {@link SQLException}
+     * instead of routing it to the degraded-DB fallback. For callers
+     * whose notification persistence must commit atomically with
+     * other writes in the same transaction (e.g. a LISTEN/NOTIFY
+     * consumer's high-water-mark advance per
+     * docs/spec/architecture.md §Inter-service communication) — a
+     * swallowed failure here would let the surrounding transaction
+     * commit while the notification is silently lost. The caller owns
+     * failure handling: the propagated exception must roll back the
+     * whole transaction, side effects included.
+     */
+    public NotifyOutcome notifyOnce(Connection conn,
+                                    String key,
+                                    String errorClass,
+                                    String message) throws SQLException {
+        return runNotify(conn,
+            sanitize(key, MAX_KEY_LENGTH),
+            sanitize(errorClass, MAX_ERROR_CLASS_LENGTH),
+            sanitize(message, MAX_MESSAGE_LENGTH));
+    }
+
+    /**
+     * Shared UPSERT + suppressed-bump core. Inputs are pre-sanitized
+     * by both public entry points; the connection's transaction
+     * semantics (own pooled connection vs caller-enlisted) are the
+     * entry points' concern.
+     */
+    private NotifyOutcome runNotify(Connection conn, String safeKey, String safeErrorClass,
+                                    String safeMessage) throws SQLException {
+        Instant now = clock.instant();
+        OffsetDateTime nowOdt = OffsetDateTime.ofInstant(now, ZoneOffset.UTC);
+        boolean emitted;
+        try (PreparedStatement ps = conn.prepareStatement(upsertSql)) {
+            ps.setString(1, safeKey);
+            ps.setString(2, safeErrorClass);
+            ps.setObject(3, nowOdt);
+            ps.setObject(4, nowOdt);
+            try (ResultSet rs = ps.executeQuery()) {
+                // RETURNING produces a row iff the INSERT
+                // succeeded OR the DO UPDATE WHERE matched —
+                // either way an emit happened. No row → CONFLICT
+                // but WHERE filtered out the UPDATE → suppressed.
+                emitted = rs.next();
+            }
+        }
+        if (emitted) {
+            // Canonical WARN format pinned for operator log
+            // scraping per the ticket's acceptance contract.
+            LOG.warnf("ADMIN-NOTIFY key=%s error=%s message=%s", safeKey, safeErrorClass, safeMessage);
+            return NotifyOutcome.EMITTED;
+        }
+        // Within-window: bump suppressed_count on the row that
+        // already exists. The follow-up UPDATE is atomic at the
+        // row level so N concurrent SUPPRESSED callers produce
+        // exactly N increments.
+        try (PreparedStatement bump = conn.prepareStatement(SUPPRESSED_BUMP_SQL)) {
+            bump.setString(1, safeKey);
+            bump.executeUpdate();
+        }
+        return NotifyOutcome.SUPPRESSED;
     }
 
     /**
