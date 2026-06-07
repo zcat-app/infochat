@@ -421,13 +421,17 @@ class BanCommandHandlerTest {
         // The cleanup's guardian admin is temporarily demoted so it does
         // NOT count as another unbanned admin; restored in the finally
         // block so subsequent tests' cleanup can still rely on it as the
-        // last-admin-protection floor when deleting test admins.
+        // last-admin-protection floor when deleting test admins. The
+        // AdminBootstrap @Startup bean seeds one more unbanned admin at
+        // boot (the %test inmemory bootstrap contact); it is demoted and
+        // restored the same way so the sole-admin premise holds.
         String actor = PREFIX + "lastAdmin-actor";
         String target = PREFIX + "lastAdmin-target";
         seedUser(actor, /* isAdmin */ true, /* isBanned */ true, "vouched");
         seedUser(target, /* isAdmin */ true, /* isBanned */ false, "vouched");
 
         setGuardianAdmin(false);
+        setBootstrapAdmin(false);
         try {
             // Snapshot pre-state (after guardian demotion).
             boolean targetBannedBefore = isBanned(target);
@@ -479,6 +483,7 @@ class BanCommandHandlerTest {
                             + "for this target");
         } finally {
             setGuardianAdmin(true);
+            setBootstrapAdmin(true);
         }
     }
 
@@ -667,6 +672,25 @@ class BanCommandHandlerTest {
              PreparedStatement ps = conn.prepareStatement(
                      "UPDATE users SET is_admin = ? "
                              + "WHERE adapter = ? AND contact_id = 'guardian-m1-044c-ban-permanent'")) {
+            ps.setBoolean(1, isAdmin);
+            ps.setString(2, ADAPTER);
+            ps.executeUpdate();
+        }
+    }
+
+    /**
+     * Demote/restore the bootstrap admin row the {@code AdminBootstrap}
+     * {@code @Startup} bean seeds at boot from the {@code %test}
+     * {@code infochat.adapters.inmemory.admin} property. Same role as
+     * {@link #setGuardianAdmin}: the lastAdmin scenario needs every
+     * unbanned admin outside its own fixture neutralized so the V5
+     * trigger sees the target as the sole remaining admin.
+     */
+    private void setBootstrapAdmin(boolean isAdmin) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "UPDATE users SET is_admin = ? "
+                             + "WHERE adapter = ? AND contact_id = 'test-bootstrap-contact'")) {
             ps.setBoolean(1, isAdmin);
             ps.setString(2, ADAPTER);
             ps.executeUpdate();

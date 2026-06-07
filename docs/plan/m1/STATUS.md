@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 30 |
+| pending | 41 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 212 |
+| done | 213 |
 | deferred | 2 |
-| **total** | **244** |
+| **total** | **256** |
 
 ---
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-178 — Implement the bootstrap-admin startup bean (complexity: medium, risk: medium)
 - M1-179 — Cross-tick UID dedup in the fetch persist path (complexity: medium, risk: high)
 - M1-181 — quarantine_review listener correctness cluster (complexity: high, risk: medium)
 - M1-182 — Re-evaluation verdict handling: re-hide, NOTIFYs, pipeline (complexity: high, risk: medium)
@@ -52,6 +51,17 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-204 — Messaging SPI conformance: setTyping no-op, start() exception type, constants drift, jitter, dead stubs (complexity: medium, risk: medium)
 - M1-205 — Adapter rate-limit enforcement: implement §6.3.7 + capability caps, or design-amend (complexity: high, risk: medium)
 - M1-206 — Parameterize SET LOCAL infochat.actor_id (drop UUID string concat) (complexity: low, risk: low)
+- M1-208 — Per-adapter bootstrap-admin contact-id parse validation (SPI surface decision) (complexity: medium, risk: medium)
+- M1-209 — Remove hand-written @NonNull made redundant by D48 null-marked packages (complexity: low, risk: medium)
+- M1-210 — Module-DAG enforcement + doc/config-truth sweep (docs say what the build does) (complexity: medium, risk: medium)
+- M1-211 — MessagingAdapter.assertIdentity: wire the spec-mandated surface or remove it (complexity: medium, risk: medium)
+- M1-212 — ProgressNotifier pipeline: implement minimally, defer by amendment, or remove (complexity: medium, risk: medium)
+- M1-213 — TranslationProvider module placement: move to the LLM adapter or amend the spec (complexity: low, risk: low)
+- M1-214 — SSRF small fixes: Location-resolve exception contract, fec0::/10, scheme case-fold, reason()-based test assertions (complexity: medium, risk: medium)
+- M1-215 — Core hygiene: sanitized key in getState WARN, full-C0 sanitize, single AuditLogWriter constructor (complexity: low, risk: low)
+- M1-216 — Collector lows: TTL-job partition independence, saturation counter, sha256 dedup, zero-width escapes (complexity: medium, risk: medium)
+- M1-218 — Provider lows: /retry in-flight reply, /invite list-vs-revoke code identity, handle-keyed slot release (complexity: low, risk: medium)
+- M1-220 — [INVESTIGATE] Bluesky source identifier: URL (per D38) vs bare DID/handle (per the fetcher) (complexity: low, risk: medium)
 
 ---
 
@@ -69,7 +79,8 @@ _(none)_
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
 - M1-207 — blocked_by: M1-189 (pending)
-- M1-208 — blocked_by: M1-178 (pending)
+- M1-217 — blocked_by: M1-192 (pending)
+- M1-219 — blocked_by: M1-197 (pending)
 
 ---
 
@@ -89,6 +100,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-180 | Partition lifecycle: provision current month + drop pruner | 2026-06-07 | round 1 APPROVE |
+| M1-178 | Implement the bootstrap-admin startup bean | 2026-06-07 | round 1 APPROVE |
 | M1-177 | Move inbound dispatch off the transport read thread | 2026-06-07 | round 1 APPROVE |
 | M1-176 | Clamp Nostr created_at to now() before it becomes published_at | 2026-06-06 | round 1 APPROVE |
 | M1-175 | Ban intent-row parity and transaction hygiene (M1-173 audit-2 findings) | 2026-06-06 | round 1 APPROVE |
@@ -97,7 +109,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-161 | [INVESTIGATE] price_snapshot PK/dedup invariant + new_price_snapshot channel intent | 2026-06-06 | round 1 APPROVE |
 | M1-160 | [INVESTIGATE] summary_anchor scope_kind discriminator | 2026-06-06 | round 1 APPROVE |
 | M1-152 | Schema-hardening migration (stage2_verdict CHECK + V27 audit verb + Nostr index) | 2026-06-06 | round 1 APPROVE |
-| M1-151 | Typed SSRF / error signals (UrlProbe + last-admin SQLSTATE) | 2026-06-06 | round 2 OVERRIDE-APPROVE |
 
 ---
 
@@ -386,8 +397,8 @@ M1-177 (done)
   ├── M1-184 (pending) ← runnable
   ├── M1-204 (pending) ← runnable
   └── M1-205 (pending) ← runnable
-M1-178 (pending) ← runnable
-  └── M1-208 (pending)
+M1-178 (done)
+  └── M1-208 (pending) ← runnable
 M1-179 (pending) ← runnable
 M1-180 (done)
 M1-181 (pending) ← runnable
@@ -402,11 +413,13 @@ M1-189 (pending) ← runnable
 M1-190 (pending) ← runnable
 M1-191 (pending) ← runnable
 M1-192 (pending) ← runnable
+  └── M1-217 (pending)
 M1-193 (pending) ← runnable
 M1-194 (pending) ← runnable
 M1-195 (pending) ← runnable
 M1-196 (pending) ← runnable
 M1-197 (pending) ← runnable
+  └── M1-219 (pending)
 M1-198 (pending) ← runnable
 M1-199 (pending) ← runnable
 M1-200 (pending) ← runnable
@@ -414,4 +427,14 @@ M1-201 (pending) ← runnable
 M1-202 (pending) ← runnable
 M1-203 (pending) ← runnable
 M1-206 (pending) ← runnable
+M1-209 (pending) ← runnable
+M1-210 (pending) ← runnable
+M1-211 (pending) ← runnable
+M1-212 (pending) ← runnable
+M1-213 (pending) ← runnable
+M1-214 (pending) ← runnable
+M1-215 (pending) ← runnable
+M1-216 (pending) ← runnable
+M1-218 (pending) ← runnable
+M1-220 (pending) ← runnable
 ```

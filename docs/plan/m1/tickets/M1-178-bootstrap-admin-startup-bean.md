@@ -1,15 +1,38 @@
 ---
 id: M1-178
 title: "Implement the bootstrap-admin startup bean"
-status: pending
+status: done
 created: 2026-06-07
 last_updated: 2026-06-07
+escalations:
+  - date: 2026-06-07
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A — escalated by the developer before review: the implementation is
+      complete and compiles, but mvn verify round 1 fails one pre-existing
+      test (BanCommandHandlerTest.banOfOnlyAdminSurfacesLastAdminError).
+      The @Startup bean now seeds (inmemory, test-bootstrap-contact,
+      is_admin=true) in every @QuarkusTest boot, so the test's
+      sole-admin premise no longer holds and last-admin protection does
+      not fire. The intent-preserving fix (neutralize the bootstrap
+      admin inside that scenario) lives in
+      infochat-provider/src/test/java/app/zcat/infochat/provider/command/BanCommandHandlerTest.java,
+      which is outside files_scope, and test_plan carries no modifies
+      entry authorizing it.
+clarity_check:
+  date: 2026-06-07
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE item 8: comment-inspection acceptance item (Gate 7 comment no longer describes the bean as deferred/future) is verifiable by diff-read rather than by a runnable test command; not a blocker because the target string is unambiguous and greppable"
+    - "COMPLEXITY-RISK-CALIBRATED: risk: medium is defensible but marginal for a ticket that seeds the sole source of is_admin=true rows in a fresh deployment; consider risk: high if no-admin-exists is treated as a high-severity failure mode"
+  blockers: []
 blocked_by: []
 files_budget: 5
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/startup
   - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/AdapterRegistry.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/startup
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/BanCommandHandlerTest.java
 complexity: medium
 risk: medium
 round_cap: 2
@@ -30,22 +53,70 @@ acceptance:
   - "Re-running startup with unchanged configuration is idempotent: a named IT asserts the second run creates no additional users rows and no additional BOOTSTRAP_ADMIN audit rows"
   - "An adapter without a configured admin is skipped (no row created for it) while the union gate in AdapterRegistry continues to enforce non-emptiness — a named IT covers the one-of-two-adapters-configured shape"
   - "The AdapterRegistry Gate 7 comment no longer describes the bean as deferred/future (\"will later read the same per-adapter property\")"
+  - "BanCommandHandlerTest.banOfOnlyAdminSurfacesLastAdminError keeps its original sole-admin premise: the scenario neutralizes the boot-seeded bootstrap admin row the same way it already demotes its guardian admin, and its assertions (error.ban.last_admin surfaced, rollback observed) are unchanged in substance"
   - "mvn -B clean verify from the repo root exits 0"
 test_plan:
   adds:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/startup
+  modifies:
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/command/BanCommandHandlerTest.java (the lastAdmin scenario's sole-admin premise is invalidated by the @Startup bean seeding (inmemory, test-bootstrap-contact, is_admin=true) at boot; the scenario additionally neutralizes that row alongside the existing guardian demotion — no behavioral assertion removed or weakened)
   preserves:
-    - all tests currently green on main
+    - all other tests currently green on main
 spec_refs:
   - docs/spec/deployment.md §Operator inputs
   - docs/spec/deployment.md §Bootstrap behavior on startup
 decision_refs:
   - D9
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-07
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 577
+      removed: 15
+revisions:
+  - date: 2026-06-07
+    reason: budget-breach refine (files_scope lacked the one pre-existing
+      test whose sole-admin premise the @Startup bean invalidates)
+    snapshot:
+      status: escalated
+      escalation_reason: budget-breach
+      files_scope_at_snapshot:
+        - infochat-provider/src/main/java/app/zcat/infochat/provider/startup
+        - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/AdapterRegistry.java
+        - infochat-provider/src/test/java/app/zcat/infochat/provider/startup
+      test_plan_at_snapshot:
+        adds:
+          - infochat-provider/src/test/java/app/zcat/infochat/provider/startup
+        preserves:
+          - all tests currently green on main
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-06-07
+    verdict: CLEAN
+    base: 12eb765521e56fc584bdc70356e93347764de0ee
+    head: 2422056a92e8520d01dba55e2dd60b870a150f60
+    verdict_file: docs/plan/m1/redteam/M1-178-2026-06-07.md
+    out_of_model_count: 2
+    note: |
+      CLEAN. Bean is not adversary-reachable (startup-only, before
+      adapter activation); all inputs are operator-trusted config or
+      D10 cryptographic identity; SQL parameterized; BOOTSTRAP_ADMIN
+      audit row written in-transaction on state-changing cases only;
+      last-admin V35 triggers untouched. Two OUT-OF-MODEL operator-
+      config hardening notes (deferred contact-id parse validation —
+      already in this ticket's out_of_scope; promote-in-place over a
+      banned/preban row) — advisory, no remediation ticket required.
 ---
 
 # M1-178: Implement the bootstrap-admin startup bean

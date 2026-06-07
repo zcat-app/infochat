@@ -233,10 +233,10 @@ public class AdapterRegistry {
         // protection (security.md §Authorization model) is global
         // across adapters and only works when the deployment has at
         // least one admin row to begin with. The @Startup
-        // admin-bootstrap bean (deferred per M1-046's notes) will
-        // later read the same per-adapter property to seed the row;
-        // this gate makes the operator-input misconfig fail fast at
-        // boot rather than at first /grant-admin attempt.
+        // AdminBootstrap bean (priority 200, provider startup
+        // package) reads the same per-adapter property to seed the
+        // row; this gate makes the operator-input misconfig fail
+        // fast at boot rather than at first /grant-admin attempt.
         Config config = ConfigProvider.getConfig();
         boolean anyBootstrapAdminConfigured = false;
         for (MessagingAdapter adapter : activating) {
