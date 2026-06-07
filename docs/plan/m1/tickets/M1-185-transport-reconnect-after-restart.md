@@ -5,7 +5,7 @@ status: pending
 created: 2026-06-07
 last_updated: 2026-06-07
 blocked_by: []
-files_budget: 9
+files_budget: 13
 files_scope:
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalAdapter.java
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalSubprocess.java
@@ -13,8 +13,12 @@ files_scope:
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXAdapter.java
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXSubprocess.java
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXWebSocketClient.java
-  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal
-  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex
+  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalReconnectTest.java
+  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/FakeSignalCli.java
+  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalSubprocessTest.java
+  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXReconnectTest.java
+  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/FakeSimpleXProcess.java
+  - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXSubprocessTest.java
 complexity: high
 risk: high
 round_cap: 3
@@ -25,29 +29,61 @@ out_of_scope:
   - backoff-curve values and jitter shape (UNIFIED.md T27 reconciles the equal-vs-full-jitter and constants drift)
   - Postgres LISTEN/NOTIFY reconnect logic in the provider — different transport, already handled there
   - subprocess spawn/restart/backoff logic itself — the supervisors restart children correctly; what is missing is the callback that revives the transport client afterwards
+  - constructor-signature changes to the adapters, subprocess supervisors, or transport clients — the restart notification is an additive registration hook (see Notes), so test call sites outside files_scope (AdapterCapabilityContractTest, AdapterLifecycleContractTest, MultiAdapterProductionIT) compile unchanged
+  - any modification to pre-existing test files other than the four authorized under §Authorized test changes (FakeSignalCli, SignalSubprocessTest, FakeSimpleXProcess, SimpleXSubprocessTest)
 acceptance:
-  - "After the supervisor restarts the signal-cli subprocess, the Signal adapter's JSON-RPC transport reconnects and inbound + outbound traffic resume — a named test kills the fake subprocess, lets the supervisor restart it, and asserts a subsequent send succeeds and a pushed inbound frame is delivered (today c.connect() has exactly one call site in SignalAdapter.start, doRestart() only spawn()s, and the adapter is permanently dead after the first transport loss)"
-  - "Same for SimpleX: after a simplex-chat subprocess restart the adapter rebuilds/reconnects its WebSocket client and traffic resumes — a named test asserts send + inbound delivery after a supervised restart, making SimpleXSubprocess's javadoc claim (\"the adapter rebuilds SimpleXWebSocketClient after the supervisor reports each restart\") true"
-  - "A send attempted while the transport is down (between death and completed reconnect) fails TRANSIENT, not PERMANENT, so the provider-side retry machinery treats the outage as recoverable — a named test pins the failure category during the gap"
-  - "Reconnect does not double-deliver or interleave with a half-dead prior connection: the old reader/listener is torn down before the new connection serves traffic — a named test asserts single delivery of an inbound frame pushed after reconnect"
+  - "After the supervisor restarts the signal-cli subprocess, the Signal adapter's JSON-RPC transport reconnects and inbound + outbound traffic resume — SignalReconnectTest kills the fake subprocess, lets the supervisor restart it, and asserts a subsequent send succeeds and a pushed inbound frame is delivered (today c.connect() has exactly one call site in SignalAdapter.start, doRestart() only spawn()s, and the adapter is permanently dead after the first transport loss)"
+  - "Same for SimpleX: after a simplex-chat subprocess restart the adapter rebuilds/reconnects its WebSocket client and traffic resumes — SimpleXReconnectTest asserts send + inbound delivery after a supervised restart, making SimpleXSubprocess's javadoc claim (\"the adapter rebuilds SimpleXWebSocketClient after the supervisor reports each restart\") true"
+  - "A send attempted while the transport is down (between death and completed reconnect) fails TRANSIENT, not PERMANENT, so the provider-side retry machinery treats the outage as recoverable — SignalReconnectTest and SimpleXReconnectTest each pin the failure category during the gap (the send-path classification code is per-transport, so both adapters are covered)"
+  - "Reconnect does not double-deliver or interleave with a half-dead prior connection: the old reader/listener is torn down before the new connection serves traffic — SignalReconnectTest and SimpleXReconnectTest each assert single delivery of an inbound frame pushed after reconnect (teardown/rebuild ordering is per-transport, so both adapters are covered)"
   - "mvn -B clean verify from the repo root exits 0"
 test_plan:
   adds:
-    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal
-    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex
+    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalReconnectTest.java
+    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXReconnectTest.java
   modifies:
-    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal
-    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex
+    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/FakeSignalCli.java
+    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalSubprocessTest.java
+    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/FakeSimpleXProcess.java
+    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXSubprocessTest.java
   preserves:
     - all tests currently green on main
 spec_refs:
   - docs/spec/messaging.md §Failure handling
 decision_refs: []
 reviews: []
+revisions:
+  - date: 2026-06-07
+    reason: clarity-fail rework
+    snapshot:
+      status: escalated
+      clarity_check:
+        date: 2026-06-07
+        verdict: FAIL
+        warnings:
+          - "ACCEPTANCE-RUNNABLE WARN: Items 1–4 say \"a named test\" rather than naming the test class; consider specifying test class names (e.g. SignalReconnectTest, SimpleXReconnectTest)"
+        blockers:
+          - "TEST-CHANGES-AUTHORIZED FAIL: test_plan.modifies lists two test directories (impl/signal, impl/simplex) without an \"Authorized test changes\" section in the ticket body naming each pre-existing test class to be modified and its new expected behavior — or remove test_plan.modifies if only new test files are added"
+      escalation_reason: clarity-fail
+      files_budget_at_snapshot: 9
+      test_plan_at_snapshot: "adds/modifies listed the two test directories, not named files"
+      acceptance_at_snapshot: "items 1–4 said 'a named test' without naming test classes; items 3–4 did not state per-transport coverage"
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+escalations:
+  - date: 2026-06-07
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      TEST-CHANGES-AUTHORIZED FAIL: The frontmatter `test_plan.modifies` section
+      lists two test directories (impl/signal, impl/simplex) without a
+      corresponding "Authorized test changes" section in the ticket body. Add a
+      dedicated "Authorized test changes" section that names each pre-existing
+      test class that will be modified and describes its new expected behavior —
+      or, if no pre-existing test files are modified (only new test files are
+      added to those directories), remove the `test_plan.modifies` entries and
+      retain only `test_plan.adds`.
 ---
 
 # M1-185: Reconnect transport after supervised subprocess restart
@@ -79,6 +115,29 @@ See frontmatter. This ticket overlaps files with M1-177/M1-184 (Signal read
 path) — not blocked, but prefer sequencing after M1-177 lands to avoid a
 rebase on the dispatch change.
 
+## Authorized test changes
+
+The supervisor→adapter restart notification and the fake-process
+kill/restart choreography touch four pre-existing test files. Each is
+authorized here with its new expected behavior:
+
+- **FakeSignalCli** (`impl/signal`). Gains the ability to be killed and to
+  accept a fresh JSON-RPC connection after the supervisor respawns it, so
+  SignalReconnectTest can exercise the death→restart→reconnect sequence.
+  Existing scripted-frame/handshake behavior is unchanged.
+- **FakeSimpleXProcess** (`impl/simplex`). Same shape: killable, and
+  accepts a fresh WebSocket connection post-restart. Existing behavior
+  unchanged.
+- **SignalSubprocessTest** (`impl/signal`). `doRestart()` now fires the
+  registered restart listener after a successful spawn. Existing
+  spawn/backoff assertions are preserved; new or adjusted assertions cover
+  listener invocation.
+- **SimpleXSubprocessTest** (`impl/simplex`). Same: a supervised restart
+  fires the registered listener; existing supervision assertions are
+  preserved.
+
+No other pre-existing test file may be modified.
+
 ## Notes
 
 - Source: `UNIFIED.md` §3 T9 under `deep-code-review/v2/` (kimi-folder msg
@@ -91,3 +150,10 @@ rebase on the dispatch change.
 - On reconnect, SignalJsonRpcClient already wholesale-clears its handle and
   pending maps (:209-214) — reuse that path rather than duplicating
   teardown.
+- The restart notification must be an additive registration hook on the
+  supervisor (e.g. an `onRestart(Runnable)`-style method), NOT a
+  constructor-signature change: 17 test files construct the classes this
+  ticket touches, three of them outside files_scope
+  (AdapterCapabilityContractTest, AdapterLifecycleContractTest,
+  MultiAdapterProductionIT) — a signature change would force out-of-scope
+  edits and a budget breach.
