@@ -14,6 +14,7 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -34,18 +35,32 @@ import java.util.UUID;
  *       didn't run (LLM unreachable). Released with Stage 1 redactions
  *       but eligible for re-evaluation to clear the failure flag.</li>
  *   <li><b>UNKNOWN-verdict</b> — {@code status='QUARANTINED' AND
- *       stage2_done=true AND stage2_failed=false}: Stage 2 ran but
- *       returned UNKNOWN. Quarantined but eligible for a second
- *       opinion with a lower attempt cap.</li>
+ *       stage2_done=true AND stage2_failed=false AND
+ *       (stage2_verdict='UNKNOWN' OR re_eval_attempts>0)}: Stage 2
+ *       ran but returned UNKNOWN. Quarantined but eligible for a
+ *       second opinion with a lower attempt cap. First-pass
+ *       INJECTION/MALWARE posts are excluded — they stay QUARANTINED
+ *       until admin review per {@code docs/spec/security.md}
+ *       §Failure handling, never auto-released. The non-zero-counter
+ *       disjunct keeps UNKNOWN-entry posts whose interim rolls
+ *       recorded a non-BENIGN verdict enumerable, so cap exhaustion
+ *       → NEEDS_REVIEW stays reachable.</li>
  * </ol>
  *
  * <p>Each class has an independent attempt cap. On BENIGN re-eval:
- * infra-failure posts get {@code stage2_failed} cleared and quarantine
- * PENDING→BENIGN_CLOSED; UNKNOWN posts get promoted
- * QUARANTINED→READY with quarantine PENDING→BENIGN_CLOSED. Non-BENIGN
- * re-evals leave the post in place with the counter incremented. Cap
- * exhaustion transitions to NEEDS_REVIEW with a throttled admin
- * notification.
+ * infra-failure posts get {@code stage2_failed} cleared (a post
+ * sitting QUARANTINED is additionally requeued to {@code RAW} so the
+ * normal pipeline finishes the release) and quarantine
+ * PENDING→BENIGN_CLOSED; UNKNOWN posts are requeued to {@code RAW} so
+ * the normal tagger/entity/embedding workers and ReadyPromoter finish
+ * the release (Invariant 5 routes the post to the next uncompleted
+ * stage; ReadyPromoter owns the only {@code new_post} NOTIFY), with
+ * quarantine PENDING→BENIGN_CLOSED. Non-BENIGN re-evals record the
+ * verdict, increment the counter, and re-hide a released post to
+ * QUARANTINED per {@code docs/spec/security.md} §Re-evaluation job —
+ * a post the judge now classifies hostile must not stay user-visible
+ * for the rest of the attempt budget. Cap exhaustion transitions to
+ * NEEDS_REVIEW with a throttled admin notification.
  */
 @ApplicationScoped
 public class ReEvaluationJob {
@@ -122,20 +137,27 @@ public class ReEvaluationJob {
             LOG.infof("ReEvaluationJob: INFRA_FAILURE for post_id=%s — skipping attempt increment",
                 candidate.postId());
         } else {
-            incrementAttemptCounter(candidate);
+            applyNonBenignReEval(candidate, verdict);
         }
     }
 
     private void applyBenignReEval(ReEvalCandidate candidate) {
-        String priorVerdict = candidate.stage2Failed() ? "INFRA_FAILURE" : "UNKNOWN";
+        // prior_verdict reflects the recorded stage2_verdict — interim
+        // non-BENIGN rolls overwrite it, so an INJECTION-then-BENIGN
+        // release is logged as the hostile flip it is, not the post's
+        // entry class. NULL means the judge never produced a verdict:
+        // the infra-failure entry state.
+        String priorVerdict = candidate.stage2Verdict() != null
+            ? candidate.stage2Verdict() : "INFRA_FAILURE";
         TransactionHelper.inTransaction(dataSource, "ReEvaluationJob.applyBenign", conn -> {
             if (candidate.stage2Failed()) {
-                // Infra-failure: clear stage2_failed, post stays RAW
-                // (it was released with redactions), close quarantine.
-                clearStage2Failed(conn, candidate);
+                // Infra-failure: clear stage2_failed; a QUARANTINED
+                // post is requeued to RAW, a RAW/READY one keeps its
+                // status. Quarantine rows close below either way.
+                clearStage2FailedAndRequeueIfQuarantined(conn, candidate);
             } else {
-                // UNKNOWN: promote QUARANTINED→READY, close quarantine.
-                promoteToReady(conn, candidate);
+                // UNKNOWN: requeue QUARANTINED→RAW, close quarantine.
+                requeueForPipeline(conn, candidate);
             }
             closeQuarantineRows(conn, candidate.postId());
             writeReEvalReleasedAudit(conn, candidate, priorVerdict, candidate.reEvalAttempts() + 1);
@@ -170,34 +192,108 @@ public class ReEvaluationJob {
             candidate.postId());
     }
 
-    private void incrementAttemptCounter(ReEvalCandidate candidate) {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(
-                 "UPDATE post SET re_eval_attempts = re_eval_attempts + 1 "
-                     + "WHERE id = ? AND fetched_at = ?")) {
-            ps.setObject(1, candidate.postId());
-            ps.setTimestamp(2, Timestamp.from(candidate.fetchedAt()));
+    /**
+     * Non-BENIGN re-eval verdict (INJECTION / MALWARE / UNKNOWN):
+     * record the verdict and increment the counter for both post
+     * classes, and re-hide a post that is not currently QUARANTINED
+     * (a Stage-2-infra-failure post released READY, or still RAW in
+     * the pipeline) per {@code docs/spec/security.md} §Re-evaluation
+     * job. {@code stage2_failed} is deliberately untouched — the spec
+     * says it is preserved, and flipping it for UNKNOWN-class posts
+     * would migrate them into the infra-failure enumeration branch
+     * and its higher attempt cap, contradicting the same section's
+     * lower-UNKNOWN-cap rationale. The re-hide and its NOTIFYs run in
+     * ONE transaction so the announce can never outlive a rolled-back
+     * transition.
+     */
+    private void applyNonBenignReEval(ReEvalCandidate candidate, Stage2VerdictHandler.Verdict verdict) {
+        boolean[] reHidden = {false};
+        TransactionHelper.inTransaction(dataSource, "ReEvaluationJob.applyNonBenign", conn -> {
+            recordVerdictAndIncrementCounter(conn, candidate, verdict);
+            reHidden[0] = reHideToQuarantined(conn, candidate);
+            if (reHidden[0]) {
+                reAnnouncePendingQuarantineRows(conn, candidate.postId());
+            }
+        });
+        LOG.infof("ReEvaluationJob: %s re-eval for post_id=%s — verdict recorded, counter incremented%s",
+            verdict, candidate.postId(), reHidden[0] ? ", post re-hidden to QUARANTINED" : "");
+    }
+
+    private static void recordVerdictAndIncrementCounter(Connection conn, ReEvalCandidate candidate,
+                                                         Stage2VerdictHandler.Verdict verdict) throws SQLException {
+        final String sql =
+            "UPDATE post SET stage2_verdict = ?, re_eval_attempts = re_eval_attempts + 1 "
+                + "WHERE id = ? AND fetched_at = ?";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, verdict.name());
+            ps.setObject(2, candidate.postId());
+            ps.setTimestamp(3, Timestamp.from(candidate.fetchedAt()));
             ps.executeUpdate();
-        } catch (SQLException e) {
-            throw new IllegalStateException(
-                "ReEvaluationJob: failed to increment re_eval_attempts for post_id=" + candidate.postId(), e);
         }
     }
 
-    private void clearStage2Failed(Connection conn, ReEvalCandidate candidate) throws SQLException {
+    /**
+     * Re-hide: {@code status='QUARANTINED'} for a post that isn't
+     * already there. The {@code status <> 'QUARANTINED'} predicate
+     * makes the UNKNOWN-class case (already QUARANTINED on every
+     * tick) a no-op, so the PENDING re-announce below fires only on
+     * an actual visibility transition — not on every re-eval attempt.
+     */
+    private static boolean reHideToQuarantined(Connection conn, ReEvalCandidate candidate) throws SQLException {
         final String sql =
-            "UPDATE post SET stage2_failed = FALSE, re_eval_attempts = re_eval_attempts + 1 "
-                + "WHERE id = ? AND fetched_at = ?";
+            "UPDATE post SET status = 'QUARANTINED', status_changed_at = now() "
+                + "WHERE id = ? AND fetched_at = ? AND status <> 'QUARANTINED'";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setObject(1, candidate.postId());
             ps.setTimestamp(2, Timestamp.from(candidate.fetchedAt()));
-            ps.executeUpdate();
+            return ps.executeUpdate() > 0;
         }
     }
 
-    private void promoteToReady(Connection conn, ReEvalCandidate candidate) throws SQLException {
+    /**
+     * Announce the re-hide on quarantine_review by re-emitting
+     * PENDING for the post's open quarantine rows. No new channel or
+     * payload shape — the wire contract is closed; the Provider's
+     * high-water mark makes a duplicate (quarantine_id, PENDING)
+     * idempotent. The {@code updated_at} bump is load-bearing: the
+     * Provider catch-up scan cursors on {@code quarantine.updated_at},
+     * so without it a missed NOTIFY could never be recovered.
+     */
+    private void reAnnouncePendingQuarantineRows(Connection conn, UUID postId) throws SQLException {
         final String sql =
-            "UPDATE post SET status = 'READY', ready_at = now(), status_changed_at = now(), "
+            "UPDATE quarantine SET updated_at = now() "
+                + "WHERE post_id = ? AND status = 'PENDING' RETURNING id";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setObject(1, postId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    UUID quarantineId = (UUID) rs.getObject(1);
+                    quarantineNotifyEmitter.emit(conn, QuarantineNotifyEmitter.TargetKind.QUARANTINE,
+                        quarantineId, QuarantineNotifyEmitter.NewStatus.PENDING);
+                }
+            }
+        }
+    }
+
+    /**
+     * BENIGN on an infra-failure post: clear the flag, and requeue a
+     * QUARANTINED post (release-on-stage2-failure=false, or re-hidden
+     * by a prior non-BENIGN roll) to RAW so the normal pipeline and
+     * ReadyPromoter finish the release — mirroring
+     * {@link #requeueForPipeline}. A RAW or READY post keeps its
+     * status: it is already in the pipeline or already visible, and
+     * the flag clear completes the release on its own. Either way the
+     * post ends on the release path, so the single RE_EVAL_RELEASED
+     * row written by the caller records an actual release — never a
+     * release-that-never-happened for a post left QUARANTINED.
+     */
+    private void clearStage2FailedAndRequeueIfQuarantined(Connection conn, ReEvalCandidate candidate)
+            throws SQLException {
+        final String sql =
+            "UPDATE post SET stage2_failed = FALSE, "
+                + "status = CASE WHEN status = 'QUARANTINED' THEN 'RAW' ELSE status END, "
+                + "status_changed_at = CASE WHEN status = 'QUARANTINED' THEN now() "
+                + "                         ELSE status_changed_at END, "
                 + "re_eval_attempts = re_eval_attempts + 1 "
                 + "WHERE id = ? AND fetched_at = ?";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -207,13 +303,53 @@ public class ReEvaluationJob {
         }
     }
 
+    /**
+     * BENIGN on an UNKNOWN post: requeue QUARANTINED→RAW instead of
+     * flipping READY directly. A direct flip would orphan the post —
+     * TaggerWorker picks only {@code status='RAW'}, so tags would stay
+     * {@code '{}'} forever (invisible to tag-filtered retrieval), and
+     * ReadyPromoter (the only {@code new_post} NOTIFY emit) would
+     * never announce it. With {@code stage1_done / stage2_done} TRUE
+     * and the later flags FALSE, Invariant 5 routes the requeued post
+     * to Tagger → Entity → Embedding → ReadyPromoter, which flips
+     * READY and fires {@code new_post}. {@code body} is untouched —
+     * Stage 1 redactions stay until {@code /quarantine approve}. The
+     * counter increment stays here: {@code writeReEvalReleasedAudit}'s
+     * {@code attempt = reEvalAttempts()+1} math depends on it.
+     */
+    private void requeueForPipeline(Connection conn, ReEvalCandidate candidate) throws SQLException {
+        final String sql =
+            "UPDATE post SET status = 'RAW', status_changed_at = now(), "
+                + "re_eval_attempts = re_eval_attempts + 1 "
+                + "WHERE id = ? AND fetched_at = ?";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setObject(1, candidate.postId());
+            ps.setTimestamp(2, Timestamp.from(candidate.fetchedAt()));
+            ps.executeUpdate();
+        }
+    }
+
+    /**
+     * Close the post's open quarantine rows PENDING→BENIGN_CLOSED and
+     * emit one quarantine_review NOTIFY per row closed HERE — the
+     * channel contract fires on BENIGN_CLOSED transitions, and
+     * UPDATE…RETURNING scopes the emit so rows closed by an earlier
+     * verdict never re-fire. Runs on the caller's connection inside
+     * applyBenignReEval's transaction (same-transaction NOTIFY rule).
+     */
     private void closeQuarantineRows(Connection conn, UUID postId) throws SQLException {
         final String sql =
             "UPDATE quarantine SET status = 'BENIGN_CLOSED', updated_at = now() "
-                + "WHERE post_id = ? AND status = 'PENDING'";
+                + "WHERE post_id = ? AND status = 'PENDING' RETURNING id";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setObject(1, postId);
-            ps.executeUpdate();
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    UUID quarantineId = (UUID) rs.getObject(1);
+                    quarantineNotifyEmitter.emit(conn, QuarantineNotifyEmitter.TargetKind.QUARANTINE,
+                        quarantineId, QuarantineNotifyEmitter.NewStatus.BENIGN_CLOSED);
+                }
+            }
         }
     }
 
@@ -283,17 +419,25 @@ public class ReEvaluationJob {
     List<ReEvalCandidate> enumerateCandidates() throws SQLException {
         // Two classes: infra-failure (stage2_failed=true, any status that
         // isn't NEEDS_REVIEW) and UNKNOWN (QUARANTINED + stage2_done +
-        // !stage2_failed). No cap filter here: cap-reached rows must still
-        // enter processOne so its >= cap branch fires the NEEDS_REVIEW
-        // transition. transitionToNeedsReview flips status to NEEDS_REVIEW,
-        // which excludes the row from both branches on the next tick — so a
+        // !stage2_failed). The UNKNOWN branch keys on the recorded
+        // first-pass verdict: a first-pass INJECTION/MALWARE post stays
+        // QUARANTINED for admin review (docs/spec/security.md §Failure
+        // handling) and must never re-roll toward auto-release; the
+        // re_eval_attempts > 0 disjunct keeps UNKNOWN-entry posts whose
+        // interim rolls overwrote stage2_verdict enumerable, so cap
+        // exhaustion → NEEDS_REVIEW stays reachable. No cap filter here:
+        // cap-reached rows must still enter processOne so its >= cap
+        // branch fires the NEEDS_REVIEW transition.
+        // transitionToNeedsReview flips status to NEEDS_REVIEW, which
+        // excludes the row from both branches on the next tick — so a
         // cap-exhausted row is enumerated exactly once more, then drops out.
         final String sql =
-            "SELECT id, fetched_at, stage2_failed, re_eval_attempts FROM post "
+            "SELECT id, fetched_at, stage2_failed, re_eval_attempts, stage2_verdict FROM post "
                 + "WHERE ("
                 + "  (stage2_failed = TRUE AND status != 'NEEDS_REVIEW')"
                 + "  OR "
-                + "  (status = 'QUARANTINED' AND stage2_done = TRUE AND stage2_failed = FALSE)"
+                + "  (status = 'QUARANTINED' AND stage2_done = TRUE AND stage2_failed = FALSE"
+                + "   AND (stage2_verdict = 'UNKNOWN' OR re_eval_attempts > 0))"
                 + ") ORDER BY fetched_at, id LIMIT ?";
         List<ReEvalCandidate> candidates = new ArrayList<>();
         try (Connection conn = dataSource.getConnection();
@@ -305,7 +449,8 @@ public class ReEvaluationJob {
                         (UUID) rs.getObject(1),
                         rs.getTimestamp(2).toInstant(),
                         rs.getBoolean(3),
-                        rs.getInt(4)));
+                        rs.getInt(4),
+                        rs.getString(5)));
                 }
             }
         }
@@ -333,6 +478,13 @@ public class ReEvaluationJob {
         }
     }
 
-    record ReEvalCandidate(UUID postId, Instant fetchedAt, boolean stage2Failed, int reEvalAttempts) {
+    /**
+     * {@code stage2Verdict} is the recorded {@code post.stage2_verdict}
+     * — NULL only for infra-failure posts the judge never produced a
+     * verdict for (Stage2VerdictHandler records every parsed verdict;
+     * non-BENIGN re-eval rolls overwrite it).
+     */
+    record ReEvalCandidate(UUID postId, Instant fetchedAt, boolean stage2Failed, int reEvalAttempts,
+                           @Nullable String stage2Verdict) {
     }
 }

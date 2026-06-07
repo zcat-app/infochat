@@ -135,8 +135,7 @@ public class Stage2VerdictHandler {
         TransactionHelper.inTransaction(dataSource, "Stage2VerdictHandler", conn -> {
             updatePostStage2DoneRaw(conn, postId, postFetchedAt, /* stage2Failed */ false);
             setStage2Verdict(conn, postId, postFetchedAt, "BENIGN");
-            updateStage1QuarantineRowsToBenignClosed(conn, postId);
-            emitQuarantineNotifyForClosedRows(conn, postId);
+            closeStage1QuarantineRowsAndEmit(conn, postId);
         });
         LOG.infof("Stage 2 verdict: BENIGN post_id=%s — released to Tagger/Embedding (stage2_done=true, status=RAW)",
             postId);
@@ -222,32 +221,23 @@ public class Stage2VerdictHandler {
 
     /**
      * Transition the Stage 1 PENDING quarantine rows to
-     * BENIGN_CLOSED on a BENIGN verdict. Only Stage 1 rows are
-     * touched ({@code flagged_by='stage1'}); a future Stage 2-
-     * written quarantine row (if any — none in M1) is filtered out.
-     * The {@code WHERE status='PENDING'} predicate is the
-     * idempotency guard: a re-enqueue that re-runs Stage 2 sees
-     * BENIGN_CLOSED rows and the UPDATE is a no-op (consistent
+     * BENIGN_CLOSED on a BENIGN verdict and emit one
+     * quarantine_review NOTIFY per row this verdict transitioned.
+     * Only Stage 1 rows are touched ({@code flagged_by='stage1'});
+     * a future Stage 2-written quarantine row (if any — none in M1)
+     * is filtered out. The {@code WHERE status='PENDING'} predicate
+     * is the idempotency guard: a re-enqueue that re-runs Stage 2
+     * sees BENIGN_CLOSED rows and the UPDATE is a no-op (consistent
      * with Invariant 5's "stage-flags are the durable cursor").
+     * UPDATE…RETURNING scopes the emit to exactly the rows closed
+     * HERE — rows closed by an earlier verdict already had their
+     * NOTIFY and must not re-fire.
      */
-    private static void updateStage1QuarantineRowsToBenignClosed(Connection conn, UUID postId) throws SQLException {
+    private void closeStage1QuarantineRowsAndEmit(Connection conn, UUID postId) throws SQLException {
         final String sql =
             "UPDATE quarantine SET status = 'BENIGN_CLOSED', updated_at = now() "
-                + "WHERE post_id = ? AND flagged_by = 'stage1' AND status = 'PENDING'";
-        try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setObject(1, postId);
-            ps.executeUpdate();
-        }
-    }
-
-    /**
-     * Emit quarantine_review NOTIFY for each BENIGN_CLOSED quarantine
-     * row belonging to this post. Called after the BENIGN verdict
-     * transitions Stage 1 rows from PENDING to BENIGN_CLOSED.
-     */
-    private void emitQuarantineNotifyForClosedRows(Connection conn, UUID postId) throws SQLException {
-        final String sql =
-            "SELECT id FROM quarantine WHERE post_id = ? AND status = 'BENIGN_CLOSED'";
+                + "WHERE post_id = ? AND flagged_by = 'stage1' AND status = 'PENDING' "
+                + "RETURNING id";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setObject(1, postId);
             try (ResultSet rs = ps.executeQuery()) {

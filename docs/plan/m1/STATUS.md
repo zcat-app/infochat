@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 40 |
+| pending | 39 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 214 |
+| done | 215 |
 | deferred | 2 |
 | **total** | **256** |
 
@@ -26,7 +26,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-179 — Cross-tick UID dedup in the fetch persist path (complexity: medium, risk: high)
 - M1-181 — quarantine_review listener correctness cluster (complexity: high, risk: medium)
-- M1-182 — Re-evaluation verdict handling: re-hide, NOTIFYs, pipeline (complexity: high, risk: medium)
 - M1-183 — LLM rate-cap + in-flight coverage for /summary and /retry (complexity: medium, risk: medium)
 - M1-184 — Signal reader/codec hardening against malformed frames (complexity: low, risk: medium)
 - M1-185 — Reconnect transport after supervised subprocess restart (complexity: high, risk: high)
@@ -99,6 +98,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-188 | Serialize SimpleX WS sends + bound Signal handle map | 2026-06-07 | round 1 APPROVE |
+| M1-182 | Re-evaluation verdict handling: re-hide, NOTIFYs, pipeline | 2026-06-07 | round 2 OVERRIDE-APPROVE |
 | M1-180 | Partition lifecycle: provision current month + drop pruner | 2026-06-07 | round 1 APPROVE |
 | M1-178 | Implement the bootstrap-admin startup bean | 2026-06-07 | round 1 APPROVE |
 | M1-177 | Move inbound dispatch off the transport read thread | 2026-06-07 | round 1 APPROVE |
@@ -107,7 +107,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-174 | Grant-admin intent-row coverage (probe-visibility parity) | 2026-06-06 | round 1 APPROVE |
 | M1-173 | Revoke-admin intent-row coverage (M1-151 redteam findings) | 2026-06-06 | round 1 APPROVE |
 | M1-161 | [INVESTIGATE] price_snapshot PK/dedup invariant + new_price_snapshot channel intent | 2026-06-06 | round 1 APPROVE |
-| M1-160 | [INVESTIGATE] summary_anchor scope_kind discriminator | 2026-06-06 | round 1 APPROVE |
 
 ---
 
@@ -401,7 +400,7 @@ M1-178 (done)
 M1-179 (pending) ← runnable
 M1-180 (done)
 M1-181 (pending) ← runnable
-M1-182 (pending) ← runnable
+M1-182 (done)
 M1-183 (pending) ← runnable
 M1-185 (pending) ← runnable
 M1-186 (pending) ← runnable

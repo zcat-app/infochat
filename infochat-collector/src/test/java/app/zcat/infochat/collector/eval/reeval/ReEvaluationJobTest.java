@@ -6,6 +6,7 @@ import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import app.zcat.infochat.llm.LlmProvider;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -74,15 +75,19 @@ class ReEvaluationJobTest {
     }
 
     @Test
-    void unknownBenign_promotesToReady_closesQuarantine() throws Exception {
-        // UNKNOWN-verdict QUARANTINED post, re-eval says BENIGN → READY.
+    void unknownBenign_requeuesToRawForPipeline_closesQuarantine() throws Exception {
+        // UNKNOWN-verdict QUARANTINED post, re-eval says BENIGN → requeued
+        // RAW so the tagger/entity/embedding workers and ReadyPromoter
+        // finish the release (a direct READY flip would orphan tags and
+        // the new_post NOTIFY). The full READY-with-tags consequence is
+        // pinned in ReEvalVerdictNotifyIT.
         stub().setNextResponse("BENIGN");
         SeededPost post = seedUnknownQuarantinedPost("unknown-benign");
         seedQuarantineRow(post, "placeholder-2", "original span");
 
         reEvaluationJob.processOne(candidateFor(post, false, 0));
 
-        assertPostStatus(post.id, "READY");
+        assertPostStatus(post.id, "RAW");
         assertPostBodyContains(post.id, "[REDACTED:placeholder-2]");
         assertQuarantineStatus(post.id, "BENIGN_CLOSED");
     }
@@ -108,6 +113,9 @@ class ReEvaluationJobTest {
 
         assertPostStatus(post.id, "QUARANTINED");
         assertReEvalAttempts(post.id, 1);
+        // "alongside the new verdict" — the re-eval verdict is recorded,
+        // not just counted (docs/spec/security.md §Re-evaluation job).
+        assertPostField(post.id, "stage2_verdict", "INJECTION");
     }
 
     @Test
@@ -120,6 +128,51 @@ class ReEvaluationJobTest {
         reEvaluationJob.processOne(candidateFor(post, true, 0));
 
         assertReEvalAttempts(post.id, 0);
+    }
+
+    @Test
+    void unknownEntryReleaseAfterInterimInjectionRoll_recordsPriorVerdictInjection() throws Exception {
+        // UNKNOWN-entry post; an interim roll records INJECTION, the
+        // next roll releases BENIGN. RE_EVAL_RELEASED must carry the
+        // recorded stage2_verdict ('INJECTION' — the hostile-flip
+        // signal), not the post's entry class
+        // (docs/spec/security.md §Re-evaluation job).
+        SeededPost post = seedUnknownQuarantinedPost("prior-verdict");
+        seedQuarantineRow(post, "placeholder-prior", "original span");
+
+        stub().setNextResponse("INJECTION");
+        reEvaluationJob.processOne(candidateFor(post, false, 0, "UNKNOWN"));
+        assertPostField(post.id, "stage2_verdict", "INJECTION");
+
+        stub().setNextResponse("BENIGN");
+        // The second roll's candidate mirrors what enumerateCandidates
+        // now reads: the overwritten verdict and the incremented counter.
+        reEvaluationJob.processOne(candidateFor(post, false, 1, "INJECTION"));
+
+        assertPostStatus(post.id, "RAW");
+        assertReEvalReleasedPriorVerdict(post.id, "INJECTION");
+    }
+
+    @Test
+    void quarantinedInfraFailureBenign_requeuesToRaw_singleReleaseAuditRow() throws Exception {
+        // A QUARANTINED infra-failure post (release-on-stage2-failure=
+        // false shape, or re-hidden by a prior non-BENIGN roll)
+        // re-evaluated BENIGN requeues through the normal pipeline —
+        // RAW, flag cleared, quarantine closed — with exactly ONE
+        // RE_EVAL_RELEASED row for the whole flow. The old
+        // clear-flag-only behavior left the post QUARANTINED while the
+        // audit row reported a release that never happened.
+        stub().setNextResponse("BENIGN");
+        SeededPost post = seedInfraFailurePost("infra-requeue");
+        setPostStatus(post, "QUARANTINED");
+        seedQuarantineRow(post, "placeholder-requeue", "original");
+
+        reEvaluationJob.processOne(candidateFor(post, true, 0));
+
+        assertPostStatus(post.id, "RAW");
+        assertPostField(post.id, "stage2_failed", false);
+        assertQuarantineStatus(post.id, "BENIGN_CLOSED");
+        assertReEvalReleasedCount(post.id, 1);
     }
 
     @Test
@@ -149,7 +202,16 @@ class ReEvaluationJobTest {
 
     private ReEvaluationJob.ReEvalCandidate candidateFor(SeededPost post, boolean stage2Failed,
                                                          int attempts) {
-        return new ReEvaluationJob.ReEvalCandidate(post.id, post.fetchedAt, stage2Failed, attempts);
+        // Mirrors the seeded state: infra-failure posts carry no recorded
+        // verdict (the judge never ran), UNKNOWN-class posts carry 'UNKNOWN'.
+        return candidateFor(post, stage2Failed, attempts, stage2Failed ? null : "UNKNOWN");
+    }
+
+    private ReEvaluationJob.ReEvalCandidate candidateFor(SeededPost post, boolean stage2Failed,
+                                                         int attempts,
+                                                         @Nullable String stage2Verdict) {
+        return new ReEvaluationJob.ReEvalCandidate(post.id, post.fetchedAt, stage2Failed, attempts,
+            stage2Verdict);
     }
 
     private SeededPost seedInfraFailurePost(String slug) throws Exception {
@@ -190,12 +252,14 @@ class ReEvaluationJobTest {
                      + "  id, uid, source_id, upstream_identifier, title, body,"
                      + "  fetched_at, status, status_changed_at,"
                      + "  stage1_done, stage1_flagged, stage2_done, stage2_failed,"
-                     + "  tagger_done, tagger_fallback, embedding_done, tags, re_eval_attempts"
+                     + "  tagger_done, tagger_fallback, embedding_done, tags, re_eval_attempts,"
+                     + "  stage2_verdict"
                      + ") VALUES ("
                      + "  gen_random_uuid(), ?, ?, ?, ?, ?,"
                      + "  ?, 'QUARANTINED', now(),"
                      + "  TRUE, TRUE, TRUE, FALSE,"
-                     + "  FALSE, FALSE, FALSE, '{}', 0"
+                     + "  FALSE, FALSE, FALSE, '{}', 0,"
+                     + "  'UNKNOWN'"
                      + ") RETURNING id, fetched_at")) {
             ps.setString(1, "reeval-" + slug);
             ps.setObject(2, sourceId);
@@ -267,6 +331,18 @@ class ReEvaluationJobTest {
                 rs.next();
                 return (UUID) rs.getObject(1);
             }
+        }
+    }
+
+    private void setPostStatus(SeededPost post, String status) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "UPDATE post SET status = ?, status_changed_at = now() "
+                     + "WHERE id = ? AND fetched_at = ?")) {
+            ps.setString(1, status);
+            ps.setObject(2, post.id);
+            ps.setTimestamp(3, Timestamp.from(post.fetchedAt));
+            ps.executeUpdate();
         }
     }
 
@@ -354,6 +430,36 @@ class ReEvaluationJobTest {
             ps.setString(3, actorContactId);
             try (ResultSet rs = ps.executeQuery()) {
                 assertTrue(rs.next(), "Expected audit row: action=" + action + " target=" + postId);
+            }
+        }
+    }
+
+    private void assertReEvalReleasedCount(UUID postId, int expected) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT COUNT(*) FROM audit_log "
+                     + "WHERE target_id = ? AND action = 'RE_EVAL_RELEASED'")) {
+            ps.setString(1, postId.toString());
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next());
+                assertEquals(expected, rs.getInt(1),
+                    "RE_EVAL_RELEASED rows for post " + postId);
+            }
+        }
+    }
+
+    private void assertReEvalReleasedPriorVerdict(UUID postId, String expected) throws Exception {
+        // ->> extraction instead of a raw-substring match: the jsonb
+        // column re-renders with its own spacing on read-back.
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT details_json->>'prior_verdict' FROM audit_log "
+                     + "WHERE target_id = ? AND action = 'RE_EVAL_RELEASED'")) {
+            ps.setString(1, postId.toString());
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(), "Expected RE_EVAL_RELEASED audit row for " + postId);
+                assertEquals(expected, rs.getString(1),
+                    "RE_EVAL_RELEASED details_json.prior_verdict");
             }
         }
     }
