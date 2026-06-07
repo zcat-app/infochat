@@ -72,6 +72,10 @@ class UnsaveCommandHandlerTest {
                             + "SELECT id FROM source WHERE identifier LIKE ?)",
                     PREFIX + "%");
             exec(conn,
+                    "DELETE FROM source_subscription WHERE source_id IN ("
+                            + "SELECT id FROM source WHERE identifier LIKE ?)",
+                    PREFIX + "%");
+            exec(conn,
                     "DELETE FROM source WHERE identifier LIKE ?",
                     PREFIX + "%");
             exec(conn,
@@ -128,8 +132,16 @@ class UnsaveCommandHandlerTest {
         // real cap mechanism); /unsave one row; assert the trigger-
         // driven decrement lets a subsequent /save admit.
         String contactId = PREFIX + "reset-actor";
-        seedUser(contactId);
+        UUID userId = seedUser(contactId);
         UUID sourceId = seedSource(PREFIX + "reset-source");
+        // The /save visibility filter requires a caller-scope
+        // subscription; DM scope_id is the user's own users.id.
+        try (Connection conn = dataSource.getConnection()) {
+            exec(conn,
+                    "INSERT INTO source_subscription (scope_kind, scope_id, source_id) "
+                            + "VALUES ('dm', ?, ?)",
+                    userId, sourceId);
+        }
         String[] capUids = new String[saveCap];
         for (int i = 0; i < saveCap; i++) {
             capUids[i] = PREFIX + "reset-uid-" + i;

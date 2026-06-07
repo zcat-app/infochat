@@ -53,12 +53,14 @@ import java.util.Objects;
  *           INSERT — the second observes the updated counter and
  *           returns {@code error.save.cap_met}. Verified by
  *           {@code SaveCapConcurrencyIT}.</li>
- *       <li>Target post lookup: {@code SELECT id, title, body, url,
- *           author, published_at, source_id, fetched_at FROM post
- *           WHERE uid = ? AND status = 'READY' ORDER BY fetched_at
- *           DESC LIMIT 1}. Non-READY rows (QUARANTINED, NEEDS_REVIEW)
- *           are indistinguishable from missing UIDs at the user
- *           surface per spec §Content Visibility-of-target rules — both
+ *       <li>Target post lookup: the {@code READY}-status match plus
+ *           the any-caller-scope visibility filter (spec §Content
+ *           Visibility-of-target rules) — the post's source must be
+ *           subscribed in the caller's DM scope or in an approved,
+ *           non-removed group where the caller holds an active
+ *           membership. Non-READY rows (QUARANTINED, NEEDS_REVIEW),
+ *           missing UIDs, and READY rows invisible in every caller
+ *           scope are indistinguishable at the user surface — all
  *           branches return {@code error.save.unknown_uid}.</li>
  *       <li>Already-saved check: a {@code SELECT 1 FROM saved_post}
  *           round-trip is cheaper than catching the PK-collision
@@ -95,11 +97,30 @@ public class SaveCommandHandler implements CommandHandler {
     // fetcher's job per V7 + schema.md §UID derivation); we snapshot
     // the latest READY version. The JOIN on source supplies the
     // current bootstrap_tags for snapshot_tags.
+    //
+    // The two EXISTS legs are the any-caller-scope visibility filter
+    // (spec §Content visibility-of-target rules): the post's source
+    // must be subscribed in the caller's DM scope (scope_id = the
+    // caller's users.id) or in an approved, non-removed group where
+    // the caller holds an active membership. A READY post outside
+    // that union falls into the same empty-result path as an unknown
+    // UID, so the existence-vs-no-access distinction is never exposed
+    // (the getPost contract, security.md §Prompt-injection defenses).
     private static final String SELECT_POST_SQL =
             "SELECT p.id, p.title, p.body, p.url, p.author, p.published_at, "
                     + "p.source_id, s.bootstrap_tags "
                     + "FROM post p JOIN source s ON s.id = p.source_id "
                     + "WHERE p.uid = ? AND p.status = 'READY' "
+                    + "AND (EXISTS (SELECT 1 FROM source_subscription ss "
+                    + "WHERE ss.source_id = p.source_id "
+                    + "AND ss.scope_kind = 'dm' AND ss.scope_id = ?) "
+                    + "OR EXISTS (SELECT 1 FROM source_subscription ss "
+                    + "JOIN group_membership gm ON gm.group_id = ss.scope_id "
+                    + "JOIN groups g ON g.id = gm.group_id "
+                    + "WHERE ss.source_id = p.source_id "
+                    + "AND ss.scope_kind = 'group' "
+                    + "AND gm.user_id = ? AND gm.removed_at IS NULL "
+                    + "AND g.approval_status = 'approved' AND g.removed_at IS NULL)) "
                     + "ORDER BY p.fetched_at DESC LIMIT 1";
 
     private static final String SELECT_ALREADY_SAVED_SQL =
@@ -197,10 +218,11 @@ public class SaveCommandHandler implements CommandHandler {
                 }
                 ActorRow actor = actorOpt.get();
 
-                // Step 3b — target post lookup. Non-READY posts and
-                // missing UIDs both surface as unknown_uid per spec
+                // Step 3b — target post lookup. Non-READY posts,
+                // missing UIDs, and READY posts invisible in every
+                // caller scope all surface as unknown_uid per spec
                 // §Content Visibility-of-target rules.
-                Optional<PostSnapshot> postOpt = lookupReadyPost(conn, uid);
+                Optional<PostSnapshot> postOpt = lookupVisibleReadyPost(conn, uid, actor.id);
                 if (postOpt.isEmpty()) {
                     conn.rollback();
                     return reply(scope, bundleLoader.get(BundleKeys.ERROR_SAVE_UNKNOWN_UID));
@@ -253,9 +275,12 @@ public class SaveCommandHandler implements CommandHandler {
                 .map(u -> new ActorRow(u.id(), u.saveCount()));
     }
 
-    private Optional<PostSnapshot> lookupReadyPost(Connection conn, String uid) throws SQLException {
+    private Optional<PostSnapshot> lookupVisibleReadyPost(Connection conn, String uid,
+                                                          UUID actorId) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(SELECT_POST_SQL)) {
             ps.setString(1, uid);
+            ps.setObject(2, actorId);
+            ps.setObject(3, actorId);
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) {
                     return Optional.empty();

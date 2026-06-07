@@ -72,6 +72,10 @@ class SaveCapConcurrencyIT {
                             + "SELECT id FROM source WHERE identifier LIKE ?)",
                     PREFIX + "%");
             exec(conn,
+                    "DELETE FROM source_subscription WHERE source_id IN ("
+                            + "SELECT id FROM source WHERE identifier LIKE ?)",
+                    PREFIX + "%");
+            exec(conn,
                     "DELETE FROM source WHERE identifier LIKE ?",
                     PREFIX + "%");
             exec(conn,
@@ -85,6 +89,7 @@ class SaveCapConcurrencyIT {
         String contactId = PREFIX + "actor";
         seedUserAtSaveCount(contactId, saveCap - 1);
         UUID sourceId = seedSource(PREFIX + "source");
+        seedDmSubscription(contactId, sourceId);
         String uidA = PREFIX + "uid-a";
         String uidB = PREFIX + "uid-b";
         seedReadyPost(sourceId, uidA);
@@ -185,6 +190,17 @@ class SaveCapConcurrencyIT {
                 rs.next();
                 return (UUID) rs.getObject("id");
             }
+        }
+    }
+
+    private void seedDmSubscription(String contactId, UUID sourceId) throws Exception {
+        try (Connection conn = dataSource.getConnection()) {
+            // DM scope_id is the user's own users.id (schema V7); resolved
+            // by subquery because seedUserAtSaveCount does not return it.
+            exec(conn,
+                    "INSERT INTO source_subscription (scope_kind, scope_id, source_id) "
+                            + "SELECT 'dm', id, ? FROM users WHERE contact_id = ?",
+                    sourceId, contactId);
         }
     }
 

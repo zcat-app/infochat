@@ -89,9 +89,22 @@ class SaveCommandHandlerTest {
                     "DELETE FROM post WHERE source_id IN ("
                             + "SELECT id FROM source WHERE identifier LIKE ?)",
                     PREFIX + "%");
+            // subscription rows must go before their FK target source.
+            exec(conn,
+                    "DELETE FROM source_subscription WHERE source_id IN ("
+                            + "SELECT id FROM source WHERE identifier LIKE ?)",
+                    PREFIX + "%");
             // source rows under the prefix.
             exec(conn,
                     "DELETE FROM source WHERE identifier LIKE ?",
+                    PREFIX + "%");
+            // membership rows must go before their FK targets groups/users.
+            exec(conn,
+                    "DELETE FROM group_membership WHERE group_id IN ("
+                            + "SELECT id FROM groups WHERE upstream_group_id LIKE ?)",
+                    PREFIX + "%");
+            exec(conn,
+                    "DELETE FROM groups WHERE upstream_group_id LIKE ?",
                     PREFIX + "%");
             exec(conn,
                     "DELETE FROM users WHERE contact_id LIKE ?",
@@ -102,8 +115,9 @@ class SaveCommandHandlerTest {
     @Test
     void saveHappyPathReturnsSuccessAndWritesSnapshotRow() throws Exception {
         String contactId = PREFIX + "happy-actor";
-        seedUser(contactId);
+        UUID userId = seedUser(contactId);
         UUID sourceId = seedSource(PREFIX + "happy-source", new String[] { "news", "tech" });
+        seedDmSubscription(userId, sourceId);
         String uid = PREFIX + "happy-uid";
         seedPost(sourceId, uid, "READY", "Title H", "Body H", "https://example.com/h", "Alice", Instant.parse("2026-05-01T00:00:00Z"));
 
@@ -127,8 +141,11 @@ class SaveCommandHandlerTest {
     @Test
     void saveAgainstQuarantinedPostReturnsUnknownUid() throws Exception {
         String contactId = PREFIX + "qrnt-actor";
-        seedUser(contactId);
+        UUID userId = seedUser(contactId);
         UUID sourceId = seedSource(PREFIX + "qrnt-source", new String[] {});
+        // Subscribed on purpose: the status leg must be the only
+        // reason this /save rejects, not the visibility filter.
+        seedDmSubscription(userId, sourceId);
         String uid = PREFIX + "qrnt-uid";
         seedPost(sourceId, uid, "QUARANTINED", "Title Q", "Body Q", null, null, null);
 
@@ -143,8 +160,11 @@ class SaveCommandHandlerTest {
     @Test
     void saveAgainstNeedsReviewPostReturnsUnknownUid() throws Exception {
         String contactId = PREFIX + "need-actor";
-        seedUser(contactId);
+        UUID userId = seedUser(contactId);
         UUID sourceId = seedSource(PREFIX + "need-source", new String[] {});
+        // Subscribed on purpose: the status leg must be the only
+        // reason this /save rejects, not the visibility filter.
+        seedDmSubscription(userId, sourceId);
         String uid = PREFIX + "need-uid";
         seedPost(sourceId, uid, "NEEDS_REVIEW", "Title N", "Body N", null, null, null);
 
@@ -173,8 +193,9 @@ class SaveCommandHandlerTest {
     @Test
     void saveAgainstAlreadySavedPostReturnsAlreadySaved() throws Exception {
         String contactId = PREFIX + "dup-actor";
-        seedUser(contactId);
+        UUID userId = seedUser(contactId);
         UUID sourceId = seedSource(PREFIX + "dup-source", new String[] {});
+        seedDmSubscription(userId, sourceId);
         String uid = PREFIX + "dup-uid";
         seedPost(sourceId, uid, "READY", "Title D", "Body D", null, null, null);
 
@@ -195,8 +216,9 @@ class SaveCommandHandlerTest {
     @Test
     void saveAtCapReturnsCapMetAndWritesNoRow() throws Exception {
         String contactId = PREFIX + "cap-actor";
-        seedUser(contactId);
+        UUID userId = seedUser(contactId);
         UUID sourceId = seedSource(PREFIX + "cap-source", new String[] {});
+        seedDmSubscription(userId, sourceId);
         // Saturate to the cap with cap distinct UIDs.
         for (int i = 0; i < saveCap; i++) {
             String uid = PREFIX + "cap-uid-" + i;
@@ -232,8 +254,9 @@ class SaveCommandHandlerTest {
     @Test
     void saveWithPersonalTagsPopulatesPersonalTagsColumn() throws Exception {
         String contactId = PREFIX + "ptag-actor";
-        seedUser(contactId);
+        UUID userId = seedUser(contactId);
         UUID sourceId = seedSource(PREFIX + "ptag-source", new String[] { "news" });
+        seedDmSubscription(userId, sourceId);
         String uid = PREFIX + "ptag-uid";
         seedPost(sourceId, uid, "READY", "Title P", "Body P", null, null, null);
 
@@ -260,11 +283,13 @@ class SaveCommandHandlerTest {
     @Test
     void saveWithOverLengthPersonalTagIsRejectedAndWritesNoRow() throws Exception {
         String contactId = PREFIX + "longtag-actor";
-        seedUser(contactId);
+        UUID userId = seedUser(contactId);
         UUID sourceId = seedSource(PREFIX + "longtag-source", new String[] {});
+        seedDmSubscription(userId, sourceId);
         String uid = PREFIX + "longtag-uid";
-        // A valid READY post — the only reason nothing is stored must be
-        // the over-length tag, not a missing/non-READY target.
+        // A valid READY, visible post — the only reason nothing is stored
+        // must be the over-length tag, not a missing/non-READY/invisible
+        // target.
         seedPost(sourceId, uid, "READY", "Title L", "Body L", null, null, null);
 
         String overLengthTag = "x".repeat(personalTagMaxLength + 1);
@@ -282,8 +307,9 @@ class SaveCommandHandlerTest {
     @Test
     void saveWithOverCountPersonalTagListIsRejectedAndWritesNoRow() throws Exception {
         String contactId = PREFIX + "manytags-actor";
-        seedUser(contactId);
+        UUID userId = seedUser(contactId);
         UUID sourceId = seedSource(PREFIX + "manytags-source", new String[] {});
+        seedDmSubscription(userId, sourceId);
         String uid = PREFIX + "manytags-uid";
         seedPost(sourceId, uid, "READY", "Title M", "Body M", null, null, null);
 
@@ -310,8 +336,9 @@ class SaveCommandHandlerTest {
     @Test
     void saveSnapshotsBodyTitleUrlAuthorPublishedAtAndSourceId() throws Exception {
         String contactId = PREFIX + "snap-actor";
-        seedUser(contactId);
+        UUID userId = seedUser(contactId);
         UUID sourceId = seedSource(PREFIX + "snap-source", new String[] { "news", "tech" });
+        seedDmSubscription(userId, sourceId);
         String uid = PREFIX + "snap-uid";
         Instant publishedAt = Instant.parse("2026-04-15T12:34:56Z");
         seedPost(sourceId, uid, "READY", "Snapshot Title", "Snapshot Body",
@@ -348,8 +375,11 @@ class SaveCommandHandlerTest {
     void save_succeedsInGroupScope() throws Exception {
         String contactId = PREFIX + "group-actor";
         inboundContext.setSenderContactId(contactId);
-        seedUser(contactId);
+        UUID userId = seedUser(contactId);
         UUID sourceId = seedSource(PREFIX + "group-source", new String[] { "news" });
+        // The visibility filter is caller-based, not calling-scope-based:
+        // a DM subscription makes the post saveable from group scope too.
+        seedDmSubscription(userId, sourceId);
         String uid = PREFIX + "group-uid";
         seedPost(sourceId, uid, "READY", "Title G", "Body G", "https://example.com/g", null, null);
 
@@ -361,6 +391,108 @@ class SaveCommandHandlerTest {
                 "/save in group scope must succeed for any active group member");
         assertEquals(1, readSaveCount(contactId),
                 "users.save_count must increment after group-scope /save");
+    }
+
+    // ----- any-caller-scope visibility filter (spec §Content) -------------
+
+    @Test
+    void saveVisibleOnlyViaDmSubscriptionSucceeds() throws Exception {
+        String contactId = PREFIX + "visdm-actor";
+        UUID userId = seedUser(contactId);
+        UUID sourceId = seedSource(PREFIX + "visdm-source", new String[] {});
+        seedDmSubscription(userId, sourceId);
+        // The actor is also a member of an approved group WITHOUT the
+        // subscription — the DM leg alone must admit.
+        UUID groupId = seedGroup(PREFIX + "visdm-group", "approved");
+        seedGroupMembership(groupId, userId, false);
+        String uid = PREFIX + "visdm-uid";
+        seedPost(sourceId, uid, "READY", "Title V", "Body V", null, null, null);
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(contactId), "/save " + uid);
+
+        assertEquals(MessageFormat.format(bundleLoader.get(BundleKeys.REPLY_SAVE_SUCCESS), uid),
+                reply.text(),
+                "/save must admit a post visible via the caller's DM subscription");
+    }
+
+    @Test
+    void saveVisibleOnlyViaApprovedGroupMembershipSucceeds() throws Exception {
+        String contactId = PREFIX + "visgrp-actor";
+        UUID userId = seedUser(contactId);
+        UUID sourceId = seedSource(PREFIX + "visgrp-source", new String[] {});
+        // No DM subscription — visibility flows only through the
+        // approved group's subscription + the caller's active membership.
+        UUID groupId = seedGroup(PREFIX + "visgrp-group", "approved");
+        seedGroupMembership(groupId, userId, false);
+        seedGroupSubscription(groupId, sourceId);
+        String uid = PREFIX + "visgrp-uid";
+        seedPost(sourceId, uid, "READY", "Title G", "Body G", null, null, null);
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(contactId), "/save " + uid);
+
+        assertEquals(MessageFormat.format(bundleLoader.get(BundleKeys.REPLY_SAVE_SUCCESS), uid),
+                reply.text(),
+                "/save from DM must admit a post visible via an approved-group membership");
+    }
+
+    @Test
+    void saveOfReadyPostInvisibleInAllCallerScopesReturnsUnknownUid() throws Exception {
+        String contactId = PREFIX + "invis-actor";
+        seedUser(contactId);
+        // READY post, but no subscription in any of the caller's scopes.
+        UUID sourceId = seedSource(PREFIX + "invis-source", new String[] {});
+        String uid = PREFIX + "invis-uid";
+        seedPost(sourceId, uid, "READY", "Title I", "Body I", null, null, null);
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(contactId), "/save " + uid);
+
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_SAVE_UNKNOWN_UID), reply.text(),
+                "a READY post invisible in every caller scope must surface "
+                        + "error.save.unknown_uid (existence-vs-no-access never exposed)");
+        assertEquals(0L, countSavedPosts(contactId),
+                "no saved_post row may be written for an invisible post");
+    }
+
+    @Test
+    void saveViaDepartedGroupMembershipReturnsUnknownUid() throws Exception {
+        String contactId = PREFIX + "left-actor";
+        UUID userId = seedUser(contactId);
+        UUID sourceId = seedSource(PREFIX + "left-source", new String[] {});
+        // Approved group subscribes, but the caller's membership is
+        // soft-cleared (removed_at set) — departure ends save-visibility.
+        UUID groupId = seedGroup(PREFIX + "left-group", "approved");
+        seedGroupMembership(groupId, userId, true);
+        seedGroupSubscription(groupId, sourceId);
+        String uid = PREFIX + "left-uid";
+        seedPost(sourceId, uid, "READY", "Title D", "Body D", null, null, null);
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(contactId), "/save " + uid);
+
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_SAVE_UNKNOWN_UID), reply.text(),
+                "a departed membership (removed_at set) must not grant save-visibility");
+        assertEquals(0L, countSavedPosts(contactId),
+                "no saved_post row may be written via a departed membership");
+    }
+
+    @Test
+    void saveViaPendingGroupReturnsUnknownUid() throws Exception {
+        String contactId = PREFIX + "pend-actor";
+        UUID userId = seedUser(contactId);
+        UUID sourceId = seedSource(PREFIX + "pend-source", new String[] {});
+        // Active membership, but the group is not approved — a
+        // pending group processes no commands and grants no visibility.
+        UUID groupId = seedGroup(PREFIX + "pend-group", "pending");
+        seedGroupMembership(groupId, userId, false);
+        seedGroupSubscription(groupId, sourceId);
+        String uid = PREFIX + "pend-uid";
+        seedPost(sourceId, uid, "READY", "Title P", "Body P", null, null, null);
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(contactId), "/save " + uid);
+
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_SAVE_UNKNOWN_UID), reply.text(),
+                "a non-approved group must not grant save-visibility");
+        assertEquals(0L, countSavedPosts(contactId),
+                "no saved_post row may be written via a non-approved group");
     }
 
     // ----- helpers --------------------------------------------------------
@@ -393,6 +525,49 @@ class SaveCommandHandlerTest {
                 rs.next();
                 return (UUID) rs.getObject("id");
             }
+        }
+    }
+
+    private void seedDmSubscription(UUID userId, UUID sourceId) throws Exception {
+        try (Connection conn = dataSource.getConnection()) {
+            // DM scope_id is the user's own users.id (schema V7).
+            exec(conn,
+                    "INSERT INTO source_subscription (scope_kind, scope_id, source_id) "
+                            + "VALUES ('dm', ?, ?)",
+                    userId, sourceId);
+        }
+    }
+
+    private UUID seedGroup(String upstreamGroupId, String approvalStatus) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO groups (adapter, upstream_group_id, approval_status) "
+                             + "VALUES (?, ?, ?) RETURNING id")) {
+            ps.setString(1, ADAPTER);
+            ps.setString(2, upstreamGroupId);
+            ps.setString(3, approvalStatus);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return (UUID) rs.getObject("id");
+            }
+        }
+    }
+
+    private void seedGroupMembership(UUID groupId, UUID userId, boolean removed) throws Exception {
+        try (Connection conn = dataSource.getConnection()) {
+            exec(conn,
+                    "INSERT INTO group_membership (group_id, user_id, removed_at) "
+                            + "VALUES (?, ?, " + (removed ? "NOW()" : "NULL") + ")",
+                    groupId, userId);
+        }
+    }
+
+    private void seedGroupSubscription(UUID groupId, UUID sourceId) throws Exception {
+        try (Connection conn = dataSource.getConnection()) {
+            exec(conn,
+                    "INSERT INTO source_subscription (scope_kind, scope_id, source_id) "
+                            + "VALUES ('group', ?, ?)",
+                    groupId, sourceId);
         }
     }
 

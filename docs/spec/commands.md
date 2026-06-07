@@ -199,7 +199,21 @@ text, and output structure are in `docs/design/03-commands.md`.
   hidden — invisible to the user) is treated as an unknown UID.
   `/save` on a `NEEDS_REVIEW` post is treated as an unknown UID:
   `NEEDS_REVIEW` posts are never user-visible — they are reachable
-  only by bot admins via `/quarantine list --all`. The `/save` flow
+  only by bot admins via `/quarantine list --all`. A `READY` post is
+  additionally subject to an **any-caller-scope visibility filter**:
+  `/save` admits the post only if its source is subscribed in at
+  least one of the caller's scopes — the caller's own DM
+  subscriptions, or a group subscription of an approved, non-removed
+  group in which the caller holds an active membership
+  (`group_membership.removed_at IS NULL`). The filter is evaluated
+  against the caller, not the calling scope — a post visible in a
+  group the user belongs to may be saved from DM, consistent with
+  saves being per-user-globally (decision D13). A `READY` post
+  outside that union is treated as an unknown UID: the reply is
+  identical to the nonexistent-UID case, so the
+  existence-vs-no-access distinction is never exposed (mirroring the
+  `getPost` tool contract, `security.md` §Prompt-injection defenses).
+  The `/save` flow
   never lets a user bookmark content they cannot see.
 - `/saved [tag] [-w …] [--page N]` — list saved posts with optional
   filters and pagination. **Saves are per-user-globally** (decision

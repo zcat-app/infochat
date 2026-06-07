@@ -56,6 +56,10 @@ class SavedLibraryIT {
                             + "SELECT id FROM source WHERE identifier LIKE ?)",
                     PREFIX + "%");
             exec(conn,
+                    "DELETE FROM source_subscription WHERE source_id IN ("
+                            + "SELECT id FROM source WHERE identifier LIKE ?)",
+                    PREFIX + "%");
+            exec(conn,
                     "DELETE FROM source WHERE identifier LIKE ?",
                     PREFIX + "%");
             exec(conn,
@@ -75,6 +79,13 @@ class SavedLibraryIT {
                 ps.executeUpdate();
             }
             UUID sourceId = seedSource(conn, PREFIX + "source");
+            // DM scope_id is the actor's own users.id (schema V7) —
+            // the /save visibility filter requires a caller-scope
+            // subscription to the post's source.
+            exec(conn,
+                    "INSERT INTO source_subscription (scope_kind, scope_id, source_id) "
+                            + "SELECT 'dm', id, ? FROM users WHERE contact_id = ?",
+                    sourceId, ACTOR);
             seedReadyPost(conn, sourceId, UID);
         }
     }

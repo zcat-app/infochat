@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 24 |
+| pending | 23 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 232 |
+| done | 233 |
 | deferred | 2 |
 | **total** | **258** |
 
@@ -29,7 +29,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-193 — /stop wiring: pg backend pid + statement timeouts + tool conns (complexity: high, risk: medium)
 - M1-197 — Tool JSON ready_at value + /export paged replies and truncation flag (complexity: medium, risk: medium)
 - M1-198 — Group-scope bot-admin commands: resolve caller via InboundContext (complexity: medium, risk: medium)
-- M1-199 — /save visibility sentence: adjudicate the scope-visibility reading (complexity: low, risk: low)
 - M1-201 — Ops hardening: drop infochat-dev password fallbacks + readiness probes (complexity: medium, risk: medium)
 - M1-202 — Collector fetch hygiene: tracker predicates/keys, Bluesky encoding+parse, Registrar CDI, poller overlap (complexity: medium, risk: medium)
 - M1-203 — Nostr /add-source: StreamSource-shaped relay probe instead of guaranteed SSRF rejection (complexity: medium, risk: medium)
@@ -87,11 +86,11 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-217 | LLM-adapter lows: Entry nullability contradiction, joinPath/preview dedup, Anthropic multi-block content | 2026-06-07 | round 1 APPROVE |
 | M1-209 | Remove hand-written @NonNull made redundant by D48 null-marked packages | 2026-06-07 | round 1 APPROVE |
 | M1-200 | Chat persistence: seq atomicity, pruner truncation, V42 duplicate-index drop | 2026-06-07 | round 1 APPROVE |
+| M1-199 | /save visibility sentence: adjudicate the scope-visibility reading | 2026-06-07 | round 1 APPROVE |
 | M1-196 | Digest scheduler: no missed-slot records for pre-approval windows + async slot dispatch | 2026-06-07 | round 1 APPROVE |
 | M1-195 | Audit correctness: auto-promote guard, /unban no-op, intent-row parity | 2026-06-07 | round 1 APPROVE |
 | M1-194 | EligiblePostQuery SQL LIMIT + chat tool result budgets | 2026-06-07 | round 1 APPROVE |
 | M1-192 | LLM per-task config completion (configFor, remote-llm, guard) | 2026-06-07 | round 1 APPROVE |
-| M1-191 | SSRF: replace the JVM-wide pin lock with a per-host pin map | 2026-06-07 | round 1 APPROVE |
 
 ---
 
@@ -405,7 +404,7 @@ M1-196 (done)
 M1-197 (pending) ← runnable
   └── M1-219 (pending)
 M1-198 (pending) ← runnable
-M1-199 (pending) ← runnable
+M1-199 (done)
 M1-200 (done)
 M1-201 (pending) ← runnable
 M1-202 (pending) ← runnable
