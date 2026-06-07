@@ -4,6 +4,7 @@ import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.core.log.ContactIds;
+import app.zcat.infochat.core.util.JsonEscaper;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
@@ -23,6 +24,7 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.text.MessageFormat;
 import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -31,6 +33,18 @@ import java.util.UUID;
  * group scope, demotes existing admin and promotes target in one
  * transaction. The partial unique index {@code one_admin_per_group}
  * guarantees at most one admin at any point.
+ *
+ * <p>Audit-on-intent: after a non-locking permission pre-check passes
+ * and BEFORE the mutation transaction opens, the handler writes a
+ * PROMOTE_GROUP_ADMIN_INTENT row on a separate auto-commit connection
+ * (spec §Authorization model step 8 "Audit-log the intent" precedes
+ * step 9 "Execute"; GRANT_ADMIN_INTENT placement) — so the
+ * unknown-contact, banned-target, probation-target and not-in-group
+ * refusal legs all leave a surviving intent row while
+ * non-admin-caller refusals stay audit-silent. The pre-transaction
+ * placement avoids the FK-vs-FOR-UPDATE deadlock: the
+ * audit_log.actor_user_id FK takes FOR KEY SHARE on the actor row,
+ * which the in-tx FOR UPDATE admin gate would block undetectably.</p>
  */
 @ApplicationScoped
 public class PromoteCommandHandler implements CommandHandler {
@@ -80,7 +94,30 @@ public class PromoteCommandHandler implements CommandHandler {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
         }
 
+        // Permission pre-check (spec §Authorization model step 7),
+        // refusing and NON-LOCKING — keeps unauthorized senders from
+        // growing the append-only audit_log with the intent row below.
+        // The in-tx FOR UPDATE gate stays authoritative for EXECUTION:
+        // an actor revoked between this read and the transaction is
+        // still refused in-tx, so execution can never happen without
+        // the intent row.
+        Optional<UserRepository.UserRow> actorPre =
+                userRepository.findByAdapterAndContactId(adapter, callerContactId);
+        if (actorPre.isEmpty() || !actorPre.get().isAdmin()) {
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+        }
+
         String requestId = UUID.randomUUID().toString();
+
+        // Audit-on-intent (spec step 8) on a separate auto-commit
+        // connection BEFORE the locking transaction opens, so the
+        // unknown-contact, banned-target, probation-target and
+        // not-in-group refusal legs all leave a surviving intent row.
+        // The shared requestId correlates it with the
+        // PROMOTE_GROUP_ADMIN effect row.
+        insertIntentAudit(adapter, targetContactId, actorPre.get(),
+                group.adapterGroupId(), requestId);
+
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
@@ -223,6 +260,48 @@ public class PromoteCommandHandler implements CommandHandler {
             ps.setObject(1, groupId);
             ps.setObject(2, userId);
             ps.executeUpdate();
+        }
+    }
+
+    /**
+     * Write the PROMOTE_GROUP_ADMIN_INTENT row on its own auto-commit
+     * connection (GRANT_ADMIN_INTENT pattern). The target lookup here
+     * resolves ONLY the row's target_id — the target's users id when
+     * registered, a synthetic UUID otherwise (target_contact_id
+     * carries the identity either way) — and the details_json
+     * target_registered flag that makes a synthetic id
+     * distinguishable from a real-but-since-deleted user id; target
+     * state never gates the write. details_json additionally records
+     * the upstream group id: the refusal legs commit no effect row
+     * carrying scope_id, so without it the probe's group context
+     * would be lost.
+     */
+    private void insertIntentAudit(String adapter, String targetContactId,
+                                   UserRepository.UserRow actor,
+                                   String upstreamGroupId, String requestId) {
+        Optional<UUID> targetPre = userRepository
+                .findByAdapterAndContactId(adapter, targetContactId)
+                .map(UserRepository.UserRow::id);
+        UUID targetUserIdForIntent = targetPre.orElse(UUID.randomUUID());
+        try (Connection conn = dataSource.getConnection()) {
+            RedactionHook.AuditRow row = RedactionHook.AuditRow.builder()
+                    .actorUserId(actor.id())
+                    .actorContactId(actor.contactId())
+                    .actorAdapter(adapter)
+                    .action(AuditAction.PROMOTE_GROUP_ADMIN_INTENT)
+                    .targetKind("user")
+                    .targetId(targetUserIdForIntent.toString())
+                    .targetContactId(targetContactId)
+                    .requestId(requestId)
+                    .detailsJson("{\"target_registered\":" + targetPre.isPresent()
+                            + ",\"upstream_group_id\":\"" + JsonEscaper.escape(upstreamGroupId)
+                            + "\"}")
+                    .build();
+            auditLogWriter.write(conn, row);
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "PromoteCommandHandler intent-audit write failed for adapter="
+                            + adapter + " target=" + ContactIds.redact(targetContactId), e);
         }
     }
 

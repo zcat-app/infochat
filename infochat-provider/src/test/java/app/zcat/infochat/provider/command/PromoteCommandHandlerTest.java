@@ -160,6 +160,27 @@ class PromoteCommandHandlerTest {
     }
 
     @Test
+    void promote_bannedTargetRefusalLeavesPromoteIntentAuditRow() throws Exception {
+        // Spec §Authorization model step 8 precedes step 9: an admin's
+        // probe that fails an execution-semantics check (here: banned
+        // target) must still leave a surviving intent row — a distinct
+        // verb from the PROMOTE_GROUP_ADMIN effect row.
+        inboundContext.setSenderContactId(adminContactId);
+        ScopeRef scope = new ScopeRef.Group(UPSTREAM_GROUP_ID);
+
+        OutboundMessage result = handler.handle(scope, "/promote " + bannedTargetContactId);
+
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_PROMOTE_TARGET_BANNED), result.text());
+        assertEquals(1L, countAuditRowsByTargetContact("PROMOTE_GROUP_ADMIN_INTENT",
+                        bannedTargetContactId),
+                "the admin's refused probe must leave exactly one surviving "
+                        + "PROMOTE_GROUP_ADMIN_INTENT row");
+        assertEquals(0L, countAuditRowsByTargetContact("PROMOTE_GROUP_ADMIN",
+                        bannedTargetContactId),
+                "the refused probe must not write a PROMOTE_GROUP_ADMIN effect row");
+    }
+
+    @Test
     void promote_demotesExistingAdminInSameTransaction() {
         inboundContext.setSenderContactId(adminContactId);
         ScopeRef scope = new ScopeRef.Group(UPSTREAM_GROUP_ID);
@@ -172,6 +193,20 @@ class PromoteCommandHandlerTest {
         // After: target is admin, existing is not
         assertTrue(isGroupAdmin(groupId, targetUserId));
         assertFalse(isGroupAdmin(groupId, existingAdminMemberId));
+    }
+
+    private long countAuditRowsByTargetContact(String action, String targetContact)
+            throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT count(*) FROM audit_log WHERE action = ? AND target_contact_id = ?")) {
+            ps.setString(1, action);
+            ps.setString(2, targetContact);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getLong(1);
+            }
+        }
     }
 
     private boolean isGroupAdmin(UUID gId, UUID uId) {

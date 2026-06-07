@@ -37,15 +37,27 @@ public class GroupAutoPromoteService {
 
     // ON CONFLICT handles two cases:
     // 1. Existing member (PK conflict on group_id, user_id): UPDATE sets
-    //    is_group_admin=true only for active (non-removed) members.
-    // 2. Partial unique index one_admin_per_group rejects the UPDATE if
-    //    another user already holds the admin slot — executeUpdate returns 0.
+    //    is_group_admin=true only for active (non-removed) members whose
+    //    admin flag is currently false. The is_group_admin = false guard
+    //    keeps a standing admin's repeat call from re-running a
+    //    true→true UPDATE — which would report 1 row updated and write
+    //    a spurious PROMOTE_GROUP_ADMIN audit row per message.
+    // 2. Occupied slot: rejection surfaces as a 23505 unique violation
+    //    raised by the one_admin_per_group partial index — the genuine
+    //    race-guard leg for concurrent promotions that both passed the
+    //    hasActiveAdmin pre-check (steady-state occupied-slot calls
+    //    return false at the pre-check and never run this statement).
     private static final String AUTO_PROMOTE_SQL =
             "INSERT INTO group_membership (group_id, user_id, is_group_admin) "
                     + "VALUES (?, ?, true) "
                     + "ON CONFLICT (group_id, user_id) DO UPDATE "
                     + "SET is_group_admin = true "
-                    + "WHERE group_membership.removed_at IS NULL";
+                    + "WHERE group_membership.removed_at IS NULL "
+                    + "AND group_membership.is_group_admin = false";
+
+    private static final String HAS_ACTIVE_ADMIN_SQL =
+            "SELECT 1 FROM group_membership "
+                    + "WHERE group_id = ? AND is_group_admin = true AND removed_at IS NULL";
 
     private final DataSource dataSource;
     private final AuditLogWriter auditLogWriter;
@@ -69,6 +81,16 @@ public class GroupAutoPromoteService {
                                   String adapter, String contactId) {
         try (Connection conn = dataSource.getConnection()) {
             if (!isEligible(conn, userId)) {
+                return false;
+            }
+            // Steady-state occupied-slot rejection: when any active
+            // admin exists (including the sender), return false without
+            // attempting the INSERT — this runs per group message, so
+            // it must not cycle through the 23505 exception path or
+            // re-promote a standing admin. The 23505 catch below stays
+            // as the race guard for concurrent promotions that both
+            // pass this read.
+            if (hasActiveAdmin(conn, groupId)) {
                 return false;
             }
             conn.setAutoCommit(false);
@@ -107,6 +129,15 @@ public class GroupAutoPromoteService {
             }
         } catch (SQLException e) {
             throw new IllegalStateException("tryAutoPromote failed", e);
+        }
+    }
+
+    private boolean hasActiveAdmin(Connection conn, UUID groupId) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(HAS_ACTIVE_ADMIN_SQL)) {
+            ps.setObject(1, groupId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
         }
     }
 

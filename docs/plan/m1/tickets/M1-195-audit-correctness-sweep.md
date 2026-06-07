@@ -1,9 +1,14 @@
 ---
 id: M1-195
 title: "Audit correctness: auto-promote guard, /unban no-op, intent-row parity"
-status: pending
+status: done
 created: 2026-06-07
 last_updated: 2026-06-07
+clarity_check:
+  date: 2026-06-07
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
 files_budget: 12
 files_scope:
@@ -46,7 +51,20 @@ spec_refs:
   - docs/spec/security.md §Authorization model
   - docs/spec/commands.md §Permission model
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-07
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 13
+      added: 600
+      removed: 19
 escalations:
   - date: 2026-06-07
     reason: clarity-fail
@@ -82,6 +100,24 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-06-07
+    verdict: CLEAN
+    base: 867bf77 (merge-base with main)
+    head: b805f73 (branch tip, implementation commit)
+    verdict_file: docs/plan/m1/redteam/M1-195-2026-06-07.md
+    out_of_model_count: 1
+    note: |
+      CLEAN. Audit-on-intent ordering (step 8 before step 9), non-admin
+      audit-silence, parameterized SQL + JsonEscaper-guarded details_json,
+      the auto-promote true→true guard (one_admin_per_group index still
+      backstops the TOCTOU), and the /unban not-banned no-op leg all hold
+      against their threat-model promises. One advisory OUT-OF-MODEL note:
+      admin /unban|/vouch|/promote|/demote probes now each cost one
+      append-only audit_log row, within a compromised admin's existing
+      powers and not a bounded commitment — no remediation ticket filed;
+      per-bucket admin-command rate limit is the lever if defense-in-depth
+      is later wanted (adjacent to M1-222).
 ---
 
 # M1-195: Audit correctness: auto-promote guard, /unban no-op, intent-row parity

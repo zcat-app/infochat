@@ -95,8 +95,20 @@ public enum AuditAction {
     BAN,
     BAN_INTENT,
     UNBAN,
+    // UNBAN_INTENT, VOUCH_INTENT, PROMOTE_GROUP_ADMIN_INTENT and
+    // DEMOTE_GROUP_ADMIN_INTENT are the audit-on-intent rows written
+    // on a separate auto-commit connection BEFORE the mutation
+    // transaction (security.md §Authorization model: step 8
+    // "Audit-log the intent" precedes step 9 "Execute"), with the
+    // GRANT_ADMIN_INTENT placement semantics: the row is written only
+    // after the caller's permission gate passes and before every
+    // execution-semantics check, so unknown-contact, banned-target
+    // and no-op probes leave a surviving intent row while
+    // non-admin-caller refusals stay audit-silent.
+    UNBAN_INTENT,
     UNBAN_PREBAN_DELETE,
     VOUCH,
+    VOUCH_INTENT,
     INVITE_CREATE,
     INVITE_CREATE_INTENT,
     INVITE_REVOKE,
@@ -104,7 +116,15 @@ public enum AuditAction {
     INVITE_CONSUME,
     INVITE_BRUTE_FORCE_BREACH,
     PROMOTE_GROUP_ADMIN,
+    // Intent counterpart of PROMOTE_GROUP_ADMIN — see the UNBAN_INTENT
+    // comment for the shared placement semantics. Covers /promote only;
+    // the auto-promote path (GroupAutoPromoteService) has no caller
+    // intent to record.
+    PROMOTE_GROUP_ADMIN_INTENT,
     DEMOTE_GROUP_ADMIN,
+    // Intent counterpart of DEMOTE_GROUP_ADMIN — see the UNBAN_INTENT
+    // comment for the shared placement semantics.
+    DEMOTE_GROUP_ADMIN_INTENT,
     // D47 group authorization (M1-113). APPROVE_GROUP records the
     // bot-admin transition of groups.approval_status from
     // 'pending'/'rejected' to 'approved'; REJECT_GROUP records the

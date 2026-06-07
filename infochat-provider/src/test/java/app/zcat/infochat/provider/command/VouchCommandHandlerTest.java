@@ -125,6 +125,27 @@ class VouchCommandHandlerTest {
         assertNull(userId(absent), "/vouch must not synthesize a users row for unknown contact");
     }
 
+    // ----- post-permission refusal leaves a VOUCH_INTENT row -----------------
+
+    @Test
+    void vouchUnknownContactRefusalLeavesVouchIntentAuditRow() throws Exception {
+        // Spec §Authorization model step 8 precedes step 9: an admin's
+        // probe that fails an execution-semantics check (here:
+        // unknown contact) must still leave a surviving intent row —
+        // a distinct verb from the VOUCH effect row.
+        String actor = PREFIX + "intent-actor";
+        String absent = PREFIX + "intent-absent";
+        seedUser(actor, /* isAdmin */ true, "vouched", null);
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(actor), "/vouch " + absent);
+
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_CONTACT_NOT_REGISTERED), reply.text());
+        assertEquals(1L, countAuditRowsByTargetContact("VOUCH_INTENT", absent),
+                "the admin's refused probe must leave exactly one surviving VOUCH_INTENT row");
+        assertEquals(0L, countAuditRowsByTargetContact("VOUCH", absent),
+                "the refused probe must not write a VOUCH effect row");
+    }
+
     // ----- (c) registered user in probation → probation clears, state kept --
 
     @Test
@@ -372,6 +393,20 @@ class VouchCommandHandlerTest {
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return rs.getTimestamp("probation_until");
+            }
+        }
+    }
+
+    private long countAuditRowsByTargetContact(String action, String targetContactId)
+            throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT count(*) FROM audit_log WHERE action = ? AND target_contact_id = ?")) {
+            ps.setString(1, action);
+            ps.setString(2, targetContactId);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getLong(1);
             }
         }
     }

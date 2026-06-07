@@ -132,6 +132,42 @@ class DemoteCommandHandlerTest {
         assertEquals(bundleLoader.get(BundleKeys.ERROR_DEMOTE_TARGET_NOT_ADMIN), result.text());
     }
 
+    @Test
+    void demote_targetNotAdminRefusalLeavesDemoteIntentAuditRow() throws Exception {
+        // Spec §Authorization model step 8 precedes step 9: an admin's
+        // probe that fails an execution-semantics check (here: target
+        // is not the current group admin) must still leave a surviving
+        // intent row — a distinct verb from the DEMOTE_GROUP_ADMIN
+        // effect row.
+        inboundContext.setSenderContactId(adminContactId);
+        ScopeRef scope = new ScopeRef.Group(UPSTREAM_GROUP_ID);
+
+        OutboundMessage result = handler.handle(scope, "/demote " + nonGroupAdminContactId);
+
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_DEMOTE_TARGET_NOT_ADMIN), result.text());
+        assertEquals(1L, countAuditRowsByTargetContact("DEMOTE_GROUP_ADMIN_INTENT",
+                        nonGroupAdminContactId),
+                "the admin's refused probe must leave exactly one surviving "
+                        + "DEMOTE_GROUP_ADMIN_INTENT row");
+        assertEquals(0L, countAuditRowsByTargetContact("DEMOTE_GROUP_ADMIN",
+                        nonGroupAdminContactId),
+                "the refused probe must not write a DEMOTE_GROUP_ADMIN effect row");
+    }
+
+    private long countAuditRowsByTargetContact(String action, String targetContact)
+            throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT count(*) FROM audit_log WHERE action = ? AND target_contact_id = ?")) {
+            ps.setString(1, action);
+            ps.setString(2, targetContact);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getLong(1);
+            }
+        }
+    }
+
     private boolean isGroupAdmin(UUID gId, UUID uId) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(

@@ -126,6 +126,43 @@ class GroupAutoPromoteServiceTest {
     }
 
     @Test
+    void tryAutoPromote_standingAdminRepeatMessagesWriteSingleAuditRow() {
+        assertTrue(service.tryAutoPromote(groupId, eligibleUserId, TEST_ADAPTER,
+                "autopromote-eligible-" + eligibleUserId));
+
+        // Steady state: every subsequent group message from the
+        // standing admin re-enters tryAutoPromote; each call must be a
+        // no-op — no true→true re-promotion, no spurious audit row.
+        assertFalse(service.tryAutoPromote(groupId, eligibleUserId, TEST_ADAPTER,
+                "autopromote-eligible-" + eligibleUserId));
+        assertFalse(service.tryAutoPromote(groupId, eligibleUserId, TEST_ADAPTER,
+                "autopromote-eligible-" + eligibleUserId));
+
+        assertTrue(isGroupAdmin(groupId, eligibleUserId));
+        assertEquals(1L, countAuditEntries(groupId, eligibleUserId, AuditAction.PROMOTE_GROUP_ADMIN),
+                "a standing admin's repeat messages must write zero additional "
+                        + "PROMOTE_GROUP_ADMIN audit rows");
+    }
+
+    @Test
+    void tryAutoPromote_nonAdminMemberWhileSlotHeldWritesNoAuditRow() {
+        // First user takes the admin slot; second user is an existing
+        // non-admin member.
+        assertTrue(service.tryAutoPromote(groupId, eligibleUserId, TEST_ADAPTER,
+                "autopromote-eligible-" + eligibleUserId));
+        membershipRepository.addMember(groupId, secondUserId);
+
+        boolean result = service.tryAutoPromote(groupId, secondUserId, TEST_ADAPTER,
+                "autopromote-second-" + secondUserId);
+
+        assertFalse(result,
+                "a member's message while another user holds the admin slot must return false");
+        assertFalse(isGroupAdmin(groupId, secondUserId));
+        assertEquals(0L, countAuditEntries(groupId, secondUserId, AuditAction.PROMOTE_GROUP_ADMIN),
+                "an occupied-slot rejection must not write a PROMOTE_GROUP_ADMIN audit row");
+    }
+
+    @Test
     void tryAutoPromote_returnsFalseForRemovedMember() {
         // Seed membership then mark removed
         membershipRepository.addMember(groupId, eligibleUserId);
@@ -135,6 +172,23 @@ class GroupAutoPromoteServiceTest {
                 "autopromote-eligible-" + eligibleUserId);
 
         assertFalse(result);
+    }
+
+    private long countAuditEntries(UUID gId, UUID uId, AuditAction action) {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT count(*) FROM audit_log "
+                             + "WHERE scope_id = ? AND target_id = ? AND action = ?")) {
+            ps.setObject(1, gId);
+            ps.setString(2, uId.toString());
+            ps.setString(3, action.name());
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getLong(1);
+            }
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     private boolean hasAuditEntry(UUID gId, UUID uId, AuditAction action) {

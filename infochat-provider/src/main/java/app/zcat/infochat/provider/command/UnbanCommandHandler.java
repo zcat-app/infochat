@@ -37,6 +37,16 @@ import java.util.UUID;
  *   <li>Admin gate — resolve actor by {@code (adapter, contact_id)};
  *       non-admin → {@code error.admin_only}, no DB write.</li>
  *   <li>Parse the positional {@code <contact>} argument.</li>
+ *   <li>Audit-on-intent — write the UNBAN_INTENT row on a separate
+ *       auto-commit connection (GRANT_ADMIN_INTENT pattern: spec
+ *       §Authorization model step 8 "Audit-log the intent" precedes
+ *       step 9 "Execute"), unconditionally once the admin gate passes
+ *       and BEFORE target resolution, so the unknown-contact, preban
+ *       and not-banned no-op legs all leave a surviving intent row
+ *       while non-admin refusals stay audit-silent. The row's
+ *       target_id is the target's users id when registered, a
+ *       synthetic UUID otherwise; details_json records
+ *       target_registered so the two are distinguishable.</li>
  *   <li>Resolve the target row by {@code (inbound_adapter,
  *       target_contact_id)}. No row → {@code error.contact_not_registered}
  *       per spec §Admin Unknown-contact rule (an {@code /unban} against a
@@ -52,6 +62,13 @@ import java.util.UUID;
  *       writes the {@code UNBAN_PREBAN_DELETE} audit row AND deletes the
  *       users row in one transaction. Reply:
  *       {@code reply.unban.preban_deleted}.</li>
+ *   <li>Not-banned no-op — a non-preban target with
+ *       {@code is_banned=FALSE} has nothing to unban: reply
+ *       {@code reply.unban.plain} with NO UNBAN audit row, no
+ *       restoration claim, and no UPDATE (only the step-4 intent row
+ *       records the probe). Without this leg the handler fabricated
+ *       an UNBAN event plus a {@code restored_group_admin} list for a
+ *       user who was never banned.</li>
  *   <li>Non-preban path — open one application-side transaction
  *       ({@code autoCommit=false}). SELECT the user's
  *       {@code is_group_admin=TRUE} rows (groups joined). PRE-WRITE the
@@ -143,6 +160,18 @@ public class UnbanCommandHandler implements CommandHandler {
         }
         String targetContactId = args.contact;
 
+        String requestId = UUID.randomUUID().toString();
+
+        // Step 2.5 — audit-on-intent (spec §Authorization model step 8)
+        // on a separate auto-commit connection, after the step-1 admin
+        // gate and BEFORE every execution-semantics check (target
+        // resolution, preban carve-out, not-banned no-op), so each of
+        // those refusal legs leaves a surviving UNBAN_INTENT row
+        // (GRANT_ADMIN_INTENT placement; the shared requestId
+        // correlates intent with the UNBAN / UNBAN_PREBAN_DELETE
+        // effect row on the execution paths).
+        insertUnbanIntentAudit(adapter, targetContactId, actor, requestId);
+
         // Step 3 — resolve target. Unknown contact → friendly error, no
         // DB write (Unknown-contact rule per spec §Admin).
         Optional<UserRow> targetOpt = lookupUser(adapter, targetContactId);
@@ -151,12 +180,17 @@ public class UnbanCommandHandler implements CommandHandler {
         }
         UserRow target = targetOpt.get();
 
-        String requestId = UUID.randomUUID().toString();
-
         // Step 4 — preban carve-out.
         if ("preban".equals(target.registrationState)) {
             executeDeletePrebanUser(adapter, targetContactId, target.id, actor.id, requestId);
             return reply(scope, bundleLoader.get(BundleKeys.REPLY_UNBAN_PREBAN_DELETED));
+        }
+
+        // Step 4.5 — not-banned no-op. Nothing to unban: no UNBAN
+        // audit row, no group-admin restoration claim, no UPDATE. The
+        // step-2.5 intent row is the only trace of the probe.
+        if (!target.isBanned) {
+            return reply(scope, bundleLoader.get(BundleKeys.REPLY_UNBAN_PLAIN));
         }
 
         // Step 5 — non-preban path. One transaction: read group-admin
@@ -256,7 +290,42 @@ public class UnbanCommandHandler implements CommandHandler {
         }
         return userRepository.findByAdapterAndContactId(adapter, contactId)
                 .map(u -> new UserRow(u.id(), u.contactId(), u.isAdmin(),
-                        u.registrationState()));
+                        u.isBanned(), u.registrationState()));
+    }
+
+    /**
+     * Write the UNBAN_INTENT row on its own auto-commit connection
+     * (GRANT_ADMIN_INTENT pattern). The target lookup here resolves
+     * ONLY the row's target_id — the target's users id when
+     * registered, a synthetic UUID otherwise (target_contact_id
+     * carries the identity either way) — and the details_json
+     * target_registered flag that makes a synthetic id
+     * distinguishable from a real-but-since-deleted user id; target
+     * state never gates the write.
+     */
+    private void insertUnbanIntentAudit(String adapter, String targetContactId,
+                                        UserRow actor, String requestId) {
+        Optional<UserRow> targetPre = lookupUser(adapter, targetContactId);
+        UUID targetUserIdForIntent = targetPre.map(u -> u.id).orElse(UUID.randomUUID());
+        try (Connection conn = dataSource.getConnection()) {
+            RedactionHook.AuditRow row = RedactionHook.AuditRow.builder()
+                    .actorUserId(actor.id)
+                    .actorContactId(actor.contactId)
+                    .actorAdapter(adapter)
+                    .action(AuditAction.UNBAN_INTENT)
+                    .targetKind("user")
+                    .targetId(targetUserIdForIntent.toString())
+                    .targetContactId(targetContactId)
+                    .requestId(requestId)
+                    .detailsJson("{\"target_registered\":" + targetPre.isPresent() + "}")
+                    .build();
+            auditLogWriter.write(conn, row);
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "UnbanCommandHandler intent-audit write failed for adapter="
+                            + adapter + " contact_id="
+                            + ContactIds.redact(targetContactId), e);
+        }
     }
 
     private List<GroupRow> selectGroupAdminMemberships(Connection conn, UUID userId)
@@ -352,7 +421,7 @@ public class UnbanCommandHandler implements CommandHandler {
 
     /** Minimal in-memory representation of a users row this handler needs. */
     private record UserRow(UUID id, String contactId, boolean isAdmin,
-                           String registrationState) {}
+                           boolean isBanned, String registrationState) {}
 
     /** Restored group-admin row pair (id used in details_json, display_name in the reply). */
     private record GroupRow(UUID id, String displayName) {}

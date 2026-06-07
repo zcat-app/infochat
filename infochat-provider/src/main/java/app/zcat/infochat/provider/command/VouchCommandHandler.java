@@ -41,6 +41,26 @@ import org.jspecify.annotations.Nullable;
  *       group inbounds hit {@code error.admin_only} without opening
  *       a transaction.</li>
  *   <li>Parse the positional {@code <contact>} argument.</li>
+ *   <li>Permission pre-check (spec §Authorization model step 7) —
+ *       refusing and NON-LOCKING: resolve the actor by
+ *       (adapter, contact_id); absent or non-admin →
+ *       {@code error.admin_only}. Mirrors GrantAdminCommandHandler's
+ *       step-3 gate; the in-tx {@code FOR UPDATE} gate below stays
+ *       authoritative for EXECUTION. Refusal-before-intent keeps
+ *       unauthorized senders from growing the append-only
+ *       audit_log.</li>
+ *   <li>Audit-on-intent — write the VOUCH_INTENT row on a separate
+ *       auto-commit connection (spec §Authorization model step 8
+ *       "Audit-log the intent" precedes step 9 "Execute") BEFORE the
+ *       locking transaction opens, unconditionally once the pre-check
+ *       passes and before every execution-semantics check — so the
+ *       unknown-contact, banned-target and no-op refusal legs all
+ *       leave a surviving intent row. The pre-transaction placement
+ *       is load-bearing: the audit_log.actor_user_id FK takes FOR KEY
+ *       SHARE on the actor row, which deadlocks against the in-tx
+ *       FOR UPDATE admin gate if the write happens while that lock is
+ *       held (this connection would wait in application code, not in
+ *       the database, so PostgreSQL cannot detect it).</li>
  *   <li>Open one application-side transaction
  *       ({@code autoCommit=false}). All admin and target reads
  *       happen INSIDE this transaction.</li>
@@ -140,13 +160,40 @@ public class VouchCommandHandler implements CommandHandler {
         }
         String targetContactId = args.contact;
 
+        // Permission pre-check (spec §Authorization model step 7),
+        // refusing and NON-LOCKING (plain MVCC read; mirrors
+        // GrantAdminCommandHandler's step-3 gate). Refusing here keeps
+        // unauthorized senders from growing the append-only audit_log
+        // with the intent row below. The in-tx FOR UPDATE gate stays
+        // authoritative for EXECUTION: an actor revoked between this
+        // read and the transaction is still refused in-tx — execution
+        // can never happen without the intent row.
+        Optional<ActorRow> actorPre = lookupActor(adapter, callerContactId);
+        if (actorPre.isEmpty() || !actorPre.get().isAdmin) {
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+        }
+
+        String requestId = UUID.randomUUID().toString();
+
+        // Audit-on-intent (spec step 8) on a separate auto-commit
+        // connection BEFORE the locking transaction opens, so the
+        // unknown-contact, banned-target and no-op refusal legs all
+        // leave a surviving VOUCH_INTENT row. Pre-transaction
+        // placement is mandatory, not stylistic: the
+        // audit_log.actor_user_id FK takes FOR KEY SHARE on the actor
+        // row, which deadlocks (undetectably — this connection would
+        // wait in application code) against the FOR UPDATE admin gate
+        // below if written while that lock is held. The shared
+        // requestId correlates the intent row with the VOUCH effect
+        // row.
+        insertVouchIntentAudit(adapter, targetContactId, actorPre.get(), requestId);
+
         // All authorization-sensitive reads + the audit/UPDATE run
         // inside ONE transaction. The admin gate is the FIRST read so
         // non-admin callers cannot probe arbitrary target state via
         // the 4-way reply discrimination (M1-045 redteam-fix round 2
         // INFO-LEAK closure). The /revoke-admin TOCTOU close (OUT-OF-
         // MODEL #2) is the FOR UPDATE on the actor row.
-        String requestId = UUID.randomUUID().toString();
         String successReplyText = null;
         String outcomeBundleKey = null;
         try (Connection conn = dataSource.getConnection()) {
@@ -218,11 +265,59 @@ public class VouchCommandHandler implements CommandHandler {
         return !row.probationUntil.isAfter(Instant.now());
     }
 
+    /**
+     * Non-locking lookup used by the permission pre-check and the
+     * intent row's target_id resolution. Plain MVCC SELECT — takes no
+     * row lock, so it can never participate in the FK-vs-FOR-UPDATE
+     * deadlock the pre-transaction intent placement exists to avoid.
+     */
+    private Optional<ActorRow> lookupActor(String adapter, String contactId) {
+        return userRepository.findByAdapterAndContactId(adapter, contactId)
+                .map(u -> new ActorRow(u.id(), u.contactId(), u.isAdmin()));
+    }
+
     private Optional<ActorRow> lookupActorForUpdate(Connection conn,
                                                     String adapter,
                                                     String contactId) throws SQLException {
         return userRepository.findByAdapterAndContactIdForUpdate(conn, adapter, contactId)
                 .map(u -> new ActorRow(u.id(), u.contactId(), u.isAdmin()));
+    }
+
+    /**
+     * Write the VOUCH_INTENT row on its own auto-commit connection
+     * (GRANT_ADMIN_INTENT pattern). The target lookup here resolves
+     * ONLY the row's target_id — the target's users id when
+     * registered, a synthetic UUID otherwise (target_contact_id
+     * carries the identity either way) — and the details_json
+     * target_registered flag that makes a synthetic id
+     * distinguishable from a real-but-since-deleted user id; target
+     * state never gates the write.
+     */
+    private void insertVouchIntentAudit(String adapter, String targetContactId,
+                                        ActorRow actor, String requestId) {
+        Optional<UUID> targetPre = userRepository
+                .findByAdapterAndContactId(adapter, targetContactId)
+                .map(UserRepository.UserRow::id);
+        UUID targetUserIdForIntent = targetPre.orElse(UUID.randomUUID());
+        try (Connection conn = dataSource.getConnection()) {
+            RedactionHook.AuditRow row = RedactionHook.AuditRow.builder()
+                    .actorUserId(actor.id)
+                    .actorContactId(actor.contactId)
+                    .actorAdapter(adapter)
+                    .action(AuditAction.VOUCH_INTENT)
+                    .targetKind("user")
+                    .targetId(targetUserIdForIntent.toString())
+                    .targetContactId(targetContactId)
+                    .requestId(requestId)
+                    .detailsJson("{\"target_registered\":" + targetPre.isPresent() + "}")
+                    .build();
+            auditLogWriter.write(conn, row);
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "VouchCommandHandler intent-audit write failed for adapter="
+                            + adapter + " contact_id="
+                            + ContactIds.redact(targetContactId), e);
+        }
     }
 
     private Optional<TargetRow> lookupTargetInTx(Connection conn,

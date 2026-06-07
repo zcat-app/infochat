@@ -131,7 +131,6 @@ class UnbanCommandHandlerTest {
         String absent = PREFIX + "unknown-absent";
         seedUser(actor, /* isAdmin */ true, false, "vouched");
         long usersBefore = countUsersUnderPrefix();
-        long auditBefore = countAuditUnderTargetPrefix(PREFIX + "unknown-");
 
         OutboundMessage reply = handler.handle(
                 new ScopeRef.Dm(actor),
@@ -142,8 +141,42 @@ class UnbanCommandHandlerTest {
                         + "error.contact_not_registered");
         assertEquals(usersBefore, countUsersUnderPrefix(),
                 "/unban against unknown contact must not write any users row");
-        assertEquals(auditBefore, countAuditUnderTargetPrefix(PREFIX + "unknown-"),
-                "/unban against unknown contact must not write any audit row");
+        // The admin's probe leaves exactly one UNBAN_INTENT row — the
+        // intent write precedes target resolution, per the GrantAdmin
+        // unknown-contact semantics — and no effect row.
+        assertEquals(1L, countAuditRowsByTargetContact("UNBAN_INTENT", absent),
+                "the admin's unknown-contact probe must leave a surviving UNBAN_INTENT row");
+        assertEquals(0L, countAuditRowsByTargetContact("UNBAN", absent),
+                "/unban against unknown contact must not write an UNBAN effect row");
+        assertEquals(0L, countAuditRowsByTargetContact("UNBAN_PREBAN_DELETE", absent),
+                "/unban against unknown contact must not write an UNBAN_PREBAN_DELETE row");
+    }
+
+    // ----- not-banned no-op: no UNBAN row, no restoration claim ------------
+
+    @Test
+    void unbanOfNonBannedNonPrebanUserWritesNoUnbanAuditRow() throws Exception {
+        String actor = PREFIX + "noop-actor";
+        String target = PREFIX + "noop-target";
+        seedUser(actor, /* isAdmin */ true, false, "vouched");
+        UUID targetId = seedUser(target, /* isAdmin */ false, /* isBanned */ false, "invited");
+        // Target currently holds a group-admin slot: the no-op reply
+        // must NOT claim that slot was "restored" (nothing was).
+        UUID groupId = seedGroup(PREFIX + "noop-group", "GroupNoop");
+        seedMembership(groupId, targetId, /* isGroupAdmin */ true);
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/unban " + target);
+
+        assertEquals(bundleLoader.get(BundleKeys.REPLY_UNBAN_PLAIN), reply.text(),
+                "no-op /unban of a non-banned user must reply plainly, with no "
+                        + "group-admin restoration claim");
+        assertEquals(0L, countAuditRows("UNBAN", targetId),
+                "no-op /unban must not fabricate an UNBAN audit row");
+        // The probe is still visible: exactly one intent row survives.
+        assertEquals(1L, countAuditRows("UNBAN_INTENT", targetId),
+                "no-op /unban must leave a surviving UNBAN_INTENT row");
     }
 
     // ----- (13) Preban path: CALL delete_preban_user, audit + delete -------
@@ -373,6 +406,20 @@ class UnbanCommandHandlerTest {
              PreparedStatement ps = conn.prepareStatement(
                      "SELECT count(*) FROM audit_log WHERE target_contact_id LIKE ?")) {
             ps.setString(1, subPrefix + "%");
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getLong(1);
+            }
+        }
+    }
+
+    private long countAuditRowsByTargetContact(String action, String targetContactId)
+            throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT count(*) FROM audit_log WHERE action = ? AND target_contact_id = ?")) {
+            ps.setString(1, action);
+            ps.setString(2, targetContactId);
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return rs.getLong(1);
