@@ -37,9 +37,36 @@ test_plan:
   preserves:
     - all tests currently green on main
 spec_refs:
-  - docs/spec/commands.md §Conversation control
+  - docs/spec/commands.md §Command catalogue
+  - docs/spec/commands.md §Chat mode
 decision_refs: []
+revisions:
+  - date: 2026-06-07
+    reason: clarity-fail rework
+    summary: |
+      - body: added "Authorized test changes" section resolving the
+        TEST-CHANGES-AUTHORIZED blocker — test_plan.modifies kept, but scoped
+        to adding new named test methods to EligiblePostQueryIT.java only; no
+        pre-existing test method's assertions, seeds, or names change.
+      - Notes: struck "LIMIT cap+1 probe" as a satisfying implementation
+        shape — EligiblePostQueryIT.capDropsOldestAndReportsExcludedCount
+        asserts exact totals (totalBeforeCap=8, excludedCount=3 with cap 5),
+        which a standalone cap+1 probe cannot report; acceptance items 2+4
+        force an exact-count shape.
+      - spec_refs: §Conversation control (covers /stop, /clear, /retry —
+        clarity warning: wrong section) replaced by §Command catalogue (the
+        /summary cluster-cap paragraph) and §Chat mode (chat tool surface).
 reviews: []
+escalations:
+  - date: 2026-06-07
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      TEST-CHANGES-AUTHORIZED: FAIL — test_plan.modifies lists
+      infochat-provider/src/test/java/app/zcat/infochat/provider/summary,
+      but the ticket body has no "Authorized test changes" section
+      enumerating which pre-existing test class(es) will be modified, what
+      they currently assert, and the new expected behavior. Acceptance
+      item 4 ("existing tests stay green") contradicts the modifies field.
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -73,12 +100,27 @@ do-not-regress surface.
 
 See frontmatter.
 
+## Authorized test changes
+
+`test_plan.modifies` lists the summary test directory because the new named
+tests for acceptance items 1 and 2 are added as new test methods inside the
+existing `EligiblePostQueryIT.java` (next to its seed helpers, which they
+may reuse) — a file modification, not a test-behavior modification. No
+pre-existing test method's assertions, seeds, or names change. In
+particular `capDropsOldestAndReportsExcludedCount` (seeds 8 posts against
+cap 5; asserts `posts().size()==5`, `totalBeforeCap()==8`,
+`excludedCount()==3`, `profileCap()==5`) stays green verbatim — it is part
+of the do-not-regress surface of acceptance item 2.
+
 ## Notes
 
 - Source: `UNIFIED.md` §3 T18 under `deep-code-review/v2/` (gpt P1/P2).
 - The audit's suggested shape — `LIMIT clusterCap` plus a `COUNT(*)` for
-  the excess note — is Tier B (unverified): a window-function count or
-  `LIMIT cap+1` probe also satisfy the acceptance; whatever is chosen, the
-  excluded-count behavior is pinned by the second acceptance item.
+  the excess note — is Tier B (unverified): a window-function count
+  (`COUNT(*) OVER ()`) also satisfies the acceptance. A standalone
+  `LIMIT cap+1` probe does NOT: it can only establish "total ≥ cap+1",
+  while the existing `EligiblePostQueryIT.capDropsOldestAndReportsExcludedCount`
+  asserts exact totals (`totalBeforeCap()==8` with cap 5), so acceptance
+  items 2 and 4 jointly force an exact-count shape.
 - Tool budget values are design-tier; document the chosen caps where the
   tool registry documents its other bounds.
