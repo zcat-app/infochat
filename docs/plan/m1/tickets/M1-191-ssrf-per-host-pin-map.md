@@ -21,17 +21,16 @@ out_of_scope:
   - redirect-cap / body-size / timeout enforcement — untouched semantics
   - callers of the SSRF client (fetchers, probes, Nostr dials) — the module API surface should stay source-compatible; if a signature must change, sweep call sites and escalate on files_scope
 acceptance:
-  - "Outbound fetches to DIFFERENT hosts no longer serialize on a JVM-wide lock: a named test holds one pinned dial open (slow connect) and asserts a concurrent fetch to a different host completes without waiting for it (today PinnedDnsResolver.Provider has a single static ReentrantLock and a single static volatile ACTIVE_PINS slot, so every outbound HTTP fetch and every Nostr WebSocket dial in the JVM serializes — lock held across connect+headers per hop, ~4 hops adversarial ≈ 140s)"
+  - "Outbound fetches to DIFFERENT hosts no longer serialize on a JVM-wide lock: a named test in SsrfGuardedHttpClientConcurrencyTest holds one pinned dial open (slow connect) and asserts a concurrent fetch to a different host completes without waiting for it (today PinnedDnsResolver.Provider has a single static ReentrantLock and a single static volatile ACTIVE_PINS slot, so every outbound HTTP fetch and every Nostr WebSocket dial in the JVM serializes — lock held across connect+headers per hop, ~4 hops adversarial ≈ 140s)"
   - "Per docs/spec/security.md §SSRF and outbound connections — \"DNS is re-resolved after every redirect (TOCTOU defense); the IP blocklist re-applies each hop.\" — the existing redirect/rebind tests stay green: the concurrency change does not weaken per-hop re-validation"
-  - "Per docs/spec/security.md §SSRF and outbound connections — \"The IP-blocklist and DNS-rebind defenses are **transport-agnostic** — a `wss://` relay connection is gated by the same checks as an `https://` feed fetch (decision D38).\" — checkAndPinForWebSocket still pins and validates WS dials, now concurrently with HTTP fetches: a named test runs a WS pin and an HTTP fetch simultaneously"
-  - "Pin isolation under concurrency: while host A is pinned, a lookup of host A returns exactly its validated addresses and a concurrent pin of host B neither disturbs nor observes A's pin — a named test pins two hosts concurrently and asserts both resolve to their own validated address lists"
-  - "Pin lifetime is correct under failure: a throw inside the guarded section releases that host's pin (no stale pin survives), and concurrent holders of the SAME host don't release each other's pin early — named tests cover unlock-on-throw and same-host overlap"
+  - "Per docs/spec/security.md §SSRF and outbound connections — \"The IP-blocklist and DNS-rebind defenses are **transport-agnostic** — a `wss://` relay connection is gated by the same checks as an `https://` feed fetch (decision D38).\" — checkAndPinForWebSocket still pins and validates WS dials, now concurrently with HTTP fetches: a named test in SsrfGuardedHttpClientConcurrencyTest runs a WS pin and an HTTP fetch simultaneously"
+  - "Pin isolation under concurrency: while host A is pinned, a lookup of host A returns exactly its validated addresses and a concurrent pin of host B neither disturbs nor observes A's pin — a named test in PinnedDnsResolverConcurrencyTest pins two hosts concurrently and asserts both resolve to their own validated address lists"
+  - "Pin lifetime is correct under failure: a throw inside the guarded section releases that host's pin (no stale pin survives), and concurrent holders of the SAME host don't release each other's pin early — named tests in PinnedDnsResolverConcurrencyTest cover unlock-on-throw and same-host overlap"
   - "mvn -B clean verify from the repo root exits 0"
 test_plan:
   adds:
-    - infochat-ssrf/src/test/java/app/zcat/infochat/ssrf
-  modifies:
-    - infochat-ssrf/src/test/java/app/zcat/infochat/ssrf
+    - infochat-ssrf/src/test/java/app/zcat/infochat/ssrf/PinnedDnsResolverConcurrencyTest.java
+    - infochat-ssrf/src/test/java/app/zcat/infochat/ssrf/SsrfGuardedHttpClientConcurrencyTest.java
   preserves:
     - all tests currently green on main
 spec_refs:
@@ -40,6 +39,40 @@ decision_refs:
   - D20
   - D38
 reviews: []
+escalations:
+  - date: 2026-06-07
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      TEST-CHANGES-AUTHORIZED FAIL: test_plan.modifies lists
+      infochat-ssrf/src/test/java/app/zcat/infochat/ssrf but the ticket
+      body contains no "Authorized test changes" section. Add a section
+      that names each existing test class or method that will be modified
+      and describes the new expected behavior (or explicitly states
+      "setup-only changes: assertion logic is unchanged, only
+      construction/instantiation of PinnedDnsResolver/SsrfGuardedHttpClient
+      is updated to match new API"). If the existing tests require no
+      behavioral changes — only mechanical API-call updates — state that
+      explicitly with the class names.
+revisions:
+  - date: 2026-06-07
+    reason: clarity-fail-refine (round 1) — disclaim modifications to existing tests, name the planned test classes, settle the files_budget grouping
+    snapshot: |
+      test_plan (pre-refine):
+        adds:
+          - infochat-ssrf/src/test/java/app/zcat/infochat/ssrf
+        modifies:
+          - infochat-ssrf/src/test/java/app/zcat/infochat/ssrf
+        preserves:
+          - all tests currently green on main
+      Acceptance items 1, 3, 4, 5 said "a named test" / "named tests" without
+      naming classes; the body carried NO "Authorized test changes" section
+      while test_plan.modifies listed the whole test directory (clarity blocker
+      TEST-CHANGES-AUTHORIZED). Verified on disk pre-refine: none of the three
+      existing test classes (IpBlocklistTest 34 tests, SsrfGuardedHttpClientTest
+      18, UrlRedactorTest 8) references PinnedDnsResolver, the Provider pin
+      internals (ACTIVE_PINS / ReentrantLock / PinnedDial), or checkAndPin —
+      grep over infochat-ssrf/src/test returned zero hits — so the modifies
+      entry was unfounded and is removed rather than authorized.
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -70,6 +103,22 @@ the pin) is preserved verbatim.
 ## Out-of-scope
 
 See frontmatter.
+
+## Authorized test changes
+
+None. No existing test class is modified. Verified on disk: the three
+existing classes — IpBlocklistTest (34 tests), SsrfGuardedHttpClientTest
+(18), UrlRedactorTest (8) — reference neither PinnedDnsResolver nor the
+Provider pin internals (ACTIVE_PINS, ReentrantLock, PinnedDial,
+checkAndPin) and assert through the module's public API only; all must
+stay green unchanged (acceptance item 2). New concurrency scenarios land
+exclusively in two NEW classes: PinnedDnsResolverConcurrencyTest
+(pin isolation, unlock-on-throw, same-host overlap — items 4, 5) and
+SsrfGuardedHttpClientConcurrencyTest (cross-host non-serialization,
+WS+HTTP simultaneity — items 1, 3). With this grouping the touched-file
+count is 2 production + 2 new test files = 4 ≤ files_budget 5. If
+implementation discovers an unavoidable touch to an existing test class —
+even a mechanical one — it is NOT pre-authorized here: escalate.
 
 ## Notes
 
