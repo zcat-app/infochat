@@ -79,8 +79,8 @@ See frontmatter.
   recorded in the batch summary).
 - blocked_by M1-189 keeps the grant-layer migrations strictly ordered
   (V39 → this ticket's version, if direction (a) adds one). Migration
-  version: next free after the MIG-lane sweep at start (V41 is reserved
-  by M1-200; V39/V40 by M1-189/M1-190).
+  version: next free after the MIG-lane sweep at start (V41 is taken
+  by M1-182; V42 is reserved by M1-200; V39/V40 by M1-189/M1-190).
 - migration_touch is set true for the MIG lane even though direction
   (b) ships no migration — better a stale reservation than a version
   collision (workflow memory: sweep worktrees before assigning).

@@ -1,6 +1,6 @@
 ---
 id: M1-200
-title: "Chat persistence: seq atomicity, pruner truncation, V41 duplicate-index drop"
+title: "Chat persistence: seq atomicity, pruner truncation, V42 duplicate-index drop"
 status: pending
 created: 2026-06-07
 last_updated: 2026-06-07
@@ -26,9 +26,9 @@ acceptance:
   - "Concurrent persistTurn callers for the same (user, scope) never collide on the chat_message primary key: a named DB-backed concurrency test runs parallel writers against one session and asserts every turn lands with a distinct seq and no SQLException (today ChatSessionRepository reads next_seq with a plain SELECT — no FOR UPDATE — before the INSERT, so two writers read the same value and the second hits the PK)"
   - "The /compress reset path still works: CompressCommandHandler resets next_seq to 0 directly via UPDATE chat_session — the chosen seq-allocation mechanism must coexist with that reset (existing CompressCommandHandlerTest and ClearCommandHandlerTest stay green)"
   - "A retention shorter than 24 hours prunes only rows older than the configured duration: a named test sets a sub-day retention and asserts younger rows survive (today the pruner computes int days = (int) retention.toDays(), so PT12H becomes 0 days and the DELETE removes every chat_memory/chat_session/summary_anchor row)"
-  - "Migration V41 drops idx_chat_message_session_seq: a named IT asserts the index no longer exists after migration while the chat_message primary key remains (today V18:74-75 creates the index on exactly the PK's column list — a duplicate)"
-  - "The chat_memory LRU cap's behavior under concurrent inserts is settled: either the V18 trigger race past the 200-row cap is fixed (e.g. in V41) with a named concurrency test, or the bounded overshoot is accepted and documented in a trigger comment with the rationale argued in the commit message"
-  - "mvn -B clean verify from the repo root exits 0 (Flyway ITs prove V41 applies on a fresh DB and on a V40-migrated DB)"
+  - "Migration V42 drops idx_chat_message_session_seq: a named IT asserts the index no longer exists after migration while the chat_message primary key remains (today V18:74-75 creates the index on exactly the PK's column list — a duplicate)"
+  - "The chat_memory LRU cap's behavior under concurrent inserts is settled: either the V18 trigger race past the 200-row cap is fixed (e.g. in V42) with a named concurrency test, or the bounded overshoot is accepted and documented in a trigger comment with the rationale argued in the commit message"
+  - "mvn -B clean verify from the repo root exits 0 (Flyway ITs prove V42 applies on a fresh DB and on a V41-migrated DB)"
 test_plan:
   adds:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/chat
@@ -47,7 +47,7 @@ reopens: []
 redteam_findings: []
 ---
 
-# M1-200: Chat persistence: seq atomicity, pruner truncation, V41 duplicate-index drop
+# M1-200: Chat persistence: seq atomicity, pruner truncation, V42 duplicate-index drop
 
 ## Context
 
@@ -67,7 +67,7 @@ Four chat-persistence defects (unified findings P5, P6, D7, D8 —
    suggestion targets only the remaining truncation at the Java side.
 3. **Duplicate index (D8, low).** V18:74-75's
    idx_chat_message_session_seq indexes exactly the PK column list.
-   Drop is assigned migration **V41**.
+   Drop is assigned migration **V42**.
 4. **LRU trigger race (D7, low-med).** V18's BEFORE-INSERT trigger runs
    a COUNT(*) per insert and can overshoot the 200-row cap under READ
    COMMITTED concurrency — settle: fix or accept-and-document.
@@ -91,10 +91,12 @@ See frontmatter.
 
 - Source: `UNIFIED.md` §3 T23 under `deep-code-review/v2/` (gpt R4,
   opus-47 prov F9 / core F4, kimi-folder core C-F4).
-- Migration version: **V41** (swept 2026-06-07: V38 is the highest on
-  disk in main and every worktree; V39/V40 are reserved by pending
-  M1-189/M1-190 frontmatter. Re-sweep both at start per the
-  migration-lane rule and bump if taken).
+- Migration version: **V42** (re-swept 2026-06-07: the original V41
+  claim double-booked with M1-182's redteam-refine claim, which was
+  invisible to the draft-time sweep because it lived only on the
+  M1-182 branch; V41 is now M1-182's approve_quarantine amendment on
+  disk. V39/V40 remain reserved by pending M1-189/M1-190 frontmatter.
+  Re-sweep at start per the migration-lane rule and bump if taken).
 
 ## Suggested direction (unverified hypothesis)
 

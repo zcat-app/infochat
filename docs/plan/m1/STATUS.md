@@ -43,7 +43,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-197 — Tool JSON ready_at value + /export paged replies and truncation flag (complexity: medium, risk: medium)
 - M1-198 — Group-scope bot-admin commands: resolve caller via InboundContext (complexity: medium, risk: medium)
 - M1-199 — /save visibility sentence: adjudicate the scope-visibility reading (complexity: low, risk: low)
-- M1-200 — Chat persistence: seq atomicity, pruner truncation, V41 duplicate-index drop (complexity: medium, risk: medium)
+- M1-200 — Chat persistence: seq atomicity, pruner truncation, V42 duplicate-index drop (complexity: medium, risk: medium)
 - M1-201 — Ops hardening: drop infochat-dev password fallbacks + readiness probes (complexity: medium, risk: medium)
 - M1-202 — Collector fetch hygiene: tracker predicates/keys, Bluesky encoding+parse, Registrar CDI, poller overlap (complexity: medium, risk: medium)
 - M1-203 — Nostr /add-source: StreamSource-shaped relay probe instead of guaranteed SSRF rejection (complexity: medium, risk: medium)
