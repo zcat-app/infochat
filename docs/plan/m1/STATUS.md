@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 17 |
+| pending | 31 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 211 |
 | deferred | 2 |
-| **total** | **230** |
+| **total** | **244** |
 
 ---
 
@@ -41,6 +41,18 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-192 — LLM per-task config completion (configFor, remote-llm, guard) (complexity: medium, risk: medium)
 - M1-193 — /stop wiring: pg backend pid + statement timeouts + tool conns (complexity: high, risk: medium)
 - M1-194 — EligiblePostQuery SQL LIMIT + chat tool result budgets (complexity: medium, risk: medium)
+- M1-195 — Audit correctness: auto-promote guard, /unban no-op, intent-row parity (complexity: medium, risk: medium)
+- M1-196 — Digest scheduler: no missed-slot records for pre-approval windows + async slot dispatch (complexity: medium, risk: medium)
+- M1-197 — Tool JSON ready_at value + /export paged replies and truncation flag (complexity: medium, risk: medium)
+- M1-198 — Group-scope bot-admin commands: resolve caller via InboundContext (complexity: medium, risk: medium)
+- M1-199 — /save visibility sentence: adjudicate the scope-visibility reading (complexity: low, risk: low)
+- M1-200 — Chat persistence: seq atomicity, pruner truncation, V41 duplicate-index drop (complexity: medium, risk: medium)
+- M1-201 — Ops hardening: drop infochat-dev password fallbacks + readiness probes (complexity: medium, risk: medium)
+- M1-202 — Collector fetch hygiene: tracker predicates/keys, Bluesky encoding+parse, Registrar CDI, poller overlap (complexity: medium, risk: medium)
+- M1-203 — Nostr /add-source: StreamSource-shaped relay probe instead of guaranteed SSRF rejection (complexity: medium, risk: medium)
+- M1-204 — Messaging SPI conformance: setTyping no-op, start() exception type, constants drift, jitter, dead stubs (complexity: medium, risk: medium)
+- M1-205 — Adapter rate-limit enforcement: implement §6.3.7 + capability caps, or design-amend (complexity: high, risk: medium)
+- M1-206 — Parameterize SET LOCAL infochat.actor_id (drop UUID string concat) (complexity: low, risk: low)
 
 ---
 
@@ -57,7 +69,8 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-207 — blocked_by: M1-189 (pending)
+- M1-208 — blocked_by: M1-178 (pending)
 
 ---
 
@@ -371,8 +384,11 @@ M1-173 (done)
   └── M1-175 (done)
 M1-176 (done)
 M1-177 (done)
-  └── M1-184 (pending) ← runnable
+  ├── M1-184 (pending) ← runnable
+  ├── M1-204 (pending) ← runnable
+  └── M1-205 (pending) ← runnable
 M1-178 (pending) ← runnable
+  └── M1-208 (pending)
 M1-179 (pending) ← runnable
 M1-180 (pending) ← runnable
 M1-181 (pending) ← runnable
@@ -383,9 +399,20 @@ M1-186 (pending) ← runnable
 M1-187 (pending) ← runnable
 M1-188 (pending) ← runnable
 M1-189 (pending) ← runnable
+  └── M1-207 (pending)
 M1-190 (pending) ← runnable
 M1-191 (pending) ← runnable
 M1-192 (pending) ← runnable
 M1-193 (pending) ← runnable
 M1-194 (pending) ← runnable
+M1-195 (pending) ← runnable
+M1-196 (pending) ← runnable
+M1-197 (pending) ← runnable
+M1-198 (pending) ← runnable
+M1-199 (pending) ← runnable
+M1-200 (pending) ← runnable
+M1-201 (pending) ← runnable
+M1-202 (pending) ← runnable
+M1-203 (pending) ← runnable
+M1-206 (pending) ← runnable
 ```
