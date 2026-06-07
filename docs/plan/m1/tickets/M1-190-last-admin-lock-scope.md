@@ -1,9 +1,14 @@
 ---
 id: M1-190
 title: "Scope the last-admin LOCK TABLE to admin-relevant updates"
-status: pending
+status: done
 created: 2026-06-07
 last_updated: 2026-06-07
+clarity_check:
+  date: 2026-06-07
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
 files_budget: 4
 files_scope:
@@ -32,11 +37,96 @@ test_plan:
 spec_refs:
   - docs/spec/schema.md §Invariants
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-07
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 186
+      removed: 7
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
+redteam_findings:
+  - date: 2026-06-07
+    category: AUTH-BYPASS
+    severity: low
+    promise: |
+      "Last-admin protection (bot admin only). Cannot revoke the only bot
+      admin's `is_admin`, cannot ban the only bot admin, cannot ban self.
+      ... Enforced at the trigger layer, not just the command layer, so a
+      buggy command cannot bypass it."
+    gap: |
+      The lock-then-count TOCTOU defense in V40__last_admin_lock_scope.sql
+      (lines 54-64, LOCK TABLE ... SHARE ROW EXCLUSIVE followed by SELECT
+      count(*)) is only correct under READ COMMITTED isolation. Under
+      REPEATABLE READ the waiter's SELECT count(*) uses the transaction
+      snapshot taken before the lock was granted: two concurrent
+      transactions each demoting (or banning) a different admin both see
+      the other admin as still effective, both pass remaining >= 1, and
+      both commit — leaving zero is_admin=true AND is_banned=false rows.
+      Carried forward verbatim from V35; nothing in the migration enforces
+      the isolation-level dependency.
+    repro: |
+      With exactly two admins A and B, open two application transactions
+      at REPEATABLE READ. T1: UPDATE users SET is_admin=false WHERE id=A;
+      T2: UPDATE users SET is_admin=false WHERE id=B concurrently. T1
+      locks, counts B (snapshot-visible), passes, commits. T2 acquires the
+      lock after T1 commits, but its RR snapshot predates T1's commit,
+      still counts A as admin, passes, commits. Deployment now has zero
+      bot admins.
+    suggested_fix_class: trust-boundary-tightening
+  - date: 2026-06-07
+    category: AUTH-BYPASS
+    severity: low
+    promise: |
+      "Cannot revoke the only bot admin's `is_admin`, cannot ban the only
+      bot admin, cannot ban self. ... Enforced at the trigger layer, not
+      just the command layer, so a buggy command cannot bypass it."
+    gap: |
+      The ban-self check in V40__last_admin_lock_scope.sql lines 44-52
+      fails open: current_setting('infochat.actor_id', TRUE) returns NULL
+      when the GUC was never set, and the IF v_actor IS NOT NULL AND
+      v_actor <> '' guard then skips the entire ban-self comparison. The
+      trigger-layer "cannot ban self" promise only holds when the command
+      layer correctly sets the GUC — the trigger does NOT independently
+      defend against the "buggy command" the spec names. With >=2 admins
+      a GUC-less self-ban succeeds silently. Carried forward unchanged
+      from V24/V35.
+    repro: |
+      A command path executes UPDATE users SET is_banned=true WHERE
+      id=<actor's own id> on a connection where SET infochat.actor_id was
+      omitted or reset by pool recycling. With two or more admins present,
+      the update commits: the admin has banned themself with no error and
+      no IC001.
+    suggested_fix_class: trust-boundary-tightening
+redteam_audits:
+  - date: 2026-06-07
+    verdict: FINDINGS
+    base: 837d72e^ (= main tip 3b9112d)
+    head: 837d72e
+    verdict_file: docs/plan/m1/redteam/M1-190-2026-06-07.md
+    findings_count: 2
+    out_of_model_count: 2
+    note: |
+      Both findings are low-severity and carried forward verbatim from
+      V24/V35 — pre-existing weaknesses in the trigger bodies that V40
+      re-ships wholesale, not regressions introduced by M1-190's lock
+      scoping. Finding 1: the lock-then-count race safety silently
+      depends on READ COMMITTED isolation. Finding 2: the ban-self GUC
+      check fails open when infochat.actor_id is unset. User decision
+      2026-06-07: both fixed in-branch before squash-merge (V40 rejects
+      guarded transitions under REPEATABLE READ and rejects actor-less
+      bans of admin rows after the last-admin count; proven by
+      LastAdminGuardFailClosedTest). See the verdict file's disposition
+      for the full fix rationale.
 ---
 
 # M1-190: Scope the last-admin LOCK TABLE to admin-relevant updates
