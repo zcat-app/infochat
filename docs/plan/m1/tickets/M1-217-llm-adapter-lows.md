@@ -1,9 +1,14 @@
 ---
 id: M1-217
 title: "LLM-adapter lows: Entry nullability contradiction, joinPath/preview dedup, Anthropic multi-block content"
-status: pending
+status: done
 created: 2026-06-07
 last_updated: 2026-06-07
+clarity_check:
+  date: 2026-06-07
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: [M1-192]
 files_budget: 8
 files_scope:
@@ -37,7 +42,20 @@ spec_refs:
   - docs/spec/llm.md §SPI shape
 decision_refs:
   - D32
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-07
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 369
+      removed: 103
 overrides: []
 aborted_attempts: []
 reopens: []

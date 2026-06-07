@@ -131,7 +131,7 @@ public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
                 "OpenAiCompatibleEmbeddingProvider: failed to assemble request body", e);
         }
 
-        URI uri = URI.create(joinPath(baseUrl, "/embeddings"));
+        URI uri = URI.create(LlmHttpSupport.joinPath(baseUrl, "/embeddings"));
         HttpRequest.Builder reqBuilder = HttpRequest.newBuilder(uri)
             .timeout(Duration.ofMillis(timeoutMs))
             .header("Content-Type", "application/json")
@@ -156,7 +156,7 @@ public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
         }
 
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            String preview = preview(response.body());
+            String preview = LlmHttpSupport.preview(response.body());
             LOG.warnf("OpenAiCompatibleEmbeddingProvider: non-2xx %d from %s; body preview: %s",
                 response.statusCode(), uri, preview);
             throw new EmbeddingCallFailedException(
@@ -179,7 +179,7 @@ public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
         if (!data.isArray()) {
             throw new EmbeddingCallFailedException(
                 "OpenAiCompatibleEmbeddingProvider: response missing data[] from " + uri
-                    + "; preview: " + preview(responseBody));
+                    + "; preview: " + LlmHttpSupport.preview(responseBody));
         }
         List<EmbeddingResult> results = new ArrayList<>(data.size());
         for (int i = 0; i < data.size(); i++) {
@@ -187,7 +187,7 @@ public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
             if (!embedding.isArray()) {
                 throw new EmbeddingCallFailedException(
                     "OpenAiCompatibleEmbeddingProvider: data[" + i + "].embedding missing or not array from "
-                        + uri + "; preview: " + preview(responseBody));
+                        + uri + "; preview: " + LlmHttpSupport.preview(responseBody));
             }
             float[] vector = new float[embedding.size()];
             for (int j = 0; j < embedding.size(); j++) {
@@ -207,32 +207,6 @@ public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
                     + " — expected " + expectedCount + " embeddings, got " + results.size());
         }
         return results;
-    }
-
-    /**
-     * Concatenate {@code base} + {@code path} with exactly one slash
-     * between them. Same helper shape as
-     * {@link OpenAiCompatibleProvider#joinPath} — kept inline rather
-     * than extracted to a shared util because the helper is two
-     * branches and pulling it into a third class would add an
-     * abstraction without enough callers to justify the file.
-     */
-    private static String joinPath(String base, String path) {
-        if (base.endsWith("/")) {
-            return base.substring(0, base.length() - 1) + path;
-        }
-        return base + path;
-    }
-
-    /** Truncate a body for log inclusion — never leak the full reply. */
-    private static String preview(String s) {
-        if (s == null) {
-            return "<null>";
-        }
-        if (s.length() <= 200) {
-            return s;
-        }
-        return s.substring(0, 200) + "…(" + s.length() + " bytes)";
     }
 
     /**

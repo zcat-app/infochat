@@ -145,7 +145,7 @@ public class AnthropicProvider implements LlmProvider {
                 "AnthropicProvider: failed to assemble request body", e);
         }
 
-        URI uri = URI.create(joinPath(cfg.baseUrl(), "/messages"));
+        URI uri = URI.create(LlmHttpSupport.joinPath(cfg.baseUrl(), "/messages"));
         HttpRequest.Builder reqBuilder = HttpRequest.newBuilder(uri)
             .timeout(Duration.ofMillis(cfg.timeoutMs()))
             .header("Content-Type", "application/json")
@@ -196,12 +196,28 @@ public class AnthropicProvider implements LlmProvider {
             throw new LlmCallFailedException(
                 "AnthropicProvider: response missing content[] from " + uri);
         }
-        JsonNode text = content.get(0).path("text");
-        if (!text.isTextual()) {
-            throw new LlmCallFailedException(
-                "AnthropicProvider: response missing content[0].text from " + uri);
+        // Concatenate every text-typed block rather than reading
+        // content[0].text: the Messages API may lead with non-text
+        // blocks (e.g. thinking) or split the reply across several
+        // text blocks — first-block-only would throw on the former
+        // and silently truncate the latter.
+        StringBuilder text = new StringBuilder();
+        boolean sawTextBlock = false;
+        for (JsonNode block : content) {
+            if (!"text".equals(block.path("type").asText())) {
+                continue;
+            }
+            JsonNode blockText = block.path("text");
+            if (blockText.isTextual()) {
+                text.append(blockText.asText());
+                sawTextBlock = true;
+            }
         }
-        return new LlmResponse(text.asText());
+        if (!sawTextBlock) {
+            throw new LlmCallFailedException(
+                "AnthropicProvider: response has no text content block from " + uri);
+        }
+        return new LlmResponse(text.toString());
     }
 
     /**
@@ -212,29 +228,12 @@ public class AnthropicProvider implements LlmProvider {
         try {
             JsonNode root = JSON.readTree(body);
             if ("error".equals(root.path("type").asText())) {
-                return preview(root.path("error").path("message").asText("(no message)"));
+                return LlmHttpSupport.preview(root.path("error").path("message").asText("(no message)"));
             }
         } catch (IOException ignored) {
             // Fall through to preview
         }
-        return preview(body);
-    }
-
-    private static String joinPath(String base, String path) {
-        if (base.endsWith("/")) {
-            return base.substring(0, base.length() - 1) + path;
-        }
-        return base + path;
-    }
-
-    private static String preview(String s) {
-        if (s == null) {
-            return "<null>";
-        }
-        if (s.length() <= 200) {
-            return s;
-        }
-        return s.substring(0, 200) + "…(" + s.length() + " bytes)";
+        return LlmHttpSupport.preview(body);
     }
 
     private record TaskConfig(String baseUrl, String apiKey, String model, long timeoutMs, int maxTokens) {

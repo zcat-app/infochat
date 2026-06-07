@@ -159,12 +159,7 @@ public class LlmRouter {
         // docs/spec/llm.md §Per-task routing rules).
         if (isLanguageAwareTask(task) && !"en".equalsIgnoreCase(lang)) {
             for (Entry e : entries) {
-                // supportedLanguages() is @Nullable per the Entry component
-                // contract; a null reads as "no declared language" and skips
-                // the entry, matching the compact constructor's null→empty
-                // normalization.
-                Set<String> supported = e.supportedLanguages();
-                if (supported != null && supported.contains(lang)) {
+                if (e.supportedLanguages().contains(lang)) {
                     return e.provider();
                 }
             }
@@ -329,17 +324,27 @@ public class LlmRouter {
      * @param name                stable, operator-visible provider id.
      * @param provider            the live {@link LlmProvider} instance.
      * @param supportedLanguages  ISO 639-1 codes the provider can
-     *                            emit. Empty means "any" — the
-     *                            language-aware branch skips empty
-     *                            sets so a generic provider doesn't
+     *                            emit. Never null once constructed;
+     *                            empty means "no declared language",
+     *                            which the language-aware branch skips
+     *                            so a generic provider doesn't
      *                            front-run a capability-declaring one.
      */
-    public record Entry(String name, LlmProvider provider, @Nullable Set<String> supportedLanguages) {
-        public Entry {
+    public record Entry(String name, LlmProvider provider, Set<String> supportedLanguages) {
+        /**
+         * Canonical constructor, written out (not compact) so the
+         * supportedLanguages PARAMETER can be {@code @Nullable} while
+         * the component stays non-null: a caller may pass null for
+         * "no declared languages" — normalized to the empty set here —
+         * and the accessor still never returns null.
+         */
+        public Entry(String name, LlmProvider provider, @Nullable Set<String> supportedLanguages) {
             if (name.isEmpty()) {
                 throw new IllegalArgumentException("Entry.name must be non-empty");
             }
-            supportedLanguages = supportedLanguages == null
+            this.name = name;
+            this.provider = provider;
+            this.supportedLanguages = supportedLanguages == null
                 ? Set.of()
                 : Set.copyOf(supportedLanguages);
         }

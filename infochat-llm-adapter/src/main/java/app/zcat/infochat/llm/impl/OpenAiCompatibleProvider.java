@@ -182,7 +182,7 @@ public class OpenAiCompatibleProvider implements LlmProvider {
                 "OpenAiCompatibleProvider: failed to assemble request body", e);
         }
 
-        URI uri = URI.create(joinPath(cfg.baseUrl(), "/chat/completions"));
+        URI uri = URI.create(LlmHttpSupport.joinPath(cfg.baseUrl(), "/chat/completions"));
         HttpRequest.Builder reqBuilder = HttpRequest.newBuilder(uri)
             .timeout(Duration.ofMillis(cfg.timeoutMs()))
             .header("Content-Type", "application/json")
@@ -212,7 +212,7 @@ public class OpenAiCompatibleProvider implements LlmProvider {
         }
 
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            String preview = preview(response.body());
+            String preview = LlmHttpSupport.preview(response.body());
             LOG.warnf("OpenAiCompatibleProvider: non-2xx %d from %s; body preview: %s",
                 response.statusCode(), uri, preview);
             throw new LlmCallFailedException(
@@ -235,39 +235,15 @@ public class OpenAiCompatibleProvider implements LlmProvider {
         if (!choices.isArray() || choices.isEmpty()) {
             throw new LlmCallFailedException(
                 "OpenAiCompatibleProvider: response missing choices[] from " + uri
-                    + "; preview: " + preview(responseBody));
+                    + "; preview: " + LlmHttpSupport.preview(responseBody));
         }
         JsonNode content = choices.get(0).path("message").path("content");
         if (!content.isTextual()) {
             throw new LlmCallFailedException(
                 "OpenAiCompatibleProvider: response missing choices[0].message.content from "
-                    + uri + "; preview: " + preview(responseBody));
+                    + uri + "; preview: " + LlmHttpSupport.preview(responseBody));
         }
         return new LlmResponse(content.asText());
-    }
-
-    /**
-     * Concatenate {@code base} + {@code path} with exactly one slash
-     * between them. {@code base} may end with {@code "/"} (Ollama
-     * config often ends with {@code /v1/}); {@code path} starts with
-     * {@code "/"} by convention here.
-     */
-    private static String joinPath(String base, String path) {
-        if (base.endsWith("/")) {
-            return base.substring(0, base.length() - 1) + path;
-        }
-        return base + path;
-    }
-
-    /** Truncate a body for log inclusion — never leak the full reply. */
-    private static String preview(String s) {
-        if (s == null) {
-            return "<null>";
-        }
-        if (s.length() <= 200) {
-            return s;
-        }
-        return s.substring(0, 200) + "…(" + s.length() + " bytes)";
     }
 
     /** Per-task config snapshot extracted by {@link #configFor}. */

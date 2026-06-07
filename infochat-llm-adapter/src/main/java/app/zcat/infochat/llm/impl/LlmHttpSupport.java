@@ -11,14 +11,16 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Flow;
 
 /**
- * Shared response-hardening helper for the LLM / embedding HTTP
- * provider impls in this package: a <b>bounded body read</b> —
+ * Shared HTTP helpers for the LLM / embedding provider impls in this
+ * package. The load-bearing member is a <b>bounded body read</b> —
  * {@link #boundedStringHandler(long)} replaces
  * {@code BodyHandlers.ofString()} (unbounded) so a pathological
  * multi-GB reply from a misbehaving or hostile endpoint cannot OOM
  * the JVM. The LLM endpoint is operator-configured (semi-trusted),
  * so this is hygiene, not an SSRF-grade target — these calls do not
  * pass through the {@code infochat-ssrf} guard's {@code readBounded}.
+ * Also home to the small request/log helpers every provider needs:
+ * {@link #joinPath} and {@link #preview}.
  *
  * <p>Package-private: the three providers ({@link OpenAiCompatibleProvider},
  * {@link AnthropicProvider}, {@link OpenAiCompatibleEmbeddingProvider})
@@ -59,6 +61,35 @@ final class LlmHttpSupport {
             return MAX_BODY_CAP_BYTES;
         }
         return configured;
+    }
+
+    /**
+     * Hard cap on the characters {@link #preview} retains. This is the
+     * log-leak bound for error-path body previews: a non-2xx provider
+     * reply reaches the log only through {@code preview}, so at most
+     * this many characters of a response body can ever be logged.
+     */
+    static final int PREVIEW_MAX_CHARS = 200;
+
+    /**
+     * Concatenate {@code base} + {@code path} with exactly one slash
+     * between them. {@code base} may end with {@code "/"} (Ollama
+     * config often ends with {@code /v1/}); {@code path} starts with
+     * {@code "/"} by convention in this package.
+     */
+    static String joinPath(String base, String path) {
+        if (base.endsWith("/")) {
+            return base.substring(0, base.length() - 1) + path;
+        }
+        return base + path;
+    }
+
+    /** Truncate a body for log inclusion — never leak the full reply. */
+    static String preview(String s) {
+        if (s.length() <= PREVIEW_MAX_CHARS) {
+            return s;
+        }
+        return s.substring(0, PREVIEW_MAX_CHARS) + "…(" + s.length() + " bytes)";
     }
 
     /**

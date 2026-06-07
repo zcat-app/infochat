@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 31 |
+| pending | 30 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 225 |
+| done | 226 |
 | deferred | 2 |
 | **total** | **258** |
 
@@ -49,7 +49,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-214 — SSRF small fixes: Location-resolve exception contract, fec0::/10, scheme case-fold, reason()-based test assertions (complexity: medium, risk: medium)
 - M1-215 — Core hygiene: sanitized key in getState WARN, full-C0 sanitize, single AuditLogWriter constructor (complexity: low, risk: low)
 - M1-216 — Collector lows: TTL-job partition independence, saturation counter, sha256 dedup, zero-width escapes (complexity: medium, risk: medium)
-- M1-217 — LLM-adapter lows: Entry nullability contradiction, joinPath/preview dedup, Anthropic multi-block content (complexity: low, risk: low)
 - M1-218 — Provider lows: /retry in-flight reply, /invite list-vs-revoke code identity, handle-keyed slot release (complexity: low, risk: medium)
 - M1-220 — [INVESTIGATE] Bluesky source identifier: URL (per D38) vs bare DID/handle (per the fetcher) (complexity: low, risk: medium)
 - M1-221 — LLM retry-once backoff: sleep before the single retry (M1-192 redteam F2) (complexity: medium, risk: low)
@@ -89,6 +88,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-217 | LLM-adapter lows: Entry nullability contradiction, joinPath/preview dedup, Anthropic multi-block content | 2026-06-07 | round 1 APPROVE |
 | M1-209 | Remove hand-written @NonNull made redundant by D48 null-marked packages | 2026-06-07 | round 1 APPROVE |
 | M1-194 | EligiblePostQuery SQL LIMIT + chat tool result budgets | 2026-06-07 | round 1 APPROVE |
 | M1-192 | LLM per-task config completion (configFor, remote-llm, guard) | 2026-06-07 | round 1 APPROVE |
@@ -98,7 +98,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-188 | Serialize SimpleX WS sends + bound Signal handle map | 2026-06-07 | round 1 APPROVE |
 | M1-185 | Reconnect transport after supervised subprocess restart | 2026-06-07 | round 1 APPROVE |
 | M1-183 | LLM rate-cap + in-flight coverage for /summary and /retry | 2026-06-07 | round 2 APPROVE |
-| M1-182 | Re-evaluation verdict handling: re-hide, NOTIFYs, pipeline | 2026-06-07 | round 2 OVERRIDE-APPROVE |
 
 ---
 
@@ -404,7 +403,7 @@ M1-189 (done)
 M1-190 (done)
 M1-191 (done)
 M1-192 (done)
-  └── M1-217 (pending) ← runnable
+  └── M1-217 (done)
 M1-193 (pending) ← runnable
 M1-194 (done)
 M1-195 (pending) ← runnable
