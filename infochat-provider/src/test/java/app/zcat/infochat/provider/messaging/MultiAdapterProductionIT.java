@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.messaging;
 
 import app.zcat.infochat.core.log.ContactIds;
 import app.zcat.infochat.messaging.MessagingAdapter;
+import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.messaging.impl.signal.FakeSignalCli;
@@ -36,6 +37,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.text.MessageFormat;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -432,13 +434,29 @@ class MultiAdapterProductionIT {
                 sgFake.close();
                 Thread.sleep(250);
 
-                // Probe SimpleX liveness via the fire-and-forget typing
-                // pulse. SimpleXAdapter.setTyping uses
-                // SimpleXWebSocketClient.sendFireAndForget — it serializes
-                // through the WS without awaiting a server response, so
-                // the test thread does not block. Poll the fake's frame
-                // queue to confirm the bytes arrived.
-                sx.setTyping(new ScopeRef.Dm("simplex-recipient-queue"), true);
+                // Probe SimpleX liveness via a real send dispatched from
+                // a background virtual thread (setTyping is no longer a
+                // probe option: the SPI declares it a no-op for
+                // supportsTypingIndicator=false adapters, so it issues no
+                // frame). send() blocks awaiting the command ack, which
+                // the fake never produces — the probe only needs the
+                // frame BYTES to reach the fake's queue, and sx.close()
+                // in the finally completes the in-flight send
+                // exceptionally so the probe thread never outlives the
+                // test.
+                Thread.ofVirtual().name("m1-204-simplex-send-after-sg-crash")
+                        .start(() -> {
+                            try {
+                                sx.send(new OutboundMessage(
+                                        new ScopeRef.Dm("simplex-recipient-queue"),
+                                        "liveness probe",
+                                        Instant.now(),
+                                        "liveness-probe-after-signal-crash"));
+                            } catch (MessagingException ignored) {
+                                // ack timeout / close-triggered abort —
+                                // irrelevant to the probe.
+                            }
+                        });
                 String frame = sxFake.awaitFrame(Duration.ofSeconds(2));
                 assertNotNull(frame,
                         "SimpleX must still flush WebSocket frames after Signal crash");

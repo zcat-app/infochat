@@ -33,7 +33,7 @@ import java.util.function.Consumer;
  * a local simplex-chat instance and a {@link SimpleXWebSocketClient} that
  * speaks the simplex-chat WebSocket bot API. Implements the full
  * {@link MessagingAdapter} contract: send / update / finalizeMessage via
- * the WebSocket, typing as a best-effort fire-and-forget, identity assertion
+ * the WebSocket, typing as a capability-declared no-op, identity assertion
  * from the SimpleX-cryptographically-routed inbound envelope (decision
  * D10 + D32, {@code docs/spec/messaging.md} §Per-adapter trust level).
  *
@@ -46,21 +46,23 @@ import java.util.function.Consumer;
  * Provider-side wiring (M1-105) instantiates with the configured form.</p>
  *
  * <p>The supportsTypingIndicator capability flag is {@code false} per
- * design §6.4.2 (SimpleX has no first-class typing indicator). {@link
- * #setTyping} still issues the {@code apiSetContactTyping}-shaped command
- * on a best-effort basis; if simplex-chat rejects it, the
- * fire-and-forget path absorbs the failure — typing is best-effort by
- * the SPI's own contract ({@link MessagingAdapter#setTyping}).</p>
+ * design §6.4.2 (SimpleX has no first-class typing indicator), so
+ * {@link #setTyping} is a no-op — the SPI contract
+ * ({@link MessagingAdapter#setTyping}) says "No-op for adapters with
+ * {@link CapabilityFlags#supportsTypingIndicator} false"; its
+ * best-effort wording covers transport-failure absorption on adapters
+ * that DO support typing, not permission to send the command anyway.</p>
  */
 public final class SimpleXAdapter implements MessagingAdapter {
 
     private static final Logger LOG = LoggerFactory.getLogger(SimpleXAdapter.class);
 
     // maxInboundMessageBytes is the 16 KiB laptop default per
-    // docs/design/06-messaging.md §6.2.2 (profile-tunable). maxMessageBytes,
-    // maxSendsPerSecond, and minEditInterval are best-guess defaults not
-    // fixed by spec and are expected to be tuned against a live simplex-chat
-    // in M1-105.
+    // docs/design/06-messaging.md §6.2.2 (profile-tunable). maxMessageBytes
+    // is a best-guess default not fixed by spec, to be tuned against a live
+    // simplex-chat. maxSendsPerSecond and minEditInterval take design
+    // §6.4.2's conservative values (5/s, 600 ms floor), to be raised only
+    // after observation.
     private static final CapabilityFlags CAPABILITIES = new CapabilityFlags(
             /* supportsMentionByContactId */ true,
             /* supportsMembershipEvents   */ false,
@@ -72,10 +74,10 @@ public final class SimpleXAdapter implements MessagingAdapter {
             /* maxMessageBytes            */ 2_000,
             /* maxInboundMessageBytes     */ 16_384,
             /* maxInflightSends           */ 4,
-            /* maxSendsPerSecond          */ 8,
+            /* maxSendsPerSecond          */ 5,
             /* supportsMessageEdit        */ true,
             /* supportsTypingIndicator    */ false,
-            /* minEditInterval            */ Duration.ZERO);
+            /* minEditInterval            */ Duration.ofMillis(600));
 
     static final Duration WS_READY_TIMEOUT = Duration.ofSeconds(10);
     static final Duration ACK_TIMEOUT = Duration.ofSeconds(30);
@@ -126,9 +128,10 @@ public final class SimpleXAdapter implements MessagingAdapter {
      * {@link #name}, {@link #trustLevel}, {@link #capabilities}, and
      * {@link #setInboundHandler} (the handler is stored for inspection)
      * but every transport call — {@link #start}, {@link #send},
-     * {@link #update}, {@link #finalizeMessage}, {@link #setTyping},
+     * {@link #update}, {@link #finalizeMessage},
      * {@link #assertIdentity} — throws because no config or
-     * {@link HttpClient} was provided. Used by
+     * {@link HttpClient} was provided ({@link #setTyping} is a
+     * capability-declared no-op on every instance). Used by
      * {@code SimpleXAdapterSkeletonTest} to assert the static capability
      * surface.
      */
@@ -420,24 +423,11 @@ public final class SimpleXAdapter implements MessagingAdapter {
 
     @Override
     public void setTyping(ScopeRef scope, boolean typing) {
-        SimpleXWebSocketClient ws = webSocket;
-        if (ws == null) {
-            // Best-effort: an un-started or closed adapter silently absorbs
-            // the typing pulse per SPI Javadoc on setTyping (no throw).
-            return;
-        }
-        try {
-            String envelope = SimpleXMessageCodec.encodeTypingCommand(
-                    nextCorrId(), scope, typing);
-            ws.sendFireAndForget(envelope);
-        } catch (MessagingException e) {
-            // Best-effort: encodeTypingCommand now propagates a checked
-            // PERMANENT on a bad queue address (the codec's encode-time
-            // validator). setTyping has a no-throw SPI contract, so absorb
-            // it here exactly as the ws == null branch above absorbs an
-            // un-started adapter.
-            LOG.debug("setTyping absorbed encode failure: {}", e.category());
-        }
+        // No-op per the SPI contract: capabilities.supportsTypingIndicator
+        // is false (SimpleX has no first-class typing indicator, design
+        // §6.4.2), and MessagingAdapter#setTyping declares "No-op for
+        // adapters with CapabilityFlags#supportsTypingIndicator false".
+        // No transport command may be issued here.
     }
 
     @Override

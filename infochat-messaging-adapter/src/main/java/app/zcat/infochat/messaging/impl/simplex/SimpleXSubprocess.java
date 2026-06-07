@@ -18,7 +18,8 @@ import java.util.function.Consumer;
  * Owns the simplex-chat OS process. Spawns it via {@link ProcessBuilder},
  * drains its stdout/stderr to SLF4J via virtual-thread loops, and runs a
  * supervisor that restarts the process on unexpected exit with
- * exponential backoff + full jitter until a profile-driven crash cap is
+ * exponential backoff + equal jitter (delay uniform in {@code [exp/2,
+ * exp]}, see {@link #backoffDelay}) until a profile-driven crash cap is
  * exhausted, at which point the subprocess transitions to the terminal
  * {@link State#FAILED} state and fires the throttled
  * {@code adminNotifier} hook (per acceptance items 3 + 4 of M1-103).

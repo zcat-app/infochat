@@ -190,6 +190,23 @@ class SimpleXSubprocessTest {
                 zeroJitter);
         assertEquals(5L, capped.toMillis(), "cap clamps the exponential");
         assertFalse(capped.isNegative());
+        // Upper bound of the agreed equal-jitter range [exp/2, exp]: a
+        // Random pinned to the maximum draw (bound-1 = half) lands the
+        // delay exactly at the full exponent, never beyond.
+        Random maxJitter = new Random() {
+            @Override
+            public long nextLong(long bound) {
+                return bound - 1;
+            }
+        };
+        assertEquals(10L, SimpleXSubprocess.backoffDelay(1,
+                Duration.ofMillis(10),
+                Duration.ofMillis(1_000),
+                maxJitter).toMillis(), "10ms exp → 10ms at max jitter");
+        assertEquals(40L, SimpleXSubprocess.backoffDelay(3,
+                Duration.ofMillis(10),
+                Duration.ofMillis(1_000),
+                maxJitter).toMillis(), "40ms exp → 40ms at max jitter");
     }
 
     @Test

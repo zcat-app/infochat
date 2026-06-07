@@ -133,9 +133,9 @@ public final class SignalAdapter implements MessagingAdapter {
      * @param account        the signal-cli account identifier (E.164 phone or ACI).
      * @param botAci         the bot's per-adapter ACI (UUID) — the D10
      *                       trust anchor for group-mode mention
-     *                       recognition. Resolved by Provider-side
-     *                       wiring (M1-035b/M1-105) via
-     *                       {@link SignalIdentity#resolve}.
+     *                       recognition. Sourced by Provider-side
+     *                       wiring (M1-035b/M1-105) from
+     *                       {@code infochat.adapters.signal.bot-aci}.
      * @param daemonEndpoint the local TCP endpoint signal-cli's
      *                       {@code daemon --tcp host:port} will bind
      *                       and the JSON-RPC client will connect to.
@@ -175,11 +175,16 @@ public final class SignalAdapter implements MessagingAdapter {
      * Start the signal-cli subprocess, wait for its TCP JSON-RPC
      * endpoint to become reachable, then open the JSON-RPC client.
      *
+     * @throws MessagingException on transport startup failure (the SPI
+     *         contract): subprocess spawn failure, daemon endpoint not
+     *         reachable within the probe timeout, or JSON-RPC connect
+     *         failure.
      * @throws IllegalStateException if the capability-only constructor
-     *         was used or if the start sequence fails.
+     *         was used, or on invalid operator config (blank bot ACI) —
+     *         programming/config errors, not transport failures.
      */
     @Override
-    public void start() {
+    public void start() throws MessagingException {
         if (binary == null || dataDir == null || account == null
                 || botAci == null || daemonEndpoint == null) {
             throw new IllegalStateException(
@@ -213,13 +218,17 @@ public final class SignalAdapter implements MessagingAdapter {
         try {
             sp.start();
         } catch (IOException e) {
-            throw new IllegalStateException("Failed to start signal-cli subprocess", e);
+            // PERMANENT: a spawn failure is a missing/unexecutable binary,
+            // not a recoverable transport outage (and the throw-site
+            // discipline defaults the undecidable cases to PERMANENT).
+            throw new MessagingException(FailureCategory.PERMANENT,
+                    "Failed to start signal-cli subprocess", e);
         }
         attachSubprocess(sp);
         if (!awaitEndpoint(daemonEndpoint, ENDPOINT_PROBE_TIMEOUT)) {
             sp.stop();
             this.subprocess = null;
-            throw new IllegalStateException(
+            throw new MessagingException(FailureCategory.TRANSIENT,
                     "signal-cli daemon endpoint " + daemonEndpoint + " not reachable within "
                             + ENDPOINT_PROBE_TIMEOUT);
         }
@@ -230,15 +239,34 @@ public final class SignalAdapter implements MessagingAdapter {
         SignalJsonRpcClient c = new SignalJsonRpcClient(
                 daemonEndpoint, account, new SignalMessageCodec(), JSONRPC_RESPONSE_TIMEOUT,
                 sp::restartHung);
+        connectClient(c, sp);
+        attachClient(c);
+        LOG.infof("Signal adapter started; daemon endpoint=%s", daemonEndpoint);
+    }
+
+    /**
+     * Connect the JSON-RPC client, mapping a connect-time
+     * {@link IOException} to the SPI's checked {@link MessagingException}
+     * (TRANSIENT: the daemon answered the endpoint probe moments earlier,
+     * so a refused/reset connect is a recoverable outage shape) and
+     * tearing the just-started subprocess down so a failed {@link #start()}
+     * leaves no orphaned child.
+     *
+     * <p>Package-private seam mirroring {@link #attachClient} /
+     * {@link #attachSubprocess}: a daemon that vanishes between the
+     * endpoint probe and the connect is a timing window no test can
+     * produce deterministically through {@link #start()}, so the
+     * connect-failure contract is pinned against this seam.</p>
+     */
+    void connectClient(SignalJsonRpcClient c, SignalSubprocess sp) throws MessagingException {
         try {
             c.connect();
         } catch (IOException e) {
             sp.stop();
             this.subprocess = null;
-            throw new IllegalStateException("Failed to connect SignalJsonRpcClient", e);
+            throw new MessagingException(FailureCategory.TRANSIENT,
+                    "Failed to connect SignalJsonRpcClient", e);
         }
-        attachClient(c);
-        LOG.infof("Signal adapter started; daemon endpoint=%s", daemonEndpoint);
     }
 
     /** Disconnect the JSON-RPC client and stop the signal-cli subprocess. */

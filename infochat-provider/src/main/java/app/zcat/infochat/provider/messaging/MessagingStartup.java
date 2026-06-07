@@ -51,12 +51,14 @@ public class MessagingStartup {
      * Per-adapter transport startup with per-adapter resilience. A
      * failure on one adapter is logged at ERROR and does not propagate;
      * the next adapter is still attempted (§6.7 invariant). The catch
-     * spans {@link Exception} — both the SPI's checked
-     * {@link app.zcat.infochat.messaging.MessagingException} (SimpleX)
-     * and the runtime exceptions Signal's start path raises — because
-     * the resilience invariant requires that no adapter failure abort
-     * the loop. JVM-level {@link Error}s propagate: a broken JVM is not
-     * a per-adapter condition.
+     * spans {@link Exception} — the SPI's checked
+     * {@link app.zcat.infochat.messaging.MessagingException} (the
+     * declared transport-startup-failure channel) plus any runtime
+     * exception an adapter's start path raises (e.g. an
+     * {@link IllegalStateException} from a wiring/config guard) —
+     * because the resilience invariant requires that no adapter failure
+     * abort the loop. JVM-level {@link Error}s propagate: a broken JVM
+     * is not a per-adapter condition.
      *
      * <p>Each adapter's start outcome is recorded in
      * {@link AdapterConnectionState} so the readiness probe can apply

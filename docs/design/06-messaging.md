@@ -576,6 +576,7 @@
   ### 6.4.6 Reconnection
 
   - **Network failures** (TCP reset, server unreachable, idle timeout, etc.) → exponential backoff reconnect (1s → 2s → 5s → 15s → 60s, then steady at 60s).
+  - **simplex-chat subprocess respawn backoff jitter:** the supervisor's crash-respawn delay is **equal-jitter** exponential — sampled uniformly from `[exp/2, exp]`, where `exp` doubles per consecutive crash up to the cap — so the delay floor still grows per attempt and a fast-crashing child never enters a tight respawn loop. This deliberately differs from the §6.3.6 outbound-retry discipline (full jitter, `[0, exp)`): send retries contend with other clients against a shared remote dependency, where full jitter's wider spread de-synchronizes the herd; a local child respawn has no herd to avoid but must keep a growing minimum delay.
   - Reconnect attempts are logged; first failure logged at WARN, subsequent at INFO.
   - After 5 consecutive network failures, the Provider's admin notifier is invoked (throttled).
   - Inbound queue continues accepting outbound enqueues during disconnect; messages are sent on reconnect.

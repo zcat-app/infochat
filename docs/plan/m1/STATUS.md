@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 15 |
+| pending | 14 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 242 |
+| done | 243 |
 | deferred | 2 |
 | **total** | **259** |
 
@@ -28,7 +28,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-193 — /stop wiring: pg backend pid + statement timeouts + tool conns (complexity: high, risk: medium)
 - M1-198 — Group-scope bot-admin commands: resolve caller via InboundContext (complexity: medium, risk: medium)
 - M1-202 — Collector fetch hygiene: tracker predicates/keys, Bluesky encoding+parse, Registrar CDI, poller overlap (complexity: medium, risk: medium)
-- M1-204 — Messaging SPI conformance: setTyping no-op, start() exception type, constants drift, jitter, dead stubs (complexity: medium, risk: medium)
 - M1-205 — Adapter rate-limit enforcement: implement §6.3.7 + capability caps, or design-amend (complexity: high, risk: medium)
 - M1-207 — infochat_admin role: resolve the paper-principal contradiction (decision) (complexity: low, risk: medium)
 - M1-208 — Per-adapter bootstrap-admin contact-id parse validation (SPI surface decision) (complexity: medium, risk: medium)
@@ -78,12 +77,12 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-216 | Collector lows: TTL-job partition independence, saturation counter, sha256 dedup, zero-width escapes | 2026-06-08 | round 1 APPROVE |
 | M1-214 | SSRF small fixes: Location-resolve exception contract, fec0::/10, scheme case-fold, reason()-based test assertions | 2026-06-08 | round 1 APPROVE |
 | M1-206 | Parameterize SET LOCAL infochat.actor_id (drop UUID string concat) | 2026-06-08 | round 1 APPROVE |
+| M1-204 | Messaging SPI conformance: setTyping no-op, start() exception type, constants drift, jitter, dead stubs | 2026-06-08 | round 1 APPROVE |
 | M1-201 | Ops hardening: drop infochat-dev password fallbacks + readiness probes | 2026-06-08 | round 1 APPROVE |
 | M1-197 | Tool JSON ready_at value + /export paged replies and truncation flag | 2026-06-08 | round 1 APPROVE |
 | M1-184 | Signal reader/codec hardening against malformed frames | 2026-06-08 | round 1 APPROVE |
 | M1-222 | Per-group LLM rate cap (D47) on the group chat path | 2026-06-07 | round 2 OVERRIDE-APPROVE |
 | M1-221 | LLM retry-once backoff: sleep before the single retry (M1-192 redteam F2) | 2026-06-07 | round 2 OVERRIDE-APPROVE |
-| M1-220 | [INVESTIGATE] Bluesky source identifier: URL (per D38) vs bare DID/handle (per the fetcher) | 2026-06-07 | round 1 APPROVE |
 
 ---
 
@@ -370,7 +369,7 @@ M1-173 (done)
 M1-176 (done)
 M1-177 (done)
   ├── M1-184 (done)
-  ├── M1-204 (pending) ← runnable
+  ├── M1-204 (done)
   └── M1-205 (pending) ← runnable
 M1-178 (done)
   └── M1-208 (pending) ← runnable

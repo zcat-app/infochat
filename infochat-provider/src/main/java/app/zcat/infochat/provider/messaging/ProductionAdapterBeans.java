@@ -54,10 +54,10 @@ import java.util.function.Consumer;
  *       with a blank bot identity, reintroducing the forged-mention
  *       attack class the spec forever excludes per
  *       {@code security.md} §"What's intentionally NOT in v1".
- *       Long-term this Producer switches to
- *       {@link SimpleXIdentity#resolve(java.nio.file.Path)} and
- *       drops the config read once the dataDir-to-identity parse
- *       lands (M1-103 left {@code resolve} unimplemented).</li>
+ *       The config key is the identity's source of truth — a
+ *       dataDir-to-identity parse ({@code SimpleXIdentity.resolve})
+ *       was once planned and dropped; {@link SimpleXIdentity} is a
+ *       plain config-sourced value holder.</li>
  *   <li>Signal reads {@code infochat.adapters.signal.binary},
  *       {@code .data-dir}, {@code .account},
  *       {@code .bot-aci} (the bot's own per-adapter ACI — DISTINCT
