@@ -1202,9 +1202,6 @@ CREATE TABLE chat_message (
     REFERENCES chat_session(user_id, scope_kind, scope_id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_chat_message_session_seq
-  ON chat_message(user_id, scope_kind, scope_id, seq);
-
 -- Triggers maintain chat_session counters:
 CREATE OR REPLACE FUNCTION trg_chat_session_counters()
 RETURNS TRIGGER AS $$
