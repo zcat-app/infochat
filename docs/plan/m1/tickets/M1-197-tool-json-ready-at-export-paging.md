@@ -31,7 +31,7 @@ out_of_scope:
   - the group-scope caller-resolution trap in admin handlers — M1-198's
 acceptance:
   - "Per docs/spec/security.md §Prompt-injection defenses (tool catalogue) — searchPosts returns a \"list of `{uid, title, url, ready_at, tags}`\" and getPost returns \"`{uid, title, body, url, ready_at, tags}` or `null`\" — the ready_at JSON field carries the post's ready_at column value: named tests seed a post whose published_at differs from ready_at and assert the emitted JSON value equals ready_at (today both tools SELECT p.published_at and emit it under the ready_at key — SearchPostsTool.java:168-169, GetPostTool.java:61-62)"
-  - "Per docs/spec/commands.md §Content — /export \"is sent as a reply message (or paginated reply messages)\" and \"if the total export size exceeds the per-message cap, the reply is split into pages\" — no single /export reply message body exceeds the page cap: a named test seeds more than one page of data and asserts every emitted reply body is within the cap while all export data remains reachable in-band (today formatPages concatenates every page into ONE OutboundMessage, making the cap cosmetic)"
+  - "Per docs/spec/commands.md §Conversation control — /export \"is sent as a reply message (or paginated reply messages)\" and \"if the total export size exceeds the per-message cap, the reply is split into pages\" — no single /export reply message body exceeds the page cap: a named test seeds more than one page of data and asserts every emitted reply body is within the cap while all export data remains reachable in-band (today formatPages concatenates every page into ONE OutboundMessage, making the cap cosmetic)"
   - "An exactly-cap-full table is not flagged truncated: a named test seeds exactly maxRowsPerTable rows and asserts the table is absent from truncatedTables (today rows.size() >= maxRowsPerTable with LIMIT maxRowsPerTable false-positives on the exactly-full case)"
   - "Existing export and tool tests stay green except where they pin the corrected behaviors"
   - "mvn -B clean verify from the repo root exits 0"
@@ -45,7 +45,7 @@ test_plan:
     - all tests currently green on main
 spec_refs:
   - docs/spec/security.md §Prompt-injection defenses
-  - docs/spec/commands.md §Content
+  - docs/spec/commands.md §Conversation control
 decision_refs:
   - D13
 reviews:
