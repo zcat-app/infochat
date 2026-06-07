@@ -4,11 +4,14 @@ import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
+import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.chat.LlmRateCap;
 import app.zcat.infochat.provider.digest.DigestRetryService;
 import app.zcat.infochat.provider.digest.DigestRetryService.RetryResult;
 import app.zcat.infochat.provider.group.GroupMembershipRepository;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.messaging.RateCapBucket;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -26,6 +29,7 @@ import java.sql.Statement;
 import java.util.UUID;
 import java.util.logging.Logger;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -49,6 +53,11 @@ class RetryDigestCommandTest {
         handler.digestRetryService = digestRetryService;
         handler.groupMembershipRepository = new StubGroupMembershipRepository(true);
         handler.auditLogWriter = new AuditLogWriter(row -> row);
+        // M1-222 cap gates in handleDigestRetry: generous defaults so
+        // the pre-existing routing tests pass both gates untouched; the
+        // cap tests below swap in drained instances.
+        handler.llmRateCap = new LlmRateCap(10);
+        handler.rateCapBucket = new CountingLlmBucket(10);
         DataSource stub = stubDigestDataSource(USER_ID, true, GROUP_ID);
         handler.dataSource = stub;
         handler.userRepository = new UserRepository(stub);
@@ -104,14 +113,86 @@ class RetryDigestCommandTest {
                 "reply must indicate concurrent retry. Got: " + reply.text());
     }
 
+    // ----- M1-222: per-group LLM cap on the --digest re-roll ---------------
+    //
+    // Per docs/spec/security.md §Rate limiting, the per-group LLM
+    // sub-bucket (D47) bounds "chat replies + on-demand /summary +
+    // /retry re-rolls"; the per-user LlmRateCap fires first. Redteam
+    // M1-222 finding 1 (DOS-medium): pre-fix, /retry --digest reached
+    // DigestRetryService without consulting either cap.
+
+    @Test
+    void retryDigest_rejectedWhenGroupLlmBucketExhausted() {
+        handler.rateCapBucket = new CountingLlmBucket(0);
+        // Single-token per-user cap: the post-rejection acquire below
+        // only succeeds if the group-cap rejection refunded the token
+        // the gate consumed (redteam finding 3, digest call site).
+        handler.llmRateCap = new LlmRateCap(1);
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Group("group-1"), "/retry --digest");
+
+        assertEquals(handler.bundleLoader.get(BundleKeys.GROUP_LLM_RATE_LIMIT), reply.text(),
+                "group-cap overflow must send the fixed group.llm_rate_limit reply");
+        assertEquals(0, digestRetryService.callCount,
+                "retryDigest must NOT be called when the per-group LLM bucket is exhausted");
+        assertTrue(handler.llmRateCap.tryAcquire(USER_ID),
+                "the group-cap rejection must refund the per-user token it consumed");
+    }
+
+    @Test
+    void retryDigest_rejectedWhenPerUserLlmBucketExhausted() {
+        LlmRateCap exhausted = new LlmRateCap(1);
+        assertTrue(exhausted.tryAcquire(USER_ID), "drain the bucket's only token");
+        handler.llmRateCap = exhausted;
+        CountingLlmBucket groupBucket = new CountingLlmBucket(10);
+        handler.rateCapBucket = groupBucket;
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Group("group-1"), "/retry --digest");
+
+        assertEquals(handler.bundleLoader.get(BundleKeys.ERROR_CHAT_LLM_RATE_CAP), reply.text(),
+                "per-user overflow must send the existing chat-LLM rate-cap reply");
+        assertEquals(0, digestRetryService.callCount,
+                "retryDigest must NOT be called when the per-user LLM cap is exhausted");
+        assertEquals(10, groupBucket.tokensLeft,
+                "the per-user cap fires first — a per-user rejection must not touch the group bucket");
+    }
+
     // ----- stubs -------------------------------------------------------------
 
     static class StubDigestRetryService extends DigestRetryService {
         RetryResult nextResult = RetryResult.SUCCESS;
+        int callCount = 0;
 
         @Override
         public RetryResult retryDigest(UUID groupId) {
+            callCount++;
             return nextResult;
+        }
+    }
+
+    /**
+     * Deterministic token-draining stub for the per-group LLM bucket,
+     * mirroring {@code GroupApprovalCheckTest.CountingBucket}: the
+     * command-test package cannot see {@link RateCapBucket}'s
+     * package-private test-seam constructors, so the override replaces
+     * the real refill arithmetic with a plain counter.
+     */
+    static final class CountingLlmBucket extends RateCapBucket {
+        int tokensLeft;
+
+        CountingLlmBucket(int cap) {
+            this.tokensLeft = cap;
+        }
+
+        @Override
+        public boolean tryAcquireGroupLlm(UUID groupId) {
+            if (tokensLeft > 0) {
+                tokensLeft--;
+                return true;
+            }
+            return false;
         }
     }
 

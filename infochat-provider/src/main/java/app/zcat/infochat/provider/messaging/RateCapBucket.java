@@ -71,6 +71,29 @@ public class RateCapBucket {
     @ConfigProperty(name = "infochat.ratelimit.group-reply-refill-window", defaultValue = "PT15M")
     Duration groupReplyRefillWindow;
 
+    // D47 per-group LLM sub-bucket (M1-222). Approved-group backstop
+    // bounding aggregate LLM-triggering operations across all group
+    // members — the per-user LlmRateCap fires first; this cap bounds
+    // groups with many active members. Window fixed at 15 minutes by
+    // the property name; same declared-default pattern as group-reply.
+    @ConfigProperty(name = "infochat.ratelimit.group-llm-per-15min", defaultValue = "5")
+    int groupLlmCap;
+
+    @ConfigProperty(name = "infochat.ratelimit.group-llm-refill-window", defaultValue = "PT15M")
+    Duration groupLlmRefillWindow;
+
+    // D47 per-group command sub-bucket (M1-222 redteam follow-up).
+    // Approved-group aggregate bound on slash-command dispatch volume
+    // across all group members per design §4.9; overflow sends the
+    // fixed group.command_rate_limit reply. Window fixed at 15 minutes
+    // by the property name; same declared-default pattern as the other
+    // two group buckets.
+    @ConfigProperty(name = "infochat.ratelimit.group-commands-per-15min", defaultValue = "20")
+    int groupCommandCap;
+
+    @ConfigProperty(name = "infochat.ratelimit.group-command-refill-window", defaultValue = "PT15M")
+    Duration groupCommandRefillWindow;
+
     private Clock clock = Clock.systemUTC();
 
     private final ConcurrentHashMap<Key, Bucket> buckets = new ConcurrentHashMap<>();
@@ -79,6 +102,16 @@ public class RateCapBucket {
     // sweep below; the predicate (idle past evictionThreshold) is
     // key-shape-independent.
     private final ConcurrentHashMap<UUID, Bucket> groupBuckets = new ConcurrentHashMap<>();
+
+    // D47 per-group LLM bucket map (M1-222). Separate from the reply
+    // map — the two sub-buckets have independent caps and budgets per
+    // design §4.9; one group id holds one entry in each.
+    private final ConcurrentHashMap<UUID, Bucket> groupLlmBuckets = new ConcurrentHashMap<>();
+
+    // D47 per-group command bucket map (M1-222 redteam follow-up).
+    // Independent cap and budget per design §4.9; one group id holds
+    // one entry in each of the three group maps.
+    private final ConcurrentHashMap<UUID, Bucket> groupCommandBuckets = new ConcurrentHashMap<>();
 
     public RateCapBucket() {
         // CDI no-arg constructor; @ConfigProperty fields populated post-construction.
@@ -97,9 +130,11 @@ public class RateCapBucket {
     }
 
     /**
-     * Test seam (contact + group buckets). New for M1-112 so
+     * Test seam (contact + group-reply buckets). New for M1-112 so
      * {@code GroupApprovalCheckTest} can drive the bucket-exhausted
      * scenario with a small cap against a controllable clock.
+     * Group-LLM defaults match the application-properties laptop
+     * values, mirroring the 4-arg seam's group-reply defaulting.
      */
     RateCapBucket(Clock clock,
                   int inboundPerMinute,
@@ -107,12 +142,57 @@ public class RateCapBucket {
                   Duration evictionThreshold,
                   int groupReplyCap,
                   Duration groupReplyRefillWindow) {
+        this(clock, inboundPerMinute, refillWindow, evictionThreshold,
+                groupReplyCap, groupReplyRefillWindow, 5, Duration.ofMinutes(15));
+    }
+
+    /**
+     * Test seam (contact + group-reply + group-LLM buckets). New for
+     * M1-222 so {@code RateCapBucketTest} can drive the group-LLM
+     * exhaustion / refill / eviction scenarios with a small cap
+     * against a controllable clock. Group-command defaults match the
+     * application-properties laptop values, mirroring the narrower
+     * seams' defaulting.
+     */
+    RateCapBucket(Clock clock,
+                  int inboundPerMinute,
+                  Duration refillWindow,
+                  Duration evictionThreshold,
+                  int groupReplyCap,
+                  Duration groupReplyRefillWindow,
+                  int groupLlmCap,
+                  Duration groupLlmRefillWindow) {
+        this(clock, inboundPerMinute, refillWindow, evictionThreshold,
+                groupReplyCap, groupReplyRefillWindow, groupLlmCap, groupLlmRefillWindow,
+                20, Duration.ofMinutes(15));
+    }
+
+    /**
+     * Test seam (all four buckets). New for the M1-222 redteam
+     * follow-up so {@code RateCapBucketTest} can drive the
+     * group-command exhaustion / refill / eviction scenarios with a
+     * small cap against a controllable clock.
+     */
+    RateCapBucket(Clock clock,
+                  int inboundPerMinute,
+                  Duration refillWindow,
+                  Duration evictionThreshold,
+                  int groupReplyCap,
+                  Duration groupReplyRefillWindow,
+                  int groupLlmCap,
+                  Duration groupLlmRefillWindow,
+                  int groupCommandCap,
+                  Duration groupCommandRefillWindow) {
         this.clock = clock;
         this.inboundPerMinute = inboundPerMinute;
         this.refillWindow = refillWindow;
         this.evictionThreshold = evictionThreshold;
         this.groupReplyCap = groupReplyCap;
         this.groupReplyRefillWindow = groupReplyRefillWindow;
+        this.groupLlmCap = groupLlmCap;
+        this.groupLlmRefillWindow = groupLlmRefillWindow;
+        this.groupCommandCap = groupCommandCap;
+        this.groupCommandRefillWindow = groupCommandRefillWindow;
     }
 
     /**
@@ -179,6 +259,70 @@ public class RateCapBucket {
     }
 
     /**
+     * D47 per-group LLM sub-bucket (M1-222). Token-bucket keyed on
+     * {@code groups.id}, bounding LLM-triggering operations across all
+     * members of one approved group — the aggregate backstop behind
+     * the per-user {@code LlmRateCap}, which fires first by call-site
+     * construction. Exhaustion returns {@code false}; the caller sends
+     * the fixed {@code group.llm_rate_limit} bundle reply per design
+     * §4.9 (NOT a silent drop — that is the reply bucket's overflow
+     * action). The "approved only" constraint is positional: only
+     * approved groups reach the chat dispatch that consults this
+     * bucket. Periodic digests are system-initiated and never consult
+     * this bucket.
+     */
+    public boolean tryAcquireGroupLlm(UUID groupId) {
+        Bucket bucket = groupLlmBuckets.computeIfAbsent(
+                groupId, k -> new Bucket(groupLlmCap, clock.millis()));
+        synchronized (bucket) {
+            long now = clock.millis();
+            long elapsed = Math.max(0L, now - bucket.lastRefillEpochMillis);
+            long windowMs = groupLlmRefillWindow.toMillis();
+            long refillCount = elapsed * (long) groupLlmCap / windowMs;
+            if (refillCount > 0) {
+                bucket.tokens = (int) Math.min((long) groupLlmCap, (long) bucket.tokens + refillCount);
+                bucket.lastRefillEpochMillis += refillCount * windowMs / (long) groupLlmCap;
+            }
+            if (bucket.tokens > 0) {
+                bucket.tokens--;
+                return true;
+            }
+            return false;
+        }
+    }
+
+    /**
+     * D47 per-group command sub-bucket (M1-222 redteam follow-up).
+     * Token-bucket keyed on {@code groups.id}, bounding slash-command
+     * dispatch volume across all members of one approved group.
+     * Exhaustion returns {@code false}; the caller sends the fixed
+     * {@code group.command_rate_limit} bundle reply per design §4.9
+     * (NOT a silent drop — that is the reply bucket's overflow
+     * action). The "approved only" constraint is positional: only
+     * approved groups reach the slash dispatch that consults this
+     * bucket. DM slash dispatch never consults it.
+     */
+    public boolean tryAcquireGroupCommand(UUID groupId) {
+        Bucket bucket = groupCommandBuckets.computeIfAbsent(
+                groupId, k -> new Bucket(groupCommandCap, clock.millis()));
+        synchronized (bucket) {
+            long now = clock.millis();
+            long elapsed = Math.max(0L, now - bucket.lastRefillEpochMillis);
+            long windowMs = groupCommandRefillWindow.toMillis();
+            long refillCount = elapsed * (long) groupCommandCap / windowMs;
+            if (refillCount > 0) {
+                bucket.tokens = (int) Math.min((long) groupCommandCap, (long) bucket.tokens + refillCount);
+                bucket.lastRefillEpochMillis += refillCount * windowMs / (long) groupCommandCap;
+            }
+            if (bucket.tokens > 0) {
+                bucket.tokens--;
+                return true;
+            }
+            return false;
+        }
+    }
+
+    /**
      * Periodically evict idle buckets to bound memory. Quarkus runtime
      * invokes this method on the scheduler thread; plain-JUnit tests
      * never see it fire (no scheduler runtime).
@@ -197,19 +341,34 @@ public class RateCapBucket {
      * (docs/plan/m1/redteam/M1-044a-2026-05-21.md) and M1-044b's
      * Implementation notes §"Rate-cap eviction-predicate fix".</p>
      *
-     * <p>Sweeps both the contact map and the group map under the same
-     * threshold — the predicate is key-shape independent.</p>
+     * <p>Sweeps the contact map, the group-reply map, the group-LLM
+     * map, and the group-command map with the same
+     * key-shape-independent predicate, but
+     * each map's effective threshold is
+     * {@code max(evictionThreshold, thatMapsRefillWindow)}: eviction
+     * recreates a key with a FULL allotment, which is only equivalent
+     * to lazy refill once the bucket has been idle for at least one
+     * whole refill window. A threshold below the window would let a
+     * drained-then-idle bucket be reborn full early — sustained rate
+     * above the configured cap (redteam M1-222 finding 2; the 15-min
+     * group windows exceed the PT10M default threshold, the 1-min
+     * contact window does not).</p>
      */
     @Scheduled(every = "{infochat.rate-cap.sweep-interval:5m}")
     void evictIdleBuckets() {
-        long thresholdEpochMillis = clock.millis() - evictionThreshold.toMillis();
-        buckets.entrySet().removeIf(entry -> {
-            Bucket bucket = entry.getValue();
-            synchronized (bucket) {
-                return bucket.lastRefillEpochMillis < thresholdEpochMillis;
-            }
-        });
-        groupBuckets.entrySet().removeIf(entry -> {
+        long now = clock.millis();
+        evictIdle(buckets, now - effectiveEvictionMillis(refillWindow));
+        evictIdle(groupBuckets, now - effectiveEvictionMillis(groupReplyRefillWindow));
+        evictIdle(groupLlmBuckets, now - effectiveEvictionMillis(groupLlmRefillWindow));
+        evictIdle(groupCommandBuckets, now - effectiveEvictionMillis(groupCommandRefillWindow));
+    }
+
+    private long effectiveEvictionMillis(Duration mapRefillWindow) {
+        return Math.max(evictionThreshold.toMillis(), mapRefillWindow.toMillis());
+    }
+
+    private static <K> void evictIdle(ConcurrentHashMap<K, Bucket> map, long thresholdEpochMillis) {
+        map.entrySet().removeIf(entry -> {
             Bucket bucket = entry.getValue();
             synchronized (bucket) {
                 return bucket.lastRefillEpochMillis < thresholdEpochMillis;
@@ -225,6 +384,26 @@ public class RateCapBucket {
      */
     int bucketCount() {
         return buckets.size();
+    }
+
+    /**
+     * Test-only seam: report the current group-LLM bucket-map size so
+     * {@code RateCapBucketTest} can assert the eviction sweep removed
+     * the entry from the map. Package-private — production callers
+     * consume {@link #tryAcquireGroupLlm}, never the size.
+     */
+    int groupLlmBucketCount() {
+        return groupLlmBuckets.size();
+    }
+
+    /**
+     * Test-only seam: report the current group-command bucket-map size
+     * so {@code RateCapBucketTest} can assert the eviction sweep
+     * removed the entry from the map. Package-private — production
+     * callers consume {@link #tryAcquireGroupCommand}, never the size.
+     */
+    int groupCommandBucketCount() {
+        return groupCommandBuckets.size();
     }
 
     private record Key(String adapter, String contactId) {

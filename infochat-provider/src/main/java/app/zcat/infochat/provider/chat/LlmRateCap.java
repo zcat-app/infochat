@@ -64,6 +64,25 @@ public class LlmRateCap {
         }
     }
 
+    /**
+     * Undo the caller's most recent {@link #tryAcquire}: remove the
+     * newest recorded timestamp so a downstream rejection (the
+     * per-group LLM backstop, D47) consumes no per-user budget —
+     * without this, a group whose aggregate bucket is pinned empty
+     * would drain every member's personal budget on fixed rate-limit
+     * replies (redteam M1-222 finding 3). The map-miss / empty-deque
+     * no-op covers the eviction-sweep shape, not an illegal call.
+     */
+    public void refund(UUID userId) {
+        Deque<Long> timestamps = llmCallTimestamps.get(userId);
+        if (timestamps == null) {
+            return;
+        }
+        synchronized (timestamps) {
+            timestamps.pollLast();
+        }
+    }
+
     @Scheduled(every = "{infochat.chat.llm-rate-cap-sweep-interval:5m}")
     void evictIdleEntries() {
         evictIdleEntries(System.currentTimeMillis());

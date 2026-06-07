@@ -1075,6 +1075,25 @@ public final class BundleKeys {
     /** Fixed reply when first @mention would exceed the global max-groups cap ({@code infochat.groups.global-max-groups}). */
     public static final String GROUP_GLOBAL_LIMIT = "group.global_limit";
 
+    /**
+     * Fixed reply when a group chat-mode message exhausts the per-group
+     * LLM sub-bucket ({@code infochat.ratelimit.group-llm-per-15min},
+     * M1-222). Per {@code docs/design/04-security.md} §4.9 the LLM-rate
+     * overflow action is this fixed reply — unlike the reply-rate
+     * bucket's silent drop.
+     */
+    public static final String GROUP_LLM_RATE_LIMIT = "group.llm_rate_limit";
+
+    /**
+     * Fixed reply when a group slash command exhausts the per-group
+     * command sub-bucket
+     * ({@code infochat.ratelimit.group-commands-per-15min}, M1-222
+     * redteam follow-up). Per {@code docs/design/04-security.md} §4.9
+     * the command-rate overflow action is this fixed reply — unlike
+     * the reply-rate bucket's silent drop.
+     */
+    public static final String GROUP_COMMAND_RATE_LIMIT = "group.command_rate_limit";
+
     // ----- D47 admin commands — /approve-group + /reject-group + /list-groups (M1-113) -----
     // Per docs/spec/commands.md §Admin (bot admin) + decision D47.
     // The three handlers operate on groups.approval_status. /approve-group

@@ -580,7 +580,33 @@ public class InboundRouter {
         String body;
         try {
             if (normalized.startsWith("/")) {
-                body = handleSlash(msg.scope(), normalized);
+                // Per-group command rate cap (D47) per spec §Rate
+                // limiting: an aggregate sub-bucket keyed on groups.id
+                // bounding slash-command dispatch volume from all
+                // members. "Approved only" holds by position
+                // (pending/rejected stopped at step 3.5); DM slash
+                // dispatch never consults the group bucket. Overflow
+                // sends the fixed group.command_rate_limit reply per
+                // design §4.9 — unlike the reply bucket's silent drop.
+                // An empty group lookup is the same vanished-mid-
+                // dispatch race as the step-4.1 and chat branches and
+                // silent-drops identically.
+                if (msg.scope() instanceof ScopeRef.Group group) {
+                    Optional<UUID> groupDbId =
+                            lookupGroupId(adapterName, group.adapterGroupId());
+                    if (groupDbId.isEmpty()) {
+                        log.debug("InboundRouter: no active groups row for command scope adapter={} scope={}; dropping",
+                                adapterName, ContactIds.redact(group.adapterGroupId()));
+                        return;
+                    }
+                    if (!rateCapBucket.tryAcquireGroupCommand(groupDbId.get())) {
+                        body = bundleLoader.get(BundleKeys.GROUP_COMMAND_RATE_LIMIT);
+                    } else {
+                        body = handleSlash(msg.scope(), normalized);
+                    }
+                } else {
+                    body = handleSlash(msg.scope(), normalized);
+                }
             } else {
                 // Chat-mode dispatch: enforce LLM rate cap, then delegate
                 // to ChatAgent (the chat-mode body cap already fired
@@ -602,7 +628,28 @@ public class InboundRouter {
                                 adapterName, ContactIds.redact(scopeIdOf(msg.scope())));
                         return;
                     }
-                    body = chatAgent.handle(actorId, scopeKind, scopeId.get(), normalized);
+                    // Per-group LLM backstop (D47, M1-222) per spec
+                    // §Rate limiting: the per-user cap above fires
+                    // first; this aggregate sub-bucket keyed on
+                    // groups.id bounds LLM cost for groups with many
+                    // active members. Group scope only — the DM case
+                    // never consults the group bucket. "Approved only"
+                    // holds by position (pending/rejected stopped at
+                    // step 3.5). Overflow sends the fixed
+                    // group.llm_rate_limit reply per design §4.9 —
+                    // unlike the reply bucket's silent drop. Periodic
+                    // digests are system-initiated and never reach
+                    // this path.
+                    if (msg.scope() instanceof ScopeRef.Group
+                            && !rateCapBucket.tryAcquireGroupLlm(scopeId.get())) {
+                        // Group-cap rejection refunds the per-user token
+                        // acquired above — the backstop must not drain the
+                        // sender's personal budget on fixed replies.
+                        llmRateCap.refund(actorId);
+                        body = bundleLoader.get(BundleKeys.GROUP_LLM_RATE_LIMIT);
+                    } else {
+                        body = chatAgent.handle(actorId, scopeKind, scopeId.get(), normalized);
+                    }
                 }
             }
         } catch (RuntimeException e) {

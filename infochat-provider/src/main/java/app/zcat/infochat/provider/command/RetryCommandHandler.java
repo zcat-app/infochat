@@ -17,6 +17,7 @@ import app.zcat.infochat.provider.group.GroupMembershipRepository;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.messaging.RateCapBucket;
 import app.zcat.infochat.provider.summary.ClusterTraversal.Cluster;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator;
@@ -114,6 +115,9 @@ public class RetryCommandHandler implements CommandHandler {
 
     @Inject
     DigestRetryService digestRetryService;
+
+    @Inject
+    RateCapBucket rateCapBucket;
 
     @Inject
     GroupMembershipRepository groupMembershipRepository;
@@ -393,6 +397,24 @@ public class RetryCommandHandler implements CommandHandler {
         }
 
         writeDigestRetryAudit(actor, adapter, contactId, groupDbId);
+
+        // security.md §Rate limiting: /retry re-rolls draw from the same
+        // per-user LLM bucket as chat replies and /summary; the per-group
+        // sub-bucket (D47) is the aggregate backstop and fires second. A
+        // group-cap rejection refunds the per-user token so the backstop
+        // consumes no personal budget. Audited above before the cap gates
+        // — every authorized attempt leaves an audit row regardless of
+        // outcome (matching the cooldown / NO_PRIOR shapes below), so an
+        // admin hammering --digest stays audit-visible. Tokens are spent
+        // before retryDigest even though non-SUCCESS results skip the LLM
+        // — over-counting is conservative for an anti-DOS cap.
+        if (!llmRateCap.tryAcquire(actor.id)) {
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_CHAT_LLM_RATE_CAP));
+        }
+        if (!rateCapBucket.tryAcquireGroupLlm(groupDbId)) {
+            llmRateCap.refund(actor.id);
+            return reply(scope, bundleLoader.get(BundleKeys.GROUP_LLM_RATE_LIMIT));
+        }
         DigestRetryService.RetryResult result = digestRetryService.retryDigest(groupDbId);
         return switch (result) {
             case SUCCESS -> reply(scope,
