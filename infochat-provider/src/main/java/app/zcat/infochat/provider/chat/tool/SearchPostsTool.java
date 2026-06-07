@@ -132,7 +132,10 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
                                List<String> effectiveTags, Instant cutoff,
                                int limit) throws SQLException {
         StringBuilder sql = new StringBuilder();
-        sql.append("SELECT p.uid, p.title, p.url, p.published_at, p.tags ")
+        // published_at stays the window filter and sort key below; the
+        // emitted ready_at field carries the ready_at column per the
+        // spec's tool catalogue result shape.
+        sql.append("SELECT p.uid, p.title, p.url, p.ready_at, p.tags ")
            .append("FROM post p ")
            .append("WHERE p.status = 'READY' ")
            .append("AND p.published_at >= ? ")
@@ -165,7 +168,7 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
                         .append(",\"title\":").append(jsonStr(rs.getString("title")))
                         .append(",\"url\":").append(jsonStr(rs.getString("url")))
                         .append(",\"ready_at\":").append(jsonStr(
-                                instantStr(rs.getTimestamp("published_at"))))
+                                instantStr(rs.getTimestamp("ready_at"))))
                         .append(",\"tags\":");
                     appendJsonArray(json, (String[]) rs.getArray("tags").getArray());
                     json.append('}');

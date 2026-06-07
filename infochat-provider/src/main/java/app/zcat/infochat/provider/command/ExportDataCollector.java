@@ -134,8 +134,9 @@ public class ExportDataCollector {
 
     /**
      * Per-table row cap. Bounds memory for power users with large
-     * audit histories. When a table hits the cap, its name appears
-     * in {@link ExportResult#truncatedTables()}.
+     * audit histories. When a table has more rows than the cap, the
+     * export is cut at the cap and the table's name appears in
+     * {@link ExportResult#truncatedTables()}.
      */
     @ConfigProperty(name = "infochat.export.max-rows-per-table", defaultValue = "10000")
     int maxRowsPerTable;
@@ -187,14 +188,19 @@ public class ExportDataCollector {
     private void collectTable(LinkedHashMap<String, List<String>> tables,
                               List<String> truncated,
                               String tableName, List<String> rows) {
-        if (rows.size() >= maxRowsPerTable) {
+        // withLimit fetches one probe row beyond the cap: a result
+        // larger than the cap proves rows were cut, while an exactly
+        // cap-full table is not flagged. The probe row never reaches
+        // the export output.
+        if (rows.size() > maxRowsPerTable) {
             truncated.add(tableName);
+            rows.removeLast();
         }
         tables.put(tableName, rows);
     }
 
     private String withLimit(String sql) {
-        return sql + " LIMIT " + maxRowsPerTable;
+        return sql + " LIMIT " + (maxRowsPerTable + 1);
     }
 
     private List<String> queryChatMemory(

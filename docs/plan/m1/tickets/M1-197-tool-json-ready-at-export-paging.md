@@ -1,9 +1,13 @@
 ---
 id: M1-197
 title: "Tool JSON ready_at value + /export paged replies and truncation flag"
-status: pending
+status: done
 created: 2026-06-07
-last_updated: 2026-06-07
+last_updated: 2026-06-08
+clarity_check:
+  date: 2026-06-08
+  verdict: PASS
+  warnings: ["Acceptance item 2 leaves the implementation approach for paged /export replies open (implementer's call); the SPI-adjacent route would require the escalate path, potentially consuming a round"]
 blocked_by: []
 files_budget: 8
 files_scope:
@@ -44,7 +48,20 @@ spec_refs:
   - docs/spec/commands.md §Content
 decision_refs:
   - D13
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-08
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 396
+      removed: 55
 overrides: []
 aborted_attempts: []
 reopens: []

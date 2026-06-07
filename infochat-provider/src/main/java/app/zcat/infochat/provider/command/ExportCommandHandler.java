@@ -22,10 +22,18 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * {@code /export} — returns the calling user's own data as an in-band
- * JSON reply. Audit-logged before effect. Delivery is in-band: the
- * export is sent as the reply message on the same adapter channel;
- * no external URLs or out-of-band download links.
+ * {@code /export [--page N]} — returns the calling user's own data as
+ * an in-band JSON reply. Audit-logged before effect. Delivery is
+ * in-band: the export is sent as the reply message on the same adapter
+ * channel; no external URLs or out-of-band download links.
+ *
+ * <p>When the export exceeds the per-message page cap, each reply
+ * carries exactly one page ({@code page=N/T} header) and the remaining
+ * pages are fetched by re-invoking with {@code --page N} (1-indexed,
+ * the corpus paging shape — see {@link ListSourcesCommandHandler}).
+ * The {@link CommandHandler} SPI returns a single reply per inbound
+ * command, so pages map to re-invocations rather than a multi-message
+ * send.
  *
  * <p>Group scope is rejected in v1: the frozen {@link CommandHandler}
  * SPI does not carry the inbound actor's identity in group scope
@@ -91,21 +99,31 @@ public class ExportCommandHandler implements CommandHandler {
             return reply(scope, NO_USER_REPLY);
         }
 
-        // Audit-logged before effect (Invariant 7).
+        // Audit-logged before effect (Invariant 7). Every invocation
+        // (including --page re-invocations) is its own audited /export.
         writeAuditRow(userId, contactId, adapter);
 
         ExportDataCollector.ExportResult result =
                 dataCollector.collect(userId, "dm", userId);
 
-        int effectiveCap = exportPageCap - HEADER_BUDGET;
+        String truncationNote = result.truncatedTables().isEmpty() ? ""
+                : "\n\nSome tables exceeded the row limit and were truncated: "
+                        + String.join(", ", result.truncatedTables()) + ".";
+
+        // Reserve the note's length so header + fenced page + note —
+        // the whole reply body — stays within the page cap.
+        int effectiveCap = exportPageCap - HEADER_BUDGET - truncationNote.length();
         List<String> pages = ExportPaginator.paginate(result.tables(), effectiveCap);
 
-        String body = formatPages(pages);
-        if (!result.truncatedTables().isEmpty()) {
-            body += "\n\nSome tables exceeded the row limit and were truncated: "
-                    + String.join(", ", result.truncatedTables()) + ".";
+        int requestedPage = parseRequestedPage(rawText);
+        if (requestedPage > pages.size()) {
+            return reply(scope, "Page " + requestedPage
+                    + " is out of range: this export has " + pages.size()
+                    + (pages.size() == 1 ? " page." : " pages."));
         }
-        return reply(scope, body);
+        String body = formatPage(pages.get(requestedPage - 1),
+                requestedPage, pages.size());
+        return reply(scope, body + truncationNote);
     }
 
     private @Nullable UUID lookupUserId(String adapter, String contactId) {
@@ -139,22 +157,45 @@ public class ExportCommandHandler implements CommandHandler {
     }
 
     /**
-     * Format paginated JSON pages into a single reply string. Single
-     * page: no page marker. Multi-page: each page gets a
-     * {@code page=N/T} header before the opening fence.
+     * Format one page as a reply body. Single-page export: no page
+     * marker. Multi-page: a {@code page=N/T} header before the opening
+     * fence (the header + fences fit {@link #HEADER_BUDGET}).
      */
-    static String formatPages(List<String> pages) {
-        if (pages.size() == 1) {
-            return "```json\n" + pages.getFirst() + "\n```";
+    static String formatPage(String pageJson, int page, int totalPages) {
+        String fenced = "```json\n" + pageJson + "\n```";
+        if (totalPages == 1) {
+            return fenced;
         }
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < pages.size(); i++) {
-            if (i > 0) sb.append("\n\n");
-            sb.append("page=").append(i + 1).append('/').append(pages.size())
-              .append('\n');
-            sb.append("```json\n").append(pages.get(i)).append("\n```");
+        return "page=" + page + "/" + totalPages + "\n" + fenced;
+    }
+
+    /**
+     * Parse {@code --page N} from the raw command text (1-indexed;
+     * both {@code --page N} and {@code --page=N} forms, the corpus
+     * shape). Missing, malformed, or non-positive values fall back
+     * to page 1.
+     */
+    static int parseRequestedPage(String rawText) {
+        String[] tokens = rawText.trim().split("\\s+");
+        for (int i = 1; i < tokens.length; i++) {
+            String tok = tokens[i];
+            if (tok.equals("--page") && i + 1 < tokens.length) {
+                return parsePage(tokens[i + 1]);
+            }
+            if (tok.startsWith("--page=")) {
+                return parsePage(tok.substring("--page=".length()));
+            }
         }
-        return sb.toString();
+        return 1;
+    }
+
+    private static int parsePage(String value) {
+        try {
+            int n = Integer.parseInt(value);
+            return n >= 1 ? n : 1;
+        } catch (NumberFormatException e) {
+            return 1;
+        }
     }
 
     private static OutboundMessage reply(ScopeRef scope, String text) {

@@ -243,6 +243,55 @@ class ExportDataCollectorTest {
         assertEquals(5, result.tables().get("saved_post").size());
     }
 
+    @Test
+    void exactlyCapFullTableNotFlaggedTruncated() throws Exception {
+        String contactId = PREFIX + "capfull-actor";
+        UUID userId = seedUser(contactId);
+        UUID sourceId = seedSource(PREFIX + "capfull-source");
+        for (int i = 0; i < 5; i++) {
+            seedSavedPost(userId, sourceId, PREFIX + "capfull-uid-" + i,
+                    new String[]{}, Instant.now().minus(i, ChronoUnit.HOURS));
+        }
+
+        // Direct instantiation: the injected bean carries the default
+        // 10000-row cap, which cannot be overridden mid-test.
+        ExportDataCollector smallCapCollector = new ExportDataCollector();
+        smallCapCollector.dataSource = dataSource;
+        smallCapCollector.maxRowsPerTable = 5;
+
+        ExportDataCollector.ExportResult result =
+                smallCapCollector.collect(userId, "dm", userId);
+
+        assertFalse(result.truncatedTables().contains("saved_post"),
+                "an exactly cap-full table must NOT be flagged truncated; got: "
+                        + result.truncatedTables());
+        assertEquals(5, result.tables().get("saved_post").size(),
+                "all cap rows must be exported");
+    }
+
+    @Test
+    void overCapTableFlaggedTruncatedAndCutAtCap() throws Exception {
+        String contactId = PREFIX + "overcap-actor";
+        UUID userId = seedUser(contactId);
+        UUID sourceId = seedSource(PREFIX + "overcap-source");
+        for (int i = 0; i < 6; i++) {
+            seedSavedPost(userId, sourceId, PREFIX + "overcap-uid-" + i,
+                    new String[]{}, Instant.now().minus(i, ChronoUnit.HOURS));
+        }
+
+        ExportDataCollector smallCapCollector = new ExportDataCollector();
+        smallCapCollector.dataSource = dataSource;
+        smallCapCollector.maxRowsPerTable = 5;
+
+        ExportDataCollector.ExportResult result =
+                smallCapCollector.collect(userId, "dm", userId);
+
+        assertTrue(result.truncatedTables().contains("saved_post"),
+                "a table with more rows than the cap must be flagged truncated");
+        assertEquals(5, result.tables().get("saved_post").size(),
+                "the probe row must not reach the export output");
+    }
+
     // -- helpers --
 
     private UUID seedUser(String contactId) throws Exception {

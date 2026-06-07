@@ -6,6 +6,7 @@ import app.zcat.infochat.provider.messaging.InboundContext;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.ConfigProvider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -98,11 +99,70 @@ class ExportCommandHandlerTest {
         OutboundMessage reply = handler.handle(new ScopeRef.Dm(contactId), "/export");
         String text = reply.text();
 
-        // Multi-page: must contain page markers.
+        // Multi-page: the first reply carries page 1 only; later pages
+        // are fetched via --page re-invocation.
         assertTrue(text.contains("page=1/"),
                 "multi-page export must have page=1/ marker; got length=" + text.length());
-        assertTrue(text.contains("page=2/"),
-                "multi-page export must have page=2/ marker");
+        assertFalse(text.contains("page=2/"),
+                "each reply must carry exactly one page");
+
+        OutboundMessage page2 = handler.handle(
+                new ScopeRef.Dm(contactId), "/export --page 2");
+        assertTrue(page2.text().contains("page=2/"),
+                "/export --page 2 must return the page=2/ reply");
+    }
+
+    @Test
+    void pagedRepliesStayWithinCapAndCoverAllData() throws Exception {
+        String contactId = PREFIX + "cap-actor";
+        UUID userId = seedUser(contactId);
+
+        UUID sourceId = seedSource(PREFIX + "cap-source");
+        // More than one page of data at the default 2048 cap.
+        for (int i = 0; i < 40; i++) {
+            seedSavedPost(userId, sourceId, PREFIX + "cap-uid-" + i,
+                    new String[]{"tag-" + i},
+                    Instant.now().minus(i, ChronoUnit.MINUTES));
+        }
+        int pageCap = ConfigProvider.getConfig()
+                .getValue("infochat.export.page-cap", Integer.class);
+
+        OutboundMessage first = handler.handle(new ScopeRef.Dm(contactId), "/export");
+        int totalPages = parseTotalPages(first.text());
+        assertTrue(totalPages > 1,
+                "40 saved posts must exceed one page; got " + totalPages);
+
+        // Every page reply stays within the cap, and the union of the
+        // pages reaches all seeded rows in-band.
+        StringBuilder union = new StringBuilder(first.text());
+        assertTrue(first.text().length() <= pageCap,
+                "page 1 reply length " + first.text().length()
+                        + " exceeds cap " + pageCap);
+        for (int n = 2; n <= totalPages; n++) {
+            OutboundMessage page = handler.handle(
+                    new ScopeRef.Dm(contactId), "/export --page " + n);
+            assertTrue(page.text().length() <= pageCap,
+                    "page " + n + " reply length " + page.text().length()
+                            + " exceeds cap " + pageCap);
+            union.append(page.text());
+        }
+        String all = union.toString();
+        for (int i = 0; i < 40; i++) {
+            assertTrue(all.contains(PREFIX + "cap-uid-" + i),
+                    "row " + i + " must be reachable across the paged replies");
+        }
+    }
+
+    @Test
+    void pageBeyondRangeReturnsOutOfRangeReply() throws Exception {
+        String contactId = PREFIX + "range-actor";
+        seedUser(contactId);
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(contactId), "/export --page 99");
+        assertTrue(reply.text().contains("out of range"),
+                "a page beyond the export must return the out-of-range reply; got: "
+                        + reply.text());
     }
 
     @Test
@@ -117,17 +177,20 @@ class ExportCommandHandlerTest {
                     Instant.now().minus(i, ChronoUnit.MINUTES));
         }
 
-        OutboundMessage reply = handler.handle(new ScopeRef.Dm(contactId), "/export");
-        String text = reply.text();
+        OutboundMessage first = handler.handle(new ScopeRef.Dm(contactId), "/export");
+        int totalPages = parseTotalPages(first.text());
 
-        // Extract JSON blocks from within triple-backtick fences.
-        List<String> jsonBlocks = extractJsonBlocks(text);
-        assertFalse(jsonBlocks.isEmpty(), "must have at least one JSON block");
+        for (int n = 1; n <= totalPages; n++) {
+            OutboundMessage reply = handler.handle(
+                    new ScopeRef.Dm(contactId), "/export --page " + n);
 
-        for (int i = 0; i < jsonBlocks.size(); i++) {
-            String block = jsonBlocks.get(i);
+            // Each reply carries exactly one fenced JSON block.
+            List<String> jsonBlocks = extractJsonBlocks(reply.text());
+            assertEquals(1, jsonBlocks.size(),
+                    "page " + n + " must carry exactly one JSON block");
+            String block = jsonBlocks.getFirst();
             assertTrue(block.startsWith("{") && block.endsWith("}"),
-                    "page " + (i + 1) + " must be a valid JSON object; starts with: "
+                    "page " + n + " must be a valid JSON object; starts with: "
                             + block.substring(0, Math.min(50, block.length())));
             // Verify balanced braces as a minimal structural check.
             int depth = 0;
@@ -136,7 +199,7 @@ class ExportCommandHandlerTest {
                 else if (c == '}') depth--;
             }
             assertEquals(0, depth,
-                    "page " + (i + 1) + " must have balanced braces");
+                    "page " + n + " must have balanced braces");
         }
     }
 
@@ -195,6 +258,15 @@ class ExportCommandHandlerTest {
     }
 
     // -- helpers --
+
+    /** Extract T from the first {@code page=N/T} marker in a reply. */
+    private static int parseTotalPages(String text) {
+        int idx = text.indexOf("page=");
+        assertTrue(idx >= 0, "reply must carry a page=N/T marker; got: " + text);
+        int slash = text.indexOf('/', idx);
+        int eol = text.indexOf('\n', slash);
+        return Integer.parseInt(text.substring(slash + 1, eol));
+    }
 
     private List<String> extractJsonBlocks(String text) {
         List<String> blocks = new ArrayList<>();

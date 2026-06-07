@@ -20,17 +20,16 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Behavioral assertions for {@link GetPostTool}'s result byte budget:
- * an oversized seeded body must come back bounded at
- * {@link GetPostTool#MAX_BODY_BYTES} with the explicit
- * {@link GetPostTool#TRUNCATION_MARKER}, while bodies within budget
- * pass through unchanged. Seeds fixtures directly via JDBC against the
- * &#64;QuarkusTest DevServices DB.
+ * Behavioral assertions for {@link SearchPostsTool}'s result shape:
+ * the emitted {@code ready_at} JSON field carries the post's
+ * {@code ready_at} column value (the spec's tool-catalogue shape),
+ * not {@code published_at}. Seeds fixtures directly via JDBC against
+ * the &#64;QuarkusTest DevServices DB.
  */
 @QuarkusTest
-class GetPostToolTest {
+class SearchPostsToolTest {
 
-    private static final String PREFIX = "get-post-test/";
+    private static final String PREFIX = "search-posts-test/";
     /** All fixtures share one fetched_at so they land in the V11/V28/V29 May 2026 partition. */
     private static final Instant FETCHED_AT = Instant.parse("2026-05-22T12:00:00Z");
 
@@ -39,7 +38,7 @@ class GetPostToolTest {
     DataSource dataSource;
 
     @Inject
-    GetPostTool tool;
+    SearchPostsTool tool;
 
     @BeforeEach
     void cleanup() throws Exception {
@@ -54,55 +53,19 @@ class GetPostToolTest {
     }
 
     @Test
-    void oversizedBodyComesBackBoundedWithTruncationMarker() throws Exception {
-        UUID userId = seedUser("oversize");
-        UUID sourceId = seedSource("oversize-src", "Oversize source");
-        seedSubscription("dm", userId, sourceId);
-        // 1 KiB past the budget; single-byte chars so bytes == chars.
-        String oversizedBody = "a".repeat(GetPostTool.MAX_BODY_BYTES + 1024);
-        seedReadyPost("oversize-post", sourceId, oversizedBody);
-
-        String json = tool.execute(userId, "dm", userId,
-            Map.of("uid", PREFIX + "oversize-post"));
-
-        assertTrue(json.contains(GetPostTool.TRUNCATION_MARKER),
-            "a body over the byte budget carries the explicit truncation marker");
-        assertTrue(json.contains("a".repeat(GetPostTool.MAX_BODY_BYTES)
-                + GetPostTool.TRUNCATION_MARKER),
-            "the body is cut exactly at MAX_BODY_BYTES, marker appended");
-        assertFalse(json.contains("a".repeat(GetPostTool.MAX_BODY_BYTES + 1)),
-            "no byte past the budget reaches the result");
-    }
-
-    @Test
-    void bodyWithinBudgetPassesThroughUnchanged() throws Exception {
-        UUID userId = seedUser("small");
-        UUID sourceId = seedSource("small-src", "Small source");
-        seedSubscription("dm", userId, sourceId);
-        seedReadyPost("small-post", sourceId, "A short body.");
-
-        String json = tool.execute(userId, "dm", userId,
-            Map.of("uid", PREFIX + "small-post"));
-
-        assertTrue(json.contains("\"body\":\"A short body.\""),
-            "a body within budget is returned verbatim: " + json);
-        assertFalse(json.contains(GetPostTool.TRUNCATION_MARKER),
-            "no marker when nothing was cut");
-    }
-
-    @Test
     void readyAtFieldCarriesReadyAtColumnValueNotPublishedAt() throws Exception {
         UUID userId = seedUser("ready-at");
         UUID sourceId = seedSource("ready-at-src", "Ready-at source");
         seedSubscription("dm", userId, sourceId);
-        // Distinct published_at vs ready_at so the assertion can tell
-        // the two columns apart.
-        Instant publishedAt = FETCHED_AT.minus(2, ChronoUnit.HOURS);
-        Instant readyAt = FETCHED_AT.plus(15, ChronoUnit.MINUTES);
-        seedReadyPost("ready-at-post", sourceId, "A body.", publishedAt, readyAt);
+        // published_at must sit inside the default search window
+        // (published_at is the window filter); ready_at is a distinct
+        // value so the assertion can tell the two columns apart.
+        Instant publishedAt = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+                .minus(1, ChronoUnit.HOURS);
+        Instant readyAt = publishedAt.plus(15, ChronoUnit.MINUTES);
+        seedReadyPost("ready-at-post", sourceId, publishedAt, readyAt);
 
-        String json = tool.execute(userId, "dm", userId,
-            Map.of("uid", PREFIX + "ready-at-post"));
+        String json = tool.execute(userId, "dm", userId, Map.of());
 
         assertTrue(json.contains("\"ready_at\":\"" + readyAt + "\""),
             "the ready_at JSON field carries the ready_at column value; got: " + json);
@@ -152,11 +115,7 @@ class GetPostToolTest {
         }
     }
 
-    private void seedReadyPost(String slug, UUID sourceId, String body) throws Exception {
-        seedReadyPost(slug, sourceId, body, FETCHED_AT, FETCHED_AT);
-    }
-
-    private void seedReadyPost(String slug, UUID sourceId, String body,
+    private void seedReadyPost(String slug, UUID sourceId,
                                Instant publishedAt, Instant readyAt) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
@@ -166,7 +125,7 @@ class GetPostToolTest {
             ps.setString(1, PREFIX + slug);
             ps.setObject(2, sourceId);
             ps.setString(3, "Title " + slug);
-            ps.setString(4, body);
+            ps.setString(4, "Body " + slug);
             ps.setString(5, "https://example.com/" + slug);
             ps.setTimestamp(6, Timestamp.from(publishedAt));
             ps.setTimestamp(7, Timestamp.from(FETCHED_AT));

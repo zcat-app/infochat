@@ -53,7 +53,7 @@ public class GetPostTool implements ChatToolRegistry.ChatTool {
 
         // Scope-filtered: returns null for invisible UIDs (same path as
         // nonexistent — the distinction is never exposed).
-        String sql = "SELECT p.uid, p.title, p.body, p.url, p.published_at, p.tags "
+        String sql = "SELECT p.uid, p.title, p.body, p.url, p.ready_at, p.tags "
                    + "FROM post p "
                    + "WHERE p.uid = ? AND p.status = 'READY' "
                    + "AND p.source_id IN (SELECT source_id FROM source_subscription "
@@ -74,7 +74,7 @@ public class GetPostTool implements ChatToolRegistry.ChatTool {
                             body == null ? null : truncateUtf8(body, MAX_BODY_BYTES)))
                     .append(",\"url\":").append(jsonStr(rs.getString("url")))
                     .append(",\"ready_at\":").append(jsonStr(instantStr(
-                            rs.getTimestamp("published_at"))))
+                            rs.getTimestamp("ready_at"))))
                     .append(",\"tags\":");
                 appendJsonArray(json, (String[]) rs.getArray("tags").getArray());
                 json.append('}');
