@@ -7,6 +7,7 @@ import org.jboss.logmanager.LogContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -23,6 +24,9 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
@@ -87,7 +91,7 @@ class DigestSchedulerTest {
         int stagger = DigestScheduler.staggerOffset(groupId, 30);
         Instant now = todayAt(7, 45, "UTC").plusSeconds(stagger * 60L + 1);
 
-        scheduler.tickAt(now);
+        awaitDispatches(scheduler.tickAt(now));
 
         List<DigestSlot> slots = observer.getCaptured().stream()
                 .filter(s -> s.groupId().equals(groupId) && "morning".equals(s.slotKind()))
@@ -109,7 +113,7 @@ class DigestSchedulerTest {
         int stagger = DigestScheduler.staggerOffset(groupId, 30);
         Instant now = windowStart.plusSeconds(stagger * 60L + 1);
 
-        scheduler.tickAt(now);
+        awaitDispatches(scheduler.tickAt(now));
 
         boolean emittedForGroup = observer.getCaptured().stream()
                 .anyMatch(s -> s.groupId().equals(groupId) && "morning".equals(s.slotKind()));
@@ -124,7 +128,7 @@ class DigestSchedulerTest {
         // Clock at 09:00 UTC — well past 08:15 window-end for morning
         Instant now = todayAt(9, 0, "UTC");
 
-        scheduler.tickAt(now);
+        awaitDispatches(scheduler.tickAt(now));
 
         boolean emittedMorning = observer.getCaptured().stream()
                 .anyMatch(s -> s.groupId().equals(groupId) && "morning".equals(s.slotKind()));
@@ -154,7 +158,7 @@ class DigestSchedulerTest {
         int staggerA = DigestScheduler.staggerOffset(groupA, 30);
         Instant now = todayAt(7, 45, "UTC").plusSeconds(staggerA * 60L + 1);
 
-        scheduler.tickAt(now);
+        awaitDispatches(scheduler.tickAt(now));
 
         List<DigestSlot> slots = observer.getCaptured();
         boolean hasGroupA = slots.stream().anyMatch(s ->
@@ -190,7 +194,7 @@ class DigestSchedulerTest {
 
         // Tick near end of window — all groups should have fired
         Instant now = todayAt(8, 14, "UTC");
-        scheduler.tickAt(now);
+        awaitDispatches(scheduler.tickAt(now));
 
         Set<UUID> groupSet = Set.of(groups);
         long morningSlots = observer.getCaptured().stream()
@@ -214,7 +218,7 @@ class DigestSchedulerTest {
         int stagger = DigestScheduler.staggerOffset(groupId, 30);
         Instant now = todayAt(7, 45, "UTC").plusSeconds(stagger * 60L + 1);
 
-        scheduler.tickAt(now);
+        awaitDispatches(scheduler.tickAt(now));
 
         boolean emittedForGroup = observer.getCaptured().stream()
                 .anyMatch(s -> s.groupId().equals(groupId));
@@ -226,8 +230,8 @@ class DigestSchedulerTest {
         UUID groupId = insertGroup("Not/AZone");
 
         Instant now = todayAt(8, 0, "UTC");
-        scheduler.tickAt(now);
-        scheduler.tickAt(now.plusSeconds(60));
+        awaitDispatches(scheduler.tickAt(now));
+        awaitDispatches(scheduler.tickAt(now.plusSeconds(60)));
 
         boolean emitted = observer.getCaptured().stream()
                 .anyMatch(s -> s.groupId().equals(groupId));
@@ -276,6 +280,53 @@ class DigestSchedulerTest {
                 assertEquals(0, rs.getLong(1),
                         "audit row must roll back when the sentinel insert fails");
             }
+        }
+    }
+
+    @Test
+    @Timeout(30)
+    void tick_slowSlotConsumerDoesNotDelayOtherGroupsEmission() throws Exception {
+        UUID groupA = insertGroup("UTC");
+        UUID groupB = insertGroup("UTC");
+
+        // Whichever of the two groups is dispatched first blocks inside its
+        // consumer. Under synchronous dispatch the block would happen on the
+        // tick thread, so the second group's slot could never be emitted
+        // within this tick — the await below would time out (and the old
+        // code would hang inside tickAt itself, tripping @Timeout).
+        observer.gateFirstSlotOf(Set.of(groupA, groupB));
+        try {
+            // 08:14 UTC: end of the morning window, past every stagger offset
+            Instant now = todayAt(8, 14, "UTC");
+            List<Future<?>> dispatches = scheduler.tickAt(now);
+
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            while (capturedMorningGroups(groupA, groupB).size() < 2
+                    && System.nanoTime() < deadline) {
+                Thread.sleep(10);
+            }
+            assertEquals(Set.of(groupA, groupB), capturedMorningGroups(groupA, groupB),
+                    "the second group's slot must be emitted while the first group's"
+                            + " consumer is still blocked");
+
+            observer.releaseGate();
+            awaitDispatches(dispatches);
+        } finally {
+            observer.releaseGate();
+        }
+    }
+
+    private Set<UUID> capturedMorningGroups(UUID... groups) {
+        Set<UUID> filter = Set.of(groups);
+        return observer.getCaptured().stream()
+                .filter(s -> filter.contains(s.groupId()) && "morning".equals(s.slotKind()))
+                .map(DigestSlot::groupId)
+                .collect(Collectors.toSet());
+    }
+
+    private void awaitDispatches(List<Future<?>> dispatches) throws Exception {
+        for (Future<?> dispatch : dispatches) {
+            dispatch.get(10, TimeUnit.SECONDS);
         }
     }
 

@@ -5,6 +5,7 @@ import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import io.quarkus.scheduler.Scheduled;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Event;
 import jakarta.inject.Inject;
@@ -30,6 +31,9 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -42,7 +46,13 @@ import org.jspecify.annotations.Nullable;
  * <p>Missed slots (past window-end with no summary_cache row) are
  * recorded as {@link AuditAction#DIGEST_SLOT_MISSED} audit rows and
  * a sentinel cache row is inserted to prevent re-detection on the
- * next tick.</p>
+ * next tick. Windows that ended before the group's latest approval
+ * are skipped without any record (skip-not-catch-up per
+ * docs/spec/commands.md §Periodic group digests).</p>
+ *
+ * <p>Slot events are dispatched on virtual threads: one group's slow
+ * consumer cannot delay later groups' slot emissions in the same
+ * tick.</p>
  */
 @ApplicationScoped
 public class DigestScheduler {
@@ -55,6 +65,15 @@ public class DigestScheduler {
     // WARN once per (group, offending value), not per tick — the scheduler
     // fires every minute and an unfixed timezone would flood the log.
     private final Set<String> warnedTimezones = ConcurrentHashMap.newKeySet();
+
+    // Slot dispatch runs on a virtual thread per slot: fire() delivers
+    // synchronously to observers, so a slow consumer (an LLM digest render)
+    // dispatched on the tick thread would delay every later group's slot in
+    // the same tick. A tick that re-fires a slot whose previous dispatch is
+    // still rendering (no cache row yet) is absorbed by DigestWorker's
+    // in-flight guard, and the summary_cache unique index backstops it.
+    private final ExecutorService slotDispatchExecutor =
+            Executors.newVirtualThreadPerTaskExecutor();
 
     @Inject
     DataSource dataSource;
@@ -88,19 +107,30 @@ public class DigestScheduler {
         tickAt(clock.instant());
     }
 
-    // Package-private: called directly by tests with a controlled instant
-    void tickAt(Instant now) {
+    @PreDestroy
+    void shutdownSlotDispatch() {
+        slotDispatchExecutor.shutdown();
+    }
+
+    // Package-private: called directly by tests with a controlled instant.
+    // Returns this tick's in-flight dispatch futures so tests can await
+    // delivery deterministically; the production tick() ignores them.
+    List<Future<?>> tickAt(Instant now) {
+        List<Future<?>> dispatches = new ArrayList<>();
         List<GroupRow> groups = queryActiveGroups();
         for (GroupRow group : groups) {
             ZoneId tz = parseTimezone(group.id, group.timezone);
             if (tz == null) continue;
-            processSlot(now, group, tz, SLOT_MORNING, morningSlotHour);
-            processSlot(now, group, tz, SLOT_EVENING, eveningSlotHour);
+            Future<?> morning = processSlot(now, group, tz, SLOT_MORNING, morningSlotHour);
+            if (morning != null) dispatches.add(morning);
+            Future<?> evening = processSlot(now, group, tz, SLOT_EVENING, eveningSlotHour);
+            if (evening != null) dispatches.add(evening);
         }
+        return dispatches;
     }
 
-    private void processSlot(Instant now, GroupRow group, ZoneId tz,
-                             String slotKind, int centerHour) {
+    private @Nullable Future<?> processSlot(Instant now, GroupRow group, ZoneId tz,
+                                            String slotKind, int centerHour) {
         LocalDate today = now.atZone(tz).toLocalDate();
         ZonedDateTime center = ZonedDateTime.of(today, LocalTime.of(centerHour, 0), tz);
         Instant windowStart = center.minusMinutes(windowWidthMinutes / 2).toInstant();
@@ -111,29 +141,79 @@ public class DigestScheduler {
 
         try {
             if (now.isBefore(windowStart)) {
-                return;
+                return null;
             }
 
             boolean alreadyFired = summaryCacheRepository.existsByGroupAndSlot(
                     group.id, slotKind, windowStart);
             if (alreadyFired) {
-                return;
+                return null;
             }
 
             if (!now.isBefore(windowEnd)) {
+                // Skip-not-catch-up (commands.md §Periodic group digests): a
+                // window that ended before the group's latest approval elapsed
+                // while the group was not yet eligible — it is neither caught
+                // up nor recorded as missed. Approval time comes from the
+                // APPROVE_GROUP audit row, which ApproveGroupCommandHandler
+                // writes in the same transaction as the approval_status flip,
+                // so 'approved' is visible if and only if the row is.
+                Instant approvedAt = latestApprovalTime(group.id);
+                if (approvedAt != null && !windowEnd.isAfter(approvedAt)) {
+                    return null;
+                }
                 // Past window-end with no cache row: missed slot
                 recordMissedSlot(group.id, slotKind, windowStart, windowEnd);
-                return;
+                return null;
             }
 
             if (!now.isBefore(effectiveFireTime)) {
                 // Within window and past stagger time: emit
-                digestSlotEvent.fire(new DigestSlot(
-                        group.id, group.timezone, slotKind, windowStart, windowEnd));
+                DigestSlot slot = new DigestSlot(
+                        group.id, group.timezone, slotKind, windowStart, windowEnd);
+                return slotDispatchExecutor.submit(() -> fireSlot(slot));
             }
+            return null;
         } catch (SQLException e) {
             throw new RuntimeException(
                     "Digest scheduler failed for group " + group.id + " slot " + slotKind, e);
+        }
+    }
+
+    // Runs on a dispatch virtual thread. fire() delivers synchronously to
+    // observers on THIS thread; an observer failure would otherwise vanish
+    // inside the executor's unread Future, so log it here.
+    private void fireSlot(DigestSlot slot) {
+        try {
+            digestSlotEvent.fire(slot);
+        } catch (RuntimeException e) {
+            LOG.errorf(e, "Digest slot dispatch failed for group %s slot %s window %s",
+                    slot.groupId(), slot.slotKind(), slot.windowStart());
+        }
+    }
+
+    /**
+     * Latest APPROVE_GROUP audit timestamp for the group, or {@code null}
+     * when no approval was ever recorded — groups grandfathered by V26
+     * carry no audit row and are treated as approved-since-forever, which
+     * preserves their existing missed-slot behavior. Reads
+     * {@code audit_log_view} because the provider role has INSERT-only on
+     * {@code audit_log} itself; {@code created_at}/{@code action}/
+     * {@code target_id} pass through the view unredacted, and audit_log is
+     * append-only (Invariant 10) so the row cannot disappear later.
+     */
+    private @Nullable Instant latestApprovalTime(UUID groupId) throws SQLException {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT max(created_at) FROM audit_log_view"
+                             + " WHERE action = 'APPROVE_GROUP'"
+                             + " AND target_kind = 'group' AND target_id = ?")) {
+            ps.setString(1, groupId.toString());
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                Timestamp approvedAt = rs.getTimestamp(1);
+                return approvedAt == null ? null : approvedAt.toInstant();
+            }
         }
     }
 

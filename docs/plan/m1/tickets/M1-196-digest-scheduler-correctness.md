@@ -1,7 +1,12 @@
 ---
 id: M1-196
 title: "Digest scheduler: no missed-slot records for pre-approval windows + async slot dispatch"
-status: pending
+status: done
+clarity_check:
+  date: 2026-06-07
+  verdict: PASS
+  warnings: []
+  blockers: []
 created: 2026-06-07
 last_updated: 2026-06-07
 blocked_by: []
@@ -38,8 +43,39 @@ spec_refs:
 decision_refs:
   - D16
   - D47
-reviews: []
-overrides: []
+reviews:
+  - round: 1
+    date: 2026-06-07
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 434
+      removed: 33
+overrides:
+  - date: 2026-06-07
+    objection: |
+      PARALLEL-START precondition: FAIL — in-flight ticket M1-221 declares
+      files_scope: [] (empty), so disjointness with M1-196 cannot be proven
+      mechanically; the parallel rule requires every in-flight ticket to
+      declare a non-empty files_scope.
+    user_justification: |
+      De facto disjointness verified two independent ways before the
+      override: (1) M1-221's actual working-tree diff at start time is
+      entirely infochat-collector (RetryBackoff.java + Stage2/Tagger/
+      EntityExtractor workers + their tests); (2) M1-221's acceptance
+      remit names only collector eval workers and optionally LLM-adapter
+      exception classes — nothing under infochat-provider digest/ or
+      command/. All other in-flight tickets (M1-195, M1-222) have provably
+      disjoint files_scope. Additionally the branch is created from
+      current main d0340b7 (not the stale worktree fork point dd989fa) to
+      pick up M1-181's ThrottledAdminNotifier API change, which
+      DigestScheduler injects.
 aborted_attempts: []
 reopens: []
 redteam_findings: []

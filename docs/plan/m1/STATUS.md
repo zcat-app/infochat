@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 28 |
+| pending | 27 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 228 |
+| done | 229 |
 | deferred | 2 |
 | **total** | **258** |
 
@@ -28,7 +28,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-186 — Signal group outbound send path (complexity: medium, risk: medium)
 - M1-187 — Strip bot-mention span in group inbound delivery (complexity: medium, risk: medium)
 - M1-193 — /stop wiring: pg backend pid + statement timeouts + tool conns (complexity: high, risk: medium)
-- M1-196 — Digest scheduler: no missed-slot records for pre-approval windows + async slot dispatch (complexity: medium, risk: medium)
 - M1-197 — Tool JSON ready_at value + /export paged replies and truncation flag (complexity: medium, risk: medium)
 - M1-198 — Group-scope bot-admin commands: resolve caller via InboundContext (complexity: medium, risk: medium)
 - M1-199 — /save visibility sentence: adjudicate the scope-visibility reading (complexity: low, risk: low)
@@ -89,13 +88,13 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-220 | [INVESTIGATE] Bluesky source identifier: URL (per D38) vs bare DID/handle (per the fetcher) | 2026-06-07 | round 1 APPROVE |
 | M1-217 | LLM-adapter lows: Entry nullability contradiction, joinPath/preview dedup, Anthropic multi-block content | 2026-06-07 | round 1 APPROVE |
 | M1-209 | Remove hand-written @NonNull made redundant by D48 null-marked packages | 2026-06-07 | round 1 APPROVE |
+| M1-196 | Digest scheduler: no missed-slot records for pre-approval windows + async slot dispatch | 2026-06-07 | round 1 APPROVE |
 | M1-195 | Audit correctness: auto-promote guard, /unban no-op, intent-row parity | 2026-06-07 | round 1 APPROVE |
 | M1-194 | EligiblePostQuery SQL LIMIT + chat tool result budgets | 2026-06-07 | round 1 APPROVE |
 | M1-192 | LLM per-task config completion (configFor, remote-llm, guard) | 2026-06-07 | round 1 APPROVE |
 | M1-191 | SSRF: replace the JVM-wide pin lock with a per-host pin map | 2026-06-07 | round 1 APPROVE |
 | M1-190 | Scope the last-admin LOCK TABLE to admin-relevant updates | 2026-06-07 | round 1 APPROVE |
 | M1-189 | DB grants: revoke PUBLIC on quarantine procs + price_snapshot UPDATE | 2026-06-07 | round 1 APPROVE |
-| M1-188 | Serialize SimpleX WS sends + bound Signal handle map | 2026-06-07 | round 1 APPROVE |
 
 ---
 
@@ -405,7 +404,7 @@ M1-192 (done)
 M1-193 (pending) ← runnable
 M1-194 (done)
 M1-195 (done)
-M1-196 (pending) ← runnable
+M1-196 (done)
 M1-197 (pending) ← runnable
   └── M1-219 (pending)
 M1-198 (pending) ← runnable

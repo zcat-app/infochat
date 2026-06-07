@@ -30,6 +30,8 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -101,7 +103,7 @@ class DigestRoundtripIT {
         updatePostPublishedAt(morningWindowStart.plusSeconds(60));
 
         // ---- Step (a): scheduler fires slot for group with active subscriptions ----
-        scheduler.tickAt(morningTick);
+        awaitDispatches(scheduler.tickAt(morningTick));
 
         var cacheA = readCacheRow(GROUP_1, "morning", morningWindowStart);
         assertTrue(cacheA.isPresent(), "Step (a): summary_cache row must exist for group 1");
@@ -142,7 +144,7 @@ class DigestRoundtripIT {
 
         // Re-fire for the same morning slot — existsByGroupAndSlot
         // guard must prevent re-execution.
-        scheduler.tickAt(morningTick);
+        awaitDispatches(scheduler.tickAt(morningTick));
 
         assertEquals(llmCountAfterMorning, testLlmProvider.callCount(),
                 "Step (d): LLM call count must NOT increment on duplicate slot");
@@ -162,7 +164,7 @@ class DigestRoundtripIT {
         Instant eveningTick = eveningWindowEnd.minusSeconds(1);
         updatePostPublishedAt(eveningWindowStart.plusSeconds(60));
 
-        scheduler.tickAt(eveningTick);
+        awaitDispatches(scheduler.tickAt(eveningTick));
 
         var cacheE = readCacheRow(GROUP_1, "evening", eveningWindowStart);
         assertTrue(cacheE.isPresent(), "Step (e): new evening cache entry must exist");
@@ -257,6 +259,12 @@ class DigestRoundtripIT {
     }
 
     // -- helpers ----------------------------------------------------------------
+
+    private void awaitDispatches(List<Future<?>> dispatches) throws Exception {
+        for (Future<?> dispatch : dispatches) {
+            dispatch.get(30, TimeUnit.SECONDS);
+        }
+    }
 
     /**
      * Reads a summary_cache row without the expires_at TTL filter that
