@@ -12,13 +12,16 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -49,6 +52,7 @@ class BlueskyFetcherTest {
     private HttpServer server;
     private int port;
     private final AtomicReference<String> injectSecondPageRawQuery = new AtomicReference<>();
+    private final List<URI> xrpcRequests = Collections.synchronizedList(new ArrayList<>());
 
     @BeforeEach
     void startServer() throws IOException {
@@ -58,6 +62,7 @@ class BlueskyFetcherTest {
         byte[] fixtureBody = Files.readAllBytes(FEED_FIXTURE);
 
         server.createContext("/xrpc/app.bsky.feed.getAuthorFeed", exchange -> {
+            xrpcRequests.add(exchange.getRequestURI());
             String query = exchange.getRequestURI().getQuery();
             byte[] body;
             if (query != null && query.contains("cursor=")) {
@@ -120,7 +125,7 @@ class BlueskyFetcherTest {
     @Test
     void fetchReturnsParsedPosts() {
         List<NormalizedPost> posts = testModeFetcher(5).fetch(
-            1L, "alice.bsky.social");
+            1L, feedIdentifier());
 
         // Fixture has 3 posts on page 1 plus 1 on page 2 = 4 total
         // (first page returns cursor → fetcher requests second page)
@@ -138,7 +143,7 @@ class BlueskyFetcherTest {
         // Page cap of 1: fetcher stops after the first page even though
         // the fixture returns a cursor inviting a second request.
         List<NormalizedPost> posts = testModeFetcher(1).fetch(
-            2L, "alice.bsky.social");
+            2L, feedIdentifier());
 
         assertEquals(3, posts.size(),
             "page cap 1 means only the first page (3 posts from fixture); "
@@ -148,7 +153,7 @@ class BlueskyFetcherTest {
     @Test
     void fetchMapsFieldsCorrectly() {
         List<NormalizedPost> posts = testModeFetcher(1).fetch(
-            5L, "alice.bsky.social");
+            5L, feedIdentifier());
 
         NormalizedPost first = posts.get(0);
         assertEquals(5L, first.sourceId());
@@ -170,14 +175,11 @@ class BlueskyFetcherTest {
     @Test
     void fetchThrowsOnNon2xx() {
         // Point at the /error endpoint which returns 429
-        BlueskyFetcher fetcher = new BlueskyFetcher(
-            testModeClient(),
-            5,
-            "http://127.0.0.1:" + port + "/error");
+        BlueskyFetcher fetcher = testModeFetcher(5);
 
         BlueskyFetcher.BlueskyFetchException ex = assertThrows(
             BlueskyFetcher.BlueskyFetchException.class,
-            () -> fetcher.fetch(1L, "alice.bsky.social"));
+            () -> fetcher.fetch(1L, "http://127.0.0.1:" + port + "/error"));
 
         assertTrue(ex.getMessage().contains("429"),
             "exception must surface the upstream HTTP status code");
@@ -185,24 +187,20 @@ class BlueskyFetcherTest {
 
     @Test
     void fetchHandlesEmptyFeed() {
-        BlueskyFetcher fetcher = new BlueskyFetcher(
-            testModeClient(),
-            5,
-            "http://127.0.0.1:" + port + "/empty");
+        BlueskyFetcher fetcher = testModeFetcher(5);
 
-        List<NormalizedPost> posts = fetcher.fetch(1L, "alice.bsky.social");
+        List<NormalizedPost> posts = fetcher.fetch(
+            1L, "http://127.0.0.1:" + port + "/empty");
 
         assertTrue(posts.isEmpty(), "empty feed must return an empty list");
     }
 
     @Test
     void cursorWithSpecialCharsIsEncodedNotInterpreted() {
-        BlueskyFetcher fetcher = new BlueskyFetcher(
-            testModeClient(),
-            5,
-            "http://127.0.0.1:" + port + "/inject/xrpc");
+        BlueskyFetcher fetcher = testModeFetcher(5);
 
-        fetcher.fetch(1L, "alice.bsky.social");
+        fetcher.fetch(1L,
+            "http://127.0.0.1:" + port + "/inject/xrpc?actor=alice.bsky.social");
 
         String rawQuery = injectSecondPageRawQuery.get();
         assertNotNull(rawQuery, "fetcher must have requested a second page using the cursor");
@@ -218,11 +216,39 @@ class BlueskyFetcherTest {
             "cursor injection must not introduce a second actor parameter: " + rawQuery);
     }
 
+    @Test
+    void documentedUrlIdentifierShapeYieldsWellFormedXrpcRequest() {
+        // The blessed identifier shape (design 02-schema §2.2.1 decision
+        // record): the full XRPC getAuthorFeed URL carrying ?actor=, as
+        // shipped in the bootstrap fixture and the deployment example.
+        String identifier = "http://127.0.0.1:" + port
+            + "/xrpc/app.bsky.feed.getAuthorFeed?actor=example.dev";
+
+        List<NormalizedPost> posts = testModeFetcher(5).fetch(7L, identifier);
+
+        assertEquals(4, posts.size(),
+            "documented URL identifier must fetch and paginate normally");
+        URI firstRequest = xrpcRequests.get(0);
+        assertEquals("/xrpc/app.bsky.feed.getAuthorFeed", firstRequest.getPath());
+        assertEquals("actor=example.dev", firstRequest.getQuery());
+        URI secondRequest = xrpcRequests.get(1);
+        assertEquals("/xrpc/app.bsky.feed.getAuthorFeed", secondRequest.getPath());
+        assertTrue(secondRequest.getQuery().startsWith("actor=example.dev&cursor="),
+            "page-2 request must keep the actor and append the cursor: "
+            + secondRequest.getQuery());
+    }
+
     private BlueskyFetcher testModeFetcher(int pageCap) {
-        return new BlueskyFetcher(
-            testModeClient(),
-            pageCap,
-            "http://127.0.0.1:" + port + "/xrpc/app.bsky.feed.getAuthorFeed");
+        return new BlueskyFetcher(testModeClient(), pageCap);
+    }
+
+    /**
+     * Identifier in the blessed URL shape, pointed at the in-process
+     * server's getAuthorFeed context.
+     */
+    private String feedIdentifier() {
+        return "http://127.0.0.1:" + port
+            + "/xrpc/app.bsky.feed.getAuthorFeed?actor=alice.bsky.social";
     }
 
     private SsrfGuardedHttpClient testModeClient() {

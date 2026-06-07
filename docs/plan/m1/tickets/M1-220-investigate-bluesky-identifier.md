@@ -1,9 +1,30 @@
 ---
 id: M1-220
 title: "[INVESTIGATE] Bluesky source identifier: URL (per D38) vs bare DID/handle (per the fetcher)"
-status: pending
+status: done
 created: 2026-06-07
 last_updated: 2026-06-07
+clarity_check:
+  date: 2026-06-07
+  verdict: PASS
+  warnings: []
+  blockers: []
+escalations:
+  - date: 2026-06-07
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      Pre-implementation developer escalation (no review round ran):
+      investigation verdict is direction (b) — URL is the blessed bluesky
+      identifier (AddSourceCommandHandler stores args.url().toString()
+      verbatim; all five sibling HTTP-shaped fetchers treat identifier as
+      URL; fixture and design/07 already carry the URL form; D38 stands
+      unamended). Every direction-(b) implementation must modify the
+      pre-existing BlueskyFetcherTest.java (4 construction sites pass the
+      3-arg (client, pageCap, xrpcBase) constructor; all tests feed bare
+      handles as identifiers), but test_plan carries only adds: +
+      preserves: — no modifies: entry. Modifying an unauthorized
+      pre-existing test is a test-integrity violation; widening test_plan
+      requires escalate → refine.
 blocked_by: []
 files_budget: 7
 files_scope:
@@ -29,13 +50,37 @@ acceptance:
 test_plan:
   adds:
     - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/bluesky
+  modifies:
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/bluesky/BlueskyFetcherTest.java
   preserves:
     - all tests currently green on main
 spec_refs:
   - docs/spec/schema.md §Sources and tags
 decision_refs:
   - D38
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-07
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 153
+      removed: 53
+revisions:
+  - date: 2026-06-07
+    reason: budget-breach-refine (test_plan lacked modifies authorization for the direction-(b) verdict; pre-implementation, no review round ran)
+    snapshot: |
+      test_plan:
+        adds:
+          - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/bluesky
+        preserves:
+          - all tests currently green on main
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -84,3 +129,23 @@ See frontmatter.
 - Direction (a) is likely the smaller diff (spec/decision wording +
   fixture), but the D38 sentence is uniqueness-key load-bearing —
   hence investigate-tier with the verdict recorded before code.
+
+## Investigation verdict (2026-06-07, pre-implementation)
+
+**Direction (b): the URL form is the blessed bluesky identifier.**
+Grounding: AddSourceCommandHandler stores `args.url().toString()`
+verbatim as the identifier, and the whole /add-source pipeline is
+URL-shaped (host-based kind inference, SSRF-guarded URL probe) — a
+bare DID/handle cannot enter it, so direction (a) would not resolve
+the contradiction, only relocate it to user-added sources. All five
+sibling HTTP-shaped fetchers (rss, youtube, odysee, nitter, reddit)
+already treat the identifier as a URL; BlueskyFetcher is the sole
+outlier. Consequences: D38 stands unamended; the fixture and
+design/07's operator example are already correct (untouched
+files_scope entries — justified negative space). Implementation form:
+fetch the identifier URL directly (sibling precedent), paginate by
+appending the encoded cursor; the hard-coded XRPC base, its config
+knob, and the constructor's xrpcBase parameter go away. The
+pre-existing BlueskyFetcherTest asserts the bare-handle semantics this
+verdict declares wrong; rewriting it to the URL shape is the
+authorized modification recorded in test_plan.modifies.

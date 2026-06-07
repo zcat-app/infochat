@@ -22,8 +22,13 @@ import java.util.List;
 /**
  * Polled {@link Fetcher} for Bluesky feeds via the AT Protocol public
  * API ({@code app.bsky.feed.getAuthorFeed}). The source's identifier
- * is the DID or handle of the account to follow; no authentication is
- * required for public feeds in v1.
+ * is the full XRPC {@code getAuthorFeed} URL carrying the account's
+ * {@code actor} query parameter — the URL form per decision D38 and the
+ * §2.2.1 decision record in design 02-schema, e.g.
+ * {@code https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?actor=example.dev}.
+ * The fetcher requests that URL directly (same shape as the sibling
+ * HTTP-shaped fetchers); no authentication is required for public
+ * feeds in v1.
  *
  * <p>Unlike {@link app.zcat.infochat.collector.fetcher.rss.RssFetcher}
  * (which issues a single GET per tick), this fetcher paginates
@@ -39,33 +44,22 @@ import java.util.List;
 @ApplicationScoped
 public class BlueskyFetcher implements Fetcher {
 
-    private static final String DEFAULT_XRPC_BASE =
-        "https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed";
-
     private final SsrfGuardedHttpClient client;
     private final int pageCap;
-    private final String xrpcBase;
 
     public BlueskyFetcher() {
-        this(new SsrfGuardedHttpClient(), resolvePageCap(), resolveXrpcBase());
+        this(new SsrfGuardedHttpClient(), resolvePageCap());
     }
 
-    BlueskyFetcher(SsrfGuardedHttpClient client, int pageCap, String xrpcBase) {
+    BlueskyFetcher(SsrfGuardedHttpClient client, int pageCap) {
         this.client = client;
         this.pageCap = pageCap;
-        this.xrpcBase = xrpcBase;
     }
 
     private static int resolvePageCap() {
         return ConfigProvider.getConfig()
             .getOptionalValue("infochat.fetch.bluesky.page-cap", Integer.class)
             .orElse(5);
-    }
-
-    private static String resolveXrpcBase() {
-        return ConfigProvider.getConfig()
-            .getOptionalValue("infochat.fetch.bluesky.api-base-url", String.class)
-            .orElse(DEFAULT_XRPC_BASE);
     }
 
     @Override
@@ -75,7 +69,7 @@ public class BlueskyFetcher implements Fetcher {
         String cursor = null;
 
         for (int page = 0; page < pageCap; page++) {
-            URI uri = buildUri(identifier, cursor);
+            URI uri = buildPageUri(identifier, cursor);
 
             HttpResponse<byte[]> response;
             try {
@@ -109,15 +103,15 @@ public class BlueskyFetcher implements Fetcher {
         return Collections.unmodifiableList(allPosts);
     }
 
-    private URI buildUri(String actor, @Nullable String cursor) {
-        StringBuilder sb = new StringBuilder(xrpcBase)
-            .append("?actor=").append(actor);
-        if (cursor != null) {
-            // cursor is upstream-supplied (untrusted): encode so a value
-            // containing & / # / ? cannot inject or truncate the query.
-            sb.append("&cursor=").append(URLEncoder.encode(cursor, StandardCharsets.UTF_8));
+    private static URI buildPageUri(String identifier, @Nullable String cursor) {
+        if (cursor == null) {
+            return URI.create(identifier);
         }
-        return URI.create(sb.toString());
+        // cursor is upstream-supplied (untrusted): encode so a value
+        // containing & / # / ? cannot inject or truncate the query.
+        char separator = identifier.indexOf('?') >= 0 ? '&' : '?';
+        return URI.create(identifier + separator + "cursor="
+            + URLEncoder.encode(cursor, StandardCharsets.UTF_8));
     }
 
     public static final class BlueskyFetchException extends RuntimeException {

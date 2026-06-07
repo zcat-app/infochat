@@ -501,6 +501,36 @@ failed` is structurally impossible (the worker doesn't schedule disabled
 rows). All admin transitions are bot-admin only — source rows are global
 (D7), so a group admin cannot pause a source that the deployment shares.
 
+**Bluesky identifier shape — verdict: the URL form (D38 stands
+unamended).** Three artifacts disagreed on what a `kind='bluesky'`
+row's `identifier` holds: D38 says the identifier is the URL for
+HTTP-shaped sources; the bundled bootstrap fixture and the deployment
+example carry the full XRPC `getAuthorFeed` URL; the fetcher's javadoc
+claimed a bare DID/handle and appended the identifier verbatim as
+`?actor=` onto a hard-coded base — so a bootstrap-loaded source using
+the documented URL shape issued `?actor=https://…` and fetched
+nothing. Resolution: the URL form is blessed. The identifier is the
+full XRPC `getAuthorFeed` URL carrying the account's `actor` query
+parameter, e.g.
+`https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?actor=example.dev`,
+and the fetcher requests it directly, paginating by appending the
+URL-encoded `cursor` parameter.
+
+Rationale:
+
+- `/add-source` stores the user-supplied URL verbatim as the
+  identifier after host-based kind inference and the SSRF-guarded
+  reachability probe ([03-commands.md](03-commands.md) §Kind
+  resolution) — a bare DID/handle cannot enter that pipeline, so
+  blessing it would leave every user-added bluesky source broken and
+  merely relocate the contradiction.
+- Every sibling HTTP-shaped fetcher already treats the identifier as
+  a URL (rss/youtube/odysee/nitter fetch it directly; reddit derives
+  by appending `.json`); bluesky was the sole outlier.
+- D38's identifier sentence is load-bearing for the
+  `(kind, identifier)` uniqueness key; the URL verdict leaves it, the
+  fixture, and the deployment example unchanged.
+
 ### 2.2.2 `tag` (Tier-1 controlled vocabulary, D5)
 
 ```sql
