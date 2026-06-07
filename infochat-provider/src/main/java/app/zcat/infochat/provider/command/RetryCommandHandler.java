@@ -174,8 +174,10 @@ public class RetryCommandHandler implements CommandHandler {
         // retry slots — rejections leave both in a state where the
         // next permitted request succeeds.
         String scopeKind = "dm";
-        if (!inFlightTracker.tryAcquire(userId.get(), scopeKind, scopeId)) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_NO_ANCHOR));
+        InFlightTracker.CancellationHandle slot =
+                inFlightTracker.tryAcquire(userId.get(), scopeKind, scopeId);
+        if (slot == null) {
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_IN_FLIGHT));
         }
 
         try {
@@ -232,7 +234,7 @@ public class RetryCommandHandler implements CommandHandler {
 
             return reply(scope, out.toString().stripTrailing());
         } finally {
-            inFlightTracker.release(userId.get(), scopeKind, scopeId);
+            inFlightTracker.release(userId.get(), scopeKind, scopeId, slot);
         }
     }
 

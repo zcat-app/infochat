@@ -62,7 +62,9 @@ public class CancellationService {
         }
 
         // Release the in-flight slot so the user can issue new requests.
-        inFlightTracker.release(userId, scopeKind, scopeId);
+        // Handle-keyed: frees the slot only if it is still held by the
+        // handle this cancel targeted, never a newer holder's.
+        inFlightTracker.release(userId, scopeKind, scopeId, handle);
 
         return true;
     }

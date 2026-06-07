@@ -1,15 +1,23 @@
 ---
 id: M1-218
 title: "Provider lows: /retry in-flight reply, /invite list-vs-revoke code identity, handle-keyed slot release"
-status: pending
+status: done
 created: 2026-06-07
-last_updated: 2026-06-07
+last_updated: 2026-06-08
+clarity_check:
+  date: 2026-06-08
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
-files_budget: 9
+files_budget: 13
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/InviteCommandHandler.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/command/SummaryCommandHandler.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/InFlightTracker.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatAgent.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/CancellationService.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
   - infochat-provider/src/main/resources/bundles
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command
@@ -21,7 +29,7 @@ security_relevant: false
 migration_touch: false
 out_of_scope:
   - the rate-cap acquisition /retry is missing — M1-183's (it wires tryAcquireLlmRateCap into RetryCommandHandler; same file — serialize)
-  - /stop wiring, statement timeouts, and everything else in the chat package — M1-193's (complexity high; InFlightTracker sits in its directory scope — serialize)
+  - /stop wiring, statement timeouts, and everything else in the chat package — M1-193's (complexity high); this ticket's chat-package and SummaryCommandHandler edits are limited to InFlightTracker's handle-keyed acquire/release API and the mechanical release/tryAcquire call-site migration it forces (deliberate M1-193 overlap accepted 2026-06-08 — M1-193 rebases over this)
   - the group-scope caller-resolution trap in InviteCommandHandler (error.admin_only for a real admin in a group) — M1-198's (same file — serialize)
   - the remaining audit P22/P18 members — recorded as deliberate drops in the batch summary with per-item rationale (ConfirmStateService sweep, tool LIMIT clamp inconsistency, InboundRouter test-subclass guards, admin-handler dedup [deferred until M1-195/M1-198/M1-206 land], /export heap footprint, InMemoryAdapter items)
   - confirm-flow semantics for /invite revoke — the ConfirmStateService handshake stays exactly as shipped; only the code-identity matching changes
@@ -41,11 +49,75 @@ spec_refs:
 decision_refs:
   - D43
   - D44
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-08
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 15
+      added: 235
+      removed: 47
+revisions:
+  - date: 2026-06-08
+    reason: budget-breach rework — leg 3's handle-keyed release changes InFlightTracker's API shape; the call-site sweep (ChatAgent, SummaryCommandHandler, CancellationService) was missing from files_scope
+    prior_values: |
+      files_budget: 9
+      files_scope:
+        - infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java
+        - infochat-provider/src/main/java/app/zcat/infochat/provider/command/InviteCommandHandler.java
+        - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/InFlightTracker.java
+        - infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java
+        - infochat-provider/src/main/resources/bundles
+        - infochat-provider/src/test/java/app/zcat/infochat/provider/command
+        - infochat-provider/src/test/java/app/zcat/infochat/provider/chat
+      out_of_scope[1]: "/stop wiring, statement timeouts, and everything
+        else in the chat package — M1-193's (complexity high;
+        InFlightTracker sits in its directory scope — serialize)"
+      (Refine adds the three release/tryAcquire call-site files to
+       files_scope, raises files_budget 9 → 12, and narrows the
+       chat-package out_of_scope item to M1-193's actual work items so
+       the mechanical call-site migration is unambiguously in scope.
+       Acceptance unchanged.)
+  - date: 2026-06-08
+    reason: budget-breach rework #2 — SummaryCommandHandlerTest (field named `tracker`, missed by the `inFlightTracker.` sweep pattern) is a direct tryAcquire/release caller forced to adapt by the handle-keyed API; it lies inside the scoped command-test directory
+    prior_values: |
+      files_budget: 12
+      (Refine raises files_budget 12 → 13. files_scope, out_of_scope,
+       and acceptance unchanged — the overflow file is inside the
+       already-scoped infochat-provider/src/test/.../command directory.)
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+escalations:
+  - date: 2026-06-08
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A — pre-implementation developer trigger. Acceptance leg 3
+      (handle-keyed slot release) changes InFlightTracker.release's
+      shape; the call-site sweep finds release/tryAcquire callers in
+      chat/ChatAgent.java (:122,:134), command/SummaryCommandHandler.java
+      (:183,:239), and chat/CancellationService.java (:65) — none in
+      files_scope. Clean remove(key,handle) fix touches 12 files vs
+      files_budget 9. In-scope-only alternatives leave the unconditional
+      release in place for the chat and /summary paths or trade
+      simplicity for an implicit per-thread acquisition record.
+  - date: 2026-06-08
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A — developer trigger, post-implementation pre-review. Diff is 13
+      files vs files_budget 12. Overflow file: SummaryCommandHandlerTest
+      (field named `tracker`, missed by the first call-site sweep's
+      `inFlightTracker.` pattern; uses tryAcquire/release directly, so the
+      handle-keyed API change forces its adaptation). It lies inside the
+      scoped command-test directory — files_scope is respected; only the
+      numeric budget is exceeded. mvn verify green at 13 files.
 ---
 
 # M1-218: Provider lows

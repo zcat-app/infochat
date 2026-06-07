@@ -471,19 +471,21 @@ public class InviteCommandHandler implements CommandHandler {
     }
 
     private String renderListEntry(PendingInviteRow row) {
-        String codePrefix = row.code.toString().substring(0, 8);
+        // Full code, not a prefix: /invite revoke matches the full UUID,
+        // so the list must display exactly what revoke accepts.
+        String codeText = row.code.toString();
         String expiresAtIso = row.expiresAt == null ? "(no expiry)" : row.expiresAt.toString();
         if ("OPEN_ADAPTER".equals(row.inviteType)) {
             return MessageFormat.format(
                     bundleLoader.get(BundleKeys.REPLY_INVITE_LIST_ENTRY_OPEN),
-                    codePrefix, row.adapter, expiresAtIso);
+                    codeText, row.adapter, expiresAtIso);
         }
         String target = row.expectedContactId == null
                 ? ""
                 : ContactIds.redact(row.expectedContactId);
         return MessageFormat.format(
                 bundleLoader.get(BundleKeys.REPLY_INVITE_LIST_ENTRY),
-                codePrefix, row.adapter, target, expiresAtIso);
+                codeText, row.adapter, target, expiresAtIso);
     }
 
     // ------------------------------------------------------------------

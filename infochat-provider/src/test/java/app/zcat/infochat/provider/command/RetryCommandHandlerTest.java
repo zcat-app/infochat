@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.command;
 
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
+import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.chat.CancellationService;
 import app.zcat.infochat.provider.chat.InFlightTracker;
@@ -43,6 +44,8 @@ import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RetryCommandHandlerTest {
@@ -250,7 +253,8 @@ class RetryCommandHandlerTest {
         // Single-token bucket: the follow-up request below only succeeds
         // if the rejected one consumed nothing from it.
         handler.llmRateCap = new LlmRateCap(1);
-        assertTrue(tracker.tryAcquire(USER_ID, "dm", USER_ID), "occupy the slot");
+        InFlightTracker.CancellationHandle slot = tracker.tryAcquire(USER_ID, "dm", USER_ID);
+        assertNotNull(slot, "occupy the slot");
 
         handler.handle(new ScopeRef.Dm(PREFIX + "nl"), "/retry");
         assertEquals(0, proseGenerator.callCount,
@@ -258,7 +262,7 @@ class RetryCommandHandlerTest {
         assertEquals(0, anchorRepo.incrementCallCount,
                 "a busy rejection must not burn one of the anchor's retry slots");
 
-        tracker.release(USER_ID, "dm", USER_ID); // the first request finishes
+        tracker.release(USER_ID, "dm", USER_ID, slot); // the first request finishes
         OutboundMessage ok = handler.handle(new ScopeRef.Dm(PREFIX + "nl"), "/retry");
 
         assertTrue(ok.text().contains("Recovered re-roll."),
@@ -267,6 +271,29 @@ class RetryCommandHandlerTest {
                         + ok.text());
         assertFalse(tracker.isInFlight(USER_ID, "dm", USER_ID),
                 "the successful re-roll must release its slot");
+    }
+
+    // ----- M1-218: busy /retry names the in-flight condition ----------------
+
+    @Test
+    void retryWhileRequestInFlightRepliesWithInFlightMessageNotNoAnchor() throws Exception {
+        List<String> postUids = List.of(PREFIX + "if1");
+        String json = "[{\"topicId\":\"t-if\",\"postUids\":[\"" + postUids.get(0) + "\"]}]";
+        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary", "hash", postUids, json);
+        Post readyPost = post(postUids.get(0), "InFlight headline", Instant.now());
+        handler.dataSource = stubUserAndPostsDataSource(USER_ID, List.of(readyPost));
+        // The caller's previous request is still running.
+        assertNotNull(tracker.tryAcquire(USER_ID, "dm", USER_ID), "occupy the slot");
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "if"), "/retry");
+
+        BundleLoader bundles = newRealBundleLoader();
+        assertEquals(bundles.get(BundleKeys.ERROR_RETRY_IN_FLIGHT), reply.text(),
+                "busy /retry must name the in-flight condition");
+        assertNotEquals(bundles.get(BundleKeys.ERROR_RETRY_NO_ANCHOR), reply.text(),
+                "busy /retry must be distinguishable from the nothing-to-retry case");
+        assertEquals(0, proseGenerator.callCount,
+                "busy /retry must make no LLM re-roll");
     }
 
     // ----- fixtures + stubs ------------------------------------------------

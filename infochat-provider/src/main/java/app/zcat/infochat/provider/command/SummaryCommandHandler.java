@@ -180,7 +180,9 @@ public class SummaryCommandHandler implements CommandHandler {
         // v1 DM-only: scopeId IS the caller's users.id here (group
         // scope returned no_posts_yet above).
         UUID actorId = scopeId.get();
-        if (!inFlightTracker.tryAcquire(actorId, scopeKind, actorId)) {
+        InFlightTracker.CancellationHandle slot =
+                inFlightTracker.tryAcquire(actorId, scopeKind, actorId);
+        if (slot == null) {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_CHAT_IN_FLIGHT));
         }
         try {
@@ -236,7 +238,7 @@ public class SummaryCommandHandler implements CommandHandler {
 
             return reply(scope, out.toString().stripTrailing());
         } finally {
-            inFlightTracker.release(actorId, scopeKind, actorId);
+            inFlightTracker.release(actorId, scopeKind, actorId, slot);
         }
     }
 

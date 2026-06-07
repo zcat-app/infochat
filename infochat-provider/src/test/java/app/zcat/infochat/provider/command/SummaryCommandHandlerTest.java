@@ -36,6 +36,7 @@ import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -342,7 +343,7 @@ class SummaryCommandHandlerTest {
                 List.of(post(PREFIX + "sec1", "Second headline", Instant.now())), 0);
         // Model the first /summary still in flight for the same
         // (user, scope) by holding its tracker slot.
-        assertTrue(tracker.tryAcquire(userId, "dm", userId));
+        assertNotNull(tracker.tryAcquire(userId, "dm", userId));
 
         OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "sec"), "/summary");
 
@@ -364,13 +365,14 @@ class SummaryCommandHandlerTest {
         // Single-token bucket: the follow-up request below only succeeds
         // if the rejected one consumed nothing from it.
         handler.llmRateCap = new LlmRateCap(1);
-        assertTrue(tracker.tryAcquire(userId, "dm", userId), "occupy the slot");
+        InFlightTracker.CancellationHandle slot = tracker.tryAcquire(userId, "dm", userId);
+        assertNotNull(slot, "occupy the slot");
 
         OutboundMessage rejected = handler.handle(new ScopeRef.Dm(PREFIX + "nl"), "/summary");
         assertTrue(rejected.text().contains("already in progress"),
                 "the occupied slot must reject the request. Got: " + rejected.text());
 
-        tracker.release(userId, "dm", userId); // the first request finishes
+        tracker.release(userId, "dm", userId, slot); // the first request finishes
         OutboundMessage ok = handler.handle(new ScopeRef.Dm(PREFIX + "nl"), "/summary");
 
         assertTrue(ok.text().contains("Recovered prose."),

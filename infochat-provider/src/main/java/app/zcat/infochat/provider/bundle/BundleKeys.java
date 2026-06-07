@@ -906,6 +906,9 @@ public final class BundleKeys {
     /** No eligible anchor (never ran /summary, or anchor was cleared). */
     public static final String ERROR_RETRY_NO_ANCHOR = "error.retry.no_anchor";
 
+    /** The caller's previous request is still in flight — distinct from the no-anchor case. */
+    public static final String ERROR_RETRY_IN_FLIGHT = "error.retry.in_flight";
+
     /** All frozen UIDs are no longer READY — nothing to retry. */
     public static final String ERROR_RETRY_NO_ELIGIBLE_POSTS = "error.retry.no_eligible_posts";
 

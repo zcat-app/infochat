@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.command;
 
+import app.zcat.infochat.core.log.ContactIds;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
@@ -388,6 +389,52 @@ class InviteCommandHandlerTest {
         assertTrue(body.contains("OPEN"),
                 "OPEN_ADAPTER row must carry the OPEN marker in the rendered list — got: "
                         + body);
+    }
+
+    // ----- M1-218: list output round-trips into revoke ---------------------
+
+    @Test
+    void inviteListDisplayedCodeRoundTripsIntoSuccessfulRevoke() throws Exception {
+        String actor = PREFIX + "roundtrip-actor";
+        String target = PREFIX + "roundtrip-target";
+        UUID actorId = seedUser(actor, true);
+        UUID code = UUID.randomUUID();
+        seedInvitePending("CONTACT_BOUND", target, actorId, code);
+
+        OutboundMessage listReply = handler.handle(new ScopeRef.Dm(actor), "/invite list");
+
+        // Take the code handle for OUR row (located via its redacted
+        // target marker) exactly as the admin sees it rendered.
+        String row = listReply.text().lines()
+                .filter(line -> line.contains(ContactIds.redact(target)))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError(
+                        "seeded invite row missing from /invite list — got: " + listReply.text()));
+        int open = row.indexOf('`');
+        int close = row.indexOf('`', open + 1);
+        assertTrue(open >= 0 && close > open,
+                "list entry must carry a backtick-delimited code handle — got: " + row);
+        String displayedCode = row.substring(open + 1, close);
+
+        OutboundMessage promptReply = handler.handle(
+                new ScopeRef.Dm(actor), "/invite revoke " + displayedCode);
+        assertEquals(expectedRevokePrompt(code), promptReply.text(),
+                "/invite revoke must accept the handle /invite list displayed");
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(actor), "/invite revoke confirm");
+        assertEquals(bundleLoader.get(BundleKeys.REPLY_INVITE_REVOKED), reply.text(),
+                "revoking with the displayed handle must succeed");
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT status FROM invite_code WHERE code = ?")) {
+            ps.setObject(1, code);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next());
+                assertEquals("REVOKED", rs.getString("status"),
+                        "the list-displayed handle must revoke the seeded row");
+            }
+        }
     }
 
     // ----- (31) /invite revoke happy path ---------------------------------

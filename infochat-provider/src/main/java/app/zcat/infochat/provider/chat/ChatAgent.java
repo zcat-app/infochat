@@ -119,7 +119,9 @@ public class ChatAgent {
      */
     public String handle(UUID userId, String scopeKind,
                                    UUID scopeId, String userMessage) {
-        if (!inFlightTracker.tryAcquire(userId, scopeKind, scopeId)) {
+        InFlightTracker.CancellationHandle slot =
+                inFlightTracker.tryAcquire(userId, scopeKind, scopeId);
+        if (slot == null) {
             return bundleLoader.get(BundleKeys.ERROR_CHAT_IN_FLIGHT);
         }
         try {
@@ -131,7 +133,7 @@ public class ChatAgent {
             SafeLog.error(log, "ChatAgent.handle failed for userId=" + userId, e);
             return bundleLoader.get(BundleKeys.ERROR_CHAT_UNAVAILABLE);
         } finally {
-            inFlightTracker.release(userId, scopeKind, scopeId);
+            inFlightTracker.release(userId, scopeKind, scopeId, slot);
         }
     }
 

@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.chat;
 
 import jakarta.enterprise.context.ApplicationScoped;
+import org.jspecify.annotations.Nullable;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -43,19 +44,27 @@ public class InFlightTracker {
 
     /**
      * Attempt to acquire the in-flight slot for the given (user, scope).
-     * Returns true if the slot was free and is now held; false if already occupied.
-     * Automatically captures Thread.currentThread() as the worker thread.
+     * Returns the handle now holding the slot, or null if the slot is
+     * already occupied. Automatically captures Thread.currentThread()
+     * as the worker thread. The caller retains the handle and passes it
+     * back to {@link #release} so only the current holder can free the slot.
      */
-    public boolean tryAcquire(UUID userId, String scopeKind, UUID scopeId) {
+    public @Nullable CancellationHandle tryAcquire(UUID userId, String scopeKind, UUID scopeId) {
         CancellationHandle handle = new CancellationHandle(Thread.currentThread());
-        return inFlight.putIfAbsent(new ScopeKey(userId, scopeKind, scopeId), handle) == null;
+        boolean acquired =
+                inFlight.putIfAbsent(new ScopeKey(userId, scopeKind, scopeId), handle) == null;
+        return acquired ? handle : null;
     }
 
     /**
-     * Release the in-flight slot. Safe to call even if no slot was acquired.
+     * Release the in-flight slot iff it is still held by the given handle
+     * (two-arg {@code ConcurrentHashMap.remove(key, value)}; handles
+     * compare by identity). A stale release — a worker's finally firing
+     * after /stop already freed the slot and a newer request re-acquired
+     * it — is a no-op, leaving the new holder's cancellation path intact.
      */
-    public void release(UUID userId, String scopeKind, UUID scopeId) {
-        inFlight.remove(new ScopeKey(userId, scopeKind, scopeId));
+    public void release(UUID userId, String scopeKind, UUID scopeId, CancellationHandle handle) {
+        inFlight.remove(new ScopeKey(userId, scopeKind, scopeId), handle);
     }
 
     /**
