@@ -132,21 +132,17 @@ public class EligiblePostQuery {
 
         TagMode tagMode = readTagMode(scopeKind, scopeId);
 
-        List<Post> all = selectPosts(scopeKind, scopeId, positionalTag, cutoff,
+        Selection selection = selectPosts(scopeKind, scopeId, positionalTag, cutoff,
                 tagMode, restrictedTags);
 
-        int total = all.size();
-        List<Post> capped;
-        int excluded;
-        if (total > clusterCap) {
-            // Keep the freshest clusterCap (head of the DESC ordering)
-            // and drop the OLDEST per the spec.
-            capped = new ArrayList<>(all.subList(0, clusterCap));
-            excluded = total - clusterCap;
-        } else {
-            capped = all;
-            excluded = 0;
-        }
+        // The SQL LIMIT already kept the freshest clusterCap (head of
+        // the DESC ordering, dropping the OLDEST per the spec); the
+        // window-function count carries the true pre-LIMIT total so the
+        // cap-excess message stays exact without materializing every
+        // eligible body in Java.
+        int total = selection.totalBeforeCap();
+        List<Post> capped = selection.posts();
+        int excluded = total - capped.size();
 
         return new Result(capped, total, excluded, clusterCap, profileLabel, restriction);
     }
@@ -161,7 +157,11 @@ public class EligiblePostQuery {
 
     // ----- private SQL helpers ------------------------------------------
 
-    private List<Post> selectPosts(String scopeKind, UUID scopeId,
+    /** Bounded row set plus the true pre-LIMIT match count. */
+    private record Selection(List<Post> posts, int totalBeforeCap) {
+    }
+
+    private Selection selectPosts(String scopeKind, UUID scopeId,
                                     Optional<String> positionalTag, Instant cutoff,
                                     TagMode tagMode, List<String> restrictedTags) {
         // The SELECT pins:
@@ -173,9 +173,15 @@ public class EligiblePostQuery {
         //   - optional top-3 restricted tags → tags intersect restricted set
         //   - ORDER BY published_at DESC, id DESC (deterministic; secondary
         //     key breaks ties stably across runs)
+        //   - COUNT(*) OVER () projects the pre-LIMIT match total on every
+        //     row (window functions evaluate before LIMIT), so the
+        //     cap-excess counts stay exact without a second round-trip
+        //   - LIMIT clusterCap bounds the rows (and bodies) materialized
+        //     in Java to the cap
         StringBuilder sql = new StringBuilder();
         sql.append("SELECT p.id, p.uid, p.source_id, s.display_name, p.title, ")
-           .append("       p.url, p.body, p.published_at, p.tags ")
+           .append("       p.url, p.body, p.published_at, p.tags, ")
+           .append("       COUNT(*) OVER () AS total_count ")
            .append("  FROM post p ")
            .append("  JOIN source s ON s.id = p.source_id ")
            .append(" WHERE p.status = 'READY' ")
@@ -207,12 +213,15 @@ public class EligiblePostQuery {
         // tag_mode='ALL' + no positional tag + ≤5 followed → no tag filter.
 
         sql.append(" ORDER BY p.published_at DESC, p.id DESC ");
+        sql.append(" LIMIT ? ");
+        params.add(clusterCap);
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql.toString())) {
             bindParams(ps, conn, params);
             try (ResultSet rs = ps.executeQuery()) {
                 List<Post> out = new ArrayList<>();
+                int totalBeforeCap = 0;
                 while (rs.next()) {
                     UUID id = (UUID) rs.getObject("id");
                     String uid = rs.getString("uid");
@@ -225,10 +234,12 @@ public class EligiblePostQuery {
                     Instant publishedAt = publishedTs == null ? null : publishedTs.toInstant();
                     String[] tagArr = (String[]) rs.getArray("tags").getArray();
                     List<String> tags = Arrays.asList(tagArr);
+                    // Same value on every row; zero rows → total stays 0.
+                    totalBeforeCap = rs.getInt("total_count");
                     out.add(new Post(id, uid, sourceId, displayName, title, url, body,
                             publishedAt, tags));
                 }
-                return out;
+                return new Selection(out, totalBeforeCap);
             }
         } catch (SQLException e) {
             throw new IllegalStateException("EligiblePostQuery.selectPosts failed", e);

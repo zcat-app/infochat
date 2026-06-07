@@ -209,6 +209,53 @@ class EligiblePostQueryIT {
     }
 
     @Test
+    void sqlLimitBoundsMaterializedRowsToClusterCap() throws Exception {
+        // The main query carries a SQL-side LIMIT: seeding more
+        // eligible posts than clusterCap must never materialize more
+        // than the cap in Java — the bound is applied before bodies
+        // leave the database, not by a post-hoc subList.
+        UUID userId = insertUser("sql-bound-user");
+        UUID sourceId = insertSource("sql-bound-src", "SQB");
+        insertSubscription("dm", userId, sourceId);
+        Instant now = Instant.now();
+        for (int i = 0; i < 9; i++) {
+            insertPost("sql-bound-" + i, sourceId, "Bound " + i,
+                    now.minus(Duration.ofMinutes(i)), "READY", List.of(PREFIX + "news"));
+        }
+
+        Result result = query.fetch("dm", userId, Optional.empty(), Duration.ofHours(24));
+        assertEquals(5, result.posts().size(),
+                "9 eligible posts against cap 5 — the SQL LIMIT bounds the rows");
+        // The LIMIT keeps the head of the DESC ordering: freshest five.
+        assertEquals("Bound 0", result.posts().get(0).title());
+        assertEquals("Bound 4", result.posts().get(4).title());
+    }
+
+    @Test
+    void sqlLimitPreservesTotalAndExcludedCounts() throws Exception {
+        // Cap-excess reporting must not regress under the SQL bound:
+        // the window-function count keeps total/excluded exact even
+        // though only cap rows come back (a naive LIMIT would report
+        // total == cap and excluded == 0).
+        UUID userId = insertUser("sql-count-user");
+        UUID sourceId = insertSource("sql-count-src", "SQC");
+        insertSubscription("dm", userId, sourceId);
+        Instant now = Instant.now();
+        for (int i = 0; i < 7; i++) {
+            insertPost("sql-count-" + i, sourceId, "Count " + i,
+                    now.minus(Duration.ofMinutes(i)), "READY", List.of(PREFIX + "news"));
+        }
+
+        Result result = query.fetch("dm", userId, Optional.empty(), Duration.ofHours(24));
+        assertEquals(5, result.posts().size());
+        assertEquals(7, result.totalBeforeCap(),
+                "totalBeforeCap is the true pre-LIMIT match count");
+        assertEquals(2, result.excludedCount(),
+                "excludedCount composes the cap-excess message exactly");
+        assertEquals(5, result.profileCap());
+    }
+
+    @Test
     void deterministicOrderingByPublishedAtThenIdDesc() throws Exception {
         UUID userId = insertUser("order-user");
         UUID sourceId = insertSource("order-src", "ORD");

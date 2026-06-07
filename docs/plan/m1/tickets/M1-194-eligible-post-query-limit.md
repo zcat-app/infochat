@@ -1,7 +1,7 @@
 ---
 id: M1-194
 title: "EligiblePostQuery SQL LIMIT + chat tool result budgets"
-status: pending
+status: done
 created: 2026-06-07
 last_updated: 2026-06-07
 blocked_by: []
@@ -40,6 +40,11 @@ spec_refs:
   - docs/spec/commands.md §Command catalogue
   - docs/spec/commands.md §Chat mode
 decision_refs: []
+clarity_check:
+  date: 2026-06-07
+  verdict: PASS
+  warnings: []
+  blockers: []
 revisions:
   - date: 2026-06-07
     reason: clarity-fail rework
@@ -56,7 +61,20 @@ revisions:
       - spec_refs: §Conversation control (covers /stop, /clear, /retry —
         clarity warning: wrong section) replaced by §Command catalogue (the
         /summary cluster-cap paragraph) and §Chat mode (chat tool surface).
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-07
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 449
+      removed: 31
 escalations:
   - date: 2026-06-07
     reason: clarity-fail
