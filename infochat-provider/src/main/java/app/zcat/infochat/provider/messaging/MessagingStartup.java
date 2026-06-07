@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.messaging;
 
 import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.messaging.MessagingAdapter;
+import app.zcat.infochat.provider.health.AdapterConnectionState;
 import io.quarkus.runtime.Startup;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Priority;
@@ -37,6 +38,9 @@ public class MessagingStartup {
     @Inject
     AdapterRegistry adapterRegistry;
 
+    @Inject
+    AdapterConnectionState connectionState;
+
     @PostConstruct
     void onStartup() {
         adapterRegistry.start();
@@ -53,13 +57,24 @@ public class MessagingStartup {
      * the resilience invariant requires that no adapter failure abort
      * the loop. JVM-level {@link Error}s propagate: a broken JVM is not
      * a per-adapter condition.
+     *
+     * <p>Each adapter's start outcome is recorded in
+     * {@link AdapterConnectionState} so the readiness probe can apply
+     * the §6.7 / deployment-spec rule "ready when at least one enabled
+     * adapter is connected". The reset before the loop mirrors
+     * {@link AdapterRegistry#start()}'s idempotent-restart clearing of
+     * its activated set: a re-run must not retain connected flags for
+     * adapters no longer activated.</p>
      */
     void startAllAdapters() {
+        connectionState.reset();
         for (MessagingAdapter adapter : adapterRegistry.activatedAdapters()) {
             try {
                 adapter.start();
+                connectionState.reportStarted(adapter.name());
                 log.info("started adapter transport: {}", adapter.name());
             } catch (Exception e) {
+                connectionState.reportFailed(adapter.name());
                 SafeLog.error(log,
                         "Adapter " + adapter.name()
                                 + " failed to start; continuing with the remaining adapters",

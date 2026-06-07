@@ -49,6 +49,19 @@
             <artifactId>quarkus-scheduler</artifactId>
         </dependency>
         <!--
+             quarkus-smallrye-health serves the liveness/readiness probes at
+             /q/health/live and /q/health/ready (docs/spec/deployment.md
+             §Health and observability; docs/design/07-deployment.md §7.12).
+             The Collector needs only the extension defaults — the automatic
+             Agroal datasource readiness check plus startup completing — and
+             this dependency is its only HTTP surface (no user-facing API).
+             Version BOM-managed.
+        -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-smallrye-health</artifactId>
+        </dependency>
+        <!--
              quarkus-messaging is the Quarkus 3.x umbrella for SmallRye
              Reactive Messaging core. Provides the in-memory channel
              runtime used by EvalQueueProducer (@Channel("eval-queue"))
@@ -156,6 +169,31 @@
                 </executions>
             </plugin>
             <!--
+                 vertx.disableWebsockets=false pins vanilla Vert.x server-side
+                 WebSocket support in both test JVMs. With quarkus-vertx-http
+                 on the classpath, Quarkus's VertxHttpRecorder sets that
+                 system property to true at boot (a request-path optimization
+                 — Quarkus serves WebSockets through its own router, not the
+                 vert.x webSocketHandler path) unless it is already set.
+                 io.vertx.core.http.impl.HttpServerImpl latches the property
+                 into a static final at class load, so a @QuarkusTest booting
+                 first in the JVM silently breaks every later
+                 Vertx.vertx().createHttpServer().webSocketHandler(...) fake
+                 (FakeNostrRelay): the ws-only server's request handler stays
+                 null and the handshake dies with an event-loop NPE.
+                 Presetting the property at JVM start wins because the
+                 recorder only sets it when absent. Test JVMs only — the
+                 production Collector serves no WebSockets.
+            -->
+            <plugin>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <systemPropertyVariables>
+                        <vertx.disableWebsockets>false</vertx.disableWebsockets>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+            <!--
                  maven-failsafe-plugin is bound here so *IT.java tests
                  (FlywayMigrationIT) run during `mvn verify`. Maven's
                  default lifecycle does not bind failsafe; without this
@@ -163,10 +201,19 @@
                  every IT and the file would be dead code on disk.
                  Surefire (test phase) remains bound by the super-pom
                  default and picks up *Test.java automatically.
+                 systemPropertyVariables: same vertx.disableWebsockets
+                 pin as the surefire stanza above — the Nostr ITs spin
+                 up FakeNostrRelay next to a booted @QuarkusTest
+                 container in the same JVM.
             -->
             <plugin>
                 <artifactId>maven-failsafe-plugin</artifactId>
                 <version>3.5.2</version>
+                <configuration>
+                    <systemPropertyVariables>
+                        <vertx.disableWebsockets>false</vertx.disableWebsockets>
+                    </systemPropertyVariables>
+                </configuration>
                 <executions>
                     <execution>
                         <goals>

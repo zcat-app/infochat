@@ -10,6 +10,7 @@ import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.messaging.impl.signal.SignalAdapter;
 import app.zcat.infochat.messaging.impl.simplex.SimpleXAdapter;
+import app.zcat.infochat.provider.health.AdapterConnectionState;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
@@ -133,6 +134,9 @@ class ProductionAdapterActivationTest {
         Field f = MessagingStartup.class.getDeclaredField("adapterRegistry");
         f.setAccessible(true);
         f.set(startup, new StubAdapterRegistry(activated));
+        Field cs = MessagingStartup.class.getDeclaredField("connectionState");
+        cs.setAccessible(true);
+        cs.set(startup, new AdapterConnectionState());
         return startup;
     }
 

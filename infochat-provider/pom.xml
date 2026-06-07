@@ -96,6 +96,18 @@
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-scheduler</artifactId>
         </dependency>
+        <!--
+             quarkus-smallrye-health serves the liveness/readiness probes at
+             /q/health/live and /q/health/ready (docs/spec/deployment.md
+             §Health and observability; docs/design/07-deployment.md §7.12).
+             Pulls in quarkus-vertx-http — the Provider's only HTTP surface;
+             no application REST endpoints exist (Provider is user-facing
+             via messaging adapters only).
+        -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-smallrye-health</artifactId>
+        </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-junit5</artifactId>
