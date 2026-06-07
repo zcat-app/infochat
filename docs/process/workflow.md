@@ -325,6 +325,18 @@ Parallel allowed when:
 
 If parallel, each ticket runs in a git worktree (`Agent(isolation: "worktree")`). The skill refuses to start a parallel ticket whose constraints overlap an in-flight ticket; the conflict is surfaced via `STATUS.md`.
 
+### Migration ordering (below-max interaction audit)
+
+Migration version numbers are reserved at ticket-draft time, but tickets land in any order, and a migration added to an in-flight ticket mid-implementation (e.g. a redteam remediation) takes the next free number — above reserved-but-unlanded ones — and may land first. The result is a migration whose version is **below** one already on `main`: on every fresh database it executes *earlier* than a higher-numbered migration that was authored and tested before it existed.
+
+Any migration whose version is below a version already on `main`, or below any `V*.sql` present in a sibling worktree, MUST carry in its header comment an interaction audit against each such higher-numbered migration:
+
+1. **Objects both re-declare.** A `CREATE OR REPLACE` body must be copied from the highest-numbered declaration on disk (any checkout), never an older lineage — the higher-numbered migration runs later and silently clobbers a lower-numbered re-declaration.
+2. **Structure the higher one depends on.** Tables, columns, or grants this migration changes that the higher-numbered migration's DDL, DML, or function bodies reference. plpgsql bodies are not resolved against the catalog at `CREATE` time, so a broken reference applies cleanly and fails only when the function is first called.
+3. **Data backfills crossing the boundary.** Any row-copying in either migration that assumes the other's pre-change structure.
+
+The reviewer rejects a diff that adds a below-max migration without this audit. Precedent: V39's header reasons explicitly about ACL preservation across the already-landed V41 re-declaration (the 2026-06-07 V39/V40/V41 inversion — both audits held; the rule makes them mandatory rather than voluntary).
+
 ---
 
 ## Naming conventions (slug, branch, ticket file)
