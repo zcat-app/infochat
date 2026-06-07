@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 38 |
+| pending | 39 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 216 |
 | deferred | 2 |
-| **total** | **256** |
+| **total** | **257** |
 
 ---
 
@@ -60,6 +60,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-217 — LLM-adapter lows: Entry nullability contradiction, joinPath/preview dedup, Anthropic multi-block content (complexity: low, risk: low)
 - M1-218 — Provider lows: /retry in-flight reply, /invite list-vs-revoke code identity, handle-keyed slot release (complexity: low, risk: medium)
 - M1-220 — [INVESTIGATE] Bluesky source identifier: URL (per D38) vs bare DID/handle (per the fetcher) (complexity: low, risk: medium)
+- M1-221 — LLM retry-once backoff: sleep before the single retry (M1-192 redteam F2) (complexity: medium, risk: low)
 
 ---
 
@@ -434,4 +435,5 @@ M1-215 (pending) ← runnable
 M1-216 (pending) ← runnable
 M1-218 (pending) ← runnable
 M1-220 (pending) ← runnable
+M1-221 (pending) ← runnable
 ```
