@@ -9,6 +9,7 @@ import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.chat.LlmRateCap;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import app.zcat.infochat.provider.command.AssetCommandFamilyOracle;
 import app.zcat.infochat.provider.command.CommandPermissions;
@@ -20,7 +21,6 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.context.control.ActivateRequestContext;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
-import io.quarkus.scheduler.Scheduled;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -35,8 +35,6 @@ import java.text.MessageFormat;
 import java.text.Normalizer;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayDeque;
-import java.util.Deque;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -279,11 +277,11 @@ public class InboundRouter {
     @Inject
     SummaryAnchorRepository summaryAnchorRepository;
 
+    @Inject
+    LlmRateCap llmRateCap;
+
     @ConfigProperty(name = "infochat.chat.body-cap", defaultValue = "2048")
     int chatBodyCap;
-
-    @ConfigProperty(name = "infochat.chat.llm-rate-cap-per-minute", defaultValue = "10")
-    int llmRateCapPerMinute;
 
     /**
      * Defense-in-depth body cap. The default is below the in-memory
@@ -294,12 +292,6 @@ public class InboundRouter {
      */
     @ConfigProperty(name = "infochat.router.max-inbound-body-bytes", defaultValue = "65536")
     int maxInboundBodyBytes;
-
-    // Per-user LLM call timestamps for the chat-mode rate cap.
-    // Keyed by users.id; each deque holds call epoch-millis within
-    // the last 60 s. Synchronized on the deque instance per entry.
-    private final ConcurrentHashMap<UUID, Deque<Long>> llmCallTimestamps =
-            new ConcurrentHashMap<>();
 
     /**
      * Reply targets keyed by {@link MessagingAdapter#name()}.
@@ -597,7 +589,7 @@ public class InboundRouter {
                 // UUID for DM, the group's UUID for group scope
                 // (per-scope isolation, schema §Invariants).
                 UUID actorId = snapshot.get().id();
-                if (!tryAcquireLlmRateCap(actorId)) {
+                if (!llmRateCap.tryAcquire(actorId)) {
                     body = bundleLoader.get(BundleKeys.ERROR_CHAT_LLM_RATE_CAP);
                 } else {
                     String scopeKind = chatModeScopeKindOf(msg.scope());
@@ -860,49 +852,6 @@ public class InboundRouter {
             throw new IllegalStateException(
                     "InboundRouter.ensureGroupMembership failed", e);
         }
-    }
-
-    // Per-user sliding-window LLM rate cap. Prunes call timestamps
-    // older than 60 s, then checks if the user has exceeded the cap.
-    boolean tryAcquireLlmRateCap(UUID userId) {
-        Deque<Long> timestamps = llmCallTimestamps.computeIfAbsent(
-                userId, k -> new ArrayDeque<>());
-        long now = System.currentTimeMillis();
-        long windowStart = now - 60_000;
-        synchronized (timestamps) {
-            while (!timestamps.isEmpty() && timestamps.peekFirst() < windowStart) {
-                timestamps.pollFirst();
-            }
-            if (timestamps.size() >= llmRateCapPerMinute) {
-                return false;
-            }
-            timestamps.addLast(now);
-            return true;
-        }
-    }
-
-    @Scheduled(every = "{infochat.chat.llm-rate-cap-sweep-interval:5m}")
-    void evictIdleLlmRateCapEntries() {
-        evictIdleLlmRateCapEntries(System.currentTimeMillis());
-    }
-
-    // 2x the 60 s rate-cap window: timestamps older than this are pruned;
-    // entries whose deque is then empty are removed from the map.
-    void evictIdleLlmRateCapEntries(long nowMillis) {
-        long cutoff = nowMillis - 120_000;
-        llmCallTimestamps.entrySet().removeIf(entry -> {
-            Deque<Long> timestamps = entry.getValue();
-            synchronized (timestamps) {
-                while (!timestamps.isEmpty() && timestamps.peekFirst() < cutoff) {
-                    timestamps.pollFirst();
-                }
-                return timestamps.isEmpty();
-            }
-        });
-    }
-
-    int llmRateCapEntryCount() {
-        return llmCallTimestamps.size();
     }
 
     /**

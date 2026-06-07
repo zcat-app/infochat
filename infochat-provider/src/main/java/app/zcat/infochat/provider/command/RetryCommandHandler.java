@@ -9,6 +9,7 @@ import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.chat.CancellationService;
 import app.zcat.infochat.provider.chat.InFlightTracker;
+import app.zcat.infochat.provider.chat.LlmRateCap;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository.AnchorRow;
 import app.zcat.infochat.provider.digest.DigestRetryService;
@@ -109,6 +110,9 @@ public class RetryCommandHandler implements CommandHandler {
     InFlightTracker inFlightTracker;
 
     @Inject
+    LlmRateCap llmRateCap;
+
+    @Inject
     DigestRetryService digestRetryService;
 
     @Inject
@@ -160,22 +164,35 @@ public class RetryCommandHandler implements CommandHandler {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_NO_ELIGIBLE_POSTS));
         }
 
-        // Enforce profile-driven retry cap
-        int retryCount = summaryAnchorRepository.incrementAndGetRetryCount(
-                userId.get(), "dm", scopeId);
-        if (retryCount > retryCap) {
-            return reply(scope, MessageFormat.format(
-                    bundleLoader.get(BundleKeys.ERROR_RETRY_CAP_EXHAUSTED),
-                    String.valueOf(retryCap)));
-        }
-
-        // Acquire in-flight slot for the LLM re-roll
+        // Acquire the in-flight slot for the LLM re-roll BEFORE the
+        // LLM bucket and the retry counter, so a busy rejection
+        // consumes neither a bucket token nor one of the anchor's
+        // retry slots — rejections leave both in a state where the
+        // next permitted request succeeds.
         String scopeKind = "dm";
         if (!inFlightTracker.tryAcquire(userId.get(), scopeKind, scopeId)) {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_NO_ANCHOR));
         }
 
         try {
+            // security.md §Rate limiting: /retry re-rolls draw from the
+            // same per-user LLM bucket as chat replies and /summary.
+            // Checked before the retry-counter increment so a rate-cap
+            // rejection does not burn a retry slot (bucket tokens
+            // self-heal after 60 s; the anchor's retry slots do not).
+            if (!llmRateCap.tryAcquire(userId.get())) {
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_CHAT_LLM_RATE_CAP));
+            }
+
+            // Enforce profile-driven retry cap
+            int retryCount = summaryAnchorRepository.incrementAndGetRetryCount(
+                    userId.get(), "dm", scopeId);
+            if (retryCount > retryCap) {
+                return reply(scope, MessageFormat.format(
+                        bundleLoader.get(BundleKeys.ERROR_RETRY_CAP_EXHAUSTED),
+                        String.valueOf(retryCap)));
+            }
+
             // Reconstruct clusters from the stored cluster_map, filtering
             // to only READY posts
             List<Cluster> clusters = reconstructClusters(anchor.clusterMapJson(), readyPosts);

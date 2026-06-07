@@ -4,6 +4,7 @@ import app.zcat.infochat.messaging.Identity;
 import app.zcat.infochat.messaging.InboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
+import app.zcat.infochat.provider.chat.LlmRateCap;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import org.junit.jupiter.api.Test;
 
@@ -493,11 +494,12 @@ class InboundRouterIntakeOrderingTest {
         InboundRouter router = newRouterWithLog(log,
                 Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), "vouched")),
                 Optional.empty());
-        // The two chat-mode config fields default to 0 outside CDI;
-        // lift them so the non-slash body passes the chat-mode body
-        // cap and the LLM rate cap and reaches scope resolution.
+        // Outside CDI the chat-mode body-cap config field defaults to 0
+        // and the LLM rate-cap collaborator is null; lift both so the
+        // non-slash body passes the chat-mode body cap and the LLM
+        // rate cap and reaches scope resolution.
         router.chatBodyCap = 2048;
-        router.llmRateCapPerMinute = 10;
+        router.llmRateCap = new LlmRateCap(10);
         CapturingAdapter target = new CapturingAdapter();
         router.setReplyTarget(target);
 

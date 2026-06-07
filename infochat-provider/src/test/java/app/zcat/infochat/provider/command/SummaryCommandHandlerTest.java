@@ -3,6 +3,8 @@ package app.zcat.infochat.provider.command;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.chat.InFlightTracker;
+import app.zcat.infochat.provider.chat.LlmRateCap;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.messaging.InboundContext;
@@ -15,6 +17,7 @@ import app.zcat.infochat.provider.summary.EmptyEdgeSource;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator.ClusterProse;
 import app.zcat.infochat.provider.translation.TranslationPipeline;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -29,6 +32,7 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -39,13 +43,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@link SummaryCommandHandler} per the test-pyramid convention at
  * {@code docs/process/test-pyramid.md} §Handler unit tests.
  *
- * <p>The handler's seven {@code @Inject} collaborators are stubbed in
+ * <p>The handler's {@code @Inject} collaborators are stubbed in
  * {@link #buildHandlerWithStubs()}: {@link BundleLoader} (real,
  * loaded by hand), {@link RecordingEligiblePostQuery},
  * {@link RecordingSummaryProseGenerator}, {@link LlmOutputSanitizer}
  * (real), real {@link ClusterTraversal}, {@link InboundContext}
- * (constructed), and {@link FixedUserAndLanguageDataSource} for the
- * DM-scope users-id lookup.
+ * (constructed), {@link FixedUserAndLanguageDataSource} for the
+ * DM-scope users-id lookup, plus a real {@link InFlightTracker} and a
+ * real {@link LlmRateCap} (M1-183 admission control).
  *
  * <p>Asserted invariants (one {@code @Test} per behavioral branch):
  * <ul>
@@ -75,6 +80,8 @@ class SummaryCommandHandlerTest {
     private RecordingSummaryProseGenerator proseGenerator;
     private RecordingSummaryAnchorRepository anchorRepository;
     private BundleLoader bundleLoader;
+    private InFlightTracker tracker;
+    private UUID userId;
 
     @BeforeEach
     void buildHandlerWithStubs() throws Exception {
@@ -82,15 +89,19 @@ class SummaryCommandHandlerTest {
         eligiblePostQuery = new RecordingEligiblePostQuery();
         proseGenerator = new RecordingSummaryProseGenerator();
         anchorRepository = new RecordingSummaryAnchorRepository();
+        tracker = new InFlightTracker();
+        userId = UUID.randomUUID();
         handler = new SummaryCommandHandler();
         handler.bundleLoader = bundleLoader;
-        handler.dataSource = new FixedUserAndLanguageDataSource(UUID.randomUUID());
+        handler.dataSource = new FixedUserAndLanguageDataSource(userId);
         handler.eligiblePostQuery = eligiblePostQuery;
         handler.clusterTraversal = new ClusterTraversal(new EmptyEdgeSource(), 3);
         handler.summaryProseGenerator = proseGenerator;
         handler.llmOutputSanitizer = new LlmOutputSanitizer();
         handler.translationPipeline = newEnShortCircuitPipeline();
         handler.summaryAnchorRepository = anchorRepository;
+        handler.inFlightTracker = tracker;
+        handler.llmRateCap = new LlmRateCap(10);
         InboundContext context = new InboundContext();
         context.setAdapterName("inmemory");
         handler.inboundContext = context;
@@ -279,6 +290,97 @@ class SummaryCommandHandlerTest {
                         + "this degraded run regenerates the prose')");
     }
 
+    // ----- M1-183: LLM rate cap + in-flight coverage ---------------------
+    //
+    // Per docs/spec/security.md §Rate limiting, /summary draws from the
+    // same per-user LLM bucket as chat replies and /retry re-rolls; per
+    // docs/spec/commands.md §Conversation control + §Surface conventions,
+    // a /summary prose generation is interruptible (registered with
+    // InFlightTracker) and at most one interruptible request may be in
+    // flight per (user, scope).
+
+    @Test
+    void summaryRejectedWithRateLimitReplyWhenLlmBucketExhausted() {
+        eligiblePostQuery.seedPosts(
+                List.of(post(PREFIX + "rl1", "Rate headline", Instant.now())), 0);
+        // Exhaust the per-user LLM bucket: a single-token bucket whose
+        // token is already taken for this user.
+        LlmRateCap exhausted = new LlmRateCap(1);
+        assertTrue(exhausted.tryAcquire(userId), "drain the bucket's only token");
+        handler.llmRateCap = exhausted;
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "rl"), "/summary");
+
+        assertTrue(reply.text().contains("too quickly"),
+                "rate-capped /summary must get the rate-limit reply. Got: " + reply.text());
+        assertEquals(0, proseGenerator.callCount(),
+                "rate-capped /summary must make no LLM call");
+        assertFalse(tracker.isInFlight(userId, "dm", userId),
+                "rate-cap rejection must not leave the in-flight slot held");
+    }
+
+    @Test
+    void summaryRegistersInFlightDuringProseGenerationAndReleasesAfterwards() {
+        eligiblePostQuery.seedPosts(
+                List.of(post(PREFIX + "if1", "InFlight headline", Instant.now())), 0);
+        proseGenerator.setResponseText("In-flight prose.");
+        proseGenerator.probeInFlightDuringGenerate(
+                () -> tracker.isInFlight(userId, "dm", userId));
+
+        handler.handle(new ScopeRef.Dm(PREFIX + "if"), "/summary");
+
+        assertTrue(proseGenerator.wasInFlightDuringGenerate(),
+                "/summary must hold the InFlightTracker slot during prose "
+                        + "generation so /stop can find it");
+        assertFalse(tracker.isInFlight(userId, "dm", userId),
+                "the slot must be released after the reply is composed");
+    }
+
+    @Test
+    void secondSummaryWhileOneInFlightRepliesInProgressWithoutSecondLlmCall() {
+        eligiblePostQuery.seedPosts(
+                List.of(post(PREFIX + "sec1", "Second headline", Instant.now())), 0);
+        // Model the first /summary still in flight for the same
+        // (user, scope) by holding its tracker slot.
+        assertTrue(tracker.tryAcquire(userId, "dm", userId));
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "sec"), "/summary");
+
+        assertTrue(reply.text().contains("already in progress"),
+                "second /summary while one is in flight must get the "
+                        + "in-progress reply. Got: " + reply.text());
+        assertEquals(0, proseGenerator.callCount(),
+                "the rejected second /summary must make no LLM call");
+        assertTrue(tracker.isInFlight(userId, "dm", userId),
+                "the first request's slot must remain held — the rejection "
+                        + "must not release a slot it failed to acquire");
+    }
+
+    @Test
+    void rejectedSummaryLeavesSlotAndBucketUsableForNextRequest() {
+        eligiblePostQuery.seedPosts(
+                List.of(post(PREFIX + "nl1", "NoLeak headline", Instant.now())), 0);
+        proseGenerator.setResponseText("Recovered prose.");
+        // Single-token bucket: the follow-up request below only succeeds
+        // if the rejected one consumed nothing from it.
+        handler.llmRateCap = new LlmRateCap(1);
+        assertTrue(tracker.tryAcquire(userId, "dm", userId), "occupy the slot");
+
+        OutboundMessage rejected = handler.handle(new ScopeRef.Dm(PREFIX + "nl"), "/summary");
+        assertTrue(rejected.text().contains("already in progress"),
+                "the occupied slot must reject the request. Got: " + rejected.text());
+
+        tracker.release(userId, "dm", userId); // the first request finishes
+        OutboundMessage ok = handler.handle(new ScopeRef.Dm(PREFIX + "nl"), "/summary");
+
+        assertTrue(ok.text().contains("Recovered prose."),
+                "the next permitted request must succeed — the rejection "
+                        + "consumed neither the slot nor the single bucket token. Got: "
+                        + ok.text());
+        assertFalse(tracker.isInFlight(userId, "dm", userId),
+                "the successful run must release its slot");
+    }
+
     // ----- fixtures + collaborator stubs --------------------------------
 
     private static TranslationPipeline newEnShortCircuitPipeline() throws Exception {
@@ -370,6 +472,8 @@ class SummaryCommandHandlerTest {
         private final AtomicInteger callCount = new AtomicInteger();
         private String responseText = "default test summary";
         private boolean degradedMode = false;
+        private @Nullable BooleanSupplier inFlightProbe;
+        private boolean inFlightDuringGenerate;
 
         void setResponseText(String text) {
             this.responseText = text;
@@ -379,8 +483,23 @@ class SummaryCommandHandlerTest {
             this.degradedMode = degraded;
         }
 
+        /**
+         * Evaluated at the top of {@link #generate} — lets a test
+         * observe tracker state at the moment the LLM layer runs.
+         */
+        void probeInFlightDuringGenerate(BooleanSupplier probe) {
+            this.inFlightProbe = probe;
+        }
+
+        boolean wasInFlightDuringGenerate() {
+            return inFlightDuringGenerate;
+        }
+
         @Override
         public List<ClusterProse> generate(List<Cluster> clusters, String scopeLanguage) {
+            if (inFlightProbe != null) {
+                inFlightDuringGenerate = inFlightProbe.getAsBoolean();
+            }
             List<ClusterProse> out = new ArrayList<>(clusters.size());
             for (Cluster c : clusters) {
                 callCount.incrementAndGet();

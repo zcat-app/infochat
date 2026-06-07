@@ -5,6 +5,7 @@ import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.chat.CancellationService;
 import app.zcat.infochat.provider.chat.InFlightTracker;
+import app.zcat.infochat.provider.chat.LlmRateCap;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository.AnchorRow;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
@@ -76,6 +77,7 @@ class RetryCommandHandlerTest {
         handler.llmOutputSanitizer = new LlmOutputSanitizer();
         handler.translationPipeline = newEnShortCircuitPipeline();
         handler.inFlightTracker = tracker;
+        handler.llmRateCap = new LlmRateCap(10);
         handler.retryCap = 3;
         handler.statusDriftThreshold = 0.25;
         InboundContext ctx = new InboundContext();
@@ -205,6 +207,66 @@ class RetryCommandHandlerTest {
                 "sanitizer must strip /grant-admin. Got: " + reply.text());
         assertTrue(reply.text().contains("[redacted command]"),
                 "sanitizer must replace with [redacted command]. Got: " + reply.text());
+    }
+
+    // ----- M1-183: LLM rate cap + in-flight no-leak --------------------
+    //
+    // Per docs/spec/security.md §Rate limiting, /retry re-rolls draw
+    // from the same per-user LLM bucket as chat replies and /summary.
+
+    @Test
+    void retryRejectedWithRateLimitReplyWhenLlmBucketExhausted() {
+        List<String> postUids = List.of(PREFIX + "rl1");
+        String json = "[{\"topicId\":\"t-rl\",\"postUids\":[\"" + postUids.get(0) + "\"]}]";
+        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary", "hash", postUids, json);
+        Post readyPost = post(postUids.get(0), "Rate headline", Instant.now());
+        handler.dataSource = stubUserAndPostsDataSource(USER_ID, List.of(readyPost));
+        // Exhaust the per-user LLM bucket: a single-token bucket whose
+        // token is already taken for this user.
+        LlmRateCap exhausted = new LlmRateCap(1);
+        assertTrue(exhausted.tryAcquire(USER_ID), "drain the bucket's only token");
+        handler.llmRateCap = exhausted;
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "rl"), "/retry");
+
+        assertTrue(reply.text().contains("too quickly"),
+                "rate-capped /retry must get the rate-limit reply. Got: " + reply.text());
+        assertEquals(0, proseGenerator.callCount,
+                "rate-capped /retry must make no LLM re-roll");
+        assertEquals(0, anchorRepo.incrementCallCount,
+                "a rate-cap rejection must not burn one of the anchor's retry slots");
+        assertFalse(tracker.isInFlight(USER_ID, "dm", USER_ID),
+                "rate-cap rejection must not leave the in-flight slot held");
+    }
+
+    @Test
+    void rejectedRetryLeavesSlotAndBucketUsableForNextRequest() {
+        List<String> postUids = List.of(PREFIX + "nl1");
+        String json = "[{\"topicId\":\"t-nl\",\"postUids\":[\"" + postUids.get(0) + "\"]}]";
+        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary", "hash", postUids, json);
+        Post readyPost = post(postUids.get(0), "NoLeak headline", Instant.now());
+        handler.dataSource = stubUserAndPostsDataSource(USER_ID, List.of(readyPost));
+        proseGenerator.responseText = "Recovered re-roll.";
+        // Single-token bucket: the follow-up request below only succeeds
+        // if the rejected one consumed nothing from it.
+        handler.llmRateCap = new LlmRateCap(1);
+        assertTrue(tracker.tryAcquire(USER_ID, "dm", USER_ID), "occupy the slot");
+
+        handler.handle(new ScopeRef.Dm(PREFIX + "nl"), "/retry");
+        assertEquals(0, proseGenerator.callCount,
+                "the in-flight-busy rejection must make no LLM re-roll");
+        assertEquals(0, anchorRepo.incrementCallCount,
+                "a busy rejection must not burn one of the anchor's retry slots");
+
+        tracker.release(USER_ID, "dm", USER_ID); // the first request finishes
+        OutboundMessage ok = handler.handle(new ScopeRef.Dm(PREFIX + "nl"), "/retry");
+
+        assertTrue(ok.text().contains("Recovered re-roll."),
+                "the next permitted request must succeed — the rejection "
+                        + "consumed neither the slot nor the single bucket token. Got: "
+                        + ok.text());
+        assertFalse(tracker.isInFlight(USER_ID, "dm", USER_ID),
+                "the successful re-roll must release its slot");
     }
 
     // ----- fixtures + stubs ------------------------------------------------

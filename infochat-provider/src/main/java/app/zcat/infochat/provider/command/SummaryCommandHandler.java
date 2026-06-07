@@ -4,6 +4,8 @@ import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.chat.InFlightTracker;
+import app.zcat.infochat.provider.chat.LlmRateCap;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import app.zcat.infochat.provider.command.SummaryArgs.Failure;
 import app.zcat.infochat.provider.command.SummaryArgs.ParseResult;
@@ -59,6 +61,10 @@ import java.util.UUID;
  *   <li>Run {@link EligiblePostQuery#fetch} for the deterministic
  *       eligible-post set (status='READY', window, subscriptions,
  *       optional tag filter, cap).</li>
+ *   <li>Acquire the per-(user, scope) {@link InFlightTracker} slot and
+ *       a per-user {@link LlmRateCap} token; a busy slot or empty
+ *       bucket short-circuits to the localized rejection reply with no
+ *       LLM call.</li>
  *   <li>Run {@link ClusterTraversal#cluster} (singletons in MVP).</li>
  *   <li>Run {@link SummaryProseGenerator#generate} (one LLM call per
  *       cluster).</li>
@@ -117,6 +123,12 @@ public class SummaryCommandHandler implements CommandHandler {
     @Inject
     SummaryAnchorRepository summaryAnchorRepository;
 
+    @Inject
+    InFlightTracker inFlightTracker;
+
+    @Inject
+    LlmRateCap llmRateCap;
+
     @Override
     public String name() {
         return "summary";
@@ -158,50 +170,74 @@ public class SummaryCommandHandler implements CommandHandler {
             return reply(scope, bundleLoader.get(BundleKeys.REPLY_SUMMARY_NO_POSTS_YET));
         }
 
-        String scopeLanguage = readScopeLanguage(scopeKind, scopeId.get());
-
-        List<Cluster> clusters = clusterTraversal.cluster(result.posts());
-        List<ClusterProse> prose = summaryProseGenerator.generate(clusters, "en");
-
-        // Write the summary anchor — enables /retry to replay the prose
-        // layer with the same deterministic post selection (D19, D36).
-        // Written on both normal and degraded paths: spec says "/retry
-        // against this degraded run regenerates the prose if the LLM
-        // has recovered."
-        List<String> postUids = result.posts().stream().map(Post::uid).toList();
-        String argHash = computeArgHash(rawText);
-        String clusterMapJson = serializeClusterMap(clusters);
-        summaryAnchorRepository.write(
-                scopeId.get(), scopeKind, scopeId.get(), "summary",
-                argHash, postUids, clusterMapJson);
-
-        StringBuilder out = new StringBuilder();
-
-        if (result.topTagRestriction().isPresent()) {
-            out.append(format(BundleKeys.REPLY_SUMMARY_TOP_3_OF_N_PREFIX,
-                    result.topTagRestriction().get().followedTagCount()));
-            out.append("\n\n");
+        // At most one in-flight interruptible request per (user, scope)
+        // (commands.md §Surface conventions); the registration is also
+        // what lets /stop find the prose generation (D35). The slot is
+        // checked BEFORE the LLM bucket so neither check consumes
+        // anything on a rejection — an already-in-flight rejection
+        // takes no bucket token, and a rate-cap rejection records no
+        // timestamp, so the next permitted request still succeeds.
+        // v1 DM-only: scopeId IS the caller's users.id here (group
+        // scope returned no_posts_yet above).
+        UUID actorId = scopeId.get();
+        if (!inFlightTracker.tryAcquire(actorId, scopeKind, actorId)) {
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_CHAT_IN_FLIGHT));
         }
-        if (result.excludedCount() > 0) {
-            out.append(format(BundleKeys.REPLY_SUMMARY_CAP_EXCESS_NOTICE,
-                    result.posts().size(),
-                    result.totalBeforeCap(),
-                    result.profileLabel(),
-                    result.excludedCount()));
-            out.append("\n\n");
-        }
+        try {
+            // security.md §Rate limiting: on-demand /summary draws from
+            // the same per-user LLM bucket as chat replies and /retry
+            // re-rolls.
+            if (!llmRateCap.tryAcquire(actorId)) {
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_CHAT_LLM_RATE_CAP));
+            }
 
-        boolean anyDegraded = prose.stream().anyMatch(ClusterProse::degraded);
-        if (anyDegraded) {
-            out.append(bundleLoader.get(BundleKeys.REPLY_SUMMARY_DEGRADED_NOTICE));
-            out.append("\n\n");
-        }
+            String scopeLanguage = readScopeLanguage(scopeKind, scopeId.get());
 
-        for (ClusterProse cp : prose) {
-            appendClusterBlock(out, cp, scopeLanguage);
-        }
+            List<Cluster> clusters = clusterTraversal.cluster(result.posts());
+            List<ClusterProse> prose = summaryProseGenerator.generate(clusters, "en");
 
-        return reply(scope, out.toString().stripTrailing());
+            // Write the summary anchor — enables /retry to replay the prose
+            // layer with the same deterministic post selection (D19, D36).
+            // Written on both normal and degraded paths: spec says "/retry
+            // against this degraded run regenerates the prose if the LLM
+            // has recovered."
+            List<String> postUids = result.posts().stream().map(Post::uid).toList();
+            String argHash = computeArgHash(rawText);
+            String clusterMapJson = serializeClusterMap(clusters);
+            summaryAnchorRepository.write(
+                    scopeId.get(), scopeKind, scopeId.get(), "summary",
+                    argHash, postUids, clusterMapJson);
+
+            StringBuilder out = new StringBuilder();
+
+            if (result.topTagRestriction().isPresent()) {
+                out.append(format(BundleKeys.REPLY_SUMMARY_TOP_3_OF_N_PREFIX,
+                        result.topTagRestriction().get().followedTagCount()));
+                out.append("\n\n");
+            }
+            if (result.excludedCount() > 0) {
+                out.append(format(BundleKeys.REPLY_SUMMARY_CAP_EXCESS_NOTICE,
+                        result.posts().size(),
+                        result.totalBeforeCap(),
+                        result.profileLabel(),
+                        result.excludedCount()));
+                out.append("\n\n");
+            }
+
+            boolean anyDegraded = prose.stream().anyMatch(ClusterProse::degraded);
+            if (anyDegraded) {
+                out.append(bundleLoader.get(BundleKeys.REPLY_SUMMARY_DEGRADED_NOTICE));
+                out.append("\n\n");
+            }
+
+            for (ClusterProse cp : prose) {
+                appendClusterBlock(out, cp, scopeLanguage);
+            }
+
+            return reply(scope, out.toString().stripTrailing());
+        } finally {
+            inFlightTracker.release(actorId, scopeKind, actorId);
+        }
     }
 
     /**

@@ -3,6 +3,7 @@ package app.zcat.infochat.provider.messaging;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
+import app.zcat.infochat.provider.chat.LlmRateCap;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
@@ -77,7 +78,7 @@ class InboundRouterTest {
     DataSource dataSource;
 
     @Inject
-    InboundRouter inboundRouter;
+    LlmRateCap llmRateCap;
 
     @Inject
     RateCapBucket rateCapBucket;
@@ -226,15 +227,15 @@ class InboundRouterTest {
     @Test
     void llmRateCapEvictsIdleEntries() {
         UUID userId = UUID.randomUUID();
-        int before = inboundRouter.llmRateCapEntryCount();
-        assertTrue(inboundRouter.tryAcquireLlmRateCap(userId));
-        assertEquals(before + 1, inboundRouter.llmRateCapEntryCount());
+        int before = llmRateCap.entryCount();
+        assertTrue(llmRateCap.tryAcquire(userId));
+        assertEquals(before + 1, llmRateCap.entryCount());
 
         // Simulate time advancing past 2x the 60 s window so the
         // sweep prunes the timestamp and finds the deque empty.
-        inboundRouter.evictIdleLlmRateCapEntries(
+        llmRateCap.evictIdleEntries(
                 System.currentTimeMillis() + 200_000);
-        assertEquals(0, inboundRouter.llmRateCapEntryCount(),
+        assertEquals(0, llmRateCap.entryCount(),
                 "All entries should be evicted after timestamps age past 2x the window");
     }
 

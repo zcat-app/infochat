@@ -1,9 +1,13 @@
 ---
 id: M1-183
 title: "LLM rate-cap + in-flight coverage for /summary and /retry"
-status: pending
+status: done
 created: 2026-06-07
 last_updated: 2026-06-07
+clarity_check:
+  date: 2026-06-07
+  verdict: PASS
+  warnings: []
 blocked_by: []
 files_budget: 10
 files_scope:
@@ -52,11 +56,85 @@ spec_refs:
   - docs/spec/commands.md §Surface conventions
 decision_refs:
   - D35
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-07
+    verdict: REWORK
+    checks:
+      scope_drift: FAIL
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 11
+      added: 410
+      removed: 130
+  - round: 2
+    date: 2026-06-07
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 432
+      removed: 128
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
+redteam_audits:
+  - date: 2026-06-07
+    verdict: FINDINGS
+    base: 0cbb8d5
+    head: working tree (m1/M1-183-llm-rate-cap-in-flight-coverag, pre-commit)
+    verdict_file: docs/plan/m1/redteam/M1-183-2026-06-07.md
+    findings_count: 1
+    out_of_model_count: 1
+    note: |
+      One DOS-medium finding (per-group LLM sub-bucket / D47 absent) lands on a
+      surface M1-183 explicitly declares out_of_scope. Threat-actor confirms the
+      diff's per-user multi-surface LLM rate-cap coverage is delivered soundly —
+      no token burn on rejection, no in-flight slot leak, no cross-user-isolation
+      gap. The per-group backstop is a pre-existing gap not remediable in this
+      ticket; feeds a separate D47 ticket or spec-amend. No M1-183 change.
+redteam_findings:
+  - date: 2026-06-07
+    category: DOS
+    severity: medium
+    promise: |
+      **Per-group LLM rate (D47)** — a separate sub-bucket per approved group
+      bounding LLM-triggering operations (chat replies + on-demand `/summary` +
+      `/retry` re-rolls) across all group members. The per-user LLM cap fires
+      first; the per-group cap is the backstop for groups with many active
+      members.
+    gap: |
+      The diff routes every LLM-triggering surface through LlmRateCap, which is
+      strictly per-users.id (key is UUID userId, LlmRateCap.java:50/:34). Group
+      chat-mode LLM dispatch (InboundRouter.java:592) gates on
+      llmRateCap.tryAcquire(actorId) where actorId is the individual sender. No
+      per-groups-row aggregate bucket is consulted. GroupApprovalCheck has no
+      LLM-cap logic; the only per-group LLM-cost control is DigestRetryService's
+      digest cooldown (/retry --digest only). The group-aggregate dimension the
+      threat model names is absent.
+    repro: |
+      An approved group has many registered, non-banned members. Each sends
+      chat-mode @mention messages at or below the per-user cap (default 10/min),
+      each passing llmRateCap.tryAcquire at InboundRouter.java:592 and reaching
+      chatAgent.handle. Aggregate LLM invocations for that single group scale
+      linearly with member count, bounded only by the sum of per-user caps — the
+      "groups with many active members" exhaustion case the per-group backstop
+      was specified to bound. No per-group LLM bucket ever rejects the flood.
+    suggested_fix_class: rate-limit
+    disposition: |
+      Out_of_scope for M1-183 — frontmatter explicitly excludes "the per-group
+      LLM sub-bucket (D47)". Pre-existing gap, NOT introduced by this diff; the
+      per-user multi-surface coverage that IS this ticket's subject is delivered
+      soundly. Remediate via a separate D47 per-group-bucket ticket or a
+      spec-amend deferring the backstop. No change to M1-183 warranted.
 revisions:
   - date: 2026-06-07
     reason: clarity-fail rework (TEST-CHANGES-AUTHORIZED blocker; latent files_scope/files_budget gap found during escalation grounding — cap-helper extraction forces changes to two messaging test files outside the original scope)
@@ -157,3 +235,16 @@ below preserves the behavior the existing tests pin.
   the implementer's call within that path.
 - RetryCommandHandler's existing InFlightTracker registration is correct;
   only the rate bucket is missing there.
+
+## Round 1 rework
+
+1. Revert the two comment-only hunks in
+   `infochat-provider/src/main/java/app/zcat/infochat/provider/bundle/BundleKeys.java`
+   (the "Chat-mode errors" section comment and the `ERROR_CHAT_IN_FLIGHT`
+   javadoc) — the file matches no `files_scope` entry and is not
+   lifecycle-exempt, so its presence in the diff is an automatic files_scope
+   membership failure. If the comment refresh is wanted (the keys are now
+   shared with the /summary and /retry handlers, making the old "never by
+   command handlers" wording stale), either escalate for a `files_scope`
+   revision via the workflow or file a follow-up doc-comment ticket; do not
+   carry the file in this diff.
