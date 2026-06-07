@@ -19,6 +19,9 @@ import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -54,17 +57,23 @@ final class SimpleXWebSocketClient {
     // peer cannot OOM the adapter. Mirrors NostrRelayConnection's bound.
     static final int MAX_FRAME_BYTES = 1_048_576;
 
-    /** Receives decoded inbound chat messages from the WS listener thread. */
+    /**
+     * Receives decoded inbound chat messages on the client's dedicated
+     * inbound-dispatch thread (never the WS listener thread — the
+     * consumer may block, e.g. reply synchronously and await the ack
+     * only the listener thread can deliver).
+     */
     @FunctionalInterface
     interface InboundConsumer {
         void onInbound(@NonNull InboundMessage msg);
     }
 
     /**
-     * Receives decoded group-scope candidates from the WS listener
-     * thread. The mention-recognition decision belongs to the
-     * downstream consumer ({@link SimpleXGroupHandler}); the client
-     * just routes the variant.
+     * Receives decoded group-scope candidates on the client's dedicated
+     * inbound-dispatch thread (same threading contract as
+     * {@link InboundConsumer}). The mention-recognition decision
+     * belongs to the downstream consumer ({@link SimpleXGroupHandler});
+     * the client just routes the variant.
      */
     @FunctionalInterface
     interface GroupCandidateConsumer {
@@ -77,6 +86,19 @@ final class SimpleXWebSocketClient {
     private final GroupCandidateConsumer groupCandidateConsumer;
 
     private final Map<String, CompletableFuture<String>> pending = new ConcurrentHashMap<>();
+    // Single dedicated inbound-dispatch thread: Inbound / GroupCandidate
+    // frames hop off the WS listener thread here so a blocking consumer
+    // (a handler replying synchronously from onMessage) cannot deadlock
+    // against the listener that must deliver its ack. SendAck and
+    // CommandError never enter this queue — they complete pending
+    // futures directly on the listener thread. One thread (not a pool)
+    // preserves per-connection FIFO delivery order by construction. The
+    // worker is created lazily on first dispatch, so a never-started
+    // client spawns no thread; the instance is terminal after close()
+    // (the `closed` flag never resets), matching the executor's
+    // shutdown-once lifecycle.
+    private final ExecutorService dispatchExecutor = Executors.newSingleThreadExecutor(
+            Thread.ofPlatform().daemon().name("simplex-inbound-dispatch").factory());
     // Null until connect() completes the handshake; every read copies to a
     // local and guards on null before use.
     private volatile @Nullable WebSocket webSocket;
@@ -142,6 +164,9 @@ final class SimpleXWebSocketClient {
         // Drain pending command futures; the wire closing on us means none
         // will ever be acked. The category is PERMANENT because retrying on a
         // closed socket cannot succeed — callers must rebuild via start().
+        // Runs BEFORE the dispatcher shutdown: a dispatch thread blocked in
+        // sendCommand (a consumer replying synchronously) is parked on one
+        // of these futures and must be released first.
         var snapshot = Map.copyOf(pending);
         pending.clear();
         for (var entry : snapshot.entrySet()) {
@@ -149,6 +174,9 @@ final class SimpleXWebSocketClient {
                     FailureCategory.PERMANENT,
                     "WebSocket closed before command " + entry.getKey() + " was acked"));
         }
+        // Queued-but-undelivered inbound frames are dropped — the
+        // connection is going away, matching at-most-once inbound.
+        dispatchExecutor.shutdownNow();
     }
 
     /**
@@ -317,12 +345,31 @@ final class SimpleXWebSocketClient {
             return;
         }
         switch (decoded) {
-            case SimpleXMessageCodec.Inbound in -> inboundConsumer.onInbound(in.message());
-            case SimpleXMessageCodec.GroupCandidate gc -> groupCandidateConsumer.onGroupCandidate(gc);
+            case SimpleXMessageCodec.Inbound in -> dispatchAsync(() -> inboundConsumer.onInbound(in.message()));
+            case SimpleXMessageCodec.GroupCandidate gc ->
+                    dispatchAsync(() -> groupCandidateConsumer.onGroupCandidate(gc));
             case SimpleXMessageCodec.SendAck ack -> completePending(ack.corrId(), ack.chatItemId());
             case SimpleXMessageCodec.CommandError err -> failPending(err);
             case SimpleXMessageCodec.Ignored ignored ->
                     LOG.debug("simplex-chat frame ignored: {}", ignored.reason());
+        }
+    }
+
+    /**
+     * Hand one inbound delivery to the dispatch thread. Acks bypass
+     * this hop (they complete pending futures directly on the listener
+     * thread) — routing them through the queue would re-introduce the
+     * deadlock this hop exists to break: a consumer blocked in the
+     * dispatch thread would sit ahead of its own ack.
+     */
+    private void dispatchAsync(Runnable delivery) {
+        try {
+            dispatchExecutor.execute(delivery);
+        } catch (RejectedExecutionException e) {
+            // close() shut the dispatcher down while the listener was
+            // delivering its final frames; dropping is correct, the
+            // connection is going away (at-most-once inbound).
+            LOG.debug("inbound frame dropped — dispatcher shut down");
         }
     }
 

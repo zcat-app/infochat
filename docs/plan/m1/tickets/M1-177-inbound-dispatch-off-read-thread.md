@@ -1,9 +1,14 @@
 ---
 id: M1-177
 title: "Move inbound dispatch off the transport read thread"
-status: pending
+status: done
 created: 2026-06-07
 last_updated: 2026-06-07
+clarity_check:
+  date: 2026-06-07
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
 files_budget: 9
 files_scope:
@@ -43,7 +48,20 @@ test_plan:
 spec_refs:
   - docs/spec/messaging.md §Required SPI surface
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-07
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 578
+      removed: 29
 overrides: []
 aborted_attempts: []
 reopens: []

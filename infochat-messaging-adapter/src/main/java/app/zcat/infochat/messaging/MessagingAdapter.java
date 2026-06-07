@@ -199,6 +199,14 @@ public interface MessagingAdapter {
      * Functional callback Provider registers with each
      * {@link MessagingAdapter}. Pure SPI; concrete dispatching to
      * command handlers / chat mode lives in Provider.
+     *
+     * <p>Threading contract: the handler may block and may send
+     * replies synchronously from {@link #onMessage} (including calls
+     * back into the same adapter's {@link MessagingAdapter#send}
+     * path). Adapters MUST NOT invoke it on the thread that reads
+     * the transport socket — a handler blocked awaiting its reply's
+     * ack would deadlock against the reader thread that has to
+     * deliver that ack.</p>
      */
     @FunctionalInterface
     interface InboundHandler {

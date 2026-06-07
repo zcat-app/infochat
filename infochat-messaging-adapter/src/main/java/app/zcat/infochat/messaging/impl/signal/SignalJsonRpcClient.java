@@ -28,6 +28,9 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -49,10 +52,17 @@ import jakarta.json.JsonObject;
  *
  * <p>Reader-loop responsibility: read one line, decode via
  * {@link SignalMessageCodec}, and dispatch — Response /
- * ErrorResponse complete the per-{@code rpcId} pending future;
- * Notification {@code method="receive"} is translated to an
+ * ErrorResponse complete the per-{@code rpcId} pending future ON the
+ * reader thread; Notification {@code method="receive"} is handed off
+ * to a single dedicated dispatch thread, where it is translated to an
  * {@link InboundMessage} and delivered to the registered
- * {@link MessagingAdapter.InboundHandler}. Receive notifications that
+ * {@link MessagingAdapter.InboundHandler}. The split is load-bearing:
+ * a handler may block inside {@code onMessage} (e.g. send a reply and
+ * await its ack), so handlers must never run on the reader thread —
+ * the reader is the only thread that can complete the ack the handler
+ * is waiting for. One dispatch thread (not a pool) preserves
+ * per-connection FIFO delivery order by construction. Receive
+ * notifications that
  * are not DM-scope ({@link SignalMessageCodec#extractDm} returning
  * empty) are routed raw to the registered group-notification handler
  * — the adapter's {@code SignalGroupHandler}, whose own decode
@@ -133,6 +143,12 @@ final class SignalJsonRpcClient {
     @Nullable private volatile Socket socket;
     @Nullable private volatile BufferedWriter writer;
     @Nullable private volatile Thread readerThread;
+    // Per-connection inbound dispatch thread (created by connect, shut
+    // down by disconnect). Notifications hop off the reader thread
+    // here so a blocking InboundHandler/MembershipHandler cannot
+    // deadlock against the reader that delivers its ack; responses
+    // never enter this queue.
+    @Nullable private volatile ExecutorService dispatchExecutor;
 
     /**
      * Convenience constructor with no hung-process escalation wired:
@@ -180,6 +196,10 @@ final class SignalJsonRpcClient {
                 new OutputStreamWriter(s.getOutputStream(), StandardCharsets.UTF_8));
         this.socket = s;
         this.writer = w;
+        // Fresh dispatcher per connect — disconnect() shuts the prior
+        // one down, and a shut-down executor rejects all tasks.
+        this.dispatchExecutor = Executors.newSingleThreadExecutor(
+                Thread.ofPlatform().daemon().name("signal-inbound-dispatch").factory());
         Thread t = new Thread(this::readerLoop, "signal-jsonrpc-reader");
         t.setDaemon(true);
         this.readerThread = t;
@@ -204,9 +224,19 @@ final class SignalJsonRpcClient {
             }
         }
         // Wake any awaiting callers so they fail fast rather than time out.
+        // Runs BEFORE the dispatcher shutdown: a dispatch thread blocked in
+        // call() (a handler replying synchronously) is parked on one of
+        // these futures and must be released for the shutdown to complete.
         pending.forEach((id, f) -> f.completeExceptionally(
                 new IOException("SignalJsonRpcClient disconnected")));
         pending.clear();
+        ExecutorService executor = dispatchExecutor;
+        if (executor != null) {
+            // Queued-but-undelivered notifications are dropped — the
+            // connection is going away, matching at-most-once inbound.
+            executor.shutdownNow();
+            this.dispatchExecutor = null;
+        }
         // Drop any open per-handle state — a reconnect starts with a
         // fresh registry; stale handles from before the disconnect
         // resolve to PERMANENT on the next update attempt, which is
@@ -487,7 +517,31 @@ final class SignalJsonRpcClient {
         switch (msg) {
             case SignalMessageCodec.JsonRpcMessage.Response r -> completePending(r.id(), r);
             case SignalMessageCodec.JsonRpcMessage.ErrorResponse e -> completePending(e.id(), e);
-            case SignalMessageCodec.JsonRpcMessage.Notification n -> dispatchNotification(n);
+            case SignalMessageCodec.JsonRpcMessage.Notification n -> dispatchAsync(n);
+        }
+    }
+
+    /**
+     * Hand one notification to the dispatch thread. Responses bypass
+     * this hop (they complete pending futures directly on the reader
+     * thread) — routing them through the queue would re-introduce the
+     * deadlock this hop exists to break: a handler blocked in the
+     * dispatch thread would sit ahead of its own ack.
+     */
+    private void dispatchAsync(SignalMessageCodec.JsonRpcMessage.Notification n) {
+        ExecutorService executor = dispatchExecutor;
+        if (executor == null) {
+            // readerLoop only runs after connect() set the field; null
+            // means disconnect() already tore it down mid-read.
+            return;
+        }
+        try {
+            executor.execute(() -> dispatchNotification(n));
+        } catch (RejectedExecutionException e) {
+            // disconnect() shut the dispatcher down while the reader was
+            // draining its final lines; dropping is correct, the
+            // connection is going away (at-most-once inbound).
+            LOG.debugf("inbound notification dropped — dispatcher shut down");
         }
     }
 
@@ -542,12 +596,11 @@ final class SignalJsonRpcClient {
             handler.onMessage(inbound);
         } catch (RuntimeException e) {
             // Mirror SimpleXAdapter.onInbound: a Provider-side handler that
-            // throws must NOT propagate out of the reader loop and kill the
-            // signal-jsonrpc-reader thread, which would leave the subprocess
-            // alive but deaf. Drop this message and keep reading. D37: log the
-            // exception class only — the Throwable's message may carry inbound
-            // chat-mode bytes.
-            LOG.warnf("inbound Signal handler threw %s; dropping message, reader continues",
+            // throws must NOT propagate and kill the dispatch thread, which
+            // would leave the subprocess alive but deaf. Drop this message
+            // and keep dispatching. D37: log the exception class only — the
+            // Throwable's message may carry inbound chat-mode bytes.
+            LOG.warnf("inbound Signal handler threw %s; dropping message, dispatch continues",
                     e.getClass().getSimpleName());
         }
     }
@@ -560,11 +613,11 @@ final class SignalJsonRpcClient {
         try {
             route.accept(receiveParams);
         } catch (RuntimeException e) {
-            // Same reader-survival invariant as the DM path above: a
+            // Same dispatch-survival invariant as the DM path above: a
             // throw from group translation or a Provider-side handler
-            // must not kill the reader thread. D37: class name only —
+            // must not kill the dispatch thread. D37: class name only —
             // the Throwable's message may carry inbound group bytes.
-            LOG.warnf("Signal group-route handler threw %s; dropping notification, reader continues",
+            LOG.warnf("Signal group-route handler threw %s; dropping notification, dispatch continues",
                     e.getClass().getSimpleName());
         }
     }
