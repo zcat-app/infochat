@@ -73,6 +73,9 @@ final class SignalSubprocess {
     private volatile boolean stopping;
     @Nullable private volatile Process current;
     @Nullable private volatile ScheduledFuture<?> nextRestart;
+    // Seeded to a no-op (like SignalJsonRpcClient's hungRestartHook) so the
+    // fire site never needs a null check.
+    private volatile Runnable restartListener = () -> { };
 
     /**
      * Production constructor — owns its scheduler so callers do not
@@ -230,7 +233,30 @@ final class SignalSubprocess {
                 long delayMs = computeBackoffDelay(attempt);
                 nextRestart = scheduler.schedule(this::doRestart, delayMs, TimeUnit.MILLISECONDS);
             }
+            return;
         }
+        // Fire only after a successful respawn — a failed spawn() means there
+        // is no daemon to reconnect to. Runs on the single-thread watchdog
+        // scheduler: the listener must hand off any blocking work to its own
+        // thread, and a listener RuntimeException must not kill the watchdog.
+        try {
+            restartListener.run();
+        } catch (RuntimeException e) {
+            LOG.warnf("restart listener threw: %s", e.getClass().getSimpleName());
+        }
+    }
+
+    /**
+     * Register a callback fired after each successful supervised respawn
+     * (never on the initial {@link #start()}). The transport client that
+     * died with the previous child is the listener's to revive — the
+     * subprocess + connection form one supervised unit (design §6.4.6).
+     * Fires on the watchdog scheduler thread; implementations must hop to
+     * their own thread before blocking (an endpoint probe here would stall
+     * crash detection). Last registration wins.
+     */
+    void onRestart(Runnable listener) {
+        this.restartListener = listener;
     }
 
     /**

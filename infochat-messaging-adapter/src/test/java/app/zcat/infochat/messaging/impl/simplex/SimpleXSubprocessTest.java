@@ -105,6 +105,60 @@ class SimpleXSubprocessTest {
     }
 
     @Test
+    void restartFiresRegisteredListener() throws Exception {
+        // The restart→rebuild contract (M1-185): every successful launch
+        // after the first fires the registered listener so the adapter can
+        // rebuild the WebSocket client that died with the previous child.
+        // /bin/true exits ~immediately, so each supervised restart is a
+        // successful launch and must fire.
+        AtomicInteger restartNotifications = new AtomicInteger();
+        SimpleXSubprocess sub = new SimpleXSubprocess(
+                List.of(TRUE),
+                Duration.ofMillis(10),
+                Duration.ofMillis(50),
+                /* crashCap */ 4,
+                msg -> { /* unused */ },
+                new Random(0L));
+        sub.onRestart(restartNotifications::incrementAndGet);
+        sub.start();
+        try {
+            awaitCountAtLeast(restartNotifications, 1, Duration.ofSeconds(2));
+            assertTrue(restartNotifications.get() >= 1,
+                    "listener must fire after a successful supervised restart; fired "
+                            + restartNotifications.get() + " times");
+        } finally {
+            sub.stop();
+        }
+    }
+
+    @Test
+    void listenerNotFiredOnInitialLaunch() throws Exception {
+        // The listener contract is restart-only: the first launch belongs
+        // to start(), where the adapter builds its first WebSocket client
+        // itself.
+        AtomicInteger restartNotifications = new AtomicInteger();
+        SimpleXSubprocess sub = new SimpleXSubprocess(
+                List.of(SLEEP, "30"),
+                Duration.ofMillis(5),
+                Duration.ofMillis(20),
+                /* crashCap */ 5,
+                msg -> { /* unused */ },
+                new Random(0L));
+        sub.onRestart(restartNotifications::incrementAndGet);
+        sub.start();
+        try {
+            awaitState(sub, SimpleXSubprocess.State.RUNNING, Duration.ofSeconds(2));
+            // Settle window: a misbehaving implementation that fires on the
+            // initial launch would have ticked the counter by now.
+            Thread.sleep(300);
+            assertEquals(0, restartNotifications.get(),
+                    "initial launch must not fire the restart listener");
+        } finally {
+            sub.stop();
+        }
+    }
+
+    @Test
     void backoffDelayIsEqualJitterExponential() {
         // The deterministic component doubles each consecutive failure up to
         // max; with a Random pinned to 0 we see pure half-of-exponent values.
@@ -239,6 +293,18 @@ class SimpleXSubprocessTest {
         long deadline = System.nanoTime() + timeout.toNanos();
         while (System.nanoTime() < deadline) {
             if (sub.restartCount() >= target) {
+                return;
+            }
+            TimeUnit.MILLISECONDS.sleep(5);
+        }
+    }
+
+    private static void awaitCountAtLeast(AtomicInteger counter,
+                                          int target,
+                                          Duration timeout) throws InterruptedException {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        while (System.nanoTime() < deadline) {
+            if (counter.get() >= target) {
                 return;
             }
             TimeUnit.MILLISECONDS.sleep(5);

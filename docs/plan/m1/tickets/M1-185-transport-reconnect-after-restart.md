@@ -1,7 +1,7 @@
 ---
 id: M1-185
 title: "Reconnect transport after supervised subprocess restart"
-status: pending
+status: done
 created: 2026-06-07
 last_updated: 2026-06-07
 blocked_by: []
@@ -24,6 +24,12 @@ risk: high
 round_cap: 3
 security_relevant: false
 migration_touch: false
+clarity_check:
+  date: 2026-06-07
+  verdict: PASS
+  warnings: []
+  blockers: []
+outline_file: target/m1-tick-outline-M1-185.md
 out_of_scope:
   - the inbound-dispatch threading change (M1-177) and reader/codec hardening (M1-184) — same files; this ticket adds the restart→reconnect path only
   - backoff-curve values and jitter shape (UNIFIED.md T27 reconciles the equal-vs-full-jitter and constants drift)
@@ -51,7 +57,20 @@ test_plan:
 spec_refs:
   - docs/spec/messaging.md §Failure handling
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-07
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 13
+      added: 1049
+      removed: 31
 revisions:
   - date: 2026-06-07
     reason: clarity-fail rework

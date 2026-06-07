@@ -214,6 +214,11 @@ final class SignalJsonRpcClient {
         Socket s = new Socket(endpoint.getAddress(), endpoint.getPort());
         BufferedWriter w = new BufferedWriter(
                 new OutputStreamWriter(s.getOutputStream(), StandardCharsets.UTF_8));
+        // A fresh connection talks to a fresh daemon: a timeout streak
+        // carried over from before the outage (e.g. 2 of 3) must not
+        // combine with one post-reconnect timeout into a spurious
+        // hung-restart kick against the new child.
+        consecutiveTimeouts.set(0);
         this.socket = s;
         this.writer = w;
         // Fresh dispatcher per connect — disconnect() shuts the prior

@@ -17,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 
 /**
@@ -37,6 +38,10 @@ public final class FakeSignalCli implements AutoCloseable {
     private final BlockingQueue<JsonObject> received = new LinkedBlockingQueue<>();
     private final Thread acceptThread;
     private final Object writeLock = new Object();
+    // Counts every accepted connection (TCP probes included). Tests that
+    // choreograph a kill→reconnect sequence snapshot the value before the
+    // kill and await a higher one, so they never race the re-accept.
+    private final AtomicInteger connectionGeneration = new AtomicInteger();
 
     private volatile Socket clientConn;
     private volatile BufferedWriter clientWriter;
@@ -105,6 +110,42 @@ public final class FakeSignalCli implements AutoCloseable {
         sendLine(raw);
     }
 
+    /**
+     * Sever the live client connection WITHOUT closing the server socket
+     * — simulates the signal-cli daemon dying while the listen port stays
+     * available (the supervisor respawns a daemon on the same endpoint).
+     * The accept loop keeps running, so a reconnecting client re-wires
+     * {@code clientConn}/{@code clientWriter} on its next connect.
+     */
+    void killClientConnection() throws IOException {
+        Socket c = clientConn;
+        if (c != null) {
+            c.close();
+        }
+    }
+
+    /** Count of connections accepted so far (TCP probes included). */
+    int connectionGeneration() {
+        return connectionGeneration.get();
+    }
+
+    /**
+     * Block until the fake has accepted at least {@code atLeast}
+     * connections — the reconnect tests' way of observing that the
+     * adapter's post-restart connect actually arrived.
+     */
+    void awaitConnectionGeneration(int atLeast, long timeoutMs) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+        while (connectionGeneration.get() < atLeast && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        if (connectionGeneration.get() < atLeast) {
+            throw new AssertionError(
+                    "FakeSignalCli saw " + connectionGeneration.get()
+                            + " connections; expected ≥" + atLeast + " within " + timeoutMs + " ms");
+        }
+    }
+
     @Override
     public void close() throws IOException {
         Socket c = clientConn;
@@ -140,6 +181,7 @@ public final class FakeSignalCli implements AutoCloseable {
                 this.clientConn = s;
                 this.clientWriter = new BufferedWriter(
                         new OutputStreamWriter(s.getOutputStream(), StandardCharsets.UTF_8));
+                connectionGeneration.incrementAndGet();
                 Thread reader = new Thread(() -> readLoop(s), "fake-signal-cli-read");
                 reader.setDaemon(true);
                 reader.start();

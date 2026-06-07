@@ -20,6 +20,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.time.Duration;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Signal production adapter. Spawns signal-cli as a TCP-JSON-RPC
@@ -99,6 +100,11 @@ public final class SignalAdapter implements MessagingAdapter {
     @Nullable private volatile SignalJsonRpcClient client;
     @Nullable private volatile InboundHandler handler;
     @Nullable private volatile MembershipHandler membershipHandler;
+    // Single-flight latch: two restart notifications must not run two
+    // concurrent reconnects (overlapping disconnect/connect would race the
+    // reader/dispatcher teardown). A failed attempt simply ends; the next
+    // restart notification retries.
+    private final AtomicBoolean reconnectInFlight = new AtomicBoolean();
 
     /**
      * Capability-introspection constructor used by tests that only
@@ -209,7 +215,7 @@ public final class SignalAdapter implements MessagingAdapter {
         } catch (IOException e) {
             throw new IllegalStateException("Failed to start signal-cli subprocess", e);
         }
-        this.subprocess = sp;
+        attachSubprocess(sp);
         if (!awaitEndpoint(daemonEndpoint, ENDPOINT_PROBE_TIMEOUT)) {
             sp.stop();
             this.subprocess = null;
@@ -338,6 +344,79 @@ public final class SignalAdapter implements MessagingAdapter {
             c.setInboundHandler(current);
         }
         c.setGroupNotificationHandler(params -> groupHandler().handleReceive(params));
+    }
+
+    /**
+     * Wire a started subprocess supervisor into this adapter: store it
+     * and register the restart→reconnect listener, so a supervised
+     * respawn revives the JSON-RPC transport that died with the previous
+     * child (design §6.4.6: subprocess + connection are one supervised
+     * unit).
+     *
+     * <p>Package-private seam mirroring {@link #attachClient}: the
+     * FakeSignalCli-driven tests exercise the production restart→reconnect
+     * wiring without {@link #start()}, which requires a real signal-cli
+     * binary.</p>
+     */
+    void attachSubprocess(SignalSubprocess sp) {
+        this.subprocess = sp;
+        sp.onRestart(this::onSubprocessRestart);
+    }
+
+    /**
+     * Restart notification entry point. Fires on the supervisor's
+     * single-thread watchdog scheduler — the reconnect blocks on an
+     * endpoint probe (up to {@link #ENDPOINT_PROBE_TIMEOUT}) and a reader
+     * join, so it must hop to its own thread or crash detection stalls.
+     */
+    private void onSubprocessRestart() {
+        Thread t = new Thread(this::reconnect, "signal-adapter-reconnect");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private void reconnect() {
+        if (!reconnectInFlight.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            SignalSubprocess sp = subprocess;
+            SignalJsonRpcClient c = client;
+            if (sp == null || c == null) {
+                // close() ran, or start() never finished wiring the client —
+                // nothing to revive.
+                return;
+            }
+            if (!awaitEndpoint(sp.endpoint(), ENDPOINT_PROBE_TIMEOUT)) {
+                // Daemon respawned but its endpoint never came up — likely
+                // crashing again; the next restart notification retries.
+                LOG.warnf("Signal reconnect aborted: daemon endpoint %s not reachable within %s",
+                        sp.endpoint(), ENDPOINT_PROBE_TIMEOUT);
+                return;
+            }
+            // Teardown-before-serve: disconnect() joins the old reader and
+            // shuts the dispatch executor before connect() builds fresh
+            // ones, so a half-dead prior connection can never interleave
+            // with (or double-deliver into) the new one. Sends during this
+            // window classify TRANSIENT inside the client.
+            c.disconnect();
+            try {
+                c.connect();
+            } catch (IOException e) {
+                LOG.warnf("Signal reconnect failed: %s; awaiting next supervised restart",
+                        e.getClass().getSimpleName());
+                return;
+            }
+            if (subprocess == null || client == null) {
+                // close() won the race while we were connecting — do not
+                // resurrect the transport after teardown.
+                c.disconnect();
+                return;
+            }
+            LOG.infof("Signal adapter reconnected after subprocess restart");
+        } finally {
+            reconnectInFlight.set(false);
+        }
     }
 
     /**

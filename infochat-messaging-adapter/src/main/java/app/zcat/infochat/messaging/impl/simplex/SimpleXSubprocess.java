@@ -82,6 +82,8 @@ final class SimpleXSubprocess {
     private volatile @Nullable Process currentProcess;
     private volatile @Nullable Thread supervisor;
     private volatile boolean stopping = false;
+    // Seeded to a no-op so the fire site never needs a null check.
+    private volatile Runnable restartListener = () -> { };
 
     SimpleXSubprocess(List<String> command,
                       Duration backoffBase,
@@ -182,12 +184,18 @@ final class SimpleXSubprocess {
 
     private void runSupervisor() {
         int consecutiveCrashes = 0;
+        // The first launchProcess() attempt belongs to start(); every later
+        // iteration (crash-restart or launch-failure-retry) is a restart, and
+        // a successful launch there must notify the adapter so it rebuilds
+        // the WebSocket client (design §6.4.6: one supervised unit).
+        boolean restartIteration = false;
         while (!stopping) {
             Process process;
             try {
                 process = launchProcess();
             } catch (IOException e) {
                 LOG.warn("simplex-chat launch failed: {}", e.getClass().getSimpleName());
+                restartIteration = true;
                 consecutiveCrashes++;
                 if (handleCrashCap(consecutiveCrashes)) {
                     return;
@@ -200,10 +208,37 @@ final class SimpleXSubprocess {
             }
             currentProcess = process;
             state.set(State.RUNNING);
+            if (restartIteration) {
+                notifyRestartListener();
+            }
+            restartIteration = true;
             consecutiveCrashes = supervise(process, consecutiveCrashes);
             if (stopping || state.get() == State.FAILED) {
                 return;
             }
+        }
+    }
+
+    /**
+     * Register a callback fired after each successful supervised respawn
+     * (never on the initial {@link #start()} launch). This is the
+     * supervisor→adapter notification the class javadoc promises: the
+     * adapter rebuilds {@link SimpleXWebSocketClient} in response. Fires on
+     * the supervisor virtual thread — implementations must hop to their own
+     * thread before blocking (a WebSocket-ready probe here would delay
+     * {@code waitFor} crash detection). Last registration wins.
+     */
+    void onRestart(Runnable listener) {
+        this.restartListener = listener;
+    }
+
+    private void notifyRestartListener() {
+        try {
+            restartListener.run();
+        } catch (RuntimeException e) {
+            // Same discipline as the adminNotifier: a buggy listener must
+            // not kill the supervisor loop.
+            LOG.warn("restart listener threw: {}", e.getClass().getSimpleName());
         }
     }
 

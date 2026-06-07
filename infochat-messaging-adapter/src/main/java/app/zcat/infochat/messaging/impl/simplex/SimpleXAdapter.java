@@ -24,6 +24,7 @@ import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Random;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
@@ -108,6 +109,17 @@ public final class SimpleXAdapter implements MessagingAdapter {
     private volatile @Nullable InboundHandler inboundHandler;
     private volatile @Nullable SimpleXSubprocess subprocess;
     private volatile @Nullable SimpleXWebSocketClient webSocket;
+    // True from the moment the reconnect path starts tearing down the old
+    // WebSocket client until a fresh one is swapped in. Sends during this
+    // window classify TRANSIENT (the outage is recoverable); a closed
+    // SimpleXWebSocketClient would otherwise classify them PERMANENT. Left
+    // set when a rebuild attempt fails — the outage continues until the
+    // next restart notification (or the supervisor's FAILED transition).
+    private volatile boolean reconnecting;
+    // Single-flight latch: two restart notifications must not run two
+    // concurrent rebuilds (overlapping close/build would race the client
+    // swap). Always cleared, unlike `reconnecting`.
+    private final AtomicBoolean reconnectInFlight = new AtomicBoolean();
 
     /**
      * Capability-only constructor. The resulting adapter can answer
@@ -205,32 +217,121 @@ public final class SimpleXAdapter implements MessagingAdapter {
                 notify,
                 new Random());
         sub.start();
-        this.subprocess = sub;
+        attachSubprocess(sub);
         try {
             waitForWebSocketReady(cfg.wsPort());
+            rebuildWebSocket();
         } catch (MessagingException e) {
             sub.stop();
             this.subprocess = null;
             throw e;
         }
+    }
+
+    /**
+     * Wire a started subprocess supervisor into this adapter: store it
+     * and register the restart→rebuild listener, so a supervised respawn
+     * revives the WebSocket client that died with the previous child —
+     * the rebuild mechanism the {@link SimpleXSubprocess} javadoc
+     * promises (design §6.4.6: subprocess + connection are one
+     * supervised unit).
+     *
+     * <p>Package-private seam: the FakeSimpleXProcess-driven tests
+     * exercise the production restart→rebuild wiring without
+     * {@link #start()}, which requires a real simplex-chat binary.</p>
+     */
+    void attachSubprocess(SimpleXSubprocess sub) {
+        this.subprocess = sub;
+        sub.onRestart(this::onSubprocessRestart);
+    }
+
+    /**
+     * Build a fresh {@link SimpleXWebSocketClient} (with its group
+     * handler), start it, and swap it into {@link #webSocket}.
+     * {@code SimpleXWebSocketClient} is terminal after {@code close()}
+     * — its {@code closed} flag never resets — so reviving the
+     * transport always means a fresh instance; this method is the one
+     * construction site shared by {@link #start()} and the post-restart
+     * reconnect path.
+     *
+     * <p>The group handler funnels its deliveries through onInbound so
+     * both DM and group paths share the volatile-field read of
+     * {@code inboundHandler} and the misbehaving-handler protection in
+     * one place. A Provider that calls setInboundHandler after
+     * start() still gets group messages routed correctly because
+     * onInbound re-reads the field on each dispatch.</p>
+     */
+    void rebuildWebSocket() throws MessagingException {
+        SimpleXConfig cfg = requireWired();
+        HttpClient http = httpClient;
+        SimpleXIdentity identity = botIdentity;
+        if (http == null || identity == null) {
+            throw new IllegalStateException(
+                    "SimpleXAdapter not fully wired (httpClient/botIdentity are null)");
+        }
         URI uri = URI.create("ws://127.0.0.1:" + cfg.wsPort());
-        // The group handler funnels its deliveries through onInbound so
-        // both DM and group paths share the volatile-field read of
-        // `inboundHandler` and the misbehaving-handler protection in
-        // one place. A Provider that calls setInboundHandler after
-        // start() still gets group messages routed correctly because
-        // onInbound re-reads the field on each dispatch.
         SimpleXGroupHandler groupHandler = new SimpleXGroupHandler(identity, this::onInbound);
         SimpleXWebSocketClient ws = new SimpleXWebSocketClient(
                 uri, http, this::onInbound, groupHandler::onGroupCandidate);
-        try {
-            ws.start();
-        } catch (MessagingException e) {
-            sub.stop();
-            this.subprocess = null;
-            throw e;
-        }
+        ws.start();
         this.webSocket = ws;
+    }
+
+    /**
+     * Restart notification entry point. Fires on the supervisor virtual
+     * thread — the rebuild blocks on the WebSocket-ready probe (up to
+     * {@link #WS_READY_TIMEOUT}), so it must hop to its own thread or
+     * the supervisor's {@code waitFor} crash detection is delayed.
+     */
+    private void onSubprocessRestart() {
+        Thread.ofVirtual()
+                .name("simplex-adapter-reconnect")
+                .start(this::reconnect);
+    }
+
+    private void reconnect() {
+        if (!reconnectInFlight.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            SimpleXConfig cfg = config;
+            SimpleXWebSocketClient old = webSocket;
+            if (cfg == null || old == null) {
+                // close() ran, or start() never finished wiring the client —
+                // nothing to revive.
+                return;
+            }
+            // Teardown-before-serve: the old client's listener is closed
+            // before the fresh client exists, so a half-dead prior
+            // connection can never interleave with (or double-deliver
+            // into) the new one. The flag is set FIRST so sends in the
+            // gap classify TRANSIENT instead of hitting the closed
+            // client's PERMANENT.
+            reconnecting = true;
+            old.close();
+            waitForWebSocketReady(cfg.wsPort());
+            rebuildWebSocket();
+            if (subprocess == null) {
+                // close() won the race while we were rebuilding — do not
+                // resurrect the transport after teardown.
+                SimpleXWebSocketClient fresh = webSocket;
+                if (fresh != null) {
+                    fresh.close();
+                    webSocket = null;
+                }
+                return;
+            }
+            reconnecting = false;
+            LOG.info("SimpleX adapter reconnected after subprocess restart");
+        } catch (MessagingException e) {
+            // `reconnecting` stays set: the outage continues, sends stay
+            // TRANSIENT, and the next restart notification (or the
+            // supervisor's FAILED transition) resolves it.
+            LOG.warn("SimpleX reconnect failed ({}); awaiting next supervised restart",
+                    e.category());
+        } finally {
+            reconnectInFlight.set(false);
+        }
     }
 
     /**
@@ -250,6 +351,9 @@ public final class SimpleXAdapter implements MessagingAdapter {
             sub.stop();
             subprocess = null;
         }
+        // A closed adapter is not "reconnecting" — post-close sends must
+        // resolve to the null→PERMANENT branch, not a stale TRANSIENT.
+        reconnecting = false;
     }
 
     /**
@@ -399,6 +503,15 @@ public final class SimpleXAdapter implements MessagingAdapter {
     }
 
     private SimpleXWebSocketClient requireConnected() throws MessagingException {
+        // Checked BEFORE the null→PERMANENT branch: a send during the
+        // restart→rebuild gap is a recoverable outage the Provider's retry
+        // machinery should ride out, while an un-started adapter stays
+        // PERMANENT (the cross-adapter contract pinned by
+        // AdapterCapabilityContractTest).
+        if (reconnecting) {
+            throw new MessagingException(FailureCategory.TRANSIENT,
+                    "SimpleX transport is reconnecting after a subprocess restart");
+        }
         SimpleXWebSocketClient ws = webSocket;
         if (ws == null) {
             throw new MessagingException(FailureCategory.PERMANENT,

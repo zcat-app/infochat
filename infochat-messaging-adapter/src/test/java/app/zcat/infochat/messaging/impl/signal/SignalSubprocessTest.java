@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.net.InetSocketAddress;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
@@ -103,5 +104,53 @@ class SignalSubprocessTest {
                 sp.restartAttempts(),
                 "stop()-induced exit must not be counted as a crash");
         assertEquals(SignalSubprocess.State.STOPPED, sp.state());
+    }
+
+    @Test
+    void restartFiresRegisteredListenerAfterSuccessfulSpawn() throws Exception {
+        // The restart→reconnect contract (M1-185): each successful respawn
+        // in doRestart() fires the registered listener so the adapter can
+        // revive the JSON-RPC transport that died with the previous child.
+        // An exit-1 script crashes immediately, so every restart iteration
+        // spawns successfully and then exits — each spawn must fire.
+        ProcessBuilder pb = new ProcessBuilder("/bin/sh", "-c", "exit 1");
+        SignalSubprocess sp = new SignalSubprocess(
+                pb, NEVER_PROBED, FAST_BACKOFF, /* maxRestarts */ 3);
+        AtomicInteger restartNotifications = new AtomicInteger();
+        sp.onRestart(restartNotifications::incrementAndGet);
+        sp.start();
+        try {
+            long deadline = System.nanoTime() + 5_000_000_000L;
+            while (restartNotifications.get() < 1 && System.nanoTime() < deadline) {
+                Thread.sleep(20);
+            }
+            assertTrue(restartNotifications.get() >= 1,
+                    "listener must fire after a successful supervised respawn; fired "
+                            + restartNotifications.get() + " times");
+        } finally {
+            sp.stop();
+        }
+    }
+
+    @Test
+    void listenerNotFiredOnInitialStart() throws Exception {
+        // The listener contract is restart-only: the initial start() spawn
+        // is the adapter's own connect path, not a reconnect trigger.
+        ProcessBuilder pb = new ProcessBuilder("/bin/sh", "-c", "sleep 30");
+        SignalSubprocess sp = new SignalSubprocess(
+                pb, NEVER_PROBED, FAST_BACKOFF, /* maxRestarts */ 5);
+        AtomicInteger restartNotifications = new AtomicInteger();
+        sp.onRestart(restartNotifications::incrementAndGet);
+        sp.start();
+        try {
+            assertTrue(sp.isAlive());
+            // Settle window: a misbehaving implementation that fires on the
+            // initial spawn would have ticked the counter by now.
+            Thread.sleep(300);
+            assertEquals(0, restartNotifications.get(),
+                    "initial start() must not fire the restart listener");
+        } finally {
+            sp.stop();
+        }
     }
 }

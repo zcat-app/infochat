@@ -14,9 +14,9 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.Base64;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 
 /**
@@ -43,12 +43,20 @@ public final class FakeSimpleXProcess implements AutoCloseable {
     private final ServerSocket serverSocket;
     private final int port;
     private final BlockingQueue<String> received = new LinkedBlockingQueue<>();
-    private final CountDownLatch clientConnected = new CountDownLatch(1);
+    // Counts every completed WS handshake. Tests that choreograph a
+    // kill→reconnect sequence snapshot the value before the kill and await
+    // a higher one, so they never race the re-accept; awaitClient(timeout)
+    // (the pre-existing single-connection call pattern) awaits ≥1.
+    private final AtomicInteger handshakeGeneration = new AtomicInteger();
 
     private volatile Socket clientSocket;
     private volatile Thread acceptThread;
     private volatile Thread readerThread;
     private volatile boolean closed = false;
+    // Identity of a socket deliberately severed by killClientConnection():
+    // its reader's IOException is choreography, not a fake-side failure,
+    // and must not surface a __READER_ERROR__ marker into the frame queue.
+    private volatile Socket killedSocket;
 
     public FakeSimpleXProcess() throws IOException {
         this.serverSocket = new ServerSocket();
@@ -72,9 +80,42 @@ public final class FakeSimpleXProcess implements AutoCloseable {
 
     /** Wait until the client has finished the WS handshake. */
     public void awaitClient(Duration timeout) throws InterruptedException {
-        if (!clientConnected.await(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
+        awaitClientGeneration(1, timeout);
+    }
+
+    /** Count of completed WS handshakes so far. */
+    int clientGeneration() {
+        return handshakeGeneration.get();
+    }
+
+    /**
+     * Block until at least {@code atLeast} WS handshakes have completed —
+     * the reconnect tests' way of observing that the adapter's rebuilt
+     * client actually arrived after a kill.
+     */
+    void awaitClientGeneration(int atLeast, Duration timeout) throws InterruptedException {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        while (handshakeGeneration.get() < atLeast && System.nanoTime() < deadline) {
+            TimeUnit.MILLISECONDS.sleep(5);
+        }
+        if (handshakeGeneration.get() < atLeast) {
             throw new IllegalStateException(
                     "client did not connect within " + timeout);
+        }
+    }
+
+    /**
+     * Sever the live client connection WITHOUT closing the server socket
+     * — simulates simplex-chat dying while the WS port stays available
+     * (the supervisor respawns a process serving the same port). The
+     * accept loop keeps running, so a rebuilt client re-wires
+     * {@code clientSocket} on its next handshake.
+     */
+    void killClientConnection() throws IOException {
+        Socket s = clientSocket;
+        if (s != null) {
+            killedSocket = s;
+            s.close();
         }
     }
 
@@ -163,15 +204,17 @@ public final class FakeSimpleXProcess implements AutoCloseable {
                     continue;
                 }
                 this.clientSocket = s;
-                clientConnected.countDown();
+                handshakeGeneration.incrementAndGet();
                 this.readerThread = Thread.ofVirtual()
                         .name("fake-simplex-reader")
                         .start(() -> runReader(s));
-                // After a successful handshake we exit the accept loop —
-                // the existing single-client read-path semantics are
-                // preserved (this fake handles one live client at a time,
-                // matching what the M1-103 unit tests expect).
-                return;
+                // Keep accepting after a successful handshake: a client
+                // rebuilt after a supervised subprocess restart connects on
+                // a later iteration and overwrites clientSocket — one LIVE
+                // client at a time is still the semantics (the pre-existing
+                // single-connection suites make exactly one connection and
+                // see no behavioral difference; the loop just blocks in
+                // accept() until close()).
             } catch (IOException e) {
                 if (closed) {
                     return;
@@ -263,9 +306,11 @@ public final class FakeSimpleXProcess implements AutoCloseable {
                 }
             }
         } catch (IOException e) {
-            if (!closed) {
+            if (!closed && s != killedSocket) {
                 // Reader thread died on a non-shutdown IOException — surface
-                // via the queue so awaitFrame can observe.
+                // via the queue so awaitFrame can observe. A deliberately
+                // killed socket's reader is excluded: its death is the
+                // test's own choreography.
                 received.add("__READER_ERROR__:" + e.getClass().getSimpleName());
             }
         }
