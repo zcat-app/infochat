@@ -160,8 +160,13 @@ public class AddSourceCommandHandler implements CommandHandler {
         }
         KindResolver.SourceKind kind = resolution.kind().orElseThrow();
 
-        // URL probe.
-        ProbeResult probe = urlProbe.probe(args.url());
+        // URL probe. StreamSource-shaped kinds (Nostr in v1) get a
+        // single relay connection attempt per spec §Source management;
+        // the HTTP probe's scheme allowlist would reject wss/ws with a
+        // misleading SSRF-blocked reply.
+        ProbeResult probe = kind == KindResolver.SourceKind.NOSTR
+                ? urlProbe.probeRelay(args.url())
+                : urlProbe.probe(args.url());
         if (!probe.ok()) {
             return reply(scope, bundleLoader.get(probe.failureBundleKey()));
         }

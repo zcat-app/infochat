@@ -1,9 +1,14 @@
 ---
 id: M1-203
 title: "Nostr /add-source: StreamSource-shaped relay probe instead of guaranteed SSRF rejection"
-status: pending
+status: done
 created: 2026-06-07
 last_updated: 2026-06-07
+clarity_check:
+  date: 2026-06-07
+  verdict: WARN
+  warnings: ["Acceptance items 1-4 each say 'a named test' without naming the test class or method; behavioral assertions are specific and inlined, so implementation is not blocked, but the reviewer must rely on full mvn verify rather than targeted test runs. Implementer should name the test class/method before starting."]
+  blockers: []
 blocked_by: []
 files_budget: 7
 files_scope:
@@ -41,11 +46,41 @@ spec_refs:
   - docs/spec/security.md §SSRF
 decision_refs:
   - D38
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-07
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 570
+      removed: 9
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-06-07
+    verdict: CLEAN
+    base: a742a79
+    head: working-tree@m1/M1-203-nostr-add-source-streamsource
+    verdict_file: docs/plan/m1/redteam/M1-203-2026-06-07.md
+    out_of_model_count: 1
+    note: |
+      CLEAN pre-commit audit. The ws/wss relay probe reuses
+      SsrfGuardedHttpClient.checkAndPinForWebSocket — identical
+      scheme-allowlist + IpBlocklist + DNS-rebind pin pipeline as the HTTP
+      path, verified against the actual infochat-ssrf implementation.
+      Fail-closed (blocked range → BLOCKED_SSRF, no row), timeout caps set,
+      no info-leak in replies, authz/ban/audit untouched. One advisory
+      OUT-OF-MODEL nit (orphaned buildAsync future on .get() timeout could
+      leak a late-completing WebSocket); bounded by the /add-source rate
+      limit, not a threat-model DOS commitment — no remediation ticket filed.
 ---
 
 # M1-203: Nostr /add-source: StreamSource-shaped relay probe instead of guaranteed SSRF rejection
