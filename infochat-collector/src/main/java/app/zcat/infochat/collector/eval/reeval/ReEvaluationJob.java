@@ -13,7 +13,6 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
@@ -118,7 +117,7 @@ public class ReEvaluationJob {
         checkNeedsReviewDepth();
     }
 
-    void processOne(@NonNull ReEvalCandidate candidate) {
+    void processOne(ReEvalCandidate candidate) {
         int cap = candidate.stage2Failed() ? infraFailureCap : unknownCap;
 
         if (candidate.reEvalAttempts() >= cap) {

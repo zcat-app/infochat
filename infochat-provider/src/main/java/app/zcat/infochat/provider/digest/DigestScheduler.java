@@ -10,7 +10,6 @@ import jakarta.enterprise.event.Event;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
-import org.jspecify.annotations.NonNull;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -178,7 +177,7 @@ public class DigestScheduler {
      * Uses the UUID's most-significant bits so the hash is stable
      * across JVM restarts (unlike Object.hashCode()).
      */
-    static int staggerOffset(@NonNull UUID groupId, int windowWidthMinutes) {
+    static int staggerOffset(UUID groupId, int windowWidthMinutes) {
         long hash = groupId.getMostSignificantBits();
         return (int) (Math.abs(hash % windowWidthMinutes));
     }
@@ -224,6 +223,6 @@ public class DigestScheduler {
         }
     }
 
-    record GroupRow(@NonNull UUID id, @NonNull String timezone) {
+    record GroupRow(UUID id, String timezone) {
     }
 }

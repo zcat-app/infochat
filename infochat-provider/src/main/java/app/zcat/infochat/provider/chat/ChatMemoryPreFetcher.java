@@ -2,7 +2,6 @@ package app.zcat.infochat.provider.chat;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jspecify.annotations.NonNull;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -22,14 +21,14 @@ import java.util.UUID;
 @ApplicationScoped
 public class ChatMemoryPreFetcher {
 
-    public record MemoryHit(@NonNull Instant createdAt,
-                            @NonNull String summary,
-                            @NonNull List<String> referencedPosts) {}
+    public record MemoryHit(Instant createdAt,
+                            String summary,
+                            List<String> referencedPosts) {}
 
     private final DataSource dataSource;
 
     @Inject
-    public ChatMemoryPreFetcher(@NonNull DataSource dataSource) {
+    public ChatMemoryPreFetcher(DataSource dataSource) {
         this.dataSource = dataSource;
     }
 
@@ -41,10 +40,10 @@ public class ChatMemoryPreFetcher {
         this.dataSource = null;
     }
 
-    public @NonNull List<MemoryHit> preFetch(@NonNull UUID userId,
-                                              @NonNull String scopeKind,
-                                              @NonNull UUID scopeId,
-                                              @NonNull String userMessage) {
+    public List<MemoryHit> preFetch(UUID userId,
+                                              String scopeKind,
+                                              UUID scopeId,
+                                              String userMessage) {
         List<String> keywords = extractKeywords(userMessage);
         if (keywords.isEmpty()) {
             return List.of();
@@ -53,7 +52,7 @@ public class ChatMemoryPreFetcher {
     }
 
     // Cheap keyword extraction: split, lowercase, drop short tokens.
-    static @NonNull List<String> extractKeywords(@NonNull String message) {
+    static List<String> extractKeywords(String message) {
         String[] tokens = message.toLowerCase(Locale.ROOT).split("\\s+");
         List<String> keywords = new ArrayList<>();
         for (String token : tokens) {

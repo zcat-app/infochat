@@ -1,6 +1,5 @@
 package app.zcat.infochat.core.util;
 
-import org.jspecify.annotations.NonNull;
 
 /**
  * Escapes a raw string into the <em>content</em> of a JSON string
@@ -20,7 +19,7 @@ public final class JsonEscaper {
     private JsonEscaper() {
     }
 
-    public static String escape(@NonNull String raw) {
+    public static String escape(String raw) {
         StringBuilder out = new StringBuilder(raw.length());
         for (int i = 0; i < raw.length(); i++) {
             char c = raw.charAt(i);

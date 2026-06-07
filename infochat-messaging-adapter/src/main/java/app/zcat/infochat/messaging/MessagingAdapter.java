@@ -1,6 +1,5 @@
 package app.zcat.infochat.messaging;
 
-import org.jspecify.annotations.NonNull;
 
 /**
  * Transport contract between Provider and a messaging backend
@@ -78,7 +77,7 @@ public interface MessagingAdapter {
      * @param msg the inbound message; never null.
      * @return the asserted sender identity; never null.
      */
-    Identity assertIdentity(@NonNull InboundMessage msg);
+    Identity assertIdentity(InboundMessage msg);
 
     /**
      * Send a new message to the given scope.
@@ -92,7 +91,7 @@ public interface MessagingAdapter {
      *         {@link MessagingException#category()} reports whether the
      *         caller should retry (TRANSIENT) or abort (PERMANENT).
      */
-    MessageHandle send(@NonNull OutboundMessage msg) throws MessagingException;
+    MessageHandle send(OutboundMessage msg) throws MessagingException;
 
     /**
      * Replace the visible body of a previously-sent message.
@@ -105,7 +104,7 @@ public interface MessagingAdapter {
      * @param body   the new body text; never null.
      * @throws MessagingException on transport failure.
      */
-    void update(@NonNull MessageHandle handle, @NonNull String body) throws MessagingException;
+    void update(MessageHandle handle, String body) throws MessagingException;
 
     /**
      * Mark the message as final and apply the closing body. For
@@ -126,7 +125,7 @@ public interface MessagingAdapter {
      * @throws MessagingException on transport failure or on attempting
      *         to mutate an already-finalized handle.
      */
-    void finalizeMessage(@NonNull MessageHandle handle, @NonNull String body) throws MessagingException;
+    void finalizeMessage(MessageHandle handle, String body) throws MessagingException;
 
     /**
      * Show or clear the typing indicator for a scope. No-op for
@@ -138,7 +137,7 @@ public interface MessagingAdapter {
      * @param scope  the scope to toggle typing on; never null.
      * @param typing true to start, false to stop.
      */
-    void setTyping(@NonNull ScopeRef scope, boolean typing);
+    void setTyping(ScopeRef scope, boolean typing);
 
     /**
      * Register the callback Provider uses to receive inbound
@@ -147,7 +146,7 @@ public interface MessagingAdapter {
      *
      * @param handler the inbound-message callback; never null.
      */
-    void setInboundHandler(@NonNull InboundHandler handler);
+    void setInboundHandler(InboundHandler handler);
 
     /**
      * Register the callback Provider uses to receive membership
@@ -165,7 +164,7 @@ public interface MessagingAdapter {
      *
      * @param handler the membership-event callback; never null.
      */
-    default void setMembershipEventHandler(@NonNull MembershipHandler handler) {
+    default void setMembershipEventHandler(MembershipHandler handler) {
         // No-op — overridden by adapters that fire membership events.
     }
 
@@ -219,7 +218,7 @@ public interface MessagingAdapter {
          *            mention-stripped {@link InboundMessage#text() text}
          *            are all populated by the adapter.
          */
-        void onMessage(@NonNull InboundMessage msg);
+        void onMessage(InboundMessage msg);
     }
 
     /**
@@ -233,6 +232,6 @@ public interface MessagingAdapter {
          *
          * @param event the membership event; never null.
          */
-        void onEvent(@NonNull MembershipEvent event);
+        void onEvent(MembershipEvent event);
     }
 }

@@ -3,7 +3,6 @@ package app.zcat.infochat.provider.digest;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
@@ -59,7 +58,7 @@ public class DigestRetryService {
      * existing cache row and re-executes the digest worker with a
      * synthetic slot built from the old row's coordinates.
      */
-    public @NonNull RetryResult retryDigest(@NonNull UUID groupId) {
+    public RetryResult retryDigest(UUID groupId) {
         Instant last = lastRetryAt.get(groupId);
         if (last != null && Instant.now().isBefore(last.plus(retryCooldown))) {
             return RetryResult.RATE_LIMITED;

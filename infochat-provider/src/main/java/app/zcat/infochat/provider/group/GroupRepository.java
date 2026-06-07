@@ -2,7 +2,6 @@ package app.zcat.infochat.provider.group;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
@@ -123,7 +122,7 @@ public class GroupRepository {
     private final DataSource dataSource;
 
     @Inject
-    public GroupRepository(@NonNull DataSource dataSource) {
+    public GroupRepository(DataSource dataSource) {
         this.dataSource = dataSource;
     }
 
@@ -133,15 +132,15 @@ public class GroupRepository {
      * {@code removedAt} are nullable per the V5 / V26 schema.
      */
     public record GroupApprovalRow(
-            @NonNull UUID id,
-            @NonNull String approvalStatus,
+            UUID id,
+            String approvalStatus,
             @Nullable UUID activatedBy,
             @Nullable Instant removedAt) {}
 
     // Race-safe upsert: INSERT…ON CONFLICT DO NOTHING + SELECT.
     // Matches the AutoRegisterService precedent.
-    public @NonNull UUID findOrCreateByAdapterAndUpstreamId(
-            @NonNull String adapter, @NonNull String upstreamGroupId) {
+    public UUID findOrCreateByAdapterAndUpstreamId(
+            String adapter, String upstreamGroupId) {
         try (Connection conn = dataSource.getConnection()) {
             try (PreparedStatement ps = conn.prepareStatement(UPSERT)) {
                 ps.setString(1, adapter);
@@ -164,7 +163,7 @@ public class GroupRepository {
         }
     }
 
-    public void markRemoved(@NonNull UUID groupId) {
+    public void markRemoved(UUID groupId) {
         try (Connection conn = dataSource.getConnection()) {
             markRemoved(conn, groupId);
         } catch (SQLException e) {
@@ -175,7 +174,7 @@ public class GroupRepository {
     // Runs on the caller's connection so the caller can wrap
     // audit-before-effect around the call inside one transaction
     // (the setApprovalStatus precedent).
-    public void markRemoved(@NonNull Connection conn, @NonNull UUID groupId)
+    public void markRemoved(Connection conn, UUID groupId)
             throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(SET_REMOVED)) {
             ps.setObject(1, groupId);
@@ -183,7 +182,7 @@ public class GroupRepository {
         }
     }
 
-    public void clearRemoved(@NonNull UUID groupId) {
+    public void clearRemoved(UUID groupId) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(CLEAR_REMOVED)) {
             ps.setObject(1, groupId);
@@ -201,8 +200,8 @@ public class GroupRepository {
      * inbound is processed, short-circuited, or routed to the creation
      * path.
      */
-    public @NonNull Optional<GroupApprovalRow> findApprovalRow(
-            @NonNull String adapter, @NonNull String upstreamGroupId) {
+    public Optional<GroupApprovalRow> findApprovalRow(
+            String adapter, String upstreamGroupId) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(SELECT_APPROVAL_ROW)) {
             ps.setString(1, adapter);
@@ -243,10 +242,10 @@ public class GroupRepository {
      * the caller resolves the user id from the inbound contact id before
      * invoking this method.</p>
      */
-    public @NonNull Optional<UUID> tryInsertPending(
-            @NonNull String adapter,
-            @NonNull String upstreamGroupId,
-            @NonNull UUID activatedByUserId) {
+    public Optional<UUID> tryInsertPending(
+            String adapter,
+            String upstreamGroupId,
+            UUID activatedByUserId) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(INSERT_PENDING_RETURNING)) {
             ps.setString(1, adapter);
@@ -274,7 +273,7 @@ public class GroupRepository {
      * the count includes rejected groups so an activate-reject cycle
      * does NOT free a slot until the row is also removed.
      */
-    public long countGroupsActivatedBy(@NonNull UUID userId) {
+    public long countGroupsActivatedBy(UUID userId) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(COUNT_BY_ACTIVATED_BY)) {
             ps.setObject(1, userId);
@@ -314,10 +313,10 @@ public class GroupRepository {
      * a second SELECT. Returned by {@link #findById}.
      */
     public record GroupRow(
-            @NonNull UUID id,
-            @NonNull String adapter,
-            @NonNull String upstreamGroupId,
-            @NonNull String approvalStatus,
+            UUID id,
+            String adapter,
+            String upstreamGroupId,
+            String approvalStatus,
             @Nullable UUID activatedBy,
             @Nullable Instant removedAt) {}
 
@@ -329,7 +328,7 @@ public class GroupRepository {
      * {@code (adapter, upstream_group_id)} pair the post-mutation
      * group-message delivery needs.
      */
-    public @NonNull Optional<GroupRow> findById(@NonNull UUID groupId) {
+    public Optional<GroupRow> findById(UUID groupId) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(SELECT_BY_ID)) {
             ps.setObject(1, groupId);
@@ -367,9 +366,9 @@ public class GroupRepository {
      *         A non-existent row also returns {@code false}; the caller
      *         must short-circuit on {@link #findById} before calling this.
      */
-    public boolean setApprovalStatus(@NonNull Connection conn,
-                                     @NonNull UUID groupId,
-                                     @NonNull String newStatus) throws SQLException {
+    public boolean setApprovalStatus(Connection conn,
+                                     UUID groupId,
+                                     String newStatus) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(UPDATE_APPROVAL_STATUS)) {
             ps.setString(1, newStatus);
             ps.setObject(2, groupId);
@@ -386,9 +385,9 @@ public class GroupRepository {
      * {@code ContactIds.redact}.
      */
     public record GroupListRow(
-            @NonNull UUID id,
-            @NonNull String approvalStatus,
-            @NonNull String timezone,
+            UUID id,
+            String approvalStatus,
+            String timezone,
             @Nullable String activatorContactId,
             long memberCount) {}
 
@@ -398,7 +397,7 @@ public class GroupRepository {
      * {@code (page - 1) * pageSize}; the caller computes total pages
      * separately via {@link #countAllGroups}.
      */
-    public @NonNull List<GroupListRow> listGroupsPage(int page, int pageSize) {
+    public List<GroupListRow> listGroupsPage(int page, int pageSize) {
         List<GroupListRow> out = new ArrayList<>();
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(LIST_GROUPS_PAGE)) {

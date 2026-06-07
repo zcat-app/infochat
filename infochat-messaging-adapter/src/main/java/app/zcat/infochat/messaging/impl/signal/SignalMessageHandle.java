@@ -1,6 +1,5 @@
 package app.zcat.infochat.messaging.impl.signal;
 
-import org.jspecify.annotations.NonNull;
 
 import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.OutboundMessage;
@@ -33,5 +32,5 @@ import app.zcat.infochat.messaging.OutboundMessage;
  *                  protocol does not derive it from the timestamp.
  * @param original  the original outbound message (debugging context).
  */
-record SignalMessageHandle(long timestamp, @NonNull String recipient, @NonNull OutboundMessage original) {
+record SignalMessageHandle(long timestamp, String recipient, OutboundMessage original) {
 }

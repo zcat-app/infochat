@@ -2,7 +2,6 @@ package app.zcat.infochat.provider.digest;
 
 import java.util.List;
 
-import org.jspecify.annotations.NonNull;
 
 import app.zcat.infochat.provider.summary.EligiblePostQuery;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -14,7 +13,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 @ApplicationScoped
 public class DegradedDigestRenderer {
 
-    public @NonNull String render(@NonNull List<EligiblePostQuery.Post> posts) {
+    public String render(List<EligiblePostQuery.Post> posts) {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < posts.size(); i++) {
             if (i > 0) sb.append("\n\n");

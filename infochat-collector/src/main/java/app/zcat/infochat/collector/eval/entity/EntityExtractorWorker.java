@@ -15,7 +15,6 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
@@ -414,7 +413,7 @@ public class EntityExtractorWorker {
     }
 
     /** One pending post, populated by {@link #enumeratePending}. */
-    public record PostRow(@NonNull UUID id, @NonNull Instant fetchedAt,
+    public record PostRow(UUID id, Instant fetchedAt,
                           @Nullable String title, @Nullable String body) {
     }
 

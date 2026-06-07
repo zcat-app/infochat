@@ -6,7 +6,6 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
-import org.jspecify.annotations.NonNull;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -181,7 +180,7 @@ public class LinkingJob {
      * Package-private so tests can drive the single-post path directly
      * without waiting on the scheduler.
      */
-    void processOne(@NonNull DrivingPost driving) {
+    void processOne(DrivingPost driving) {
         TransactionHelper.inTransaction(dataSource, "LinkingJob", conn -> {
             List<Candidate> entityCandidates = findEntityCandidates(conn, driving);
             List<Candidate> semanticCandidates = findSemanticCandidates(conn, driving);
@@ -345,10 +344,10 @@ public class LinkingJob {
     }
 
     /** One driving post enumerated by {@link #enumerateDriving}. */
-    public record DrivingPost(@NonNull UUID id, @NonNull Instant fetchedAt) {
+    public record DrivingPost(UUID id, Instant fetchedAt) {
     }
 
     /** One link candidate with its score (entity count or semantic similarity). */
-    public record Candidate(@NonNull UUID postId, float score) {
+    public record Candidate(UUID postId, float score) {
     }
 }

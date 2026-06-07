@@ -6,7 +6,6 @@ import jakarta.enterprise.inject.Produces;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
-import org.jspecify.annotations.NonNull;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -157,7 +156,7 @@ public class ThrottledAdminNotifier {
      */
     // Assigned in the @PostConstruct init() before any notifyOnce() can run.
     // NullAway's field-init check models only constructors/initializers, not
-    // @PostConstruct, so suppress that one check here; the field stays @NonNull
+    // @PostConstruct, so suppress that one check here; the field stays non-null
     // for every dereference.
     @SuppressWarnings("NullAway.Init")
     private String upsertSql;
@@ -213,9 +212,9 @@ public class ThrottledAdminNotifier {
      *         the throttle window elapsed); {@link NotifyOutcome#SUPPRESSED}
      *         when the call landed inside the throttle window.
      */
-    public NotifyOutcome notifyOnce(@NonNull String key,
-                                    @NonNull String errorClass,
-                                    @NonNull String message) {
+    public NotifyOutcome notifyOnce(String key,
+                                    String errorClass,
+                                    String message) {
         // Sanitize once at the entry boundary so the log sink, the
         // DB row, and any future side-channel see the same bounded,
         // line-boundary-safe values.
@@ -282,7 +281,7 @@ public class ThrottledAdminNotifier {
      * admin commands that surface notifier counters to bot admins.
      * Returns {@link Optional#empty()} when no row exists for the key.
      */
-    public Optional<AdminNotificationRecord> getState(@NonNull String key) {
+    public Optional<AdminNotificationRecord> getState(String key) {
         // Sanitize the lookup key the same way notifyOnce does so the
         // two calls with the same caller-supplied key reach the same
         // row (the row was persisted under the sanitized form).

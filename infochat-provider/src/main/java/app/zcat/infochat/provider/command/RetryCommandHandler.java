@@ -30,7 +30,6 @@ import jakarta.json.JsonObject;
 import jakarta.json.JsonReader;
 import jakarta.json.JsonString;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
@@ -125,12 +124,12 @@ public class RetryCommandHandler implements CommandHandler {
     double statusDriftThreshold;
 
     @Override
-    public @NonNull String name() {
+    public String name() {
         return "retry";
     }
 
     @Override
-    public @NonNull OutboundMessage handle(@NonNull ScopeRef scope, @NonNull String rawText) {
+    public OutboundMessage handle(ScopeRef scope, String rawText) {
         if (hasFlag(rawText, "--digest")) {
             return handleDigestRetry(scope);
         }

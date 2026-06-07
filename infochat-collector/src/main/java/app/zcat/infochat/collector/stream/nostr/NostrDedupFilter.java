@@ -1,6 +1,5 @@
 package app.zcat.infochat.collector.stream.nostr;
 
-import org.jspecify.annotations.NonNull;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -64,7 +63,7 @@ public final class NostrDedupFilter {
      * arrival until eviction. Callers that get {@code false} must drop
      * the event before the outbox write.
      */
-    public boolean accept(@NonNull String eventId) {
+    public boolean accept(String eventId) {
         synchronized (lock) {
             if (seen.containsKey(eventId)) {
                 return false;

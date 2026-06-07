@@ -4,7 +4,6 @@ import app.zcat.infochat.core.util.JsonEscaper;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jspecify.annotations.NonNull;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -151,9 +150,9 @@ public class ExportDataCollector {
      * @return export result with table data and truncation info
      */
     public ExportResult collect(
-            @NonNull UUID userId,
-            @NonNull String scopeKind,
-            @NonNull UUID scopeId) {
+            UUID userId,
+            String scopeKind,
+            UUID scopeId) {
 
         try (Connection conn = dataSource.getConnection()) {
             LinkedHashMap<String, List<String>> tables = new LinkedHashMap<>();

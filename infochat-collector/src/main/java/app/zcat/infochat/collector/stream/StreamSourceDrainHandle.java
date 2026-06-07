@@ -1,6 +1,5 @@
 package app.zcat.infochat.collector.stream;
 
-import org.jspecify.annotations.NonNull;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -22,7 +21,7 @@ final class StreamSourceDrainHandle {
     private final StreamSourceRegistration registration;
     private final Future<?> stopFuture;
 
-    StreamSourceDrainHandle(@NonNull StreamSourceRegistration registration, @NonNull Future<?> stopFuture) {
+    StreamSourceDrainHandle(StreamSourceRegistration registration, Future<?> stopFuture) {
         this.registration = registration;
         this.stopFuture = stopFuture;
     }
@@ -44,7 +43,7 @@ final class StreamSourceDrainHandle {
      * incremented) rather than propagated: shutdown must keep draining the
      * remaining sources even if one source's teardown blows up.</p>
      */
-    boolean awaitUntil(@NonNull Instant deadline) {
+    boolean awaitUntil(Instant deadline) {
         long remainingMillis = Duration.between(Instant.now(), deadline).toMillis();
         try {
             stopFuture.get(Math.max(0L, remainingMillis), TimeUnit.MILLISECONDS);

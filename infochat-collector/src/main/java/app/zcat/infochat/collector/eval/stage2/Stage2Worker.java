@@ -10,7 +10,6 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import java.io.IOException;
@@ -155,7 +154,7 @@ public class Stage2Worker {
      *
      * <p>Bounded by the same concurrency semaphore as {@link #judge}.
      */
-    public Stage2VerdictHandler.Verdict judgeBody(@NonNull UUID postId, @NonNull String originalBody) {
+    public Stage2VerdictHandler.Verdict judgeBody(UUID postId, String originalBody) {
         concurrencyPermits.acquireUninterruptibly();
         try {
             return invokeWithRetryOnce(postId, originalBody);

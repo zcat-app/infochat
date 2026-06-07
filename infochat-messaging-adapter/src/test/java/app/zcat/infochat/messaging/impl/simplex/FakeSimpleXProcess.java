@@ -18,7 +18,6 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
-import org.jspecify.annotations.NonNull;
 
 /**
  * Test double that stands in for a running simplex-chat process for the
@@ -72,7 +71,7 @@ public final class FakeSimpleXProcess implements AutoCloseable {
     }
 
     /** Wait until the client has finished the WS handshake. */
-    public void awaitClient(@NonNull Duration timeout) throws InterruptedException {
+    public void awaitClient(Duration timeout) throws InterruptedException {
         if (!clientConnected.await(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
             throw new IllegalStateException(
                     "client did not connect within " + timeout);
@@ -105,7 +104,7 @@ public final class FakeSimpleXProcess implements AutoCloseable {
     }
 
     /** Pop the next text frame the client sent us, or fail the test on timeout. */
-    public String awaitFrame(@NonNull Duration timeout) throws InterruptedException {
+    public String awaitFrame(Duration timeout) throws InterruptedException {
         String frame = received.poll(timeout.toMillis(), TimeUnit.MILLISECONDS);
         if (frame == null) {
             throw new IllegalStateException(

@@ -1,6 +1,5 @@
 package app.zcat.infochat.messaging;
 
-import org.jspecify.annotations.NonNull;
 
 /**
  * Opaque token returned by {@link MessagingAdapter#send} that lets the
@@ -31,5 +30,5 @@ import org.jspecify.annotations.NonNull;
  * system — a determined caller can still call {@link #opaqueValue}.
  * This Javadoc is the single point of authority.</p>
  */
-public record MessageHandle(@NonNull String opaqueValue) {
+public record MessageHandle(String opaqueValue) {
 }

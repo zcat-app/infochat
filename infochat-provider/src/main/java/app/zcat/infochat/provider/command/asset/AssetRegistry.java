@@ -8,7 +8,6 @@ import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 import io.quarkus.runtime.StartupEvent;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
@@ -45,19 +44,19 @@ public class AssetRegistry {
 
     /** Per-(asset, sub_verb) runtime state from {@code asset_config}. */
     public record SubVerbEntry(
-            @NonNull String subVerb,
+            String subVerb,
             boolean enabled,
             boolean isDefault,
-            @NonNull String attributionUrl,
-            @NonNull String defaultQuoteCurrency
+            String attributionUrl,
+            String defaultQuoteCurrency
     ) {}
 
     /** Per-asset metadata, joining DB state + bootstrap-file metadata. */
     public record AssetEntry(
-            @NonNull String name,
-            @NonNull String displayName,
-            @NonNull List<SubVerbEntry> subVerbs,
-            @NonNull List<String> supportedVsCurrencies
+            String name,
+            String displayName,
+            List<SubVerbEntry> subVerbs,
+            List<String> supportedVsCurrencies
     ) {
         public List<String> enabledSubVerbNames() {
             List<String> names = new ArrayList<>();
@@ -69,7 +68,7 @@ public class AssetRegistry {
             return names;
         }
 
-        public @Nullable SubVerbEntry findSubVerb(@NonNull String name) {
+        public @Nullable SubVerbEntry findSubVerb(String name) {
             for (SubVerbEntry sv : subVerbs) {
                 if (sv.subVerb.equals(name)) {
                     return sv;
@@ -100,7 +99,7 @@ public class AssetRegistry {
     public AssetRegistry() {}
 
     /** Test constructor — accepts a pre-built asset map. */
-    AssetRegistry(@NonNull Map<String, AssetEntry> assets) {
+    AssetRegistry(Map<String, AssetEntry> assets) {
         this.assets = Map.copyOf(assets);
     }
 
@@ -116,7 +115,7 @@ public class AssetRegistry {
         this.assets = Map.copyOf(loaded);
     }
 
-    public boolean containsEnabledAsset(@NonNull String name) {
+    public boolean containsEnabledAsset(String name) {
         AssetEntry entry = assets.get(name);
         if (entry == null) {
             return false;
@@ -124,11 +123,11 @@ public class AssetRegistry {
         return !entry.enabledSubVerbNames().isEmpty();
     }
 
-    public @Nullable AssetEntry getAsset(@NonNull String name) {
+    public @Nullable AssetEntry getAsset(String name) {
         return assets.get(name);
     }
 
-    public @NonNull Set<String> getEnabledAssetNames() {
+    public Set<String> getEnabledAssetNames() {
         Set<String> names = new LinkedHashSet<>();
         for (Map.Entry<String, AssetEntry> e : assets.entrySet()) {
             if (!e.getValue().enabledSubVerbNames().isEmpty()) {
@@ -138,7 +137,7 @@ public class AssetRegistry {
         return Collections.unmodifiableSet(names);
     }
 
-    public @NonNull List<AssetEntry> getEnabledAssets() {
+    public List<AssetEntry> getEnabledAssets() {
         List<AssetEntry> result = new ArrayList<>();
         for (AssetEntry entry : assets.values()) {
             if (!entry.enabledSubVerbNames().isEmpty()) {
@@ -225,7 +224,7 @@ public class AssetRegistry {
     @JsonIgnoreProperties(ignoreUnknown = true)
     private static class BootstrapAsset {
         // id is the asset key; consumers dereference it unguarded, so the
-        // contract stays @NonNull. Jackson sets it reflectively, which the
+        // contract stays non-null. Jackson sets it reflectively, which the
         // field-init check cannot see — hence the Init suppression.
         @JsonProperty("id")
         @SuppressWarnings("NullAway.Init")

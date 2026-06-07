@@ -1,6 +1,5 @@
 package app.zcat.infochat.messaging.impl.simplex;
 
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import java.net.http.WebSocket;
@@ -48,7 +47,7 @@ final class OneOutstandingWebSocket implements WebSocket {
     }
 
     @Override
-    public synchronized CompletableFuture<WebSocket> sendText(@NonNull CharSequence data,
+    public synchronized CompletableFuture<WebSocket> sendText(CharSequence data,
                                                               boolean last) {
         CompletableFuture<WebSocket> prior = outstanding;
         if (prior != null && !prior.isDone()) {
@@ -93,22 +92,22 @@ final class OneOutstandingWebSocket implements WebSocket {
     }
 
     @Override
-    public CompletableFuture<WebSocket> sendBinary(@NonNull ByteBuffer data, boolean last) {
+    public CompletableFuture<WebSocket> sendBinary(ByteBuffer data, boolean last) {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public CompletableFuture<WebSocket> sendPing(@NonNull ByteBuffer message) {
+    public CompletableFuture<WebSocket> sendPing(ByteBuffer message) {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public CompletableFuture<WebSocket> sendPong(@NonNull ByteBuffer message) {
+    public CompletableFuture<WebSocket> sendPong(ByteBuffer message) {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public CompletableFuture<WebSocket> sendClose(int statusCode, @NonNull String reason) {
+    public CompletableFuture<WebSocket> sendClose(int statusCode, String reason) {
         throw new UnsupportedOperationException();
     }
 

@@ -7,7 +7,6 @@ import app.zcat.infochat.core.log.ContactIds;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
@@ -153,7 +152,7 @@ public class InviteCodeConsumer {
 
     public record BruteForceThresholdBreached() implements Outcome {}
 
-    public Outcome consume(@NonNull String adapter, @NonNull String contactId, @NonNull String body) {
+    public Outcome consume(String adapter, String contactId, String body) {
         // Parse the normalized body into a UUID candidate. The router
         // (M1-044e fix) no longer pre-parses the body; the consumer owns
         // both "is this a UUID?" and "does this UUID match a PENDING

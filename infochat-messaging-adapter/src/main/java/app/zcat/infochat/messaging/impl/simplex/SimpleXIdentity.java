@@ -1,6 +1,5 @@
 package app.zcat.infochat.messaging.impl.simplex;
 
-import org.jspecify.annotations.NonNull;
 
 import java.nio.file.Path;
 
@@ -13,7 +12,7 @@ import java.nio.file.Path;
  *
  * @param queueAddress the bot's SimpleX queue address; never null.
  */
-public record SimpleXIdentity(@NonNull String queueAddress) {
+public record SimpleXIdentity(String queueAddress) {
 
     /**
      * Resolve the bot's queue address from the simplex-chat data
@@ -25,7 +24,7 @@ public record SimpleXIdentity(@NonNull String queueAddress) {
      * @param dataDir the simplex-chat data directory; never null.
      * @return the resolved {@link SimpleXIdentity}.
      */
-    public static SimpleXIdentity resolve(@NonNull Path dataDir) {
+    public static SimpleXIdentity resolve(Path dataDir) {
         throw new UnsupportedOperationException(
                 "resolving the bot queue address from simplex-chat data is implemented in M1-103");
     }

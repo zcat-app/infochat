@@ -1,6 +1,5 @@
 package app.zcat.infochat.messaging.impl.simplex;
 
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -108,9 +107,9 @@ final class SimpleXMessageCodec {
      *         Provider's capability-flag chunking should have prevented
      *         this; the check is a system-boundary defense.
      */
-    static @NonNull String encodeSendCommand(@NonNull String corrId,
-                                             @NonNull ScopeRef scope,
-                                             @NonNull String text) throws MessagingException {
+    static String encodeSendCommand(String corrId,
+                                             ScopeRef scope,
+                                             String text) throws MessagingException {
         requireWithinCap(text);
         String target = targetSelector(scope);
         String cmd = "/_send " + target + " json " + jsonString(textContent(text));
@@ -123,18 +122,18 @@ final class SimpleXMessageCodec {
      * terminal edit) uses {@code live=off} via
      * {@link #encodeFinalizeCommand}.
      */
-    static @NonNull String encodeUpdateCommand(@NonNull String corrId,
-                                               @NonNull String chatItemId,
-                                               @NonNull ScopeRef scope,
-                                               @NonNull String text) throws MessagingException {
+    static String encodeUpdateCommand(String corrId,
+                                               String chatItemId,
+                                               ScopeRef scope,
+                                               String text) throws MessagingException {
         return encodeEdit(corrId, chatItemId, scope, text, /* live */ true);
     }
 
     /** Encode the terminal edit ({@code live=off}). */
-    static @NonNull String encodeFinalizeCommand(@NonNull String corrId,
-                                                 @NonNull String chatItemId,
-                                                 @NonNull ScopeRef scope,
-                                                 @NonNull String text) throws MessagingException {
+    static String encodeFinalizeCommand(String corrId,
+                                                 String chatItemId,
+                                                 ScopeRef scope,
+                                                 String text) throws MessagingException {
         return encodeEdit(corrId, chatItemId, scope, text, /* live */ false);
     }
 
@@ -161,8 +160,8 @@ final class SimpleXMessageCodec {
      * either acts on it or returns an error envelope the codec classifies
      * via {@link #classifyError(String)}.
      */
-    static @NonNull String encodeTypingCommand(@NonNull String corrId,
-                                               @NonNull ScopeRef scope,
+    static String encodeTypingCommand(String corrId,
+                                               ScopeRef scope,
                                                boolean typing) throws MessagingException {
         String target = targetSelector(scope);
         String cmd = "/_set_contact_typing " + target + " " + (typing ? "on" : "off");
@@ -202,7 +201,7 @@ final class SimpleXMessageCodec {
         }
     }
 
-    static boolean isValidQueueAddressId(@NonNull String id) {
+    static boolean isValidQueueAddressId(String id) {
         return !id.isEmpty() && QUEUE_ADDRESS_CHARSET.matcher(id).matches();
     }
 
@@ -255,7 +254,7 @@ final class SimpleXMessageCodec {
      * direct} and non-{@code group} chatTypes still surface as
      * {@link Ignored}.</p>
      */
-    static @NonNull DecodedFrame decode(@NonNull String frame) {
+    static DecodedFrame decode(String frame) {
         JsonNode root;
         try {
             root = MAPPER.readTree(frame);
@@ -600,7 +599,7 @@ final class SimpleXMessageCodec {
      * §Failure handling and {@code docs/design/06-messaging.md} §6.4.7.
      * Unknown tags default to {@code PERMANENT} per the spec rule.
      */
-    static @NonNull FailureCategory classifyError(@NonNull String errorTag) {
+    static FailureCategory classifyError(String errorTag) {
         String lower = errorTag.toLowerCase(java.util.Locale.ROOT);
         // Transient: anything that looks like a network reset, idle close,
         // rate limit, or "try again" signal. The spec wants these retried by
@@ -628,7 +627,7 @@ final class SimpleXMessageCodec {
     }
 
     /** A direct-message inbound that should be delivered to Provider. */
-    record Inbound(@NonNull InboundMessage message) implements DecodedFrame {
+    record Inbound(InboundMessage message) implements DecodedFrame {
     }
 
     /**
@@ -641,26 +640,26 @@ final class SimpleXMessageCodec {
      * format, validated through {@link #isValidQueueAddressId}.
      */
     record GroupCandidate(
-            @NonNull String adapterGroupId,
-            @NonNull String senderContactId,
+            String adapterGroupId,
+            String senderContactId,
             @Nullable String senderDisplayName,
-            @NonNull String text,
-            @NonNull List<String> mentionQueueAddresses,
-            @NonNull String adapterMessageId) implements DecodedFrame {
+            String text,
+            List<String> mentionQueueAddresses,
+            String adapterMessageId) implements DecodedFrame {
     }
 
     /** Response to a command we previously issued, carrying the chat-item id. */
-    record SendAck(@NonNull String corrId, @NonNull String chatItemId) implements DecodedFrame {
+    record SendAck(String corrId, String chatItemId) implements DecodedFrame {
     }
 
     /** Error response to a command, with the categorised failure. */
-    record CommandError(@NonNull String corrId,
-                        @NonNull FailureCategory category,
-                        @NonNull String detail) implements DecodedFrame {
+    record CommandError(String corrId,
+                        FailureCategory category,
+                        String detail) implements DecodedFrame {
     }
 
     /** A frame we recognised but do not handle in this milestone. */
-    record Ignored(@NonNull String reason) implements DecodedFrame {
+    record Ignored(String reason) implements DecodedFrame {
     }
 
     /**
@@ -669,7 +668,7 @@ final class SimpleXMessageCodec {
      * mirrors {@code NostrMessage.MalformedFrameException}.
      */
     static final class MalformedFrameException extends RuntimeException {
-        MalformedFrameException(@NonNull String message) {
+        MalformedFrameException(String message) {
             super(message);
         }
     }

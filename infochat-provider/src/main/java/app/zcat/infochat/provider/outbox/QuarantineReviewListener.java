@@ -8,7 +8,6 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
-import org.jspecify.annotations.NonNull;
 import org.postgresql.PGConnection;
 import org.postgresql.PGNotification;
 
@@ -140,8 +139,8 @@ public class QuarantineReviewListener {
      *
      * @return {@code true} if the cursor advanced
      */
-    boolean handleEvent(@NonNull String targetKind, @NonNull UUID targetId,
-                        @NonNull String newStatus, @NonNull Instant eventTime) throws SQLException {
+    boolean handleEvent(String targetKind, UUID targetId,
+                        String newStatus, Instant eventTime) throws SQLException {
         boolean advanced = providerStateDao.advanceCursor(
                 CHANNEL, eventTime, targetKind, targetId.toString());
 

@@ -4,7 +4,6 @@ import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jspecify.annotations.NonNull;
 
 import java.math.BigDecimal;
 import java.text.MessageFormat;
@@ -34,7 +33,7 @@ public class AssetReplyRenderer {
     public AssetReplyRenderer() {}
 
     /** Test constructor. */
-    AssetReplyRenderer(@NonNull BundleLoader bundleLoader) {
+    AssetReplyRenderer(BundleLoader bundleLoader) {
         this.bundleLoader = bundleLoader;
     }
 
@@ -45,9 +44,9 @@ public class AssetReplyRenderer {
      * @param displayName the human-readable asset name (e.g. "Zcash")
      * @param sourceUrl   the attribution URL for this source
      */
-    public String render(AssetSnapshotReader.@NonNull SnapshotResult result,
-                         @NonNull String displayName,
-                         @NonNull String sourceUrl) {
+    public String render(AssetSnapshotReader.SnapshotResult result,
+                         String displayName,
+                         String sourceUrl) {
         AssetSnapshotReader.Snapshot snap = result.snapshot();
         StringBuilder sb = new StringBuilder();
 

@@ -1,6 +1,5 @@
 package app.zcat.infochat.llm.routing;
 
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import app.zcat.infochat.llm.LlmProvider;
@@ -136,7 +135,7 @@ public class LlmRouter {
      * exactly one {@link LlmProvider}. Throws if no provider is
      * registered for the resolved name.
      */
-    public LlmProvider forTask(@NonNull ModelTask task, @Nullable String scopeLanguage) {
+    public LlmProvider forTask(ModelTask task, @Nullable String scopeLanguage) {
         if (task == null) {
             throw new IllegalArgumentException("LlmRouter.forTask: task must be non-null");
         }
@@ -335,7 +334,7 @@ public class LlmRouter {
      *                            sets so a generic provider doesn't
      *                            front-run a capability-declaring one.
      */
-    public record Entry(@NonNull String name, @NonNull LlmProvider provider, @Nullable Set<String> supportedLanguages) {
+    public record Entry(String name, LlmProvider provider, @Nullable Set<String> supportedLanguages) {
         public Entry {
             if (name.isEmpty()) {
                 throw new IllegalArgumentException("Entry.name must be non-empty");
@@ -354,9 +353,9 @@ public class LlmRouter {
      */
     @FunctionalInterface
     public interface ConfigReader {
-        Optional<String> get(@NonNull String key);
+        Optional<String> get(String key);
 
-        static ConfigReader fromMap(@NonNull Map<String, String> map) {
+        static ConfigReader fromMap(Map<String, String> map) {
             Map<String, String> snap = Map.copyOf(map);
             return key -> Optional.ofNullable(snap.get(key));
         }
@@ -371,7 +370,7 @@ public class LlmRouter {
         }
 
         @Override
-        public Optional<String> get(@NonNull String key) {
+        public Optional<String> get(String key) {
             // The literal string "null" (case-insensitive) is normalized
             // to empty so it reads as "no override set". Some config
             // sources stringify an explicitly-unset/null value as the

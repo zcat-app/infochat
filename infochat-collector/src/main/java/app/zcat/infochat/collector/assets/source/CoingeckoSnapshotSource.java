@@ -11,7 +11,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -66,23 +65,23 @@ public class CoingeckoSnapshotSource implements AssetDataSource {
     }
 
     // Package-private constructor seam — see RssFetcher precedent.
-    CoingeckoSnapshotSource(@NonNull SsrfGuardedHttpClient client) {
+    CoingeckoSnapshotSource(SsrfGuardedHttpClient client) {
         this.client = client;
         this.mapper = new ObjectMapper();
     }
 
     @Override
-    public @NonNull String id() {
+    public String id() {
         return ID;
     }
 
     @Override
-    public @NonNull Set<String> supportedAssets() {
+    public Set<String> supportedAssets() {
         return SLUGS.keySet();
     }
 
     @Override
-    public @NonNull Set<String> supportedQuoteCurrencies(@NonNull String asset) {
+    public Set<String> supportedQuoteCurrencies(String asset) {
         if (!SLUGS.containsKey(asset)) {
             return Set.of();
         }
@@ -90,7 +89,7 @@ public class CoingeckoSnapshotSource implements AssetDataSource {
     }
 
     @Override
-    public @NonNull PriceSnapshot fetchSnapshot(@NonNull String asset, @NonNull String vs)
+    public PriceSnapshot fetchSnapshot(String asset, String vs)
             throws FetchException {
         String slug = SLUGS.get(asset);
         if (slug == null) {
@@ -156,7 +155,7 @@ public class CoingeckoSnapshotSource implements AssetDataSource {
     }
 
     @Override
-    public @NonNull String attributionUrl(@NonNull String asset, @NonNull String vs) {
+    public String attributionUrl(String asset, String vs) {
         String slug = SLUGS.getOrDefault(asset, asset);
         return ATTRIBUTION_BASE + slug;
     }

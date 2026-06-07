@@ -9,7 +9,6 @@ import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
-import org.jspecify.annotations.NonNull;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -64,9 +63,9 @@ public class LlmTranslationProvider implements TranslationProvider {
     }
 
     @Override
-    public @NonNull String translate(@NonNull String text,
-                                     @NonNull Locale from,
-                                     @NonNull Locale to) {
+    public String translate(String text,
+                                     Locale from,
+                                     Locale to) {
         if (from.equals(to)) {
             return text;
         }

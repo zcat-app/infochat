@@ -1,6 +1,5 @@
 package app.zcat.infochat.messaging.impl.simplex;
 
-import org.jspecify.annotations.NonNull;
 
 import app.zcat.infochat.messaging.Identity;
 import app.zcat.infochat.messaging.InboundMessage;
@@ -55,8 +54,8 @@ final class SimpleXGroupHandler {
      *                       call after {@link SimpleXAdapter#start}
      *                       still routes correctly. Never null.
      */
-    SimpleXGroupHandler(@NonNull SimpleXIdentity botIdentity,
-                        MessagingAdapter.@NonNull InboundHandler inboundHandler) {
+    SimpleXGroupHandler(SimpleXIdentity botIdentity,
+                        MessagingAdapter.InboundHandler inboundHandler) {
         this.botIdentity = botIdentity;
         this.inboundHandler = inboundHandler;
     }
@@ -68,7 +67,7 @@ final class SimpleXGroupHandler {
      * silent so an attacker spamming a group cannot generate log
      * pressure that reveals the bot is reading their messages.
      */
-    void onGroupCandidate(SimpleXMessageCodec.@NonNull GroupCandidate gc) {
+    void onGroupCandidate(SimpleXMessageCodec.GroupCandidate gc) {
         if (!SimpleXMentionParser.botMentioned(gc.mentionQueueAddresses(),
                 botIdentity.queueAddress())) {
             return;

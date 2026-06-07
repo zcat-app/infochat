@@ -11,7 +11,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -64,23 +63,23 @@ public class BitfinexSnapshotSource implements AssetDataSource {
         this(new SsrfGuardedHttpClient());
     }
 
-    BitfinexSnapshotSource(@NonNull SsrfGuardedHttpClient client) {
+    BitfinexSnapshotSource(SsrfGuardedHttpClient client) {
         this.client = client;
         this.mapper = new ObjectMapper();
     }
 
     @Override
-    public @NonNull String id() {
+    public String id() {
         return ID;
     }
 
     @Override
-    public @NonNull Set<String> supportedAssets() {
+    public Set<String> supportedAssets() {
         return TICKERS.keySet();
     }
 
     @Override
-    public @NonNull Set<String> supportedQuoteCurrencies(@NonNull String asset) {
+    public Set<String> supportedQuoteCurrencies(String asset) {
         if (!TICKERS.containsKey(asset)) {
             return Set.of();
         }
@@ -88,7 +87,7 @@ public class BitfinexSnapshotSource implements AssetDataSource {
     }
 
     @Override
-    public @NonNull PriceSnapshot fetchSnapshot(@NonNull String asset, @NonNull String vs)
+    public PriceSnapshot fetchSnapshot(String asset, String vs)
             throws FetchException {
         String ticker = TICKERS.get(asset);
         if (ticker == null) {
@@ -165,7 +164,7 @@ public class BitfinexSnapshotSource implements AssetDataSource {
     }
 
     @Override
-    public @NonNull String attributionUrl(@NonNull String asset, @NonNull String vs) {
+    public String attributionUrl(String asset, String vs) {
         String ticker = TICKERS.getOrDefault(asset, asset.toUpperCase(Locale.ROOT));
         return String.format("https://www.bitfinex.com/t/%s:%s", ticker, vs.toUpperCase(Locale.ROOT));
     }

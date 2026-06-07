@@ -1,6 +1,5 @@
 package app.zcat.infochat.llm.routing;
 
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import app.zcat.infochat.llm.ModelTask;
@@ -177,7 +176,7 @@ public class LlmRouterStartupGuard {
      * @PostConstruct above; no other consumer should call it
      * directly.
      */
-    public static void validateLocalOnlyConfiguration(@NonNull Map<String, String> snapshot) {
+    public static void validateLocalOnlyConfiguration(Map<String, String> snapshot) {
         boolean localOnly = "true".equalsIgnoreCase(stripOrEmpty(snapshot.get(CONFIG_KEY_LOCAL_ONLY)));
 
         String embeddingBaseUrl = stripOrEmpty(snapshot.get(CONFIG_KEY_EMBEDDINGS_BASE_URL));

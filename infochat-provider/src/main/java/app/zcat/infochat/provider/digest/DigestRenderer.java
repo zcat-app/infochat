@@ -2,7 +2,6 @@ package app.zcat.infochat.provider.digest;
 
 import java.util.List;
 
-import org.jspecify.annotations.NonNull;
 
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.summary.ClusterTraversal;
@@ -33,8 +32,8 @@ public class DigestRenderer {
     @Inject
     TranslationPipeline translationPipeline;
 
-    public @NonNull String render(@NonNull List<EligiblePostQuery.Post> posts,
-                                  @NonNull String langCode) {
+    public String render(List<EligiblePostQuery.Post> posts,
+                                  String langCode) {
         List<Cluster> clusters = clusterTraversal.cluster(posts);
         List<ClusterProse> proseList = summaryProseGenerator.generate(clusters, langCode);
 

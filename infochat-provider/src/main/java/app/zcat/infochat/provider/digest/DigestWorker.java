@@ -19,7 +19,6 @@ import java.util.concurrent.TimeoutException;
 import javax.sql.DataSource;
 
 import org.jboss.logging.Logger;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import app.zcat.infochat.messaging.MessagingAdapter;
@@ -74,7 +73,7 @@ public class DigestWorker {
     // still running; overlapping same-group processing would double-deliver.
     private final Set<String> inFlightSlots = ConcurrentHashMap.newKeySet();
 
-    public void execute(@Observes @NonNull DigestSlot slot) {
+    public void execute(@Observes DigestSlot slot) {
         String inFlightKey = slot.groupId() + ":" + slot.slotKind();
         if (!inFlightSlots.add(inFlightKey)) {
             LOG.warnf("Digest already in flight for group %s slot %s — skipping overlapping execution",
@@ -149,9 +148,9 @@ public class DigestWorker {
         adapter.send(msg);
     }
 
-    record GroupMetadata(@NonNull String adapterName,
-                         @NonNull String upstreamGroupId,
-                         @NonNull String language) {}
+    record GroupMetadata(String adapterName,
+                         String upstreamGroupId,
+                         String language) {}
 
     GroupMetadata readGroupMetadata(UUID groupId) throws SQLException {
         try (Connection conn = dataSource.getConnection();

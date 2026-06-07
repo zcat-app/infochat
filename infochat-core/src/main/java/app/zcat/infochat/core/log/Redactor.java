@@ -1,7 +1,6 @@
 package app.zcat.infochat.core.log;
 
 import io.quarkus.logging.LoggingFilter;
-import org.jspecify.annotations.NonNull;
 
 import java.util.List;
 import java.util.logging.Filter;
@@ -71,11 +70,11 @@ public final class Redactor implements Filter {
      * {@link #TIMEOUT_SENTINEL} for the entire input rather than
      * emitting raw text.
      */
-    public static @NonNull String redact(@NonNull String input) {
+    public static String redact(String input) {
         return redact(input, DEFAULT_TIMEOUT_MS);
     }
 
-    static @NonNull String redact(@NonNull String input, long timeoutMs) {
+    static String redact(String input, long timeoutMs) {
         if (input.isEmpty()) {
             return input;
         }
@@ -101,7 +100,7 @@ public final class Redactor implements Filter {
     // --- Filter implementation ---
 
     @Override
-    public boolean isLoggable(@NonNull LogRecord record) {
+    public boolean isLoggable(LogRecord record) {
         String msg = record.getMessage();
         if (msg != null) {
             String redacted = redact(msg);

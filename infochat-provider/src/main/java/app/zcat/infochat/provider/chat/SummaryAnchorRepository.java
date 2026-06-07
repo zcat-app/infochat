@@ -2,7 +2,6 @@ package app.zcat.infochat.provider.chat;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
@@ -59,18 +58,18 @@ public class SummaryAnchorRepository {
             + "  AND command_kind = 'personal'";
 
     public record AnchorRow(
-            @NonNull UUID userId,
-            @NonNull UUID scopeId,
-            @NonNull String commandName,
-            @NonNull String argHash,
-            @NonNull List<String> postUids,
+            UUID userId,
+            UUID scopeId,
+            String commandName,
+            String argHash,
+            List<String> postUids,
             @Nullable String clusterMapJson,
-            @NonNull Instant generatedAt) {}
+            Instant generatedAt) {}
 
     // Carries scope_kind for the same reason the table does: a DM and a
     // group scope with colliding UUIDs must not share a retry count.
-    private record RetryKey(@NonNull UUID userId, @NonNull String scopeKind,
-                            @NonNull UUID scopeId) {}
+    private record RetryKey(UUID userId, String scopeKind,
+                            UUID scopeId) {}
 
     @Inject
     DataSource dataSource;
@@ -81,9 +80,9 @@ public class SummaryAnchorRepository {
      * Write (upsert) a personal anchor row. Resets the in-memory retry
      * count for the same (user, scope) since this is a fresh summary.
      */
-    public void write(@NonNull UUID userId, @NonNull String scopeKind, @NonNull UUID scopeId,
-                      @NonNull String commandName, @NonNull String argHash,
-                      @NonNull List<String> postUids, @Nullable String clusterMapJson) {
+    public void write(UUID userId, String scopeKind, UUID scopeId,
+                      String commandName, String argHash,
+                      List<String> postUids, @Nullable String clusterMapJson) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(UPSERT)) {
             ps.setObject(1, userId);
@@ -105,8 +104,8 @@ public class SummaryAnchorRepository {
     /**
      * Read the personal anchor for the given (user, scope).
      */
-    public @NonNull Optional<AnchorRow> read(@NonNull UUID userId, @NonNull String scopeKind,
-                                             @NonNull UUID scopeId) {
+    public Optional<AnchorRow> read(UUID userId, String scopeKind,
+                                             UUID scopeId) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(SELECT)) {
             ps.setObject(1, userId);
@@ -134,7 +133,7 @@ public class SummaryAnchorRepository {
     /**
      * Delete the personal anchor and clear the retry count.
      */
-    public void clear(@NonNull UUID userId, @NonNull String scopeKind, @NonNull UUID scopeId) {
+    public void clear(UUID userId, String scopeKind, UUID scopeId) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(DELETE)) {
             ps.setObject(1, userId);
@@ -151,8 +150,8 @@ public class SummaryAnchorRepository {
      * Atomically increment and return the retry count for the given
      * (user, scope). First call after a write (or clear) returns 1.
      */
-    public int incrementAndGetRetryCount(@NonNull UUID userId, @NonNull String scopeKind,
-                                         @NonNull UUID scopeId) {
+    public int incrementAndGetRetryCount(UUID userId, String scopeKind,
+                                         UUID scopeId) {
         return retryCounts
                 .computeIfAbsent(new RetryKey(userId, scopeKind, scopeId),
                         k -> new AtomicInteger(0))
@@ -162,8 +161,8 @@ public class SummaryAnchorRepository {
     /**
      * Clear the in-memory retry count.
      */
-    public void clearRetryCount(@NonNull UUID userId, @NonNull String scopeKind,
-                                @NonNull UUID scopeId) {
+    public void clearRetryCount(UUID userId, String scopeKind,
+                                UUID scopeId) {
         retryCounts.remove(new RetryKey(userId, scopeKind, scopeId));
     }
 }

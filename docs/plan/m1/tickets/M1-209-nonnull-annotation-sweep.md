@@ -1,9 +1,14 @@
 ---
 id: M1-209
 title: "Remove hand-written @NonNull made redundant by D48 null-marked packages"
-status: pending
+status: done
 created: 2026-06-07
 last_updated: 2026-06-07
+clarity_check:
+  date: 2026-06-07
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
 files_budget: 200
 files_scope:
@@ -34,7 +39,20 @@ test_plan:
 spec_refs: []
 decision_refs:
   - D48
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-07
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 192
+      added: 816
+      removed: 1015
 overrides: []
 aborted_attempts: []
 reopens: []

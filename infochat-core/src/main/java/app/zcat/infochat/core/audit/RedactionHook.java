@@ -1,6 +1,5 @@
 package app.zcat.infochat.core.audit;
 
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import java.util.UUID;
@@ -40,7 +39,7 @@ public interface RedactionHook {
      *         An impl that does not need to redact MAY return the
      *         input unchanged.
      */
-    AuditRow redact(@NonNull AuditRow row);
+    AuditRow redact(AuditRow row);
 
     /**
      * In-memory representation of one audit_log row before the
@@ -79,9 +78,9 @@ public interface RedactionHook {
             @Nullable UUID actorUserId,
             @Nullable String actorContactId,
             @Nullable String actorAdapter,
-            @NonNull AuditAction action,
-            @NonNull String targetKind,
-            @NonNull String targetId,
+            AuditAction action,
+            String targetKind,
+            String targetId,
             @Nullable String targetContactId,
             @Nullable UUID scopeId,
             @Nullable String requestId,
@@ -137,17 +136,17 @@ public interface RedactionHook {
                 return this;
             }
 
-            public Builder action(@NonNull AuditAction v) {
+            public Builder action(AuditAction v) {
                 this.action = v;
                 return this;
             }
 
-            public Builder targetKind(@NonNull String v) {
+            public Builder targetKind(String v) {
                 this.targetKind = v;
                 return this;
             }
 
-            public Builder targetId(@NonNull String v) {
+            public Builder targetId(String v) {
                 this.targetId = v;
                 return this;
             }

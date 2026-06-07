@@ -1,6 +1,5 @@
 package app.zcat.infochat.messaging.impl.simplex;
 
-import org.jspecify.annotations.NonNull;
 
 import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.ScopeRef;
@@ -23,7 +22,7 @@ import app.zcat.infochat.messaging.ScopeRef;
  * originating outbound for retry deduplication.</p>
  */
 record SimpleXMessageHandle(
-        @NonNull String chatItemId,
-        @NonNull ScopeRef scope,
-        @NonNull String correlationId) {
+        String chatItemId,
+        ScopeRef scope,
+        String correlationId) {
 }

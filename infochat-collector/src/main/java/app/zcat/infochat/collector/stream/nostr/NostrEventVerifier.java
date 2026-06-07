@@ -3,7 +3,6 @@ package app.zcat.infochat.collector.stream.nostr;
 import org.bouncycastle.asn1.sec.SECNamedCurves;
 import org.bouncycastle.asn1.x9.X9ECParameters;
 import org.bouncycastle.math.ec.ECPoint;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import java.math.BigInteger;
@@ -57,7 +56,7 @@ public final class NostrEventVerifier {
      * The caller cannot meaningfully distinguish "malformed" from "wrong sig"
      * at the trust boundary; both mean "drop, increment failed-sig counter".</p>
      */
-    public boolean verify(@NonNull NostrEvent event) {
+    public boolean verify(NostrEvent event) {
         if (event.id() == null || event.pubkey() == null || event.sig() == null
                 || event.content() == null || event.tags() == null) {
             return false;

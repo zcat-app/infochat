@@ -2,7 +2,6 @@ package app.zcat.infochat.core.audit;
 
 import app.zcat.infochat.core.log.Redactor;
 import jakarta.enterprise.context.ApplicationScoped;
-import org.jspecify.annotations.NonNull;
 
 /**
  * Default {@link RedactionHook} delegating to the shared
@@ -31,7 +30,7 @@ public class DefaultRedactionHook implements RedactionHook {
             "{\"_redacted\":true,\"reason\":\"regex_watchdog_timeout\"}";
 
     @Override
-    public AuditRow redact(@NonNull AuditRow row) {
+    public AuditRow redact(AuditRow row) {
         String detailsJson = row.detailsJson();
         if (detailsJson == null || detailsJson.isEmpty()) {
             return row;

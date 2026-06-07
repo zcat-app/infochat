@@ -12,7 +12,6 @@ import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
@@ -66,7 +65,7 @@ public class GroupTimezoneCommandHandler implements CommandHandler {
     }
 
     @Override
-    public OutboundMessage handle(@NonNull ScopeRef scope, @NonNull String rawText) {
+    public OutboundMessage handle(ScopeRef scope, String rawText) {
         if (!(scope instanceof ScopeRef.Group group)) {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_GROUP_TIMEZONE_DM_SCOPE));
         }

@@ -12,7 +12,6 @@ import java.util.UUID;
 
 import javax.sql.DataSource;
 
-import org.jspecify.annotations.NonNull;
 
 import app.zcat.infochat.provider.summary.EligiblePostQuery;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -25,7 +24,7 @@ public class DigestPostCollector {
     DataSource dataSource;
 
     public record CollectionResult(
-            @NonNull List<EligiblePostQuery.Post> posts,
+            List<EligiblePostQuery.Post> posts,
             long tagSubscriptionVersion,
             long sourceSubscriptionVersion) {}
 
@@ -33,7 +32,7 @@ public class DigestPostCollector {
      * Collects posts matching the group's active subscriptions published since
      * the given instant, plus the current subscription versions for cache-keying.
      */
-    public @NonNull CollectionResult collectForGroup(@NonNull UUID groupId, @NonNull Instant since)
+    public CollectionResult collectForGroup(UUID groupId, Instant since)
             throws SQLException {
         try (Connection conn = dataSource.getConnection()) {
             String tagMode = "ALL";

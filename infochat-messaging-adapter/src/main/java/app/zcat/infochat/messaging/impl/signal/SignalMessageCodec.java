@@ -1,6 +1,5 @@
 package app.zcat.infochat.messaging.impl.signal;
 
-import org.jspecify.annotations.NonNull;
 
 import jakarta.json.Json;
 import jakarta.json.JsonObject;
@@ -40,7 +39,7 @@ import java.util.Optional;
  */
 final class SignalMessageCodec {
 
-    String encodeSend(long rpcId, @NonNull String account, @NonNull String recipient, @NonNull String message) {
+    String encodeSend(long rpcId, String account, String recipient, String message) {
         JsonObject params = Json.createObjectBuilder()
                 .add("account", account)
                 .add("recipient", Json.createArrayBuilder().add(recipient))
@@ -49,8 +48,8 @@ final class SignalMessageCodec {
         return encodeRequest(rpcId, "send", params);
     }
 
-    String encodeUpdateMessage(long rpcId, @NonNull String account, @NonNull String recipient,
-                               long targetSentTimestamp, @NonNull String message) {
+    String encodeUpdateMessage(long rpcId, String account, String recipient,
+                               long targetSentTimestamp, String message) {
         JsonObject params = Json.createObjectBuilder()
                 .add("account", account)
                 .add("recipient", Json.createArrayBuilder().add(recipient))
@@ -60,7 +59,7 @@ final class SignalMessageCodec {
         return encodeRequest(rpcId, "updateMessage", params);
     }
 
-    String encodeSendTyping(long rpcId, @NonNull String account, @NonNull String recipient, boolean typing) {
+    String encodeSendTyping(long rpcId, String account, String recipient, boolean typing) {
         JsonObjectBuilder b = Json.createObjectBuilder()
                 .add("account", account)
                 .add("recipient", Json.createArrayBuilder().add(recipient));
@@ -88,8 +87,7 @@ final class SignalMessageCodec {
      * envelope that fits no JSON-RPC 2.0 shape — the reader treats
      * the throw as a transport-level corruption and disconnects.
      */
-    @NonNull
-    JsonRpcMessage decode(@NonNull String line) {
+    JsonRpcMessage decode(String line) {
         JsonObject obj;
         try (JsonReader reader = Json.createReader(new StringReader(line))) {
             obj = reader.readObject();
@@ -129,7 +127,7 @@ final class SignalMessageCodec {
      * sync/typing/receipt notification, or otherwise lacks a usable
      * sender ACI + body.
      */
-    Optional<ReceivedDm> extractDm(@NonNull JsonObject receiveParams) {
+    Optional<ReceivedDm> extractDm(JsonObject receiveParams) {
         JsonObject envelope = receiveParams.getJsonObject("envelope");
         if (envelope == null) {
             return Optional.empty();
@@ -164,8 +162,7 @@ final class SignalMessageCodec {
      * whether to accept non-UUID identifiers (e.g. legacy phone-number
      * sources during account migration).
      */
-    @NonNull
-    String canonicalizeAci(@NonNull String aci) {
+    String canonicalizeAci(String aci) {
         return aci.toLowerCase(Locale.ROOT);
     }
 
@@ -173,15 +170,15 @@ final class SignalMessageCodec {
     sealed interface JsonRpcMessage {
 
         /** Successful response — {@code id} matches the request, {@code result} is the call's return payload. */
-        record Response(@NonNull String id, @NonNull JsonObject result) implements JsonRpcMessage {}
+        record Response(String id, JsonObject result) implements JsonRpcMessage {}
 
         /** Error response — {@code id} matches the request, {@code code} is the JSON-RPC error code. */
-        record ErrorResponse(@NonNull String id, int code, @NonNull String message) implements JsonRpcMessage {}
+        record ErrorResponse(String id, int code, String message) implements JsonRpcMessage {}
 
         /** Server-initiated notification — {@code method} is the event name (e.g. {@code "receive"}). */
-        record Notification(@NonNull String method, @NonNull JsonObject params) implements JsonRpcMessage {}
+        record Notification(String method, JsonObject params) implements JsonRpcMessage {}
     }
 
     /** Result of decoding a DM-scope inbound from a {@code receive} notification. */
-    record ReceivedDm(@NonNull String senderContactId, @NonNull String body, long timestamp) {}
+    record ReceivedDm(String senderContactId, String body, long timestamp) {}
 }

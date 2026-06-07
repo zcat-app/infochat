@@ -2,7 +2,6 @@ package app.zcat.infochat.collector.stream;
 
 import app.zcat.infochat.core.ingest.NormalizedPost;
 import app.zcat.infochat.core.ingest.StreamSource;
-import org.jspecify.annotations.NonNull;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -152,7 +151,7 @@ final class FakeStreamSource implements StreamSource {
     }
 
     @Override
-    public void start(long sourceId, @NonNull String filterSpec, @NonNull Consumer<NormalizedPost> deliver) {
+    public void start(long sourceId, String filterSpec, Consumer<NormalizedPost> deliver) {
         this.deliver = deliver;
         startEntered.countDown();
         try {

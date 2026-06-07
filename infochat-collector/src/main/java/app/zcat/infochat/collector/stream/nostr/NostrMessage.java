@@ -6,7 +6,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.jspecify.annotations.NonNull;
 
 import java.util.OptionalLong;
 
@@ -25,15 +24,15 @@ public sealed interface NostrMessage
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
     /** {@code ["EVENT", subscriptionId, {event}]} — a new event on a subscription. */
-    record Event(@NonNull String subscriptionId, @NonNull NostrEvent event) implements NostrMessage {
+    record Event(String subscriptionId, NostrEvent event) implements NostrMessage {
     }
 
     /** {@code ["EOSE", subscriptionId]} — end of stored events; the live tail follows. */
-    record Eose(@NonNull String subscriptionId) implements NostrMessage {
+    record Eose(String subscriptionId) implements NostrMessage {
     }
 
     /** {@code ["NOTICE", message]} — a human-readable relay notice. */
-    record Notice(@NonNull String message) implements NostrMessage {
+    record Notice(String message) implements NostrMessage {
     }
 
     /**
@@ -44,8 +43,7 @@ public sealed interface NostrMessage
      *         so the caller logs and skips rather than letting a bad frame
      *         tear the connection down.
      */
-    @NonNull
-    static NostrMessage parse(@NonNull String frame) {
+    static NostrMessage parse(String frame) {
         JsonNode root;
         try {
             root = MAPPER.readTree(frame);
@@ -92,9 +90,8 @@ public sealed interface NostrMessage
      *
      * @throws MalformedFrameException if {@code filterSpec} is not a JSON object.
      */
-    @NonNull
-    static String serializeReq(@NonNull String subscriptionId,
-                               @NonNull String filterSpec, @NonNull OptionalLong since) {
+    static String serializeReq(String subscriptionId,
+                               String filterSpec, OptionalLong since) {
         JsonNode parsed;
         try {
             parsed = MAPPER.readTree(filterSpec);
@@ -128,11 +125,11 @@ public sealed interface NostrMessage
      * at the boundary and skips the frame.
      */
     final class MalformedFrameException extends RuntimeException {
-        MalformedFrameException(@NonNull String message) {
+        MalformedFrameException(String message) {
             super(message);
         }
 
-        MalformedFrameException(@NonNull String message, @NonNull Throwable cause) {
+        MalformedFrameException(String message, Throwable cause) {
             super(message, cause);
         }
     }

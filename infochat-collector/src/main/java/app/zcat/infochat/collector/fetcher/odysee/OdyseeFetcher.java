@@ -7,7 +7,6 @@ import app.zcat.infochat.core.ingest.NormalizedPost;
 import app.zcat.infochat.ssrf.SsrfGuardedHttpClient;
 import app.zcat.infochat.ssrf.UrlRedactor;
 import jakarta.enterprise.context.ApplicationScoped;
-import org.jspecify.annotations.NonNull;
 
 import java.io.IOException;
 import java.net.URI;
@@ -51,7 +50,7 @@ public class OdyseeFetcher implements Fetcher {
     }
 
     @Override
-    public List<NormalizedPost> fetch(long sourceId, @NonNull String identifier) {
+    public List<NormalizedPost> fetch(long sourceId, String identifier) {
         Instant fetchedAt = Instant.now();
 
         HttpResponse<byte[]> response;
@@ -82,11 +81,11 @@ public class OdyseeFetcher implements Fetcher {
      * update.
      */
     public static final class OdyseeFetchException extends RuntimeException {
-        public OdyseeFetchException(@NonNull String message) {
+        public OdyseeFetchException(String message) {
             super(message);
         }
 
-        public OdyseeFetchException(@NonNull String message, @NonNull Throwable cause) {
+        public OdyseeFetchException(String message, Throwable cause) {
             super(message, cause);
         }
     }

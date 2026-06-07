@@ -89,7 +89,7 @@ final class LlmHttpSupport {
         // (reactive-streams contract guarantees onSubscribe precedes every
         // other signal). NullAway's field-init check models only
         // constructors/initializers, not the Flow.Subscriber lifecycle, so
-        // suppress that one check here; the field stays @NonNull for every
+        // suppress that one check here; the field stays non-null for every
         // dereference.
         @SuppressWarnings("NullAway.Init")
         private Flow.Subscription subscription;

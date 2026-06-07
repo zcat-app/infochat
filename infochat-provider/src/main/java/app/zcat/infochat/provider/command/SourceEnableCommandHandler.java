@@ -15,7 +15,6 @@ import app.zcat.infochat.provider.source.UrlProbe.ProbeResult;
 import app.zcat.infochat.provider.user.UserRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
@@ -127,7 +126,7 @@ public class SourceEnableCommandHandler implements CommandHandler {
     }
 
     @Override
-    public OutboundMessage handle(@NonNull ScopeRef scope, @NonNull String rawText) {
+    public OutboundMessage handle(ScopeRef scope, String rawText) {
         if (scope instanceof ScopeRef.Group group) {
             if (!isGroupAdmin(group)) {
                 return reply(scope, bundleLoader.get(BundleKeys.ERROR_GROUP_ADMIN_NOT_IN_V1));

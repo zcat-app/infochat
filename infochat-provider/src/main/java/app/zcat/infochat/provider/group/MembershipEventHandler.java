@@ -8,7 +8,6 @@ import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.messaging.MembershipEvent;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,10 +44,10 @@ public class MembershipEventHandler {
     private final AuditLogWriter auditLogWriter;
 
     @Inject
-    public MembershipEventHandler(@NonNull DataSource dataSource,
-                                  @NonNull GroupMembershipRepository membershipRepository,
-                                  @NonNull GroupRepository groupRepository,
-                                  @NonNull AuditLogWriter auditLogWriter) {
+    public MembershipEventHandler(DataSource dataSource,
+                                  GroupMembershipRepository membershipRepository,
+                                  GroupRepository groupRepository,
+                                  AuditLogWriter auditLogWriter) {
         this.dataSource = dataSource;
         this.membershipRepository = membershipRepository;
         this.groupRepository = groupRepository;
@@ -59,7 +58,7 @@ public class MembershipEventHandler {
      * Dispatch a membership event from the given adapter. Called by
      * the lambda wired in {@code AdapterRegistry.start()}.
      */
-    public void handle(@NonNull MembershipEvent event, @NonNull String adapter) {
+    public void handle(MembershipEvent event, String adapter) {
         switch (event) {
             case MembershipEvent.UserLeft left -> handleUserLeft(left, adapter);
             case MembershipEvent.BotRemoved removed -> handleBotRemoved(removed, adapter);

@@ -3,7 +3,6 @@ package app.zcat.infochat.collector.stream.nostr;
 import app.zcat.infochat.core.ingest.NormalizedPost;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import java.time.Instant;
@@ -67,8 +66,7 @@ public record NostrEvent(
      *                  persister, which writes the resolved UUID instead).
      * @param fetchedAt wall-clock receipt time, supplied by the caller.
      */
-    @NonNull
-    public NormalizedPost toNormalizedPost(long sourceId, @NonNull Instant fetchedAt) {
+    public NormalizedPost toNormalizedPost(long sourceId, Instant fetchedAt) {
         Map<String, String> rawMetadata;
         if (kind == 6) {
             String repostTarget = extractFirstETag();

@@ -1,6 +1,5 @@
 package app.zcat.infochat.messaging.impl.simplex;
 
-import org.jspecify.annotations.NonNull;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -65,8 +64,8 @@ final class SimpleXMentionParser {
      * @return true iff some mention entry is byte-equal to the bot's
      *         queue-address string.
      */
-    static boolean botMentioned(@NonNull List<String> mentionQueueAddresses,
-                                @NonNull String botQueueAddress) {
+    static boolean botMentioned(List<String> mentionQueueAddresses,
+                                String botQueueAddress) {
         if (mentionQueueAddresses.isEmpty()) {
             return false;
         }

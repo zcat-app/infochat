@@ -14,7 +14,6 @@ import javax.sql.DataSource;
 
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import app.zcat.infochat.collector.assets.source.AssetDataSource;
@@ -162,7 +161,7 @@ public class AssetSnapshotFetcher {
      * uniformly. Visible-for-test so unit tests can fire ticks
      * deterministically against a halted scheduler.
      */
-    public void runHostTick(@NonNull String host) {
+    public void runHostTick(String host) {
         List<EnabledPair> rows;
         try {
             rows = enumerateEnabled(host);
@@ -185,7 +184,7 @@ public class AssetSnapshotFetcher {
         }
     }
 
-    private void tickOnePair(@NonNull String host, @NonNull EnabledPair row) {
+    private void tickOnePair(String host, EnabledPair row) {
         AssetDataSource source = resolveSource(host);
         if (source == null) {
             LOG.warnf("AssetSnapshotFetcher: no AssetDataSource bean for host=%s; skipping", host);
@@ -210,7 +209,7 @@ public class AssetSnapshotFetcher {
         }
     }
 
-    private void recordSuccess(@NonNull EnabledPair row) {
+    private void recordSuccess(EnabledPair row) {
         final String sql =
             "UPDATE asset_config "
             + "   SET consecutive_failures = 0, "
@@ -227,7 +226,7 @@ public class AssetSnapshotFetcher {
         }
     }
 
-    private void recordFailure(@NonNull EnabledPair row, @NonNull FetchException cause) {
+    private void recordFailure(EnabledPair row, FetchException cause) {
         // This is the D42 failure ladder for asset_config. It is deliberately
         // NOT commonized with SourceRepository's D42 ladder for the `source`
         // table: the two share only an incidental shape. They key on different
@@ -312,7 +311,7 @@ public class AssetSnapshotFetcher {
         adminNotifier.notifyOnce(key, errorClass, message);
     }
 
-    private List<EnabledPair> enumerateEnabled(@NonNull String host) throws SQLException {
+    private List<EnabledPair> enumerateEnabled(String host) throws SQLException {
         final String sql =
             "SELECT asset, sub_verb, default_quote_currency "
             + "  FROM asset_config "
@@ -330,7 +329,7 @@ public class AssetSnapshotFetcher {
         return out;
     }
 
-    private @Nullable AssetDataSource resolveSource(@NonNull String host) {
+    private @Nullable AssetDataSource resolveSource(String host) {
         Map<String, AssetDataSource> snapshot = sourcesById;
         if (snapshot == null) {
             snapshot = buildSourceMap();

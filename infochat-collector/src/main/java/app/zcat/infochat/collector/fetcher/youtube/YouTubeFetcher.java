@@ -7,7 +7,6 @@ import app.zcat.infochat.core.ingest.NormalizedPost;
 import app.zcat.infochat.ssrf.SsrfGuardedHttpClient;
 import app.zcat.infochat.ssrf.UrlRedactor;
 import jakarta.enterprise.context.ApplicationScoped;
-import org.jspecify.annotations.NonNull;
 
 import java.io.IOException;
 import java.net.URI;
@@ -45,7 +44,7 @@ public class YouTubeFetcher implements Fetcher {
     }
 
     @Override
-    public List<NormalizedPost> fetch(long sourceId, @NonNull String identifier) {
+    public List<NormalizedPost> fetch(long sourceId, String identifier) {
         Instant fetchedAt = Instant.now();
 
         HttpResponse<byte[]> response;
@@ -75,11 +74,11 @@ public class YouTubeFetcher implements Fetcher {
      * through the Fetcher SPI to FetchScheduler's per-tick error handler.
      */
     public static final class YouTubeFetchException extends RuntimeException {
-        public YouTubeFetchException(@NonNull String message) {
+        public YouTubeFetchException(String message) {
             super(message);
         }
 
-        public YouTubeFetchException(@NonNull String message, @NonNull Throwable cause) {
+        public YouTubeFetchException(String message, Throwable cause) {
             super(message, cause);
         }
     }

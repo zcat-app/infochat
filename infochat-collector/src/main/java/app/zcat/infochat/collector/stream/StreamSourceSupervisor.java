@@ -9,7 +9,6 @@ import jakarta.annotation.Priority;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
-import org.jspecify.annotations.NonNull;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -83,7 +82,7 @@ public class StreamSourceSupervisor {
      * runs {@link #init} eagerly so a plain JUnit test can register, drain,
      * and stop without a Quarkus container.
      */
-    StreamSourceSupervisor(@NonNull Duration drainTimeout) {
+    StreamSourceSupervisor(Duration drainTimeout) {
         this.drainTimeout = drainTimeout;
         init();
     }
@@ -109,8 +108,8 @@ public class StreamSourceSupervisor {
      * SPI's {@code start} needs both: the caller owns the outbox-writing
      * delivery callback, the supervisor owns only the worker lifecycle.</p>
      */
-    public void register(long sourceId, @NonNull String filterSpec,
-                         @NonNull StreamSource source, @NonNull Consumer<NormalizedPost> deliver) {
+    public void register(long sourceId, String filterSpec,
+                         StreamSource source, Consumer<NormalizedPost> deliver) {
         StreamSourceRegistration registration =
                 new StreamSourceRegistration(sourceId, filterSpec, source, deliver);
         registrations.put(sourceId, registration);
@@ -140,8 +139,7 @@ public class StreamSourceSupervisor {
      * counter incremented. Returns the per-source drain outcome
      * ({@code true} = flushed cleanly).
      */
-    @NonNull
-    public Map<Long, Boolean> drainAll(@NonNull Duration timeout) {
+    public Map<Long, Boolean> drainAll(Duration timeout) {
         Instant deadline = Instant.now().plus(timeout);
         List<StreamSourceDrainHandle> handles = new ArrayList<>();
         for (StreamSourceRegistration registration : registrations.values()) {

@@ -7,7 +7,6 @@ import app.zcat.infochat.ssrf.SsrfGuardedHttpClient;
 import app.zcat.infochat.ssrf.UrlRedactor;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.eclipse.microprofile.config.ConfigProvider;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import java.io.IOException;
@@ -70,7 +69,7 @@ public class BlueskyFetcher implements Fetcher {
     }
 
     @Override
-    public List<NormalizedPost> fetch(long sourceId, @NonNull String identifier) {
+    public List<NormalizedPost> fetch(long sourceId, String identifier) {
         Instant fetchedAt = Instant.now();
         List<NormalizedPost> allPosts = new ArrayList<>();
         String cursor = null;
@@ -122,11 +121,11 @@ public class BlueskyFetcher implements Fetcher {
     }
 
     public static final class BlueskyFetchException extends RuntimeException {
-        public BlueskyFetchException(@NonNull String message) {
+        public BlueskyFetchException(String message) {
             super(message);
         }
 
-        public BlueskyFetchException(@NonNull String message, @NonNull Throwable cause) {
+        public BlueskyFetchException(String message, Throwable cause) {
             super(message, cause);
         }
     }

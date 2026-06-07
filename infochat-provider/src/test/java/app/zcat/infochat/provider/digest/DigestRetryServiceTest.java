@@ -1,7 +1,6 @@
 package app.zcat.infochat.provider.digest;
 
 import app.zcat.infochat.provider.digest.DigestRetryService.RetryResult;
-import org.jspecify.annotations.NonNull;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -132,7 +131,7 @@ class DigestRetryServiceTest {
         DigestSlot lastSlot;
 
         @Override
-        public void execute(@NonNull DigestSlot slot) {
+        public void execute(DigestSlot slot) {
             executeCount++;
             lastSlot = slot;
         }

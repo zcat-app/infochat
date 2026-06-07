@@ -13,7 +13,6 @@ import app.zcat.infochat.provider.messaging.InboundContext;
 import app.zcat.infochat.provider.user.UserRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
@@ -126,7 +125,7 @@ public class UnbanCommandHandler implements CommandHandler {
     }
 
     @Override
-    public OutboundMessage handle(@NonNull ScopeRef scope, @NonNull String rawText) {
+    public OutboundMessage handle(ScopeRef scope, String rawText) {
         String adapter = inboundContext.adapterName();
         String callerContactId = contactIdOf(scope);
 

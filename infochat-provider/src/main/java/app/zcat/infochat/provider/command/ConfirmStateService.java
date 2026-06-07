@@ -4,7 +4,6 @@ import app.zcat.infochat.messaging.ScopeRef;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jspecify.annotations.NonNull;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -69,7 +68,7 @@ public class ConfirmStateService {
      * @Inject default is restored by setting it back to
      * {@link Clock#systemUTC()} on @AfterEach.
      */
-    void setClock(@NonNull Clock clock) {
+    void setClock(Clock clock) {
         this.clock = clock;
     }
 
@@ -98,9 +97,9 @@ public class ConfirmStateService {
      * with deadline {@code clock.instant() + timeout}. A prior
      * pending under the same key is replaced (acceptance item 7).
      */
-    public void remember(@NonNull UUID actorUserId,
-                         @NonNull ScopeRef scope,
-                         @NonNull PendingConfirm pendingConfirm) {
+    public void remember(UUID actorUserId,
+                         ScopeRef scope,
+                         PendingConfirm pendingConfirm) {
         Instant deadline = clock.instant().plus(timeout);
         pending.put(new ConfirmKey(actorUserId, scope), new Stored(pendingConfirm, deadline));
     }
@@ -111,9 +110,9 @@ public class ConfirmStateService {
      * Lazy expiry: a past-deadline entry is removed and an empty
      * Optional returned.
      */
-    public Optional<PendingConfirm> takeMatching(@NonNull UUID actorUserId,
-                                                 @NonNull ScopeRef scope,
-                                                 @NonNull String commandName) {
+    public Optional<PendingConfirm> takeMatching(UUID actorUserId,
+                                                 ScopeRef scope,
+                                                 String commandName) {
         AtomicReference<PendingConfirm> result = new AtomicReference<>();
         pending.compute(new ConfirmKey(actorUserId, scope), (k, stored) -> {
             if (stored == null) {
@@ -138,8 +137,8 @@ public class ConfirmStateService {
      * The router's step 4.5 sweep uses this to drain a pending entry
      * when any non-confirm-shape input arrives.
      */
-    public Optional<PendingConfirm> takeAny(@NonNull UUID actorUserId,
-                                            @NonNull ScopeRef scope) {
+    public Optional<PendingConfirm> takeAny(UUID actorUserId,
+                                            ScopeRef scope) {
         AtomicReference<PendingConfirm> result = new AtomicReference<>();
         pending.compute(new ConfirmKey(actorUserId, scope), (k, stored) -> {
             if (stored == null) {
@@ -158,8 +157,8 @@ public class ConfirmStateService {
      * Read the pending without removing it. Deadline-checked: a
      * past-deadline entry is removed and an empty Optional returned.
      */
-    public Optional<PendingConfirm> peek(@NonNull UUID actorUserId,
-                                         @NonNull ScopeRef scope) {
+    public Optional<PendingConfirm> peek(UUID actorUserId,
+                                         ScopeRef scope) {
         ConfirmKey key = new ConfirmKey(actorUserId, scope);
         Stored stored = pending.get(key);
         if (stored == null) {

@@ -2,7 +2,6 @@ package app.zcat.infochat.collector.stream;
 
 import app.zcat.infochat.core.ingest.NormalizedPost;
 import app.zcat.infochat.core.ingest.StreamSource;
-import org.jspecify.annotations.NonNull;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
@@ -35,8 +34,8 @@ final class StreamSourceRegistration {
     @SuppressWarnings("NullAway.Init")
     private volatile Future<?> startFuture;
 
-    StreamSourceRegistration(long sourceId, @NonNull String filterSpec,
-                             @NonNull StreamSource source, @NonNull Consumer<NormalizedPost> deliver) {
+    StreamSourceRegistration(long sourceId, String filterSpec,
+                             StreamSource source, Consumer<NormalizedPost> deliver) {
         this.sourceId = sourceId;
         this.filterSpec = filterSpec;
         this.source = source;
@@ -58,7 +57,7 @@ final class StreamSourceRegistration {
      * task is submitted, NOT when {@code start()} returns — async startup
      * means a relay unreachable at boot never blocks the caller.
      */
-    void startOn(@NonNull ExecutorService executor) {
+    void startOn(ExecutorService executor) {
         startFuture = executor.submit(() -> source.start(sourceId, filterSpec, deliver));
     }
 
@@ -69,8 +68,7 @@ final class StreamSourceRegistration {
      * outbox (architecture.md §Ingest SPIs), so draining IS calling
      * {@code stop()} and waiting for it to return.
      */
-    @NonNull
-    StreamSourceDrainHandle beginDrain(@NonNull ExecutorService executor) {
+    StreamSourceDrainHandle beginDrain(ExecutorService executor) {
         Future<?> stopFuture = executor.submit(source::stop);
         return new StreamSourceDrainHandle(this, stopFuture);
     }

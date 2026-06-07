@@ -8,7 +8,6 @@ import app.zcat.infochat.provider.chat.tool.SearchPostsTool;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import java.sql.SQLException;
@@ -27,8 +26,8 @@ import java.util.UUID;
 public class ChatToolDispatcher {
 
     public sealed interface ToolResult {
-        record Success(@NonNull String content) implements ToolResult {}
-        record ValidationError(@NonNull String reason) implements ToolResult {}
+        record Success(String content) implements ToolResult {}
+        record ValidationError(String reason) implements ToolResult {}
     }
 
     // Per-turn state: tracks call count and caches results so identical
@@ -53,12 +52,12 @@ public class ChatToolDispatcher {
     private final int listMaxSize;
 
     @Inject
-    public ChatToolDispatcher(@NonNull ChatToolRegistry registry,
-                               @NonNull SearchPostsTool searchPostsTool,
-                               @NonNull GetPostTool getPostTool,
-                               @NonNull GetReferencesTool getReferencesTool,
-                               @NonNull RecallMemoryTool recallMemoryTool,
-                               @NonNull ListSavesTool listSavesTool,
+    public ChatToolDispatcher(ChatToolRegistry registry,
+                               SearchPostsTool searchPostsTool,
+                               GetPostTool getPostTool,
+                               GetReferencesTool getReferencesTool,
+                               RecallMemoryTool recallMemoryTool,
+                               ListSavesTool listSavesTool,
                                @ConfigProperty(name = "infochat.chat.tool.input-max-length",
                                        defaultValue = "500") int inputMaxLength,
                                @ConfigProperty(name = "infochat.chat.tool.limit-cap",
@@ -80,8 +79,8 @@ public class ChatToolDispatcher {
     }
 
     // Package-private for testing with fake tool implementations
-    ChatToolDispatcher(@NonNull ChatToolRegistry registry,
-                       @NonNull Map<String, ChatToolRegistry.ChatTool> tools,
+    ChatToolDispatcher(ChatToolRegistry registry,
+                       Map<String, ChatToolRegistry.ChatTool> tools,
                        int inputMaxLength, int limitCap, int listMaxSize) {
         this.registry = registry;
         this.tools = Map.copyOf(tools);
@@ -108,20 +107,20 @@ public class ChatToolDispatcher {
     // Convenience overload: creates a fresh TurnContext per call (no
     // cross-call cap or caching). M1-063 session dispatch should use the
     // TurnContext-aware overload with a shared context per turn.
-    public @NonNull ToolResult dispatch(@NonNull String toolName,
-                                         @NonNull Map<String, Object> args,
-                                         @NonNull UUID userId,
-                                         @NonNull String scopeKind,
-                                         @NonNull UUID scopeId) {
+    public ToolResult dispatch(String toolName,
+                                         Map<String, Object> args,
+                                         UUID userId,
+                                         String scopeKind,
+                                         UUID scopeId) {
         return dispatch(toolName, args, userId, scopeKind, scopeId, new TurnContext());
     }
 
-    public @NonNull ToolResult dispatch(@NonNull String toolName,
-                                         @NonNull Map<String, Object> args,
-                                         @NonNull UUID userId,
-                                         @NonNull String scopeKind,
-                                         @NonNull UUID scopeId,
-                                         @NonNull TurnContext turn) {
+    public ToolResult dispatch(String toolName,
+                                         Map<String, Object> args,
+                                         UUID userId,
+                                         String scopeKind,
+                                         UUID scopeId,
+                                         TurnContext turn) {
         if (!registry.toolNames().contains(toolName)) {
             return new ToolResult.ValidationError("Unknown tool: " + toolName);
         }

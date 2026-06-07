@@ -16,7 +16,6 @@ import jakarta.annotation.Priority;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -108,11 +107,11 @@ public final class NostrStreamSource implements StreamSource {
     @SuppressWarnings("NullAway.Init")
     private Consumer<NormalizedPost> deliver;
 
-    NostrStreamSource(@NonNull List<URI> relayUris, @NonNull Supplier<OptionalLong> sinceCursor,
-                      @NonNull Duration backoffBase, @NonNull Duration backoffMax,
-                      @NonNull HttpClient httpClient, @NonNull SsrfGuardedHttpClient ssrfClient,
-                      @NonNull NostrEventVerifier verifier,
-                      @NonNull RelayHealthTracker healthTracker, @NonNull NostrDedupFilter dedupFilter) {
+    NostrStreamSource(List<URI> relayUris, Supplier<OptionalLong> sinceCursor,
+                      Duration backoffBase, Duration backoffMax,
+                      HttpClient httpClient, SsrfGuardedHttpClient ssrfClient,
+                      NostrEventVerifier verifier,
+                      RelayHealthTracker healthTracker, NostrDedupFilter dedupFilter) {
         this.relayUris = List.copyOf(relayUris);
         this.sinceCursor = sinceCursor;
         this.backoffBase = backoffBase;
@@ -125,7 +124,7 @@ public final class NostrStreamSource implements StreamSource {
     }
 
     @Override
-    public void start(long sourceId, @NonNull String filterSpec, @NonNull Consumer<NormalizedPost> deliver) {
+    public void start(long sourceId, String filterSpec, Consumer<NormalizedPost> deliver) {
         this.sourceId = sourceId;
         this.deliver = deliver;
         this.delivering = true;
@@ -371,8 +370,8 @@ public final class NostrStreamSource implements StreamSource {
          * a different thread than the loopThread that fired the transition —
          * we spawn a fresh virtual thread for the terminal teardown.
          */
-        void handleTransition(RelayHealthTracker.@NonNull Transition transition,
-                              @NonNull UUID sourceUuid, long dispatchKey) {
+        void handleTransition(RelayHealthTracker.Transition transition,
+                              UUID sourceUuid, long dispatchKey) {
             switch (transition) {
                 case ALL_RELAYS_BAD -> adminNotifier.notifyOnce(
                         "nostr-all-relays-bad:" + sourceUuid,
@@ -480,6 +479,6 @@ public final class NostrStreamSource implements StreamSource {
     }
 
     /** One enumerated {@code kind='nostr'} source row: id, filter spec, raw config JSON. */
-    record NostrSourceRow(@NonNull UUID id, @NonNull String identifier, @NonNull String config) {
+    record NostrSourceRow(UUID id, String identifier, String config) {
     }
 }

@@ -1,7 +1,6 @@
 package app.zcat.infochat.messaging.impl.signal;
 
 import org.jboss.logging.Logger;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import app.zcat.infochat.messaging.FailureCategory;
@@ -178,18 +177,18 @@ final class SignalJsonRpcClient {
      * five-arg form so the supervisor ({@link SignalSubprocess}) can be
      * kicked when the daemon wedges.
      */
-    SignalJsonRpcClient(@NonNull InetSocketAddress endpoint,
-                        @NonNull String account,
-                        @NonNull SignalMessageCodec codec,
-                        @NonNull Duration responseTimeout) {
+    SignalJsonRpcClient(InetSocketAddress endpoint,
+                        String account,
+                        SignalMessageCodec codec,
+                        Duration responseTimeout) {
         this(endpoint, account, codec, responseTimeout, () -> { });
     }
 
-    SignalJsonRpcClient(@NonNull InetSocketAddress endpoint,
-                        @NonNull String account,
-                        @NonNull SignalMessageCodec codec,
-                        @NonNull Duration responseTimeout,
-                        @NonNull Runnable hungRestartHook) {
+    SignalJsonRpcClient(InetSocketAddress endpoint,
+                        String account,
+                        SignalMessageCodec codec,
+                        Duration responseTimeout,
+                        Runnable hungRestartHook) {
         this.endpoint = endpoint;
         this.account = account;
         this.codec = codec;
@@ -197,7 +196,7 @@ final class SignalJsonRpcClient {
         this.hungRestartHook = hungRestartHook;
     }
 
-    void setInboundHandler(MessagingAdapter.@NonNull InboundHandler handler) {
+    void setInboundHandler(MessagingAdapter.InboundHandler handler) {
         this.inboundHandler = handler;
     }
 
@@ -207,7 +206,7 @@ final class SignalJsonRpcClient {
      * the JSON-RPC notification ({@code SignalGroupHandler}'s
      * {@code handleReceive} input shape).
      */
-    void setGroupNotificationHandler(@NonNull Consumer<JsonObject> handler) {
+    void setGroupNotificationHandler(Consumer<JsonObject> handler) {
         this.groupNotificationHandler = handler;
     }
 
@@ -267,8 +266,7 @@ final class SignalJsonRpcClient {
         }
     }
 
-    @NonNull
-    MessageHandle send(@NonNull OutboundMessage msg) throws MessagingException {
+    MessageHandle send(OutboundMessage msg) throws MessagingException {
         String recipient = recipientFromDmScope(msg.scope(), "send");
         long rpcId = rpcIdGen.incrementAndGet();
         String request = codec.encodeSend(rpcId, account, recipient, msg.text());
@@ -282,12 +280,12 @@ final class SignalJsonRpcClient {
         return handle;
     }
 
-    void update(@NonNull MessageHandle handle, @NonNull String body) throws MessagingException {
+    void update(MessageHandle handle, String body) throws MessagingException {
         SignalMessageHandle internal = lookupOpen(handle);
         editMessage(internal, body);
     }
 
-    void finalizeHandle(@NonNull MessageHandle handle, @NonNull String body) throws MessagingException {
+    void finalizeHandle(MessageHandle handle, String body) throws MessagingException {
         SignalMessageHandle internal = lookupOpen(handle);
         editMessage(internal, body);
         // Eviction-on-finalize bounds the open-handle map. Subsequent
@@ -299,7 +297,7 @@ final class SignalJsonRpcClient {
         }
     }
 
-    void setTyping(@NonNull ScopeRef scope, boolean typing) {
+    void setTyping(ScopeRef scope, boolean typing) {
         if (!(scope instanceof ScopeRef.Dm dm)) {
             // Group typing is M1-108; setTyping is best-effort per SPI,
             // so we drop the call rather than fail.

@@ -2,7 +2,6 @@ package app.zcat.infochat.provider.command;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jspecify.annotations.NonNull;
 
 import java.util.Set;
 
@@ -59,7 +58,7 @@ public class CommandPermissions {
     private final AssetCommandFamilyOracle assetCommandFamilyOracle;
 
     @Inject
-    public CommandPermissions(@NonNull AssetCommandFamilyOracle assetCommandFamilyOracle) {
+    public CommandPermissions(AssetCommandFamilyOracle assetCommandFamilyOracle) {
         this.assetCommandFamilyOracle = assetCommandFamilyOracle;
     }
 
@@ -69,7 +68,7 @@ public class CommandPermissions {
      * name is in the spec's closed allowed-set OR delegates to the
      * asset oracle. Unknown names fail closed.
      */
-    public boolean allowedDuringProbation(@NonNull String slashCommand) {
+    public boolean allowedDuringProbation(String slashCommand) {
         return ALLOWED.contains(slashCommand) || assetCommandFamilyOracle.isAssetCommand(slashCommand);
     }
 }

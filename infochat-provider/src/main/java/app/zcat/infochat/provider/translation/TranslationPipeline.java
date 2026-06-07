@@ -5,7 +5,6 @@ import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
-import org.jspecify.annotations.NonNull;
 
 import java.util.Locale;
 
@@ -53,8 +52,8 @@ public class TranslationPipeline {
      * @return the translated, sanitized text (or English on
      *     translator failure); never null.
      */
-    public @NonNull String run(@NonNull String postSanitizer1English,
-                               @NonNull String scopeLanguage) {
+    public String run(String postSanitizer1English,
+                               String scopeLanguage) {
         // Step 1: en-short-circuit — the TranslationProvider is never
         // invoked, the cache is never consulted, the sanitizer-2 pass
         // is skipped (spec §Translation flow line 199).

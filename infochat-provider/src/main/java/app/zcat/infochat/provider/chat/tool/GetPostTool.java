@@ -1,7 +1,6 @@
 package app.zcat.infochat.provider.chat.tool;
 
 import app.zcat.infochat.provider.chat.ChatToolRegistry;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import jakarta.enterprise.context.ApplicationScoped;
@@ -25,13 +24,13 @@ public class GetPostTool implements ChatToolRegistry.ChatTool {
     private final DataSource dataSource;
 
     @Inject
-    public GetPostTool(@NonNull DataSource dataSource) {
+    public GetPostTool(DataSource dataSource) {
         this.dataSource = dataSource;
     }
 
     @Override
-    public @NonNull String execute(@NonNull UUID userId, @NonNull String scopeKind,
-                                    @NonNull UUID scopeId, @NonNull Map<String, Object> args)
+    public String execute(UUID userId, String scopeKind,
+                                    UUID scopeId, Map<String, Object> args)
             throws SQLException {
         String uid = (String) args.get("uid");
         if (uid == null) {

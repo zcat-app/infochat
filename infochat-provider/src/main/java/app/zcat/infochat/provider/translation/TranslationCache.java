@@ -3,7 +3,6 @@ package app.zcat.infochat.provider.translation;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import jakarta.enterprise.context.ApplicationScoped;
-import org.jspecify.annotations.NonNull;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -39,7 +38,7 @@ public class TranslationCache {
      * hex form (not raw byte[]) ensures stable equals/hashCode across
      * JVMs and easy assertion in tests.
      */
-    public record TranslationKey(@NonNull String sha256Hex, @NonNull String toLang) {}
+    public record TranslationKey(String sha256Hex, String toLang) {}
 
     private final Cache<TranslationKey, String> cache = Caffeine.newBuilder()
             .expireAfterWrite(Duration.ofHours(24))
@@ -55,8 +54,8 @@ public class TranslationCache {
      * @return the cached post-sanitizer-2 translated text, or empty
      *         on a miss.
      */
-    public @NonNull Optional<String> get(@NonNull String englishText,
-                                         @NonNull String toLang) {
+    public Optional<String> get(String englishText,
+                                         String toLang) {
         TranslationKey key = keyFor(englishText, toLang);
         return Optional.ofNullable(cache.getIfPresent(key));
     }
@@ -73,9 +72,9 @@ public class TranslationCache {
      * @param sanitized2TranslatedValue post-sanitizer-2 translated
      *                                  text; never null.
      */
-    public void put(@NonNull String englishText,
-                    @NonNull String toLang,
-                    @NonNull String sanitized2TranslatedValue) {
+    public void put(String englishText,
+                    String toLang,
+                    String sanitized2TranslatedValue) {
         TranslationKey key = keyFor(englishText, toLang);
         cache.put(key, sanitized2TranslatedValue);
     }

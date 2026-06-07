@@ -3,7 +3,6 @@ package app.zcat.infochat.collector.assets;
 import java.math.BigDecimal;
 import java.time.Instant;
 
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -20,17 +19,17 @@ import org.jspecify.annotations.Nullable;
  * forensic / replay purposes. Persisted as JSONB in price_snapshot.
  */
 public record PriceSnapshot(
-        @NonNull String asset,
-        @NonNull String subVerb,
-        @NonNull String vsCurrency,
-        @NonNull BigDecimal price,
+        String asset,
+        String subVerb,
+        String vsCurrency,
+        BigDecimal price,
         @Nullable BigDecimal volume24h,
         @Nullable BigDecimal high24h,
         @Nullable BigDecimal low24h,
         @Nullable BigDecimal change1hPct,
         @Nullable BigDecimal change24hPct,
         @Nullable BigDecimal change7dPct,
-        @NonNull Instant capturedAt,
-        @NonNull String sourceUrl,
+        Instant capturedAt,
+        String sourceUrl,
         @Nullable String rawPayload
 ) { }

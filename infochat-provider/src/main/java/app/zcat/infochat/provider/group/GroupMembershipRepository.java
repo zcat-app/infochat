@@ -2,7 +2,6 @@ package app.zcat.infochat.provider.group;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
@@ -50,11 +49,11 @@ public class GroupMembershipRepository {
     private final DataSource dataSource;
 
     @Inject
-    public GroupMembershipRepository(@NonNull DataSource dataSource) {
+    public GroupMembershipRepository(DataSource dataSource) {
         this.dataSource = dataSource;
     }
 
-    public void addMember(@NonNull UUID groupId, @NonNull UUID userId) {
+    public void addMember(UUID groupId, UUID userId) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(INSERT_MEMBER)) {
             ps.setObject(1, groupId);
@@ -65,7 +64,7 @@ public class GroupMembershipRepository {
         }
     }
 
-    public boolean isGroupAdmin(@NonNull UUID groupId, @NonNull UUID userId) {
+    public boolean isGroupAdmin(UUID groupId, UUID userId) {
         try (Connection conn = dataSource.getConnection()) {
             return isGroupAdmin(conn, groupId, userId);
         } catch (SQLException e) {
@@ -76,8 +75,8 @@ public class GroupMembershipRepository {
     // Runs on the caller's connection so the caller can wrap
     // audit-before-effect around the call inside one transaction
     // (the GroupRepository.setApprovalStatus precedent).
-    public boolean isGroupAdmin(@NonNull Connection conn, @NonNull UUID groupId,
-                                @NonNull UUID userId) throws SQLException {
+    public boolean isGroupAdmin(Connection conn, UUID groupId,
+                                UUID userId) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(SELECT_ADMIN_FLAG)) {
             ps.setObject(1, groupId);
             ps.setObject(2, userId);
@@ -116,7 +115,7 @@ public class GroupMembershipRepository {
     }
 
     // Returns false if the partial unique index rejects a second active admin.
-    public boolean promoteToAdmin(@NonNull UUID groupId, @NonNull UUID userId) {
+    public boolean promoteToAdmin(UUID groupId, UUID userId) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(PROMOTE)) {
             ps.setObject(1, groupId);
@@ -131,7 +130,7 @@ public class GroupMembershipRepository {
         }
     }
 
-    public void demoteAdmin(@NonNull UUID groupId, @NonNull UUID userId) {
+    public void demoteAdmin(UUID groupId, UUID userId) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(DEMOTE)) {
             ps.setObject(1, groupId);
@@ -144,7 +143,7 @@ public class GroupMembershipRepository {
 
     // Sets removed_at; the V5 trigger clears is_group_admin in the same
     // statement execution, freeing the partial unique index slot.
-    public void markMemberRemoved(@NonNull UUID groupId, @NonNull UUID userId) {
+    public void markMemberRemoved(UUID groupId, UUID userId) {
         try (Connection conn = dataSource.getConnection()) {
             markMemberRemoved(conn, groupId, userId);
         } catch (SQLException e) {
@@ -154,8 +153,8 @@ public class GroupMembershipRepository {
 
     // Runs on the caller's connection so the caller can wrap
     // audit-before-effect around the call inside one transaction.
-    public void markMemberRemoved(@NonNull Connection conn, @NonNull UUID groupId,
-                                  @NonNull UUID userId) throws SQLException {
+    public void markMemberRemoved(Connection conn, UUID groupId,
+                                  UUID userId) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(MARK_REMOVED)) {
             ps.setObject(1, groupId);
             ps.setObject(2, userId);

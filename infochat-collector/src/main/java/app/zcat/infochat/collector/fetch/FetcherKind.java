@@ -2,7 +2,6 @@ package app.zcat.infochat.collector.fetch;
 
 import jakarta.enterprise.util.AnnotationLiteral;
 import jakarta.inject.Qualifier;
-import org.jspecify.annotations.NonNull;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.Target;
@@ -32,7 +31,7 @@ public @interface FetcherKind {
     final class Literal extends AnnotationLiteral<FetcherKind> implements FetcherKind {
         private final String value;
 
-        public Literal(@NonNull String value) {
+        public Literal(String value) {
             this.value = value;
         }
 

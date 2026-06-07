@@ -1,6 +1,5 @@
 package app.zcat.infochat.collector.eval.entity;
 
-import org.jspecify.annotations.NonNull;
 
 import java.util.List;
 
@@ -18,9 +17,9 @@ import java.util.List;
  * separately (the worker advances {@code entity_done=TRUE} in both
  * cases but only notifies on failure-release).
  */
-public record EntityExtractionResult(@NonNull List<Entity> entities) {
+public record EntityExtractionResult(List<Entity> entities) {
 
     /** One extracted entity destined for a {@code post_entity} row. */
-    public record Entity(@NonNull String text, @NonNull String type) {
+    public record Entity(String text, String type) {
     }
 }

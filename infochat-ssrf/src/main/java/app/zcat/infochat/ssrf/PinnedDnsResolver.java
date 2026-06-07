@@ -1,6 +1,5 @@
 package app.zcat.infochat.ssrf;
 
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import java.net.InetAddress;
@@ -61,7 +60,7 @@ public final class PinnedDnsResolver implements InetAddressResolver {
     }
 
     @Override
-    public Stream<InetAddress> lookupByName(@NonNull String host, @NonNull LookupPolicy lookupPolicy)
+    public Stream<InetAddress> lookupByName(String host, LookupPolicy lookupPolicy)
             throws UnknownHostException {
         // M1-026 Finding 2: canonicalize the host BEFORE pins.get().
         // The pin map is keyed by SsrfGuardedHttpClient.canonicalizeHost
@@ -123,12 +122,12 @@ public final class PinnedDnsResolver implements InetAddressResolver {
         // resolver below is called, BUILTIN is non-null. NullAway's
         // field-init check models only constructors/initializers, not
         // the SPI get() lifecycle, so suppress that one check; the
-        // field stays @NonNull for every dereference.
+        // field stays non-null for every dereference.
         @SuppressWarnings("NullAway.Init")
         private static volatile InetAddressResolver BUILTIN;
 
         @Override
-        public InetAddressResolver get(@NonNull Configuration configuration) {
+        public InetAddressResolver get(Configuration configuration) {
             BUILTIN = configuration.builtinResolver();
             return new ForwardingResolver();
         }
@@ -174,7 +173,7 @@ public final class PinnedDnsResolver implements InetAddressResolver {
         private static final class ForwardingResolver implements InetAddressResolver {
 
             @Override
-            public Stream<InetAddress> lookupByName(@NonNull String host, @NonNull LookupPolicy lookupPolicy)
+            public Stream<InetAddress> lookupByName(String host, LookupPolicy lookupPolicy)
                     throws UnknownHostException {
                 Map<String, List<InetAddress>> pins = ACTIVE_PINS;
                 if (pins != null) {

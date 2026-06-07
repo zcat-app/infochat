@@ -3,7 +3,6 @@ package app.zcat.infochat.provider.command.asset;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
@@ -31,25 +30,25 @@ public class AssetSnapshotReader {
 
     /** Snapshot data from a single {@code price_snapshot} row. */
     public record Snapshot(
-            @NonNull String asset,
-            @NonNull String subVerb,
-            @NonNull String vsCurrency,
-            @NonNull BigDecimal price,
+            String asset,
+            String subVerb,
+            String vsCurrency,
+            BigDecimal price,
             @Nullable BigDecimal volume24h,
             @Nullable BigDecimal high24h,
             @Nullable BigDecimal low24h,
             @Nullable BigDecimal change1hPct,
             @Nullable BigDecimal change24hPct,
             @Nullable BigDecimal change7dPct,
-            @NonNull Instant capturedAt,
+            Instant capturedAt,
             @Nullable String sourceUrl
     ) {}
 
     /** Result of a snapshot lookup: the data plus staleness info. */
     public record SnapshotResult(
-            @NonNull Snapshot snapshot,
+            Snapshot snapshot,
             boolean stale,
-            @NonNull Duration refreshInterval
+            Duration refreshInterval
     ) {}
 
     @Inject
@@ -68,7 +67,7 @@ public class AssetSnapshotReader {
     public AssetSnapshotReader() {}
 
     /** Test constructor — bypasses CDI injection. */
-    AssetSnapshotReader(@NonNull DataSource dataSource, long refreshCoingecko,
+    AssetSnapshotReader(DataSource dataSource, long refreshCoingecko,
                         long refreshKraken, long refreshBitfinex) {
         this.dataSource = dataSource;
         this.refreshCoingeckoSeconds = refreshCoingecko;
@@ -81,9 +80,9 @@ public class AssetSnapshotReader {
      *
      * @return the snapshot with staleness metadata, or null if no row exists
      */
-    public @Nullable SnapshotResult readLatest(@NonNull String asset,
-                                                @NonNull String subVerb,
-                                                @NonNull String vsCurrency) {
+    public @Nullable SnapshotResult readLatest(String asset,
+                                                String subVerb,
+                                                String vsCurrency) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "SELECT asset, sub_verb, vs_currency, price, volume_24h, "

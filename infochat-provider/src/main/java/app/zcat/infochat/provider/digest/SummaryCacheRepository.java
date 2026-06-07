@@ -2,7 +2,6 @@ package app.zcat.infochat.provider.digest;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
@@ -30,14 +29,14 @@ public class SummaryCacheRepository {
      * Insert a new summary cache row. Called by DigestWorker (M1-080b)
      * after generating digest content.
      */
-    public void insert(@NonNull UUID groupId,
-                       @NonNull String slotKind,
-                       @NonNull Instant slotFiredAt,
+    public void insert(UUID groupId,
+                       String slotKind,
+                       Instant slotFiredAt,
                        long tagSubscriptionVersion,
                        long sourceSubscriptionVersion,
-                       @NonNull String content,
+                       String content,
                        boolean isDegraded,
-                       @NonNull Instant expiresAt) throws SQLException {
+                       Instant expiresAt) throws SQLException {
         try (Connection conn = dataSource.getConnection()) {
             insert(conn, groupId, slotKind, slotFiredAt,
                     tagSubscriptionVersion, sourceSubscriptionVersion,
@@ -52,15 +51,15 @@ public class SummaryCacheRepository {
      * Does not commit or roll back — transaction control stays with the
      * caller that owns the connection.
      */
-    public void insert(@NonNull Connection conn,
-                       @NonNull UUID groupId,
-                       @NonNull String slotKind,
-                       @NonNull Instant slotFiredAt,
+    public void insert(Connection conn,
+                       UUID groupId,
+                       String slotKind,
+                       Instant slotFiredAt,
                        long tagSubscriptionVersion,
                        long sourceSubscriptionVersion,
-                       @NonNull String content,
+                       String content,
                        boolean isDegraded,
-                       @NonNull Instant expiresAt) throws SQLException {
+                       Instant expiresAt) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(
                      "INSERT INTO summary_cache"
                              + " (group_id, slot_kind, slot_fired_at,"
@@ -84,9 +83,9 @@ public class SummaryCacheRepository {
      * within a given window. Returns empty if no valid (non-expired) row
      * exists.
      */
-    public Optional<CacheEntry> findByGroupAndSlot(@NonNull UUID groupId,
-                                                   @NonNull String slotKind,
-                                                   @NonNull Instant slotFiredAt) throws SQLException {
+    public Optional<CacheEntry> findByGroupAndSlot(UUID groupId,
+                                                   String slotKind,
+                                                   Instant slotFiredAt) throws SQLException {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "SELECT id, tag_subscription_version, source_subscription_version,"
@@ -123,9 +122,9 @@ public class SummaryCacheRepository {
      * {@link DigestScheduler} to determine if a slot has already fired
      * (even if the cached content has since expired).
      */
-    public boolean existsByGroupAndSlot(@NonNull UUID groupId,
-                                        @NonNull String slotKind,
-                                        @NonNull Instant slotFiredAt) throws SQLException {
+    public boolean existsByGroupAndSlot(UUID groupId,
+                                        String slotKind,
+                                        Instant slotFiredAt) throws SQLException {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "SELECT 1 FROM summary_cache"
@@ -142,14 +141,14 @@ public class SummaryCacheRepository {
 
     public record CacheEntry(
             long id,
-            @NonNull UUID groupId,
-            @NonNull String slotKind,
-            @NonNull Instant slotFiredAt,
+            UUID groupId,
+            String slotKind,
+            Instant slotFiredAt,
             long tagSubscriptionVersion,
             long sourceSubscriptionVersion,
-            @NonNull String content,
+            String content,
             boolean isDegraded,
-            @NonNull Instant createdAt,
-            @NonNull Instant expiresAt) {
+            Instant createdAt,
+            Instant expiresAt) {
     }
 }

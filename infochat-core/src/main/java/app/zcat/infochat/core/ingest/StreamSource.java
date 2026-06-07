@@ -1,6 +1,5 @@
 package app.zcat.infochat.core.ingest;
 
-import org.jspecify.annotations.NonNull;
 
 import java.util.function.Consumer;
 
@@ -34,7 +33,7 @@ public interface StreamSource {
      *                   must NOT call {@code deliver} after {@link
      *                   #stop} returns.
      */
-    void start(long sourceId, @NonNull String filterSpec, @NonNull Consumer<NormalizedPost> deliver);
+    void start(long sourceId, String filterSpec, Consumer<NormalizedPost> deliver);
 
     /**
      * Close the subscription. Implementations must release any

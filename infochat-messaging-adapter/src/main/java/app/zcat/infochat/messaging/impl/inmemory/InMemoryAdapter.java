@@ -1,6 +1,5 @@
 package app.zcat.infochat.messaging.impl.inmemory;
 
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import app.zcat.infochat.messaging.AdapterTrustLevel;
@@ -121,7 +120,7 @@ public final class InMemoryAdapter implements MessagingAdapter {
     }
 
     @Override
-    public Identity assertIdentity(@NonNull InboundMessage msg) {
+    public Identity assertIdentity(InboundMessage msg) {
         // The in-memory adapter has no cryptographic verification step;
         // the test driver populated the Identity when it synthesised
         // the inbound message. SimpleX/Signal will assert against the
@@ -130,7 +129,7 @@ public final class InMemoryAdapter implements MessagingAdapter {
     }
 
     @Override
-    public MessageHandle send(@NonNull OutboundMessage msg) throws MessagingException {
+    public MessageHandle send(OutboundMessage msg) throws MessagingException {
         long id = handleIdGen.incrementAndGet();
         MessageHandle handle = new MessageHandle("inmem-" + id);
         InMemoryMessageHandle internal = new InMemoryMessageHandle(id, msg);
@@ -142,28 +141,28 @@ public final class InMemoryAdapter implements MessagingAdapter {
     }
 
     @Override
-    public void update(@NonNull MessageHandle handle, @NonNull String body) throws MessagingException {
+    public void update(MessageHandle handle, String body) throws MessagingException {
         requireKnownAndOpen(handle).add(new UpdateEvent(body, false));
     }
 
     @Override
-    public void finalizeMessage(@NonNull MessageHandle handle, @NonNull String body) throws MessagingException {
+    public void finalizeMessage(MessageHandle handle, String body) throws MessagingException {
         requireKnownAndOpen(handle).add(new UpdateEvent(body, true));
         finalized.put(handle.opaqueValue(), Boolean.TRUE);
     }
 
     @Override
-    public void setTyping(@NonNull ScopeRef scope, boolean typing) {
+    public void setTyping(ScopeRef scope, boolean typing) {
         typingEvents.add(new TypingEvent(scope, typing));
     }
 
     @Override
-    public void setInboundHandler(@NonNull InboundHandler handler) {
+    public void setInboundHandler(InboundHandler handler) {
         this.handler = handler;
     }
 
     @Override
-    public void setMembershipEventHandler(@NonNull MembershipHandler handler) {
+    public void setMembershipEventHandler(MembershipHandler handler) {
         this.membershipHandler = handler;
     }
 
@@ -175,7 +174,7 @@ public final class InMemoryAdapter implements MessagingAdapter {
      * verify identity stability can rely on the same instance being
      * delivered for every message with the same id).
      */
-    public void deliverDm(@NonNull String contactId, @NonNull String text) {
+    public void deliverDm(String contactId, String text) {
         InboundHandler current = handler;
         if (current == null) {
             // Adapter boundary: a test driver dispatching to an
@@ -199,12 +198,12 @@ public final class InMemoryAdapter implements MessagingAdapter {
     // -- Group primitives (test infrastructure) --------------------------------
 
     /** Register a group for subsequent member and mention operations. */
-    public void createGroup(@NonNull String groupId) {
+    public void createGroup(String groupId) {
         groups.putIfAbsent(groupId, ConcurrentHashMap.newKeySet());
     }
 
     /** Add a member to an existing group. */
-    public void addMember(@NonNull String groupId, @NonNull String contactId) {
+    public void addMember(String groupId, String contactId) {
         Set<String> members = groups.get(groupId);
         if (members == null) {
             throw new IllegalStateException(
@@ -214,7 +213,7 @@ public final class InMemoryAdapter implements MessagingAdapter {
     }
 
     /** Remove a member and fire a {@link MembershipEvent.UserLeft}. */
-    public void removeMember(@NonNull String groupId, @NonNull String contactId) {
+    public void removeMember(String groupId, String contactId) {
         Set<String> members = groups.get(groupId);
         if (members == null) {
             throw new IllegalStateException(
@@ -225,7 +224,7 @@ public final class InMemoryAdapter implements MessagingAdapter {
     }
 
     /** Remove the bot from a group and fire a {@link MembershipEvent.BotRemoved}. */
-    public void removeBot(@NonNull String groupId) {
+    public void removeBot(String groupId) {
         dispatchMembershipEvent(new MembershipEvent.BotRemoved(groupId));
     }
 
@@ -250,9 +249,9 @@ public final class InMemoryAdapter implements MessagingAdapter {
      * group, sender, and text, and synchronously invoke the registered
      * {@link InboundHandler}. Mirrors {@link #deliverDm} for groups.
      */
-    public void deliverGroupMention(@NonNull String groupId,
-                                    @NonNull String senderContactId,
-                                    @NonNull String text) {
+    public void deliverGroupMention(String groupId,
+                                    String senderContactId,
+                                    String text) {
         InboundHandler current = handler;
         if (current == null) {
             throw new IllegalStateException(
@@ -276,12 +275,12 @@ public final class InMemoryAdapter implements MessagingAdapter {
     }
 
     /** Whether a group is registered. */
-    public boolean hasGroup(@NonNull String groupId) {
+    public boolean hasGroup(String groupId) {
         return groups.containsKey(groupId);
     }
 
     /** Snapshot of current members in a group. */
-    public Set<String> groupMembers(@NonNull String groupId) {
+    public Set<String> groupMembers(String groupId) {
         Set<String> members = groups.get(groupId);
         if (members == null) {
             return Set.of();
@@ -301,7 +300,7 @@ public final class InMemoryAdapter implements MessagingAdapter {
      * initial send body and the finalize body when present). Order is
      * insertion order: send → update*… → finalize?.
      */
-    public List<UpdateEvent> updateHistory(@NonNull MessageHandle handle) {
+    public List<UpdateEvent> updateHistory(MessageHandle handle) {
         List<UpdateEvent> events = history.get(handle.opaqueValue());
         if (events == null) {
             return Collections.emptyList();
@@ -350,8 +349,8 @@ public final class InMemoryAdapter implements MessagingAdapter {
     }
 
     /** Update / finalize event recorded per handle in the order applied. */
-    public record UpdateEvent(@NonNull String body, boolean isFinal) {}
+    public record UpdateEvent(String body, boolean isFinal) {}
 
     /** Typing on/off event recorded in the order applied. */
-    public record TypingEvent(@NonNull ScopeRef scope, boolean typing) {}
+    public record TypingEvent(ScopeRef scope, boolean typing) {}
 }

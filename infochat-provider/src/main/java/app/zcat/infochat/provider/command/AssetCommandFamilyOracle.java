@@ -3,7 +3,6 @@ package app.zcat.infochat.provider.command;
 import app.zcat.infochat.provider.command.asset.AssetRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -30,7 +29,7 @@ public class AssetCommandFamilyOracle {
     }
 
     @Inject
-    public AssetCommandFamilyOracle(@NonNull AssetRegistry assetRegistry) {
+    public AssetCommandFamilyOracle(AssetRegistry assetRegistry) {
         this.assetRegistry = assetRegistry;
     }
 
@@ -38,7 +37,7 @@ public class AssetCommandFamilyOracle {
      * Whether the given slash command name (without the leading
      * {@code /}) belongs to the operator-configured asset family.
      */
-    public boolean isAssetCommand(@NonNull String slashCommand) {
+    public boolean isAssetCommand(String slashCommand) {
         // No-arg (test) path: no registry → false for all.
         // CDI (production) path: delegates to the loaded registry.
         return assetRegistry != null && assetRegistry.containsEnabledAsset(slashCommand);

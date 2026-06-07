@@ -1,6 +1,5 @@
 package app.zcat.infochat.messaging.impl.simplex;
 
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -71,7 +70,7 @@ final class SimpleXWebSocketClient {
      */
     @FunctionalInterface
     interface InboundConsumer {
-        void onInbound(@NonNull InboundMessage msg);
+        void onInbound(InboundMessage msg);
     }
 
     /**
@@ -83,7 +82,7 @@ final class SimpleXWebSocketClient {
      */
     @FunctionalInterface
     interface GroupCandidateConsumer {
-        void onGroupCandidate(SimpleXMessageCodec.@NonNull GroupCandidate gc);
+        void onGroupCandidate(SimpleXMessageCodec.GroupCandidate gc);
     }
 
     private final URI uri;
@@ -116,10 +115,10 @@ final class SimpleXWebSocketClient {
     private final Object sendLock = new Object();
     private volatile boolean closed = false;
 
-    SimpleXWebSocketClient(@NonNull URI uri,
-                           @NonNull HttpClient httpClient,
-                           @NonNull InboundConsumer inboundConsumer,
-                           @NonNull GroupCandidateConsumer groupCandidateConsumer) {
+    SimpleXWebSocketClient(URI uri,
+                           HttpClient httpClient,
+                           InboundConsumer inboundConsumer,
+                           GroupCandidateConsumer groupCandidateConsumer) {
         this.uri = uri;
         this.httpClient = httpClient;
         this.inboundConsumer = inboundConsumer;
@@ -205,9 +204,9 @@ final class SimpleXWebSocketClient {
      * @param envelopeJson the JSON envelope produced by {@link SimpleXMessageCodec}.
      * @param ackTimeout   bound on how long to wait for the ack.
      */
-    @NonNull String sendCommand(@NonNull String corrId,
-                                @NonNull String envelopeJson,
-                                @NonNull Duration ackTimeout) throws MessagingException {
+    String sendCommand(String corrId,
+                                String envelopeJson,
+                                Duration ackTimeout) throws MessagingException {
         if (closed) {
             throw new MessagingException(FailureCategory.PERMANENT,
                     "WebSocket is closed; cannot send corrId=" + corrId);
@@ -265,7 +264,7 @@ final class SimpleXWebSocketClient {
      * which the SPI defines as best-effort and not allowed to throw. A
      * send failure here is logged at DEBUG and absorbed.
      */
-    void sendFireAndForget(@NonNull String envelopeJson) {
+    void sendFireAndForget(String envelopeJson) {
         WebSocket ws = webSocket;
         if (ws == null || closed) {
             LOG.debug("dropping fire-and-forget send; socket not available");
@@ -344,13 +343,13 @@ final class SimpleXWebSocketClient {
         private boolean skipUntilLast = false;
 
         @Override
-        public void onOpen(@NonNull WebSocket webSocket) {
+        public void onOpen(WebSocket webSocket) {
             webSocket.request(1);
         }
 
         @Override
-        public java.util.concurrent.@Nullable CompletionStage<?> onText(@NonNull WebSocket webSocket,
-                                                              @NonNull CharSequence data,
+        public java.util.concurrent.@Nullable CompletionStage<?> onText(WebSocket webSocket,
+                                                              CharSequence data,
                                                               boolean last) {
             if (skipUntilLast) {
                 if (last) {
@@ -378,9 +377,9 @@ final class SimpleXWebSocketClient {
         }
 
         @Override
-        public java.util.concurrent.@Nullable CompletionStage<?> onClose(@NonNull WebSocket webSocket,
+        public java.util.concurrent.@Nullable CompletionStage<?> onClose(WebSocket webSocket,
                                                                int statusCode,
-                                                               @NonNull String reason) {
+                                                               String reason) {
             // The supervisor (SimpleXSubprocess) sees the process exit and
             // restarts the pair; this listener just drains pending futures.
             failAllPending(new MessagingException(FailureCategory.PERMANENT,
@@ -389,7 +388,7 @@ final class SimpleXWebSocketClient {
         }
 
         @Override
-        public void onError(@NonNull WebSocket webSocket, @NonNull Throwable error) {
+        public void onError(WebSocket webSocket, Throwable error) {
             failAllPending(new MessagingException(FailureCategory.TRANSIENT,
                     "WebSocket error: " + error.getClass().getSimpleName(), error));
         }

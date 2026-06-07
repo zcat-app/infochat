@@ -1,7 +1,6 @@
 package app.zcat.infochat.provider.chat.tool;
 
 import app.zcat.infochat.provider.chat.ChatToolRegistry;
-import org.jspecify.annotations.NonNull;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -26,14 +25,14 @@ public class RecallMemoryTool implements ChatToolRegistry.ChatTool {
     private final DataSource dataSource;
 
     @Inject
-    public RecallMemoryTool(@NonNull DataSource dataSource) {
+    public RecallMemoryTool(DataSource dataSource) {
         this.dataSource = dataSource;
     }
 
     @Override
     @SuppressWarnings("unchecked")
-    public @NonNull String execute(@NonNull UUID userId, @NonNull String scopeKind,
-                                    @NonNull UUID scopeId, @NonNull Map<String, Object> args)
+    public String execute(UUID userId, String scopeKind,
+                                    UUID scopeId, Map<String, Object> args)
             throws SQLException {
         List<String> keywords = args.containsKey("keywords")
                 ? (List<String>) args.get("keywords") : List.of();

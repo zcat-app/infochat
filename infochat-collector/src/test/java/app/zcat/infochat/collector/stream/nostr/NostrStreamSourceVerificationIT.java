@@ -10,7 +10,6 @@ import app.zcat.infochat.ssrf.IpBlocklist;
 import app.zcat.infochat.ssrf.SsrfGuardedHttpClient;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
-import org.jspecify.annotations.NonNull;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -304,7 +303,7 @@ class NostrStreamSourceVerificationIT {
     private static final class LoopbackPermittingBlocklist extends IpBlocklist {
 
         @Override
-        public boolean isBlocked(@NonNull InetAddress addr) {
+        public boolean isBlocked(InetAddress addr) {
             if (addr.isLoopbackAddress()) {
                 return false;
             }

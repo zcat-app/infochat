@@ -1,6 +1,5 @@
 package app.zcat.infochat.messaging.impl.simplex;
 
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -84,12 +83,12 @@ final class SimpleXSubprocess {
     private volatile @Nullable Thread supervisor;
     private volatile boolean stopping = false;
 
-    SimpleXSubprocess(@NonNull List<String> command,
-                      @NonNull Duration backoffBase,
-                      @NonNull Duration backoffMax,
+    SimpleXSubprocess(List<String> command,
+                      Duration backoffBase,
+                      Duration backoffMax,
                       int crashCap,
-                      @NonNull Consumer<String> adminNotifier,
-                      @NonNull Random random) {
+                      Consumer<String> adminNotifier,
+                      Random random) {
         if (command.isEmpty()) {
             throw new IllegalArgumentException("command must be non-empty");
         }
@@ -107,7 +106,7 @@ final class SimpleXSubprocess {
      * integration ticket; the shape here matches the documented CLI surface
      * (data-dir via {@code -d}, WebSocket port via {@code --network}).
      */
-    static @NonNull List<String> commandFor(@NonNull SimpleXConfig config) {
+    static List<String> commandFor(SimpleXConfig config) {
         return List.of(
                 config.binary(),
                 "-d", config.dataDir(),
@@ -164,7 +163,7 @@ final class SimpleXSubprocess {
         state.compareAndSet(State.RESTARTING, State.STOPPED);
     }
 
-    @NonNull State state() {
+    State state() {
         // The AtomicReference is seeded non-null (State.NOT_STARTED) and only
         // ever CAS'd to non-null State values; NullAway models
         // AtomicReference.get() as @Nullable, so assert the invariant here.
@@ -329,10 +328,10 @@ final class SimpleXSubprocess {
      *
      * @param attempt 1-based consecutive-failure count.
      */
-    static @NonNull Duration backoffDelay(int attempt,
-                                          @NonNull Duration base,
-                                          @NonNull Duration max,
-                                          @NonNull Random random) {
+    static Duration backoffDelay(int attempt,
+                                          Duration base,
+                                          Duration max,
+                                          Random random) {
         long maxMillis = max.toMillis();
         long exp = base.toMillis();
         for (int i = 1; i < attempt && exp < maxMillis; i++) {

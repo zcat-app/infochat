@@ -1,7 +1,6 @@
 package app.zcat.infochat.collector.stream.nostr;
 
 import app.zcat.infochat.ssrf.SsrfGuardedHttpClient;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -94,7 +93,7 @@ final class NostrRelayConnection {
     private volatile boolean running = true;
     // Lazily initialized when the run loop connects (null in the pre-connect
     // window, which stop() guards with explicit null-checks); never assigned
-    // null thereafter, so @NonNull at every deref under NullAway.Init.
+    // null thereafter, so non-null at every deref under NullAway.Init.
     @SuppressWarnings("NullAway.Init")
     private volatile Thread loopThread;
     @SuppressWarnings("NullAway.Init")
@@ -110,14 +109,14 @@ final class NostrRelayConnection {
     @SuppressWarnings("NullAway.Init")
     private volatile List<InetAddress> pinnedAddresses;
 
-    NostrRelayConnection(@NonNull URI relayUri, @NonNull String filterSpec,
-                         @NonNull Supplier<OptionalLong> sinceCursor,
-                         @NonNull Consumer<NostrEvent> eventSink,
-                         @NonNull Duration backoffBase, @NonNull Duration backoffMax,
-                         @NonNull HttpClient httpClient,
-                         @NonNull SsrfGuardedHttpClient ssrfClient,
-                         @NonNull Duration peerIpCheckInterval,
-                         @NonNull RelayHealthTracker healthTracker) {
+    NostrRelayConnection(URI relayUri, String filterSpec,
+                         Supplier<OptionalLong> sinceCursor,
+                         Consumer<NostrEvent> eventSink,
+                         Duration backoffBase, Duration backoffMax,
+                         HttpClient httpClient,
+                         SsrfGuardedHttpClient ssrfClient,
+                         Duration peerIpCheckInterval,
+                         RelayHealthTracker healthTracker) {
         this.relayUri = relayUri;
         this.subscriptionId = "infochat-" + UUID.randomUUID();
         this.filterSpec = filterSpec;
@@ -359,8 +358,8 @@ final class NostrRelayConnection {
      *
      * @param attempt 1-based consecutive-failure count.
      */
-    static @NonNull Duration backoffDelay(int attempt, @NonNull Duration base,
-                                          @NonNull Duration max, @NonNull Random random) {
+    static Duration backoffDelay(int attempt, Duration base,
+                                          Duration max, Random random) {
         long maxMillis = max.toMillis();
         long exp = base.toMillis();
         for (int i = 1; i < attempt && exp < maxMillis; i++) {
@@ -390,14 +389,14 @@ final class NostrRelayConnection {
         // and routes to the reconnect/backoff arm.
         @SuppressWarnings("FutureReturnValueIgnored")
         @Override
-        public void onOpen(@NonNull WebSocket webSocket) {
+        public void onOpen(WebSocket webSocket) {
             webSocket.request(1);
             String req = NostrMessage.serializeReq(subscriptionId, filterSpec, sinceCursor.get());
             webSocket.sendText(req, true);
         }
 
         @Override
-        public @Nullable CompletionStage<?> onText(@NonNull WebSocket webSocket, @NonNull CharSequence data, boolean last) {
+        public @Nullable CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
             if (skipUntilLast) {
                 if (last) {
                     skipUntilLast = false;
@@ -424,13 +423,13 @@ final class NostrRelayConnection {
         }
 
         @Override
-        public @Nullable CompletionStage<?> onClose(@NonNull WebSocket webSocket, int statusCode, @NonNull String reason) {
+        public @Nullable CompletionStage<?> onClose(WebSocket webSocket, int statusCode, String reason) {
             signalClosed();
             return null;
         }
 
         @Override
-        public void onError(@NonNull WebSocket webSocket, @NonNull Throwable error) {
+        public void onError(WebSocket webSocket, Throwable error) {
             signalClosed();
         }
 

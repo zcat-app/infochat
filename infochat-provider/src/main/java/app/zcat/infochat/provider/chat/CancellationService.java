@@ -3,7 +3,6 @@ package app.zcat.infochat.provider.chat;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -43,7 +42,7 @@ public class CancellationService {
      * Returns true if an in-flight slot existed and cancellation was attempted;
      * false if nothing was in flight.
      */
-    public boolean cancel(@NonNull UUID userId, @NonNull String scopeKind, @NonNull UUID scopeId) {
+    public boolean cancel(UUID userId, String scopeKind, UUID scopeId) {
         Optional<InFlightTracker.CancellationHandle> handleOpt =
                 inFlightTracker.getCancellationHandle(userId, scopeKind, scopeId);
         if (handleOpt.isEmpty()) {
@@ -74,7 +73,7 @@ public class CancellationService {
      * read-only queries — bounds the worst case even when pg_cancel_backend
      * fails or the cancellation handle is never registered.
      */
-    public void applyStatementTimeout(@NonNull Connection conn) throws SQLException {
+    public void applyStatementTimeout(Connection conn) throws SQLException {
         try (var stmt = conn.createStatement()) {
             stmt.execute("SET statement_timeout = " + statementTimeout.toMillis());
         }
@@ -83,7 +82,7 @@ public class CancellationService {
     /**
      * Expose the configured statement timeout for test verification.
      */
-    public @NonNull Duration statementTimeout() {
+    public Duration statementTimeout() {
         return statementTimeout;
     }
 

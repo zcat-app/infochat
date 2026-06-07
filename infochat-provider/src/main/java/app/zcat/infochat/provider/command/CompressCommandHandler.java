@@ -15,7 +15,6 @@ import app.zcat.infochat.provider.messaging.InboundContext;
 import app.zcat.infochat.provider.user.UserRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -102,7 +101,7 @@ public class CompressCommandHandler implements CommandHandler {
     }
 
     @Override
-    public OutboundMessage handle(@NonNull ScopeRef scope, @NonNull String rawText) {
+    public OutboundMessage handle(ScopeRef scope, String rawText) {
         String adapter = inboundContext.adapterName();
         String callerContactId = inboundContext.senderContactId();
 
@@ -135,8 +134,8 @@ public class CompressCommandHandler implements CommandHandler {
      * chat_message, resets session counters. On LLM failure the
      * session is left unchanged.
      */
-    public CompressResult compress(@NonNull UUID userId, @NonNull String scopeKind,
-                                   @NonNull UUID scopeId, @NonNull String scopeLanguage) {
+    public CompressResult compress(UUID userId, String scopeKind,
+                                   UUID scopeId, String scopeLanguage) {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {

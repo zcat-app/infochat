@@ -2,7 +2,6 @@ package app.zcat.infochat.provider.chat;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jspecify.annotations.NonNull;
 
 import java.util.List;
 import java.util.UUID;
@@ -14,9 +13,9 @@ import java.util.UUID;
 @ApplicationScoped
 public class ChatPromptBuilder {
 
-    public record BuiltPrompt(@NonNull String systemPrompt,
-                               @NonNull String userPrompt,
-                               @NonNull String marker) {}
+    public record BuiltPrompt(String systemPrompt,
+                               String userPrompt,
+                               String marker) {}
 
     static final String UNTRUSTED_CONTENT_OPEN_FORMAT =
             "<<<UNTRUSTED_CONTENT id=\"%s\">>>";
@@ -44,14 +43,14 @@ public class ChatPromptBuilder {
     private final ChatMemoryPreFetcher memoryPreFetcher;
 
     @Inject
-    public ChatPromptBuilder(@NonNull ChatMemoryPreFetcher memoryPreFetcher) {
+    public ChatPromptBuilder(ChatMemoryPreFetcher memoryPreFetcher) {
         this.memoryPreFetcher = memoryPreFetcher;
     }
 
-    public @NonNull BuiltPrompt build(@NonNull UUID userId,
-                                       @NonNull String scopeKind,
-                                       @NonNull UUID scopeId,
-                                       @NonNull String userMessage) {
+    public BuiltPrompt build(UUID userId,
+                                       String scopeKind,
+                                       UUID scopeId,
+                                       String userMessage) {
         String marker = UUID.randomUUID().toString();
         String open = String.format(UNTRUSTED_CONTENT_OPEN_FORMAT, marker);
         String close = String.format(UNTRUSTED_CONTENT_CLOSE_FORMAT, marker);

@@ -3,7 +3,6 @@ package app.zcat.infochat.provider.group;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.messaging.RateCapBucket;
 import org.junit.jupiter.api.Test;
-import org.jspecify.annotations.NonNull;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -91,9 +90,9 @@ class GroupApprovalCheckTest {
         assertEquals(REDACTED_CONTACT, service.lastInvocation.redactedContact());
     }
 
-    private static GroupApprovalCheck checkWith(@NonNull StubGroupRepository repo,
-                                                @NonNull RateCapBucket bucket,
-                                                @NonNull RecordingGroupApprovalService service) {
+    private static GroupApprovalCheck checkWith(StubGroupRepository repo,
+                                                RateCapBucket bucket,
+                                                RecordingGroupApprovalService service) {
         GroupApprovalCheck check = new GroupApprovalCheck();
         check.groupRepository = repo;
         check.rateCapBucket = bucket;
@@ -101,8 +100,8 @@ class GroupApprovalCheckTest {
         return check;
     }
 
-    private static StubGroupRepository stubRepoWithExistingRow(@NonNull UUID groupId,
-                                                               @NonNull String approvalStatus) {
+    private static StubGroupRepository stubRepoWithExistingRow(UUID groupId,
+                                                               String approvalStatus) {
         return new StubGroupRepository(Optional.of(
                 new GroupRepository.GroupApprovalRow(
                         groupId, approvalStatus, UUID.randomUUID(), null)));
@@ -130,7 +129,7 @@ class GroupApprovalCheckTest {
         }
 
         @Override
-        public boolean tryAcquireGroupReply(@NonNull UUID groupId) {
+        public boolean tryAcquireGroupReply(UUID groupId) {
             if (tokensLeft > 0) {
                 tokensLeft--;
                 return true;
@@ -148,14 +147,14 @@ class GroupApprovalCheckTest {
     static final class StubGroupRepository extends GroupRepository {
         private final Optional<GroupApprovalRow> response;
 
-        StubGroupRepository(@NonNull Optional<GroupApprovalRow> response) {
+        StubGroupRepository(Optional<GroupApprovalRow> response) {
             super(GroupApprovalServiceTest.noopDataSource());
             this.response = response;
         }
 
         @Override
-        public @NonNull Optional<GroupApprovalRow> findApprovalRow(
-                @NonNull String adapter, @NonNull String upstreamGroupId) {
+        public Optional<GroupApprovalRow> findApprovalRow(
+                String adapter, String upstreamGroupId) {
             return response;
         }
     }
@@ -176,19 +175,19 @@ class GroupApprovalCheckTest {
 
         @Override
         public GroupApprovalCheck.Outcome evaluate(
-                @NonNull String adapter,
-                @NonNull String upstreamGroupId,
-                @NonNull UUID activatorUserId,
-                @NonNull String activatorRedactedContactId) {
+                String adapter,
+                String upstreamGroupId,
+                UUID activatorUserId,
+                String activatorRedactedContactId) {
             lastInvocation = new Invocation(
                     adapter, upstreamGroupId, activatorUserId, activatorRedactedContactId);
             return programmedOutcome;
         }
 
         record Invocation(
-                @NonNull String adapter,
-                @NonNull String upstreamGroupId,
-                @NonNull UUID userId,
-                @NonNull String redactedContact) {}
+                String adapter,
+                String upstreamGroupId,
+                UUID userId,
+                String redactedContact) {}
     }
 }

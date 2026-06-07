@@ -1,7 +1,6 @@
 package app.zcat.infochat.provider.messaging;
 
 import app.zcat.infochat.provider.group.GroupApprovalCheck;
-import org.jspecify.annotations.NonNull;
 
 import java.util.UUID;
 
@@ -36,10 +35,10 @@ import java.util.UUID;
  */
 class NoopGroupApprovalCheck extends GroupApprovalCheck {
     @Override
-    public @NonNull Outcome check(@NonNull String adapter,
-                                  @NonNull String upstreamGroupId,
-                                  @NonNull UUID activatorUserId,
-                                  @NonNull String activatorRedactedContactId) {
+    public Outcome check(String adapter,
+                                  String upstreamGroupId,
+                                  UUID activatorUserId,
+                                  String activatorRedactedContactId) {
         return new Outcome.Approved();
     }
 }

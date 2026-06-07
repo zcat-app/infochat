@@ -1,6 +1,5 @@
 package app.zcat.infochat.messaging;
 
-import org.jspecify.annotations.NonNull;
 
 /**
  * Adapter-sourced group-membership lifecycle signal. Adapters surface
@@ -19,21 +18,21 @@ public sealed interface MembershipEvent
                 MembershipEvent.GroupDeleted {
 
     /** The adapter-defined stable group identifier this event pertains to. */
-    @NonNull String adapterGroupId();
+    String adapterGroupId();
 
     /** A user joined a group the bot is a member of. */
-    record UserJoined(@NonNull String adapterGroupId, @NonNull String contactId)
+    record UserJoined(String adapterGroupId, String contactId)
             implements MembershipEvent {}
 
     /** A user left (or was removed from) a group the bot is a member of. */
-    record UserLeft(@NonNull String adapterGroupId, @NonNull String contactId)
+    record UserLeft(String adapterGroupId, String contactId)
             implements MembershipEvent {}
 
     /** The bot itself was removed from the group. */
-    record BotRemoved(@NonNull String adapterGroupId)
+    record BotRemoved(String adapterGroupId)
             implements MembershipEvent {}
 
     /** The group was deleted entirely by the platform or group owner. */
-    record GroupDeleted(@NonNull String adapterGroupId)
+    record GroupDeleted(String adapterGroupId)
             implements MembershipEvent {}
 }

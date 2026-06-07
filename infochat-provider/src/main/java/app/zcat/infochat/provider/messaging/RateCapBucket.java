@@ -3,7 +3,6 @@ package app.zcat.infochat.provider.messaging;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jspecify.annotations.NonNull;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -159,7 +158,7 @@ public class RateCapBucket {
      * — the group cap is per-15-minutes by design, the contact cap is
      * per-minute. The two maps share the eviction sweep below.</p>
      */
-    public boolean tryAcquireGroupReply(@NonNull UUID groupId) {
+    public boolean tryAcquireGroupReply(UUID groupId) {
         Bucket bucket = groupBuckets.computeIfAbsent(
                 groupId, k -> new Bucket(groupReplyCap, clock.millis()));
         synchronized (bucket) {

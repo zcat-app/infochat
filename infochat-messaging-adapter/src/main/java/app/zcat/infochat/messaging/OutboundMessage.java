@@ -1,6 +1,5 @@
 package app.zcat.infochat.messaging;
 
-import org.jspecify.annotations.NonNull;
 
 import java.time.Instant;
 
@@ -16,8 +15,8 @@ import java.time.Instant;
  * is non-null and stable across retries of the same logical outbound.</p>
  */
 public record OutboundMessage(
-        @NonNull ScopeRef scope,
-        @NonNull String text,
-        @NonNull Instant requestedAt,
-        @NonNull String correlationId) {
+        ScopeRef scope,
+        String text,
+        Instant requestedAt,
+        String correlationId) {
 }

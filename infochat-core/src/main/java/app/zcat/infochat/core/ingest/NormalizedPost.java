@@ -1,6 +1,5 @@
 package app.zcat.infochat.core.ingest;
 
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import java.time.Instant;
@@ -43,12 +42,12 @@ import java.util.Map;
  */
 public record NormalizedPost(
         long sourceId,
-        @NonNull String upstreamIdentifier,
+        String upstreamIdentifier,
         @Nullable String title,
-        @NonNull String body,
+        String body,
         @Nullable String url,
         @Nullable Instant publishedAt,
-        @NonNull Instant fetchedAt,
-        @NonNull Map<String, String> rawMetadata
+        Instant fetchedAt,
+        Map<String, String> rawMetadata
 ) {
 }

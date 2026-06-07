@@ -9,7 +9,6 @@ import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
@@ -95,7 +94,7 @@ public class SavedCommandHandler implements CommandHandler {
     }
 
     @Override
-    public OutboundMessage handle(@NonNull ScopeRef scope, @NonNull String rawText) {
+    public OutboundMessage handle(ScopeRef scope, String rawText) {
         ParsedArgs args = parseArgs(rawText);
         String adapter = inboundContext.adapterName();
         String callerContactId = resolveContactId(scope);

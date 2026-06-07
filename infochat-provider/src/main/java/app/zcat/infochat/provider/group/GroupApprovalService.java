@@ -5,7 +5,6 @@ import app.zcat.infochat.provider.bundle.BundleKeys;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jspecify.annotations.NonNull;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -105,10 +104,10 @@ public class GroupApprovalService {
      *         from the four GROUP_* keys), depending on the path.
      */
     public GroupApprovalCheck.Outcome evaluate(
-            @NonNull String adapter,
-            @NonNull String upstreamGroupId,
-            @NonNull UUID activatorUserId,
-            @NonNull String activatorRedactedContactId) {
+            String adapter,
+            String upstreamGroupId,
+            UUID activatorUserId,
+            String activatorRedactedContactId) {
         // Existing-row branch — caps are NOT consulted (they bound
         // creation, not subsequent @mentions on already-pending
         // groups). The dispatch returns the appropriate user-visible
@@ -163,10 +162,10 @@ public class GroupApprovalService {
      * creation", which the INSERT…ON CONFLICT semantics already
      * guarantee on the caller side.</p>
      */
-    private void notifyAdmin(@NonNull String adapter,
-                             @NonNull String upstreamGroupId,
-                             @NonNull UUID groupId,
-                             @NonNull String activatorRedactedContactId) {
+    private void notifyAdmin(String adapter,
+                             String upstreamGroupId,
+                             UUID groupId,
+                             String activatorRedactedContactId) {
         // The dedup key uses upstreamGroupId verbatim — the SELECT/
         // INSERT use the same value, so the key inherits the UNIQUE
         // (adapter, upstream_group_id) constraint and cannot collide
@@ -198,7 +197,7 @@ public class GroupApprovalService {
     // the injected control characters rendered visibly (e.g. literal
     // "\n") rather than silently flattened into a single line that
     // could carry a forged `approve_command=` token.
-    static String escapeControlChars(@NonNull String value) {
+    static String escapeControlChars(String value) {
         return value
                 .replace("\\", "\\\\")
                 .replace("\n", "\\n")

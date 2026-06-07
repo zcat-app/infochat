@@ -4,7 +4,6 @@ import app.zcat.infochat.core.ingest.NormalizedPost;
 import app.zcat.infochat.ssrf.IpBlocklist;
 import app.zcat.infochat.ssrf.SsrfGuardedHttpClient;
 import com.fasterxml.jackson.databind.JsonNode;
-import org.jspecify.annotations.NonNull;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -222,7 +221,7 @@ class NostrStreamSourceTest {
     private static final class LoopbackPermittingBlocklist extends IpBlocklist {
 
         @Override
-        public boolean isBlocked(@NonNull InetAddress addr) {
+        public boolean isBlocked(InetAddress addr) {
             if (addr.isLoopbackAddress()) {
                 return false;
             }

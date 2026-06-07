@@ -1,6 +1,5 @@
 package app.zcat.infochat.llm;
 
-import org.jspecify.annotations.NonNull;
 
 import java.util.List;
 
@@ -30,5 +29,5 @@ public interface EmbeddingProvider {
      * @return one {@link EmbeddingResult} per input, in input order.
      *         Never null; size equals {@code texts.size()}.
      */
-    List<EmbeddingResult> embed(@NonNull List<String> texts);
+    List<EmbeddingResult> embed(List<String> texts);
 }

@@ -3,7 +3,6 @@ package app.zcat.infochat.provider.chat.tool;
 import app.zcat.infochat.provider.chat.ChatToolRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jspecify.annotations.NonNull;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -41,13 +40,13 @@ public class GetReferencesTool implements ChatToolRegistry.ChatTool {
     private final DataSource dataSource;
 
     @Inject
-    public GetReferencesTool(@NonNull DataSource dataSource) {
+    public GetReferencesTool(DataSource dataSource) {
         this.dataSource = dataSource;
     }
 
     @Override
-    public @NonNull String execute(@NonNull UUID userId, @NonNull String scopeKind,
-                                    @NonNull UUID scopeId, @NonNull Map<String, Object> args)
+    public String execute(UUID userId, String scopeKind,
+                                    UUID scopeId, Map<String, Object> args)
             throws SQLException {
         String uid = (String) args.get("uid");
         if (uid == null) {

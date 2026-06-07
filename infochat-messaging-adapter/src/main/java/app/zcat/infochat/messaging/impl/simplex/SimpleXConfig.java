@@ -5,7 +5,6 @@ import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jspecify.annotations.NonNull;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -50,8 +49,8 @@ public class SimpleXConfig {
     private final int wsPort;
 
     @Inject
-    public SimpleXConfig(@ConfigProperty(name = BINARY_KEY) @NonNull String binary,
-                         @ConfigProperty(name = DATA_DIR_KEY) @NonNull String dataDir,
+    public SimpleXConfig(@ConfigProperty(name = BINARY_KEY) String binary,
+                         @ConfigProperty(name = DATA_DIR_KEY) String dataDir,
                          @ConfigProperty(name = WS_PORT_KEY, defaultValue = "" + DEFAULT_WS_PORT) int wsPort) {
         this.binary = binary;
         this.dataDir = dataDir;

@@ -9,7 +9,6 @@ import app.zcat.infochat.provider.digest.DigestRetryService;
 import app.zcat.infochat.provider.digest.DigestRetryService.RetryResult;
 import app.zcat.infochat.provider.group.GroupMembershipRepository;
 import app.zcat.infochat.provider.messaging.InboundContext;
-import org.jspecify.annotations.NonNull;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -111,7 +110,7 @@ class RetryDigestCommandTest {
         RetryResult nextResult = RetryResult.SUCCESS;
 
         @Override
-        public @NonNull RetryResult retryDigest(@NonNull UUID groupId) {
+        public RetryResult retryDigest(UUID groupId) {
             return nextResult;
         }
     }
@@ -125,7 +124,7 @@ class RetryDigestCommandTest {
         }
 
         @Override
-        public boolean isGroupAdmin(@NonNull UUID groupId, @NonNull UUID userId) {
+        public boolean isGroupAdmin(UUID groupId, UUID userId) {
             return isGroupAdmin;
         }
     }

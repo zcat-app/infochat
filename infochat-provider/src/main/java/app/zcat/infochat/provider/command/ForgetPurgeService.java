@@ -1,7 +1,6 @@
 package app.zcat.infochat.provider.command;
 
 import jakarta.enterprise.context.ApplicationScoped;
-import org.jspecify.annotations.NonNull;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -81,10 +80,10 @@ public class ForgetPurgeService {
      * Pre-count rows that will be purged. Called before the audit
      * row is written (Invariant 7: audit-before-effect).
      */
-    public PurgeResult preCount(@NonNull Connection conn,
-                                @NonNull UUID userId,
-                                @NonNull String scopeKind,
-                                @NonNull UUID scopeId) throws SQLException {
+    public PurgeResult preCount(Connection conn,
+                                UUID userId,
+                                String scopeKind,
+                                UUID scopeId) throws SQLException {
         int chatMemoryCount = countScoped(conn, COUNT_CHAT_MEMORY_SQL,
                 userId, scopeKind, scopeId);
         int chatSessionCount = countScoped(conn, COUNT_CHAT_SESSION_SQL,
@@ -100,10 +99,10 @@ public class ForgetPurgeService {
      * Execute the four-table purge inside the caller's transaction.
      * Called after the audit row has been written.
      */
-    public PurgeResult purge(@NonNull Connection conn,
-                             @NonNull UUID userId,
-                             @NonNull String scopeKind,
-                             @NonNull UUID scopeId) throws SQLException {
+    public PurgeResult purge(Connection conn,
+                             UUID userId,
+                             String scopeKind,
+                             UUID scopeId) throws SQLException {
         int chatMemoryCount = deleteScoped(conn, DELETE_CHAT_MEMORY_SQL,
                 userId, scopeKind, scopeId);
         int chatSessionCount = deleteScoped(conn, DELETE_CHAT_SESSION_SQL,
@@ -120,10 +119,10 @@ public class ForgetPurgeService {
      * user still has chat-tier rows. Runs inside the caller's
      * transaction so the count reflects the post-purge state.
      */
-    public int countRemainingScopes(@NonNull Connection conn,
-                                    @NonNull UUID userId,
-                                    @NonNull String scopeKind,
-                                    @NonNull UUID scopeId) throws SQLException {
+    public int countRemainingScopes(Connection conn,
+                                    UUID userId,
+                                    String scopeKind,
+                                    UUID scopeId) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(COUNT_REMAINING_SCOPES_SQL)) {
             ps.setObject(1, userId);
             ps.setString(2, scopeKind);

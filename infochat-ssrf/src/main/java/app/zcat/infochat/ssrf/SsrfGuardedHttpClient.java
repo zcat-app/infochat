@@ -1,6 +1,5 @@
 package app.zcat.infochat.ssrf;
 
-import org.jspecify.annotations.NonNull;
 
 import javax.net.ssl.SSLSession;
 import java.io.ByteArrayOutputStream;
@@ -301,7 +300,7 @@ public final class SsrfGuardedHttpClient {
      * Delegates to {@link #get(URI, Map)} with an empty header map;
      * see that method for the full SSRF guard pipeline description.
      */
-    public HttpResponse<byte[]> get(@NonNull URI uri) throws IOException, InterruptedException {
+    public HttpResponse<byte[]> get(URI uri) throws IOException, InterruptedException {
         return get(uri, Map.of());
     }
 
@@ -326,7 +325,7 @@ public final class SsrfGuardedHttpClient {
      * body), not for header overrides. {@link SsrfPolicyException}
      * is raised on any policy violation, matching {@link #get(URI)}.
      */
-    public HttpResponse<byte[]> get(@NonNull URI uri, @NonNull Map<String, String> extraHeaders)
+    public HttpResponse<byte[]> get(URI uri, Map<String, String> extraHeaders)
             throws IOException, InterruptedException {
         HttpResponse<InputStream> terminalResponse;
         // Mutable per-call copy of the caller's headers: credential
@@ -596,7 +595,7 @@ public final class SsrfGuardedHttpClient {
      * data path then runs lock-released, like {@link #get}'s body
      * read.
      */
-    public @NonNull PinnedDial checkAndPinForWebSocket(@NonNull URI uri) {
+    public PinnedDial checkAndPinForWebSocket(URI uri) {
         ReentrantLock lock = PinnedDnsResolver.Provider.lock();
         lock.lock();
         try {
@@ -630,7 +629,7 @@ public final class SsrfGuardedHttpClient {
      * invalid host). A thrown re-resolve is itself a peer-IP-change
      * signal — the caller should hard-close the connection.
      */
-    public @NonNull List<InetAddress> resolveForWebSocket(@NonNull URI uri) {
+    public List<InetAddress> resolveForWebSocket(URI uri) {
         return resolveAndValidate(uri, WEBSOCKET_SCHEMES).addresses();
     }
 
@@ -672,7 +671,7 @@ public final class SsrfGuardedHttpClient {
          * is currently serving for the host. Stable across the life
          * of this handle.
          */
-        public @NonNull List<InetAddress> addresses() {
+        public List<InetAddress> addresses() {
             return addresses;
         }
 

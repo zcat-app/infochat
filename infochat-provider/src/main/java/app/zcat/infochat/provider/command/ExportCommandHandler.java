@@ -11,7 +11,6 @@ import app.zcat.infochat.provider.user.UserRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
@@ -78,7 +77,7 @@ public class ExportCommandHandler implements CommandHandler {
     }
 
     @Override
-    public OutboundMessage handle(@NonNull ScopeRef scope, @NonNull String rawText) {
+    public OutboundMessage handle(ScopeRef scope, String rawText) {
         if (scope instanceof ScopeRef.Group) {
             return reply(scope, GROUP_NOT_SUPPORTED_REPLY);
         }

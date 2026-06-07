@@ -18,7 +18,6 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
-import org.jspecify.annotations.NonNull;
 
 /**
  * Top-level package-private test double for signal-cli's TCP JSON-RPC
@@ -64,7 +63,7 @@ public final class FakeSignalCli implements AutoCloseable {
         return msg;
     }
 
-    public void respondSuccess(@NonNull String requestId, @NonNull JsonObject result)
+    public void respondSuccess(String requestId, JsonObject result)
             throws IOException, InterruptedException {
         sendLine(Json.createObjectBuilder()
                 .add("jsonrpc", "2.0")

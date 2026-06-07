@@ -6,7 +6,6 @@ import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jspecify.annotations.NonNull;
 
 import java.text.MessageFormat;
 import java.time.Instant;
@@ -46,10 +45,10 @@ public class AssetHandler {
     public AssetHandler() {}
 
     /** Test constructor. */
-    AssetHandler(@NonNull AssetRegistry assetRegistry,
-                 @NonNull AssetSnapshotReader snapshotReader,
-                 @NonNull AssetReplyRenderer replyRenderer,
-                 @NonNull BundleLoader bundleLoader) {
+    AssetHandler(AssetRegistry assetRegistry,
+                 AssetSnapshotReader snapshotReader,
+                 AssetReplyRenderer replyRenderer,
+                 BundleLoader bundleLoader) {
         this.assetRegistry = assetRegistry;
         this.snapshotReader = snapshotReader;
         this.replyRenderer = replyRenderer;
@@ -63,9 +62,9 @@ public class AssetHandler {
      * @param scope     the originating scope
      * @param rawText   the full post-normalization command text (e.g. "/zcash kraken --vs eur")
      */
-    public @NonNull OutboundMessage handle(@NonNull String assetName,
-                                           @NonNull ScopeRef scope,
-                                           @NonNull String rawText) {
+    public OutboundMessage handle(String assetName,
+                                           ScopeRef scope,
+                                           String rawText) {
         AssetRegistry.AssetEntry asset = assetRegistry.getAsset(assetName);
         if (asset == null) {
             return reply(scope, MessageFormat.format(
@@ -146,7 +145,7 @@ public class AssetHandler {
     }
 
     /** Parses {@code /<asset> [sub-verb] [--vs <currency>]} from the raw command text. */
-    static ParsedArgs parseArgs(@NonNull String rawText) {
+    static ParsedArgs parseArgs(String rawText) {
         String[] tokens = rawText.trim().split("\\s+");
         String subVerb = null;
         String vsCurrency = null;

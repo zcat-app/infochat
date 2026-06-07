@@ -6,7 +6,6 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
-import org.jspecify.annotations.NonNull;
 
 import javax.sql.DataSource;
 import java.lang.management.ManagementFactory;
@@ -81,7 +80,7 @@ public abstract class AbstractInstanceLockGuard {
     // silently release the single-instance gate. Assigned in the
     // @PostConstruct onStartup() (or the test seam); NullAway's field-init
     // check models only constructors/initializers, not @PostConstruct, so
-    // suppress that one check — the field stays @NonNull for every dereference
+    // suppress that one check — the field stays non-null for every dereference
     // (all probe reads are guarded by the heldConnection == null check).
     @SuppressWarnings("NullAway.Init")
     private Connection heldConnection;
@@ -205,7 +204,7 @@ public abstract class AbstractInstanceLockGuard {
      * so the second connection observes {@code false} exactly as a second JVM
      * would.
      */
-    public boolean tryAcquire(@NonNull Connection conn) throws SQLException {
+    public boolean tryAcquire(Connection conn) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(
                 "SELECT pg_try_advisory_lock(hashtext(?))")) {
             ps.setString(1, lockKeyHashInput());
@@ -221,7 +220,7 @@ public abstract class AbstractInstanceLockGuard {
      * the live holder in the fatal log line. Returns empty if no row exists yet
      * (a prior holder that crashed before its first upsert).
      */
-    public Optional<Holder> readHolder(@NonNull Connection conn) throws SQLException {
+    public Optional<Holder> readHolder(Connection conn) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(
                 "SELECT host_id, pid, last_seen_at FROM heartbeat WHERE service = ?")) {
             ps.setString(1, serviceName());
@@ -244,7 +243,7 @@ public abstract class AbstractInstanceLockGuard {
      * {@code fatalf} stores the format string and parameters separately, which
      * would break test handlers that read only {@code getMessage()}.
      */
-    public void logContention(@NonNull Optional<Holder> holder) {
+    public void logContention(Optional<Holder> holder) {
         if (holder.isPresent()) {
             Holder h = holder.get();
             log.fatal(String.format(
@@ -286,7 +285,7 @@ public abstract class AbstractInstanceLockGuard {
 
     // Test seam: installs a held connection and exit hook so the liveness probe
     // can be exercised directly, without booting the @Startup acquisition path.
-    void primeForTest(@NonNull Connection heldConnection, @NonNull ExitHook exitHook) {
+    void primeForTest(Connection heldConnection, ExitHook exitHook) {
         synchronized (connectionLock) {
             this.heldConnection = heldConnection;
             this.lockHeld = true;
@@ -300,5 +299,5 @@ public abstract class AbstractInstanceLockGuard {
         void exit(int code);
     }
 
-    public record Holder(@NonNull String hostId, int pid, @NonNull Instant lastSeenAt) {}
+    public record Holder(String hostId, int pid, Instant lastSeenAt) {}
 }

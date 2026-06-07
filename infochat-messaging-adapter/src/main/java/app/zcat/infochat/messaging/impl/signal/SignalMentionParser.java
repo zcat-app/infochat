@@ -1,6 +1,5 @@
 package app.zcat.infochat.messaging.impl.signal;
 
-import org.jspecify.annotations.NonNull;
 
 import jakarta.json.JsonArray;
 import jakarta.json.JsonObject;
@@ -46,7 +45,7 @@ final class SignalMentionParser {
      * @return true iff the dataMessage carries an ACI-anchored mention
      *         of the bot.
      */
-    static boolean botMentioned(@NonNull JsonObject dataMessage, @NonNull String botAci) {
+    static boolean botMentioned(JsonObject dataMessage, String botAci) {
         JsonArray mentions = dataMessage.getJsonArray("mentions");
         if (mentions == null || mentions.isEmpty()) {
             return false;

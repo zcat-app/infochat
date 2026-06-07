@@ -9,7 +9,6 @@ import java.sql.Types;
 
 import javax.sql.DataSource;
 
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import app.zcat.infochat.collector.assets.PriceSnapshot;
@@ -81,7 +80,7 @@ public class PriceSnapshotStore {
     Runnable afterInsertHook = () -> {};
 
     @Transactional
-    public void store(@NonNull PriceSnapshot snapshot) {
+    public void store(PriceSnapshot snapshot) {
         try (Connection conn = dataSource.getConnection()) {
             int inserted;
             try (PreparedStatement ps = conn.prepareStatement(INSERT_SQL)) {

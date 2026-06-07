@@ -10,7 +10,6 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.jspecify.annotations.NonNull;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -308,8 +307,8 @@ class GroupApprovalServiceTest {
         int findCalls = 0;
         int tryInsertCalls = 0;
 
-        RaceLosingGroupRepository(@NonNull GroupApprovalRow winnerRow) {
-            // Pass a never-used DataSource so the parent's @NonNull
+        RaceLosingGroupRepository(GroupApprovalRow winnerRow) {
+            // Pass a never-used DataSource so the parent's non-null
             // contract is satisfied; the overrides below intercept every
             // SQL path so the parent's DataSource never executes a query.
             super(noopDataSource());
@@ -317,23 +316,23 @@ class GroupApprovalServiceTest {
         }
 
         @Override
-        public @NonNull Optional<GroupApprovalRow> findApprovalRow(
-                @NonNull String adapter, @NonNull String upstreamGroupId) {
+        public Optional<GroupApprovalRow> findApprovalRow(
+                String adapter, String upstreamGroupId) {
             findCalls++;
             return findCalls == 1 ? Optional.empty() : Optional.of(winnerRow);
         }
 
         @Override
-        public @NonNull Optional<UUID> tryInsertPending(
-                @NonNull String adapter,
-                @NonNull String upstreamGroupId,
-                @NonNull UUID activatedByUserId) {
+        public Optional<UUID> tryInsertPending(
+                String adapter,
+                String upstreamGroupId,
+                UUID activatedByUserId) {
             tryInsertCalls++;
             return Optional.empty();
         }
 
         @Override
-        public long countGroupsActivatedBy(@NonNull UUID userId) {
+        public long countGroupsActivatedBy(UUID userId) {
             return 0L;
         }
 
@@ -345,7 +344,7 @@ class GroupApprovalServiceTest {
 
     /**
      * Never-used {@link DataSource} that satisfies the
-     * {@link GroupRepository} parent constructor's @NonNull contract
+     * {@link GroupRepository} parent constructor's non-null contract
      * without booting a real pool. The {@code group/} tests that
      * subclass {@code GroupRepository} all override every SQL path,
      * so the parent's {@code dataSource} field is bound but never
@@ -379,9 +378,9 @@ class GroupApprovalServiceTest {
         int notifyCalls = 0;
 
         @Override
-        public NotifyOutcome notifyOnce(@NonNull String key,
-                                        @NonNull String errorClass,
-                                        @NonNull String message) {
+        public NotifyOutcome notifyOnce(String key,
+                                        String errorClass,
+                                        String message) {
             notifyCalls++;
             return NotifyOutcome.EMITTED;
         }

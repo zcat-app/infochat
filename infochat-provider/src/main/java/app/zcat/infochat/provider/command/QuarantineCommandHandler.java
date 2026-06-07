@@ -13,7 +13,6 @@ import app.zcat.infochat.provider.messaging.RateCapBucket;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
@@ -80,7 +79,7 @@ public class QuarantineCommandHandler implements CommandHandler {
     }
 
     @Override
-    public OutboundMessage handle(@NonNull ScopeRef scope, @NonNull String rawText) {
+    public OutboundMessage handle(ScopeRef scope, String rawText) {
         if (scope instanceof ScopeRef.Group) {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY));
         }

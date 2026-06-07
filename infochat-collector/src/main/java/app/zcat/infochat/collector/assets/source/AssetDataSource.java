@@ -2,7 +2,6 @@ package app.zcat.infochat.collector.assets.source;
 
 import java.util.Set;
 
-import org.jspecify.annotations.NonNull;
 
 import app.zcat.infochat.collector.assets.PriceSnapshot;
 
@@ -31,21 +30,21 @@ public interface AssetDataSource {
      * {@code "kraken"}, {@code "bitfinex"}). Used by the fetcher to
      * match a row's {@code sub_verb} column to its handler bean.
      */
-    @NonNull String id();
+    String id();
 
     /**
      * The asset ids this source can quote (e.g.
      * {@code Set.of("zcash", "monero")} for v1). The fetcher MUST NOT
      * call {@link #fetchSnapshot} for an asset absent from this set.
      */
-    @NonNull Set<String> supportedAssets();
+    Set<String> supportedAssets();
 
     /**
      * The vs-currency codes this source supports for a given asset
      * (e.g. {@code Set.of("usd", "eur", "czk", "btc")}). Returns an
      * empty set for unsupported assets.
      */
-    @NonNull Set<String> supportedQuoteCurrencies(@NonNull String asset);
+    Set<String> supportedQuoteCurrencies(String asset);
 
     /**
      * Issue one outbound HTTP fetch, parse the response, and return
@@ -58,7 +57,7 @@ public interface AssetDataSource {
      * as {@link FetchException}; runtime exceptions escape unwrapped
      * and indicate a programming bug rather than a fetch failure.
      */
-    @NonNull PriceSnapshot fetchSnapshot(@NonNull String asset, @NonNull String vs) throws FetchException;
+    PriceSnapshot fetchSnapshot(String asset, String vs) throws FetchException;
 
     /**
      * Per-source attribution URL (design §10.7 ToS attribution table).
@@ -67,7 +66,7 @@ public interface AssetDataSource {
      * pins both the {@code http} prefix and the absence of
      * {@code "]("} in the returned string.
      */
-    @NonNull String attributionUrl(@NonNull String asset, @NonNull String vs);
+    String attributionUrl(String asset, String vs);
 
     /**
      * Checked exception raised on any infrastructure failure of a
@@ -83,11 +82,11 @@ public interface AssetDataSource {
 
         private static final long serialVersionUID = 1L;
 
-        public FetchException(@NonNull String message) {
+        public FetchException(String message) {
             super(message);
         }
 
-        public FetchException(@NonNull String message, @NonNull Throwable cause) {
+        public FetchException(String message, Throwable cause) {
             super(message, cause);
         }
     }

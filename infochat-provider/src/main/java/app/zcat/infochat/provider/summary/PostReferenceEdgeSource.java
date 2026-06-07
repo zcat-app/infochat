@@ -2,7 +2,6 @@ package app.zcat.infochat.provider.summary;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jspecify.annotations.NonNull;
 
 import javax.sql.DataSource;
 import java.sql.Array;
@@ -43,7 +42,7 @@ public interface PostReferenceEdgeSource {
      * direction). Posts with no intra-input neighbours appear as keys
      * mapped to an empty set.
      */
-    @NonNull Map<UUID, Set<UUID>> neighborsAmong(@NonNull Collection<UUID> postIds);
+    Map<UUID, Set<UUID>> neighborsAmong(Collection<UUID> postIds);
 
     /**
      * Production implementation backed by JDBC against the V29
@@ -58,7 +57,7 @@ public interface PostReferenceEdgeSource {
         DataSource dataSource;
 
         @Override
-        public @NonNull Map<UUID, Set<UUID>> neighborsAmong(@NonNull Collection<UUID> postIds) {
+        public Map<UUID, Set<UUID>> neighborsAmong(Collection<UUID> postIds) {
             Map<UUID, Set<UUID>> adjacency = new HashMap<>();
             for (UUID id : postIds) {
                 adjacency.put(id, new LinkedHashSet<>());

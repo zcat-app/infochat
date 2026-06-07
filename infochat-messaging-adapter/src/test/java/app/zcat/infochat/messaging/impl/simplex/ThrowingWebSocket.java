@@ -1,6 +1,5 @@
 package app.zcat.infochat.messaging.impl.simplex;
 
-import org.jspecify.annotations.NonNull;
 
 import java.net.http.WebSocket;
 import java.nio.ByteBuffer;
@@ -20,27 +19,27 @@ import java.util.concurrent.CompletableFuture;
 final class ThrowingWebSocket implements WebSocket {
 
     @Override
-    public CompletableFuture<WebSocket> sendText(@NonNull CharSequence data, boolean last) {
+    public CompletableFuture<WebSocket> sendText(CharSequence data, boolean last) {
         throw new IllegalStateException("simulated send on a concurrently-aborted WebSocket");
     }
 
     @Override
-    public CompletableFuture<WebSocket> sendBinary(@NonNull ByteBuffer data, boolean last) {
+    public CompletableFuture<WebSocket> sendBinary(ByteBuffer data, boolean last) {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public CompletableFuture<WebSocket> sendPing(@NonNull ByteBuffer message) {
+    public CompletableFuture<WebSocket> sendPing(ByteBuffer message) {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public CompletableFuture<WebSocket> sendPong(@NonNull ByteBuffer message) {
+    public CompletableFuture<WebSocket> sendPong(ByteBuffer message) {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public CompletableFuture<WebSocket> sendClose(int statusCode, @NonNull String reason) {
+    public CompletableFuture<WebSocket> sendClose(int statusCode, String reason) {
         throw new UnsupportedOperationException();
     }
 

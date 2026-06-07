@@ -3,7 +3,6 @@ package app.zcat.infochat.collector.fetcher.reddit;
 import app.zcat.infochat.core.ingest.NormalizedPost;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import java.io.IOException;
@@ -30,7 +29,7 @@ final class RedditResponseParser {
      * One page of a Reddit listing: the parsed posts plus the
      * pagination cursor for the next page (null = last page).
      */
-    record ListingPage(@NonNull List<NormalizedPost> posts, @Nullable String after) {}
+    record ListingPage(List<NormalizedPost> posts, @Nullable String after) {}
 
     private RedditResponseParser() {}
 
@@ -40,7 +39,7 @@ final class RedditResponseParser {
      * @throws IOException if the body is not valid JSON or does not
      *         contain the expected listing structure
      */
-    static ListingPage parse(long sourceId, byte @NonNull [] body, @NonNull Instant fetchedAt)
+    static ListingPage parse(long sourceId, byte [] body, Instant fetchedAt)
             throws IOException {
         JsonNode root = MAPPER.readTree(body);
         JsonNode data = root.path("data");

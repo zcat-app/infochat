@@ -1,7 +1,6 @@
 package app.zcat.infochat.provider.command;
 
 import app.zcat.infochat.core.util.JsonEscaper;
-import org.jspecify.annotations.NonNull;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -35,7 +34,7 @@ public final class ExportPaginator {
      *         empty arrays in the output)
      */
     public static List<String> paginate(
-            @NonNull LinkedHashMap<String, List<String>> tableRows,
+            LinkedHashMap<String, List<String>> tableRows,
             int pageCap) {
 
         List<String> pages = new ArrayList<>();

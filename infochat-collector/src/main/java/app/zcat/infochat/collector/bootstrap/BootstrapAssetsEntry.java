@@ -1,6 +1,5 @@
 package app.zcat.infochat.collector.bootstrap;
 
-import org.jspecify.annotations.NonNull;
 
 import java.util.List;
 
@@ -29,13 +28,13 @@ import java.util.List;
  * preference (M1-054) does not extend this set.
  */
 public record BootstrapAssetsEntry(
-    @NonNull String id,
-    @NonNull String displayName,
-    @NonNull String ticker,
-    @NonNull String defaultSubVerb,
-    @NonNull List<SubVerb> subVerbs,
-    @NonNull List<String> supportedVs,
-    @NonNull String defaultQuoteCurrency
+    String id,
+    String displayName,
+    String ticker,
+    String defaultSubVerb,
+    List<SubVerb> subVerbs,
+    List<String> supportedVs,
+    String defaultQuoteCurrency
 ) {
     /**
      * One {@code (id, external_id)} pair from an entry's
@@ -46,6 +45,6 @@ public record BootstrapAssetsEntry(
      * (e.g. CoinGecko coin id {@code "zcash"}, Kraken pair
      * {@code "ZECUSD"}, Bitfinex pair {@code "tZECUSD"}).
      */
-    public record SubVerb(@NonNull String id, @NonNull String externalId) {
+    public record SubVerb(String id, String externalId) {
     }
 }

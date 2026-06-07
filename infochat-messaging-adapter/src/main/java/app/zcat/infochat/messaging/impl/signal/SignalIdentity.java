@@ -1,6 +1,5 @@
 package app.zcat.infochat.messaging.impl.signal;
 
-import org.jspecify.annotations.NonNull;
 
 import java.nio.file.Path;
 
@@ -13,7 +12,7 @@ import java.nio.file.Path;
  *
  * @param aci the bot's ACI; never null.
  */
-public record SignalIdentity(@NonNull String aci) {
+public record SignalIdentity(String aci) {
 
     /**
      * Resolve the bot's ACI from the signal-cli data directory as a pure
@@ -25,7 +24,7 @@ public record SignalIdentity(@NonNull String aci) {
      * @param dataDir the signal-cli data directory; never null.
      * @return the resolved {@link SignalIdentity}.
      */
-    public static SignalIdentity resolve(@NonNull Path dataDir) {
+    public static SignalIdentity resolve(Path dataDir) {
         throw new UnsupportedOperationException(
                 "resolving the bot ACI from signal-cli account state is implemented in M1-107");
     }

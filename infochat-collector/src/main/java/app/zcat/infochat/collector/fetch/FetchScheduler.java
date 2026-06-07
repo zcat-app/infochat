@@ -37,7 +37,6 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -217,7 +216,7 @@ public class FetchScheduler {
      * @param row the source row to tick (already enumerated as
      *            {@code status='active' AND deleted_at IS NULL}).
      */
-    public void tickOnce(@NonNull SourceRow row) {
+    public void tickOnce(SourceRow row) {
         Fetcher fetcher = fetchersByKind.get(row.kind());
         if (fetcher == null) {
             if (warnedOrphanKinds.add(row.kind())) {
@@ -313,7 +312,7 @@ public class FetchScheduler {
      * invoke this helper directly without re-wiring the full
      * {@link #tickOnce(SourceRow)} dependency graph.
      */
-    void logFetchFailure(@NonNull SourceRow row, @NonNull Throwable t) {
+    void logFetchFailure(SourceRow row, Throwable t) {
         String chain = redactUrlsInText(exceptionChainMessage(t));
         LOG.warnf(
             "FetchScheduler tick failed for source uuid=%s (dispatch=%d): %s",
@@ -333,7 +332,7 @@ public class FetchScheduler {
      * the chain walker in isolation if the format itself becomes
      * load-bearing.
      */
-    static String exceptionChainMessage(@NonNull Throwable t) {
+    static String exceptionChainMessage(Throwable t) {
         StringBuilder sb = new StringBuilder();
         IdentityHashMap<Throwable, Boolean> seen = new IdentityHashMap<>();
         Throwable current = t;
@@ -442,7 +441,7 @@ public class FetchScheduler {
      * different source on the next tick. Opaque to the Fetcher —
      * do not key any cross-tick state on it.
      */
-    public record SourceRow(@NonNull UUID uuid, @NonNull String identifier, long dispatchKey,
-                               @NonNull String kind) {
+    public record SourceRow(UUID uuid, String identifier, long dispatchKey,
+                               String kind) {
     }
 }

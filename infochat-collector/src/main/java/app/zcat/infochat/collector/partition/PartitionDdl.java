@@ -1,6 +1,5 @@
 package app.zcat.infochat.collector.partition;
 
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import java.time.Duration;
@@ -67,7 +66,7 @@ public final class PartitionDdl {
      * One statement per partitioned table for {@code month}, in
      * {@link PartitionedTable} declaration order.
      */
-    public static List<String> createPartitions(@NonNull YearMonth month) {
+    public static List<String> createPartitions(YearMonth month) {
         return Arrays.stream(PartitionedTable.values())
             .map(table -> createPartition(table, month))
             .toList();
@@ -79,7 +78,7 @@ public final class PartitionDdl {
      * month already provisioned by the V30 migration (or a prior tick) is a
      * no-op rather than an error.
      */
-    public static String createPartition(@NonNull PartitionedTable table, @NonNull YearMonth month) {
+    public static String createPartition(PartitionedTable table, YearMonth month) {
         return "CREATE TABLE IF NOT EXISTS " + table.partitionName(month)
             + " PARTITION OF " + table.parent
             + " FOR VALUES FROM ('" + bound(month) + "') TO ('" + bound(month.plusMonths(1)) + "')";
@@ -95,7 +94,7 @@ public final class PartitionDdl {
      * deployment (or an instance that was down across a month boundary) does
      * not depend on a prior month's tick having provisioned it ahead of time.
      */
-    public static List<YearMonth> monthsToProvision(@NonNull YearMonth activeMonth) {
+    public static List<YearMonth> monthsToProvision(YearMonth activeMonth) {
         return List.of(activeMonth, activeMonth.plusMonths(1));
     }
 
@@ -105,7 +104,7 @@ public final class PartitionDdl {
      * repeated runs. Dropping a partition detaches and removes it in one O(1)
      * operation — no row deletes, no index bloat (Invariant 6).
      */
-    public static String dropPartition(@NonNull String partitionName) {
+    public static String dropPartition(String partitionName) {
         return "DROP TABLE IF EXISTS " + partitionName;
     }
 
@@ -126,11 +125,11 @@ public final class PartitionDdl {
      * skipped entirely: the pruner only ever drops what the convention says
      * {@link PartitionCreator} would have created.
      */
-    public static List<String> prunablePartitions(@NonNull PartitionedTable table,
-                                                  @NonNull Collection<String> childNames,
-                                                  @NonNull YearMonth activeMonth,
+    public static List<String> prunablePartitions(PartitionedTable table,
+                                                  Collection<String> childNames,
+                                                  YearMonth activeMonth,
                                                   int retentionDays,
-                                                  @NonNull Instant now) {
+                                                  Instant now) {
         Instant cutoff = now.minus(Duration.ofDays(retentionDays));
         List<String> prunable = new ArrayList<>();
         for (String child : childNames) {

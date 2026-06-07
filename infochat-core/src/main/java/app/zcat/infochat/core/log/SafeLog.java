@@ -1,6 +1,5 @@
 package app.zcat.infochat.core.log;
 
-import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 
 /**
@@ -21,15 +20,15 @@ public final class SafeLog {
 
     private SafeLog() {}
 
-    public static void error(@NonNull Logger logger, @NonNull String msg, @NonNull Throwable t) {
+    public static void error(Logger logger, String msg, Throwable t) {
         logger.error(formatSafe(msg, t));
     }
 
-    public static void warn(@NonNull Logger logger, @NonNull String msg, @NonNull Throwable t) {
+    public static void warn(Logger logger, String msg, Throwable t) {
         logger.warn(formatSafe(msg, t));
     }
 
-    public static void info(@NonNull Logger logger, @NonNull String msg, @NonNull Throwable t) {
+    public static void info(Logger logger, String msg, Throwable t) {
         logger.info(formatSafe(msg, t));
     }
 
@@ -46,7 +45,7 @@ public final class SafeLog {
      * content into the log if a contributor later called the underlying
      * SLF4J {@code error(msg, t)} instead of this wrapper.
      */
-    static @NonNull String formatSafe(@NonNull String msg, @NonNull Throwable t) {
+    static String formatSafe(String msg, Throwable t) {
         String redacted = Redactor.redact(msg);
         StringBuilder sb = new StringBuilder(redacted.length() + 80);
         sb.append(redacted)
@@ -64,7 +63,7 @@ public final class SafeLog {
         return sb.toString();
     }
 
-    private static void appendSuppressedClassNames(@NonNull StringBuilder sb, @NonNull Throwable t) {
+    private static void appendSuppressedClassNames(StringBuilder sb, Throwable t) {
         Throwable[] suppressed = t.getSuppressed();
         if (suppressed.length == 0) {
             return;

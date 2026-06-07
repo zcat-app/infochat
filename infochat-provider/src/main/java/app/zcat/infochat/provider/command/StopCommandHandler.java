@@ -12,7 +12,6 @@ import app.zcat.infochat.provider.messaging.InboundContext;
 import app.zcat.infochat.provider.user.UserRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jspecify.annotations.NonNull;
 
 import java.text.MessageFormat;
 import java.time.Instant;
@@ -50,12 +49,12 @@ public class StopCommandHandler implements CommandHandler {
     UserRepository userRepository;
 
     @Override
-    public @NonNull String name() {
+    public String name() {
         return "stop";
     }
 
     @Override
-    public @NonNull OutboundMessage handle(@NonNull ScopeRef scope, @NonNull String rawText) {
+    public OutboundMessage handle(ScopeRef scope, String rawText) {
         Optional<UUID> userId = resolveUserId();
         if (userId.isEmpty()) {
             return reply(scope, bundleLoader.get(BundleKeys.REPLY_STOP_NOOP));

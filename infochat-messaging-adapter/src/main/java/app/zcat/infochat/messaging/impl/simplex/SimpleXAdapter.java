@@ -1,6 +1,5 @@
 package app.zcat.infochat.messaging.impl.simplex;
 
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -136,10 +135,10 @@ public final class SimpleXAdapter implements MessagingAdapter {
      * bot's per-adapter SimpleX identity used as the D10 trust anchor
      * for group mention recognition (see {@link SimpleXGroupHandler}).
      */
-    public SimpleXAdapter(@NonNull SimpleXConfig config,
-                          @NonNull HttpClient httpClient,
-                          @NonNull Consumer<String> adminNotifier,
-                          @NonNull SimpleXIdentity botIdentity) {
+    public SimpleXAdapter(SimpleXConfig config,
+                          HttpClient httpClient,
+                          Consumer<String> adminNotifier,
+                          SimpleXIdentity botIdentity) {
         this.config = config;
         this.httpClient = httpClient;
         this.adminNotifier = adminNotifier;
@@ -264,7 +263,7 @@ public final class SimpleXAdapter implements MessagingAdapter {
     }
 
     @Override
-    public Identity assertIdentity(@NonNull InboundMessage msg) {
+    public Identity assertIdentity(InboundMessage msg) {
         // SimpleX is HIGH trust because the contact id is the cryptographic
         // queue address SimpleX's message-routing layer verifies before
         // delivery to the bot. The codec extracted the verified contact id
@@ -274,7 +273,7 @@ public final class SimpleXAdapter implements MessagingAdapter {
     }
 
     @Override
-    public MessageHandle send(@NonNull OutboundMessage msg) throws MessagingException {
+    public MessageHandle send(OutboundMessage msg) throws MessagingException {
         SimpleXWebSocketClient ws = requireConnected();
         String corrId = nextCorrId();
         String envelope = SimpleXMessageCodec.encodeSendCommand(corrId, msg.scope(), msg.text());
@@ -289,7 +288,7 @@ public final class SimpleXAdapter implements MessagingAdapter {
     }
 
     @Override
-    public void update(@NonNull MessageHandle handle, @NonNull String body) throws MessagingException {
+    public void update(MessageHandle handle, String body) throws MessagingException {
         SimpleXMessageHandle internal = requireKnownAndOpen(handle);
         SimpleXWebSocketClient ws = requireConnected();
         String corrId = nextCorrId();
@@ -302,7 +301,7 @@ public final class SimpleXAdapter implements MessagingAdapter {
     }
 
     @Override
-    public void finalizeMessage(@NonNull MessageHandle handle, @NonNull String body) throws MessagingException {
+    public void finalizeMessage(MessageHandle handle, String body) throws MessagingException {
         SimpleXMessageHandle internal = requireKnownAndOpen(handle);
         SimpleXWebSocketClient ws = requireConnected();
         String corrId = nextCorrId();
@@ -316,7 +315,7 @@ public final class SimpleXAdapter implements MessagingAdapter {
     }
 
     @Override
-    public void setTyping(@NonNull ScopeRef scope, boolean typing) {
+    public void setTyping(ScopeRef scope, boolean typing) {
         SimpleXWebSocketClient ws = webSocket;
         if (ws == null) {
             // Best-effort: an un-started or closed adapter silently absorbs
@@ -338,7 +337,7 @@ public final class SimpleXAdapter implements MessagingAdapter {
     }
 
     @Override
-    public void setInboundHandler(@NonNull InboundHandler handler) {
+    public void setInboundHandler(InboundHandler handler) {
         this.inboundHandler = handler;
     }
 

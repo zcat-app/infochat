@@ -10,7 +10,6 @@ import app.zcat.infochat.provider.group.GroupMembershipRepository;
 import app.zcat.infochat.provider.group.GroupRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jspecify.annotations.NonNull;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -87,7 +86,7 @@ public class HelpCommandHandler implements CommandHandler {
     }
 
     /** One catalogue entry: the command name (for the probation predicate), its short-help bundle key, and its visibility tier. */
-    record CommandHelp(@NonNull String command, @NonNull String bundleKey, @NonNull HelpTier tier) {}
+    record CommandHelp(String command, String bundleKey, HelpTier tier) {}
 
     /** Resolved tier facts about the caller in the current dispatch. */
     record CallerTier(boolean botAdmin, boolean groupAdmin, boolean probation, boolean group) {}
@@ -166,7 +165,7 @@ public class HelpCommandHandler implements CommandHandler {
     }
 
     @Override
-    public OutboundMessage handle(@NonNull ScopeRef scope, @NonNull String rawText) {
+    public OutboundMessage handle(ScopeRef scope, String rawText) {
         CallerTier caller = resolveTier(scope);
 
         StringBuilder body = new StringBuilder();
@@ -244,7 +243,7 @@ public class HelpCommandHandler implements CommandHandler {
      * does not depend on the DB read. Mirrors the
      * {@code InboundRouter#lookupUser} test seam.</p>
      */
-    CallerTier resolveTier(@NonNull ScopeRef scope) {
+    CallerTier resolveTier(ScopeRef scope) {
         String adapter = inboundContext.adapterName();
         String contactId = scope instanceof ScopeRef.Dm dm
                 ? dm.contactId() : inboundContext.senderContactId();

@@ -1,7 +1,6 @@
 package app.zcat.infochat.messaging.impl.signal;
 
 import org.jboss.logging.Logger;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import app.zcat.infochat.messaging.AdapterTrustLevel;
@@ -135,11 +134,11 @@ public final class SignalAdapter implements MessagingAdapter {
      *                       {@code daemon --tcp host:port} will bind
      *                       and the JSON-RPC client will connect to.
      */
-    public SignalAdapter(@NonNull String binary,
-                         @NonNull String dataDir,
-                         @NonNull String account,
-                         @NonNull String botAci,
-                         @NonNull InetSocketAddress daemonEndpoint) {
+    public SignalAdapter(String binary,
+                         String dataDir,
+                         String account,
+                         String botAci,
+                         InetSocketAddress daemonEndpoint) {
         this.binary = binary;
         this.dataDir = dataDir;
         this.account = account;
@@ -262,7 +261,7 @@ public final class SignalAdapter implements MessagingAdapter {
     }
 
     @Override
-    public Identity assertIdentity(@NonNull InboundMessage msg) {
+    public Identity assertIdentity(InboundMessage msg) {
         // The cryptographic assertion lives in the JSON-RPC client's
         // inbound translation (sourceUuid is the ACI signal-cli has
         // already verified at the protocol layer); the inbound delivered
@@ -272,22 +271,22 @@ public final class SignalAdapter implements MessagingAdapter {
     }
 
     @Override
-    public MessageHandle send(@NonNull OutboundMessage msg) throws MessagingException {
+    public MessageHandle send(OutboundMessage msg) throws MessagingException {
         return requireConnected("send").send(msg);
     }
 
     @Override
-    public void update(@NonNull MessageHandle handle, @NonNull String body) throws MessagingException {
+    public void update(MessageHandle handle, String body) throws MessagingException {
         requireConnected("update").update(handle, body);
     }
 
     @Override
-    public void finalizeMessage(@NonNull MessageHandle handle, @NonNull String body) throws MessagingException {
+    public void finalizeMessage(MessageHandle handle, String body) throws MessagingException {
         requireConnected("finalizeMessage").finalizeHandle(handle, body);
     }
 
     @Override
-    public void setTyping(@NonNull ScopeRef scope, boolean typing) {
+    public void setTyping(ScopeRef scope, boolean typing) {
         SignalJsonRpcClient c = client;
         if (c == null) {
             // setTyping is best-effort per SPI; no exception.
@@ -297,7 +296,7 @@ public final class SignalAdapter implements MessagingAdapter {
     }
 
     @Override
-    public void setInboundHandler(@NonNull InboundHandler handler) {
+    public void setInboundHandler(InboundHandler handler) {
         this.handler = handler;
         SignalJsonRpcClient c = client;
         if (c != null) {
@@ -315,7 +314,7 @@ public final class SignalAdapter implements MessagingAdapter {
      * group-notification route drives (wired in {@link #attachClient}).
      */
     @Override
-    public void setMembershipEventHandler(@NonNull MembershipHandler handler) {
+    public void setMembershipEventHandler(MembershipHandler handler) {
         this.membershipHandler = handler;
     }
 

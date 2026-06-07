@@ -10,7 +10,6 @@ import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
@@ -149,7 +148,7 @@ public class UnfollowTagCommandHandler implements CommandHandler {
     }
 
     @Override
-    public OutboundMessage handle(@NonNull ScopeRef scope, @NonNull String rawText) {
+    public OutboundMessage handle(ScopeRef scope, String rawText) {
         // Permission gate: group scope requires group-admin.
         final String scopeKind;
         final UUID scopeId;

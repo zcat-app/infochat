@@ -1,7 +1,6 @@
 package app.zcat.infochat.provider.chat;
 
 import jakarta.enterprise.context.ApplicationScoped;
-import org.jspecify.annotations.NonNull;
 
 import java.sql.SQLException;
 import java.util.Map;
@@ -26,12 +25,12 @@ public class ChatToolRegistry {
     // IllegalArgumentException for tool-specific validation failures.
     @FunctionalInterface
     public interface ChatTool {
-        @NonNull String execute(@NonNull UUID userId, @NonNull String scopeKind,
-                                @NonNull UUID scopeId, @NonNull Map<String, Object> args)
+        String execute(UUID userId, String scopeKind,
+                                UUID scopeId, Map<String, Object> args)
                 throws SQLException;
     }
 
-    public @NonNull Set<String> toolNames() {
+    public Set<String> toolNames() {
         return TOOL_NAMES;
     }
 }

@@ -10,7 +10,6 @@ import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.command.BanConfirm;
 import app.zcat.infochat.provider.command.ConfirmStateService;
 import org.junit.jupiter.api.Test;
-import org.jspecify.annotations.NonNull;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -253,7 +252,7 @@ class InboundRouterConfirmCancelTest {
         @Override public String name() { return name; }
 
         @Override
-        public OutboundMessage handle(@NonNull ScopeRef scope, @NonNull String rawText) {
+        public OutboundMessage handle(ScopeRef scope, String rawText) {
             dispatchCount++;
             return new OutboundMessage(scope, stubBody, Instant.now(), "h-" + dispatchCount);
         }

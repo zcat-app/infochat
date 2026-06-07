@@ -1,7 +1,6 @@
 package app.zcat.infochat.provider.chat.tool;
 
 import app.zcat.infochat.provider.chat.ChatToolRegistry;
-import org.jspecify.annotations.NonNull;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -32,14 +31,14 @@ public class ListSavesTool implements ChatToolRegistry.ChatTool {
     private final DataSource dataSource;
 
     @Inject
-    public ListSavesTool(@NonNull DataSource dataSource) {
+    public ListSavesTool(DataSource dataSource) {
         this.dataSource = dataSource;
     }
 
     @Override
     @SuppressWarnings("unchecked")
-    public @NonNull String execute(@NonNull UUID userId, @NonNull String scopeKind,
-                                    @NonNull UUID scopeId, @NonNull Map<String, Object> args)
+    public String execute(UUID userId, String scopeKind,
+                                    UUID scopeId, Map<String, Object> args)
             throws SQLException {
         List<String> personalTags = args.containsKey("tags")
                 ? (List<String>) args.get("tags") : List.of();

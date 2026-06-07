@@ -8,7 +8,6 @@ import app.zcat.infochat.ssrf.UrlRedactor;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import java.io.IOException;
@@ -56,13 +55,13 @@ public class RedditFetcher implements Fetcher {
 
     // Package-private test seam — test supplies a SsrfGuardedHttpClient
     // with a permissive IpBlocklist and a controlled page cap.
-    RedditFetcher(@NonNull SsrfGuardedHttpClient client, int pageCap) {
+    RedditFetcher(SsrfGuardedHttpClient client, int pageCap) {
         this.client = client;
         this.pageCap = pageCap;
     }
 
     @Override
-    public List<NormalizedPost> fetch(long sourceId, @NonNull String identifier) {
+    public List<NormalizedPost> fetch(long sourceId, String identifier) {
         Instant fetchedAt = Instant.now();
         List<NormalizedPost> allPosts = new ArrayList<>();
         String afterCursor = null;
@@ -123,11 +122,11 @@ public class RedditFetcher implements Fetcher {
      * per-tick error handler catches this and logs it.
      */
     public static final class RedditFetchException extends RuntimeException {
-        public RedditFetchException(@NonNull String message) {
+        public RedditFetchException(String message) {
             super(message);
         }
 
-        public RedditFetchException(@NonNull String message, @NonNull Throwable cause) {
+        public RedditFetchException(String message, Throwable cause) {
             super(message, cause);
         }
     }

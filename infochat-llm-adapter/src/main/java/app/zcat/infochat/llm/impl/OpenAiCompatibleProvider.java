@@ -1,6 +1,5 @@
 package app.zcat.infochat.llm.impl;
 
-import org.jspecify.annotations.NonNull;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -115,7 +114,7 @@ public class OpenAiCompatibleProvider implements LlmProvider {
     private final Config config;
 
     @Inject
-    public OpenAiCompatibleProvider(@NonNull Config config) {
+    public OpenAiCompatibleProvider(Config config) {
         this.config = config;
         this.http = HttpClient.newHttpClient();
     }
@@ -126,7 +125,7 @@ public class OpenAiCompatibleProvider implements LlmProvider {
     }
 
     @Override
-    public LlmResponse generate(@NonNull ModelTask task, @NonNull String systemPrompt, @NonNull String userPrompt) {
+    public LlmResponse generate(ModelTask task, String systemPrompt, String userPrompt) {
         TaskConfig cfg = configFor(task);
         return doCall(cfg, systemPrompt, userPrompt);
     }
@@ -137,7 +136,7 @@ public class OpenAiCompatibleProvider implements LlmProvider {
      * resolution the first {@link #generate} call would perform.
      */
     @Override
-    public void assertTaskConfigResolvable(@NonNull ModelTask task) {
+    public void assertTaskConfigResolvable(ModelTask task) {
         configFor(task);
     }
 

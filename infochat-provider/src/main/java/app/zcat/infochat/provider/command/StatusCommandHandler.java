@@ -10,7 +10,6 @@ import app.zcat.infochat.provider.messaging.InboundContext;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jspecify.annotations.NonNull;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -72,7 +71,7 @@ public class StatusCommandHandler implements CommandHandler {
     }
 
     @Override
-    public OutboundMessage handle(@NonNull ScopeRef scope, @NonNull String rawText) {
+    public OutboundMessage handle(ScopeRef scope, String rawText) {
         StringBuilder body = new StringBuilder();
         body.append(MessageFormat.format(
                 bundleLoader.get(BundleKeys.REPLY_STATUS_PROFILE),
@@ -119,7 +118,7 @@ public class StatusCommandHandler implements CommandHandler {
      * hour. The {@code /status} spec asks for runtime status; second-
      * precision is not useful at an operator-discovery surface.
      */
-    static String formatUptime(@NonNull Duration uptime) {
+    static String formatUptime(Duration uptime) {
         long totalMinutes = Math.max(0L, uptime.toMinutes());
         long hours = totalMinutes / 60;
         long minutes = totalMinutes % 60;

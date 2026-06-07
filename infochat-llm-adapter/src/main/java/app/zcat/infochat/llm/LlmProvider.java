@@ -1,6 +1,5 @@
 package app.zcat.infochat.llm;
 
-import org.jspecify.annotations.NonNull;
 
 /**
  * Chat-completion + structured-output classification SPI. One
@@ -33,7 +32,7 @@ public interface LlmProvider {
      * @param userPrompt   the user-role prompt; never null.
      * @return the response carrying the model-produced text. Never null.
      */
-    LlmResponse generate(@NonNull ModelTask task, @NonNull String systemPrompt, @NonNull String userPrompt);
+    LlmResponse generate(ModelTask task, String systemPrompt, String userPrompt);
 
     /**
      * Startup-time assertion that this provider can serve the given
@@ -48,7 +47,7 @@ public interface LlmProvider {
      * per-task config requirements (notably test stubs) remain valid
      * without overriding.
      */
-    default void assertTaskConfigResolvable(@NonNull ModelTask task) {
+    default void assertTaskConfigResolvable(ModelTask task) {
     }
 
     /**

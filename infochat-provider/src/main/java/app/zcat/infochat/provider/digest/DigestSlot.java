@@ -1,6 +1,5 @@
 package app.zcat.infochat.provider.digest;
 
-import org.jspecify.annotations.NonNull;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -11,9 +10,9 @@ import java.util.UUID;
  * DigestWorker (M1-080b) consumes these to generate digest content.
  */
 public record DigestSlot(
-        @NonNull UUID groupId,
-        @NonNull String groupTimezone,
-        @NonNull String slotKind,
-        @NonNull Instant windowStart,
-        @NonNull Instant windowEnd) {
+        UUID groupId,
+        String groupTimezone,
+        String slotKind,
+        Instant windowStart,
+        Instant windowEnd) {
 }

@@ -6,7 +6,6 @@ import app.zcat.infochat.collector.outbox.PostPersister;
 import app.zcat.infochat.core.ingest.NormalizedPost;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jspecify.annotations.NonNull;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -124,8 +123,8 @@ public class Kind6Handler {
      *         repost edges that name this kind-6 post as their target
      *         (a kind-6 can itself be reposted).
      */
-    public Optional<PostPersister.PersistedPostKey> handle(@NonNull NormalizedPost post,
-                                                           @NonNull UUID sourceUuid) {
+    public Optional<PostPersister.PersistedPostKey> handle(NormalizedPost post,
+                                                           UUID sourceUuid) {
         Optional<PostPersister.PersistedPostKey> persisted = postPersister.persist(sourceUuid, post);
         if (persisted.isEmpty()) {
             // ON CONFLICT branch: duplicate (source_id, upstream_identifier,

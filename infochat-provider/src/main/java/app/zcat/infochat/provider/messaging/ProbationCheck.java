@@ -2,7 +2,6 @@ package app.zcat.infochat.provider.messaging;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
@@ -63,7 +62,7 @@ public class ProbationCheck {
      *         returns {@code false} (already promoted; the row
      *         passes step 5 unchanged).
      */
-    public boolean inProbation(@NonNull UUID userId) {
+    public boolean inProbation(UUID userId) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(SELECT_IN_PROBATION_SQL)) {
             ps.setObject(1, userId);
@@ -85,7 +84,7 @@ public class ProbationCheck {
      * "no background job is required" — the next inbound from a
      * graduated user clears the column inline.
      */
-    public void clearIfPromoted(@NonNull UUID userId) {
+    public void clearIfPromoted(UUID userId) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(CLEAR_IF_PROMOTED_SQL)) {
             ps.setObject(1, userId);
@@ -106,7 +105,7 @@ public class ProbationCheck {
      *         without widening the per-dispatch {@code UserSnapshot}
      *         column set.
      */
-    public @Nullable Instant probationExpiry(@NonNull UUID userId) {
+    public @Nullable Instant probationExpiry(UUID userId) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(SELECT_PROBATION_UNTIL_SQL)) {
             ps.setObject(1, userId);

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 39 |
+| pending | 38 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 216 |
+| done | 217 |
 | deferred | 2 |
 | **total** | **257** |
 
@@ -49,7 +49,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-205 — Adapter rate-limit enforcement: implement §6.3.7 + capability caps, or design-amend (complexity: high, risk: medium)
 - M1-206 — Parameterize SET LOCAL infochat.actor_id (drop UUID string concat) (complexity: low, risk: low)
 - M1-208 — Per-adapter bootstrap-admin contact-id parse validation (SPI surface decision) (complexity: medium, risk: medium)
-- M1-209 — Remove hand-written @NonNull made redundant by D48 null-marked packages (complexity: low, risk: medium)
 - M1-210 — Module-DAG enforcement + doc/config-truth sweep (docs say what the build does) (complexity: medium, risk: medium)
 - M1-211 — MessagingAdapter.assertIdentity: wire the spec-mandated surface or remove it (complexity: medium, risk: medium)
 - M1-212 — ProgressNotifier pipeline: implement minimally, defer by amendment, or remove (complexity: medium, risk: medium)
@@ -97,6 +96,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-209 | Remove hand-written @NonNull made redundant by D48 null-marked packages | 2026-06-07 | round 1 APPROVE |
 | M1-192 | LLM per-task config completion (configFor, remote-llm, guard) | 2026-06-07 | round 1 APPROVE |
 | M1-188 | Serialize SimpleX WS sends + bound Signal handle map | 2026-06-07 | round 1 APPROVE |
 | M1-182 | Re-evaluation verdict handling: re-hide, NOTIFYs, pipeline | 2026-06-07 | round 2 OVERRIDE-APPROVE |
@@ -106,7 +106,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-176 | Clamp Nostr created_at to now() before it becomes published_at | 2026-06-06 | round 1 APPROVE |
 | M1-175 | Ban intent-row parity and transaction hygiene (M1-173 audit-2 findings) | 2026-06-06 | round 1 APPROVE |
 | M1-174 | Grant-admin intent-row coverage (probe-visibility parity) | 2026-06-06 | round 1 APPROVE |
-| M1-173 | Revoke-admin intent-row coverage (M1-151 redteam findings) | 2026-06-06 | round 1 APPROVE |
 
 ---
 
@@ -425,7 +424,7 @@ M1-201 (pending) ← runnable
 M1-202 (pending) ← runnable
 M1-203 (pending) ← runnable
 M1-206 (pending) ← runnable
-M1-209 (pending) ← runnable
+M1-209 (done)
 M1-210 (pending) ← runnable
 M1-211 (pending) ← runnable
 M1-212 (pending) ← runnable

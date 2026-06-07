@@ -1,6 +1,5 @@
 package app.zcat.infochat.collector.stream.nostr;
 
-import org.jspecify.annotations.NonNull;
 
 import java.net.URI;
 import java.time.Clock;
@@ -73,9 +72,9 @@ final class RelayHealthTracker {
     private boolean inAllBadCycle;
     private boolean terminal;
 
-    RelayHealthTracker(@NonNull List<URI> relayUris, int failureThreshold,
-                       @NonNull Duration cooldownDuration, int allRelaysBadCycleCap,
-                       @NonNull Clock clock, @NonNull Consumer<Transition> notifier) {
+    RelayHealthTracker(List<URI> relayUris, int failureThreshold,
+                       Duration cooldownDuration, int allRelaysBadCycleCap,
+                       Clock clock, Consumer<Transition> notifier) {
         this.failureThreshold = failureThreshold;
         this.cooldownDuration = cooldownDuration;
         this.allRelaysBadCycleCap = allRelaysBadCycleCap;
@@ -93,8 +92,7 @@ final class RelayHealthTracker {
      * relay enters cooldown until {@code now + cooldownDuration}. Returns the
      * source-level transition the call caused, if any.
      */
-    @NonNull
-    Transition recordFailure(@NonNull URI relay) {
+    Transition recordFailure(URI relay) {
         Transition transition;
         synchronized (this) {
             if (terminal) {
@@ -122,8 +120,7 @@ final class RelayHealthTracker {
      * cycle, the recovery fires {@link Transition#RECOVERED} and resets the
      * cycle counter.
      */
-    @NonNull
-    Transition recordSuccess(@NonNull URI relay) {
+    Transition recordSuccess(URI relay) {
         Transition transition;
         synchronized (this) {
             if (terminal) {
@@ -148,8 +145,7 @@ final class RelayHealthTracker {
      * current clock instant (the runLoop then takes {@code max(this, backoff)}
      * so the per-attempt backoff floor still applies).
      */
-    @NonNull
-    synchronized Instant nextAttemptTime(@NonNull URI relay) {
+    synchronized Instant nextAttemptTime(URI relay) {
         Instant now = clock.instant();
         Instant cooldownUntil = stateOf(relay).cooldownUntil;
         return cooldownUntil.isAfter(now) ? cooldownUntil : now;

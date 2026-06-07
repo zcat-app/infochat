@@ -1,6 +1,5 @@
 package app.zcat.infochat.ssrf;
 
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import java.net.InetAddress;
@@ -98,7 +97,7 @@ public class IpBlocklist {
         this.hostInterfacesProvider = hostInterfacesProvider;
     }
 
-    public boolean isBlocked(@NonNull InetAddress addr) {
+    public boolean isBlocked(InetAddress addr) {
         // M1-026 Finding 3: invoke the provider PER CALL so
         // post-startup interfaces (VPN, hot-plugged NIC, freshly-
         // attached cloud EIP) are seen on the very next isBlocked.

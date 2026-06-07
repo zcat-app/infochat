@@ -5,7 +5,6 @@ import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jspecify.annotations.NonNull;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -52,8 +51,8 @@ public class GroupAutoPromoteService {
     private final AuditLogWriter auditLogWriter;
 
     @Inject
-    public GroupAutoPromoteService(@NonNull DataSource dataSource,
-                                   @NonNull AuditLogWriter auditLogWriter) {
+    public GroupAutoPromoteService(DataSource dataSource,
+                                   AuditLogWriter auditLogWriter) {
         this.dataSource = dataSource;
         this.auditLogWriter = auditLogWriter;
     }
@@ -66,8 +65,8 @@ public class GroupAutoPromoteService {
      * was removed. Writes a PROMOTE_GROUP_ADMIN audit row on success
      * within the same transaction.
      */
-    public boolean tryAutoPromote(@NonNull UUID groupId, @NonNull UUID userId,
-                                  @NonNull String adapter, @NonNull String contactId) {
+    public boolean tryAutoPromote(UUID groupId, UUID userId,
+                                  String adapter, String contactId) {
         try (Connection conn = dataSource.getConnection()) {
             if (!isEligible(conn, userId)) {
                 return false;

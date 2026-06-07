@@ -1,6 +1,5 @@
 package app.zcat.infochat.collector.eval;
 
-import org.jspecify.annotations.NonNull;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -16,12 +15,12 @@ public final class TransactionHelper {
 
     @FunctionalInterface
     public interface TxBody {
-        void run(@NonNull Connection conn) throws SQLException;
+        void run(Connection conn) throws SQLException;
     }
 
-    public static void inTransaction(@NonNull DataSource dataSource,
-                                     @NonNull String context,
-                                     @NonNull TxBody body) {
+    public static void inTransaction(DataSource dataSource,
+                                     String context,
+                                     TxBody body) {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {

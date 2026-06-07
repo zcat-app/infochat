@@ -9,7 +9,6 @@ import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
@@ -67,7 +66,7 @@ public class UnsaveCommandHandler implements CommandHandler {
     }
 
     @Override
-    public OutboundMessage handle(@NonNull ScopeRef scope, @NonNull String rawText) {
+    public OutboundMessage handle(ScopeRef scope, String rawText) {
         String uid = parseUid(rawText);
         if (uid == null) {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_UNSAVE_UNKNOWN_UID));

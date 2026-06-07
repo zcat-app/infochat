@@ -1,7 +1,6 @@
 package app.zcat.infochat.messaging.impl.signal;
 
 import org.jboss.logging.Logger;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import app.zcat.infochat.messaging.Identity;
@@ -71,7 +70,7 @@ final class SignalGroupHandler {
      *                          null means membership events are dropped
      *                          (early-boot wiring case).
      */
-    SignalGroupHandler(@NonNull String botAci,
+    SignalGroupHandler(String botAci,
                        MessagingAdapter.@Nullable InboundHandler inboundHandler,
                        MessagingAdapter.@Nullable MembershipHandler membershipHandler) {
         this.botAci = botAci.toLowerCase(Locale.ROOT);
@@ -100,7 +99,7 @@ final class SignalGroupHandler {
      * @param receiveParams the {@code params} object from a JSON-RPC
      *                      {@code receive} notification; never null.
      */
-    void handleReceive(@NonNull JsonObject receiveParams) {
+    void handleReceive(JsonObject receiveParams) {
         JsonObject envelope = receiveParams.getJsonObject("envelope");
         if (envelope == null) {
             return;

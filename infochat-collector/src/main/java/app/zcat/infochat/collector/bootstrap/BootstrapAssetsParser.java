@@ -4,7 +4,6 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.jspecify.annotations.NonNull;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -58,7 +57,7 @@ public final class BootstrapAssetsParser {
      * Parses the contents of {@code path} and returns the validated
      * entries. Convenience overload around {@link #parse(InputStream)}.
      */
-    public List<BootstrapAssetsEntry> parse(@NonNull Path path) {
+    public List<BootstrapAssetsEntry> parse(Path path) {
         try (InputStream in = Files.newInputStream(path)) {
             return parse(in);
         } catch (IOException e) {
@@ -74,7 +73,7 @@ public final class BootstrapAssetsParser {
      * surfaces as {@link BootstrapAssetsParseException} so the
      * loader's startup bean can abort Collector boot.
      */
-    public List<BootstrapAssetsEntry> parse(@NonNull InputStream in) {
+    public List<BootstrapAssetsEntry> parse(InputStream in) {
         DocWrapper doc;
         try {
             doc = objectMapper
@@ -205,11 +204,11 @@ public final class BootstrapAssetsParser {
      * propagates as a startup failure (Quarkus default).
      */
     public static final class BootstrapAssetsParseException extends RuntimeException {
-        public BootstrapAssetsParseException(@NonNull String message) {
+        public BootstrapAssetsParseException(String message) {
             super(message);
         }
 
-        public BootstrapAssetsParseException(@NonNull String message, @NonNull Throwable cause) {
+        public BootstrapAssetsParseException(String message, Throwable cause) {
             super(message, cause);
         }
     }

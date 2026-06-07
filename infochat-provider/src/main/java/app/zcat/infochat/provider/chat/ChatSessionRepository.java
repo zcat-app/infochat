@@ -2,7 +2,6 @@ package app.zcat.infochat.provider.chat;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jspecify.annotations.NonNull;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -34,7 +33,7 @@ public class ChatSessionRepository {
     private final DataSource dataSource;
 
     @Inject
-    public ChatSessionRepository(@NonNull DataSource dataSource) {
+    public ChatSessionRepository(DataSource dataSource) {
         this.dataSource = dataSource;
     }
 
@@ -45,9 +44,9 @@ public class ChatSessionRepository {
      *
      * @return the seq number assigned to this message
      */
-    public int persistTurn(@NonNull UUID userId, @NonNull String scopeKind,
-                           @NonNull UUID scopeId, @NonNull String role,
-                           @NonNull String content, int tokens) {
+    public int persistTurn(UUID userId, String scopeKind,
+                           UUID scopeId, String role,
+                           String content, int tokens) {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
@@ -99,7 +98,7 @@ public class ChatSessionRepository {
      * Rough token estimate: characters / 4, minimum 1. Adequate for the
      * session token_count bookkeeping; M1-064 auto-compress can refine.
      */
-    public static int estimateTokens(@NonNull String text) {
+    public static int estimateTokens(String text) {
         return Math.max(1, text.length() / 4);
     }
 }

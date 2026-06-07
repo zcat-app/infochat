@@ -2,7 +2,6 @@ package app.zcat.infochat.provider.bundle;
 
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
-import org.jspecify.annotations.NonNull;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -97,7 +96,7 @@ public class BundleLoader {
      * present in {@code en.properties} — the load-bearing behavior the
      * bundle-completeness CI check relies on.</p>
      */
-    public String get(@NonNull String key) {
+    public String get(String key) {
         return resolveStrict(key, FALLBACK_LANGUAGE);
     }
 
@@ -115,7 +114,7 @@ public class BundleLoader {
      * {@code LangCommandHandler}); this accessor is robust to it for
      * defense-in-depth.</p>
      */
-    public String get(@NonNull String key, @NonNull String langCode) {
+    public String get(String key, String langCode) {
         Properties target = bundlesByLang.get(langCode);
         if (target != null) {
             String value = target.getProperty(key);

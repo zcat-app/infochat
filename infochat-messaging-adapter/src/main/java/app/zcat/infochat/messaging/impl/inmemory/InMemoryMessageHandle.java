@@ -2,7 +2,6 @@ package app.zcat.infochat.messaging.impl.inmemory;
 
 import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.OutboundMessage;
-import org.jspecify.annotations.NonNull;
 
 /**
  * {@link InMemoryAdapter}-internal per-handle state record. Per
@@ -20,5 +19,5 @@ import org.jspecify.annotations.NonNull;
  * the adapter's update / typing history are accessed through the
  * concrete-class test helpers, not by inspecting this record.</p>
  */
-public record InMemoryMessageHandle(long id, @NonNull OutboundMessage original) {
+public record InMemoryMessageHandle(long id, OutboundMessage original) {
 }

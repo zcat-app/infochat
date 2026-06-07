@@ -4,7 +4,6 @@ import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jspecify.annotations.NonNull;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -62,7 +61,7 @@ public class ClusterTraversal {
      */
     @Inject
     public ClusterTraversal(
-            @NonNull PostReferenceEdgeSource edgeSource,
+            PostReferenceEdgeSource edgeSource,
             @ConfigProperty(name = "infochat.provider.cluster-traversal.depth-limit",
                             defaultValue = "3") int depthLimit) {
         this.edgeSource = edgeSource;

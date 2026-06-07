@@ -3,7 +3,6 @@ package app.zcat.infochat.collector.fetcher.bluesky;
 import app.zcat.infochat.core.ingest.NormalizedPost;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import java.io.IOException;
@@ -40,7 +39,7 @@ public final class BlueskyResponseParser {
      * @return a {@link Page} containing the parsed posts and the cursor
      *         for the next page (null when this is the last page)
      */
-    public static Page parse(long sourceId, byte @NonNull [] body, @NonNull Instant fetchedAt) {
+    public static Page parse(long sourceId, byte [] body, Instant fetchedAt) {
         JsonNode root;
         try {
             root = MAPPER.readTree(body);
@@ -147,14 +146,14 @@ public final class BlueskyResponseParser {
      * @param cursor the pagination cursor for the next page, or null if
      *               this is the last page
      */
-    public record Page(@NonNull List<NormalizedPost> posts, @Nullable String cursor) {}
+    public record Page(List<NormalizedPost> posts, @Nullable String cursor) {}
 
     public static final class BlueskyParseException extends RuntimeException {
-        public BlueskyParseException(@NonNull String message) {
+        public BlueskyParseException(String message) {
             super(message);
         }
 
-        public BlueskyParseException(@NonNull String message, @NonNull Throwable cause) {
+        public BlueskyParseException(String message, Throwable cause) {
             super(message, cause);
         }
     }

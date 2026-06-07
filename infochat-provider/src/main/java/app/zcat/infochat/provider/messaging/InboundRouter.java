@@ -22,7 +22,6 @@ import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import io.quarkus.scheduler.Scheduled;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -338,7 +337,7 @@ public class InboundRouter {
      * intake-step order.
      */
     @ActivateRequestContext
-    public void onMessage(@NonNull InboundMessage msg, @NonNull String adapterName) {
+    public void onMessage(InboundMessage msg, String adapterName) {
         // @ActivateRequestContext gives this dispatch its own CDI
         // request-scope context so @RequestScoped collaborators
         // (InboundContext) resolve correctly when invoked from threads
@@ -815,9 +814,9 @@ public class InboundRouter {
     // table, empty when the group row is absent (removed mid-dispatch).
     // Callers skip the anchor clear / silent-drop the chat dispatch on
     // empty rather than throwing.
-    private Optional<UUID> resolveChatScopeId(@NonNull ScopeRef scope,
-                                              @NonNull UUID actorId,
-                                              @NonNull String adapterName) {
+    private Optional<UUID> resolveChatScopeId(ScopeRef scope,
+                                              UUID actorId,
+                                              String adapterName) {
         return switch (scope) {
             case ScopeRef.Dm ignored -> Optional.of(actorId);
             case ScopeRef.Group group -> lookupGroupId(adapterName, group.adapterGroupId());
@@ -834,7 +833,7 @@ public class InboundRouter {
      * existence. The {@link SQLException} branch (infrastructure
      * failure) still throws.
      */
-    Optional<UUID> lookupGroupId(@NonNull String adapter, @NonNull String upstreamGroupId) {
+    Optional<UUID> lookupGroupId(String adapter, String upstreamGroupId) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(SELECT_GROUP_SQL)) {
             ps.setString(1, adapter);
@@ -851,7 +850,7 @@ public class InboundRouter {
         }
     }
 
-    private void ensureGroupMembership(@NonNull UUID groupId, @NonNull UUID userId) {
+    private void ensureGroupMembership(UUID groupId, UUID userId) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(ENSURE_MEMBERSHIP_SQL)) {
             ps.setObject(1, groupId);
@@ -910,7 +909,7 @@ public class InboundRouter {
      * Count UTF-8 byte length without allocating a byte[]. Returns true
      * as soon as the running count exceeds {@code limit} (early exit).
      */
-    static boolean exceedsUtf8ByteLength(@NonNull String s, int limit) {
+    static boolean exceedsUtf8ByteLength(String s, int limit) {
         int count = 0;
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);

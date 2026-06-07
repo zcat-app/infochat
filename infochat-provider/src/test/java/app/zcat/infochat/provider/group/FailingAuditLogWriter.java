@@ -2,7 +2,6 @@ package app.zcat.infochat.provider.group;
 
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
-import org.jspecify.annotations.NonNull;
 
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -19,7 +18,7 @@ import java.sql.SQLException;
 class FailingAuditLogWriter extends AuditLogWriter {
 
     @Override
-    public void write(@NonNull Connection conn, RedactionHook.@NonNull AuditRow row)
+    public void write(Connection conn, RedactionHook.AuditRow row)
             throws SQLException {
         throw new SQLException("simulated audit-write failure DETAIL: "
                 + "(actor_contact_id, details_json)=(" + row.actorContactId()

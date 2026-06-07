@@ -6,7 +6,6 @@ import app.zcat.infochat.provider.command.CompressCommandHandler;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,9 +48,9 @@ public class AutoCompressTrigger {
     @Inject
     public AutoCompressTrigger(
             @ConfigProperty(name = "infochat.context-compress-at") int compressAtThreshold,
-            @NonNull BundleLoader bundleLoader,
-            @NonNull CompressCommandHandler compressHandler,
-            @NonNull DataSource dataSource) {
+            BundleLoader bundleLoader,
+            CompressCommandHandler compressHandler,
+            DataSource dataSource) {
         this.compressAtThreshold = compressAtThreshold;
         this.bundleLoader = bundleLoader;
         this.compressHandler = compressHandler;
@@ -64,10 +63,10 @@ public class AutoCompressTrigger {
      * @return a notification string to append to the reply if auto-compress
      *         fired (success or failure), or empty if below threshold
      */
-    public Optional<String> checkAndCompress(@NonNull UUID userId,
-                                             @NonNull String scopeKind,
-                                             @NonNull UUID scopeId,
-                                             @NonNull String scopeLanguage) {
+    public Optional<String> checkAndCompress(UUID userId,
+                                             String scopeKind,
+                                             UUID scopeId,
+                                             String scopeLanguage) {
         int tokenCount = readTokenCount(userId, scopeKind, scopeId);
         if (tokenCount < compressAtThreshold) {
             return Optional.empty();

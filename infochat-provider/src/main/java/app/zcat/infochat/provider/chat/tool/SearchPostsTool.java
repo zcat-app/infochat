@@ -2,7 +2,6 @@ package app.zcat.infochat.provider.chat.tool;
 
 import app.zcat.infochat.core.util.JsonEscaper;
 import app.zcat.infochat.provider.chat.ChatToolRegistry;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import jakarta.enterprise.context.ApplicationScoped;
@@ -34,14 +33,14 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
     private final DataSource dataSource;
 
     @Inject
-    public SearchPostsTool(@NonNull DataSource dataSource) {
+    public SearchPostsTool(DataSource dataSource) {
         this.dataSource = dataSource;
     }
 
     @Override
     @SuppressWarnings("unchecked")
-    public @NonNull String execute(@NonNull UUID userId, @NonNull String scopeKind,
-                                    @NonNull UUID scopeId, @NonNull Map<String, Object> args)
+    public String execute(UUID userId, String scopeKind,
+                                    UUID scopeId, Map<String, Object> args)
             throws SQLException {
         List<String> tags = args.containsKey("tags")
                 ? (List<String>) args.get("tags") : List.of();
@@ -192,12 +191,12 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
         }
     }
 
-    static @NonNull String jsonStr(@Nullable String s) {
+    static String jsonStr(@Nullable String s) {
         if (s == null) return "null";
         return "\"" + JsonEscaper.escape(s) + "\"";
     }
 
-    static void appendJsonArray(@NonNull StringBuilder sb, @NonNull String[] items) {
+    static void appendJsonArray(StringBuilder sb, String[] items) {
         sb.append('[');
         for (int i = 0; i < items.length; i++) {
             if (i > 0) sb.append(',');

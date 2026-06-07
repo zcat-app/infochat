@@ -4,7 +4,6 @@ import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.messaging.RateCapBucket;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jspecify.annotations.NonNull;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -67,7 +66,7 @@ public class GroupApprovalCheck {
         record Approved() implements Outcome {}
 
         /** Fixed reply path — InboundRouter resolves the bundle key, sends the reply, stops. */
-        record FixedReply(@NonNull String bundleKey) implements Outcome {}
+        record FixedReply(String bundleKey) implements Outcome {}
 
         /** Per-group reply bucket exhausted — InboundRouter sends nothing, stops. */
         record SilentDrop() implements Outcome {}
@@ -107,10 +106,10 @@ public class GroupApprovalCheck {
      *         or {@link Outcome.SilentDrop}. InboundRouter dispatches
      *         the three shapes per its class-level Javadoc.
      */
-    public @NonNull Outcome check(@NonNull String adapter,
-                                  @NonNull String upstreamGroupId,
-                                  @NonNull UUID activatorUserId,
-                                  @NonNull String activatorRedactedContactId) {
+    public Outcome check(String adapter,
+                                  String upstreamGroupId,
+                                  UUID activatorUserId,
+                                  String activatorRedactedContactId) {
         // Bucket gate for existing rows. The lookup here is what lets
         // the bucket be keyed on the row's UUID; Service does its own
         // lookup so the dispatch result reflects the freshest
@@ -144,7 +143,7 @@ public class GroupApprovalCheck {
      * values, so reaching the default branch is a schema invariant
      * violation worth crashing on (not a defensive fall-back).</p>
      */
-    static @NonNull Outcome dispatchByStatus(@NonNull String approvalStatus) {
+    static Outcome dispatchByStatus(String approvalStatus) {
         return switch (approvalStatus) {
             case "approved" -> new Outcome.Approved();
             case "pending" -> new Outcome.FixedReply(BundleKeys.GROUP_PENDING);

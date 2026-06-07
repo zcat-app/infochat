@@ -2,7 +2,6 @@ package app.zcat.infochat.collector.fetch;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jspecify.annotations.NonNull;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -84,7 +83,7 @@ public class SourceRepository {
      * status (the scheduler only sees {@code status='active'} rows in
      * the first place) and does not fire any notification.
      */
-    public void recordSuccess(@NonNull UUID sourceId) throws SQLException {
+    public void recordSuccess(UUID sourceId) throws SQLException {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(RECORD_SUCCESS_SQL)) {
             ps.setObject(1, sourceId);
@@ -110,7 +109,7 @@ public class SourceRepository {
      *         admin notification — fire on the crossing only, not on
      *         every post-threshold failure.
      */
-    public FailureOutcome recordFailure(@NonNull UUID sourceId, int threshold) throws SQLException {
+    public FailureOutcome recordFailure(UUID sourceId, int threshold) throws SQLException {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(RECORD_FAILURE_SQL)) {
             ps.setInt(1, threshold);
@@ -155,7 +154,7 @@ public class SourceRepository {
      *                         notification once per crossing.
      */
     public record FailureOutcome(int consecutiveFailures,
-                                 @NonNull String status,
+                                 String status,
                                  boolean crossedThreshold) {
     }
 }

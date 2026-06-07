@@ -1,7 +1,6 @@
 package app.zcat.infochat.messaging.impl.signal;
 
 import org.jboss.logging.Logger;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import java.io.BufferedReader;
@@ -80,9 +79,9 @@ final class SignalSubprocess {
      * have to thread one through. The scheduler is shut down on
      * {@link #stop()}.
      */
-    SignalSubprocess(@NonNull ProcessBuilder pb,
-                     @NonNull InetSocketAddress endpoint,
-                     @NonNull BackoffPolicy backoff,
+    SignalSubprocess(ProcessBuilder pb,
+                     InetSocketAddress endpoint,
+                     BackoffPolicy backoff,
                      int maxRestarts) {
         this(pb, endpoint, backoff, maxRestarts, null);
     }
@@ -91,9 +90,9 @@ final class SignalSubprocess {
      * Test-friendly constructor — caller supplies a scheduler so the
      * test can shut it down deterministically.
      */
-    SignalSubprocess(@NonNull ProcessBuilder pb,
-                     @NonNull InetSocketAddress endpoint,
-                     @NonNull BackoffPolicy backoff,
+    SignalSubprocess(ProcessBuilder pb,
+                     InetSocketAddress endpoint,
+                     BackoffPolicy backoff,
                      int maxRestarts,
                      @Nullable ScheduledExecutorService injectedScheduler) {
         // ProcessBuilder is shared across restarts (Process is per-spawn);
@@ -308,7 +307,6 @@ final class SignalSubprocess {
         return p != null && p.isAlive();
     }
 
-    @NonNull
     State state() {
         // The AtomicReference is seeded non-null (State.NEW) and only ever
         // CAS'd to non-null State values; NullAway models AtomicReference.get()
@@ -320,7 +318,6 @@ final class SignalSubprocess {
         return restartAttempts.get();
     }
 
-    @NonNull
     InetSocketAddress endpoint() {
         return endpoint;
     }

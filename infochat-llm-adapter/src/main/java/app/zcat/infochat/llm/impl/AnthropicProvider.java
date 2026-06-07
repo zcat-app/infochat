@@ -1,6 +1,5 @@
 package app.zcat.infochat.llm.impl;
 
-import org.jspecify.annotations.NonNull;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -79,7 +78,7 @@ public class AnthropicProvider implements LlmProvider {
     private final HttpClient http;
 
     @Inject
-    public AnthropicProvider(@NonNull Config config) {
+    public AnthropicProvider(Config config) {
         this(config, HttpClient.newHttpClient());
     }
 
@@ -95,8 +94,8 @@ public class AnthropicProvider implements LlmProvider {
     }
 
     @Override
-    public @NonNull LlmResponse generate(@NonNull ModelTask task, @NonNull String systemPrompt,
-                                          @NonNull String userPrompt) {
+    public LlmResponse generate(ModelTask task, String systemPrompt,
+                                          String userPrompt) {
         TaskConfig cfg = configFor(task);
         return doCall(cfg, systemPrompt, userPrompt);
     }
@@ -107,7 +106,7 @@ public class AnthropicProvider implements LlmProvider {
      * resolution the first {@link #generate} call would perform.
      */
     @Override
-    public void assertTaskConfigResolvable(@NonNull ModelTask task) {
+    public void assertTaskConfigResolvable(ModelTask task) {
         configFor(task);
     }
 

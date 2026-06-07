@@ -17,7 +17,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -89,17 +88,17 @@ public class ChatAgent {
     private final DataSource dataSource;
 
     @Inject
-    public ChatAgent(@NonNull InFlightTracker inFlightTracker,
-                     @NonNull ChatPromptBuilder promptBuilder,
-                     @NonNull ChatToolDispatcher toolDispatcher,
-                     @NonNull ChatSessionRepository sessionRepository,
-                     @NonNull LlmRouter llmRouter,
-                     @NonNull LlmOutputSanitizer outputSanitizer,
-                     @NonNull TranslationPipeline translationPipeline,
-                     @NonNull BundleLoader bundleLoader,
-                     @NonNull AutoCompressTrigger autoCompressTrigger,
-                     @NonNull AuditLogWriter auditLogWriter,
-                     @NonNull DataSource dataSource) {
+    public ChatAgent(InFlightTracker inFlightTracker,
+                     ChatPromptBuilder promptBuilder,
+                     ChatToolDispatcher toolDispatcher,
+                     ChatSessionRepository sessionRepository,
+                     LlmRouter llmRouter,
+                     LlmOutputSanitizer outputSanitizer,
+                     TranslationPipeline translationPipeline,
+                     BundleLoader bundleLoader,
+                     AutoCompressTrigger autoCompressTrigger,
+                     AuditLogWriter auditLogWriter,
+                     DataSource dataSource) {
         this.inFlightTracker = inFlightTracker;
         this.promptBuilder = promptBuilder;
         this.toolDispatcher = toolDispatcher;
@@ -118,8 +117,8 @@ public class ChatAgent {
      * the user. The in-flight slot is acquired and released within this
      * method; callers need not manage it.
      */
-    public @NonNull String handle(@NonNull UUID userId, @NonNull String scopeKind,
-                                   @NonNull UUID scopeId, @NonNull String userMessage) {
+    public String handle(UUID userId, String scopeKind,
+                                   UUID scopeId, String userMessage) {
         if (!inFlightTracker.tryAcquire(userId, scopeKind, scopeId)) {
             return bundleLoader.get(BundleKeys.ERROR_CHAT_IN_FLIGHT);
         }
