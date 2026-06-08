@@ -10,6 +10,7 @@ import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.OutboundMessage;
+import app.zcat.infochat.messaging.OutboundRateLimiter;
 import app.zcat.infochat.messaging.ScopeRef;
 
 import java.util.Locale;
@@ -17,6 +18,7 @@ import java.util.Locale;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -77,7 +79,6 @@ public final class SignalAdapter implements MessagingAdapter {
             /* supportsThreading          */ false,
             /* maxMessageBytes            */ 2_000,
             /* maxInboundMessageBytes     */ 16_384,
-            /* maxInflightSends           */ 4,
             /* maxSendsPerSecond          */ 8,
             /* supportsMessageEdit        */ true,
             /* supportsTypingIndicator    */ true,
@@ -103,6 +104,12 @@ public final class SignalAdapter implements MessagingAdapter {
     // reader/dispatcher teardown). A failed attempt simply ends; the next
     // restart notification retries.
     private final AtomicBoolean reconnectInFlight = new AtomicBoolean();
+    // Outbound send pacer (design §6.3.6): bounds transmits to
+    // CAPABILITIES.maxSendsPerSecond so the Provider cannot drive
+    // signal-cli fast enough to trip Signal's per-account rate limit.
+    // Shared across send / update / finalizeMessage — one token per frame.
+    private final OutboundRateLimiter outboundRate =
+            new OutboundRateLimiter(CAPABILITIES.maxSendsPerSecond(), Clock.systemUTC());
 
     /**
      * Capability-introspection constructor used by tests that only
@@ -294,17 +301,23 @@ public final class SignalAdapter implements MessagingAdapter {
 
     @Override
     public MessageHandle send(OutboundMessage msg) throws MessagingException {
-        return requireConnected("send").send(msg);
+        SignalJsonRpcClient c = requireConnected("send");
+        outboundRate.acquire();
+        return c.send(msg);
     }
 
     @Override
     public void update(MessageHandle handle, String body) throws MessagingException {
-        requireConnected("update").update(handle, body);
+        SignalJsonRpcClient c = requireConnected("update");
+        outboundRate.acquire();
+        c.update(handle, body);
     }
 
     @Override
     public void finalizeMessage(MessageHandle handle, String body) throws MessagingException {
-        requireConnected("finalizeMessage").finalizeHandle(handle, body);
+        SignalJsonRpcClient c = requireConnected("finalizeMessage");
+        outboundRate.acquire();
+        c.finalizeHandle(handle, body);
     }
 
     @Override

@@ -315,7 +315,6 @@ class AdapterRegistryTest {
                     /* supportsThreading          */ false,
                     /* maxMessageBytes            */ 100_000,
                     /* maxInboundMessageBytes     */ 100_000,
-                    /* maxInflightSends           */ 1_000,
                     /* maxSendsPerSecond          */ 10_000,
                     /* supportsMessageEdit        */ true,
                     /* supportsTypingIndicator    */ true,

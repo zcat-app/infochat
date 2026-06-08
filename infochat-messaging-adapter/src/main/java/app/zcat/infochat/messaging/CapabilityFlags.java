@@ -68,13 +68,16 @@ import java.time.Duration;
  *                                   cap; messages over this size are
  *                                   dropped by the adapter before
  *                                   delivery to Provider.
- * @param maxInflightSends           concurrency: maximum
- *                                   {@link MessagingAdapter#send}
- *                                   calls allowed in flight at once.
  * @param maxSendsPerSecond          rate: token-bucket cap on
  *                                   {@link MessagingAdapter#send}
  *                                   calls per second averaged over a
- *                                   one-second window.
+ *                                   one-second window. Production
+ *                                   adapters pace outbound transmits to
+ *                                   this via {@link OutboundRateLimiter}
+ *                                   (design §6.3.6). Outbound concurrency
+ *                                   is bounded separately by the
+ *                                   transport's one-outstanding-send
+ *                                   rule, not by a capability field.
  * @param supportsMessageEdit        true when the adapter can edit a
  *                                   previously-sent message; drives
  *                                   in-place progress updates.
@@ -98,7 +101,6 @@ public record CapabilityFlags(
         boolean supportsThreading,
         int maxMessageBytes,
         int maxInboundMessageBytes,
-        int maxInflightSends,
         int maxSendsPerSecond,
         boolean supportsMessageEdit,
         boolean supportsTypingIndicator,

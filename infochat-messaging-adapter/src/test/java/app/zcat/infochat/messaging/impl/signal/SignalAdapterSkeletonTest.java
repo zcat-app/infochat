@@ -30,7 +30,6 @@ class SignalAdapterSkeletonTest {
         assertFalse(caps.supportsThreading());
         assertEquals(2_000, caps.maxMessageBytes());
         assertEquals(16_384, caps.maxInboundMessageBytes());
-        assertEquals(4, caps.maxInflightSends());
         assertEquals(8, caps.maxSendsPerSecond());
         assertTrue(caps.supportsMessageEdit());
         assertTrue(caps.supportsTypingIndicator());

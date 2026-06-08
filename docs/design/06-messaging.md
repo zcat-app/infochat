@@ -174,12 +174,14 @@
                                            //   Set to Integer.MAX_VALUE only if the protocol
                                            //   provides no enforcement mechanism; the
                                            //   adapter's design note MUST justify that.
-      int     maxInflightSends,            // CONCURRENCY: max send() calls in flight at once
-                                           //   (e.g. 4 means up to 4 outbound messages
-                                           //    may be transmitting simultaneously)
-      int     maxSendsPerSecond,           // RATE: token-bucket cap on sends per second
-                                           //   averaged over a 1s window, regardless of
-                                           //   how many are concurrently in flight
+      int     maxSendsPerSecond,           // RATE: production adapters pace outbound sends
+                                           //   (send / update / finalize) to this many per
+                                           //   second, averaged over a 1s window, via a shared
+                                           //   OutboundRateLimiter (§6.3.6). Transport
+                                           //   self-protection beneath the Provider per-user
+                                           //   limiter, never a second user-facing throttle.
+                                           //   Concurrency is bounded by the transport's
+                                           //   one-outstanding-send rule, not a capability field.
       // --- Editing / typing ---
       boolean supportsMessageEdit,         // adapter can update an already-sent message
                                            //   (e.g., SimpleX APIUpdateChatItem)
@@ -241,8 +243,8 @@
   compose: the adapter drops oversize messages **before delivery to
   Provider** (raising the inbound counter
   `adapter.inbound.dropped{reason='oversize'}` and emitting a fixed
-  reply via the same `correlationId` path used for queue-overflow drops
-  in §6.3.7), and the application-level cap fires as the second defense
+  reply with `correlationId` set to the dropped inbound message id —
+  §6.3.10), and the application-level cap fires as the second defense
   on anything that slipped through (e.g., on adapters whose protocol
   has no enforcement mechanism).
 
@@ -341,9 +343,9 @@
   ### 6.3.6 Delivery semantics
 
   - `send()` returns when the adapter has accepted the message for transmission, NOT when the recipient has read it.
-  - **Concurrency** is governed by `capabilities.maxInflightSends`: the adapter MUST NOT have more than that many `send()` calls actively transmitting at once. Excess callers either block briefly on an internal semaphore or are queued.
-  - **Rate** is governed independently by `capabilities.maxSendsPerSecond`: even if `maxInflightSends` is high, the adapter MUST NOT exceed this many sends per second averaged over a 1s window. The two limits compose — whichever is reached first applies. (Concurrency caps "how many at once"; rate caps "how many per second".)
-  - The adapter MUST NOT block the calling thread for more than a small bounded interval; if either cap would be violated, it must enqueue internally rather than stall the caller.
+  - **Rate** is governed by `capabilities.maxSendsPerSecond`: each production adapter paces its outbound transmits (send / update / finalize) to at most this many per second, averaged over a 1s window, via a shared `OutboundRateLimiter` — a token bucket that starts full, so a burst up to the cap transmits immediately and sustained sending past it blocks the calling thread for the sub-second interval until the next token accrues. This is transport self-protection: it keeps the Provider from driving the transport fast enough to trip the messaging service's own server-side rate limit or flag the bot. It is NOT a second user-facing throttle — per [../spec/messaging.md](../spec/messaging.md) §Failure handling the per-user limiter (the inbound `RateCapBucket` and the cost-side `LlmRateLimiter`) is the single source of truth for "slow this user down", and this pacer sits strictly underneath it. (The `InMemoryAdapter` test double declares the field for SPI completeness but has no transport to pace.)
+  - **Concurrency** is bounded by the transport itself, not by a capability field: each v1 transport keeps exactly one outbound frame in flight per connection — the JDK WebSocket permits one outstanding `sendText` (SimpleX, §6.4) and the Signal JSON-RPC client serializes its writes likewise (§6.5) — so there is no `maxInflightSends` knob. A multi-in-flight outbound design is forever-out-of-v1.
+  - The adapter MUST NOT block the calling thread for more than the small bounded pacing interval above.
 
   #### Failure categorisation and retry policy
 
@@ -432,7 +434,7 @@
   ### 6.3.10 Inbound message size cap
 
   - Per §6.2.2, every adapter SHOULD enforce a transport-layer size ceiling on inbound messages, dropping anything above `capabilities.maxInboundMessageBytes()` **before** delivery to `InboundHandler.onMessage`.
-  - The drop is recorded at `adapter.inbound.dropped{adapter, scope_kind, reason='oversize'}` and logged at WARN with the redacted `sender.contactId` and the message's `adapterMessageId`. A fixed friendly reply is emitted via the same priority `OutboundMessage` path used for queue-overflow drops in §6.3.7 (`correlationId = <dropped inbound message id>`).
+  - The drop is recorded at `adapter.inbound.dropped{adapter, scope_kind, reason='oversize'}` and logged at WARN with the redacted `sender.contactId` and the message's `adapterMessageId`. A fixed friendly reply is emitted as an `OutboundMessage` with `correlationId = <dropped inbound message id>`; unlike the §6.3.7 inbound-queue overflow drop (silent in v1), the oversize drop replies, because it signals a one-shot client mistake rather than a sustained flood.
   - The application-level chat-mode body cap from [03-commands.md §3.1](03-commands.md) fires as the **second defense** on anything that slips past — typically on adapters whose protocol provides no enforceable transport ceiling and which therefore declare `maxInboundMessageBytes = Integer.MAX_VALUE`. The two caps are layered, not redundant: the transport cap bounds resource cost from a hostile sender at the adapter boundary; the application cap bounds prompt-injection blast radius once the message has been parsed.
 
   ### 6.3.11 Membership events
@@ -472,8 +474,8 @@
                                                             //   are bounded by the WS frame cap; the
                                                             //   adapter clamps tighter to give the
                                                             //   application-layer cap headroom.
-  maxInflightSends           = 4      // up to 4 outbound sends in flight concurrently
-  maxSendsPerSecond          = 5      // and at most 5/s averaged; conservative, raise after observing
+  maxSendsPerSecond          = 5      // at most 5/s averaged, paced via OutboundRateLimiter
+                                      //   (§6.3.6); conservative, raise after observing
   supportsMessageEdit        = true   // APIUpdateChatItem ("/_update item …") with live=on/off
   supportsTypingIndicator    = false  // SimpleX has no first-class typing indicator
   minEditInterval            = 600ms  // conservative floor; refine after observation                                                                                                                                                                               
@@ -669,7 +671,6 @@
   maxMessageBytes            = 8000   // Signal's effective text-content cap is well above SimpleX;
                                       //   conservative chunking floor, refine after observation.
   maxInboundMessageBytes     = profile-driven (see §6.2.2)
-  maxInflightSends           = 4      // matches SimpleX; Signal's rate envelope is per-account
   maxSendsPerSecond          = 5      // conservative; Signal's per-account ceiling is higher but
                                       //   the v1 LLM concurrency cap (D46 §Topology) is the
                                       //   binding constraint anyway.
@@ -815,7 +816,6 @@
               false,           // supportsThreading
               100_000,         // maxMessageBytes — generous for tests
               100_000,         // maxInboundMessageBytes — generous for tests
-              1000,            // maxInflightSends — effectively unlimited concurrency
               10_000,          // maxSendsPerSecond — effectively unlimited rate
               true,            // supportsMessageEdit
               true,            // supportsTypingIndicator

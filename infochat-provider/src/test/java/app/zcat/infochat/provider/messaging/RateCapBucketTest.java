@@ -144,6 +144,41 @@ class RateCapBucketTest {
                 "drained-and-idle bucket must be evicted under the widened predicate");
     }
 
+    /**
+     * Pre-auth key-space bound (acceptance item 3 / gpt S5). Contact ids
+     * enter {@link RateCapBucket#tryAcquire} from the adapter boundary
+     * before any registration or auth check, so a flood of distinct
+     * {@code (adapter, contactId)} tuples must not grow the bucket map
+     * without bound. With the hard cap set small, driving far more distinct
+     * contacts than the cap leaves {@link RateCapBucket#bucketCount()}
+     * pinned at the cap: the first {@code cap} distinct contacts each mint
+     * a (full) bucket and succeed, and every distinct contact past the cap
+     * is rejected (return false) exactly like an over-cap inbound and never
+     * inserted.
+     */
+    @Test
+    void contactBucketKeySpaceBoundedUnderDistinctContactFlood() {
+        TestClock clock = new TestClock(Instant.parse("2026-05-20T00:00:00Z"));
+        RateCapBucket bucket = new RateCapBucket(clock, CAP, REFILL_WINDOW, EVICTION_THRESHOLD);
+        int cap = 5;
+        bucket.maxContactBuckets = cap;
+
+        for (int i = 0; i < cap * 10; i++) {
+            boolean acquired = bucket.tryAcquire("inmemory", "flood-" + i);
+            if (i < cap) {
+                assertTrue(acquired,
+                        "the first " + cap + " distinct contacts each mint a bucket (i=" + i + ")");
+            } else {
+                assertFalse(acquired,
+                        "a distinct contact past the key-space cap is rejected (i=" + i + ")");
+            }
+            assertTrue(bucket.bucketCount() <= cap,
+                    "the bucket map must never exceed the key-space cap (i=" + i + ")");
+        }
+        assertEquals(cap, bucket.bucketCount(),
+                "after the flood the map holds exactly the cap, not one more");
+    }
+
     // ----- D47 per-group LLM sub-bucket (M1-222) --------------------------
     // Per docs/spec/security.md §Rate limiting "Per-group LLM rate (D47)":
     // a separate sub-bucket per approved group bounding LLM-triggering

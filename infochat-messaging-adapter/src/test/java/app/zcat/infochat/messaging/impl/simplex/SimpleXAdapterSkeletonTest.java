@@ -35,7 +35,6 @@ class SimpleXAdapterSkeletonTest {
         assertFalse(caps.supportsThreading());
         assertEquals(2_000, caps.maxMessageBytes());
         assertEquals(16_384, caps.maxInboundMessageBytes());
-        assertEquals(4, caps.maxInflightSends());
         assertEquals(5, caps.maxSendsPerSecond(), "design §6.4.2: at most 5/s averaged");
         assertTrue(caps.supportsMessageEdit(), "SimpleX supports message edits");
         assertFalse(caps.supportsTypingIndicator(), "design §6.4.2: SimpleX has no first-class typing indicator");

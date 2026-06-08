@@ -12,6 +12,7 @@ import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.OutboundMessage;
+import app.zcat.infochat.messaging.OutboundRateLimiter;
 import app.zcat.infochat.messaging.ScopeRef;
 
 import java.io.IOException;
@@ -19,6 +20,7 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -72,7 +74,6 @@ public final class SimpleXAdapter implements MessagingAdapter {
             /* supportsThreading          */ false,
             /* maxMessageBytes            */ 2_000,
             /* maxInboundMessageBytes     */ 16_384,
-            /* maxInflightSends           */ 4,
             /* maxSendsPerSecond          */ 5,
             /* supportsMessageEdit        */ true,
             /* supportsTypingIndicator    */ false,
@@ -98,6 +99,12 @@ public final class SimpleXAdapter implements MessagingAdapter {
 
     private final AtomicLong handleCounter = new AtomicLong();
     private final AtomicLong commandCounter = new AtomicLong();
+    // Outbound send pacer (design §6.3.6): bounds transmits to
+    // CAPABILITIES.maxSendsPerSecond so the Provider cannot drive
+    // simplex-chat fast enough to trip its server-side rate limit. Shared
+    // across send / update / finalizeMessage — each frame draws one token.
+    private final OutboundRateLimiter outboundRate =
+            new OutboundRateLimiter(CAPABILITIES.maxSendsPerSecond(), Clock.systemUTC());
     /** Guarded by its own monitor — LinkedHashMap is not thread-safe. */
     private final Map<String, TrackedHandle> handles =
             new LinkedHashMap<>(64, 0.75f, true) {
@@ -372,6 +379,7 @@ public final class SimpleXAdapter implements MessagingAdapter {
         SimpleXWebSocketClient ws = requireConnected();
         String corrId = nextCorrId();
         String envelope = SimpleXMessageCodec.encodeSendCommand(corrId, msg.scope(), msg.text());
+        outboundRate.acquire();
         String chatItemId = ws.sendCommand(corrId, envelope, ACK_TIMEOUT);
         String opaque = "simplex-" + handleCounter.incrementAndGet();
         TrackedHandle tracked = new TrackedHandle(
@@ -392,6 +400,7 @@ public final class SimpleXAdapter implements MessagingAdapter {
         // update returns the (possibly changed) chatItemId — the SimpleX
         // surface re-acks edits with the same id. We don't need the return
         // value here, only the success/failure outcome.
+        outboundRate.acquire();
         ws.sendCommand(corrId, envelope, ACK_TIMEOUT);
     }
 
@@ -402,6 +411,7 @@ public final class SimpleXAdapter implements MessagingAdapter {
         String corrId = nextCorrId();
         String envelope = SimpleXMessageCodec.encodeFinalizeCommand(
                 corrId, internal.chatItemId(), internal.scope(), body);
+        outboundRate.acquire();
         ws.sendCommand(corrId, envelope, ACK_TIMEOUT);
         // SPI contract: after finalizeMessage, any update() on the same
         // handle MUST throw PERMANENT. The flag is checked above in

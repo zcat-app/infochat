@@ -60,6 +60,19 @@ public class RateCapBucket {
     @ConfigProperty(name = "infochat.rate-cap.eviction-threshold", defaultValue = "PT10M")
     Duration evictionThreshold;
 
+    // Hard cap on the number of distinct (adapter, contactId) buckets in
+    // `buckets`. Contact ids enter tryAcquire from the adapter boundary
+    // before any registration/auth check (Authorization step 1.5), so a
+    // flood of distinct ids would otherwise grow the map without bound
+    // between eviction sweeps. When the map is full a NEW key is rejected
+    // exactly like an over-cap inbound (silent drop, no throw, no
+    // outbound); the eviction sweep below reclaims idle keys over time. The
+    // two compose — this cap bounds the map instantaneously, eviction
+    // bounds it by decay. A new key is NEVER admitted by evicting a live
+    // one (that would reintroduce the M1-044a DOS shape).
+    @ConfigProperty(name = "infochat.rate-cap.max-contact-buckets", defaultValue = "100000")
+    int maxContactBuckets;
+
     // D47 step 3.5 (M1-112). Per-group reply bucket shared across
     // approval states — bounds outbound adapter-send cost on pending /
     // rejected / approved groups alike. Window is fixed at 15 minutes
@@ -193,6 +206,10 @@ public class RateCapBucket {
         this.groupLlmRefillWindow = groupLlmRefillWindow;
         this.groupCommandCap = groupCommandCap;
         this.groupCommandRefillWindow = groupCommandRefillWindow;
+        // No test-ctor parameter for the key-space cap — mirror the
+        // @ConfigProperty default for the no-CDI test path (the flood test
+        // overrides this field directly with a small value).
+        this.maxContactBuckets = 100_000;
     }
 
     /**
@@ -203,8 +220,24 @@ public class RateCapBucket {
      */
     public boolean tryAcquire(String adapter, String contactId) {
         Key key = new Key(adapter, contactId);
-        Bucket bucket = buckets.computeIfAbsent(
-                key, k -> new Bucket(inboundPerMinute, clock.millis()));
+        Bucket existing = buckets.get(key);
+        Bucket bucket;
+        if (existing != null) {
+            bucket = existing;
+        } else {
+            // New key — enforce the pre-auth key-space cap before creating.
+            // A full map drops the new contact like an over-cap inbound:
+            // silent, no throw, no outbound. The size-check / putIfAbsent
+            // window is benign for a flood bound — one dispatch thread per
+            // adapter, so any overshoot is bounded by the few concurrent
+            // callers, never unbounded.
+            if (buckets.size() >= maxContactBuckets) {
+                return false;
+            }
+            Bucket created = new Bucket(inboundPerMinute, clock.millis());
+            Bucket prev = buckets.putIfAbsent(key, created);
+            bucket = prev != null ? prev : created;
+        }
         synchronized (bucket) {
             long now = clock.millis();
             long elapsed = Math.max(0L, now - bucket.lastRefillEpochMillis);
