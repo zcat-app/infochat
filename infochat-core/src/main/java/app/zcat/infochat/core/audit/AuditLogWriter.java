@@ -58,26 +58,20 @@ public class AuditLogWriter {
                     + "  scope_id, request_id, details_json"
                     + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)";
 
-    @Inject
-    RedactionHook redactionHook;
+    private final RedactionHook redactionHook;
 
     /**
-     * Public no-arg constructor for the CDI runtime. Quarkus ARC
-     * instantiates the bean via this constructor and field-injects
-     * {@link #redactionHook}.
-     */
-    public AuditLogWriter() {
-    }
-
-    /**
-     * Constructor-injection form for non-CDI consumers (plain
-     * JUnit tests that do not stand up the Quarkus container).
-     * Production code uses the no-arg form and lets CDI inject
-     * the hook.
+     * Sole constructor — CDI constructor injection in the container
+     * (Quarkus ARC needs no no-arg constructor for normal-scoped
+     * beans), direct construction for non-CDI consumers (plain JUnit
+     * tests that do not stand up the Quarkus container). One
+     * initialization path means no caller can obtain a writer whose
+     * redaction hook is null.
      *
      * @param redactionHook the redaction layer applied to every
      *                      row before INSERT.
      */
+    @Inject
     public AuditLogWriter(RedactionHook redactionHook) {
         this.redactionHook = redactionHook;
     }

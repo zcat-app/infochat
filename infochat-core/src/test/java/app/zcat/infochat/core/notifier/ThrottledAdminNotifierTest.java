@@ -244,6 +244,83 @@ class ThrottledAdminNotifierTest {
     }
 
     @Test
+    void notifyOnceReplacesEscAndOtherC0ControlsInInputs() throws SQLException {
+        // ESC (0x1B) opens an ANSI escape sequence — "ESC[2K" clears
+        // the current line on a terminal, letting an attacker visually
+        // overwrite a genuine ADMIN-NOTIFY line when an operator cats
+        // the log. BEL (0x07) and BS (0x08) stand in for "any other C0
+        // control" so the assertion pins the full-range sweep, not an
+        // ESC special case.
+        String escKey = "k-c0\u001B[2Kforged";
+        String belError = "EC\u0007bell";
+        String escMessage = "detail\u001B[31mred\b";
+
+        NotifyOutcome outcome = notifier.notifyOnce(escKey, belError, escMessage);
+        assertEquals(NotifyOutcome.EMITTED, outcome);
+
+        LogRecord emitted = logCapture.records.stream()
+            .filter(r -> r.getMessage() != null
+                && r.getMessage().startsWith("ADMIN-NOTIFY"))
+            .findFirst().orElseThrow();
+        String line = emitted.getMessage();
+        assertTrue(line.chars().noneMatch(c -> c < 0x20),
+            "log line must contain no C0 control characters; was: " + line);
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT notification_key, error_class FROM admin_notification_state");
+             ResultSet rs = ps.executeQuery()) {
+            assertTrue(rs.next(), "exactly one row must be persisted");
+            String storedKey = rs.getString("notification_key");
+            String storedError = rs.getString("error_class");
+            assertTrue(storedKey.chars().noneMatch(c -> c < 0x20),
+                "stored notification_key must contain no C0 controls; was: " + storedKey);
+            assertTrue(storedError.chars().noneMatch(c -> c < 0x20),
+                "stored error_class must contain no C0 controls; was: " + storedError);
+            assertFalse(rs.next(), "only one row must be persisted");
+        }
+    }
+
+    @Test
+    void getStateSqlExceptionWarnLogsSanitizedKey() throws SQLException {
+        // Rename the table away so getState's SELECT raises
+        // SQLException at execution time; restored in finally so later
+        // tests see the normal schema. (The CHECK-constraint trick the
+        // fallback test below uses only fires on INSERT, not SELECT.)
+        try (Connection conn = dataSource.getConnection();
+             Statement st = conn.createStatement()) {
+            st.execute("ALTER TABLE admin_notification_state RENAME TO admin_notification_state_hidden");
+        }
+        try {
+            String maliciousKey = "k-warn\nADMIN-NOTIFY key=spoofed error=spoof message=fake";
+            Optional<AdminNotificationRecord> state = notifier.getState(maliciousKey);
+            assertTrue(state.isEmpty(),
+                "getState must degrade to empty on SQLException");
+
+            LogRecord warn = logCapture.records.stream()
+                .filter(r -> r.getMessage() != null
+                    && r.getMessage().contains("failed to read state"))
+                .findFirst().orElseThrow(() ->
+                    new AssertionError(
+                        "getState must WARN on SQLException; captured: "
+                            + logCapture.formatted()));
+            String line = warn.getMessage();
+            assertFalse(line.contains("\n") || line.contains("\r"),
+                "WARN line must not embed a caller-supplied line break; was: " + line);
+            // Same sanitized form the SQL lookup used: the embedded LF
+            // becomes a single space, so the spoofed ADMIN-NOTIFY text
+            // stays inside the one genuine WARN line.
+            assertTrue(line.contains("key=k-warn ADMIN-NOTIFY key=spoofed"),
+                "WARN line must carry the sanitized key form; was: " + line);
+        } finally {
+            try (Connection conn = dataSource.getConnection();
+                 Statement st = conn.createStatement()) {
+                st.execute("ALTER TABLE admin_notification_state_hidden RENAME TO admin_notification_state");
+            }
+        }
+    }
+
+    @Test
     void notifyOnceTruncatesOverLongInputsAndAppendsSuffix() throws SQLException {
         // Inputs over the documented caps (256 key / 256 error_class /
         // 2048 message); each must be trimmed and carry the

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 12 |
+| pending | 11 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 245 |
+| done | 246 |
 | deferred | 2 |
 | **total** | **259** |
 
@@ -34,7 +34,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-210 — Module-DAG enforcement + doc/config-truth sweep (docs say what the build does) (complexity: medium, risk: medium)
 - M1-211 — MessagingAdapter.assertIdentity: wire the spec-mandated surface or remove it (complexity: medium, risk: medium)
 - M1-212 — ProgressNotifier pipeline: implement minimally, defer by amendment, or remove (complexity: medium, risk: medium)
-- M1-215 — Core hygiene: sanitized key in getState WARN, full-C0 sanitize, single AuditLogWriter constructor (complexity: low, risk: low)
 - M1-219 — searchPosts window/ordering semantics: bind the spec to a timestamp column (complexity: low, risk: low)
 
 ---
@@ -74,13 +73,13 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-223 | FakeNostrRelay: plain-socket rewrite, drop standalone Vert.x | 2026-06-08 | round 1 APPROVE |
 | M1-218 | Provider lows: /retry in-flight reply, /invite list-vs-revoke code identity, handle-keyed slot release | 2026-06-08 | round 1 APPROVE |
 | M1-216 | Collector lows: TTL-job partition independence, saturation counter, sha256 dedup, zero-width escapes | 2026-06-08 | round 1 APPROVE |
+| M1-215 | Core hygiene: sanitized key in getState WARN, full-C0 sanitize, single AuditLogWriter constructor | 2026-06-08 | round 1 APPROVE |
 | M1-214 | SSRF small fixes: Location-resolve exception contract, fec0::/10, scheme case-fold, reason()-based test assertions | 2026-06-08 | round 1 APPROVE |
 | M1-213 | TranslationProvider module placement: move to the LLM adapter or amend the spec | 2026-06-08 | round 1 APPROVE |
 | M1-206 | Parameterize SET LOCAL infochat.actor_id (drop UUID string concat) | 2026-06-08 | round 1 APPROVE |
 | M1-204 | Messaging SPI conformance: setTyping no-op, start() exception type, constants drift, jitter, dead stubs | 2026-06-08 | round 1 APPROVE |
 | M1-201 | Ops hardening: drop infochat-dev password fallbacks + readiness probes | 2026-06-08 | round 1 APPROVE |
 | M1-197 | Tool JSON ready_at value + /export paged replies and truncation flag | 2026-06-08 | round 1 APPROVE |
-| M1-184 | Signal reader/codec hardening against malformed frames | 2026-06-08 | round 1 APPROVE |
 
 ---
 
@@ -406,7 +405,7 @@ M1-211 (pending) ← runnable
 M1-212 (pending) ← runnable
 M1-213 (done)
 M1-214 (done)
-M1-215 (pending) ← runnable
+M1-215 (done)
 M1-216 (done)
 M1-218 (done)
 M1-220 (done)

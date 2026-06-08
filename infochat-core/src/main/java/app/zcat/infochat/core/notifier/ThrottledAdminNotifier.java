@@ -97,13 +97,16 @@ public class ThrottledAdminNotifier {
 
     /**
      * Defend the ADMIN-NOTIFY log line and the persisted row against
-     * externally-influenced inputs. Replaces CR / LF / NUL with a
-     * single space (breaking the line-boundary semantics any operator
-     * grep relies on — a future caller forwarding feed-body text or a
-     * driver-supplied error message cannot forge a second
-     * ADMIN-NOTIFY line) and caps the result at {@code maxLen},
-     * appending {@link #TRUNCATION_SUFFIX} when truncation fires so
-     * the trim is visible to a reader.
+     * externally-influenced inputs. Replaces every C0 control
+     * character (0x00–0x1F) with a single space — CR/LF would break
+     * the line-boundary semantics any operator grep relies on (a
+     * future caller forwarding feed-body text or a driver-supplied
+     * error message cannot forge a second ADMIN-NOTIFY line), and
+     * ESC (0x1B) would open an ANSI escape sequence that can forge
+     * or visually overwrite terminal output when an operator scrapes
+     * the log — and caps the result at {@code maxLen}, appending
+     * {@link #TRUNCATION_SUFFIX} when truncation fires so the trim
+     * is visible to a reader.
      *
      * <p>Applied at the boundary between caller-supplied strings and
      * the log/DB sinks per CLAUDE.md §"No defensive code" — the
@@ -113,9 +116,17 @@ public class ThrottledAdminNotifier {
      * forgery vulnerability the moment one caller forgets.</p>
      */
     private static String sanitize(String s, int maxLen) {
-        String stripped = s.replace('\r', ' ').replace('\n', ' ').replace('\0', ' ');
+        // Full C0 sweep, not an enumerated blacklist: every control
+        // below 0x20 either breaks the one-line scrape contract or is
+        // a terminal-control character with no legitimate place in a
+        // key/error/message; replacing the whole range leaves no gaps.
+        StringBuilder stripped = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            stripped.append(c < 0x20 ? ' ' : c);
+        }
         if (stripped.length() <= maxLen) {
-            return stripped;
+            return stripped.toString();
         }
         int keep = Math.max(0, maxLen - TRUNCATION_SUFFIX.length());
         return stripped.substring(0, keep) + TRUNCATION_SUFFIX;
@@ -342,7 +353,11 @@ public class ThrottledAdminNotifier {
                 ));
             }
         } catch (SQLException e) {
-            LOG.warnf(e, "ThrottledAdminNotifier: failed to read state for key=%s", key);
+            // safeKey, not key: this WARN is part of the same sanitized
+            // scrape surface as the ADMIN-NOTIFY lines — a raw key here
+            // would be the one sink that lets a caller-supplied line
+            // break or control character reach the operator's log.
+            LOG.warnf(e, "ThrottledAdminNotifier: failed to read state for key=%s", safeKey);
             return Optional.empty();
         }
     }

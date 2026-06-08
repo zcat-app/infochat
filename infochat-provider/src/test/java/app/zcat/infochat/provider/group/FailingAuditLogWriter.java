@@ -17,6 +17,13 @@ import java.sql.SQLException;
  */
 class FailingAuditLogWriter extends AuditLogWriter {
 
+    FailingAuditLogWriter() {
+        // Identity hook only to satisfy the injected-constructor
+        // contract — the throwing write() below never reaches the
+        // redaction step.
+        super(row -> row);
+    }
+
     @Override
     public void write(Connection conn, RedactionHook.AuditRow row)
             throws SQLException {
