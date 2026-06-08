@@ -111,11 +111,13 @@ public class AssetSnapshotFetcher {
     // Profile-driven cadences per design §10.4. NO inline defaultValue
     // — the per-profile blocks in application.properties are the
     // source of truth; the base value is the test-time fallback.
-    // (FetchScheduler.java:95-100 codifies this rule.) The fields are
-    // currently informational — the @Scheduled expression below
-    // resolves the same property string at deploy time — but kept
-    // here as the explicit binding the acceptance contract requires
-    // and as the hook a future runtime-tuning ticket can read.
+    // (FetchScheduler.java:95-100 codifies this rule.) The @Scheduled
+    // expression below resolves the same property string at deploy
+    // time, so the per-tick logic never reads these fields directly;
+    // they are kept because M1-055b's acceptance contract mandates a
+    // backing @ConfigProperty declaration per host alongside the
+    // @Scheduled(every=...) reference (see the class javadoc
+    // §Profile-driven cadence).
     @SuppressWarnings("unused")
     @ConfigProperty(name = "infochat.assets.refresh.coingecko")
     Duration coingeckoRefresh;

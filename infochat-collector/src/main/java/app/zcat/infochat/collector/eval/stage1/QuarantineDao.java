@@ -43,8 +43,8 @@ import java.util.UUID;
  * {@code status='PENDING'}, {@code placeholder_id=<the id woven
  * into post.body>}, {@code original_html=<the verbatim matched
  * span>}, {@code rule_id=<the matched pattern's stable id>},
- * {@code span_start}/{@code span_end} as byte offsets in the
- * original body, {@code post_id}/{@code post_uid}/{@code
+ * {@code span_start}/{@code span_end} as Java char (UTF-16) offsets
+ * in the original body, {@code post_id}/{@code post_uid}/{@code
  * post_fetched_at} locating the parent post for the partition-aware
  * lookup that survives the post's eventual partition drop (the
  * denormalization is load-bearing per
@@ -116,11 +116,11 @@ public class QuarantineDao {
      *                       (partition locator; no FK).
      * @param ruleId         the Stage1RegexSet rule id (or
      *                       {@code "regex_timeout"} on a watchdog abort).
-     * @param spanStart      byte offset of the matched span in the
-     *                       original body; {@code 0} on a watchdog abort
-     *                       (whole-body span).
-     * @param spanEnd        byte offset (exclusive) of the matched
-     *                       span end; {@code body.length()} on a
+     * @param spanStart      Java char (UTF-16) offset of the matched span
+     *                       in the original body; {@code 0} on a watchdog
+     *                       abort (whole-body span).
+     * @param spanEnd        Java char (UTF-16) offset (exclusive) of the
+     *                       matched span end; {@code body.length()} on a
      *                       watchdog abort.
      * @param originalHtml   the verbatim matched span (or the whole
      *                       unredacted normalized body on a watchdog
