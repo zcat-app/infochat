@@ -163,7 +163,12 @@ class ProductionAdapterActivationTest {
                     Map.entry("infochat.adapters.simplex.binary", "/bin/sh"),
                     Map.entry("infochat.adapters.simplex.data-dir", "/tmp"),
                     Map.entry("infochat.adapters.simplex.ws-port", "5225"),
-                    Map.entry("infochat.adapters.simplex.admin", "simplex-test-bootstrap-admin"),
+                    // Well-formed SimpleX queue address (URL-safe base64,
+                    // >=43 chars) so AdapterRegistry's bootstrap-admin parse
+                    // gate passes; the prior kebab-slug value is rejected by
+                    // SimpleXIdentity.isWellFormed (M1-208).
+                    Map.entry("infochat.adapters.simplex.admin",
+                            "SimplexBootstrapAdminQueueAddr0000000000000A"),
                     Map.entry("infochat.adapters.simplex.bot-queue-address", "simplex-test-bot-identity"),
                     Map.entry("infochat.adapters.signal.binary", "/bin/sh"),
                     Map.entry("infochat.adapters.signal.data-dir", "/tmp"),

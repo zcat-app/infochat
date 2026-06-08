@@ -1,9 +1,14 @@
 ---
 id: M1-208
 title: "Per-adapter bootstrap-admin contact-id parse validation (SPI surface decision)"
-status: pending
+status: done
 created: 2026-06-07
 last_updated: 2026-06-08
+clarity_check:
+  date: 2026-06-08
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: [M1-178]
 files_budget: 9
 files_scope:
@@ -45,7 +50,20 @@ spec_refs:
 decision_refs:
   - D44
   - D46
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-08
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 308
+      removed: 9
 escalations:
   - date: 2026-06-08
     reason: clarity-fail
@@ -83,6 +101,26 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-06-08
+    verdict: CLEAN
+    base: 798e1886b1ac9d493a47f8af529e9c432ddf5eda
+    head: d6facf35afaca1a31853c4670a691ada2a8d5d7a
+    verdict_file: docs/plan/m1/redteam/M1-208-2026-06-08.md
+    findings_count: 0
+    out_of_model_count: 2
+    note: |
+      CLEAN — purely additive fail-fast hardening at the trusted
+      operator-config boundary (gate 7b validates each non-blank
+      infochat.adapters.<name>.admin and refuses startup on a mismatch).
+      No adversary-reachable surface, no weakened gate, no broken
+      security.md commitment. Two advisory OUT-OF-MODEL notes feed future
+      design judgement, not this ticket: (1) the `default -> true`
+      permissive branch will silently accept a future third production
+      adapter's admin id until a case arm is added — consider an
+      explicit-deny default / exhaustiveness check then; (2) the SimpleX
+      43-char length floor is a typo heuristic, not a cryptographic
+      liveness proof (acceptable under the trusted-config tier).
 ---
 
 # M1-208: Per-adapter bootstrap-admin contact-id parse validation (SPI surface decision)
