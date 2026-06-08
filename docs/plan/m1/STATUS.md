@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 6 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 253 |
 | deferred | 2 |
-| **total** | **260** |
+| **total** | **261** |
 
 ---
 
@@ -29,6 +29,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-211 — MessagingAdapter.assertIdentity: wire the spec-mandated surface or remove it (complexity: medium, risk: medium)
 - M1-212 — ProgressNotifier pipeline: implement minimally, defer by amendment, or remove (complexity: medium, risk: medium)
 - M1-219 — searchPosts window/ordering semantics: bind the spec to a timestamp column (complexity: low, risk: low)
+- M1-225 — Arm /stop timeout + pid on the four non-search chat tools (complexity: medium, risk: low)
 
 ---
 
@@ -406,4 +407,5 @@ M1-220 (done)
 M1-221 (done)
 M1-223 (done)
 M1-224 (done)
+M1-225 (pending) ← runnable
 ```
