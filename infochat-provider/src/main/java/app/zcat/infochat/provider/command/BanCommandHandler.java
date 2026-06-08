@@ -11,6 +11,7 @@ import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.messaging.RegisteredContactSet;
 import app.zcat.infochat.provider.user.UserRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -140,6 +141,9 @@ public class BanCommandHandler implements CommandHandler {
 
     @Inject
     UserRepository userRepository;
+
+    @Inject
+    RegisteredContactSet registeredContactSet;
 
     @Override
     public String name() {
@@ -370,6 +374,15 @@ public class BanCommandHandler implements CommandHandler {
                             + adapter + " contact_id="
                             + ContactIds.redact(targetContactId), e);
         }
+
+        // M1-229 registered-set coherence: drop the now-banned contact
+        // so its next inbound routes to the shared stranger limiter and
+        // its per-id rate-cap state stops being refreshed. Placed AFTER
+        // the committed ban transaction (a rolled-back ban — last-admin
+        // protection, SQL fault — returns above and never reaches here).
+        // Idempotent for a preban (unknown) target, which was never in
+        // the set.
+        registeredContactSet.invalidate(adapter, targetContactId);
 
         String body = MessageFormat.format(
                 bundleLoader.get(BundleKeys.REPLY_BAN_SUCCESS),

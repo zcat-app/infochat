@@ -34,6 +34,7 @@ class InboundRouterExportIT {
 
     @Inject InMemoryAdapter adapter;
     @Inject @SeedDataSource DataSource dataSource;
+    @Inject RegisteredContactSet registeredContactSet;
 
     @BeforeEach
     void setup() throws Exception {
@@ -100,6 +101,14 @@ class InboundRouterExportIT {
             ps.setString(2, contactId);
             ps.executeUpdate();
         }
+        // M1-229: this 'vouched' user is seeded via raw SQL, bypassing the
+        // InviteCodeConsumer path that would normally call
+        // RegisteredContactSet.markRegistered. Mirror that effect so the router
+        // routes it to its own per-id rate-cap bucket (the ExportProfile cap-2
+        // "correct bucket" this class asserts). Without it the user is treated
+        // as a stranger and shares the per-adapter stranger bucket, which the
+        // sibling rate-limit test drains.
+        registeredContactSet.markRegistered(ADAPTER, contactId);
     }
 
     private static void exec(Connection conn, String sql, Object... args) throws Exception {

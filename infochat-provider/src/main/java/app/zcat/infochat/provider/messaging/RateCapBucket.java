@@ -61,15 +61,17 @@ public class RateCapBucket {
     Duration evictionThreshold;
 
     // Hard cap on the number of distinct (adapter, contactId) buckets in
-    // `buckets`. Contact ids enter tryAcquire from the adapter boundary
-    // before any registration/auth check (Authorization step 1.5), so a
-    // flood of distinct ids would otherwise grow the map without bound
-    // between eviction sweeps. When the map is full a NEW key is rejected
-    // exactly like an over-cap inbound (silent drop, no throw, no
-    // outbound); the eviction sweep below reclaims idle keys over time. The
-    // two compose — this cap bounds the map instantaneously, eviction
-    // bounds it by decay. A new key is NEVER admitted by evicting a live
-    // one (that would reintroduce the M1-044a DOS shape).
+    // `buckets`. Since M1-229 the per-id map holds ONLY registered
+    // contacts — unregistered inbound shares strangerBuckets and never
+    // mints a per-id entry — so this cap now backstops the registered
+    // (invite-gated) key space, a far smaller population than the
+    // pre-M1-229 all-comers space. (Operator-visible semantics change:
+    // the default 100000 is no longer the all-inbound key ceiling.) The
+    // cap still composes with eviction the same way: a full map rejects a
+    // NEW key exactly like an over-cap inbound (silent drop, no throw, no
+    // outbound), and the eviction sweep below reclaims idle keys over
+    // time. A new key is NEVER admitted by evicting a live one (that
+    // would reintroduce the M1-044a DOS shape).
     @ConfigProperty(name = "infochat.rate-cap.max-contact-buckets", defaultValue = "100000")
     int maxContactBuckets;
 
@@ -125,6 +127,21 @@ public class RateCapBucket {
     // Independent cap and budget per design §4.9; one group id holds
     // one entry in each of the three group maps.
     private final ConcurrentHashMap<UUID, Bucket> groupCommandBuckets = new ConcurrentHashMap<>();
+
+    // M1-229 shared stranger limiter, keyed by adapter name. ALL
+    // unregistered inbound on one adapter (a RegisteredContactSet miss
+    // at step 1.5) shares this single bucket — strangers never mint a
+    // per-(adapter, contactId) entry in `buckets`, so a Sybil flood of
+    // distinct stranger ids cannot grow the per-id map (the M1-205
+    // capacity-wall DOS this split remediates). Reuses inboundPerMinute
+    // + refillWindow: strangers collectively get the same per-minute
+    // rate one registered contact gets individually. The key space is
+    // bounded by the (tiny, fixed) enabled-adapter count, so this map
+    // needs no key-space cap and is intentionally NOT swept by
+    // evictIdleBuckets — there is nothing to reclaim. Per-adapter (not
+    // global) so one adapter's flood cannot starve another adapter's
+    // newcomers (D46 isolation).
+    private final ConcurrentHashMap<String, Bucket> strangerBuckets = new ConcurrentHashMap<>();
 
     public RateCapBucket() {
         // CDI no-arg constructor; @ConfigProperty fields populated post-construction.
@@ -213,12 +230,39 @@ public class RateCapBucket {
     }
 
     /**
+     * Per-{@code (adapter, contactId)} acquire — the registered-contact
+     * path. Equivalent to {@link #tryAcquire(String, String, boolean)}
+     * with {@code registered=true}. Retained as the call shape for the
+     * per-actor caps that are always over a known/bounded key space
+     * ({@code QuarantineCommandHandler}'s per-admin quarantine cap) and
+     * for the existing per-id rate-cap tests.
+     *
      * @return {@code true} iff the per-{@code (adapter, contactId)}
      *         bucket has at least one token after refill; the call
      *         decrements one token on success. {@code false} on
      *         empty bucket — the caller drops the inbound.
      */
     public boolean tryAcquire(String adapter, String contactId) {
+        return tryAcquire(adapter, contactId, true);
+    }
+
+    /**
+     * Inbound rate cap split by registration (M1-229), consulted at
+     * {@link InboundRouter} step 1.5.
+     *
+     * <p>{@code registered=true} → the per-{@code (adapter, contactId)}
+     * bucket (bounded by {@code maxContactBuckets}, which now backstops
+     * only the registered key space). {@code registered=false} → the
+     * single shared per-adapter stranger limiter; {@code contactId} is
+     * deliberately ignored so a flood of distinct stranger ids cannot
+     * mint per-id state. Either branch decrements one token on success;
+     * {@code false} means the caller drops the inbound (silent, spec
+     * §Authorization model step 1.5).</p>
+     */
+    public boolean tryAcquire(String adapter, String contactId, boolean registered) {
+        if (!registered) {
+            return tryAcquireStranger(adapter);
+        }
         Key key = new Key(adapter, contactId);
         Bucket existing = buckets.get(key);
         Bucket bucket;
@@ -246,6 +290,34 @@ public class RateCapBucket {
             // refillCount = elapsed * cap / windowMs; advance lastRefill by
             // exactly the time consumed by those tokens so leftover sub-token
             // elapsed carries forward to the next call.
+            long refillCount = elapsed * (long) inboundPerMinute / windowMs;
+            if (refillCount > 0) {
+                bucket.tokens = (int) Math.min((long) inboundPerMinute, (long) bucket.tokens + refillCount);
+                bucket.lastRefillEpochMillis += refillCount * windowMs / (long) inboundPerMinute;
+            }
+            if (bucket.tokens > 0) {
+                bucket.tokens--;
+                return true;
+            }
+            return false;
+        }
+    }
+
+    /**
+     * M1-229 shared stranger limiter. One token bucket per adapter,
+     * reusing the contact cap/window, consumed by ALL unregistered
+     * inbound on that adapter. {@code computeIfAbsent} (no key-space
+     * cap) is safe here: the key is the adapter name, bounded by the
+     * fixed enabled-adapter count, so this map cannot be grown by a
+     * flood of distinct contact ids the way the per-id map could.
+     */
+    private boolean tryAcquireStranger(String adapter) {
+        Bucket bucket = strangerBuckets.computeIfAbsent(
+                adapter, k -> new Bucket(inboundPerMinute, clock.millis()));
+        synchronized (bucket) {
+            long now = clock.millis();
+            long elapsed = Math.max(0L, now - bucket.lastRefillEpochMillis);
+            long windowMs = refillWindow.toMillis();
             long refillCount = elapsed * (long) inboundPerMinute / windowMs;
             if (refillCount > 0) {
                 bucket.tokens = (int) Math.min((long) inboundPerMinute, (long) bucket.tokens + refillCount);
@@ -437,6 +509,18 @@ public class RateCapBucket {
      */
     int groupCommandBucketCount() {
         return groupCommandBuckets.size();
+    }
+
+    /**
+     * Test-only seam: report the current shared-stranger bucket-map
+     * size (one entry per adapter that has seen unregistered inbound) so
+     * {@code RateCapBucketTest} can assert a distinct-stranger flood
+     * mints exactly one shared bucket and never grows the per-id map.
+     * Package-private — production callers consume {@link #tryAcquire},
+     * never the size.
+     */
+    int strangerBucketCount() {
+        return strangerBuckets.size();
     }
 
     private record Key(String adapter, String contactId) {

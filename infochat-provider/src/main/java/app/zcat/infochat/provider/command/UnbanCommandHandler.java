@@ -10,6 +10,7 @@ import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.messaging.RegisteredContactSet;
 import app.zcat.infochat.provider.user.UserRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -133,6 +134,9 @@ public class UnbanCommandHandler implements CommandHandler {
     @Inject
     UserRepository userRepository;
 
+    @Inject
+    RegisteredContactSet registeredContactSet;
+
     @Override
     public String name() {
         return "unban";
@@ -230,6 +234,16 @@ public class UnbanCommandHandler implements CommandHandler {
                             + adapter + " contact_id="
                             + ContactIds.redact(targetContactId), e);
         }
+
+        // M1-229 registered-set coherence: this path is reached only for
+        // a non-preban, formerly-banned target, whose registration_state
+        // is therefore 'invited' or 'vouched' (preban deleted at step 4,
+        // not-banned no-op returned at step 4.5). The committed unban
+        // makes it an eligible registered identity again, so re-add it —
+        // its next inbound routes to a per-id rate-cap bucket. Placed
+        // AFTER the committed transaction (a rolled-back unban throws
+        // above and never reaches here).
+        registeredContactSet.markRegistered(adapter, targetContactId);
 
         // Step 6 / 7 — reply. Group-admin restoration disclosure when
         // any rows were restored, otherwise the plain reply.

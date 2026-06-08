@@ -179,6 +179,116 @@ class RateCapBucketTest {
                 "after the flood the map holds exactly the cap, not one more");
     }
 
+    // ----- M1-229 inbound rate-cap split: registered per-id vs shared -----
+    // stranger limiter. Per docs/spec/security.md §Rate limiting +
+    // §Authorization model step 1.5 and the M1-205 capacity-wall DOS
+    // remediation: an unregistered sender (the 3-arg tryAcquire's
+    // registered=false branch) shares ONE per-adapter bucket and mints
+    // no per-(adapter, contactId) state; a registered sender keeps an
+    // independent per-id bucket. Driven through the 4-arg seam with a
+    // small cap against the controllable TestClock.
+
+    /**
+     * Acceptance item 1: a flood of DISTINCT unregistered contact ids
+     * does not grow the per-id bucket map — strangers no longer create
+     * per-id rate-cap state. The per-id map stays empty (no registered
+     * contacts here) and all strangers share exactly one per-adapter
+     * bucket.
+     */
+    @Test
+    void strangerFloodDoesNotGrowPerIdBucketMap() {
+        TestClock clock = new TestClock(Instant.parse("2026-06-08T00:00:00Z"));
+        RateCapBucket bucket = new RateCapBucket(clock, CAP, REFILL_WINDOW, EVICTION_THRESHOLD);
+
+        for (int i = 0; i < CAP * 100; i++) {
+            // registered=false → shared stranger limiter, distinct ids.
+            bucket.tryAcquire("inmemory", "stranger-" + i, false);
+        }
+
+        assertEquals(0, bucket.bucketCount(),
+                "a distinct-stranger flood must mint ZERO per-(adapter, contactId) buckets");
+        assertEquals(1, bucket.strangerBucketCount(),
+                "all strangers on one adapter share exactly one shared bucket");
+    }
+
+    /**
+     * Acceptance item 2: sustained unregistered inbound is bounded by a
+     * single shared/aggregate limiter — over-budget stranger inbound
+     * returns false (the caller drops it silently), and the bound is on
+     * the AGGREGATE across distinct stranger ids, not per id.
+     */
+    @Test
+    void sustainedUnregisteredInboundBoundedBySharedLimiter() {
+        TestClock clock = new TestClock(Instant.parse("2026-06-08T00:00:00Z"));
+        RateCapBucket bucket = new RateCapBucket(clock, CAP, REFILL_WINDOW, EVICTION_THRESHOLD);
+
+        for (int i = 0; i < CAP; i++) {
+            assertTrue(bucket.tryAcquire("inmemory", "s-" + i, false),
+                    "the first CAP stranger inbounds (each a DISTINCT id) drain the shared budget (i=" + i + ")");
+        }
+        assertFalse(bucket.tryAcquire("inmemory", "s-distinct-new", false),
+                "a further DISTINCT stranger is dropped — bounded by the SHARED limiter, not a fresh per-id bucket");
+    }
+
+    /**
+     * Acceptance item 3: a registered contact retains an independent
+     * per-user inbound rate cap, and a stranger flood that fully drains
+     * the shared limiter does NOT consume the registered user's per-id
+     * budget.
+     */
+    @Test
+    void registeredContactRetainsIndependentPerUserCapUnaffectedByStrangerFlood() {
+        TestClock clock = new TestClock(Instant.parse("2026-06-08T00:00:00Z"));
+        RateCapBucket bucket = new RateCapBucket(clock, CAP, REFILL_WINDOW, EVICTION_THRESHOLD);
+
+        // Drain the shared stranger budget completely with a flood.
+        for (int i = 0; i < CAP * 10; i++) {
+            bucket.tryAcquire("inmemory", "flood-" + i, false);
+        }
+        assertFalse(bucket.tryAcquire("inmemory", "flood-x", false),
+                "precondition: the shared stranger budget is drained");
+
+        // A registered contact still has its full, independent per-id
+        // budget — the flood drained a different bucket.
+        for (int i = 0; i < CAP; i++) {
+            assertTrue(bucket.tryAcquire("inmemory", "regular", true),
+                    "a registered contact keeps its own per-id budget despite the stranger flood (i=" + i + ")");
+        }
+        assertFalse(bucket.tryAcquire("inmemory", "regular", true),
+                "the registered per-id bucket is independently bounded at CAP");
+    }
+
+    /**
+     * Acceptance item 4 (the M1-205 capacity-wall regression guard): a
+     * brand-new contact's invite-code message is admitted while the
+     * shared stranger budget has capacity, is transiently rate-limited
+     * once the budget is drained, and becomes admissible AGAIN after the
+     * budget refills — registration is rate-limited, never permanently
+     * closed under a sustained flood. No per-id state is ever minted for
+     * a stranger.
+     */
+    @Test
+    void strangerAdmittedWhenSharedBudgetHasCapacityAndAgainAfterRefill() {
+        TestClock clock = new TestClock(Instant.parse("2026-06-08T00:00:00Z"));
+        RateCapBucket bucket = new RateCapBucket(clock, CAP, REFILL_WINDOW, EVICTION_THRESHOLD);
+
+        // An active flood drains the shared budget.
+        for (int i = 0; i < CAP; i++) {
+            assertTrue(bucket.tryAcquire("inmemory", "flood-" + i, false));
+        }
+        assertFalse(bucket.tryAcquire("inmemory", "newcomer", false),
+                "during the flood a brand-new contact is rate-limited (transient), NOT a held capacity-wall lockout");
+
+        // Advance past the refill window — registration is not closed.
+        clock.advance(REFILL_WINDOW);
+
+        assertTrue(bucket.tryAcquire("inmemory", "newcomer", false),
+                "after the shared budget refills the newcomer's invite message is admitted again "
+                        + "(the M1-205 capacity-wall lockout is replaced by a self-clearing rate)");
+        assertEquals(0, bucket.bucketCount(),
+                "no stranger — flooding or newcomer — ever minted a per-id bucket");
+    }
+
     // ----- D47 per-group LLM sub-bucket (M1-222) --------------------------
     // Per docs/spec/security.md §Rate limiting "Per-group LLM rate (D47)":
     // a separate sub-bucket per approved group bounding LLM-triggering

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 260 |
+| done | 261 |
 | deferred | 2 |
 | **total** | **265** |
 
@@ -25,7 +25,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-227 — /digest on|off — group-admin toggle to pause/resume the periodic digest (complexity: high, risk: medium)
-- M1-229 — Split inbound rate-cap: per-user vs shared stranger bucket (complexity: high, risk: medium)
 
 ---
 
@@ -61,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-229 | Split inbound rate-cap: per-user vs shared stranger bucket | 2026-06-08 | round 1 APPROVE |
 | M1-226 | Clamp source-claimed published_at to fetched_at at the ingest boundary | 2026-06-08 | round 1 APPROVE |
 | M1-225 | Arm /stop timeout + pid on the four non-search chat tools | 2026-06-08 | round 1 APPROVE |
 | M1-224 | Bounded inbound dispatch queue (M1-205 DoS remediation) | 2026-06-08 | round 1 APPROVE |
@@ -70,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-216 | Collector lows: TTL-job partition independence, saturation counter, sha256 dedup, zero-width escapes | 2026-06-08 | round 1 APPROVE |
 | M1-215 | Core hygiene: sanitized key in getState WARN, full-C0 sanitize, single AuditLogWriter constructor | 2026-06-08 | round 1 APPROVE |
 | M1-214 | SSRF small fixes: Location-resolve exception contract, fec0::/10, scheme case-fold, reason()-based test assertions | 2026-06-08 | round 1 APPROVE |
-| M1-213 | TranslationProvider module placement: move to the LLM adapter or amend the spec | 2026-06-08 | round 1 APPROVE |
 
 ---
 
@@ -407,5 +406,5 @@ M1-225 (done)
 M1-226 (done)
 M1-227 (pending) ← runnable
   └── M1-228 (pending)
-M1-229 (pending) ← runnable
+M1-229 (done)
 ```

@@ -17,7 +17,11 @@ final class CountingRateCapBucket extends RateCapBucket {
     }
 
     @Override
-    public boolean tryAcquire(String adapter, String contactId) {
+    public boolean tryAcquire(String adapter, String contactId, boolean registered) {
+        // M1-229: the router now passes the registered flag (per-id vs
+        // shared-stranger split). The recorded name is unchanged so the
+        // intake-ordering call-order assertions still match; the flag is
+        // ignored — over-cap behavior is driven by {@link #next}.
         log.calls.add("rateCapBucket.tryAcquire");
         return next;
     }

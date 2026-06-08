@@ -239,6 +239,9 @@ public class InboundRouter {
     RateCapBucket rateCapBucket;
 
     @Inject
+    RegisteredContactSet registeredContactSet;
+
+    @Inject
     InviteCodeConsumer inviteCodeConsumer;
 
     @Inject
@@ -356,7 +359,21 @@ public class InboundRouter {
         // surface (M1-044e fix). Bucket arithmetic is O(1) and cares
         // nothing about payload size; the size-cap below still bounds
         // NFKC cost on the (rate-cap-passing) bodies that reach it.
-        if (!rateCapBucket.tryAcquire(adapterName, contactId)) {
+        //
+        // M1-229 split: a registered sender gets a per-(adapter,
+        // contactId) bucket; an unregistered sender shares the per-
+        // adapter stranger limiter and mints no per-id state, so a Sybil
+        // flood of distinct stranger ids cannot pin the per-id map at
+        // maxContactBuckets (the M1-205 capacity-wall DOS). The route is
+        // a pure in-memory RegisteredContactSet lookup — NO DB read here
+        // (the users-row SELECT stays at lookupUser below, deliberately
+        // downstream). The null guard mirrors the groupApprovalCheck /
+        // groupAutoPromoteService pattern: plain-JUnit test subclasses
+        // that bypass CDI leave the field null and route conservatively
+        // (treated as stranger, never falsely registered).
+        boolean registered = registeredContactSet != null
+                && registeredContactSet.isRegistered(adapterName, contactId);
+        if (!rateCapBucket.tryAcquire(adapterName, contactId, registered)) {
             return;
         }
 

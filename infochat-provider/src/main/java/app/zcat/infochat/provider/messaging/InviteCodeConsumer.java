@@ -127,6 +127,9 @@ public class InviteCodeConsumer {
     @Inject
     AuditLogWriter auditLogWriter;
 
+    @Inject
+    RegisteredContactSet registeredContactSet;
+
     // Sentinel map of (adapter, contact_id) tuples that have ALREADY
     // had an INVITE_BRUTE_FORCE_BREACH audit row written within the
     // current breach event, valued with the last over-threshold
@@ -223,6 +226,13 @@ public class InviteCodeConsumer {
                 insertAudit(conn, contactId, adapter,
                         AuditAction.INVITE_CONSUME, userId.toString(), contactId);
                 conn.commit();
+                // M1-229 registered-set coherence: the contact is now an
+                // 'invited' users row. Mark AFTER commit so a rolled-back
+                // accept never leaves a stale registered entry (the
+                // conservative-membership invariant). Their next inbound
+                // routes to a per-id rate-cap bucket instead of the shared
+                // stranger limiter.
+                registeredContactSet.markRegistered(adapter, contactId);
                 return new Accepted(userId);
             } catch (SQLException e) {
                 conn.rollback();

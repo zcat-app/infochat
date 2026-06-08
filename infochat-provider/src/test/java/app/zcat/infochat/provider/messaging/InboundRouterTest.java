@@ -87,6 +87,9 @@ class InboundRouterTest {
     RateCapBucket rateCapBucket;
 
     @Inject
+    RegisteredContactSet registeredContactSet;
+
+    @Inject
     BundleLoader bundleLoader;
 
     @Inject
@@ -132,6 +135,16 @@ class InboundRouterTest {
             seed.setObject(1, OffsetDateTime.now().minusHours(24));
             seed.executeUpdate();
         }
+        // M1-229: alice is seeded as a registered user via raw SQL,
+        // bypassing the InviteCodeConsumer path that would normally call
+        // RegisteredContactSet.markRegistered. Mirror that effect so the
+        // router routes alice to her own per-id rate-cap bucket — without
+        // this she would be treated as a stranger and share the per-
+        // adapter stranger bucket, which rateCapOverflowDropsSilently...
+        // deliberately drains (the test would then flake by JUnit method
+        // order). The set is @ApplicationScoped; markRegistered is
+        // idempotent across @BeforeEach runs.
+        registeredContactSet.markRegistered("inmemory", "alice");
     }
 
     @Test
@@ -199,16 +212,20 @@ class InboundRouterTest {
 
     @Test
     void rateCapOverflowDropsSilentlyWithoutOutbound() {
-        // Drain the bucket for a unique contact id by calling tryAcquire
-        // directly until it returns false (≤ infochat.rate-cap.inbound-per-minute
-        // iterations). The router-driven deliverDm below then finds the
-        // bucket empty and exercises the spec §Authorization model
+        // Drain the SHARED per-adapter stranger bucket (M1-229) by calling
+        // the 3-arg tryAcquire with registered=false until it returns
+        // false (≤ infochat.rate-cap.inbound-per-minute iterations). The
+        // overflow contact has no users row, so the router routes it to
+        // this same stranger bucket: the router-driven deliverDm below
+        // then finds it empty and exercises the spec §Authorization model
         // step 1.5 "drop silently" branch — no outbound, no downstream
-        // service consulted.
+        // service consulted. (Registered contacts in this class are
+        // markRegistered, so they use isolated per-id buckets and are
+        // unaffected by this drain.)
         String overflowContact = "rate-overflow-1";
         int safetyCap = 1000; // > any reasonable infochat.rate-cap.inbound-per-minute
         int i = 0;
-        while (rateCapBucket.tryAcquire("inmemory", overflowContact) && i < safetyCap) {
+        while (rateCapBucket.tryAcquire("inmemory", overflowContact, false) && i < safetyCap) {
             i++;
         }
         assertTrue(i < safetyCap,
@@ -510,6 +527,12 @@ class InboundRouterTest {
                 select.setString(1, contactId);
                 try (var rs = select.executeQuery()) {
                     assertTrue(rs.next(), "users row must exist after upsert");
+                    // M1-229: this contact is seeded as registered via raw
+                    // SQL, so mirror the InviteCodeConsumer.markRegistered
+                    // effect — the router then routes its inbound to a
+                    // per-id rate-cap bucket, isolated from the shared
+                    // stranger bucket drained elsewhere in this class.
+                    registeredContactSet.markRegistered("inmemory", contactId);
                     return rs.getObject("id", UUID.class);
                 }
             }
