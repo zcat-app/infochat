@@ -12,13 +12,11 @@ import app.zcat.infochat.llm.impl.OpenAiCompatibleProvider.LlmCallFailedExceptio
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.Config;
-import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Duration;
 
 /**
@@ -59,11 +57,12 @@ import java.time.Duration;
  * OpenAI where it is optional).
  *
  * <h2>Failure surface</h2>
- * <p>Same contract as {@link OpenAiCompatibleProvider}: any
- * {@link IOException}, {@link InterruptedException}, or non-2xx
- * HTTP status throws {@link LlmCallFailedException}. Anthropic
- * error responses ({@code "type": "error"}) include the inner
- * {@code error.message} in the exception for diagnostics.
+ * <p>Same contract as {@link OpenAiCompatibleProvider}, surfaced
+ * through the shared {@link LlmHttpSupport#executeJsonCall} pipeline:
+ * any {@link IOException}, {@link InterruptedException}, or non-2xx
+ * HTTP status throws {@link LlmCallFailedException}. A non-2xx reply
+ * carries a bounded body preview, which includes the inner Anthropic
+ * {@code error.message} for the small JSON error bodies the API returns.
  */
 @ApplicationScoped
 public class AnthropicProvider implements LlmProvider {
@@ -71,7 +70,6 @@ public class AnthropicProvider implements LlmProvider {
     public static final String PROVIDER_NAME = "anthropic";
 
     private static final String API_VERSION = "2023-06-01";
-    private static final Logger LOG = Logger.getLogger(AnthropicProvider.class);
     private static final ObjectMapper JSON = new ObjectMapper();
 
     private final Config config;
@@ -156,31 +154,8 @@ public class AnthropicProvider implements LlmProvider {
         }
         HttpRequest request = reqBuilder.build();
 
-        long cap = LlmHttpSupport.clampBodyCapBytes(
-            config.getOptionalValue("infochat.llm.max-response-bytes", Long.class)
-                .orElse(LlmHttpSupport.DEFAULT_BODY_CAP_BYTES));
-        HttpResponse<String> response;
-        try {
-            response = http.send(request, LlmHttpSupport.boundedStringHandler(cap));
-        } catch (IOException e) {
-            throw new LlmCallFailedException(
-                "AnthropicProvider: HTTP call failed for " + uri, e);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new LlmCallFailedException(
-                "AnthropicProvider: HTTP call interrupted for " + uri, e);
-        }
-
-        if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            String errorMsg = extractErrorMessage(response.body());
-            LOG.warnf("AnthropicProvider: non-2xx %d from %s; error: %s",
-                response.statusCode(), uri, errorMsg);
-            throw new LlmCallFailedException(
-                "AnthropicProvider: non-2xx status " + response.statusCode()
-                    + " from " + uri + ": " + errorMsg);
-        }
-
-        return parseContentText(response.body(), uri);
+        return LlmHttpSupport.executeJsonCall(
+            http, config, request, "AnthropicProvider", AnthropicProvider::parseContentText);
     }
 
     private static LlmResponse parseContentText(String responseBody, URI uri) {
@@ -218,22 +193,6 @@ public class AnthropicProvider implements LlmProvider {
                 "AnthropicProvider: response has no text content block from " + uri);
         }
         return new LlmResponse(text.toString());
-    }
-
-    /**
-     * Extracts the diagnostic message from an Anthropic error
-     * response: {@code {"type":"error","error":{"type":"...","message":"..."}}}
-     */
-    private static String extractErrorMessage(String body) {
-        try {
-            JsonNode root = JSON.readTree(body);
-            if ("error".equals(root.path("type").asText())) {
-                return LlmHttpSupport.preview(root.path("error").path("message").asText("(no message)"));
-            }
-        } catch (IOException ignored) {
-            // Fall through to preview
-        }
-        return LlmHttpSupport.preview(body);
     }
 
     private record TaskConfig(String baseUrl, String apiKey, String model, long timeoutMs, int maxTokens) {

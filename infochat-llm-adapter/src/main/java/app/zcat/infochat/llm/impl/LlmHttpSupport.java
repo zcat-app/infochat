@@ -1,6 +1,13 @@
 package app.zcat.infochat.llm.impl;
 
+import app.zcat.infochat.llm.LlmResponse;
+import org.eclipse.microprofile.config.Config;
+import org.jboss.logging.Logger;
+
 import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -28,6 +35,8 @@ import java.util.concurrent.Flow;
  */
 final class LlmHttpSupport {
 
+    private static final Logger LOG = Logger.getLogger(LlmHttpSupport.class);
+
     /** Lower bound of the operator-configurable response-body cap (1 MiB). */
     static final long MIN_BODY_CAP_BYTES = 1L * 1024 * 1024;
 
@@ -38,9 +47,13 @@ final class LlmHttpSupport {
      * Default cap when the operator does not configure one. The most
      * permissive value in the allowed range — large enough not to
      * truncate a legitimate batch-embedding reply, still bounded so a
-     * runaway response cannot exhaust the heap. Mirrored as the literal
-     * {@code "8388608"} in each provider's {@code @ConfigProperty}
-     * default (annotation arguments must be compile-time constants).
+     * runaway response cannot exhaust the heap. The two HTTP chat
+     * providers reach this default through {@link #executeJsonCall}'s
+     * {@code getOptionalValue(...).orElse(...)} read — they reference
+     * the constant directly, not a mirrored literal. Only
+     * {@link OpenAiCompatibleEmbeddingProvider} mirrors it as the literal
+     * {@code "8388608"} in its {@code @ConfigProperty} default, because
+     * annotation arguments must be compile-time constants.
      */
     static final long DEFAULT_BODY_CAP_BYTES = MAX_BODY_CAP_BYTES;
 
@@ -61,6 +74,65 @@ final class LlmHttpSupport {
             return MAX_BODY_CAP_BYTES;
         }
         return configured;
+    }
+
+    /**
+     * Provider-specific response-text extraction: turns a 2xx response
+     * body into an {@link LlmResponse}, or throws
+     * {@link OpenAiCompatibleProvider.LlmCallFailedException} when the
+     * body is malformed or the wrong shape. {@code uri} is for
+     * diagnostic messages only.
+     */
+    @FunctionalInterface
+    interface LlmResponseParser {
+        LlmResponse parse(String responseBody, URI uri);
+    }
+
+    /**
+     * The shared HTTP call pipeline for the two chat-completion HTTP
+     * providers ({@link AnthropicProvider} and
+     * {@link OpenAiCompatibleProvider}): read and clamp the
+     * operator-configurable body cap, send {@code request} with the
+     * {@linkplain #boundedStringHandler(long) bounded} body handler, map
+     * a transport failure or a non-2xx status onto
+     * {@link OpenAiCompatibleProvider.LlmCallFailedException}, and hand a
+     * 2xx body to {@code parser}. Single-sourced here so the response-cap
+     * and failure-surface contract cannot drift between the two providers;
+     * each provider supplies only its fully-built {@code request} and its
+     * response-text {@code parser}.
+     *
+     * <p>{@code providerLabel} prefixes every log line and exception
+     * message so the failing provider stays identifiable now that the
+     * call site is shared.
+     */
+    static LlmResponse executeJsonCall(HttpClient http, Config config, HttpRequest request,
+                                       String providerLabel, LlmResponseParser parser) {
+        URI uri = request.uri();
+        long cap = clampBodyCapBytes(
+            config.getOptionalValue("infochat.llm.max-response-bytes", Long.class)
+                .orElse(DEFAULT_BODY_CAP_BYTES));
+        HttpResponse<String> response;
+        try {
+            response = http.send(request, boundedStringHandler(cap));
+        } catch (IOException e) {
+            throw new OpenAiCompatibleProvider.LlmCallFailedException(
+                providerLabel + ": HTTP call failed for " + uri, e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new OpenAiCompatibleProvider.LlmCallFailedException(
+                providerLabel + ": HTTP call interrupted for " + uri, e);
+        }
+
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            String preview = preview(response.body());
+            LOG.warnf("%s: non-2xx %d from %s; body preview: %s",
+                providerLabel, response.statusCode(), uri, preview);
+            throw new OpenAiCompatibleProvider.LlmCallFailedException(
+                providerLabel + ": non-2xx status " + response.statusCode()
+                    + " from " + uri + ": " + preview);
+        }
+
+        return parser.parse(response.body(), uri);
     }
 
     /**

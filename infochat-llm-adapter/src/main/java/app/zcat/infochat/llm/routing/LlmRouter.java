@@ -136,9 +136,6 @@ public class LlmRouter {
      * registered for the resolved name.
      */
     public LlmProvider forTask(ModelTask task, @Nullable String scopeLanguage) {
-        if (task == null) {
-            throw new IllegalArgumentException("LlmRouter.forTask: task must be non-null");
-        }
         String lang = scopeLanguage == null ? "en" : scopeLanguage.toLowerCase(Locale.ROOT);
 
         // Priority 1: per-task override property.

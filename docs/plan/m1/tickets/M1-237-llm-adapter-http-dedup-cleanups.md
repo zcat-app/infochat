@@ -1,9 +1,9 @@
 ---
 id: M1-237
 title: "infochat-llm-adapter: dedup HTTP providers, drop dead null-check, fix comment"
-status: pending
+status: done
 created: 2026-06-08
-last_updated: 2026-06-08
+last_updated: 2026-06-09
 blocked_by: []
 files_budget: 7
 complexity: medium
@@ -32,12 +32,29 @@ spec_refs:
   - docs/spec/llm.md §Why a thin SPI on top of LangChain4j
 decision_refs:
   - D48
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-09
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 308
+      removed: 95
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-09
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-237: infochat-llm-adapter — dedup HTTP providers, drop dead null-check, fix comment

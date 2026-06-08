@@ -11,13 +11,11 @@ import app.zcat.infochat.llm.ModelTask;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.Config;
-import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Duration;
 
 /**
@@ -95,8 +93,6 @@ public class OpenAiCompatibleProvider implements LlmProvider {
      * exact same literal.
      */
     public static final String PROVIDER_NAME = "openai-compatible";
-
-    private static final Logger LOG = Logger.getLogger(OpenAiCompatibleProvider.class);
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
@@ -194,33 +190,8 @@ public class OpenAiCompatibleProvider implements LlmProvider {
         }
         HttpRequest request = reqBuilder.build();
 
-        // Operator-configurable response-body cap, clamped into
-        // [1 MiB, 8 MiB] before use — same dynamic read as AnthropicProvider.
-        long cap = LlmHttpSupport.clampBodyCapBytes(
-            config.getOptionalValue("infochat.llm.max-response-bytes", Long.class)
-                .orElse(LlmHttpSupport.DEFAULT_BODY_CAP_BYTES));
-        HttpResponse<String> response;
-        try {
-            response = http.send(request, LlmHttpSupport.boundedStringHandler(cap));
-        } catch (IOException e) {
-            throw new LlmCallFailedException(
-                "OpenAiCompatibleProvider: HTTP call failed for " + uri, e);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new LlmCallFailedException(
-                "OpenAiCompatibleProvider: HTTP call interrupted for " + uri, e);
-        }
-
-        if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            String preview = LlmHttpSupport.preview(response.body());
-            LOG.warnf("OpenAiCompatibleProvider: non-2xx %d from %s; body preview: %s",
-                response.statusCode(), uri, preview);
-            throw new LlmCallFailedException(
-                "OpenAiCompatibleProvider: non-2xx status " + response.statusCode()
-                    + " from " + uri);
-        }
-
-        return parseChoiceText(response.body(), uri);
+        return LlmHttpSupport.executeJsonCall(
+            http, config, request, "OpenAiCompatibleProvider", OpenAiCompatibleProvider::parseChoiceText);
     }
 
     private static LlmResponse parseChoiceText(String responseBody, URI uri) {
