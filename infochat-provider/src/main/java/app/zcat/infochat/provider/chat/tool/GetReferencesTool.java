@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.chat.tool;
 
+import app.zcat.infochat.provider.chat.CancellationService;
 import app.zcat.infochat.provider.chat.ChatToolRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -38,10 +39,12 @@ public class GetReferencesTool implements ChatToolRegistry.ChatTool {
     private static final int LIMIT_MAX = 25;
 
     private final DataSource dataSource;
+    private final CancellationService cancellationService;
 
     @Inject
-    public GetReferencesTool(DataSource dataSource) {
+    public GetReferencesTool(DataSource dataSource, CancellationService cancellationService) {
         this.dataSource = dataSource;
+        this.cancellationService = cancellationService;
     }
 
     @Override
@@ -79,6 +82,7 @@ public class GetReferencesTool implements ChatToolRegistry.ChatTool {
                 + " LIMIT ?";
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
+            cancellationService.armToolConnection(conn, userId, scopeKind, scopeId);
             ps.setString(1, uid);
             ps.setString(2, scopeKind);
             ps.setObject(3, scopeId);

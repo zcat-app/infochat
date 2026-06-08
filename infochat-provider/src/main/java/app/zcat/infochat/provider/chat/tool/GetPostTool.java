@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.chat.tool;
 
+import app.zcat.infochat.provider.chat.CancellationService;
 import app.zcat.infochat.provider.chat.ChatToolRegistry;
 import org.jspecify.annotations.Nullable;
 
@@ -36,10 +37,12 @@ public class GetPostTool implements ChatToolRegistry.ChatTool {
     static final String TRUNCATION_MARKER = "[TRUNCATED]";
 
     private final DataSource dataSource;
+    private final CancellationService cancellationService;
 
     @Inject
-    public GetPostTool(DataSource dataSource) {
+    public GetPostTool(DataSource dataSource, CancellationService cancellationService) {
         this.dataSource = dataSource;
+        this.cancellationService = cancellationService;
     }
 
     @Override
@@ -60,6 +63,7 @@ public class GetPostTool implements ChatToolRegistry.ChatTool {
                    + "WHERE scope_kind = ? AND scope_id = ?)";
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
+            cancellationService.armToolConnection(conn, userId, scopeKind, scopeId);
             ps.setString(1, uid);
             ps.setString(2, scopeKind);
             ps.setObject(3, scopeId);

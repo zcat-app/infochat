@@ -2,6 +2,8 @@ package app.zcat.infochat.provider.chat.tool;
 
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import app.zcat.infochat.provider.chat.CancellationService;
+import app.zcat.infochat.provider.chat.InFlightTracker;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -16,6 +18,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -42,6 +45,12 @@ class RecallMemoryToolTest {
 
     @Inject
     RecallMemoryTool tool;
+
+    @Inject
+    CancellationService cancellationService;
+
+    @Inject
+    InFlightTracker inFlightTracker;
 
     @BeforeEach
     void cleanup() throws Exception {
@@ -96,6 +105,38 @@ class RecallMemoryToolTest {
             "the newest entry survives the aggregate bound");
         assertFalse(json.contains("mem-11 "),
             "the oldest entry is dropped once the budget is exhausted");
+    }
+
+    @Test
+    void recallMemoryArmsTimeoutAndRegistersPid() throws Exception {
+        // Construct the tool against a counting/recording DataSource that
+        // delegates to the seed DB, plus the CDI CancellationService (whose
+        // InFlightTracker is the injected singleton). Non-empty keywords are
+        // required so execute() reaches the connection (empty short-circuits
+        // before opening one); no chat_memory row need exist. The wrapper
+        // observes the SET statement_timeout and pg_backend_pid the arming
+        // step issues.
+        UUID userId = UUID.randomUUID();
+        CountingRecordingDataSource countingDs = new CountingRecordingDataSource(dataSource);
+        RecallMemoryTool directTool = new RecallMemoryTool(countingDs, cancellationService);
+
+        // Hold the in-flight slot as ChatAgent.handle() does for a chat turn,
+        // so the tool has a handle to register the backend pid on.
+        InFlightTracker.CancellationHandle slot =
+                Objects.requireNonNull(inFlightTracker.tryAcquire(userId, "dm", userId));
+        try {
+            directTool.execute(userId, "dm", userId,
+                    Map.of("keywords", List.of(PREFIX + "kw")));
+
+            assertTrue(countingDs.executedSql().stream()
+                            .anyMatch(s -> s.contains("SET statement_timeout")),
+                    "recallMemory's connection must have statement_timeout applied. Got: "
+                            + countingDs.executedSql());
+            assertTrue(slot.hasPgBackendPid(),
+                    "recallMemory must register the connection's pg backend pid on the in-flight handle");
+        } finally {
+            inFlightTracker.release(userId, "dm", userId, slot);
+        }
     }
 
     // ---------- helpers ----------

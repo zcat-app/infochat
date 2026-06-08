@@ -1,9 +1,14 @@
 ---
 id: M1-225
 title: "Arm /stop timeout + pid on the four non-search chat tools"
-status: pending
+status: done
 created: 2026-06-08
 last_updated: 2026-06-08
+clarity_check:
+  date: 2026-06-08
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
 files_budget: 9
 files_scope:
@@ -41,7 +46,20 @@ spec_refs:
   - docs/spec/commands.md §Conversation control
 decision_refs:
   - D35
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-08
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 11
+      added: 318
+      removed: 11
 overrides: []
 aborted_attempts: []
 reopens: []

@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.chat.tool;
 
+import app.zcat.infochat.provider.chat.CancellationService;
 import app.zcat.infochat.provider.chat.ChatToolRegistry;
 
 import jakarta.enterprise.context.ApplicationScoped;
@@ -38,10 +39,12 @@ public class RecallMemoryTool implements ChatToolRegistry.ChatTool {
     static final int MAX_RESULT_BYTES = 16 * 1024;
 
     private final DataSource dataSource;
+    private final CancellationService cancellationService;
 
     @Inject
-    public RecallMemoryTool(DataSource dataSource) {
+    public RecallMemoryTool(DataSource dataSource, CancellationService cancellationService) {
         this.dataSource = dataSource;
+        this.cancellationService = cancellationService;
     }
 
     @Override
@@ -61,6 +64,7 @@ public class RecallMemoryTool implements ChatToolRegistry.ChatTool {
                    + "LIMIT 50";
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
+            cancellationService.armToolConnection(conn, userId, scopeKind, scopeId);
             ps.setObject(1, userId);
             ps.setString(2, scopeKind);
             ps.setObject(3, scopeId);

@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.chat.tool;
 
+import app.zcat.infochat.provider.chat.CancellationService;
 import app.zcat.infochat.provider.chat.ChatToolRegistry;
 
 import jakarta.enterprise.context.ApplicationScoped;
@@ -29,10 +30,12 @@ public class ListSavesTool implements ChatToolRegistry.ChatTool {
     private static final int RESULT_LIMIT = 200;
 
     private final DataSource dataSource;
+    private final CancellationService cancellationService;
 
     @Inject
-    public ListSavesTool(DataSource dataSource) {
+    public ListSavesTool(DataSource dataSource, CancellationService cancellationService) {
         this.dataSource = dataSource;
+        this.cancellationService = cancellationService;
     }
 
     @Override
@@ -64,6 +67,7 @@ public class ListSavesTool implements ChatToolRegistry.ChatTool {
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql.toString())) {
+            cancellationService.armToolConnection(conn, userId, scopeKind, scopeId);
             for (int i = 0; i < params.size(); i++) {
                 Object p = params.get(i);
                 switch (p) {

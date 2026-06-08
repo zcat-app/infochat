@@ -2,6 +2,8 @@ package app.zcat.infochat.provider.chat.tool;
 
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import app.zcat.infochat.provider.chat.CancellationService;
+import app.zcat.infochat.provider.chat.InFlightTracker;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -13,6 +15,7 @@ import java.sql.ResultSet;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -38,6 +41,12 @@ class GetReferencesToolTest {
 
     @Inject
     GetReferencesTool tool;
+
+    @Inject
+    CancellationService cancellationService;
+
+    @Inject
+    InFlightTracker inFlightTracker;
 
     @BeforeEach
     void cleanup() throws Exception {
@@ -114,6 +123,35 @@ class GetReferencesToolTest {
 
         assertEquals("[]", json,
             "no edges → empty JSON array (preserves the stub's prior contract)");
+    }
+
+    @Test
+    void getReferencesArmsTimeoutAndRegistersPid() throws Exception {
+        // Construct the tool against a counting/recording DataSource that
+        // delegates to the seed DB, plus the CDI CancellationService (whose
+        // InFlightTracker is the injected singleton). The query runs for real
+        // (no edge need exist); the wrapper observes the SET statement_timeout
+        // and pg_backend_pid the arming step issues.
+        UUID userId = UUID.randomUUID();
+        CountingRecordingDataSource countingDs = new CountingRecordingDataSource(dataSource);
+        GetReferencesTool directTool = new GetReferencesTool(countingDs, cancellationService);
+
+        // Hold the in-flight slot as ChatAgent.handle() does for a chat turn,
+        // so the tool has a handle to register the backend pid on.
+        InFlightTracker.CancellationHandle slot =
+                Objects.requireNonNull(inFlightTracker.tryAcquire(userId, "dm", userId));
+        try {
+            directTool.execute(userId, "dm", userId, Map.of("uid", PREFIX + "absent"));
+
+            assertTrue(countingDs.executedSql().stream()
+                            .anyMatch(s -> s.contains("SET statement_timeout")),
+                    "getReferences's connection must have statement_timeout applied. Got: "
+                            + countingDs.executedSql());
+            assertTrue(slot.hasPgBackendPid(),
+                    "getReferences must register the connection's pg backend pid on the in-flight handle");
+        } finally {
+            inFlightTracker.release(userId, "dm", userId, slot);
+        }
     }
 
     // ---------- helpers ----------
