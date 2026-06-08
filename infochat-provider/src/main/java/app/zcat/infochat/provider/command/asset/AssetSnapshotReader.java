@@ -54,13 +54,18 @@ public class AssetSnapshotReader {
     @Inject
     DataSource dataSource;
 
-    @ConfigProperty(name = "infochat.assets.refresh.coingecko", defaultValue = "90")
+    // Profile-driven cadence keys (design §10.4): no inline defaultValue —
+    // application.properties is the source of truth, matching the collector
+    // AssetSnapshotFetcher / FetchScheduler.java:140 convention. The provider
+    // ships the same base + per-profile values as the collector so the keys
+    // resolve to the same interval in both services under every profile.
+    @ConfigProperty(name = "infochat.assets.refresh.coingecko")
     long refreshCoingeckoSeconds;
 
-    @ConfigProperty(name = "infochat.assets.refresh.kraken", defaultValue = "90")
+    @ConfigProperty(name = "infochat.assets.refresh.kraken")
     long refreshKrakenSeconds;
 
-    @ConfigProperty(name = "infochat.assets.refresh.bitfinex", defaultValue = "90")
+    @ConfigProperty(name = "infochat.assets.refresh.bitfinex")
     long refreshBitfinexSeconds;
 
     /** CDI-required no-arg constructor. */

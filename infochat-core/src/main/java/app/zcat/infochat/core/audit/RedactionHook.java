@@ -34,6 +34,15 @@ public interface RedactionHook {
      * independently; no per-call scratch state may persist across
      * calls.
      *
+     * <p><b>Fail-closed on regex timeout.</b> Per
+     * {@code docs/spec/security.md} §Secrets handling, the redactor is
+     * fail-closed on regex timeout: it scans {@code detailsJson} under a
+     * per-input wall-clock watchdog, and a timed-out match treats the
+     * WHOLE field as redacted rather than emitting it raw. An
+     * implementation MUST replace the entire {@code detailsJson} value
+     * with a redacted placeholder when its watchdog fires — it may never
+     * return the unscanned value.</p>
+     *
      * @param row the row built by the writer, BEFORE redaction.
      * @return the redacted row that reaches the audit_log INSERT.
      *         An impl that does not need to redact MAY return the

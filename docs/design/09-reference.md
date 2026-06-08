@@ -27,7 +27,7 @@ The codebase ships as six Maven modules. Dependencies are strictly one-direction
 
 | Module | Depends on | Purpose |
 |---|---|---|
-| `infochat-core` | (none) | Domain entities, schema-level types, shared utilities. Pure Java; no Quarkus, no I/O. |
+| `infochat-core` | (none) | Domain entities, schema-level types, shared utilities, plus a few CDI beans that touch JDBC/Quarkus: the single-instance lock guard (`AbstractInstanceLockGuard` — `@Startup` + `io.quarkus.runtime.Quarkus`) and the throttled admin notifier (`ThrottledAdminNotifier` — JDBC via `javax.sql.DataSource`). Still promises no user-facing surface and no `messaging-adapter` dependency. |
 | `infochat-ssrf` | (none) | SSRF-gated outbound HTTP/WS client (allowlist, IP blocklist, DNS-rebind defense, redirect cap, scheme allowlist, timeout caps). Shared by every Collector fetch / `StreamSource` connect and every Provider `/add-source` URL probe. See [04-security.md](04-security.md) §4.2. |
 | `infochat-llm-adapter` | (none) | `LlmProvider`, `EmbeddingProvider` SPIs and impls. (`TranslationProvider` is not here: it lives in `infochat-messaging-adapter` — presentation-layer SPI, `docs/spec/llm.md` §SPI shape.) See [05-llm-and-embeddings.md](05-llm-and-embeddings.md). |
 | `infochat-messaging-adapter` | (none) | `MessagingAdapter` SPI plus the v1 in-tree implementations: SimpleX, Signal, and the in-memory test adapter (D32, D46). See [06-messaging.md](06-messaging.md). |
@@ -36,9 +36,9 @@ The codebase ships as six Maven modules. Dependencies are strictly one-direction
 
 Notes:
 
-- `infochat-core` MUST stay free of Quarkus, JAX-RS, and Hibernate. Test-friendly and reusable.
+- `infochat-core` MUST stay free of JAX-RS and Hibernate, and keeps its Quarkus/JDBC coupling to the two deliberate `@Startup`/CDI beans noted in the table row above (the single-instance lock guard and the throttled admin notifier). Otherwise test-friendly and reusable.
 - `infochat-core` is deliberately one module — splitting DTOs from entities is a v2 candidate if a third consumer appears. The rationale lives in [01-architecture.md](01-architecture.md) §1.2.
-- `infochat-collector` MUST NOT depend on `infochat-messaging-adapter`. Enforced by the parent POM and verified in CI; an attempt to add the dependency fails the build with a clear error. This is the architectural guarantee that the Collector cannot accidentally become user-facing.
+- `infochat-collector` MUST NOT depend on `infochat-messaging-adapter`. Enforced by a `maven-enforcer-plugin` `bannedDependencies` rule in `infochat-collector/pom.xml` (no CI pipeline exists in v1); an attempt to add the dependency fails the build with a clear error. This is the architectural guarantee that the Collector cannot accidentally become user-facing.
 - The three sibling shared modules — `infochat-ssrf`, `infochat-llm-adapter`, and `infochat-messaging-adapter` — MUST NOT depend on each other.
 - `infochat-ssrf` is a compile-time shared library, not a runtime communication path. The "DB-only inter-service communication" rule from [01-architecture.md](01-architecture.md) §1.2 / [04-security.md](04-security.md) §4.2 still holds: there is no Provider→Collector RPC for SSRF checks. Sharing the gate as a Maven sibling is what keeps both services' allowlists from drifting.
 

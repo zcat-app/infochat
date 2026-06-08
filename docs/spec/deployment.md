@@ -36,19 +36,22 @@ A v1 deployment runs:
   byte-equal contact ids.
 
 Both services connect to the same DB but use different DB roles
-(`security.md` and decision D34). Both services run Flyway on startup;
-the migration set is identical and idempotent on second-run. There is
-**no shared file state** between the two services — restarts and rolling
-upgrades are coordinated through the DB only.
+(`security.md` and decision D34). Only the Collector runs Flyway on
+startup — `quarkus-flyway` is test-scoped in the Provider, so the
+production Provider never migrates; the operator starts the Collector
+(which applies the migration set) before the Provider. The migration
+set is idempotent on second-run. There is **no shared file state**
+between the two services — restarts and rolling upgrades are
+coordinated through the DB only.
 
-**Dual-startup race.** When both services come up at the same time
-they may both attempt Flyway migration concurrently. Flyway's
-`schema_history` table and its `pg_advisory_lock` acquisition make
-the race correct (the loser waits, then sees the migrations already
-applied), but the operator should expect an extra-second-or-two
-startup latency on cold boot. There is no requirement to start the
-services in a fixed order; on a clean checkout running both at once
-is supported.
+**Startup ordering.** Because only the Collector migrates in
+production, the operator starts the Collector first — it applies the
+migration set under Flyway's `schema_history` table and
+`pg_advisory_lock` — and the Provider second, against an
+already-migrated schema. The Provider's bundled `quarkus-flyway` is
+test-scoped: in production it does nothing, and under test the in-JVM
+Provider boot applies the migration set itself (the advisory lock
+keeps any concurrent apply correct).
 
 ## Operator inputs
 
@@ -143,7 +146,9 @@ Everything else has a profile default.
 
 ## Bootstrap behavior on startup
 
-Both services run Flyway migrations first. Then:
+The Collector runs Flyway migrations first (the production Provider does
+not migrate — `quarkus-flyway` is test-scoped there; see the
+startup-ordering note above). Then:
 
 - **Collector** loads the bootstrap sources file and upserts `source`
   rows by `(kind, identifier)` (decision D38); never deletes; updates

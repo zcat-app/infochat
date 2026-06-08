@@ -57,7 +57,7 @@ public class StatusCommandHandler implements CommandHandler {
     @Inject
     DataSource dataSource;
 
-    @ConfigProperty(name = "infochat.profile.label", defaultValue = "laptop")
+    @ConfigProperty(name = "infochat.profile.label", defaultValue = "unknown")
     String profileLabel;
 
     // Captured at bean construction (Quarkus boot). The /status output

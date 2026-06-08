@@ -68,7 +68,7 @@ public class EligiblePostQuery {
     @ConfigProperty(name = "infochat.summary.cluster-cap", defaultValue = "200")
     int clusterCap;
 
-    @ConfigProperty(name = "infochat.profile.label", defaultValue = "laptop")
+    @ConfigProperty(name = "infochat.profile.label", defaultValue = "unknown")
     String profileLabel;
 
     /**

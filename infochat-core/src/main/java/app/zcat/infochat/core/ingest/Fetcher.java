@@ -10,8 +10,9 @@ import java.util.List;
  * hands to the outbox.
  *
  * <p>The SPI is deliberately minimal in v1: the source is identified
- * by its row id and its source-side identifier string (URL for
- * HTTP-shaped sources, filter spec for stream-but-polled sources).
+ * by a per-tick dispatch token and its source-side identifier string
+ * (URL for HTTP-shaped sources, filter spec for stream-but-polled
+ * sources).
  * Pagination, retry, backoff, and the asset-Fetcher output-type
  * discriminator are implementation concerns or follow-up tickets;
  * they are intentionally NOT method-shape commitments here.</p>
@@ -21,8 +22,11 @@ public interface Fetcher {
     /**
      * Fetch the current batch of posts for one source.
      *
-     * @param sourceId   the {@code source.id} this fetch is on behalf
-     *                   of; stamped onto every returned post.
+     * @param sourceId   the per-tick opaque dispatch token for this
+     *                   fetch, stamped onto every returned post. It is
+     *                   NOT the {@code source.id} UUID and is not stable
+     *                   across ticks (see {@link NormalizedPost}); the
+     *                   FetchScheduler passes {@code row.dispatchKey()}.
      * @param identifier the source-side identifier: URL for HTTP-shaped
      *                   sources, filter spec for stream-but-polled
      *                   sources.

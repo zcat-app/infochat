@@ -59,7 +59,7 @@ import java.util.Set;
  * lifecycle wiring is shape-only — T3-A's SimpleX/Signal beans will
  * exercise the resilience loop in earnest.</p>
  *
- * <p><b>Gate order.</b> The six gates are evaluated in §6.7's
+ * <p><b>Gate order.</b> The gates are evaluated in §6.7's
  * documented order; the first failure short-circuits with the most
  * specific {@link IllegalStateException} the implementation can
  * raise at that point. Each gate has a dedicated {@code @Test} in

@@ -116,6 +116,18 @@
     <build>
         <pluginManagement>
             <plugins>
+                <!--
+                     maven-enforcer-plugin: version managed here (M1-001
+                     BOM-managed-versions invariant); the module-DAG ban
+                     execution + bannedDependencies rule is activated in
+                     infochat-collector/pom.xml only. Build-time plugin —
+                     no effect on shipped runtime artifacts.
+                -->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-enforcer-plugin</artifactId>
+                    <version>3.5.0</version>
+                </plugin>
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-compiler-plugin</artifactId>

@@ -1,13 +1,59 @@
 ---
 id: M1-210
 title: "Module-DAG enforcement + doc/config-truth sweep (docs say what the build does)"
-status: pending
+status: done
 created: 2026-06-07
 last_updated: 2026-06-08
+revisions:
+  - date: 2026-06-08
+    reason: budget-breach refine (files_scope gap on acceptance item 1)
+    change: |
+      Added infochat-collector/pom.xml to files_scope and bumped files_budget
+      20→21 so the module-DAG ban (item 1) can be enforced correctly: the
+      maven-enforcer bannedDependencies execution must live in the collector's
+      module pom (a parent-level blanket ban would break the provider, which
+      legitimately depends on infochat-messaging-adapter, and fail item 14).
+      The enforcer plugin coordinates stay in the parent pom (already in scope).
+      Reworded acceptance item 1 to name the collector-pom mechanism.
+    prior_files_budget: 20
+    prior_acceptance_item_1: |
+      "The 09-reference module-DAG ban is build-enforced: adding a dependency
+      from infochat-collector on infochat-messaging-adapter fails the build
+      with a clear error (maven-enforcer banned-dependencies or equivalent
+      build-time mechanism; the failure demonstration is argued in the commit
+      message), and 09-reference.md's enforcement sentence states exactly what
+      is now true — POM-enforced, with the CI half either dropped or rephrased
+      as future (no CI exists)"
+  - date: 2026-06-08
+    reason: budget-breach refine (files_scope gap on acceptance item 4)
+    change: |
+      Added infochat-provider/src/main/resources/application.properties to
+      files_scope and bumped files_budget 18→20 so the assets.refresh
+      convergence can take the "equally required" direction (provider drops
+      its inline defaultValue and mirrors the collector's base+profiled
+      application.properties entries, per the FetchScheduler.java:140
+      profile-driven-key convention). Reworded acceptance item 4 to name that
+      direction. Also corrected the stale AssetSnapshotReader path literal
+      (provider/assets/ → provider/command/asset/) flagged at start grounding.
+    prior_files_budget: 18
+    prior_acceptance_item_4: |
+      "The infochat.assets.refresh.* keys resolve identically in both
+      services: today AssetSnapshotFetcher declares them with no defaultValue
+      while AssetSnapshotReader defaults the same keys to \"90\" — after this
+      ticket both services are either equally required or equally defaulted,
+      pinned by a named test or shared constant"
+clarity_check:
+  date: 2026-06-08
+  verdict: WARN
+  warnings:
+    - "FILES-BUDGET-PLAUSIBLE: files_scope names the new test directory rather than specific class file(s); budget 18 has zero headroom if two separate config test classes are written (profile.label + assets.refresh). Exceeding by one file trips round-cap."
+    - "SECURITY-FLAG-CONSISTENT: RedactionHook.java is a security-boundary SPI (fail-closed audit-redaction contract); change is javadoc-only so no behavioral risk, but security_relevant:false may cause redteam to skip the javadoc addition."
+  blockers: []
 blocked_by: []
-files_budget: 18
+files_budget: 21
 files_scope:
   - pom.xml
+  - infochat-collector/pom.xml
   - docs/design/09-reference.md
   - docs/design/07-deployment.md
   - docs/design/01-architecture.md
@@ -19,7 +65,8 @@ files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/summary/EligiblePostQuery.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/StatusCommandHandler.java
   - infochat-collector/src/main/java/app/zcat/infochat/collector/assets/AssetSnapshotFetcher.java
-  - infochat-provider/src/main/java/app/zcat/infochat/provider/assets/AssetSnapshotReader.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/command/asset/AssetSnapshotReader.java
+  - infochat-provider/src/main/resources/application.properties
   - infochat-core/src/main/java/app/zcat/infochat/core/ingest/Fetcher.java
   - infochat-core/src/main/java/app/zcat/infochat/core/ingest/StreamSource.java
   - infochat-core/src/main/java/app/zcat/infochat/core/audit/RedactionHook.java
@@ -39,10 +86,10 @@ out_of_scope:
   - the rest of design 05 §5.1's package tree (embedding-provider impl names, observability classes, etc.) — the §5.1 leg fixes ONLY the three TranslationProvider rows surfaced by M1-213, not a full tree-vs-code reconciliation
   - CLAUDE.md's "infochat.profile" concept phrasing — process-file wording, deliberately retained as the concept name per InfochatProfile's javadoc
 acceptance:
-  - "The 09-reference module-DAG ban is build-enforced: adding a dependency from infochat-collector on infochat-messaging-adapter fails the build with a clear error (maven-enforcer banned-dependencies or equivalent build-time mechanism; the failure demonstration is argued in the commit message), and 09-reference.md's enforcement sentence states exactly what is now true — POM-enforced, with the CI half either dropped or rephrased as future (no CI exists)"
+  - "The 09-reference module-DAG ban is build-enforced: a maven-enforcer-plugin bannedDependencies execution in infochat-collector/pom.xml (plugin coordinates managed/declared in the parent pom.xml) fails the build with a clear error if infochat-collector ever gains a dependency on infochat-messaging-adapter — scoped to the collector so the provider's legitimate messaging-adapter dependency is unaffected and item 14 (mvn verify exits 0) still holds; the failure demonstration is argued in the commit message, and 09-reference.md's enforcement sentence states exactly what is now true — POM-enforced, with the CI half either dropped or rephrased as future (no CI exists)"
   - "09-reference.md's infochat-core row no longer claims \"Pure Java; no Quarkus, no I/O\" — it describes the actual contents (JDBC-touching notifier, Quarkus-touching lock guard) and what the module still promises (no user-facing surface, no messaging dependency)"
   - "All readers of infochat.profile.label resolve the same default: the three @ConfigProperty declarations (today \"unknown\" in StartupReleaseOnStage2FailureWarn vs \"laptop\" in EligiblePostQuery and StatusCommandHandler) agree, pinned by a named test or a shared constant"
-  - "The infochat.assets.refresh.* keys resolve identically in both services: today AssetSnapshotFetcher declares them with no defaultValue while AssetSnapshotReader defaults the same keys to \"90\" — after this ticket both services are either equally required or equally defaulted, pinned by a named test or shared constant"
+  - "The infochat.assets.refresh.{coingecko,kraken,bitfinex} keys resolve to the same interval in both services under every profile: the provider AssetSnapshotReader drops its inline defaultValue=\"90\" (the convention violation) and infochat-provider/src/main/resources/application.properties gains the same base + per-profile values the collector already ships (base, laptop, pi, vps, remote-llm), so both services are equally required (no inline default; application.properties is the source of truth, matching the FetchScheduler.java:140 profile-driven-key convention) and resolve to the same interval per profile; pinned by a named test"
   - "No design doc instructs setting an infochat.profile= property: design 07-deployment's runbook (:103) and reference properties (:135), design 01-architecture (:629), and design 05 (:15) all name the actual mechanism (QUARKUS_PROFILE / quarkus.profile), so following the runbook no longer produces the InfochatProfile startup crash (\"No known infochat profile in active Quarkus profile chain\")"
   - "Design 05's profile enumeration says remote-llm, not the stale remote"
   - "Design 05's per-task property keys for the chat agent use the shipped key segment (ModelTask.CHAT_AGENT keySegment is \"chat\"; design 05 :64-65 says infochat.llm.chat-agent.*)"
@@ -63,7 +110,69 @@ spec_refs:
   - docs/spec/architecture.md §Service split
 decision_refs:
   - D27
-reviews: []
+escalations:
+  - date: 2026-06-08
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A — pre-implementation files_scope gap on acceptance item 4
+      (assets.refresh key convergence). Correctly satisfying "both
+      services equally required or equally defaulted" needs
+      infochat-provider/src/main/resources/application.properties,
+      which is NOT in files_scope. Detail: the keys
+      infochat.assets.refresh.{coingecko,kraken,bitfinex} are
+      profile-driven; per the codebase convention (FetchScheduler.java:140
+      "defaultValue is allowed per the AssetSnapshotFetcher convention" —
+      i.e. profile-driven cadence keys carry NO inline defaultValue, only
+      single-global keys may), the collector AssetSnapshotFetcher correctly
+      carries no inline defaultValue and backs the keys with base + profiled
+      values in collector application.properties (base 90s; laptop 60s; pi
+      300s; vps/remote-llm 90s). The provider AssetSnapshotReader violates
+      that convention with defaultValue="90" and has ZERO matching entries
+      in provider application.properties. The correct "equally required"
+      fix is to drop the provider's inline defaultValue and add the same
+      base+profiled keys to provider application.properties — but that file
+      is out of files_scope. The in-scope-only alternatives are both poor:
+      (a) add inline defaults to the collector → violates the documented
+      profile-driven-key convention and is inert (base property already
+      resolves; @Scheduled reads the property string, not the field);
+      (b) remove the provider default with no backing value → breaks
+      production /zcash config resolution and provider @QuarkusTest boot
+      (AssetHandlerIT, AssetCommandsRoundtripIT). All other 12 legs are
+      fully in-scope.
+  - date: 2026-06-08
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A — second files_scope gap on acceptance item 1 (module-DAG ban),
+      surfaced during implementation (legs 2,3,4,9,11,12,13 already applied
+      uncommitted on the branch). A correct collector↛messaging-adapter
+      maven-enforcer bannedDependencies rule CANNOT be a parent-level blanket
+      ban: infochat-provider legitimately depends on infochat-messaging-adapter
+      (infochat-provider/pom.xml:27 main + :53 test), so a blanket parent ban
+      would fail `mvn verify` for the provider — contradicting acceptance
+      item 14 (exit 0). maven-enforcer's bannedDependencies evaluates per
+      running module with no "only in module X" conditional, so the rule must
+      execute in the collector's own module pom. That requires
+      infochat-collector/pom.xml in files_scope; today only the parent pom.xml
+      is listed. Recommended resolution: refine to add
+      infochat-collector/pom.xml to files_scope and bump files_budget 20→21
+      (enforcer plugin coordinates go in the parent pom — already in scope;
+      the bannedDependencies execution stanza goes in collector/pom.xml). The
+      remaining doc legs (5,6,7,8,10) and the provider/config test touch only
+      in-scope files — this is the last gap.
+reviews:
+  - round: 1
+    date: 2026-06-08
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 19
+      added: 350
+      removed: 60
 overrides: []
 aborted_attempts: []
 reopens: []

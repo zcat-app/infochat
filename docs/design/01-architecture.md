@@ -630,7 +630,7 @@ resolves every adapter whose `enabled=true` flag is set.
 
 ## 1.7 Hardware profiles
 
-`infochat.profile=laptop|vps|pi|remote-llm` selects a bundle of defaults
+The active Quarkus profile (`QUARKUS_PROFILE` / `quarkus.profile=laptop|vps|pi|remote-llm`) selects a bundle of defaults
 applied at startup. Individual properties can still be set explicitly to
 override.
 

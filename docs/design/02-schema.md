@@ -397,25 +397,55 @@ test corpus in `infochat-core` keeps the enforcement honest):
 | `BOOTSTRAP_SOURCE_LOAD`    | Bootstrap loader (one row per load run)                | `system`        |
 | `BOOTSTRAP_ASSET_LOAD`     | Bootstrap loader (one row per load run)                | `system`        |
 | `GRANT_ADMIN`              | `/grant-admin`                                         | `user`          |
+| `GRANT_ADMIN_INTENT`       | `/grant-admin` (intent row, security.md step 8)        | `user`          |
 | `REVOKE_ADMIN`             | `/revoke-admin`                                        | `user`          |
+| `REVOKE_ADMIN_INTENT`      | `/revoke-admin` (intent row; survives last-admin rollback) | `user`          |
 | `BAN`                      | `/ban`                                                 | `user`          |
+| `BAN_INTENT`               | `/ban` (intent, first-call leg of confirm gate)        | `user`          |
 | `UNBAN`                    | `/unban` (registered row)                              | `user`          |
+| `UNBAN_INTENT`             | `/unban` (intent, first-call leg)                      | `user`          |
 | `UNBAN_PREBAN_DELETE`      | `/unban` against preban row (carve-out path)           | `user`          |
 | `VOUCH`                    | `/vouch`                                               | `user`          |
+| `VOUCH_INTENT`             | `/vouch` (intent, first-call leg)                      | `user`          |
 | `INVITE_CREATE`            | `/invite create`                                       | `invite`        |
+| `INVITE_CREATE_INTENT`     | `/invite create` (intent, first-call leg)              | `invite`        |
 | `INVITE_REVOKE`            | `/invite revoke`                                       | `invite`        |
+| `INVITE_REVOKE_INTENT`     | `/invite revoke` (intent, first-call leg)              | `invite`        |
 | `INVITE_CONSUME`           | DM intake on first message                             | `invite`        |
+| `INVITE_BRUTE_FORCE_BREACH` | DM intake: per-(adapter, contact) invite brute-force breach (V12) | `user`          |
 | `PROMOTE_GROUP_ADMIN`      | `/promote` (or first-mention auto-promote)             | `user`          |
+| `PROMOTE_GROUP_ADMIN_INTENT` | `/promote` (intent; auto-promote path writes none)     | `user`          |
 | `DEMOTE_GROUP_ADMIN`       | `/demote`                                              | `user`          |
+| `DEMOTE_GROUP_ADMIN_INTENT` | `/demote` (intent)                                     | `user`          |
+| `APPROVE_GROUP`            | `/approve-group` (D47)                                 | `group`         |
+| `REJECT_GROUP`             | `/reject-group` (D47)                                  | `group`         |
+| `REJECT_GROUP_INTENT`      | `/reject-group` (intent, first-call leg)               | `group`         |
+| `D47_GROUP_ONLY_PREBAN_CONVERSION` | V27 migration (one-time group_only → preban bulk conversion, SQL) | `system`        |
+| `LIST_GROUPS`              | `/list-groups` (bot-admin-only deployment-wide read)   | `group`         |
+| `MEMBER_LEFT`              | Group membership-left event (skipped on verified no-op) | `user`          |
+| `BOT_REMOVED`              | Bot removed from group (system actor)                  | `group`         |
 | `ADD_SOURCE`               | `/add-source`                                          | `source`        |
 | `REMOVE_SOURCE`            | `/remove-source`                                       | `source`        |
+| `REMOVE_SOURCE_INTENT`     | `/remove-source` (intent, first-call leg)              | `source`        |
 | `SOURCE_ENABLE`            | `/source-enable`                                       | `source`        |
+| `SOURCE_ENABLE_INTENT`     | `/source-enable` (intent, first-call leg)              | `source`        |
 | `SOURCE_DISABLE`           | `/source-disable`                                      | `source`        |
+| `LIST_SOURCES_ALL`         | `/list-sources --all [--include-deleted]` (privileged read) | `source`        |
+| `AUDIT_READ`               | `/audit` (admin read via audit_log_view)               | `system`        |
+| `QUARANTINE_LIST`          | `/quarantine list` (admin read)                        | `quarantine`    |
 | `APPROVE_QUARANTINE`       | `/quarantine approve` (via stored proc)                | `quarantine`    |
 | `REJECT_QUARANTINE`        | `/quarantine reject`  (via stored proc)                | `quarantine`    |
+| `EXPORT`                   | `/export` (caller's own data)                          | `user`          |
 | `FORGET`                   | `/forget` (skipped on verified no-op per Invariant 7)  | `memory`        |
+| `CHAT_MODE`                | Chat-mode dispatch (per request, before the LLM call)  | `user`          |
 | `SET_LANG`                 | `/lang`                                                | `memory`        |
 | `SET_TIMEZONE`             | `/group-timezone`                                      | `group`         |
+| `LLM_OUTPUT_SANITIZED`     | LLM output sanitizer hit (per occurrence, V13)         | `system`        |
+| `RE_EVAL_RELEASED`         | Stage-2 re-eval releases a previously-held post        | `post`          |
+| `DIGEST_RETRY`             | `/retry` (group digest re-run)                         | `group`         |
+| `DIGEST_SLOT_MISSED`       | Digest scheduler: missed slot detected                 | `group`         |
+| `QUARANTINE_TTL_REJECT`    | Quarantine TTL sweep auto-reject                       | `quarantine`    |
+| `STARTUP_RELEASE_ON_STAGE2_FAILURE_TRUE` | Collector `@Startup` warn when release-on-stage2-failure=true | `system`        |
 
 Non-privileged commands (`/summary`, `/saved`, `/save`, `/unsave`,
 `/follow-tag`, `/unfollow-tag`, asset commands, `/help`, `/status`,

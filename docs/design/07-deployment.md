@@ -62,7 +62,7 @@ The schema and code are identical; only `application.properties` URLs differ.
 
 ## 7.2 Hardware profiles
 
-`infochat.profile=laptop|vps|pi|remote-llm` is the single most important config. It selects defaults for context window, models, eval concurrency, vector index, etc. See [05-llm-and-embeddings.md §5.7](05-llm-and-embeddings.md) for the canonical model/embedding table.
+The active Quarkus profile (`QUARKUS_PROFILE` / `quarkus.profile=laptop|vps|pi|remote-llm`) is the single most important config. It selects defaults for context window, models, eval concurrency, vector index, etc. See [05-llm-and-embeddings.md §5.7](05-llm-and-embeddings.md) for the canonical model/embedding table.
 
 | Profile | Hardware | Local model? | Notes |
 |---|---|---|---|
@@ -101,7 +101,7 @@ These are the values bound at startup unless an operator override fires. Forward
 Profile is read once at startup. To switch:
 
 1. Stop both services.
-2. Edit `application.properties`: `infochat.profile=...`.
+2. Set the active profile: `quarkus.profile=...` in `application.properties` (or `QUARKUS_PROFILE=...` in the environment).
 3. If embedding dimension changes (e.g., laptop→pi), run the embedding migration: `scripts/reembed.sh`.
 4. Start collector, then provider.
 
@@ -117,8 +117,8 @@ INFO  Bootstrap – profile=laptop, overrides={infochat.llm.summarizer.model: ll
 
 Quarkus applies config in standard order; relevant for us:
 
-1. System properties              `-Dinfochat.profile=pi`
-2. Environment variables          `INFOCHAT_PROFILE=pi`
+1. System properties              `-Dquarkus.profile=pi`
+2. Environment variables          `QUARKUS_PROFILE=pi`
 3. `application.properties`         (bundled in jar; baseline defaults)
 4. `application-{profile}.properties` (bundled; profile overrides)
 5. `application.properties` on disk (next to the jar; operator overrides)
@@ -133,7 +133,7 @@ A single file, used by both services (each ignores keys not relevant to it). The
 
 ```properties
 # ── Profile ────────────────────────────────────────────────────────────
-infochat.profile=laptop                          # laptop|vps|pi|remote-llm
+quarkus.profile=laptop                           # laptop|vps|pi|remote-llm
 
 # Java 25 / Quarkus 3.33 LTS — D1. Build artifacts target JDK 25; running
 # on an older JDK fails class-loading at startup.

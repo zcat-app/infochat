@@ -12,7 +12,7 @@ The goals are:
                                                                                                                                                                                                                                                       
 1. **Local-first** by default (Ollama / llama.cpp), with remote (OpenAI-compatible, Anthropic, NanoGPT) opt-in via config.
 2. **Per-task routing** — security judge, tagger, summarizer, embedder, translator can each be a different model.                                                                                                                                     
-3. **Profile-driven defaults** — choosing `infochat.profile=laptop|vps|pi|remote` sets sensible models without hand-tuning.
+3. **Profile-driven defaults** — choosing the active Quarkus profile (`quarkus.profile=laptop|vps|pi|remote-llm`) sets sensible models without hand-tuning.
 4. **Determinism boundary** — LLMs only generate prose or extract structured fields at ingest. Retrieval is always SQL.                                                                                                                               
 5. **Prompt-injection-aware prompts** — every untrusted input is delimited and the system instructions reject in-band commands.                                                                                                                       
                                                                                                                                                                                                                                                       
@@ -26,7 +26,6 @@ infochat-llm-adapter/
 ├── api/                                                                                                                                                                                                                                              
 │   ├── LlmProvider.java            # chat + classify (structured output)        
 │   ├── EmbeddingProvider.java      # embed(texts) -> float[][]                                                                                                                                                                                       
-│   ├── TranslationProvider.java    # translate(text, from, to) -> text                                                                                                                                                                               
 │   ├── ModelTask.java              # enum: SECURITY_JUDGE, TAGGER, ENTITY,                                                                                                                                                                           
 │   │                               #       SUMMARIZER, CHAT_AGENT, TRANSLATOR                                                                                                                                                                        
 │   └── LlmCallContext.java         # carries trace id, scope id, task, language                                                                                                                                                                      
@@ -36,9 +35,7 @@ infochat-llm-adapter/
 │   ├── OpenAiCompatibleProvider.java   # Ollama, llama.cpp, OpenAI, OpenRouter, NanoGPT                                                                                                                                                              
 │   ├── AnthropicProvider.java          # native protocol; supports prompt caching                                                                                                                                                                    
 │   ├── OllamaEmbeddingProvider.java                                                                                                                                                                                                                  
-│   ├── OpenAiEmbeddingProvider.java                                                                                                                                                                                                                  
-│   ├── LlmTranslationProvider.java     # default: re-uses chat LLM                                                                                                                                                                                   
-│   └── NoopTranslationProvider.java    # used when language == 'en'                                                                                                                                                                                  
+│   └── OpenAiEmbeddingProvider.java                                                                                                                                                                                                                  
 └── observability/                                                                                                                                                                                                                                    
     ├── LlmMetrics.java                 # token counts, latency per task/provider                                                                                                                                                                     
     └── LlmRateLimiter.java             # bounded concurrency per provider                                                                                                                                                                            
@@ -61,8 +58,8 @@ infochat.llm.entity.provider=ollama
 infochat.llm.entity.model=llama3.1:8b                                                                                                                                                                                                                 
 infochat.llm.summarizer.provider=ollama                                                                                                                                                                                                               
 infochat.llm.summarizer.model=llama3.1:8b
-infochat.llm.chat-agent.provider=ollama                                                                                                                                                                                                               
-infochat.llm.chat-agent.model=llama3.1:8b                                                                                                                                                                                                             
+infochat.llm.chat.provider=ollama                                                                                                                                                                                                               
+infochat.llm.chat.model=llama3.1:8b                                                                                                                                                                                                             
 infochat.llm.translator.provider=ollama
 infochat.llm.translator.model=llama3.1:8b                                                                                                                                                                                                             
 infochat.embeddings.provider=ollama                                              
@@ -347,7 +344,7 @@ Model and dimension by profile
 ├─────────┼─────────────────────────────────────────────────────────────┼───────────┼──────────────┤
 │ pi      │ all-minilm:33m                                              │ 384       │ vector(384)  │                                                                                                                                                  
 ├─────────┼─────────────────────────────────────────────────────────────┼───────────┼──────────────┤                                                                                                                                                  
-│ remote  │ provider default (e.g., OpenAI text-embedding-3-small 1536) │ 1536      │ vector(1536) │
+│ remote-llm  │ provider default (e.g., OpenAI text-embedding-3-small 1536) │ 1536      │ vector(1536) │
 └─────────┴─────────────────────────────────────────────────────────────┴───────────┴──────────────┘                                                                                                                                                  
                                                                                  
 The dimension is fixed at migration time. A baseline migration creates the column matching the profile selected at first deploy. Switching profiles afterward requires the embedding-migration script (see 02-schema.md §2.7).                        
@@ -357,19 +354,19 @@ Index choice
 ┌───────────────────────┬─────────────────────────────────┬──────────────────────────────────────────────────────────────────────────────┐
 │        Profile        │              Index              │                                    Reason                                    │
 ├───────────────────────┼─────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────┤                                                                                                            
-│ laptop / vps / remote │ HNSW (m=16, ef_construction=64) │ Best recall, scales to millions of vectors                                   │
+│ laptop / vps / remote-llm │ HNSW (m=16, ef_construction=64) │ Best recall, scales to millions of vectors                                   │
 ├───────────────────────┼─────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────┤                                                                                                            
 │ pi                    │ IVFFlat (lists=100)             │ Cheaper to build on a 4-core ARM CPU; recall acceptable at ≤10K live vectors │                                                                                                            
 └───────────────────────┴─────────────────────────────────┴──────────────────────────────────────────────────────────────────────────────┘                                                                                                            
                                                                                                                                                                                                                                                       
 Recompute cadence                                                                                                                                                                                                                                     
                                                                                  
-Linking job runs every infochat.linking.interval (default 5 min on laptop/remote, 15 min on vps, 30 min on pi). Walks last 4 days of READY posts; for each new post, finds candidates by:                                                             
+Linking job runs every infochat.linking.interval (default 5 min on laptop/remote-llm, 15 min on vps, 30 min on pi). Walks last 4 days of READY posts; for each new post, finds candidates by:                                                             
                                                                                  
 - Shared post_entity rows → link_type='entity', score = #shared_entities                                                                                                                                                                              
 - Cosine distance < `infochat.linking.semantic-threshold` within 48h → link_type='semantic', score = 1 - cosine_distance
 
-The semantic threshold is configurable per profile (see §5.7 below); the historical hardcoded value was `0.18`, which remains the default for laptop/vps/remote. Pi loosens slightly to `0.20` to compensate for the lower-dimensional `all-minilm:33m` embeddings.
+The semantic threshold is configurable per profile (see §5.7 below); the historical hardcoded value was `0.18`, which remains the default for laptop/vps/remote-llm. Pi loosens slightly to `0.20` to compensate for the lower-dimensional `all-minilm:33m` embeddings.
                                                                                                                                                                                                                                                       
 Caps 10 outbound links per post (highest score wins).                                                                                                                                                                                                 
                                                                                                                                                                                                                                                       
@@ -446,7 +443,7 @@ For direct-generation summarizer, English-translation is skipped entirely.
 This table is the authoritative source. Profiles select all defaults at once; operator overrides individual settings if needed.
                                                                                                                                                                                                                                                       
 ┌─────────────────────────────────────────┬──────────────────┬──────────────────┬────────────────┬────────────────────────┐                                                                                                                           
-│                 Setting                 │      laptop      │       vps        │       pi       │         remote         │                                                                                                                           
+│                 Setting                 │      laptop      │       vps        │       pi       │       remote-llm        │                                                                                                                           
 ├─────────────────────────────────────────┼──────────────────┼──────────────────┼────────────────┼────────────────────────┤                                                                                                                           
 │ infochat.llm.security.model             │ llama3.2:3b      │ llama3.2:3b      │ llama3.2:1b    │ provider judge         │
 ├─────────────────────────────────────────┼──────────────────┼──────────────────┼────────────────┼────────────────────────┤
@@ -456,7 +453,7 @@ This table is the authoritative source. Profiles select all defaults at once; op
 ├─────────────────────────────────────────┼──────────────────┼──────────────────┼────────────────┼────────────────────────┤                                                                                                                           
 │ infochat.llm.summarizer.model           │ llama3.1:8b      │ llama3.2:3b      │ llama3.2:1b    │ provider chat (large)  │
 ├─────────────────────────────────────────┼──────────────────┼──────────────────┼────────────────┼────────────────────────┤                                                                                                                           
-│ infochat.llm.chat-agent.model           │ llama3.1:8b      │ llama3.2:3b      │ llama3.2:1b    │ provider chat          │
+│ infochat.llm.chat.model           │ llama3.1:8b      │ llama3.2:3b      │ llama3.2:1b    │ provider chat          │
 ├─────────────────────────────────────────┼──────────────────┼──────────────────┼────────────────┼────────────────────────┤                                                                                                                           
 │ infochat.llm.translator.model           │ summarizer       │ summarizer       │ summarizer     │ summarizer             │
 ├─────────────────────────────────────────┼──────────────────┼──────────────────┼────────────────┼────────────────────────┤                                                                                                                           
@@ -476,7 +473,7 @@ This table is the authoritative source. Profiles select all defaults at once; op
 ├─────────────────────────────────────────┼──────────────────┼──────────────────┼────────────────┼────────────────────────┤                                                                                                                           
 │ infochat.llm.summarizer.max-concurrency │ 4                │ 2                │ 1              │ 8                      │
 ├─────────────────────────────────────────┼──────────────────┼──────────────────┼────────────────┼────────────────────────┤                                                                                                                           
-│ infochat.llm.chat-agent.max-concurrency │ 4                │ 2                │ 1              │ 8                      │
+│ infochat.llm.chat.max-concurrency │ 4                │ 2                │ 1              │ 8                      │
 ├─────────────────────────────────────────┼──────────────────┼──────────────────┼────────────────┼────────────────────────┤                                                                                                                           
 │ infochat.embeddings.max-concurrency     │ 4                │ 2                │ 1              │ 8                      │
 ├─────────────────────────────────────────┼──────────────────┼──────────────────┼────────────────┼────────────────────────┤                                                                                                                           

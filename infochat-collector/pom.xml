@@ -128,6 +128,41 @@
     <build>
         <plugins>
             <!--
+                 Module-DAG enforcement (docs/design/09-reference.md): the
+                 Collector has no user-facing surface and MUST NOT depend on the
+                 Provider-side presentation SPI infochat-messaging-adapter.
+                 maven-enforcer bannedDependencies evaluates per running module,
+                 so the rule lives HERE (collector only) — a parent-level ban
+                 would also break the Provider, which depends on
+                 infochat-messaging-adapter legitimately. Version is managed in
+                 the parent <pluginManagement>. Build-time only; no effect on the
+                 shipped runtime artifact.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>ban-messaging-adapter-from-collector</id>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <bannedDependencies>
+                                    <excludes>
+                                        <exclude>app.zcat.infochat:infochat-messaging-adapter</exclude>
+                                    </excludes>
+                                    <message>infochat-collector must not depend on infochat-messaging-adapter — the Collector has no user-facing surface and no messaging dependency (module-DAG rule, docs/design/09-reference.md).</message>
+                                </bannedDependencies>
+                            </rules>
+                            <fail>true</fail>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <!--
                  NullAway + Error Prone (decision D48). The full config lives in
                  the parent <pluginManagement> and Maven applies it to the
                  lifecycle compile execution of EVERY module, so this module's

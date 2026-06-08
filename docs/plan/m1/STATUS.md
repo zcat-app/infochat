@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 257 |
+| done | 258 |
 | deferred | 2 |
 | **total** | **264** |
 
@@ -25,7 +25,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-205 — Adapter rate-limit enforcement: implement §6.3.7 + capability caps, or design-amend (complexity: high, risk: medium)
-- M1-210 — Module-DAG enforcement + doc/config-truth sweep (docs say what the build does) (complexity: medium, risk: medium)
 - M1-212 — ProgressNotifier pipeline: implement minimally, defer by amendment, or remove (complexity: medium, risk: medium)
 - M1-227 — /digest on|off — group-admin toggle to pause/resume the periodic digest (complexity: high, risk: medium)
 
@@ -393,7 +392,7 @@ M1-202 (done)
 M1-203 (done)
 M1-206 (done)
 M1-209 (done)
-M1-210 (pending) ← runnable
+M1-210 (done)
 M1-211 (done)
 M1-212 (pending) ← runnable
 M1-213 (done)
