@@ -282,22 +282,17 @@ Cross-cutting rules for asset commands (D39):
   from cache, not refetched per request.
 - **Provider/Collector contract.** The Collector owns
   `price_snapshot`: its asset Fetchers `INSERT` new rows on every
-  successful poll and emit `NOTIFY new_price_snapshot` with `(asset,
-  source)` as the payload. The Provider has **`SELECT`-only**
+  successful poll. The Provider has **`SELECT`-only**
   permission on `price_snapshot` (least-privilege, decision D34); on
   every `/zcash` / `/monero` invocation it reads the latest row for
   `(asset, sub-verb)` directly from the table — a stale read here is
-  acceptable and bounded by the freshness contract below. The
-  Provider may keep an in-process cache keyed by `(asset, sub-verb)`
-  and warm/invalidate it from the `NOTIFY` payload, but the cache
-  is an optimization; correctness comes from the table read, not
-  from the notification. **The Provider's in-process
-  `price_snapshot` cache is flushed entirely on every Postgres
-  reconnect** so a missed `NOTIFY` during a connection blip cannot
-  serve a stale row past the reconnect; this is the minimal fix
-  that does not require a high-water-mark scheme like `new_post`.
-  Asset Fetchers write **directly** to `price_snapshot` and do
-  **not** go through the post outbox.
+  acceptable and bounded by the freshness contract below.
+  Correctness comes from the table read: the latest-snapshot query
+  is a single indexed `(asset, sub_verb, captured_at DESC)` lookup,
+  so the Provider reads the table directly on each invocation with
+  no notification path or in-process cache. Asset Fetchers write
+  **directly** to `price_snapshot` and do **not** go through the
+  post outbox.
 - **Freshness contract.** A reply uses the latest snapshot for
   `(asset, sub-verb)` whose age is within a profile-driven freshness
   window. If no row is within the window — Fetcher hasn't run yet,

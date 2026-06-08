@@ -542,9 +542,6 @@ coordinated change.
     {'quarantine','post'}`, `cursor_low_id` = the corresponding
     target id (matches the channel's tagged payload, see
     `architecture.md` §Inter-service communication).
-  - `new_price_snapshot` — best-effort only; this channel does
-    not maintain a `provider_state` row (cache-flush-on-reconnect
-    is the correctness mechanism, not a high-water mark).
   The first-boot insert uses
   `INSERT INTO provider_state (channel, cursor_high,
   cursor_low_kind, cursor_low_id, updated_at) VALUES (:ch, ...)
@@ -616,9 +613,9 @@ coordinated change.
   the largest `captured_at` for the given `(asset, sub_verb)`,
   backed by an index on `(asset, sub_verb, captured_at DESC)`.
   Provider role has `SELECT`-only as already specified in
-  `security.md` §DB roles. NOTIFY `new_price_snapshot` is the
-  latency optimization; the table read is the correctness
-  guarantee.
+  `security.md` §DB roles. The table read is the correctness
+  guarantee: the Provider reads the latest row directly on each
+  invocation, with no notification path.
 
 ## Invariants
 

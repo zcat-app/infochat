@@ -2,7 +2,6 @@ package app.zcat.infochat.collector.assets.store;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.sql.Types;
@@ -12,29 +11,20 @@ import javax.sql.DataSource;
 import org.jspecify.annotations.Nullable;
 
 import app.zcat.infochat.collector.assets.PriceSnapshot;
-import app.zcat.infochat.core.util.JsonEscaper;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 
 /**
- * Persists one {@link PriceSnapshot} into {@code price_snapshot} and
- * emits {@code NOTIFY new_price_snapshot} on the same JDBC connection
- * inside the same {@code @Transactional} boundary. The INSERT and
- * the NOTIFY commit together; a rollback suppresses the NOTIFY
- * (Postgres semantics: NOTIFY fires at COMMIT, not at statement
- * execution). Mirrors {@code ReadyPromoter.promoteOne} for the
- * INSERT-then-NOTIFY pattern. A duplicate
+ * Persists one {@link PriceSnapshot} into {@code price_snapshot}
+ * inside a {@code @Transactional} boundary. A duplicate
  * {@code (asset, sub_verb, captured_at)} is dropped by
  * {@code ON CONFLICT DO NOTHING} (V38 UNIQUE, spec schema.md
- * §Operational "one row per") and suppresses the NOTIFY too — no new
- * row, nothing to invalidate.
- *
- * The NOTIFY payload is the spec-committed
- * {@code {"asset":"<asset>","source":"<sub_verb>"}} JSON shape per
- * docs/spec/commands.md §Asset commands — Provider/Collector contract.
- * The key {@code source} (NOT {@code sub_verb}) is load-bearing —
- * {@code AssetSnapshotReader} (M1-055c) deserialises by that key.
+ * §Operational "one row per"). The table read is the sole
+ * correctness path for the Provider's asset commands (spec
+ * commands.md §Asset commands — Provider/Collector contract): the
+ * Provider reads the latest row directly on every invocation, so
+ * the write side does not signal it.
  *
  * Asset snapshots bypass the post outbox / Stage 1/2 / tagging /
  * embedding pipeline entirely (spec §Asset commands — "Data is not
@@ -42,14 +32,6 @@ import jakarta.transaction.Transactional;
  */
 @ApplicationScoped
 public class PriceSnapshotStore {
-
-    /**
-     * NOTIFY channel name — best-effort cache-invalidation seam
-     * (spec commands.md §Asset commands); no production consumer yet,
-     * the Provider's in-process snapshot cache will subscribe. The
-     * table read is the correctness guarantee.
-     */
-    public static final String NEW_PRICE_SNAPSHOT_CHANNEL = "new_price_snapshot";
 
     // ON CONFLICT DO NOTHING enforces the spec's one-row-per-
     // (asset, sub_verb, captured_at) invariant against the V38 UNIQUE:
@@ -68,21 +50,19 @@ public class PriceSnapshotStore {
     DataSource dataSource;
 
     /**
-     * Test-only seam: a Runnable invoked AFTER the INSERT succeeds
-     * but BEFORE the {@code pg_notify} statement. Production code
-     * never sets this — the default no-op runs in every production
-     * write. {@code PriceSnapshotStoreTest} uses it to throw a
-     * RuntimeException inside the {@code @Transactional} boundary
-     * to assert that the INSERT rolls back AND no NOTIFY is delivered
-     * (mirrors {@code ReadyPromoter.afterUpdateHook}). Package-private
-     * so cross-package tests cannot reach in.
+     * Test-only seam: a Runnable invoked AFTER the INSERT succeeds.
+     * Production code never sets this — the default no-op runs in
+     * every production write. {@code PriceSnapshotStoreTest} uses it
+     * to throw a RuntimeException inside the {@code @Transactional}
+     * boundary to assert that the INSERT rolls back (mirrors
+     * {@code ReadyPromoter.afterUpdateHook}). Package-private so
+     * cross-package tests cannot reach in.
      */
     Runnable afterInsertHook = () -> {};
 
     @Transactional
     public void store(PriceSnapshot snapshot) {
         try (Connection conn = dataSource.getConnection()) {
-            int inserted;
             try (PreparedStatement ps = conn.prepareStatement(INSERT_SQL)) {
                 ps.setString(1, snapshot.asset());
                 ps.setString(2, snapshot.subVerb());
@@ -101,36 +81,10 @@ public class PriceSnapshotStore {
                 } else {
                     ps.setString(13, snapshot.rawPayload());
                 }
-                inserted = ps.executeUpdate();
+                ps.executeUpdate();
             }
 
             afterInsertHook.run();
-
-            // The NOTIFY is a row-landed signal: it already commits or
-            // rolls back with the INSERT, so symmetrically a duplicate
-            // (asset, sub_verb, captured_at) dropped by ON CONFLICT
-            // emits nothing — no new row means nothing to invalidate.
-            if (inserted == 0) {
-                return;
-            }
-
-            // NOTIFY payload — literal key "source" per spec
-            // commands.md §Asset commands. The value is the sub_verb
-            // (e.g. "coingecko"); the key name reconciles spec wording
-            // ("(asset, source)") with architecture wording
-            // ("(asset, sub_verb)"). M1-055c deserialises by key
-            // "source".
-            String payload = "{\"asset\":\"" + JsonEscaper.escape(snapshot.asset())
-                + "\",\"source\":\"" + JsonEscaper.escape(snapshot.subVerb()) + "\"}";
-            try (PreparedStatement ps = conn.prepareStatement("SELECT pg_notify(?, ?)")) {
-                ps.setString(1, NEW_PRICE_SNAPSHOT_CHANNEL);
-                ps.setString(2, payload);
-                try (ResultSet rs = ps.executeQuery()) {
-                    // pg_notify returns void but JDBC requires the
-                    // cursor be consumed.
-                    rs.next();
-                }
-            }
         } catch (SQLException e) {
             throw new IllegalStateException(
                 "PriceSnapshotStore: INSERT failed for asset=" + snapshot.asset()

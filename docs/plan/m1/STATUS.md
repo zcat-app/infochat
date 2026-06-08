@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 9 |
+| pending | 8 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 266 |
+| done | 267 |
 | deferred | 2 |
 | **total** | **277** |
 
@@ -26,7 +26,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-230 — Semantic-link query: use an HNSW index probe, not a self-join (complexity: medium, risk: medium)
 - M1-232 — /retry --digest: atomic regenerate, honest skip status (complexity: medium, risk: medium)
-- M1-234 — Drop the dead new_price_snapshot NOTIFY channel (+ spec) (complexity: low, risk: low)
 - M1-236 — infochat-ssrf: read-buffer churn, wss default port, dead null-check (complexity: low, risk: low)
 - M1-237 — infochat-llm-adapter: dedup HTTP providers, drop dead null-check, fix comment (complexity: medium, risk: low)
 - M1-238 — Signal adapter: constant-time mention compare + total timestamp parse (complexity: low, risk: low)
@@ -69,6 +68,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-235 | Migration: denormalize actor cols in delete_preban_user audit row | 2026-06-09 | round 1 APPROVE |
+| M1-234 | Drop the dead new_price_snapshot NOTIFY channel (+ spec) | 2026-06-09 | round 1 APPROVE |
 | M1-233 | Embedding dimensionality mismatch: alert operator, stop spamming | 2026-06-09 | round 1 APPROVE |
 | M1-231 | Implement /get-tags and /get-sources (advertised, no handler) | 2026-06-09 | round 1 APPROVE |
 | M1-229 | Split inbound rate-cap: per-user vs shared stranger bucket | 2026-06-08 | round 1 APPROVE |
@@ -77,7 +77,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-226 | Clamp source-claimed published_at to fetched_at at the ingest boundary | 2026-06-08 | round 1 APPROVE |
 | M1-225 | Arm /stop timeout + pid on the four non-search chat tools | 2026-06-08 | round 1 APPROVE |
 | M1-224 | Bounded inbound dispatch queue (M1-205 DoS remediation) | 2026-06-08 | round 1 APPROVE |
-| M1-223 | FakeNostrRelay: plain-socket rewrite, drop standalone Vert.x | 2026-06-08 | round 1 APPROVE |
 
 ---
 
@@ -419,7 +418,7 @@ M1-230 (pending) ← runnable
 M1-231 (done)
 M1-232 (pending) ← runnable
 M1-233 (done)
-M1-234 (pending) ← runnable
+M1-234 (done)
 M1-235 (done)
 M1-236 (pending) ← runnable
 M1-237 (pending) ← runnable

@@ -40,14 +40,6 @@ Collector and Provider communicate only through the shared database:
     the cursor key `(ready_at, post_id)` only. Correctness
     mechanism: high-water mark on Provider side (see Catch-up
     below).
-  - `new_price_snapshot` — fires on a successful Fetcher write to
-    `price_snapshot`. Payload carries `(asset, source)` where
-    `source` is the sub-verb value (e.g. `coingecko`, `kraken`).
-    Correctness mechanism: best-effort; the Provider's in-process
-    cache is **flushed entirely on every Postgres reconnect** so
-    a missed NOTIFY during a connection blip cannot serve a stale
-    row past the reconnect (`commands.md` §Asset commands —
-    Provider/Collector contract).
   - `quarantine_review` — fires on quarantine state-machine
     transitions reachable by Provider (`PENDING` insert,
     `BENIGN_CLOSED`, `APPROVED`, `REJECTED`) and on a `post.status

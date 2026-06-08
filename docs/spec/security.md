@@ -1046,9 +1046,8 @@ Three Postgres roles, least-privilege (decision D34):
   below); `INSERT`-only on `audit_log`; `EXECUTE` on the
   `approve_quarantine` and `reject_quarantine` stored procedures
   (no `SELECT` on the raw-original quarantine column);
-  `LISTEN/NOTIFY` (consumes `new_post`, `new_price_snapshot`, and
-  `quarantine_review` channels per `architecture.md`
-  §Inter-service communication).
+  `LISTEN/NOTIFY` (consumes `new_post` and `quarantine_review`
+  channels per `architecture.md` §Inter-service communication).
 - **Admin role** — the operator's least-privilege principal; never a
   service login. The role is `NOLOGIN`: it is a privilege bundle
   operators attach to via a personal LOGIN role granted membership

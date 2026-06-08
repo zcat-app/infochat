@@ -13,8 +13,6 @@ import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.postgresql.PGConnection;
-import org.postgresql.PGNotification;
 
 import javax.sql.DataSource;
 import java.math.BigDecimal;
@@ -24,13 +22,11 @@ import java.sql.ResultSet;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -99,20 +95,20 @@ class AssetCommandsRoundtripIT {
 
     /**
      * Steps (a) + (b): bootstrap-load schema contract and price_snapshot
-     * INSERT + NOTIFY observable by the Provider DB role.
+     * INSERT observable by the Provider DB role via a direct table read.
      *
-     * <p>Step (b) seeds {@code price_snapshot} via JDBC INSERT and emits
-     * {@code NOTIFY} manually rather than installing a fake
-     * {@code AssetDataSource} bean and triggering a fetcher tick. The
-     * {@code AssetDataSource} SPI and {@code AssetSnapshotFetcher} live
-     * in {@code infochat-collector}, which the Provider module does not
-     * depend on — the module boundary prevents CDI-based fake injection.
-     * The three acceptance assertions (row count, NOTIFY payload shape,
-     * stored price match) are identical; only the seeding mechanism
-     * differs.</p>
+     * <p>Step (b) seeds {@code price_snapshot} via JDBC INSERT rather
+     * than installing a fake {@code AssetDataSource} bean and triggering
+     * a fetcher tick. The {@code AssetDataSource} SPI and
+     * {@code AssetSnapshotFetcher} live in {@code infochat-collector},
+     * which the Provider module does not depend on — the module boundary
+     * prevents CDI-based fake injection. The Provider reads the latest
+     * snapshot directly from the table (no notification path), so the
+     * acceptance assertions are the row count and the stored-price
+     * match.</p>
      */
     @Test
-    void bootstrapLoadAndSnapshotInsertWithNotify() throws Exception {
+    void bootstrapLoadAndSnapshotInsert() throws Exception {
         // (a) asset_config rows exist after seeding
         try (Connection conn = dataSource.getConnection()) {
             assertTrue(countRows(conn,
@@ -125,34 +121,10 @@ class AssetCommandsRoundtripIT {
                     "monero must be enabled in asset_config");
         }
 
-        // (b) INSERT price_snapshot + NOTIFY, verify Provider can observe
-        try (Connection listenConn = dataSource.getConnection()) {
-            listenConn.setAutoCommit(true);
-            try (Statement s = listenConn.createStatement()) {
-                s.execute("LISTEN new_price_snapshot");
-            }
-            PGConnection pg = listenConn.unwrap(PGConnection.class);
-            pg.getNotifications(1);
-
-            try (Connection writeConn = dataSource.getConnection()) {
-                seedPriceSnapshot(writeConn, "zcash", "coingecko", "usd",
-                        ZCASH_PRICE, Instant.now().minusSeconds(30));
-                try (Statement s = writeConn.createStatement()) {
-                    s.execute("NOTIFY new_price_snapshot, "
-                            + "'{\"asset\":\"zcash\",\"source\":\"coingecko\"}'");
-                }
-            }
-
-            PGNotification[] notifications = awaitNotifications(pg, 1);
-            assertNotNull(notifications,
-                    "at least one NOTIFY new_price_snapshot must arrive");
-            PGNotification n = notifications[0];
-            assertEquals("new_price_snapshot", n.getName());
-            String payload = n.getParameter();
-            assertTrue(payload.contains("\"asset\":\"zcash\""),
-                    "payload must carry asset name: " + payload);
-            assertTrue(payload.contains("\"source\":\"coingecko\""),
-                    "payload must carry source name: " + payload);
+        // (b) INSERT price_snapshot
+        try (Connection writeConn = dataSource.getConnection()) {
+            seedPriceSnapshot(writeConn, "zcash", "coingecko", "usd",
+                    ZCASH_PRICE, Instant.now().minusSeconds(30));
         }
 
         // Verify the row landed
@@ -392,23 +364,5 @@ class AssetCommandsRoundtripIT {
             rs.next();
             return rs.getInt(1);
         }
-    }
-
-    private PGNotification[] awaitNotifications(PGConnection pg,
-                                                 int minimum) throws Exception {
-        long deadlineNanos = System.nanoTime() + 10_000_000_000L;
-        List<PGNotification> collected = new ArrayList<>();
-        while (System.nanoTime() < deadlineNanos) {
-            PGNotification[] batch = pg.getNotifications(500);
-            if (batch != null) {
-                for (PGNotification n : batch) {
-                    collected.add(n);
-                }
-                if (collected.size() >= minimum) {
-                    return collected.toArray(new PGNotification[0]);
-                }
-            }
-        }
-        return collected.isEmpty() ? null : collected.toArray(new PGNotification[0]);
     }
 }
