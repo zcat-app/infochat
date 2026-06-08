@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-212 — ProgressNotifier pipeline: implement minimally, defer by amendment, or remove (complexity: medium, risk: medium)
+- M1-212 — ProgressNotifier pipeline: implement minimally, defer by amendment, or remove (complexity: high, risk: medium)
 - M1-227 — /digest on|off — group-admin toggle to pause/resume the periodic digest (complexity: high, risk: medium)
 - M1-229 — Split inbound rate-cap: per-user vs shared stranger bucket (complexity: high, risk: medium)
 
