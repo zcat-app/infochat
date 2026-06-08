@@ -184,6 +184,8 @@ class AdapterRouterIT {
         return bundleLoader.get(BundleKeys.HELP_HEADER_DM_USER)
                 + "\n" + bundleLoader.get(BundleKeys.HELP_CMD_HELP_SHORT)
                 + "\n" + bundleLoader.get(BundleKeys.HELP_CMD_STATUS_SHORT)
+                + "\n" + bundleLoader.get(BundleKeys.HELP_CMD_GET_TAGS_SHORT)
+                + "\n" + bundleLoader.get(BundleKeys.HELP_CMD_GET_SOURCES_SHORT)
                 + "\n" + bundleLoader.get(BundleKeys.HELP_CMD_SUMMARY_SHORT)
                 + "\n" + bundleLoader.get(BundleKeys.HELP_CMD_LIST_SOURCES_SHORT)
                 + "\n" + bundleLoader.get(BundleKeys.HELP_CMD_SAVED_SHORT)

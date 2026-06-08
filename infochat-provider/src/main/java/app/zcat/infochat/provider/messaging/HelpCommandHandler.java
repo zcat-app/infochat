@@ -95,13 +95,12 @@ public class HelpCommandHandler implements CommandHandler {
      * Closed {@code (command, bundleKey, tier)} catalogue, in display
      * order. The set mirrors the v1 dispatchable command handlers; the
      * tiers mirror spec §Permission model's closed privileged-tier list.
-     * Spec commands without a v1 handler ({@code /get-tags},
-     * {@code /get-sources}) are intentionally absent — listing a
-     * non-dispatchable command would advertise an unknown-command path.
      */
     private static final List<CommandHelp> CATALOGUE = List.of(
             new CommandHelp("help", BundleKeys.HELP_CMD_HELP_SHORT, HelpTier.USER),
             new CommandHelp("status", BundleKeys.HELP_CMD_STATUS_SHORT, HelpTier.USER),
+            new CommandHelp("get-tags", BundleKeys.HELP_CMD_GET_TAGS_SHORT, HelpTier.USER),
+            new CommandHelp("get-sources", BundleKeys.HELP_CMD_GET_SOURCES_SHORT, HelpTier.USER),
             new CommandHelp("summary", BundleKeys.HELP_CMD_SUMMARY_SHORT, HelpTier.USER),
             new CommandHelp("list-sources", BundleKeys.HELP_CMD_LIST_SOURCES_SHORT, HelpTier.USER),
             new CommandHelp("save", BundleKeys.HELP_CMD_SAVE_SHORT, HelpTier.USER),

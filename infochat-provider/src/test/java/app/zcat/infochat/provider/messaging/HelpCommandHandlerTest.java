@@ -82,6 +82,8 @@ class HelpCommandHandlerTest {
         assertContainsLine(body, BundleKeys.HELP_CMD_HELP_SHORT);
         assertContainsLine(body, BundleKeys.HELP_CMD_SUMMARY_SHORT);
         assertContainsLine(body, BundleKeys.HELP_CMD_STATUS_SHORT);
+        assertContainsLine(body, BundleKeys.HELP_CMD_GET_TAGS_SHORT);
+        assertContainsLine(body, BundleKeys.HELP_CMD_GET_SOURCES_SHORT);
         assertContainsLine(body, BundleKeys.HELP_CMD_SAVE_SHORT);
         assertContainsLine(body, BundleKeys.HELP_CMD_ADD_SOURCE_SHORT);
         assertContainsLine(body, BundleKeys.HELP_CMD_LANG_SHORT);
@@ -147,6 +149,8 @@ class HelpCommandHandlerTest {
         assertContainsLine(body, BundleKeys.HELP_CMD_HELP_SHORT);
         assertContainsLine(body, BundleKeys.HELP_CMD_SUMMARY_SHORT);
         assertContainsLine(body, BundleKeys.HELP_CMD_STATUS_SHORT);
+        assertContainsLine(body, BundleKeys.HELP_CMD_GET_TAGS_SHORT);
+        assertContainsLine(body, BundleKeys.HELP_CMD_GET_SOURCES_SHORT);
         assertContainsLine(body, BundleKeys.HELP_CMD_LIST_SOURCES_SHORT);
         assertContainsLine(body, BundleKeys.HELP_CMD_SAVED_SHORT);
         assertContainsLine(body, BundleKeys.HELP_CMD_EXPORT_SHORT);

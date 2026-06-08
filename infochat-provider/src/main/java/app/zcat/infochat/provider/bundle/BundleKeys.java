@@ -51,6 +51,12 @@ public final class BundleKeys {
     /** Short-help line for {@code /status}. */
     public static final String HELP_CMD_STATUS_SHORT = "help.cmd.status.short";
 
+    /** Short-help line for {@code /get-tags}. */
+    public static final String HELP_CMD_GET_TAGS_SHORT = "help.cmd.get-tags.short";
+
+    /** Short-help line for {@code /get-sources}. */
+    public static final String HELP_CMD_GET_SOURCES_SHORT = "help.cmd.get-sources.short";
+
     /** Short-help line for {@code /list-sources}. */
     public static final String HELP_CMD_LIST_SOURCES_SHORT = "help.cmd.list-sources.short";
 

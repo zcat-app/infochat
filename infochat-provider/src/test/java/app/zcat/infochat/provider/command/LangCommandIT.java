@@ -121,6 +121,8 @@ class LangCommandIT {
                 bundleLoader.get(BundleKeys.HELP_HEADER_DM_USER),
                 bundleLoader.get(BundleKeys.HELP_CMD_HELP_SHORT),
                 bundleLoader.get(BundleKeys.HELP_CMD_STATUS_SHORT),
+                bundleLoader.get(BundleKeys.HELP_CMD_GET_TAGS_SHORT),
+                bundleLoader.get(BundleKeys.HELP_CMD_GET_SOURCES_SHORT),
                 bundleLoader.get(BundleKeys.HELP_CMD_SUMMARY_SHORT),
                 bundleLoader.get(BundleKeys.HELP_CMD_LIST_SOURCES_SHORT),
                 bundleLoader.get(BundleKeys.HELP_CMD_SAVE_SHORT),
