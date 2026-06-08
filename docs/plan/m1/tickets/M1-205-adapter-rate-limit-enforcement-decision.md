@@ -1,11 +1,9 @@
 ---
 id: M1-205
 title: "Adapter rate-limit enforcement: implement §6.3.7 + capability caps, or design-amend"
-status: deferred
+status: pending
 created: 2026-06-07
 last_updated: 2026-06-08
-deferred_on: M1-224
-deferred_reason: blocked-on-new-ticket
 blocked_by: [M1-177]
 clarity_check:
   date: 2026-06-08
@@ -70,7 +68,11 @@ reviews:
       removed: 29
 overrides: []
 aborted_attempts: []
-reopens: []
+reopens:
+  - date: 2026-06-08
+    prior_deferred_reason: blocked-on-new-ticket
+    prior_deferred_on: M1-224
+    reason: "M1-224 (bounded inbound dispatch queue, the DoS-remediation blocker) landed; resuming fresh implementation."
 redteam_findings:
   - date: 2026-06-08
     category: DOS
