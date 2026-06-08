@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 11 |
+| pending | 10 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 263 |
+| done | 264 |
 | deferred | 2 |
 | **total** | **276** |
 
@@ -29,7 +29,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-232 — /retry --digest: atomic regenerate, honest skip status (complexity: medium, risk: medium)
 - M1-233 — Embedding dimensionality mismatch: alert operator, stop spamming (complexity: low, risk: medium)
 - M1-234 — Drop the dead new_price_snapshot NOTIFY channel (+ spec) (complexity: low, risk: low)
-- M1-235 — Migration: denormalize actor cols in delete_preban_user audit row (complexity: low, risk: medium)
 - M1-236 — infochat-ssrf: read-buffer churn, wss default port, dead null-check (complexity: low, risk: low)
 - M1-237 — infochat-llm-adapter: dedup HTTP providers, drop dead null-check, fix comment (complexity: medium, risk: low)
 - M1-238 — Signal adapter: constant-time mention compare + total timestamp parse (complexity: low, risk: low)
@@ -70,6 +69,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-235 | Migration: denormalize actor cols in delete_preban_user audit row | 2026-06-09 | round 1 APPROVE |
 | M1-229 | Split inbound rate-cap: per-user vs shared stranger bucket | 2026-06-08 | round 1 APPROVE |
 | M1-228 | Don't record a missed digest slot for a window the group was paused through | 2026-06-08 | round 1 APPROVE |
 | M1-227 | /digest on|off — group-admin toggle to pause/resume the periodic digest | 2026-06-08 | round 1 APPROVE |
@@ -79,7 +79,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-223 | FakeNostrRelay: plain-socket rewrite, drop standalone Vert.x | 2026-06-08 | round 1 APPROVE |
 | M1-219 | searchPosts window/ordering semantics: bind the spec to a timestamp column | 2026-06-08 | round 1 APPROVE |
 | M1-218 | Provider lows: /retry in-flight reply, /invite list-vs-revoke code identity, handle-keyed slot release | 2026-06-08 | round 1 APPROVE |
-| M1-216 | Collector lows: TTL-job partition independence, saturation counter, sha256 dedup, zero-width escapes | 2026-06-08 | round 1 APPROVE |
 
 ---
 
@@ -422,7 +421,7 @@ M1-231 (pending) ← runnable
 M1-232 (pending) ← runnable
 M1-233 (pending) ← runnable
 M1-234 (pending) ← runnable
-M1-235 (pending) ← runnable
+M1-235 (done)
 M1-236 (pending) ← runnable
 M1-237 (pending) ← runnable
 M1-238 (pending) ← runnable

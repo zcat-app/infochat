@@ -1,9 +1,9 @@
 ---
 id: M1-235
 title: "Migration: denormalize actor cols in delete_preban_user audit row"
-status: pending
+status: done
 created: 2026-06-08
-last_updated: 2026-06-08
+last_updated: 2026-06-09
 blocked_by: []
 files_budget: 3
 complexity: low
@@ -29,12 +29,46 @@ test_plan:
 spec_refs:
   - docs/spec/schema.md §Entities
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-09
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 152
+      removed: 8
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-09
+    verdict: CLEAN
+    base: c378bcf
+    head: working tree (uncommitted, branch m1/M1-235-delete-preban-user-audit-denorm)
+    verdict_file: docs/plan/m1/redteam/M1-235-2026-06-09.md
+    out_of_model_count: 2
+    note: |
+      CLEAN — pure audit-completeness fix; V45 restores actor_contact_id /
+      actor_adapter to the delete_preban_user audit INSERT, tightening coverage
+      while carrying V24's guards forward verbatim. No gap between threat-model
+      promise and delivery. Two OUT-OF-MODEL advisories (both predate this diff,
+      neither a finding against it): (1) confirm the Provider /unban call path
+      sets the infochat.actor_id GUC the audit-integrity trigger relies on;
+      (2) spec text (security.md:581 UNBAN_DELETED_PREBAN_ROW) diverges from the
+      enum/migrations (UNBAN_PREBAN_DELETE) — candidate for a separate spec:
+      reconciliation, not a security gap.
+clarity_check:
+  date: 2026-06-08
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-235: Migration: denormalize actor cols in delete_preban_user audit row
