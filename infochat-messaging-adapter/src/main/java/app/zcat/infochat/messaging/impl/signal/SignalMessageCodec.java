@@ -208,9 +208,11 @@ final class SignalMessageCodec {
      * back to {@code dataMessage.timestamp}; null when neither field
      * holds a usable (integral, long-range) JSON number — the caller
      * drops the frame instead of letting a typed accessor throw
-     * NPE (absent) or CCE (wrong-typed).
+     * NPE (absent) or CCE (wrong-typed). Package-private so the group
+     * inbound path ({@link SignalGroupHandler}) guards the same untrusted
+     * field through this one total reference implementation.
      */
-    private static @Nullable Long usableTimestamp(JsonObject envelope, JsonObject dataMessage) {
+    static @Nullable Long usableTimestamp(JsonObject envelope, JsonObject dataMessage) {
         Long fromEnvelope = integralLong(envelope.get("timestamp"));
         return fromEnvelope != null ? fromEnvelope : integralLong(dataMessage.get("timestamp"));
     }

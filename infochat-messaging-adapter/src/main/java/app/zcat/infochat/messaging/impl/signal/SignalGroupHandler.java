@@ -154,9 +154,14 @@ final class SignalGroupHandler {
             LOG.debugf("inbound Signal group message dropped — no InboundHandler set");
             return;
         }
-        long timestamp = envelope.containsKey("timestamp")
-                ? envelope.getJsonNumber("timestamp").longValueExact()
-                : dataMessage.getJsonNumber("timestamp").longValueExact();
+        Long timestamp = SignalMessageCodec.usableTimestamp(envelope, dataMessage);
+        if (timestamp == null) {
+            // The daemon stream is a trust boundary: a present-but-null,
+            // non-numeric, or fractional/out-of-range timestamp must drop
+            // the frame, not throw out of handleReceive. The codec's DM
+            // path guards the same untrusted field identically.
+            return;
+        }
         String senderAci = sourceUuid.toLowerCase(Locale.ROOT);
         Identity sender = new Identity(senderAci, null, Instant.now());
         InboundMessage inbound = new InboundMessage(

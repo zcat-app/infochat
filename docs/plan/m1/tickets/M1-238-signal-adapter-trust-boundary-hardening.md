@@ -1,9 +1,9 @@
 ---
 id: M1-238
 title: "Signal adapter: constant-time mention compare + total timestamp parse"
-status: pending
+status: done
 created: 2026-06-08
-last_updated: 2026-06-08
+last_updated: 2026-06-09
 blocked_by: []
 files_budget: 6
 files_scope:
@@ -37,12 +37,60 @@ spec_refs:
   - docs/spec/messaging.md §Per-adapter trust level and identity
 decision_refs:
   - D10
-reviews: {}
-overrides: []
+reviews:
+  - round: 1
+    date: 2026-06-09
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 305
+      removed: 7
+overrides:
+  - date: 2026-06-09
+    objection: |
+      start --parallel precondition FAIL: an in-flight ticket (M1-232) carries
+      migration_touch: true, which serializes migrations globally (workflow.md
+      §Parallelism), and an in-flight ticket (M1-237) declares no files_scope,
+      so disjointness against it cannot be mechanically proven.
+    user_justification: |
+      Override adopted per the in-chat investigation the user approved. Both
+      blocks are mechanical false positives for M1-238: (1) M1-238 adds no
+      migration and its in-worktree checkout's highest migration is V45 — it
+      never sees M1-232's V46, so the below-max migration-ordering hazard the
+      flag guards cannot bite it; (2) M1-238's files are entirely within
+      infochat-messaging-adapter/.../signal/, and a sweep of all in-flight
+      branches (M1-232/236/237/241) found 0 touches of infochat-messaging-adapter,
+      so real file-level disjointness holds even though M1-237 lacks a path list.
+      The remaining genuine hazard (shared test port 8081 on concurrent full
+      verifies) is managed by timing, not by blocking the start.
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-09
+    verdict: CLEAN
+    base: cc71846^ (c60c6c8 — fork point)
+    head: cc71846
+    verdict_file: docs/plan/m1/redteam/M1-238-2026-06-09.md
+    out_of_model_count: 0
+    note: |
+      Post-commit, pre-merge adversarial pass on the security_relevant
+      D10 mention-trust-anchor hardening. CLEAN — no findings. M-F2's
+      timestamp guard closes (not opens) an adapter-DoS shape; the
+      attacker-influenced Signal timestamp has no threat-model integrity
+      commitment and no injection vector (Long). Nothing to remediate.
+clarity_check:
+  date: 2026-06-09
+  verdict: WARN
+  warnings:
+    - "risk: low may understate the security sensitivity of M-F1 — the D10 mention-recognition trust anchor gates whether a group message reaches the bot, and a timing-oracle in that comparison is a security property; risk: medium would be a more precise calibration. Does not block implementation."
+  blockers: []
 ---
 
 # M1-238: Signal adapter — constant-time mention compare + total timestamp parse

@@ -5,6 +5,8 @@ import jakarta.json.JsonArray;
 import jakarta.json.JsonObject;
 import jakarta.json.JsonValue;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.Locale;
 
 /**
@@ -38,6 +40,13 @@ final class SignalMentionParser {
      * whose {@code uuid} equals {@code botAci} under canonical lowercase
      * form. Missing or empty {@code mentions} array → false.
      *
+     * <p>Both operands are lower-cased (preserving the case-insensitive
+     * ACI match) and then compared as UTF-8 bytes in constant time
+     * ({@link MessageDigest#isEqual}), mirroring the {@code SimpleXMentionParser}
+     * sibling: the ACI is the D10 group-mode trust anchor and the number
+     * of leading bytes a wire mention shares with it must not leak via
+     * timing.</p>
+     *
      * @param dataMessage the signal-cli envelope's {@code dataMessage}
      *                    object; never null.
      * @param botAci      the bot's per-adapter ACI (UUID string);
@@ -50,14 +59,18 @@ final class SignalMentionParser {
         if (mentions == null || mentions.isEmpty()) {
             return false;
         }
-        String botAciLower = botAci.toLowerCase(Locale.ROOT);
+        byte[] botBytes = botAci.toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8);
         for (JsonValue entry : mentions) {
             if (entry.getValueType() != JsonValue.ValueType.OBJECT) {
                 continue;
             }
             JsonObject mention = (JsonObject) entry;
             String uuid = mention.getString("uuid", null);
-            if (uuid != null && uuid.toLowerCase(Locale.ROOT).equals(botAciLower)) {
+            if (uuid == null) {
+                continue;
+            }
+            byte[] uuidBytes = uuid.toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8);
+            if (MessageDigest.isEqual(uuidBytes, botBytes)) {
                 return true;
             }
         }

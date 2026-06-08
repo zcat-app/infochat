@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 274 |
+| done | 275 |
 | deferred | 2 |
 | **total** | **277** |
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-238 — Signal adapter: constant-time mention compare + total timestamp parse (complexity: low, risk: low)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -63,13 +63,13 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-241 | List /get-tags and /get-sources in the /help catalogue | 2026-06-09 | round 1 APPROVE |
 | M1-240 | infochat-collector: span-offset doc, unused asset-refresh fields | 2026-06-09 | round 1 APPROVE |
 | M1-239 | infochat-provider: NOTIFY discriminator, stale ban comment, locale fold | 2026-06-09 | round 1 APPROVE |
+| M1-238 | Signal adapter: constant-time mention compare + total timestamp parse | 2026-06-09 | round 1 APPROVE |
 | M1-237 | infochat-llm-adapter: dedup HTTP providers, drop dead null-check, fix comment | 2026-06-09 | round 1 APPROVE |
 | M1-236 | infochat-ssrf: read-buffer churn, wss default port, dead null-check | 2026-06-09 | round 1 APPROVE |
 | M1-235 | Migration: denormalize actor cols in delete_preban_user audit row | 2026-06-09 | round 1 APPROVE |
 | M1-234 | Drop the dead new_price_snapshot NOTIFY channel (+ spec) | 2026-06-09 | round 1 APPROVE |
 | M1-233 | Embedding dimensionality mismatch: alert operator, stop spamming | 2026-06-09 | round 1 APPROVE |
 | M1-232 | /retry --digest: atomic regenerate, honest skip status | 2026-06-09 | round 1 APPROVE |
-| M1-231 | Implement /get-tags and /get-sources (advertised, no handler) | 2026-06-09 | round 1 APPROVE |
 
 ---
 
@@ -415,7 +415,7 @@ M1-234 (done)
 M1-235 (done)
 M1-236 (done)
 M1-237 (done)
-M1-238 (pending) ← runnable
+M1-238 (done)
 M1-239 (done)
 M1-240 (done)
 M1-241 (done)
