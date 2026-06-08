@@ -3,7 +3,7 @@ id: M1-212
 title: "ProgressNotifier pipeline: implement minimally, defer by amendment, or remove"
 status: pending
 created: 2026-06-07
-last_updated: 2026-06-07
+last_updated: 2026-06-08
 blocked_by: []
 files_budget: 12
 files_scope:
@@ -36,6 +36,7 @@ test_plan:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/command
   modifies:
     - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/MessagingSpisLoadTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/spi/AllSpisLoadIT.java
   preserves:
     - all tests currently green on main
 spec_refs:
@@ -48,6 +49,25 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+escalations:
+  - date: 2026-06-08
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      TEST-CHANGES-AUTHORIZED: FAIL
+      test_plan.modifies lists MessagingSpisLoadTest.java as a pre-existing
+      test that will be modified. The ticket body has no "Authorized test
+      changes" section documenting what the modification is and what the new
+      expected behavior will be. The ticket must name, for each direction
+      (a/b/c), what happens to MessagingSpisLoadTest.java and (if modified)
+      what the new expected behavior is.
+revisions:
+  - date: 2026-06-08
+    reason: "clarity-fail rework — TEST-CHANGES-AUTHORIZED blocker: test_plan.modifies listed MessagingSpisLoadTest.java with no body authorization naming per-direction (a/b/c) what happens to it and the new expected behavior. Add an 'Authorized test changes' section covering both load tests (MessagingSpisLoadTest + AllSpisLoadIT, the latter added to test_plan.modifies since direction (c) edits it too) for all three directions; add a 'Direction chosen' placeholder to the body for review orientation (clarity WARN)."
+    prior_values: |
+      status: pending
+      test_plan.modifies:
+        - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/MessagingSpisLoadTest.java
+      (body had no "Authorized test changes" section; no "Direction chosen" placeholder)
 ---
 
 # M1-212: ProgressNotifier — implement minimally, defer by amendment, or remove
@@ -79,6 +99,52 @@ See frontmatter.
 ## Out-of-scope
 
 See frontmatter.
+
+## Direction chosen
+
+To be recorded at implementation start (the user call this ticket exists to
+make): one of `a` (IMPLEMENT MINIMAL), `b` (DEFER BY AMENDMENT), `c` (REMOVE).
+A reviewer orients on this line before checking the conditional acceptance.
+
+## Authorized test changes
+
+Both load tests pin the ProgressNotifier interface and the ProgressStage enum
+today. What happens to them is direction-dependent; the two `test_plan.modifies`
+entries fire **only under direction (c)** — under (a) and (b) both load tests
+are preserved unchanged.
+
+- `MessagingSpisLoadTest.java` (infochat-messaging-adapter) currently asserts
+  `progressNotifierIsLoadableInterface` (ProgressNotifier is an interface) and
+  `progressStageIsLoadableEnumWithSpecMandatedValues` (ProgressStage is an enum
+  with exactly seven values).
+- `AllSpisLoadIT.java` (infochat-provider) lists `ProgressNotifier` among its
+  seven `INTERFACE_FQNS`, `ProgressStage` among its two `ENUM_FQNS`, and asserts
+  the cross-module SPI surface totals fourteen types.
+
+Per direction:
+
+- **(a) IMPLEMENT MINIMAL** — interface and enum are kept. Both load tests are
+  **unchanged** (the pinned surface still exists). New behavior is proven by
+  **added** tests under `infochat-provider/src/test/.../command` (not by editing
+  the load tests): placeholder send with captured handle, typing-on where the
+  adapter supports it, coalesced update rendering, and finalize + typing-off via
+  try/finally (spec steps 1–4), plus the injection-prevention assertion of
+  acceptance item 2. No expected-behavior change to either load test.
+- **(b) DEFER BY AMENDMENT** — surface kept, no code change. Both load tests are
+  **unchanged**.
+- **(c) REMOVE** — ProgressNotifier and ProgressStage are deleted, so both load
+  tests are **modified** to drop the now-absent pins:
+  - `MessagingSpisLoadTest.java`: delete `progressNotifierIsLoadableInterface`
+    and `progressStageIsLoadableEnumWithSpecMandatedValues`. New expected
+    behavior: the smoke test pins only the surviving messaging SPI types
+    (`MessagingAdapter`, `TranslationProvider` interfaces; `MessageHandle`,
+    `CapabilityFlags` records) — ProgressNotifier/ProgressStage are no longer
+    loadable and are no longer asserted.
+  - `AllSpisLoadIT.java`: remove `app.zcat.infochat.messaging.ProgressNotifier`
+    from `INTERFACE_FQNS` and `app.zcat.infochat.messaging.ProgressStage` from
+    `ENUM_FQNS`; change the total-count assertion (and the javadoc count) from
+    fourteen to twelve. New expected behavior: the umbrella IT pins exactly
+    twelve cross-module SPI types, none of them ProgressNotifier or ProgressStage.
 
 ## Notes
 
