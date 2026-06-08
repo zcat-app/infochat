@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 11 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 263 |
 | deferred | 2 |
-| **total** | **265** |
+| **total** | **276** |
 
 ---
 
@@ -24,7 +24,17 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-230 — Semantic-link query: use an HNSW index probe, not a self-join (complexity: medium, risk: medium)
+- M1-231 — Implement /get-tags and /get-sources (advertised, no handler) (complexity: medium, risk: low)
+- M1-232 — /retry --digest: atomic regenerate, honest skip status (complexity: medium, risk: medium)
+- M1-233 — Embedding dimensionality mismatch: alert operator, stop spamming (complexity: low, risk: medium)
+- M1-234 — Drop the dead new_price_snapshot NOTIFY channel (+ spec) (complexity: low, risk: low)
+- M1-235 — Migration: denormalize actor cols in delete_preban_user audit row (complexity: low, risk: medium)
+- M1-236 — infochat-ssrf: read-buffer churn, wss default port, dead null-check (complexity: low, risk: low)
+- M1-237 — infochat-llm-adapter: dedup HTTP providers, drop dead null-check, fix comment (complexity: medium, risk: low)
+- M1-238 — Signal adapter: constant-time mention compare + total timestamp parse (complexity: low, risk: low)
+- M1-239 — infochat-provider: NOTIFY discriminator, stale ban comment, locale fold (complexity: low, risk: low)
+- M1-240 — infochat-collector: span-offset doc, unused asset-refresh fields (complexity: low, risk: low)
 
 ---
 
@@ -407,4 +417,15 @@ M1-226 (done)
 M1-227 (done)
   └── M1-228 (done)
 M1-229 (done)
+M1-230 (pending) ← runnable
+M1-231 (pending) ← runnable
+M1-232 (pending) ← runnable
+M1-233 (pending) ← runnable
+M1-234 (pending) ← runnable
+M1-235 (pending) ← runnable
+M1-236 (pending) ← runnable
+M1-237 (pending) ← runnable
+M1-238 (pending) ← runnable
+M1-239 (pending) ← runnable
+M1-240 (pending) ← runnable
 ```
