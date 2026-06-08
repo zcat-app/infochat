@@ -20,18 +20,23 @@ import java.io.OutputStreamWriter;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -115,11 +120,30 @@ final class SignalJsonRpcClient {
      */
     private static final int HUNG_TIMEOUT_THRESHOLD = 3;
 
+    /**
+     * Default bound on the inbound-dispatch executor's work queue. A
+     * hostile peer can deliver receive notifications faster than the single
+     * dispatch thread drains them (each does identity-resolution DB work
+     * downstream), so the JDK default unbounded LinkedBlockingQueue would
+     * grow without bound and OOM the only user-facing service
+     * ({@code docs/design/06-messaging.md} §6.3.7). At the cap the newest
+     * notification is dropped — see {@link #dispatchAsync}. A named
+     * constant, not runtime config, matching the sibling cap
+     * {@link #MAX_TRACKED_HANDLES}; the capacity is a constructor parameter
+     * so tests can drive the overflow path with a small queue.
+     */
+    static final int INBOUND_QUEUE_CAPACITY = 1_000;
+
     private final InetSocketAddress endpoint;
     private final String account;
     private final SignalMessageCodec codec;
     private final Duration responseTimeout;
     private final Runnable hungRestartHook;
+    private final int inboundQueueCapacity;
+    // Cumulative count of inbound notifications dropped on queue overflow
+    // (distinct from the benign shutdown-time drops in dispatchAsync).
+    // Instance-scoped, so it accumulates across reconnects.
+    private final AtomicLong droppedInboundCount = new AtomicLong();
 
     // Consecutive JSON-RPC response timeouts. Reset to zero whenever the
     // daemon answers (a success OR an error response — either proves it is
@@ -167,8 +191,16 @@ final class SignalJsonRpcClient {
     // down by disconnect). Notifications hop off the reader thread
     // here so a blocking InboundHandler/MembershipHandler cannot
     // deadlock against the reader that delivers its ack; responses
-    // never enter this queue.
+    // never enter this queue. The backing queue is BOUNDED
+    // (inboundQueueCapacity): a ThreadPoolExecutor with the default
+    // AbortPolicy rejects an execute() once the queue is full, which
+    // dispatchAsync turns into a drop-newest with a counter — the rate
+    // cap downstream of this queue bounds work per dequeued item, never
+    // the queue's own memory (docs/design/06-messaging.md §6.3.7).
     @Nullable private volatile ExecutorService dispatchExecutor;
+    // Reference to the executor's backing queue, kept so tests can read
+    // its depth; recreated alongside dispatchExecutor in connect().
+    @Nullable private volatile BlockingQueue<Runnable> dispatchQueue;
 
     /**
      * Convenience constructor with no hung-process escalation wired:
@@ -189,11 +221,23 @@ final class SignalJsonRpcClient {
                         SignalMessageCodec codec,
                         Duration responseTimeout,
                         Runnable hungRestartHook) {
+        this(endpoint, account, codec, responseTimeout, hungRestartHook, INBOUND_QUEUE_CAPACITY);
+    }
+
+    // Test seam: a small capacity drives the overflow path deterministically
+    // without flooding the production-default 1000-deep queue.
+    SignalJsonRpcClient(InetSocketAddress endpoint,
+                        String account,
+                        SignalMessageCodec codec,
+                        Duration responseTimeout,
+                        Runnable hungRestartHook,
+                        int inboundQueueCapacity) {
         this.endpoint = endpoint;
         this.account = account;
         this.codec = codec;
         this.responseTimeout = responseTimeout;
         this.hungRestartHook = hungRestartHook;
+        this.inboundQueueCapacity = inboundQueueCapacity;
     }
 
     void setInboundHandler(MessagingAdapter.InboundHandler handler) {
@@ -222,8 +266,13 @@ final class SignalJsonRpcClient {
         this.socket = s;
         this.writer = w;
         // Fresh dispatcher per connect — disconnect() shuts the prior
-        // one down, and a shut-down executor rejects all tasks.
-        this.dispatchExecutor = Executors.newSingleThreadExecutor(
+        // one down, and a shut-down executor rejects all tasks. The
+        // backing queue is bounded; on overflow the default AbortPolicy
+        // rejects execute() and dispatchAsync drops the newest notification.
+        BlockingQueue<Runnable> queue = new LinkedBlockingQueue<>(inboundQueueCapacity);
+        this.dispatchQueue = queue;
+        this.dispatchExecutor = new ThreadPoolExecutor(
+                1, 1, 0L, TimeUnit.MILLISECONDS, queue,
                 Thread.ofPlatform().daemon().name("signal-inbound-dispatch").factory());
         Thread t = new Thread(this::readerLoop, "signal-jsonrpc-reader");
         t.setDaemon(true);
@@ -261,6 +310,7 @@ final class SignalJsonRpcClient {
             // connection is going away, matching at-most-once inbound.
             executor.shutdownNow();
             this.dispatchExecutor = null;
+            this.dispatchQueue = null;
         }
         // Drop any open per-handle state — a reconnect starts with a
         // fresh registry; stale handles from before the disconnect
@@ -593,10 +643,21 @@ final class SignalJsonRpcClient {
         try {
             executor.execute(() -> dispatchNotification(n));
         } catch (RejectedExecutionException e) {
-            // disconnect() shut the dispatcher down while the reader was
-            // draining its final lines; dropping is correct, the
-            // connection is going away (at-most-once inbound).
-            LOG.debugf("inbound notification dropped — dispatcher shut down");
+            if (executor.isShutdown()) {
+                // disconnect() shut the dispatcher down while the reader was
+                // draining its final lines; dropping is correct, the
+                // connection is going away (at-most-once inbound).
+                LOG.debugf("inbound notification dropped — dispatcher shut down");
+                return;
+            }
+            // The bounded dispatch queue is full: inbound is arriving faster
+            // than the single dispatch thread can drain it. Drop the newest
+            // notification and count it, rather than let the queue grow
+            // without bound and OOM the only user-facing service
+            // (docs/design/06-messaging.md §6.3.7).
+            long dropped = droppedInboundCount.incrementAndGet();
+            LOG.warnf("inbound dispatch queue full (cap %d); dropped newest from %s (total dropped %d)",
+                    inboundQueueCapacity, redactSender(n), dropped);
         }
     }
 
@@ -610,6 +671,46 @@ final class SignalJsonRpcClient {
     int openHandleCount() {
         synchronized (handles) {
             return handles.size();
+        }
+    }
+
+    /** Visible for tests: count of inbound notifications dropped on queue overflow. */
+    long droppedInboundCount() {
+        return droppedInboundCount.get();
+    }
+
+    /** Visible for tests: current depth of the bounded dispatch queue (0 when disconnected). */
+    int dispatchQueueDepth() {
+        BlockingQueue<Runnable> queue = dispatchQueue;
+        return queue == null ? 0 : queue.size();
+    }
+
+    /**
+     * Best-effort redacted sender for an overflow WARN line. A receive
+     * notification may be a DM (sender recoverable via the codec) or a
+     * group / typing / receipt frame (no DM sender) — the latter logs
+     * {@code "non-dm"}.
+     */
+    private String redactSender(SignalMessageCodec.JsonRpcMessage.Notification n) {
+        return codec.extractDm(n.params())
+                .map(dm -> redactContactId(dm.senderContactId()))
+                .orElse("non-dm");
+    }
+
+    /**
+     * Non-reversible short token for a sender contact id, safe to log
+     * under D37 (a Signal ACI / phone number is a sensitive identifier and
+     * is never logged raw). Stable per sender so a repeat flooder stays
+     * correlatable in the overflow WARN line without exposing the id.
+     */
+    private static String redactContactId(String contactId) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(contactId.getBytes(StandardCharsets.UTF_8));
+            return "contact#" + HexFormat.of().formatHex(digest, 0, 4);
+        } catch (NoSuchAlgorithmException e) {
+            // SHA-256 is a JDK-mandated algorithm; its absence cannot happen.
+            throw new AssertionError(e);
         }
     }
 

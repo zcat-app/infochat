@@ -1,7 +1,7 @@
 ---
 id: M1-224
 title: "Bounded inbound dispatch queue (M1-205 DoS remediation)"
-status: pending
+status: done
 created: 2026-06-08
 last_updated: 2026-06-08
 blocked_by: []
@@ -40,12 +40,57 @@ spec_refs:
   - docs/spec/messaging.md §Failure handling
 decision_refs:
   - D46
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-08
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 463
+      removed: 32
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-08
+    verdict: CLEAN
+    base: HEAD (fork point of m1/M1-224-bounded-inbound-dispatch-queue with main)
+    head: working tree (uncommitted impl, in-review round-1 APPROVE)
+    verdict_file: docs/plan/m1/redteam/M1-224-2026-06-08.md
+    out_of_model_count: 2
+    note: |
+      Adversarial audit of the bounded-inbound-dispatch-queue DoS remediation
+      against docs/spec/security.md. CLEAN: the diff ADDS a memory bound
+      (bounded LinkedBlockingQueue + ThreadPoolExecutor AbortPolicy →
+      drop-newest + counter + redacted WARN) and weakens no existing
+      commitment. Overflow WARN logs the sender as a SHA-256 prefix (D37:
+      no raw contact id, no user prose), parameterized SLF4J (no log
+      injection), no Throwable interpolation. No auth/permission/ban/audit
+      surfaces touched. Two OUT-OF-MODEL advisories (not findings):
+      (1) log-volume amplification — each dropped delivery emits one WARN, so
+      sustained flood drives unbounded WARN log output; every throttling
+      promise in security.md governs admin notifications / audit rows, not
+      adapter WARN logs, and the drop fires downstream of the upstream rate
+      caps; operator may extend the model to coalesce overflow WARNs per
+      sender/window (the droppedInboundCount counter already supports a
+      periodic-summary pattern). (2) stale lifecycle comment in
+      SimpleXWebSocketClient (says "created lazily" but executor is now an
+      eager final field) — no behavioral/security impact. Both are advisory;
+      neither blocks APPROVE.
+clarity_check:
+  date: 2026-06-08
+  verdict: WARN
+  warnings:
+    - "Acceptance item 2 self-flagged by author as needing tightening: whether a synchronous throttle reply fires on overflow is unspecified. Implementer decides leaner shape (drop + counter + WARN log) vs full §6.3.7 shape (+ throttle reply); E4007 (item 4) reconciles to match. Ticket grants this latitude explicitly."
+    - "Notes say run scripts/lint-ticket.py before start — ran, PASS (0 blockers, 0 warnings)."
+  blockers: []
 ---
 
 # M1-224: Bounded inbound dispatch queue (M1-205 DoS remediation)

@@ -112,7 +112,7 @@ Within a class, codes are not reused. Allocation is append-only — once shipped
 | `E4004` | SimpleX adapter: session token revoked or repeatedly rejected → terminal `AUTH_FAILED`. Recovery: rotate `SIMPLEX_SESSION_TOKEN`, restart Provider — see [06-messaging.md §6.4.6](06-messaging.md) and [07-deployment.md](07-deployment.md) §7.14 "Rotate a SimpleX session token". |
 | `E4005` | LISTEN/NOTIFY channel dropped — reconciler runs on next startup |
 | `E4006` | Outbound queue overflow — newest message dropped |
-| `E4007` | Inbound queue overflow — newest message dropped + throttle reply |
+| `E4007` | Inbound dispatch queue overflow — newest message dropped (silent: drop counter + WARN, no reply) — see [06-messaging.md §6.3.7](06-messaging.md) |
 | `E4008` | Scheduler missed a slot (digest worker busy) |
 | `E4009` | Bootstrap-sources.json missing or malformed |
 | `E4010` | Bootstrap SHA mismatch — Collector loaded a different file than Provider sees on disk |

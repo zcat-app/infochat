@@ -12,17 +12,24 @@ import app.zcat.infochat.messaging.MessagingException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
+import java.util.HexFormat;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * JDK-{@link HttpClient}-backed WebSocket connection to a running
@@ -61,6 +68,18 @@ final class SimpleXWebSocketClient {
     // process is sub-millisecond when healthy; hitting this means the
     // socket is wedged and the supervisor restart is the recovery path.
     static final Duration TRANSMIT_TIMEOUT = Duration.ofSeconds(10);
+
+    // Default bound on the inbound-dispatch executor's work queue. A
+    // hostile peer can deliver inbound frames faster than the single
+    // dispatch thread drains them (each onInbound does identity-resolution
+    // DB work downstream), so the JDK default unbounded LinkedBlockingQueue
+    // would grow without bound and OOM the only user-facing service
+    // (docs/design/06-messaging.md §6.3.7). At the cap the newest delivery
+    // is dropped — see dispatchAsync. A named constant, not runtime config,
+    // matching the sibling caps MAX_FRAME_BYTES / MAX_TRACKED_HANDLES; the
+    // capacity is a constructor parameter so tests can drive the overflow
+    // path with a small queue.
+    static final int INBOUND_QUEUE_CAPACITY = 1_000;
 
     /**
      * Receives decoded inbound chat messages on the client's dedicated
@@ -102,8 +121,18 @@ final class SimpleXWebSocketClient {
     // client spawns no thread; the instance is terminal after close()
     // (the `closed` flag never resets), matching the executor's
     // shutdown-once lifecycle.
-    private final ExecutorService dispatchExecutor = Executors.newSingleThreadExecutor(
-            Thread.ofPlatform().daemon().name("simplex-inbound-dispatch").factory());
+    //
+    // The backing queue is BOUNDED (inboundQueueCapacity): a ThreadPoolExecutor
+    // with the default AbortPolicy rejects an execute() once the queue is full,
+    // which dispatchAsync turns into a drop-newest with a counter — the rate
+    // cap downstream of this queue bounds work per dequeued item, never the
+    // queue's own memory (docs/design/06-messaging.md §6.3.7).
+    private final int inboundQueueCapacity;
+    private final BlockingQueue<Runnable> dispatchQueue;
+    private final ExecutorService dispatchExecutor;
+    // Cumulative count of inbound deliveries dropped on queue overflow
+    // (distinct from the benign shutdown-time drops in dispatchAsync).
+    private final AtomicLong droppedInboundCount = new AtomicLong();
     // Null until connect() completes the handshake; every read copies to a
     // local and guards on null before use.
     private volatile @Nullable WebSocket webSocket;
@@ -119,10 +148,25 @@ final class SimpleXWebSocketClient {
                            HttpClient httpClient,
                            InboundConsumer inboundConsumer,
                            GroupCandidateConsumer groupCandidateConsumer) {
+        this(uri, httpClient, inboundConsumer, groupCandidateConsumer, INBOUND_QUEUE_CAPACITY);
+    }
+
+    // Test seam: a small capacity drives the overflow path deterministically
+    // without flooding the production-default 1000-deep queue.
+    SimpleXWebSocketClient(URI uri,
+                           HttpClient httpClient,
+                           InboundConsumer inboundConsumer,
+                           GroupCandidateConsumer groupCandidateConsumer,
+                           int inboundQueueCapacity) {
         this.uri = uri;
         this.httpClient = httpClient;
         this.inboundConsumer = inboundConsumer;
         this.groupCandidateConsumer = groupCandidateConsumer;
+        this.inboundQueueCapacity = inboundQueueCapacity;
+        this.dispatchQueue = new LinkedBlockingQueue<>(inboundQueueCapacity);
+        this.dispatchExecutor = new ThreadPoolExecutor(
+                1, 1, 0L, TimeUnit.MILLISECONDS, dispatchQueue,
+                Thread.ofPlatform().daemon().name("simplex-inbound-dispatch").factory());
     }
 
     /**
@@ -337,6 +381,33 @@ final class SimpleXWebSocketClient {
         return closed;
     }
 
+    /** Visible for tests: count of inbound deliveries dropped on queue overflow. */
+    long droppedInboundCount() {
+        return droppedInboundCount.get();
+    }
+
+    /** Visible for tests: current depth of the bounded dispatch queue. */
+    int dispatchQueueDepth() {
+        return dispatchQueue.size();
+    }
+
+    /**
+     * Non-reversible short token for a sender contact id, safe to log
+     * under D37 (a SimpleX queue address is a sensitive identifier and is
+     * never logged raw). Stable per sender so a repeat flooder stays
+     * correlatable in the overflow WARN line without exposing the address.
+     */
+    private static String redactContactId(String contactId) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(contactId.getBytes(StandardCharsets.UTF_8));
+            return "contact#" + HexFormat.of().formatHex(digest, 0, 4);
+        } catch (NoSuchAlgorithmException e) {
+            // SHA-256 is a JDK-mandated algorithm; its absence cannot happen.
+            throw new AssertionError(e);
+        }
+    }
+
     private final class Listener implements WebSocket.Listener {
 
         private final StringBuilder buffer = new StringBuilder();
@@ -408,9 +479,12 @@ final class SimpleXWebSocketClient {
             return;
         }
         switch (decoded) {
-            case SimpleXMessageCodec.Inbound in -> dispatchAsync(() -> inboundConsumer.onInbound(in.message()));
+            case SimpleXMessageCodec.Inbound in ->
+                    dispatchAsync(in.message().sender().contactId(),
+                            () -> inboundConsumer.onInbound(in.message()));
             case SimpleXMessageCodec.GroupCandidate gc ->
-                    dispatchAsync(() -> groupCandidateConsumer.onGroupCandidate(gc));
+                    dispatchAsync(gc.senderContactId(),
+                            () -> groupCandidateConsumer.onGroupCandidate(gc));
             case SimpleXMessageCodec.SendAck ack -> completePending(ack.corrId(), ack.chatItemId());
             case SimpleXMessageCodec.CommandError err -> failPending(err);
             case SimpleXMessageCodec.Ignored ignored ->
@@ -424,15 +498,29 @@ final class SimpleXWebSocketClient {
      * thread) — routing them through the queue would re-introduce the
      * deadlock this hop exists to break: a consumer blocked in the
      * dispatch thread would sit ahead of its own ack.
+     *
+     * <p>{@code senderContactId} is used only to attribute an overflow
+     * drop in the WARN line; it is redacted before logging.</p>
      */
-    private void dispatchAsync(Runnable delivery) {
+    private void dispatchAsync(String senderContactId, Runnable delivery) {
         try {
             dispatchExecutor.execute(delivery);
         } catch (RejectedExecutionException e) {
-            // close() shut the dispatcher down while the listener was
-            // delivering its final frames; dropping is correct, the
-            // connection is going away (at-most-once inbound).
-            LOG.debug("inbound frame dropped — dispatcher shut down");
+            if (dispatchExecutor.isShutdown()) {
+                // close() shut the dispatcher down while the listener was
+                // delivering its final frames; dropping is correct, the
+                // connection is going away (at-most-once inbound).
+                LOG.debug("inbound frame dropped — dispatcher shut down");
+                return;
+            }
+            // The bounded dispatch queue is full: inbound is arriving faster
+            // than the single dispatch thread can drain it. Drop the newest
+            // delivery (the one that could not be enqueued) and count it,
+            // rather than let the queue grow without bound and OOM the only
+            // user-facing service (docs/design/06-messaging.md §6.3.7).
+            long dropped = droppedInboundCount.incrementAndGet();
+            LOG.warn("inbound dispatch queue full (cap {}); dropped newest from {} (total dropped {})",
+                    inboundQueueCapacity, redactContactId(senderContactId), dropped);
         }
     }
 
