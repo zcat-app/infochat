@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 14 |
+| pending | 15 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 242 |
 | deferred | 2 |
-| **total** | **258** |
+| **total** | **259** |
 
 ---
 
@@ -38,6 +38,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-213 — TranslationProvider module placement: move to the LLM adapter or amend the spec (complexity: low, risk: low)
 - M1-215 — Core hygiene: sanitized key in getState WARN, full-C0 sanitize, single AuditLogWriter constructor (complexity: low, risk: low)
 - M1-219 — searchPosts window/ordering semantics: bind the spec to a timestamp column (complexity: low, risk: low)
+- M1-223 — FakeNostrRelay: plain-socket rewrite, drop standalone Vert.x (complexity: medium, risk: medium)
 
 ---
 
@@ -413,4 +414,5 @@ M1-216 (done)
 M1-218 (done)
 M1-220 (done)
 M1-221 (done)
+M1-223 (pending) ← runnable
 ```
