@@ -578,7 +578,7 @@ should pick admin placement deliberately:
   reply surfaces the deletion (`"Pre-ban-only row removed; contact
   will require a fresh invite to DM."`) so the executing admin
   understands the post-condition; the deletion is audit-logged as
-  `UNBAN_DELETED_PREBAN_ROW`. Pre-ban rows that have a non-`preban`
+  `UNBAN_PREBAN_DELETE`. Pre-ban rows that have a non-`preban`
   `registration_state` (i.e. an already-registered user later
   banned, then unbanned) are **not** affected by this rule — their
   ban flag is cleared in place and the group-admin restoration
