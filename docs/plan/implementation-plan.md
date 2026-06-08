@@ -606,7 +606,7 @@ Light up the rest of the eval pipeline (entity extraction, cross-source linking 
 #### Maven modules and packages created or touched
 
 ### `infochat-core`
-- Extend `org.infochat.core.audit` with `RE_EVAL_RELEASED`, `UNBAN_DELETED_PREBAN_ROW`, `INVITE_REVOKED`, `BAN`, `UNBAN`, `GRANT_ADMIN`, `REVOKE_ADMIN`, `PROMOTE_GROUP_ADMIN`, `DEMOTE_GROUP_ADMIN`, `VOUCH`, `QUARANTINE_APPROVE`, `QUARANTINE_REJECT`, `REMOVE_SOURCE`, `SOURCE_ENABLE`, `SOURCE_DISABLE`, `DIGEST_SLOT_MISSED`, `BOOTSTRAP_ADMIN`.
+- Extend `org.infochat.core.audit` with `RE_EVAL_RELEASED`, `UNBAN_PREBAN_DELETE`, `INVITE_REVOKED`, `BAN`, `UNBAN`, `GRANT_ADMIN`, `REVOKE_ADMIN`, `PROMOTE_GROUP_ADMIN`, `DEMOTE_GROUP_ADMIN`, `VOUCH`, `QUARANTINE_APPROVE`, `QUARANTINE_REJECT`, `REMOVE_SOURCE`, `SOURCE_ENABLE`, `SOURCE_DISABLE`, `DIGEST_SLOT_MISSED`, `BOOTSTRAP_ADMIN`.
 
 ### `infochat-collector`
 - `org.infochat.collector.eval.entity` — Entity extractor.
@@ -711,7 +711,7 @@ Light up the rest of the eval pipeline (entity extraction, cross-source linking 
 ### `/unban` of a `preban` row → row deletion
 - **G** Bob's `users` row has `is_banned = true` and `registration_state = 'preban'`
 - **W** an admin runs `/unban bob`
-- **T** the row is `DELETE`d (the single permitted application-issued DELETE on `users` per Invariant 2 carve-out); the audit row is `UNBAN_DELETED_PREBAN_ROW`; the reply discloses the deletion and that a fresh invite is required for DM (`spec/security.md` §User ban — Pre-ban → unban does NOT grant DM access; `spec/schema.md` §Invariants — 2).
+- **T** the row is `DELETE`d (the single permitted application-issued DELETE on `users` per Invariant 2 carve-out); the audit row is `UNBAN_PREBAN_DELETE`; the reply discloses the deletion and that a fresh invite is required for DM (`spec/security.md` §User ban — Pre-ban → unban does NOT grant DM access; `spec/schema.md` §Invariants — 2).
 
 #### Blocking dependencies on earlier milestones
 - M1 (Stage 1 + Stage 2 single-pass, audit log, Provider EXECUTE on stored procedures, `new_post` channel cursor mechanism).
@@ -1458,7 +1458,7 @@ This is the **in-bot** surface only. The matching **operator-side** stack — wh
 These are cases the spec is silent on, contradictory on, or where a design-tier choice carries cross-milestone weight. Each cites the spec / design location that raises it.
 
 1. **SimpleX `user_left_group` capability.** Does SimpleX's protocol expose a native left-group event, or must the SimpleX adapter set `supportsMembershipEvents = false` and rely on permanent-delivery-failure cleanup per `spec/messaging.md` §Failure handling — User left group? `design/06-messaging.md` §6.4.4 is silent; resolve during M8 by inspecting `simplex-chat` JSON output.
-2. **Audit-action enum source-of-truth file location.** `spec/schema.md` §Identity and access — Audit log says the closed verb enum lives in design notes; the M2 expansion adds many entries (`RE_EVAL_RELEASED`, `UNBAN_DELETED_PREBAN_ROW`, `INVITE_REVOKED`, `BAN`, `UNBAN`, `GRANT_ADMIN`, `REVOKE_ADMIN`, `PROMOTE_GROUP_ADMIN`, `DEMOTE_GROUP_ADMIN`, `VOUCH`, `QUARANTINE_APPROVE`, `QUARANTINE_REJECT`, `REMOVE_SOURCE`, `SOURCE_ENABLE`, `SOURCE_DISABLE`, `DIGEST_SLOT_MISSED`, `BOOTSTRAP_ADMIN`). Recommend: `org.infochat.core.audit.AuditAction` enum + a Flyway-checked DB CHECK constraint generated from it. Confirm the file location early to avoid divergence.
+2. **Audit-action enum source-of-truth file location.** `spec/schema.md` §Identity and access — Audit log says the closed verb enum lives in design notes; the M2 expansion adds many entries (`RE_EVAL_RELEASED`, `UNBAN_PREBAN_DELETE`, `INVITE_REVOKED`, `BAN`, `UNBAN`, `GRANT_ADMIN`, `REVOKE_ADMIN`, `PROMOTE_GROUP_ADMIN`, `DEMOTE_GROUP_ADMIN`, `VOUCH`, `QUARANTINE_APPROVE`, `QUARANTINE_REJECT`, `REMOVE_SOURCE`, `SOURCE_ENABLE`, `SOURCE_DISABLE`, `DIGEST_SLOT_MISSED`, `BOOTSTRAP_ADMIN`). Recommend: `org.infochat.core.audit.AuditAction` enum + a Flyway-checked DB CHECK constraint generated from it. Confirm the file location early to avoid divergence.
 3. **Nostr WebSocket library choice.** `java.net.http.HttpClient` supports WebSocket natively; alternatives include `nv-websocket-client`, Tyrus, or a Nostr-specific library. `spec/architecture.md` §Ingest SPIs is silent. Design-tier; flag during M6.
 4. **`/help` per-command bundle key naming convention.** `spec/commands.md` §Discovery — Bundle composition commits to one key per command for the help line + separate header/footer keys; the exact key naming (e.g., `help.command.summary.short` vs `help.summary`) is design-tier; settle in M0 design rewrite.
 5. **`audit_log.action` enum closed-set evolution rule.** `spec/security.md` §Secrets handling commits that **adding** a key-shape pattern to the secrets-redactor catalogue is a design-note edit and **removing** one is a spec amendment (the asymmetry prevents silent weakening). The same asymmetry should apply to `audit_log.action` and the LLM tool-name set, but the spec only states it for the secrets catalogue. Confirm whether the same rule extends to the other closed sets, or document the divergence.
