@@ -2,6 +2,7 @@ package app.zcat.infochat.collector.eval.embedding;
 
 import app.zcat.infochat.collector.eval.TransactionHelper;
 import app.zcat.infochat.core.log.SafeLog;
+import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import app.zcat.infochat.llm.EmbeddingProvider;
 import app.zcat.infochat.llm.EmbeddingResult;
 import io.quarkus.scheduler.Scheduled;
@@ -62,7 +63,7 @@ import java.util.concurrent.Semaphore;
  *       T2-G throttled admin notifier.</li>
  * </ul>
  *
- * <h2>Per-vector dimensionality fatal</h2>
+ * <h2>Per-vector dimensionality mismatch — operator alert + skip</h2>
  *
  * <p>Per {@code docs/spec/llm.md} §Embedding pipeline ("Dimensionality
  * mismatch at runtime is fatal. Storing vectors of mixed dimensions
@@ -70,13 +71,22 @@ import java.util.concurrent.Semaphore;
  * scores. The only safe recovery is a full re-embed"): if any returned
  * vector's length differs from {@code embedding_metadata.dimension}
  * (cached at @PostConstruct after the {@link EmbeddingMetadataStartupGuard}
- * has validated the singleton), this worker throws
- * {@link IllegalStateException} immediately — NOT a batch-failure
- * retry, but a metadata-invariant violation. The throw unwinds the
- * narrow {@link TransactionHelper#inTransaction} boundary so no
- * {@code post_embedding} rows are inserted and {@code embedding_done}
- * stays {@code FALSE} for every post in the batch. The operator runs
- * the re-embed procedure ({@code docs/design/02-schema.md} §2.8).
+ * has validated the singleton), this worker treats it as an
+ * operator-action-required metadata-invariant violation — NOT a
+ * batch-failure retry. It fires ONE coalesced operator alert via
+ * {@link ThrottledAdminNotifier#notifyOnce} (keyed on
+ * {@link #ERROR_CLASS_EMBEDDING_DIMENSION_MISMATCH}, so the repeated
+ * per-poll detection collapses to a single notification per throttle
+ * window) and skips the batch by returning BEFORE any INSERT or
+ * UPDATE. No {@code post_embedding} row is written and
+ * {@code embedding_done} stays {@code FALSE} for every post in the
+ * batch; the pipeline soft-stalls (affected posts wait) and resumes
+ * automatically once the operator runs the re-embed procedure
+ * ({@code docs/design/02-schema.md} §2.8). Returning instead of
+ * throwing stops the stack-trace-per-poll loop a throw would cause —
+ * the idempotent pickup query re-selects the same wedged batch on
+ * every tick, so a throw would log a fresh stack trace forever while
+ * no operator is told.
  *
  * <h2>Persistence cursor</h2>
  *
@@ -105,6 +115,14 @@ public class EmbeddingWorker {
     /** Canonical error class emitted on the no-vector release path. */
     public static final String ERROR_CLASS_EMBEDDING_BATCH_FAILURE = "embedding.batch_failure";
 
+    /**
+     * Canonical error class for the per-vector dimensionality mismatch
+     * operator alert. Used as both the {@code notifyOnce} coalescing
+     * key and the {@code error_class} so repeated per-poll detections
+     * collapse to one notification per throttle window.
+     */
+    public static final String ERROR_CLASS_EMBEDDING_DIMENSION_MISMATCH = "embedding.dimension_mismatch";
+
     private static final Logger LOG = LoggerFactory.getLogger(EmbeddingWorker.class);
 
     /**
@@ -125,6 +143,9 @@ public class EmbeddingWorker {
 
     @Inject
     EmbeddingMetadataDao metadataDao;
+
+    @Inject
+    ThrottledAdminNotifier throttledAdminNotifier;
 
     @ConfigProperty(name = "infochat.embeddings.batch-size")
     int batchSize;
@@ -192,10 +213,10 @@ public class EmbeddingWorker {
      * {@link TransactionHelper#inTransaction} so the semaphore
      * acquisition and the outbound embedding HTTP call do not hold
      * a connection idle-in-transaction. A per-vector dimensionality
-     * mismatch throws BEFORE any INSERT or UPDATE so the rollback is
-     * a no-op against the on-disk state; the post stays
-     * {@code embedding_done=FALSE} and the next tick re-picks it (or
-     * the operator runs the re-embed procedure).
+     * mismatch fires a coalesced operator alert and returns BEFORE any
+     * INSERT or UPDATE, so no wrong-dimension vector is ever stored;
+     * the post stays {@code embedding_done=FALSE} and the next tick
+     * re-picks it (until the operator runs the re-embed procedure).
      */
     public void processBatch(List<PostRow> batch) {
         try {
@@ -238,20 +259,35 @@ public class EmbeddingWorker {
                 attempt = retry;
             }
 
-            // Per-vector dimensionality fatal per
-            // docs/spec/llm.md §Embedding pipeline. Validate ALL
-            // vectors before any INSERT so the throw unwinds cleanly
-            // with no partial state.
+            // Per-vector dimensionality mismatch per docs/spec/llm.md
+            // §Embedding pipeline. Validate ALL vectors before any
+            // INSERT so the skip leaves no partial state.
             List<EmbeddingResult> results = attempt.results();
             for (int i = 0; i < results.size(); i++) {
                 int actualDimension = results.get(i).vector().length;
                 if (actualDimension != cachedDimension) {
-                    throw new IllegalStateException(
-                        "EmbeddingWorker: per-vector dimensionality mismatch at batch index " + i
-                            + " for post_id=" + batch.get(i).id()
-                            + "; expected=" + cachedDimension + " actual=" + actualDimension
-                            + ". Run the re-embed procedure ("
-                            + EmbeddingMetadataStartupGuard.REEMBED_PROCEDURE_PATH + ").");
+                    // Operator-action-required condition, not a self-healing
+                    // batch failure: the metadata invariant is violated and the
+                    // only recovery is a full re-embed. Fire ONE coalesced
+                    // operator alert (the notifier throttles repeats on the
+                    // error_class key) and skip the batch by returning BEFORE any
+                    // INSERT or UPDATE — no wrong-dimension vector is stored,
+                    // embedding_done stays FALSE, and the affected posts resume
+                    // automatically after the operator re-embeds. Returning
+                    // instead of throwing stops the stack-trace-per-poll loop the
+                    // throw caused (the idempotent pickup re-selects the same
+                    // wedged batch every tick).
+                    LOG.error(
+                        "EmbeddingWorker: per-vector dimensionality mismatch for post_id={} "
+                            + "(expected={} actual={}); embedding halted until re-embed (error_class={})",
+                        batch.get(i).id(), cachedDimension, actualDimension,
+                        ERROR_CLASS_EMBEDDING_DIMENSION_MISMATCH);
+                    throttledAdminNotifier.notifyOnce(
+                        ERROR_CLASS_EMBEDDING_DIMENSION_MISMATCH,
+                        ERROR_CLASS_EMBEDDING_DIMENSION_MISMATCH,
+                        "Embedding dimensionality mismatch; run the re-embed procedure ("
+                            + EmbeddingMetadataStartupGuard.REEMBED_PROCEDURE_PATH + ")");
+                    return;
                 }
             }
 

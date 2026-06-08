@@ -1,6 +1,7 @@
 package app.zcat.infochat.collector.eval.embedding;
 
 import app.zcat.infochat.collector.testsupport.SeedDataSource;
+import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import app.zcat.infochat.llm.EmbeddingProvider;
 import app.zcat.infochat.llm.EmbeddingResult;
 import io.quarkus.test.junit.QuarkusTest;
@@ -29,9 +30,9 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -83,6 +84,9 @@ class EmbeddingWorkerIT {
 
     @Inject
     EmbeddingProvider embeddingProvider;
+
+    @Inject
+    ThrottledAdminNotifier throttledAdminNotifier;
 
     @Inject
     UserTransaction userTransaction;
@@ -169,33 +173,42 @@ class EmbeddingWorkerIT {
         assertEquals(0, postEmbeddingCount(b.id));
     }
 
-    // ---------- 4. dimensionality mismatch → fatal throw, no progress ----------
+    // ---------- 4. dimensionality mismatch → coalesced operator alert + skip, no throw ----------
 
     @Test
     @Order(4)
-    void dimensionMismatchThrowsImmediatelyAndLeavesPostsInFlight() throws Exception {
+    void dimensionMismatchAlertsOperatorAndSkipsWithoutThrowing() throws Exception {
+        // Clear any prior row for the mismatch key so the isPresent()
+        // assertion below reflects THIS tick's alert, not a stale row.
+        clearNotification(EmbeddingWorker.ERROR_CLASS_EMBEDDING_DIMENSION_MISMATCH);
         SeededPost a = seedPickupReadyPost("embed-it-dim-a");
         SeededPost b = seedPickupReadyPost("embed-it-dim-b");
 
-        // Provider returns the correct COUNT (2 of 2) but each
-        // vector has the WRONG dimension (384 instead of 768).
-        // The worker treats this as a metadata-invariant violation,
-        // not a batch-failure-retry case — throws immediately.
+        // Provider returns the correct COUNT (2 of 2) but each vector
+        // has the WRONG dimension (384 instead of 768). The worker
+        // treats this as an operator-action-required metadata-invariant
+        // violation, not a batch-failure-retry case: it fires one
+        // coalesced operator alert and skips the batch WITHOUT throwing.
         stub().queueSuccess(List.of(zeroVector(384), oneVector(384)));
 
-        assertThrows(IllegalStateException.class,
+        assertDoesNotThrow(
             () -> embeddingWorker.processBatch(List.of(rowFor(a), rowFor(b))),
-            "dim mismatch must throw IllegalStateException synchronously");
+            "dim mismatch must skip the batch via a coalesced alert, not throw");
 
         assertEquals(1, stub().callCount(),
             "dim mismatch must NOT retry (it is not a batch-failure case)");
-        // Throw lands before the narrow transaction starts: no DB
-        // writes executed, so embedding_done stays FALSE and the
-        // post stays in-flight for the operator's re-embed procedure.
+        // The skip returns before the narrow transaction starts: no DB
+        // writes executed, so embedding_done stays FALSE and the posts
+        // stay in-flight for the operator's re-embed procedure.
         assertEmbeddingDone(a.id, false);
         assertEmbeddingDone(b.id, false);
         assertEquals(0, postEmbeddingCount(a.id));
         assertEquals(0, postEmbeddingCount(b.id));
+        // The coalesced operator alert fired on the canonical error class.
+        assertTrue(
+            throttledAdminNotifier.getState(
+                EmbeddingWorker.ERROR_CLASS_EMBEDDING_DIMENSION_MISMATCH).isPresent(),
+            "a throttled admin alert must fire on the dimension-mismatch skip");
     }
 
     // ---------- 5. pre-promotion boundary — already-embedded post NOT picked up ----------
@@ -348,6 +361,15 @@ class EmbeddingWorkerIT {
                 "DELETE FROM post WHERE uid LIKE 'embed-it/%'")) {
                 ps.executeUpdate();
             }
+        }
+    }
+
+    private void clearNotification(String notificationKey) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "DELETE FROM admin_notification_state WHERE notification_key = ?")) {
+            ps.setString(1, notificationKey);
+            ps.executeUpdate();
         }
     }
 
