@@ -3,7 +3,7 @@ id: M1-210
 title: "Module-DAG enforcement + doc/config-truth sweep (docs say what the build does)"
 status: pending
 created: 2026-06-07
-last_updated: 2026-06-07
+last_updated: 2026-06-08
 blocked_by: []
 files_budget: 18
 files_scope:
@@ -35,7 +35,8 @@ out_of_scope:
   - EligiblePostQuery's missing SQL LIMIT and result handling — M1-194's (same file: only the profile-label defaultValue line changes here; serialize or coordinate with M1-194)
   - ModelTask.java code changes — the keySegment leg fixes design 05 to match the shipped "chat" segment, not the reverse
   - V5's stale verb-catalogue comment block — applied migrations are immutable (Flyway checksums); the living catalogue is design 02-schema §2.1.8, which this ticket updates
-  - the TranslationProvider row of 09-reference's module table — M1-213's placement decision owns it
+  - the TranslationProvider row of 09-reference's module table — M1-213's placement decision owns it (landed, merged c00ae01; do not re-touch that row)
+  - the rest of design 05 §5.1's package tree (embedding-provider impl names, observability classes, etc.) — the §5.1 leg fixes ONLY the three TranslationProvider rows surfaced by M1-213, not a full tree-vs-code reconciliation
   - CLAUDE.md's "infochat.profile" concept phrasing — process-file wording, deliberately retained as the concept name per InfochatProfile's javadoc
 acceptance:
   - "The 09-reference module-DAG ban is build-enforced: adding a dependency from infochat-collector on infochat-messaging-adapter fails the build with a clear error (maven-enforcer banned-dependencies or equivalent build-time mechanism; the failure demonstration is argued in the commit message), and 09-reference.md's enforcement sentence states exactly what is now true — POM-enforced, with the CI half either dropped or rephrased as future (no CI exists)"
@@ -45,6 +46,7 @@ acceptance:
   - "No design doc instructs setting an infochat.profile= property: design 07-deployment's runbook (:103) and reference properties (:135), design 01-architecture (:629), and design 05 (:15) all name the actual mechanism (QUARKUS_PROFILE / quarkus.profile), so following the runbook no longer produces the InfochatProfile startup crash (\"No known infochat profile in active Quarkus profile chain\")"
   - "Design 05's profile enumeration says remote-llm, not the stale remote"
   - "Design 05's per-task property keys for the chat agent use the shipped key segment (ModelTask.CHAT_AGENT keySegment is \"chat\"; design 05 :64-65 says infochat.llm.chat-agent.*)"
+  - "Design 05 §5.1's SPI-overview package tree shows the TranslationProvider classes where they actually live, consistent with the merged M1-213 placement decision (docs/spec/llm.md §SPI shape): the TranslationProvider SPI interface (:29) sits under infochat-messaging-adapter, NOT infochat-llm-adapter/api/; LlmTranslationProvider (:40) sits under infochat-provider (translation/), NOT infochat-llm-adapter/impl/; and the NoopTranslationProvider row (:41) is dropped — no such class ships (the scope-language='en' passthrough is handled in the translation pipeline per llm.md §Translation flow, not a Noop SPI impl)"
   - "AdapterRegistry's gate-order comment matches the gate count (today \"The six gates\" at :60 vs \"Gate 7\" at :227 — renumber or make the comment count-free)"
   - "docs/spec/deployment.md's Flyway-ownership statements match the shipped shape: production Provider does not run migrations (quarkus-flyway is test-scoped in Provider; the operator runs Collector first) — the \"Both services run Flyway on startup\" sentences (:39, :146) and the concurrent-migration paragraph (:45) are reconciled to that"
   - "Design 02-schema §2.1.8's verb table matches the AuditAction enum: the 25 enum constants missing from the table (48 in the enum vs 23 in the table at draft time) are added — the section's own rule says \"extending the catalogue is a design-note edit\""
@@ -114,6 +116,15 @@ contract note — `deep-code-review/v2/UNIFIED.md` §2). Re-grounded
     commits the audit redactor to fail-closed-on-regex-timeout;
     Redactor implements it (TIMEOUT_SENTINEL), but the RedactionHook
     SPI javadoc never states the contract.
+12. **Design 05 §5.1 TranslationProvider tree (M1-213 follow-up).**
+    M1-213 settled TranslationProvider's home as infochat-messaging-adapter
+    (presentation-layer SPI, decision D29) and fixed spec llm.md §SPI shape
+    + 09-reference's module row, but left design 05 §5.1's package tree
+    still drawing the SPI under infochat-llm-adapter/api/ (:29),
+    LlmTranslationProvider under infochat-llm-adapter/impl/ (:40, really
+    infochat-provider/translation/), and a NoopTranslationProvider row
+    (:41) for a class that ships nowhere. Doc-only; the code already
+    matches the merged spec (zero llm-package imports of the interface).
 
 ## Acceptance
 
@@ -138,8 +149,9 @@ See frontmatter.
   literal). AdapterRegistry is in M1-178's orbit (bootstrap-admin
   comment update) — the gate-count comment leg is disjoint from
   M1-178's comment, but rebase after M1-178 if it lands first.
-  09-reference.md is also touched by M1-213 (TranslationProvider row)
-  — coordinate textually.
+  09-reference.md's TranslationProvider row was landed by M1-213
+  (merged c00ae01); do not re-touch it. The §5.1 leg added here is the
+  remaining design-05 half of that placement fix.
 - The Quarkus-touching lock guard named by the core-row leg is
   AbstractInstanceLockGuard; the JDBC class is ThrottledAdminNotifier
   (both stay where they are — doc-fix direction).
