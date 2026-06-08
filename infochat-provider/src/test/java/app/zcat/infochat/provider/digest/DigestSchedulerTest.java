@@ -226,6 +226,61 @@ class DigestSchedulerTest {
     }
 
     @Test
+    void tick_excludesGroupWithDigestDisabled() throws Exception {
+        // M1-227: queryActiveGroups ANDs digest_enabled into its selection, so
+        // a paused group is never scheduled while an otherwise-identical
+        // enabled group is.
+        UUID enabledGroup = insertGroup("UTC", true);
+        UUID pausedGroup = insertGroup("UTC", false);
+
+        // 08:14 UTC — end of the morning window [07:45, 08:15], past every
+        // stagger offset, so an eligible group is guaranteed to fire.
+        Instant now = todayAt(8, 14, "UTC");
+        awaitDispatches(scheduler.tickAt(now));
+
+        boolean enabledEmitted = observer.getCaptured().stream()
+                .anyMatch(s -> s.groupId().equals(enabledGroup) && "morning".equals(s.slotKind()));
+        boolean pausedEmitted = observer.getCaptured().stream()
+                .anyMatch(s -> s.groupId().equals(pausedGroup));
+        assertTrue(enabledEmitted, "digest_enabled=true group must be scheduled");
+        assertFalse(pausedEmitted, "digest_enabled=false group must be excluded from scheduling");
+    }
+
+    @Test
+    void tick_resumeWithinWindow_firesSlot() throws Exception {
+        // M1-227 (F3): re-enabling (/digest on) while now is still inside the
+        // active window and past the group's stagger fire time makes the group
+        // eligible again before window-end, so the existing emit branch fires
+        // that slot. (An enabled group inside its window is operationally the
+        // resumed state — the scheduler reads current digest_enabled only.)
+        UUID groupId = insertGroup("UTC", true);
+        int stagger = DigestScheduler.staggerOffset(groupId, 30);
+        Instant now = todayAt(7, 45, "UTC").plusSeconds(stagger * 60L + 1);
+
+        awaitDispatches(scheduler.tickAt(now));
+
+        boolean emitted = observer.getCaptured().stream()
+                .anyMatch(s -> s.groupId().equals(groupId) && "morning".equals(s.slotKind()));
+        assertTrue(emitted, "a resumed group inside its window past stagger fires the slot");
+    }
+
+    @Test
+    void tick_resumeAfterWindowEnd_doesNotFire() throws Exception {
+        // M1-227 (F3): re-enabling after window-end does NOT catch up — the
+        // existing past-window branch is taken and no slot fires. The
+        // post-window false missed-slot record is M1-228's scope; this test
+        // asserts only fire/no-fire.
+        UUID groupId = insertGroup("UTC", true);
+        Instant now = todayAt(9, 0, "UTC"); // past 08:15 morning window-end
+
+        awaitDispatches(scheduler.tickAt(now));
+
+        boolean emittedMorning = observer.getCaptured().stream()
+                .anyMatch(s -> s.groupId().equals(groupId) && "morning".equals(s.slotKind()));
+        assertFalse(emittedMorning, "a group resumed after window-end does not fire (no catch-up)");
+    }
+
+    @Test
     void tick_unparseableTimezone_warnsOnceAndSkipsGroup() throws Exception {
         UUID groupId = insertGroup("Not/AZone");
 
@@ -331,13 +386,18 @@ class DigestSchedulerTest {
     }
 
     private UUID insertGroup(String timezone) throws Exception {
+        return insertGroup(timezone, true);
+    }
+
+    private UUID insertGroup(String timezone, boolean digestEnabled) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                     "INSERT INTO groups (adapter, upstream_group_id, display_name, timezone, approval_status) "
-                             + "VALUES ('inmemory', ?, 'test-digest-group', ?, 'approved') "
+                     "INSERT INTO groups (adapter, upstream_group_id, display_name, timezone, approval_status, digest_enabled) "
+                             + "VALUES ('inmemory', ?, 'test-digest-group', ?, 'approved', ?) "
                              + "RETURNING id")) {
             ps.setString(1, "digest-sched-" + UUID.randomUUID());
             ps.setString(2, timezone);
+            ps.setBoolean(3, digestEnabled);
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return rs.getObject("id", UUID.class);

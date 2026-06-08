@@ -98,7 +98,18 @@ connect with (see decision D34 and `security.md`).
     (→ `'rejected'`). Periodic digests fire only for `'approved'`
     groups. The intake check (auth step 3.5) reads this column on
     every group-scope inbound. The digest scheduler selects groups
-    where `approval_status = 'approved' AND removed_at IS NULL`.
+    where `approval_status = 'approved' AND removed_at IS NULL AND
+    digest_enabled`.
+  - `digest_enabled` (boolean, `NOT NULL DEFAULT true`) — the
+    per-group delivery gate for the periodic digest, mutated at
+    runtime by `/digest on|off` (`commands.md`). The digest
+    scheduler ANDs this flag into its group-selection query, so a
+    paused group (`digest_enabled = false`) is never selected: no
+    scheduled digest is computed, cached, or sent while paused.
+    Independent of `approval_status` and `removed_at` (a group can
+    be approved and present yet paused). Like the other group state,
+    it persists across remove/re-add cycles. Affects only the
+    scheduled push — on-demand `/summary` is unaffected.
   - `activated_by` (FK → `users.id`, nullable) — the registered
     user whose first @mention created this `groups` row (D47
     accountability). Post-migration, every `groups` row created at

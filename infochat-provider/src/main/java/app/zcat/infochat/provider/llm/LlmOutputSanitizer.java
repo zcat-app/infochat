@@ -116,6 +116,7 @@ public class LlmOutputSanitizer {
             "/unfollow-source",
             "/lang",
             "/group-timezone",
+            "/digest",
             "/follow-tag",
             "/unfollow-tag"
     );

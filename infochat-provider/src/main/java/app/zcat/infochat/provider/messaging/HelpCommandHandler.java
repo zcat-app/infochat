@@ -118,6 +118,7 @@ public class HelpCommandHandler implements CommandHandler {
             new CommandHelp("stop", BundleKeys.HELP_CMD_STOP_SHORT, HelpTier.USER),
             new CommandHelp("retry", BundleKeys.HELP_CMD_RETRY_SHORT, HelpTier.USER),
             new CommandHelp("group-timezone", BundleKeys.HELP_CMD_GROUP_TIMEZONE_SHORT, HelpTier.GROUP_ADMIN),
+            new CommandHelp("digest", BundleKeys.HELP_CMD_DIGEST_SHORT, HelpTier.GROUP_ADMIN),
             new CommandHelp("grant-admin", BundleKeys.HELP_CMD_GRANT_ADMIN_SHORT, HelpTier.BOT_ADMIN),
             new CommandHelp("revoke-admin", BundleKeys.HELP_CMD_REVOKE_ADMIN_SHORT, HelpTier.BOT_ADMIN),
             new CommandHelp("ban", BundleKeys.HELP_CMD_BAN_SHORT, HelpTier.BOT_ADMIN),

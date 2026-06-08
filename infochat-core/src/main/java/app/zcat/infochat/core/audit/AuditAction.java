@@ -178,6 +178,16 @@ public enum AuditAction {
     SET_TIMEZONE,
     LLM_OUTPUT_SANITIZED,
     RE_EVAL_RELEASED,
+    // DIGEST_ENABLE / DIGEST_DISABLE record a group admin's
+    // /digest on|off toggle of groups.digest_enabled (mirroring
+    // SOURCE_ENABLE / SOURCE_DISABLE). Written only on an actual
+    // state flip — an idempotent no-op writes no row — with
+    // target_kind='group' and target_id = the group's id. M1-228
+    // reads the DIGEST_ENABLE rows to derive the missed-slot pause
+    // carve-out, so the target_kind/target_id convention is
+    // load-bearing.
+    DIGEST_ENABLE,
+    DIGEST_DISABLE,
     DIGEST_RETRY,
     DIGEST_SLOT_MISSED,
     QUARANTINE_TTL_REJECT,

@@ -1,9 +1,15 @@
 ---
 id: M1-227
 title: "/digest on|off — group-admin toggle to pause/resume the periodic digest"
-status: pending
+status: done
 created: 2026-06-08
 last_updated: 2026-06-08
+clarity_check:
+  date: 2026-06-08
+  verdict: WARN
+  warnings:
+    - "TEST-CHANGES-AUTHORIZED: DigestSchedulerTest.java, RetryDigestCommandTest.java, LlmOutputSanitizerTest.java are listed in test_plan.modifies but not named in §Out-of-scope per the template; AC 8/10/11 carry the new expected behavior inline, so the contract is present but in acceptance rather than the designated section. The reviewer will hold these test diffs to the acceptance-item descriptions."
+  blockers: []
 blocked_by: []
 files_budget: 16
 files_scope:
@@ -26,6 +32,7 @@ files_scope:
 complexity: high
 risk: medium
 round_cap: 2
+outline_file: target/m1-tick-outline-M1-227.md
 security_relevant: true
 migration_touch: true
 out_of_scope:
@@ -65,11 +72,40 @@ spec_refs:
   - docs/spec/schema.md §Identity and access
   - docs/spec/security.md §LLM output sanitizer
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-08
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 16
+      added: 750
+      removed: 21
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-06-08
+    verdict: CLEAN
+    base: 2dd4f6d^ (= main 28394e2)
+    head: 2dd4f6d
+    verdict_file: docs/plan/m1/redteam/M1-227-2026-06-08.md
+    out_of_model_count: 1
+    note: |
+      Pre-merge adversarial audit (between /m1-tick commit and /m1-tick merge).
+      No threat-model gap: auth gate (group-admin OR bot-admin) fail-closed,
+      ban/probation enforced upstream in the router, audit-before-effect in the
+      same tx and not actor-writable, all SQL parameterized, sanitizer set
+      consistent with the closed privileged-tier list, /retry --digest
+      scheduler-bypass closed. One OUT-OF-MODEL advisory (group-existence reply
+      oracle, unreachable in normal operation) — not fixed, no remediation
+      ticket. Merge may proceed.
 ---
 
 # M1-227: /digest on|off — group-admin toggle to pause/resume the periodic digest

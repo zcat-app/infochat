@@ -113,6 +113,24 @@ class RetryDigestCommandTest {
                 "reply must indicate concurrent retry. Got: " + reply.text());
     }
 
+    @Test
+    void retryDigest_rejectedWhenDigestPaused() {
+        // M1-227 (F1): /retry --digest runs through DigestRetryService, NOT the
+        // scheduler, so the digest_enabled gate must be re-checked here or a
+        // paused group could regenerate and re-send its stale cached digest.
+        DataSource pausedStub = stubDigestDataSource(USER_ID, true, GROUP_ID, false);
+        handler.dataSource = pausedStub;
+        handler.userRepository = new UserRepository(pausedStub);
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Group("group-1"), "/retry --digest");
+
+        assertEquals(handler.bundleLoader.get(BundleKeys.ERROR_RETRY_DIGEST_PAUSED), reply.text(),
+                "a paused group's digest retry must be rejected. Got: " + reply.text());
+        assertEquals(0, digestRetryService.callCount,
+                "retryDigest must NOT be called when the group's digest is paused");
+    }
+
     // ----- M1-222: per-group LLM cap on the --digest re-roll ---------------
     //
     // Per docs/spec/security.md §Rate limiting, the per-group LLM
@@ -230,12 +248,17 @@ class RetryDigestCommandTest {
         return loader;
     }
 
+    private static DataSource stubDigestDataSource(UUID userId, boolean isAdmin, UUID groupId) {
+        return stubDigestDataSource(userId, isAdmin, groupId, true);
+    }
+
     /**
      * Stub DataSource for the --digest path. Handles:
      * 1. SELECT id, is_admin FROM users WHERE adapter = ? AND contact_id = ?
-     * 2. SELECT id FROM groups WHERE adapter = ? AND upstream_group_id = ?
+     * 2. SELECT id, digest_enabled FROM groups WHERE adapter = ? AND upstream_group_id = ?
      */
-    private static DataSource stubDigestDataSource(UUID userId, boolean isAdmin, UUID groupId) {
+    private static DataSource stubDigestDataSource(UUID userId, boolean isAdmin, UUID groupId,
+                                                  boolean digestEnabled) {
         return new DataSource() {
             @Override
             public Connection getConnection() {
@@ -245,7 +268,7 @@ class RetryDigestCommandTest {
                         (proxy, method, args) -> switch (method.getName()) {
                             case "prepareStatement" -> {
                                 String sql = (String) args[0];
-                                yield stubPreparedStatement(sql, userId, isAdmin, groupId);
+                                yield stubPreparedStatement(sql, userId, isAdmin, groupId, digestEnabled);
                             }
                             case "setAutoCommit", "commit", "rollback", "close" -> null;
                             default -> throw new UnsupportedOperationException(
@@ -265,7 +288,7 @@ class RetryDigestCommandTest {
     }
 
     private static PreparedStatement stubPreparedStatement(
-            String sql, UUID userId, boolean isAdmin, UUID groupId) {
+            String sql, UUID userId, boolean isAdmin, UUID groupId, boolean digestEnabled) {
         boolean isActorQuery = sql.contains("is_admin") && sql.contains("FROM users");
         boolean isGroupQuery = sql.contains("FROM groups");
         boolean isAuditInsert = sql.contains("audit_log");
@@ -276,7 +299,7 @@ class RetryDigestCommandTest {
                     case "setString", "setObject", "setTimestamp", "setNull" -> null;
                     case "executeQuery" -> {
                         if (isActorQuery) yield actorResultSet(userId, isAdmin);
-                        if (isGroupQuery) yield groupResultSet(groupId);
+                        if (isGroupQuery) yield groupResultSet(groupId, digestEnabled);
                         yield emptyResultSet();
                     }
                     case "executeUpdate" -> 1;
@@ -321,7 +344,7 @@ class RetryDigestCommandTest {
                 });
     }
 
-    private static ResultSet groupResultSet(UUID groupId) {
+    private static ResultSet groupResultSet(UUID groupId, boolean digestEnabled) {
         boolean[] consumed = { false };
         return (ResultSet) Proxy.newProxyInstance(
                 ResultSet.class.getClassLoader(),
@@ -333,6 +356,7 @@ class RetryDigestCommandTest {
                         yield true;
                     }
                     case "getObject" -> groupId;
+                    case "getBoolean" -> digestEnabled;
                     case "close" -> null;
                     default -> throw new UnsupportedOperationException("RS." + method.getName());
                 });

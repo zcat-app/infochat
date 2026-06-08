@@ -188,6 +188,11 @@ class LlmOutputSanitizerTest {
     }
 
     @Test
+    void digestTokenIsStripped() {
+        assertStripped("/digest");
+    }
+
+    @Test
     void followTagTokenIsStripped() {
         assertStripped("/follow-tag");
     }

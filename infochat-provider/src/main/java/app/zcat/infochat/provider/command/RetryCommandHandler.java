@@ -63,8 +63,8 @@ import java.util.UUID;
 @ApplicationScoped
 public class RetryCommandHandler implements CommandHandler {
 
-    private static final String SELECT_GROUP_ID =
-            "SELECT id FROM groups WHERE adapter = ? AND upstream_group_id = ?";
+    private static final String SELECT_GROUP =
+            "SELECT id, digest_enabled FROM groups WHERE adapter = ? AND upstream_group_id = ?";
 
     // Fetch posts by uid where status='READY'. The uid column on post
     // is the human-readable "p-<hash>" identifier; we join source for
@@ -391,11 +391,22 @@ public class RetryCommandHandler implements CommandHandler {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_DIGEST_GROUP_ADMIN_REQUIRED));
         }
 
-        UUID groupDbId = lookupGroupId(group.adapterGroupId());
-        if (groupDbId == null
+        GroupRow groupRow = lookupGroup(group.adapterGroupId());
+        if (groupRow == null
                 || (!actor.isAdmin
-                    && !groupMembershipRepository.isGroupAdmin(groupDbId, actor.id))) {
+                    && !groupMembershipRepository.isGroupAdmin(groupRow.id(), actor.id))) {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_DIGEST_GROUP_ADMIN_REQUIRED));
+        }
+        UUID groupDbId = groupRow.id();
+
+        // Close the /retry --digest bypass: this path runs through
+        // DigestRetryService, NOT the scheduler, so the digest_enabled gate
+        // in queryActiveGroups does not cover it. Without this check a group
+        // admin could regenerate and re-send a paused group's stale cached
+        // digest. Reject before the audit/cap gates so a paused retry costs
+        // no audit row and no rate-limit token.
+        if (!groupRow.digestEnabled()) {
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_DIGEST_PAUSED));
         }
 
         writeDigestRetryAudit(actor, adapter, contactId, groupDbId);
@@ -457,21 +468,23 @@ public class RetryCommandHandler implements CommandHandler {
                 .orElse(null);
     }
 
-    private @Nullable UUID lookupGroupId(String adapterGroupId) {
+    private @Nullable GroupRow lookupGroup(String adapterGroupId) {
         String adapter = inboundContext.adapterName();
         try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(SELECT_GROUP_ID)) {
+             PreparedStatement ps = conn.prepareStatement(SELECT_GROUP)) {
             ps.setString(1, adapter);
             ps.setString(2, adapterGroupId);
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) {
                     return null;
                 }
-                return rs.getObject("id", UUID.class);
+                return new GroupRow(
+                        rs.getObject("id", UUID.class),
+                        rs.getBoolean("digest_enabled"));
             }
         } catch (SQLException e) {
             throw new IllegalStateException(
-                    "RetryCommandHandler.lookupGroupId failed", e);
+                    "RetryCommandHandler.lookupGroup failed", e);
         }
     }
 
@@ -483,6 +496,9 @@ public class RetryCommandHandler implements CommandHandler {
     }
 
     private record ActorRow(UUID id, boolean isAdmin) {
+    }
+
+    private record GroupRow(UUID id, boolean digestEnabled) {
     }
 
     private OutboundMessage reply(ScopeRef scope, String text) {

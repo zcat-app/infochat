@@ -1205,6 +1205,40 @@ public final class BundleKeys {
      */
     public static final String REPLY_STATUS_PENDING_GROUPS = "reply.status.pending_groups";
 
+    // ----- /digest on|off (M1-227) -------------------------------------------
+    // Per docs/spec/commands.md §Conversation control (/digest on|off) +
+    // §Permission model. Group-admin-or-bot-admin toggle of
+    // groups.digest_enabled; the scheduler ANDs the flag into its
+    // group-selection query. Plain text only — single backticks for the
+    // inline `on`/`off` literals, no markdown link syntax.
+
+    /** Short-help line for {@code /digest} (group-admin tier). */
+    public static final String HELP_CMD_DIGEST_SHORT = "help.cmd.digest.short";
+
+    /** {@code /digest on} success — the scheduled digest is resumed for the group. */
+    public static final String REPLY_DIGEST_ON = "reply.digest.on";
+
+    /** {@code /digest off} success — the scheduled digest is paused for the group. */
+    public static final String REPLY_DIGEST_OFF = "reply.digest.off";
+
+    /** {@code /digest on} when the group is already enabled — idempotent no-op (no UPDATE, no audit row). */
+    public static final String REPLY_DIGEST_ALREADY_ON = "reply.digest.already_on";
+
+    /** {@code /digest off} when the group is already paused — idempotent no-op (no UPDATE, no audit row). */
+    public static final String REPLY_DIGEST_ALREADY_OFF = "reply.digest.already_off";
+
+    /** {@code /digest} invoked from DM scope — group-only command (there is no DM periodic digest in v1). */
+    public static final String ERROR_DIGEST_DM_SCOPE = "error.digest.dm_scope";
+
+    /** {@code /digest} caller is neither group admin nor bot admin. */
+    public static final String ERROR_DIGEST_NOT_ADMIN = "error.digest.not_admin";
+
+    /** {@code /digest} with a missing or unrecognized sub-verb — usage error naming the two sub-verbs (never a silent no-op). */
+    public static final String ERROR_DIGEST_USAGE = "error.digest.usage";
+
+    /** {@code /retry --digest} rejected because the group's digest is paused ({@code digest_enabled = false}); regenerating a stale cached digest around the pause is blocked. */
+    public static final String ERROR_RETRY_DIGEST_PAUSED = "error.retry.digest_paused";
+
     private BundleKeys() {
         throw new AssertionError("BundleKeys is a constant holder and must not be instantiated");
     }

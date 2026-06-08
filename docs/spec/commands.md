@@ -607,6 +607,21 @@ and makes the digest query depend on row presence.
   per-group `groups.timezone` value, audit-logged before effect.
   Unknown zone names produce the friendly-error path with fuzzy
   suggestions over the IANA tzdb names.
+- `/digest on|off` — pauses (`off`) or resumes (`on`) the group's
+  periodic morning/evening digest. Group only; group admin or bot
+  admin. The `on`/`off` sub-verb is matched case-insensitively; a
+  missing or unrecognized sub-verb produces a friendly usage error
+  naming the two sub-verbs — never a silent no-op, never a
+  fall-through. Mutates the per-group `groups.digest_enabled` flag
+  (default `true`), audit-logged before effect. A call that requests
+  the state the group is already in is a friendly no-op: it replies
+  "already on"/"already off", performs no write, and writes no audit
+  row, so repeated toggles do not spam the audit log. Pausing affects
+  only the **scheduled** push: data collection is unaffected (the
+  Collector ingests regardless) and on-demand `/summary` keeps working
+  for a paused group. While a group is paused, `/retry --digest` is
+  also rejected (friendly error) so a stale cached digest cannot be
+  regenerated and re-sent around the pause.
 - `/forget` — immediate purge of everything kept on the calling
   user's behalf. Per decision D37, this is the user-facing privacy
   lever. The exact purge set, called from any scope, is:
@@ -1035,8 +1050,8 @@ cannot silently shrink across versions.
   `/approve-group`, `/reject-group`, `/list-groups`.
 - **Group-admin (or bot admin acting in the group):**
   `/add-source` in groups, `/unfollow-source` in groups,
-  `/lang` in groups, `/group-timezone`, `/follow-tag` in groups,
-  `/unfollow-tag` in groups.
+  `/lang` in groups, `/group-timezone`, `/digest`,
+  `/follow-tag` in groups, `/unfollow-tag` in groups.
 
 The full per-actor-tier matrix (which DM / group-member commands
 are allowed to non-privileged users, plus the per-flag splits like
