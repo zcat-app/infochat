@@ -40,7 +40,7 @@ class InMemoryAdapterTest {
     void identityIsStableAcrossMultipleDeliveriesForSameContact() {
         InMemoryAdapter adapter = new InMemoryAdapter();
         List<Identity> seen = new ArrayList<>();
-        adapter.setInboundHandler(msg -> seen.add(adapter.assertIdentity(msg)));
+        adapter.setInboundHandler(msg -> seen.add(msg.sender()));
 
         adapter.deliverDm("alice", "hello");
         adapter.deliverDm("alice", "hello again");

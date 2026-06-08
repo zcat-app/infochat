@@ -1,9 +1,9 @@
 ---
 id: M1-211
 title: "MessagingAdapter.assertIdentity: wire the spec-mandated surface or remove it"
-status: pending
+status: done
 created: 2026-06-07
-last_updated: 2026-06-07
+last_updated: 2026-06-08
 blocked_by: []
 files_budget: 15
 files_scope:
@@ -14,6 +14,7 @@ files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/InboundRouter.java
   - docs/spec/messaging.md
   - docs/design/06-messaging.md
+  - docs/design/04-security.md
   - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/inmemory
   - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging
@@ -35,10 +36,15 @@ acceptance:
   - "The choice and its argument (zero production callers since the SPI landed; the adapters' inbound paths already construct sender identity; D10 identity-anchor implications) are recorded in the commit message"
   - "mvn -B clean verify from the repo root exits 0"
 test_plan:
-  adds:
-    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging
+  adds: []
   modifies:
+    # Direction (b) chosen at start: the SPI method is removed, so the
+    # proof is the green build (no new positive-identity test added).
+    # Every path below is already inside files_scope; this list is
+    # corrected for accuracy against the call-site sweep, not expanded.
     - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/inmemory
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/digest
   preserves:
     - all tests currently green on main
 spec_refs:
@@ -47,11 +53,75 @@ spec_refs:
   - docs/spec/messaging.md §Per-adapter trust level and identity
 decision_refs:
   - D10
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-08
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 17
+      added: 103
+      removed: 132
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-06-08
+    verdict: CLEAN
+    base: main
+    head: m1/M1-211-assert-identity-spi-decision
+    verdict_file: docs/plan/m1/redteam/M1-211-2026-06-08.md
+    out_of_model_count: 0
+    note: |
+      In-progress audit before merge. assertIdentity SPI removal is a
+      pure SPI narrowing — zero production callers, three no-op
+      passthrough impls deleted, prose reworded, test doubles swept.
+      Trust boundary 1 intact (identity still flows via
+      InboundMessage.sender()); the two new spec sentences map to
+      pre-existing unchanged machinery (AdapterRegistry Gate 6
+      low-trust rejection; non-null Identity sender on InboundMessage).
+      No defense removed, no remediation needed.
+escalations:
+  - date: 2026-06-08
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A — mid-implementation the developer found docs/design/04-security.md
+      §4.8 (a live design doc outside files_scope) still asserts future
+      adapters "must implement assertIdentity()", a claim direction (b)
+      makes false. Resolution: refine to add the file to files_scope
+      (user-approved 2026-06-08) and reword the stale line; files_budget
+      unchanged (15 touched = budget).
+revisions:
+  - date: 2026-06-08
+    reason: "budget-breach refine: add docs/design/04-security.md §4.8 to files_scope to correct the removed-method claim"
+    snapshot:
+      files_budget: 15
+      files_scope:
+        - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/MessagingAdapter.java
+        - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalAdapter.java
+        - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXAdapter.java
+        - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/inmemory/InMemoryAdapter.java
+        - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/InboundRouter.java
+        - docs/spec/messaging.md
+        - docs/design/06-messaging.md
+        - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/inmemory
+        - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal
+        - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging
+        - infochat-provider/src/test/java/app/zcat/infochat/provider/digest
+clarity_check:
+  date: 2026-06-08
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE item 3: \"recorded in the commit message\" is a process check verifiable only post-commit, not a behavioral criterion checkable against the diff or test output."
+    - "FILES-BUDGET-PLAUSIBLE: files_budget 15 is plausible for direction (a) but tight for direction (b) given the call-site sweep identifies roughly 14+ test files needing edits."
+    - "TEST-CHANGES-AUTHORIZED: test_plan.modifies is substantially incomplete for direction (b); the body's call-site sweep names ~9 additional test files not listed there."
+  blockers: []
 ---
 
 # M1-211: MessagingAdapter.assertIdentity — wire or remove
@@ -93,6 +163,22 @@ See frontmatter.
 
 ## Notes
 
+- **Direction chosen at start (2026-06-08): (b)-strengthened.** Remove
+  `assertIdentity` from the SPI + the three passthrough implementations
+  + the test-double sweep, AND promote the verify-at-decode invariant
+  into binding spec/design prose (every adapter MUST assert a
+  cryptographically-anchored contact id at decode and drop on failure;
+  trust level declared; LOW gated at registration via AdapterRegistry
+  Gate 6). The design §6.4/§6.5 "Identity assertion fails → drop"
+  failure-table rows are left intact — they already describe the
+  decode-time assertion (Signal's row names "malformed envelope"), so
+  they stay accurate under direction (b). Argument
+  (zero production callers; all three impls are `return msg.sender();`;
+  assertIdentity(InboundMessage) cannot verify because InboundMessage
+  already carries the asserted Identity; asserting deeper would be a
+  security regression vs. earliest-boundary drop; D10 is a property of
+  contactId, not of a method name) is recorded in the implementation
+  commit message per acceptance item 3.
 - Source: `UNIFIED.md` §3 T31 leg (a) under `deep-code-review/v2/`
   (opus-47 arch F4).
 - Cross-ticket wiring: M1-208 considers adding a contact-id

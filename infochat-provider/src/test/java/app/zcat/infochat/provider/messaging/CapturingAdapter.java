@@ -1,8 +1,6 @@
 package app.zcat.infochat.provider.messaging;
 
 import app.zcat.infochat.messaging.CapabilityFlags;
-import app.zcat.infochat.messaging.Identity;
-import app.zcat.infochat.messaging.InboundMessage;
 import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.OutboundMessage;
@@ -40,11 +38,6 @@ final class CapturingAdapter implements MessagingAdapter {
 
     @Override
     public app.zcat.infochat.messaging.AdapterTrustLevel trustLevel() {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public Identity assertIdentity(InboundMessage msg) {
         throw new UnsupportedOperationException();
     }
 

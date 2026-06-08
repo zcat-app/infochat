@@ -120,15 +120,6 @@ public final class InMemoryAdapter implements MessagingAdapter {
     }
 
     @Override
-    public Identity assertIdentity(InboundMessage msg) {
-        // The in-memory adapter has no cryptographic verification step;
-        // the test driver populated the Identity when it synthesised
-        // the inbound message. SimpleX/Signal will assert against the
-        // transport's cryptographic identity material in T3-A.
-        return msg.sender();
-    }
-
-    @Override
     public MessageHandle send(OutboundMessage msg) throws MessagingException {
         long id = handleIdGen.incrementAndGet();
         MessageHandle handle = new MessageHandle("inmem-" + id);

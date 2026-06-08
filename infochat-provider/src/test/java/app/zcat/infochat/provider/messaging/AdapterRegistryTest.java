@@ -2,7 +2,6 @@ package app.zcat.infochat.provider.messaging;
 
 import app.zcat.infochat.messaging.AdapterTrustLevel;
 import app.zcat.infochat.messaging.CapabilityFlags;
-import app.zcat.infochat.messaging.Identity;
 import app.zcat.infochat.messaging.InboundMessage;
 import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.MessagingAdapter;
@@ -244,11 +243,6 @@ class AdapterRegistryTest {
         }
 
         @Override
-        public Identity assertIdentity(InboundMessage msg) {
-            return msg.sender();
-        }
-
-        @Override
         public MessageHandle send(OutboundMessage msg) {
             return new MessageHandle("fake-x");
         }
@@ -285,11 +279,6 @@ class AdapterRegistryTest {
         @Override
         public AdapterTrustLevel trustLevel() {
             return AdapterTrustLevel.HIGH;
-        }
-
-        @Override
-        public Identity assertIdentity(InboundMessage msg) {
-            return msg.sender();
         }
 
         @Override

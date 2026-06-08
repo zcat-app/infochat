@@ -6,8 +6,6 @@ import org.jspecify.annotations.Nullable;
 import app.zcat.infochat.messaging.AdapterTrustLevel;
 import app.zcat.infochat.messaging.CapabilityFlags;
 import app.zcat.infochat.messaging.FailureCategory;
-import app.zcat.infochat.messaging.Identity;
-import app.zcat.infochat.messaging.InboundMessage;
 import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.MessagingException;
@@ -292,16 +290,6 @@ public final class SignalAdapter implements MessagingAdapter {
     @Override
     public void stop() {
         close();
-    }
-
-    @Override
-    public Identity assertIdentity(InboundMessage msg) {
-        // The cryptographic assertion lives in the JSON-RPC client's
-        // inbound translation (sourceUuid is the ACI signal-cli has
-        // already verified at the protocol layer); the inbound delivered
-        // here already carries the verified Identity. SimpleX-parity
-        // pattern from InMemoryAdapter.
-        return msg.sender();
     }
 
     @Override

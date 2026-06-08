@@ -87,9 +87,6 @@
        *  No-op for adapters with capabilities.supportsTypingIndicator = false. */
       void setTyping(ScopeRef scope, boolean typing);
 
-      /** Strongly-typed identity assertion for an incoming message. NEVER trust display name. */                                                                                                                                                       
-      Identity assertIdentity(InboundMessage msg);                                                                                                                                                                                                      
-                                                                                                                                                                                                                                                        
       /** Did this group exist before? Used by the group-admin auto-promote flow. */                                                                                                                                                                    
       boolean groupExists(String adapterGroupId);                                                                                                                                                                                                       
   }                                                                                                                                                                                                                                                     
@@ -683,7 +680,7 @@
 
   ### 6.5.3 Identity assertion
 
-  The Signal **ACI** (Account Identifier — a UUID Signal binds to its identity keys) is the cryptographic anchor (D10). `signal-cli` surfaces the ACI on every inbound envelope as `mentionUuid` for mention payloads and as the sender envelope identifier for the message itself. The adapter's `assertIdentity` returns:
+  The Signal **ACI** (Account Identifier — a UUID Signal binds to its identity keys) is the cryptographic anchor (D10). `signal-cli` surfaces the ACI on every inbound envelope as `mentionUuid` for mention payloads and as the sender envelope identifier for the message itself. The adapter constructs the inbound message's `Identity` at decode time as:
 
   ```java
   Identity {
@@ -851,8 +848,6 @@
           typingEvents.add(new TypingEvent(Instant.now(), scope, typing));
       }                                                                                                                                                                                                                                                 
 
-      @Override public Identity assertIdentity(InboundMessage m) { return m.sender(); }                                                                                                                                                                 
-   
       @Override public boolean groupExists(String id) { return knownGroups.contains(id); }                                                                                                                                                              
                                                                                    
       /* Test helpers (not part of SPI) */                                                                                                                                                                                                              

@@ -14,13 +14,29 @@ package app.zcat.infochat.messaging;
  * {@code docs/design/06-messaging.md} §6.2. The minimum surface every
  * adapter implements: an adapter-selection {@link #name()}, an
  * instance-level {@link #trustLevel()}, a {@link #capabilities()}
- * accessor, a strongly-typed {@link #assertIdentity} for inbound
- * messages, {@link #send} / {@link #update} / {@link #finalizeMessage}
+ * accessor, {@link #send} / {@link #update} / {@link #finalizeMessage}
  * for outbound replies, {@link #setTyping} for the typing-indicator
  * pulse, and {@link #setInboundHandler} for Provider to register its
  * inbound dispatch callback. Transport lifecycle is {@link #start()} /
  * {@link #stop()} — no-op defaults so transportless adapters (the
  * in-memory test double) are unaffected.</p>
+ *
+ * <p><b>Identity assertion (no separate SPI method).</b> There is no
+ * standalone identity-assertion call on this interface. Each adapter
+ * asserts the sender's cryptographically-anchored contact id at
+ * wire-decode time — the point where the transport's verified identity
+ * material lives (SimpleX queue address, Signal ACI) — and carries the
+ * result as the {@link Identity} on every {@link InboundMessage} it
+ * dispatches (see {@link InboundMessage#sender()}). The contact id is
+ * the authorization-bearing identifier (decision D10); adapters MUST
+ * NOT trust {@code displayName}. An adapter that cannot anchor the id
+ * to a keypair MUST declare {@link #trustLevel()}
+ * {@link AdapterTrustLevel#LOW}; Provider gates LOW-trust adapters at
+ * registration (the operator opt-in), not per message. A message whose
+ * identity cannot be asserted is dropped at decode, before dispatch —
+ * the earliest boundary with the most context. See
+ * {@code docs/spec/messaging.md} §Required SPI surface and
+ * {@code docs/design/06-messaging.md} §6.2.</p>
  *
  * <p>Group-membership probing ({@code groupExists}) stays deferred to
  * the groups milestone (T2-F) — speculative SPI surface for
@@ -67,17 +83,6 @@ public interface MessagingAdapter {
      * @return the adapter's trust level; never null.
      */
     AdapterTrustLevel trustLevel();
-
-    /**
-     * Strongly-typed identity assertion for one inbound message. The
-     * returned {@link Identity}'s {@code contactId} is the
-     * authorization-bearing identifier (decision D10) — implementations
-     * MUST NOT trust {@code displayName}.
-     *
-     * @param msg the inbound message; never null.
-     * @return the asserted sender identity; never null.
-     */
-    Identity assertIdentity(InboundMessage msg);
 
     /**
      * Send a new message to the given scope.

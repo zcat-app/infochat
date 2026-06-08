@@ -249,11 +249,6 @@ class InboundRouterContactIdRedactionTest {
         }
 
         @Override
-        public Identity assertIdentity(InboundMessage msg) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
         public MessageHandle send(OutboundMessage msg) throws MessagingException {
             throw new MessagingException(FailureCategory.TRANSIENT, "send failure");
         }

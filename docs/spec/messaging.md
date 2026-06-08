@@ -27,10 +27,17 @@ in-memory test adapter), property keys, and capability defaults live in
 
 Every adapter implements:
 
-- **Identity assertion.** Receives a wire message, returns a stable,                                                                                                                                                                                  
-  cryptographically-anchored contact id plus optional display name. An                                                                                                                                                                                
-  adapter that cannot do this MUST be marked low-trust and the operator                                                                                                                                                                               
-  must opt in explicitly.
+- **Identity assertion.** Each adapter asserts the sender's stable,
+  cryptographically-anchored contact id (plus optional display name) at
+  wire-decode time — the point where the transport's verified identity
+  material lives — and carries the result on every inbound message it
+  delivers to Provider. There is no separate identity-assertion SPI
+  method: identity is bound to inbound-message construction. A message
+  whose identity cannot be asserted is dropped at decode, before
+  delivery. An adapter that cannot anchor the id to a keypair MUST be
+  marked low-trust (`trustLevel = LOW`); Provider rejects a low-trust
+  adapter at registration unless the operator opts in explicitly (see
+  §Capability flags).
 - **Receive.** Pushes inbound `(scope, contact_id, body)` to Provider.
   Group messages arrive only when the bot is `@mentioned`; the
   mention is stripped before delivery (the adapter may do the strip,
@@ -101,9 +108,10 @@ Every adapter implements:
 
 ## Capability flags (minimum set)
 
-- `trustLevel` — `HIGH` for cryptographically anchored ids, `LOW`                                                                                                                                                                                     
-  otherwise. Provider rejects identity assertions from `LOW` adapters                                                                                                                                                                                 
-  unless the operator explicitly opts in.
+- `trustLevel` — `HIGH` for cryptographically anchored ids, `LOW`
+  otherwise. Provider rejects a `LOW`-trust adapter at registration
+  (startup), before any message is processed, unless the operator
+  explicitly opts in via `infochat.adapters.<name>.allow-low-trust`.
 - `supportsCodeFormatting` — when true, code spans render as
   monospace. When false, the user sees backticks (still readable,
   decision D30). **Renamed from `supportsMarkdownCode`** because the

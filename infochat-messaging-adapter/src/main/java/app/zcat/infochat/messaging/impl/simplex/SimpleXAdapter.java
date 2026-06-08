@@ -7,7 +7,6 @@ import org.slf4j.LoggerFactory;
 import app.zcat.infochat.messaging.AdapterTrustLevel;
 import app.zcat.infochat.messaging.CapabilityFlags;
 import app.zcat.infochat.messaging.FailureCategory;
-import app.zcat.infochat.messaging.Identity;
 import app.zcat.infochat.messaging.InboundMessage;
 import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.MessagingAdapter;
@@ -128,9 +127,8 @@ public final class SimpleXAdapter implements MessagingAdapter {
      * {@link #name}, {@link #trustLevel}, {@link #capabilities}, and
      * {@link #setInboundHandler} (the handler is stored for inspection)
      * but every transport call — {@link #start}, {@link #send},
-     * {@link #update}, {@link #finalizeMessage},
-     * {@link #assertIdentity} — throws because no config or
-     * {@link HttpClient} was provided ({@link #setTyping} is a
+     * {@link #update}, {@link #finalizeMessage} — throws because no
+     * config or {@link HttpClient} was provided ({@link #setTyping} is a
      * capability-declared no-op on every instance). Used by
      * {@code SimpleXAdapterSkeletonTest} to assert the static capability
      * surface.
@@ -367,16 +365,6 @@ public final class SimpleXAdapter implements MessagingAdapter {
     @Override
     public void stop() {
         close();
-    }
-
-    @Override
-    public Identity assertIdentity(InboundMessage msg) {
-        // SimpleX is HIGH trust because the contact id is the cryptographic
-        // queue address SimpleX's message-routing layer verifies before
-        // delivery to the bot. The codec extracted the verified contact id
-        // into msg.sender() at decode time; assertIdentity returns it
-        // directly (the assertion already happened upstream of the codec).
-        return msg.sender();
     }
 
     @Override

@@ -1,8 +1,6 @@
 package app.zcat.infochat.provider.digest;
 
 import app.zcat.infochat.messaging.AdapterTrustLevel;
-import app.zcat.infochat.messaging.Identity;
-import app.zcat.infochat.messaging.InboundMessage;
 import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.OutboundMessage;
@@ -249,9 +247,6 @@ class DigestWorkerTest {
         @Override public String name() { return name; }
         @Override public app.zcat.infochat.messaging.CapabilityFlags capabilities() { return null; }
         @Override public AdapterTrustLevel trustLevel() { return AdapterTrustLevel.HIGH; }
-        @Override public Identity assertIdentity(InboundMessage msg) {
-            throw new UnsupportedOperationException();
-        }
         @Override public MessageHandle send(OutboundMessage msg) {
             sent.add(msg);
             return null;
