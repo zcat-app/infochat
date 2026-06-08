@@ -14,6 +14,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
@@ -294,6 +295,99 @@ class PostPersisterIT {
             "the re-fetched item must still have exactly one row");
         assertEquals(1, countPosts(sourceUuid, "urn:persister-it:post:batch-new"),
             "the new item must have exactly one row");
+    }
+
+    @Test
+    @Order(6)
+    void persistClampsFutureDatedPublishedAtToFetchedAt() throws Exception {
+        UUID sourceUuid = seedRssSource(
+            "https://persister-it.example.test/feed-6.xml",
+            "Persister IT source 6");
+
+        // A source claims a publish time 48h after we fetched it. The
+        // persistence-boundary clamp must store fetched_at instead, so
+        // a future claim cannot dominate searchPosts ordering
+        // (security.md §Prompt-injection defenses).
+        Instant futurePublishedAt = FETCHED_AT.plus(Duration.ofHours(48));
+        NormalizedPost futureDated = new NormalizedPost(
+            1L,
+            "urn:persister-it:post:future-dated",
+            "Future-dated title",
+            "Future-dated body",
+            "https://persister-it.example.test/posts/future-dated",
+            futurePublishedAt,
+            FETCHED_AT,
+            Map.of()
+        );
+
+        Optional<PostPersister.PersistedPostKey> key =
+            postPersister.persist(sourceUuid, futureDated);
+        assertTrue(key.isPresent(), "future-dated persist must INSERT");
+
+        assertEquals(FETCHED_AT, readPublishedAt(key.get().id()),
+            "a published_at after fetched_at must be clamped to fetched_at, "
+            + "not stored as the original future instant");
+    }
+
+    @Test
+    @Order(7)
+    void persistStoresNonFuturePublishedAtUnchangedAndNullAsNull() throws Exception {
+        UUID sourceUuid = seedRssSource(
+            "https://persister-it.example.test/feed-7.xml",
+            "Persister IT source 7");
+
+        // A publish time before fetched_at is a normal past post and
+        // binds through unchanged (PUBLISHED_AT is 5 minutes before
+        // FETCHED_AT).
+        NormalizedPost pastDated = new NormalizedPost(
+            1L,
+            "urn:persister-it:post:past-dated",
+            "Past-dated title",
+            "Past-dated body",
+            "https://persister-it.example.test/posts/past-dated",
+            PUBLISHED_AT,
+            FETCHED_AT,
+            Map.of()
+        );
+        Optional<PostPersister.PersistedPostKey> pastKey =
+            postPersister.persist(sourceUuid, pastDated);
+        assertTrue(pastKey.isPresent(), "past-dated persist must INSERT");
+        assertEquals(PUBLISHED_AT, readPublishedAt(pastKey.get().id()),
+            "a published_at before fetched_at must be stored unchanged");
+
+        // A null publish time binds as SQL NULL.
+        NormalizedPost nullPublished = new NormalizedPost(
+            1L,
+            "urn:persister-it:post:null-published",
+            "Null-published title",
+            "Null-published body",
+            "https://persister-it.example.test/posts/null-published",
+            null,
+            FETCHED_AT,
+            Map.of()
+        );
+        Optional<PostPersister.PersistedPostKey> nullKey =
+            postPersister.persist(sourceUuid, nullPublished);
+        assertTrue(nullKey.isPresent(), "null-published persist must INSERT");
+        assertEquals(null, readPublishedAt(nullKey.get().id()),
+            "a null published_at must be bound as SQL NULL");
+    }
+
+    /**
+     * Reads the {@code published_at} column for one post id, returning
+     * {@code null} when the column is SQL NULL.
+     */
+    private Instant readPublishedAt(UUID id) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT published_at FROM post WHERE id = ?")) {
+            ps.setObject(1, id);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                Timestamp publishedAt = rs.getTimestamp("published_at");
+                return publishedAt == null ? null : publishedAt.toInstant();
+            }
+        }
     }
 
     /**

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 256 |
+| done | 257 |
 | deferred | 2 |
 | **total** | **263** |
 
@@ -27,7 +27,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-205 — Adapter rate-limit enforcement: implement §6.3.7 + capability caps, or design-amend (complexity: high, risk: medium)
 - M1-210 — Module-DAG enforcement + doc/config-truth sweep (docs say what the build does) (complexity: medium, risk: medium)
 - M1-212 — ProgressNotifier pipeline: implement minimally, defer by amendment, or remove (complexity: medium, risk: medium)
-- M1-226 — Clamp source-claimed published_at to fetched_at at the ingest boundary (complexity: low, risk: low)
 - M1-227 — /digest on|off — group-admin toggle to pause/resume the periodic digest (complexity: medium, risk: medium)
 
 ---
@@ -64,6 +63,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-226 | Clamp source-claimed published_at to fetched_at at the ingest boundary | 2026-06-08 | round 1 APPROVE |
 | M1-225 | Arm /stop timeout + pid on the four non-search chat tools | 2026-06-08 | round 1 APPROVE |
 | M1-224 | Bounded inbound dispatch queue (M1-205 DoS remediation) | 2026-06-08 | round 1 APPROVE |
 | M1-223 | FakeNostrRelay: plain-socket rewrite, drop standalone Vert.x | 2026-06-08 | round 1 APPROVE |
@@ -73,7 +73,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-215 | Core hygiene: sanitized key in getState WARN, full-C0 sanitize, single AuditLogWriter constructor | 2026-06-08 | round 1 APPROVE |
 | M1-214 | SSRF small fixes: Location-resolve exception contract, fec0::/10, scheme case-fold, reason()-based test assertions | 2026-06-08 | round 1 APPROVE |
 | M1-213 | TranslationProvider module placement: move to the LLM adapter or amend the spec | 2026-06-08 | round 1 APPROVE |
-| M1-211 | MessagingAdapter.assertIdentity: wire the spec-mandated surface or remove it | 2026-06-08 | round 1 APPROVE |
 
 ---
 
@@ -407,6 +406,6 @@ M1-221 (done)
 M1-223 (done)
 M1-224 (done)
 M1-225 (done)
-M1-226 (pending) ← runnable
+M1-226 (done)
 M1-227 (pending) ← runnable
 ```

@@ -309,6 +309,14 @@ connect with (see decision D34 and `security.md`).
   cross-relay redelivery (decision D38). It is also the user-visible
   handle for
   `/save`, `/unsave`, and quarantine review.
+  - **`published_at` clamp.** `published_at` is source-controlled (RSS
+    `<pubDate>`, Atom `<published>`, Bluesky `indexedAt`), so the
+    ingest boundary clamps it to `<= fetched_at`: a source cannot
+    claim a future publish time. The clamp keeps a future-dated claim
+    from sorting to the top of every `searchPosts` window and `ORDER
+    BY published_at DESC` fed to the chat LLM (the ordering rationale
+    in security.md §Prompt-injection defenses) and from pushing the
+    per-source reconnect cursor `MAX(published_at)` past now.
 - **Post entity.** Named entities extracted from a post; used for Tier-2
   cross-source linking (decision D6: hybrid named-entity match for
   precision plus cosine similarity over embeddings for recall).

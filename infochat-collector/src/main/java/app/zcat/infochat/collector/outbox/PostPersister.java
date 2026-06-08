@@ -150,9 +150,22 @@ public class PostPersister {
             // NormalizedPost v1 has no author field; the column is
             // nullable per V7.
             ps.setString(7, null);
+            // Clamp a source-claimed publish time to the wall-clock
+            // receipt time. published_at is source-controlled (RSS
+            // <pubDate>, Atom <published>, Bluesky indexedAt); a
+            // future-dated claim would sort to the top of every
+            // searchPosts window and ORDER BY published_at DESC fed to
+            // the chat LLM (security.md §Prompt-injection defenses) and
+            // push the per-source reconnect cursor MAX(published_at)
+            // past now. A non-future value binds unchanged; a null
+            // value binds as SQL NULL. fetchedAt is non-null per the
+            // NormalizedPost SPI contract, so the comparison is total.
+            Instant fetchedAt = normalized.fetchedAt();
             Instant publishedAt = normalized.publishedAt();
-            ps.setTimestamp(8, publishedAt == null ? null : Timestamp.from(publishedAt));
-            ps.setTimestamp(9, Timestamp.from(normalized.fetchedAt()));
+            Instant clampedPublishedAt =
+                publishedAt != null && publishedAt.isAfter(fetchedAt) ? fetchedAt : publishedAt;
+            ps.setTimestamp(8, clampedPublishedAt == null ? null : Timestamp.from(clampedPublishedAt));
+            ps.setTimestamp(9, Timestamp.from(fetchedAt));
             // The NOT EXISTS pre-filter's uid probe.
             ps.setString(10, uid);
 

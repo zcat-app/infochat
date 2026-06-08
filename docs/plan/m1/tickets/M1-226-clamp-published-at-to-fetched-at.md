@@ -1,7 +1,7 @@
 ---
 id: M1-226
 title: "Clamp source-claimed published_at to fetched_at at the ingest boundary"
-status: pending
+status: done
 created: 2026-06-08
 last_updated: 2026-06-08
 blocked_by: []
@@ -35,11 +35,47 @@ spec_refs:
   - docs/spec/schema.md §Posts and derivatives
   - docs/spec/security.md §Prompt-injection defenses
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-08
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 129
+      removed: 9
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-06-08
+    verdict: CLEAN
+    base: cf83011
+    head: working-tree (branch m1/M1-226-clamp-published-at-to-fetched-at, uncommitted)
+    verdict_file: docs/plan/m1/redteam/M1-226-2026-06-08.md
+    findings_count: 0
+    out_of_model_count: 1
+    note: |
+      Adversary confirmed PostPersister.persist is the single persistence
+      sink for RSS/Bluesky/Nostr, so the published_at <= fetched_at clamp
+      is delivered uniformly with no bypass; isAfter direction correct,
+      comparison total, reconnect-cursor advance vector closed. The one
+      OUT-OF-MODEL note (no lower-bound clamp on past-dated timestamps) is
+      not a finding and already matches out_of_scope entry 2. No
+      remediation; safe to commit.
+clarity_check:
+  date: 2026-06-08
+  verdict: WARN
+  warnings:
+    - "COMPLEXITY-RISK-CALIBRATED: risk: low is borderline for a security_relevant ticket touching the published_at persistence boundary; a comparison-direction bug would be silent. Reviewer should verify the isAfter direction carefully."
+    - "TEST-CHANGES-AUTHORIZED: test_plan.adds lists PostPersisterIT.java as added, but the file already exists. Should be under test_plan.modifies. Cosmetic — existing test assertions are unaffected by the clamp (their PUBLISHED_AT precedes FETCHED_AT)."
+  blockers: []
 ---
 
 # M1-226: Clamp source-claimed published_at to fetched_at at ingest
