@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.summary;
 
 import app.zcat.infochat.messaging.ScopeRef;
+import app.zcat.infochat.provider.chat.CancellationService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -60,6 +61,9 @@ public class EligiblePostQuery {
 
     @Inject
     DataSource dataSource;
+
+    @Inject
+    CancellationService cancellationService;
 
     @ConfigProperty(name = "infochat.summary.cluster-cap", defaultValue = "200")
     int clusterCap;
@@ -217,7 +221,7 @@ public class EligiblePostQuery {
         params.add(clusterCap);
 
         try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql.toString())) {
+             PreparedStatement ps = prepareTimed(conn, sql.toString())) {
             bindParams(ps, conn, params);
             try (ResultSet rs = ps.executeQuery()) {
                 List<Post> out = new ArrayList<>();
@@ -249,7 +253,7 @@ public class EligiblePostQuery {
     private int countFollowedTags(String scopeKind, UUID scopeId) {
         String sql = "SELECT COUNT(*) FROM scope_tag WHERE scope_kind = ? AND scope_id = ?";
         try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+             PreparedStatement ps = prepareTimed(conn, sql)) {
             ps.setString(1, scopeKind);
             ps.setObject(2, scopeId);
             try (ResultSet rs = ps.executeQuery()) {
@@ -285,7 +289,7 @@ public class EligiblePostQuery {
               + " ORDER BY post_count DESC, t.name ASC "
               + " LIMIT ?";
         try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+             PreparedStatement ps = prepareTimed(conn, sql)) {
             ps.setString(1, scopeKind);
             ps.setObject(2, scopeId);
             ps.setTimestamp(3, Timestamp.from(cutoff));
@@ -305,7 +309,7 @@ public class EligiblePostQuery {
     private TagMode readTagMode(String scopeKind, UUID scopeId) {
         String sql = "SELECT tag_mode FROM scope_preferences WHERE scope_kind = ? AND scope_id = ?";
         try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+             PreparedStatement ps = prepareTimed(conn, sql)) {
             ps.setString(1, scopeKind);
             ps.setObject(2, scopeId);
             try (ResultSet rs = ps.executeQuery()) {
@@ -331,7 +335,7 @@ public class EligiblePostQuery {
     public List<String> readVocabulary() {
         String sql = "SELECT name FROM tag ORDER BY name ASC";
         try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql);
+             PreparedStatement ps = prepareTimed(conn, sql);
              ResultSet rs = ps.executeQuery()) {
             List<String> out = new ArrayList<>();
             while (rs.next()) {
@@ -341,6 +345,19 @@ public class EligiblePostQuery {
         } catch (SQLException e) {
             throw new IllegalStateException("EligiblePostQuery.readVocabulary failed", e);
         }
+    }
+
+    /**
+     * Prepare a statement on {@code conn} after applying the profile-driven
+     * statement_timeout. Per commands.md §Conversation control, on-demand
+     * /summary's read-only queries run under a statement_timeout that bounds
+     * the worst case even when pg_cancel_backend fails. Every caller declares
+     * {@code conn} first in its try-with-resources, so a SET that throws still
+     * closes the connection (the half-open connection never leaks).
+     */
+    private PreparedStatement prepareTimed(Connection conn, String sql) throws SQLException {
+        cancellationService.applyStatementTimeout(conn);
+        return conn.prepareStatement(sql);
     }
 
     private void bindParams(PreparedStatement ps, Connection conn, List<Object> params) throws SQLException {

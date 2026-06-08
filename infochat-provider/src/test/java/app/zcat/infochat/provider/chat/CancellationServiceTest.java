@@ -8,6 +8,7 @@ import java.io.PrintWriter;
 import java.lang.reflect.Proxy;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.SQLFeatureNotSupportedException;
 import java.sql.Statement;
@@ -104,6 +105,42 @@ class CancellationServiceTest {
         assertEquals(Duration.ofSeconds(30), service.statementTimeout());
     }
 
+    @Test
+    void armToolConnectionAppliesTimeoutAndRegistersPid() throws SQLException {
+        RecordingStatement recorder = new RecordingStatement();
+        Connection conn = proxyConnectionWithBackendPid(recorder, 12345);
+
+        // The chat turn holds the in-flight slot when the tool runs.
+        tracker.tryAcquire(USER_A, "dm", SCOPE_A);
+
+        service.armToolConnection(conn, USER_A, "dm", SCOPE_A);
+
+        assertTrue(recorder.executedSql.stream().anyMatch(s -> s.contains("SET statement_timeout")),
+                "armToolConnection must apply statement_timeout. Got: " + recorder.executedSql);
+        InFlightTracker.CancellationHandle handle =
+                tracker.getCancellationHandle(USER_A, "dm", SCOPE_A).orElseThrow();
+        assertTrue(handle.hasPgBackendPid(),
+                "armToolConnection must register the backend pid on the in-flight handle");
+        assertEquals(12345, handle.pgBackendPid(),
+                "the registered pid must be the connection's pg_backend_pid()");
+    }
+
+    @Test
+    void armToolConnectionWithoutSlotStillAppliesTimeout() throws SQLException {
+        RecordingStatement recorder = new RecordingStatement();
+        Connection conn = proxyConnectionWithBackendPid(recorder, 999);
+
+        // No slot held (e.g. /stop already released it, or the tool runs
+        // outside a chat turn): the timeout still applies; pid registration
+        // is a no-op rather than throwing.
+        service.armToolConnection(conn, USER_A, "dm", SCOPE_A);
+
+        assertTrue(recorder.executedSql.stream().anyMatch(s -> s.contains("SET statement_timeout")),
+                "statement_timeout must still apply with no in-flight slot");
+        assertTrue(tracker.getCancellationHandle(USER_A, "dm", SCOPE_A).isEmpty(),
+                "no slot should exist, so pid registration is a no-op");
+    }
+
     // ----- stubs -----------------------------------------------------------
 
     private static class RecordingDataSource implements DataSource {
@@ -171,6 +208,54 @@ class CancellationServiceTest {
                     case "close" -> null;
                     default -> throw new UnsupportedOperationException(
                             "Connection." + method.getName());
+                });
+    }
+
+    // Connection proxy that records SET statement_timeout (execute) and
+    // serves SELECT pg_backend_pid() (executeQuery → one row → the given pid).
+    private static Connection proxyConnectionWithBackendPid(RecordingStatement recorder, int pid) {
+        return (Connection) Proxy.newProxyInstance(
+                Connection.class.getClassLoader(),
+                new Class<?>[] { Connection.class },
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "createStatement" -> (Statement) Proxy.newProxyInstance(
+                            Statement.class.getClassLoader(),
+                            new Class<?>[] { Statement.class },
+                            (sProxy, sMethod, sArgs) -> switch (sMethod.getName()) {
+                                case "execute" -> {
+                                    recorder.executedSql.add((String) sArgs[0]);
+                                    yield false;
+                                }
+                                case "executeQuery" -> {
+                                    recorder.executedSql.add((String) sArgs[0]);
+                                    yield singleIntResultSet(pid);
+                                }
+                                case "close" -> null;
+                                default -> throw new UnsupportedOperationException(
+                                        "Statement." + sMethod.getName());
+                            });
+                    case "close" -> null;
+                    default -> throw new UnsupportedOperationException(
+                            "Connection." + method.getName());
+                });
+    }
+
+    // ResultSet proxy with exactly one row whose single int column is value.
+    private static ResultSet singleIntResultSet(int value) {
+        boolean[] advanced = { false };
+        return (ResultSet) Proxy.newProxyInstance(
+                ResultSet.class.getClassLoader(),
+                new Class<?>[] { ResultSet.class },
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "next" -> {
+                        if (advanced[0]) yield false;
+                        advanced[0] = true;
+                        yield true;
+                    }
+                    case "getInt" -> value;
+                    case "close" -> null;
+                    default -> throw new UnsupportedOperationException(
+                            "ResultSet." + method.getName());
                 });
     }
 }

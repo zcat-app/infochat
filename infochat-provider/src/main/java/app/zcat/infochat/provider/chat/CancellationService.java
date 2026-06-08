@@ -9,7 +9,9 @@ import org.slf4j.LoggerFactory;
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.UUID;
@@ -82,10 +84,36 @@ public class CancellationService {
     }
 
     /**
+     * Arm a chat-tool DB connection for /stop. Applies the profile-driven
+     * statement_timeout (the safety net) and registers this connection's
+     * Postgres backend pid on the in-flight cancellation handle for
+     * (userId, scope), so a concurrent /stop can pg_cancel_backend the
+     * in-flight tool query at exactly the connection running it. Pid
+     * registration is a no-op when no slot is currently held (e.g. /stop
+     * already released it, or the tool is exercised outside a chat turn);
+     * the statement_timeout still applies in that case.
+     */
+    public void armToolConnection(Connection conn, UUID userId,
+                                  String scopeKind, UUID scopeId) throws SQLException {
+        applyStatementTimeout(conn);
+        int pid = readBackendPid(conn);
+        inFlightTracker.getCancellationHandle(userId, scopeKind, scopeId)
+                .ifPresent(handle -> handle.registerPgBackendPid(pid));
+    }
+
+    /**
      * Expose the configured statement timeout for test verification.
      */
     public Duration statementTimeout() {
         return statementTimeout;
+    }
+
+    private static int readBackendPid(Connection conn) throws SQLException {
+        try (Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT pg_backend_pid()")) {
+            rs.next();
+            return rs.getInt(1);
+        }
     }
 
     private void cancelPgBackend(int pid) {

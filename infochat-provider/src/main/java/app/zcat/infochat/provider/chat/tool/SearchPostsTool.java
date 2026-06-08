@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.chat.tool;
 
 import app.zcat.infochat.core.util.JsonEscaper;
+import app.zcat.infochat.provider.chat.CancellationService;
 import app.zcat.infochat.provider.chat.ChatToolRegistry;
 import org.jspecify.annotations.Nullable;
 
@@ -31,10 +32,12 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
     private enum TagMode { ALL, EXPLICIT }
 
     private final DataSource dataSource;
+    private final CancellationService cancellationService;
 
     @Inject
-    public SearchPostsTool(DataSource dataSource) {
+    public SearchPostsTool(DataSource dataSource, CancellationService cancellationService) {
         this.dataSource = dataSource;
+        this.cancellationService = cancellationService;
     }
 
     @Override
@@ -52,23 +55,32 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
         if (window.compareTo(WINDOW_MIN) < 0) window = WINDOW_MIN;
         if (window.compareTo(WINDOW_MAX) > 0) window = WINDOW_MAX;
 
-        for (String tag : tags) {
-            if (!isKnownTag(tag)) {
-                throw new IllegalArgumentException("Unknown tag: " + tag);
+        // One pooled connection per tool call. Arm it for /stop first
+        // (statement_timeout safety net + register this connection's backend
+        // pid on the in-flight handle), then run every read on this single
+        // connection: the registered pid is the one actually executing the
+        // query, and the pool sees one acquisition rather than four.
+        try (Connection conn = dataSource.getConnection()) {
+            cancellationService.armToolConnection(conn, userId, scopeKind, scopeId);
+
+            for (String tag : tags) {
+                if (!isKnownTag(conn, tag)) {
+                    throw new IllegalArgumentException("Unknown tag: " + tag);
+                }
             }
+
+            TagMode tagMode = readTagMode(conn, scopeKind, scopeId);
+            List<String> effectiveTags =
+                    computeEffectiveTags(conn, tags, tagMode, scopeKind, scopeId);
+            Instant cutoff = Instant.now().minus(window);
+
+            return queryPosts(conn, scopeKind, scopeId, effectiveTags, cutoff, limit);
         }
-
-        TagMode tagMode = readTagMode(scopeKind, scopeId);
-        List<String> effectiveTags = computeEffectiveTags(tags, tagMode, scopeKind, scopeId);
-        Instant cutoff = Instant.now().minus(window);
-
-        return queryPosts(scopeKind, scopeId, effectiveTags, cutoff, limit);
     }
 
-    private boolean isKnownTag(String tag) throws SQLException {
+    private boolean isKnownTag(Connection conn, String tag) throws SQLException {
         String sql = "SELECT 1 FROM tag WHERE name = ?";
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, tag);
             try (ResultSet rs = ps.executeQuery()) {
                 return rs.next();
@@ -76,11 +88,11 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
         }
     }
 
-    private TagMode readTagMode(String scopeKind, UUID scopeId) throws SQLException {
+    private TagMode readTagMode(Connection conn, String scopeKind, UUID scopeId)
+            throws SQLException {
         String sql = "SELECT tag_mode FROM scope_preferences "
                    + "WHERE scope_kind = ? AND scope_id = ?";
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, scopeKind);
             ps.setObject(2, scopeId);
             try (ResultSet rs = ps.executeQuery()) {
@@ -92,12 +104,12 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
         }
     }
 
-    private List<String> computeEffectiveTags(List<String> requestedTags, TagMode tagMode,
-                                               String scopeKind, UUID scopeId)
+    private List<String> computeEffectiveTags(Connection conn, List<String> requestedTags,
+                                               TagMode tagMode, String scopeKind, UUID scopeId)
             throws SQLException {
         if (!requestedTags.isEmpty()) {
             if (tagMode == TagMode.EXPLICIT) {
-                Set<String> scopeTags = readScopeTags(scopeKind, scopeId);
+                Set<String> scopeTags = readScopeTags(conn, scopeKind, scopeId);
                 List<String> intersection = new ArrayList<>();
                 for (String tag : requestedTags) {
                     if (scopeTags.contains(tag)) intersection.add(tag);
@@ -107,17 +119,17 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
             return requestedTags;
         }
         if (tagMode == TagMode.EXPLICIT) {
-            return new ArrayList<>(readScopeTags(scopeKind, scopeId));
+            return new ArrayList<>(readScopeTags(conn, scopeKind, scopeId));
         }
         return List.of();
     }
 
-    private Set<String> readScopeTags(String scopeKind, UUID scopeId) throws SQLException {
+    private Set<String> readScopeTags(Connection conn, String scopeKind, UUID scopeId)
+            throws SQLException {
         String sql = "SELECT t.name FROM scope_tag st "
                    + "JOIN tag t ON t.id = st.tag_id "
                    + "WHERE st.scope_kind = ? AND st.scope_id = ?";
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, scopeKind);
             ps.setObject(2, scopeId);
             try (ResultSet rs = ps.executeQuery()) {
@@ -128,7 +140,7 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
         }
     }
 
-    private String queryPosts(String scopeKind, UUID scopeId,
+    private String queryPosts(Connection conn, String scopeKind, UUID scopeId,
                                List<String> effectiveTags, Instant cutoff,
                                int limit) throws SQLException {
         StringBuilder sql = new StringBuilder();
@@ -155,8 +167,7 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
         sql.append("ORDER BY p.published_at DESC, p.id DESC LIMIT ?");
         params.add(limit);
 
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql.toString())) {
+        try (PreparedStatement ps = conn.prepareStatement(sql.toString())) {
             bindParams(ps, conn, params);
             try (ResultSet rs = ps.executeQuery()) {
                 StringBuilder json = new StringBuilder("[");
