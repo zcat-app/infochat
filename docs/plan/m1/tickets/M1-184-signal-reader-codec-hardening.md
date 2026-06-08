@@ -108,10 +108,13 @@ redteam_audits:
       every threat-model commitment on the changed surface (input intake,
       Adapter→Provider trust boundary, D37, messaging-adapter DOS). Two
       OUT-OF-MODEL observations recorded, both in code this diff does NOT
-      touch: the pre-existing unbounded inbound-line assembly in
-      SignalJsonRpcClient (~520-537) is a candidate follow-up ticket if a
-      cap on daemon line length is wanted; the FakeRelayServer loopback
-      handshake read loops are test-fixture-only.
+      touch. POST-AUDIT CORRECTION (verified against the file): both are
+      FALSE POSITIVES — the threat-actor sees only the diff, not the full
+      file. The inbound line is ALREADY capped
+      (SignalJsonRpcClient.MAX_INBOUND_LINE_CHARS = 16_384, drop-on-overflow
+      + skipToNewline drain, introduced M1-107); no follow-up ticket is
+      warranted. The FakeRelayServer/FakeNostrRelay handshake reads are
+      test-fixture-only. See the verdict file's POST-AUDIT CORRECTION.
 ---
 
 # M1-184: Signal reader/codec hardening against malformed frames
