@@ -1,9 +1,14 @@
 ---
 id: M1-228
 title: "Don't record a missed digest slot for a window the group was paused through"
-status: pending
+status: done
 created: 2026-06-08
 last_updated: 2026-06-08
+clarity_check:
+  date: 2026-06-08
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: [M1-227]
 files_budget: 3
 files_scope:
@@ -35,7 +40,20 @@ test_plan:
 spec_refs:
   - docs/spec/commands.md §Periodic group digests
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-08
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 105
+      removed: 7
 overrides: []
 aborted_attempts: []
 reopens: []

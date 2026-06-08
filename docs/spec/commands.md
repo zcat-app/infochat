@@ -1173,6 +1173,11 @@ operator must see) and increments a `digest_slots_missed_total`
 counter labelled by group. The next slot fires normally on its
 own schedule. There is no operator-visible chat surface for
 missed digests in v1 — operators read the audit log or counter.
+A slot window the group was **paused through** via `/digest off`
+(re-enabled only after the window had already ended) is likewise
+neither caught up nor recorded as missed — symmetric to the
+approval carve-out above: the group was intentionally disabled for
+that window, so the absent digest is expected, not a missed slot.
 
 **Degraded-fallback exit.** A degraded slot (headlines + sources,
 no LLM prose) **does not** affect any subsequent slot: each slot's

@@ -162,6 +162,18 @@ public class DigestScheduler {
                 if (approvedAt != null && !windowEnd.isAfter(approvedAt)) {
                     return null;
                 }
+                // Pause carve-out, symmetric to the approval carve-out above: a
+                // group currently enabled whose most-recent re-enable happened
+                // after this window ended was paused through the window via
+                // /digest off, so the slot is neither caught up nor recorded as
+                // missed — the absent digest was intentional, not a failure. The
+                // boundary comes from the DIGEST_ENABLE audit rows M1-227 writes.
+                // A currently-disabled group never reaches this branch: it is
+                // excluded from queryActiveGroups by the digest_enabled gate.
+                Instant enabledAt = latestDigestEnableTime(group.id);
+                if (enabledAt != null && enabledAt.isAfter(windowEnd)) {
+                    return null;
+                }
                 // Past window-end with no cache row: missed slot
                 recordMissedSlot(group.id, slotKind, windowStart, windowEnd);
                 return null;
@@ -213,6 +225,30 @@ public class DigestScheduler {
                 rs.next();
                 Timestamp approvedAt = rs.getTimestamp(1);
                 return approvedAt == null ? null : approvedAt.toInstant();
+            }
+        }
+    }
+
+    /**
+     * Latest DIGEST_ENABLE audit timestamp for the group, or {@code null}
+     * when the group has no DIGEST_ENABLE row — never toggled, or digest
+     * on by default. Mirrors {@link #latestApprovalTime}: reads
+     * {@code audit_log_view} because the provider role has INSERT-only on
+     * {@code audit_log} itself, and the DIGEST_ENABLE rows the /digest
+     * toggle writes are append-only (Invariant 10) so the re-enable
+     * boundary cannot disappear later.
+     */
+    @Nullable Instant latestDigestEnableTime(UUID groupId) throws SQLException {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT max(created_at) FROM audit_log_view"
+                             + " WHERE action = 'DIGEST_ENABLE'"
+                             + " AND target_kind = 'group' AND target_id = ?")) {
+            ps.setString(1, groupId.toString());
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                Timestamp enabledAt = rs.getTimestamp(1);
+                return enabledAt == null ? null : enabledAt.toInstant();
             }
         }
     }

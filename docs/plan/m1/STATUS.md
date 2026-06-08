@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 262 |
+| done | 263 |
 | deferred | 2 |
 | **total** | **265** |
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-228 — Don't record a missed digest slot for a window the group was paused through (complexity: low, risk: low)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -61,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-229 | Split inbound rate-cap: per-user vs shared stranger bucket | 2026-06-08 | round 1 APPROVE |
+| M1-228 | Don't record a missed digest slot for a window the group was paused through | 2026-06-08 | round 1 APPROVE |
 | M1-227 | /digest on|off — group-admin toggle to pause/resume the periodic digest | 2026-06-08 | round 1 APPROVE |
 | M1-226 | Clamp source-claimed published_at to fetched_at at the ingest boundary | 2026-06-08 | round 1 APPROVE |
 | M1-225 | Arm /stop timeout + pid on the four non-search chat tools | 2026-06-08 | round 1 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-219 | searchPosts window/ordering semantics: bind the spec to a timestamp column | 2026-06-08 | round 1 APPROVE |
 | M1-218 | Provider lows: /retry in-flight reply, /invite list-vs-revoke code identity, handle-keyed slot release | 2026-06-08 | round 1 APPROVE |
 | M1-216 | Collector lows: TTL-job partition independence, saturation counter, sha256 dedup, zero-width escapes | 2026-06-08 | round 1 APPROVE |
-| M1-215 | Core hygiene: sanitized key in getState WARN, full-C0 sanitize, single AuditLogWriter constructor | 2026-06-08 | round 1 APPROVE |
 
 ---
 
@@ -405,6 +405,6 @@ M1-224 (done)
 M1-225 (done)
 M1-226 (done)
 M1-227 (done)
-  └── M1-228 (pending) ← runnable
+  └── M1-228 (done)
 M1-229 (done)
 ```

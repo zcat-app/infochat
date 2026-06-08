@@ -186,6 +186,43 @@ class DigestSchedulerMissedSlotTest {
                 "a window ending after approval must still record DIGEST_SLOT_MISSED");
     }
 
+    @Test
+    void pausedThroughWindow_recordsNoMissedSlot() throws Exception {
+        UUID groupId = insertGroup("UTC");
+
+        // Morning window [07:45, 08:15] UTC; clock at 09:00 = past window-end.
+        // The group's latest DIGEST_ENABLE (08:30) lands AFTER the window
+        // ended: it was paused through the whole window via /digest off, so
+        // the elapsed slot is neither caught up nor recorded as missed.
+        seedDigestEnableRow(groupId, todayAt(8, 30, "UTC"));
+        awaitDispatches(scheduler.tickAt(todayAt(9, 0, "UTC")));
+
+        assertEquals(0, countMissedSlotAuditRows(groupId),
+                "a window the group was paused through (re-enabled after"
+                        + " window-end) must not produce a DIGEST_SLOT_MISSED row");
+        Instant windowStart = todayAt(7, 45, "UTC");
+        String date = windowStart.toString().substring(0, 10);
+        String key = "digest_slot_missed:" + groupId + ":morning:" + date;
+        assertTrue(throttledAdminNotifier.getState(key).isEmpty(),
+                "a window the group was paused through must not notify the admin");
+    }
+
+    @Test
+    void enabledBeforeWindowEnd_stillRecordsMissedSlot() throws Exception {
+        UUID groupId = insertGroup("UTC");
+
+        // The latest DIGEST_ENABLE (07:00) PREDATES this window's end (08:15):
+        // the group was already enabled when the window elapsed, so a genuine
+        // miss must still be recorded. The pause carve-out must not suppress a
+        // real miss merely because an older DIGEST_ENABLE row exists.
+        seedDigestEnableRow(groupId, todayAt(7, 0, "UTC"));
+        awaitDispatches(scheduler.tickAt(todayAt(9, 0, "UTC")));
+
+        assertEquals(1, countMissedSlotAuditRows(groupId),
+                "a window that ended while the group was enabled must still"
+                        + " record DIGEST_SLOT_MISSED (carve-out must not suppress real misses)");
+    }
+
     /**
      * Approve the group through the real handler so the test covers the
      * complete promise: the same-transaction APPROVE_GROUP audit row the
@@ -280,6 +317,22 @@ class DigestSchedulerMissedSlotTest {
                 ps.setObject(i + 1, params[i]);
             }
             ps.execute();
+        }
+    }
+
+    // Seeds a DIGEST_ENABLE audit row with an explicit created_at so the
+    // scheduler's latestDigestEnableTime read sees a controlled re-enable
+    // boundary. A raw INSERT (not the /digest handler, which is out of this
+    // ticket's scope) is the minimal seam, and audit_log's append-only
+    // triggers block UPDATE/DELETE, not INSERT.
+    private void seedDigestEnableRow(UUID groupId, Instant createdAt) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO audit_log (created_at, action, target_kind, target_id) "
+                             + "VALUES (?, 'DIGEST_ENABLE', 'group', ?)")) {
+            ps.setObject(1, createdAt.atOffset(ZoneOffset.UTC));
+            ps.setString(2, groupId.toString());
+            ps.executeUpdate();
         }
     }
 
