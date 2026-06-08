@@ -35,11 +35,14 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Behavioral assertions for {@link SearchPostsTool}'s result shape:
- * the emitted {@code ready_at} JSON field carries the post's
- * {@code ready_at} column value (the spec's tool-catalogue shape),
- * not {@code published_at}. Seeds fixtures directly via JDBC against
- * the &#64;QuarkusTest DevServices DB.
+ * Behavioral assertions for {@link SearchPostsTool}'s result shape and
+ * its window/ordering semantics. Two things are pinned: (1) the emitted
+ * {@code ready_at} JSON field carries the post's {@code ready_at} column
+ * value (the spec's tool-catalogue shape), not {@code published_at}; and
+ * (2) the {@code window} filter and result ordering both bind to
+ * {@code published_at}, with {@code ready_at} a display field only
+ * (docs/spec/security.md §Prompt-injection defenses). Seeds fixtures
+ * directly via JDBC against the &#64;QuarkusTest DevServices DB.
  */
 @QuarkusTest
 class SearchPostsToolTest {
@@ -128,6 +131,54 @@ class SearchPostsToolTest {
         } finally {
             inFlightTracker.release(userId, "dm", userId, slot);
         }
+    }
+
+    @Test
+    void windowFilterBindsToPublishedAtNotReadyAt() throws Exception {
+        UUID userId = seedUser("window-bind");
+        UUID sourceId = seedSource("window-bind-src", "Window-bind source");
+        seedSubscription("dm", userId, sourceId);
+        // A late-readied post: published long before the window opens, but
+        // readied just now. published_at is the window filter, so it must be
+        // EXCLUDED from a 2h window — even though ready_at falls inside it.
+        // Were the window bound to ready_at, this post would surface.
+        Instant publishedAt = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+                .minus(5, ChronoUnit.HOURS);
+        Instant readyAt = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+                .minus(30, ChronoUnit.MINUTES);
+        seedReadyPost("late-readied-post", sourceId, publishedAt, readyAt);
+
+        String json = tool.execute(userId, "dm", userId, Map.of("window", "PT2H"));
+
+        assertEquals("[]", json,
+            "a post whose published_at predates the window must be excluded even "
+                + "when its ready_at falls inside the window; got: " + json);
+    }
+
+    @Test
+    void resultOrderingBindsToPublishedAtNotReadyAt() throws Exception {
+        UUID userId = seedUser("order-bind");
+        UUID sourceId = seedSource("order-bind-src", "Order-bind source");
+        seedSubscription("dm", userId, sourceId);
+        Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        // Two posts whose published_at and ready_at order them oppositely.
+        // newerPublished has the more recent published_at but the older
+        // ready_at; olderPublished is the reverse. published_at DESC ordering
+        // puts newerPublished first; a ready_at DESC ordering would flip them.
+        seedReadyPost("newer-published", sourceId,
+                now.minus(1, ChronoUnit.HOURS), now.minus(3, ChronoUnit.HOURS));
+        seedReadyPost("older-published", sourceId,
+                now.minus(2, ChronoUnit.HOURS), now.minus(30, ChronoUnit.MINUTES));
+
+        String json = tool.execute(userId, "dm", userId, Map.of("window", "PT4H"));
+
+        int newerIndex = json.indexOf(PREFIX + "newer-published");
+        int olderIndex = json.indexOf(PREFIX + "older-published");
+        assertTrue(newerIndex >= 0 && olderIndex >= 0,
+            "both posts must be within the 4h window; got: " + json);
+        assertTrue(newerIndex < olderIndex,
+            "results must be ordered by published_at descending (newer published_at "
+                + "first), not by ready_at; got: " + json);
     }
 
     // ---------- helpers ----------

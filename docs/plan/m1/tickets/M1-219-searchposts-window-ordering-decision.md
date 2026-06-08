@@ -1,9 +1,9 @@
 ---
 id: M1-219
 title: "searchPosts window/ordering semantics: bind the spec to a timestamp column"
-status: pending
+status: done
 created: 2026-06-07
-last_updated: 2026-06-07
+last_updated: 2026-06-08
 blocked_by: [M1-197]
 files_budget: 4
 files_scope:
@@ -33,11 +33,32 @@ test_plan:
 spec_refs:
   - docs/spec/security.md §Prompt-injection defenses
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-08
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 71
+      removed: 14
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+clarity_check:
+  date: 2026-06-08
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE item 3: 'existing named tests for tag filtering, visibility, and the ready_at value' does not name specific test classes; reviewer must discover them."
+    - "COMPLEXITY-RISK-CALIBRATED: risk: low is mildly under-stated for a security_relevant ticket touching an LLM tool-call predicate; consider risk: medium."
+    - "TEST-CHANGES-AUTHORIZED: acceptance item 3's 'except where they pin the corrected ordering' carve-out signals conditional pre-existing test modification; add an 'Authorized test changes' section once the direction is chosen, before the first commit modifying an existing test."
+  blockers: []
 ---
 
 # M1-219: searchPosts window/ordering semantics
