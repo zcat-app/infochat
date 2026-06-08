@@ -576,8 +576,13 @@ public class InboundRouter {
         }
 
         // Step 6 — Parse + dispatch (slash-command resolver or
-        // chat-mode fallback).
-        String body;
+        // chat-mode fallback). The body is @Nullable: a slash handler
+        // that owns its own message lifecycle via the ProgressNotifier
+        // returns null (handleSlash propagates it) to signal
+        // "already delivered" — the router then performs NO send for
+        // that invocation, so a placeholder→finalize handler does not
+        // double-send. Every other branch assigns a non-null body.
+        @Nullable String body;
         try {
             if (normalized.startsWith("/")) {
                 // Per-group command rate cap (D47) per spec §Rate
@@ -660,7 +665,11 @@ public class InboundRouter {
             body = INTERNAL_ERROR_REPLY;
         }
 
-        sendReply(msg.scope(), body, adapterName);
+        // A null body means a self-delivering handler already shipped
+        // its reply through the ProgressNotifier — skip the router send.
+        if (body != null) {
+            sendReply(msg.scope(), body, adapterName);
+        }
     }
 
     /**
@@ -759,12 +768,16 @@ public class InboundRouter {
         return normalized.startsWith(prefix + " ") && normalized.endsWith(" confirm");
     }
 
-    private String handleSlash(ScopeRef scope, String normalized) {
+    private @Nullable String handleSlash(ScopeRef scope, String normalized) {
         String firstToken = normalized.split("\\s+", 2)[0];
         String commandName = firstToken.substring(1);
         for (CommandHandler handler : commandHandlers) {
             if (handler.name().equals(commandName)) {
-                return handler.handle(scope, normalized).text();
+                // A null return signals the handler already delivered its
+                // reply via the ProgressNotifier; propagate the null so
+                // onMessage skips the router send (no double-send).
+                OutboundMessage reply = handler.handle(scope, normalized);
+                return reply == null ? null : reply.text();
             }
         }
         // Asset-command fallback: operator-configured assets have no per-asset

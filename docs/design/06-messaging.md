@@ -422,6 +422,22 @@
     Provider-side logic relies on this fallback to remain transport-neutral —
     callers MUST NOT condition on the capability flag themselves.
 
+  The provider-side concrete notifier is `StageProgressNotifier` (M1-212); it
+  drives this lifecycle for `/summary` (digest and chat-agent wiring remain named
+  follow-ups). It resolves the bound adapter from
+  `AdapterRegistry.activatedAdapters()` keyed by the inbound `adapterName`, sends
+  the placeholder, renders the five non-terminal stages as coalesced `update`s,
+  and finalizes on the payload-carrying terminal calls `complete(scope, finalText)`
+  / `fail(scope)` (the SPI gained these so the finalized body is the real summary,
+  not a stage label). Edit coalescing additionally runs **provider-side**, honoring
+  a single system-wide floor (`infochat.messaging.progress.min-edit-interval-ms`,
+  default 600ms): the spec's `max(adapterMin, systemFloor)` degrades to this
+  `systemFloor` in v1 because per-adapter `adapterMin` is not yet surfaced to the
+  notifier — the adapter-side coalescing bullet above remains the transport's own
+  obligation. The dispatch seam: a `CommandHandler` that self-delivers via the
+  notifier returns `null` from `handle`, and `InboundRouter` performs no send for
+  that invocation (no double-send).
+
   ### 6.3.9 Typing indicators
 
   - Adapters with `supportsTypingIndicator = true` SHOULD render the indicator while
@@ -1060,8 +1076,8 @@
 
   Per spec/messaging.md §Required SPI surface — Membership events, Signal exposes member-joined / member-left natively (`memberJoined`/`memberLeft` ACI arrays in `groupV2` update envelopes) and declares `supportsMembershipEvents = true`, so its group path is spec-live, not vestigial. `SignalJsonRpcClient` routes every `receive` notification that is not DM-scope to a group-notification route, which `SignalAdapter` wires to its `groupHandler()` factory when attaching the connected client. The envelope decode is split, not duplicated: `SignalMessageCodec.extractDm` keeps only DM-scope envelopes and `SignalGroupHandler.handleReceive` keeps only group-scope ones — complementary filters over the same notification stream.
 
-  ### (c) `ProgressNotifier` — verdict: **keep-as-seam**
+  ### (c) `ProgressNotifier` — verdict: **wired (M1-212)**
 
-  spec/messaging.md §Progress notifications (D31; §6.3.8 above) mandates the surface: long-running handlers (`/summary`, periodic digest, chat agent) publish stage events to a cross-cutting `ProgressNotifier`. Zero implementations therefore means an unshipped v1 surface, not dead code. The interface is retained as the v1 seam; wiring a concrete notifier into the provider handlers is follow-up work, and removing the surface would require a spec amendment.
+  spec/messaging.md §Progress notifications (D31; §6.3.8 above) mandates the surface: long-running handlers (`/summary`, periodic digest, chat agent) publish stage events to a cross-cutting `ProgressNotifier`. M1-212 wired the concrete `StageProgressNotifier` (§6.3.8) and made `/summary` publish through it — the prior keep-as-seam verdict (an unshipped v1 surface awaiting follow-up wiring) is superseded. The interface gained payload-carrying terminal calls (`complete`/`fail`) and stays an interface; `ProgressStage` keeps its seven values, so the SPI load tests are unchanged. Digest and chat-agent wiring through the same notifier remain named follow-ups (out of scope for M1-212).
 
   ---

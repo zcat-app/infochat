@@ -1,6 +1,9 @@
 package app.zcat.infochat.provider.command;
 
+import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.messaging.OutboundMessage;
+import app.zcat.infochat.messaging.ProgressNotifier;
+import app.zcat.infochat.messaging.ProgressStage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
@@ -23,6 +26,9 @@ import app.zcat.infochat.provider.summary.SummaryProseGenerator.ClusterProse;
 import app.zcat.infochat.provider.translation.TranslationPipeline;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.jspecify.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.sql.DataSource;
 import java.nio.charset.StandardCharsets;
@@ -77,6 +83,8 @@ import java.util.UUID;
 @ApplicationScoped
 public class SummaryCommandHandler implements CommandHandler {
 
+    private static final Logger log = LoggerFactory.getLogger(SummaryCommandHandler.class);
+
     /**
      * Per the V5 {@code UNIQUE (adapter, contact_id)} constraint on
      * {@code users}, the lookup MUST qualify on both columns: a
@@ -129,13 +137,28 @@ public class SummaryCommandHandler implements CommandHandler {
     @Inject
     LlmRateCap llmRateCap;
 
+    @Inject
+    ProgressNotifier progressNotifier;
+
     @Override
     public String name() {
         return "summary";
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Returns a non-null {@link OutboundMessage} for every guard /
+     * error branch (parse failure, no-posts, unknown tag, in-flight,
+     * rate-cap, group scope) — the router sends those. For the terminal
+     * summary path the handler owns its own message lifecycle through
+     * {@link ProgressNotifier} (placeholder &rarr; coalesced
+     * {@code update} &rarr; {@code complete}/{@code fail}) and returns
+     * {@code null}, so the router performs no send and the user gets
+     * exactly one visibly-evolving message rather than a duplicate.</p>
+     */
     @Override
-    public OutboundMessage handle(ScopeRef scope, String rawText) {
+    public @Nullable OutboundMessage handle(ScopeRef scope, String rawText) {
         ParseResult parsed = SummaryArgs.parse(rawText);
         if (parsed instanceof Failure f) {
             return reply(scope, format(f.bundleKey(), f.interpolationArgs().toArray()));
@@ -193,50 +216,88 @@ public class SummaryCommandHandler implements CommandHandler {
                 return reply(scope, bundleLoader.get(BundleKeys.ERROR_CHAT_LLM_RATE_CAP));
             }
 
-            String scopeLanguage = readScopeLanguage(scopeKind, scopeId.get());
+            // Committed to the terminal summary path. From here the
+            // handler owns its outbound lifecycle via ProgressNotifier:
+            // publish STARTED (placeholder send + typing on), then the
+            // stages around the real work, then complete()/fail(). The
+            // method returns null so InboundRouter performs no send.
+            // The progress strings are resolved from the D43 bundle by
+            // the notifier; no user-authored text reaches them.
+            boolean delivered = false;
+            try {
+                progressNotifier.publish(scope, ProgressStage.STARTED);
+                progressNotifier.publish(scope, ProgressStage.RETRIEVING);
+                String scopeLanguage = readScopeLanguage(scopeKind, scopeId.get());
 
-            List<Cluster> clusters = clusterTraversal.cluster(result.posts());
-            List<ClusterProse> prose = summaryProseGenerator.generate(clusters, "en");
+                List<Cluster> clusters = clusterTraversal.cluster(result.posts());
 
-            // Write the summary anchor — enables /retry to replay the prose
-            // layer with the same deterministic post selection (D19, D36).
-            // Written on both normal and degraded paths: spec says "/retry
-            // against this degraded run regenerates the prose if the LLM
-            // has recovered."
-            List<String> postUids = result.posts().stream().map(Post::uid).toList();
-            String argHash = computeArgHash(rawText);
-            String clusterMapJson = serializeClusterMap(clusters);
-            summaryAnchorRepository.write(
-                    scopeId.get(), scopeKind, scopeId.get(), "summary",
-                    argHash, postUids, clusterMapJson);
+                progressNotifier.publish(scope, ProgressStage.GENERATING);
+                List<ClusterProse> prose = summaryProseGenerator.generate(clusters, "en");
 
-            StringBuilder out = new StringBuilder();
+                // Write the summary anchor — enables /retry to replay the prose
+                // layer with the same deterministic post selection (D19, D36).
+                // Written on both normal and degraded paths: spec says "/retry
+                // against this degraded run regenerates the prose if the LLM
+                // has recovered."
+                List<String> postUids = result.posts().stream().map(Post::uid).toList();
+                String argHash = computeArgHash(rawText);
+                String clusterMapJson = serializeClusterMap(clusters);
+                summaryAnchorRepository.write(
+                        scopeId.get(), scopeKind, scopeId.get(), "summary",
+                        argHash, postUids, clusterMapJson);
 
-            if (result.topTagRestriction().isPresent()) {
-                out.append(format(BundleKeys.REPLY_SUMMARY_TOP_3_OF_N_PREFIX,
-                        result.topTagRestriction().get().followedTagCount()));
-                out.append("\n\n");
+                progressNotifier.publish(scope, ProgressStage.TRANSLATING);
+                StringBuilder out = new StringBuilder();
+
+                if (result.topTagRestriction().isPresent()) {
+                    out.append(format(BundleKeys.REPLY_SUMMARY_TOP_3_OF_N_PREFIX,
+                            result.topTagRestriction().get().followedTagCount()));
+                    out.append("\n\n");
+                }
+                if (result.excludedCount() > 0) {
+                    out.append(format(BundleKeys.REPLY_SUMMARY_CAP_EXCESS_NOTICE,
+                            result.posts().size(),
+                            result.totalBeforeCap(),
+                            result.profileLabel(),
+                            result.excludedCount()));
+                    out.append("\n\n");
+                }
+
+                boolean anyDegraded = prose.stream().anyMatch(ClusterProse::degraded);
+                if (anyDegraded) {
+                    out.append(bundleLoader.get(BundleKeys.REPLY_SUMMARY_DEGRADED_NOTICE));
+                    out.append("\n\n");
+                }
+
+                for (ClusterProse cp : prose) {
+                    appendClusterBlock(out, cp, scopeLanguage);
+                }
+
+                // Degraded prose is still a successful terminal delivery
+                // (the composed body carries the degraded notice). Only a
+                // thrown failure routes to fail() — the notifier renders a
+                // localized failure string and finalizes the placeholder
+                // so it is never left dangling.
+                progressNotifier.publish(scope, ProgressStage.FINALIZING);
+                progressNotifier.complete(scope, out.toString().stripTrailing());
+                delivered = true;
+            } catch (RuntimeException e) {
+                SafeLog.error(log, "SummaryCommandHandler summary generation failed", e);
+                progressNotifier.fail(scope);
+                delivered = true;
+            } finally {
+                // A non-RuntimeException throwable (e.g. an Error such as
+                // OutOfMemoryError) escaping before complete()/fail() would
+                // otherwise leave the notifier's per-scope placeholder state
+                // dangling (spec step 4: "placeholders are never left
+                // dangling"). fail() finalizes the placeholder and evicts the
+                // per-scope state; the throwable then continues to propagate.
+                if (!delivered) {
+                    progressNotifier.fail(scope);
+                }
             }
-            if (result.excludedCount() > 0) {
-                out.append(format(BundleKeys.REPLY_SUMMARY_CAP_EXCESS_NOTICE,
-                        result.posts().size(),
-                        result.totalBeforeCap(),
-                        result.profileLabel(),
-                        result.excludedCount()));
-                out.append("\n\n");
-            }
-
-            boolean anyDegraded = prose.stream().anyMatch(ClusterProse::degraded);
-            if (anyDegraded) {
-                out.append(bundleLoader.get(BundleKeys.REPLY_SUMMARY_DEGRADED_NOTICE));
-                out.append("\n\n");
-            }
-
-            for (ClusterProse cp : prose) {
-                appendClusterBlock(out, cp, scopeLanguage);
-            }
-
-            return reply(scope, out.toString().stripTrailing());
+            // Self-delivered via the notifier — no router send.
+            return null;
         } finally {
             inFlightTracker.release(actorId, scopeKind, actorId, slot);
         }

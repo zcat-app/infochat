@@ -24,8 +24,23 @@ package app.zcat.infochat.messaging;
  * deterministic-localization-bundle lookup that turns each
  * {@link ProgressStage} into a localized user-visible string) are
  * spec-mandated invariants the concrete notifier enforces — they are
- * NOT additional SPI methods. The interface exposes only
- * {@link #publish} so callers cannot bypass the invariants.</p>
+ * NOT additional SPI methods. The interface exposes {@link #publish}
+ * for the five non-terminal stages plus the two payload-carrying
+ * terminal calls {@link #complete} / {@link #fail}, so callers cannot
+ * bypass the invariants.</p>
+ *
+ * <p><b>Why a payload-carrying terminal call.</b> {@link #publish}
+ * renders the non-terminal stages ({@link ProgressStage#STARTED},
+ * {@link ProgressStage#RETRIEVING}, {@link ProgressStage#GENERATING},
+ * {@link ProgressStage#TRANSLATING}, {@link ProgressStage#FINALIZING})
+ * onto the placeholder as coalesced {@code update}s. The terminal
+ * message, however, is the actual operation output (e.g. the
+ * {@code /summary} content) — which a stage label cannot carry. The
+ * caller therefore signals terminal success via {@link #complete}
+ * with the real final text and terminal failure via {@link #fail}
+ * (which renders a localized failure string). Both turn typing off and
+ * finalize the placeholder via try/finally so it is never left
+ * dangling.</p>
  *
  * <p>Stage strings are template-parameterized only with
  * deterministic, sanitized scalar values (post counts,
@@ -36,7 +51,14 @@ package app.zcat.infochat.messaging;
 public interface ProgressNotifier {
 
     /**
-     * Publish one stage event.
+     * Publish one non-terminal stage event
+     * ({@link ProgressStage#STARTED}, {@link ProgressStage#RETRIEVING},
+     * {@link ProgressStage#GENERATING}, {@link ProgressStage#TRANSLATING},
+     * {@link ProgressStage#FINALIZING}). The first publish for a scope
+     * acquires the placeholder and turns typing on; subsequent ones
+     * render the stage string as a coalesced {@code update}. Terminal
+     * stages are delivered via {@link #complete} / {@link #fail}, not
+     * here.
      *
      * @param scope the destination scope; never null. The notifier
      *              maintains per-scope state (placeholder handle,
@@ -44,4 +66,25 @@ public interface ProgressNotifier {
      * @param stage the stage that has just been entered; never null.
      */
     void publish(ScopeRef scope, ProgressStage stage);
+
+    /**
+     * Terminal success. Finalizes the scope's placeholder with the
+     * real operation output {@code finalText} and turns typing off,
+     * both via try/finally so the placeholder is never left dangling.
+     *
+     * @param scope     the destination scope; never null.
+     * @param finalText the final user-visible body — the actual
+     *                  operation output, never a stage label; never null.
+     */
+    void complete(ScopeRef scope, String finalText);
+
+    /**
+     * Terminal failure. Finalizes the scope's placeholder with a
+     * localized failure string (resolved from the deterministic
+     * localization bundle, never interpolating user input) and turns
+     * typing off, both via try/finally.
+     *
+     * @param scope the destination scope; never null.
+     */
+    void fail(ScopeRef scope);
 }

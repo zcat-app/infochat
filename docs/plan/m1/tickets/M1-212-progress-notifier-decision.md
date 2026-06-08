@@ -1,15 +1,22 @@
 ---
 id: M1-212
 title: "ProgressNotifier pipeline: implement minimally, defer by amendment, or remove"
-status: pending
+status: done
 created: 2026-06-07
 last_updated: 2026-06-08
+clarity_check:
+  date: 2026-06-08
+  verdict: PASS
+  warnings: []
+  blockers: []
+outline_file: target/m1-tick-outline-M1-212.md
 blocked_by: []
 files_budget: 20
 files_scope:
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/ProgressNotifier.java
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/ProgressStage.java
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/MessagingException.java
+  - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/inmemory/InMemoryAdapter.java
   - docs/spec/messaging.md
   - docs/design/06-messaging.md
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/SummaryCommandHandler.java
@@ -25,6 +32,7 @@ files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging
   - infochat-provider/src/test/java/app/zcat/infochat/provider/bundle
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/translation/TranslationPipelineIT.java
 complexity: high
 risk: medium
 round_cap: 3
@@ -55,6 +63,7 @@ test_plan:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryCommandHandlerTest.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryIT.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryAdapterScopeIT.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/translation/TranslationPipelineIT.java
   preserves:
     - all tests currently green on main
 spec_refs:
@@ -62,11 +71,55 @@ spec_refs:
 decision_refs:
   - D31
   - D43
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-08
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 19
+      added: 1027
+      removed: 75
+  - round: 2
+    date: 2026-06-08
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 19
+      added: 1078
+      removed: 75
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-06-08
+    verdict: CLEAN
+    base: "HEAD (m1/M1-212 branch tip dba9ef2 — ticket-spec refines only)"
+    head: "working tree (uncommitted implementation under review)"
+    verdict_file: docs/plan/m1/redteam/M1-212-2026-06-08.md
+    out_of_model_count: 1
+    note: |
+      CLEAN. Ran --in-progress between review APPROVE and commit. LLM-output
+      sanitizer, no-user-text-in-progress-strings, and cross-adapter delivery
+      isolation all preserved; auth/ban/audit/rate-limit paths untouched. One
+      OUT-OF-MODEL advisory only (StageProgressNotifier per-scope state leak
+      under java.lang.Error, not RuntimeException) — not a documented-promise
+      violation. User chose to harden in-branch (round 2): SummaryCommandHandler
+      now wraps the notifier lifecycle in try/finally so any non-RuntimeException
+      throwable still drives fail() (placeholder finalized, per-scope state
+      evicted) before propagating; pinned by
+      SummaryCommandHandlerTest.errorEscapingGenerationStillFinalizesNotifierAndReleasesSlot.
 escalations:
   - date: 2026-06-08
     reason: clarity-fail
@@ -99,6 +152,32 @@ escalations:
       RESOLUTION is fine (AdapterRegistry.activatedAdapters() is a public
       CDI seam already used by 4 handlers); only the duplicate-send problem
       forces the out-of-scope edits.
+  - date: 2026-06-08
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A — developer scope finding at implementation start (direction (a),
+      after plan-writer OUTLINE: PASS, Risk 1 verified against disk). About to
+      touch ONE path outside files_scope:
+      infochat-messaging-adapter/.../impl/inmemory/InMemoryAdapter.java.
+      Root cause: under direction (a) /summary delivers via placeholder
+      send -> coalesced update -> finalizeMessage. InMemoryAdapter records
+      send() bodies on `sent` (InMemoryAdapter.java:129, exposed by
+      sentMessages() :284) but records update()/finalizeMessage() bodies on a
+      per-handle `history` map (:135,:140), reachable ONLY via
+      updateHistory(MessageHandle) (:293) — which needs the handle the notifier
+      creates internally. There is NO handle-less accessor for finalized bodies
+      and no accessor enumerating handles. SummaryIT (:96-104) and
+      SummaryAdapterScopeIT (:100-102) run against the real InMemoryAdapter via
+      the CDI deployment shape and assert summary content on
+      sentMessages().get(0).text(); under placeholder->finalize that entry is
+      the PLACEHOLDER, not the summary, so both ITs cannot observe the delivered
+      summary without a new recorder accessor on InMemoryAdapter (e.g.
+      finalizedBodies()). CapturingAdapter (provider test dir, in-scope) throws
+      on finalizeMessage and is not usable by the ITs; the in-scope notifier/
+      router unit tests get a NEW recording double in the in-scope test dirs (no
+      scope issue). Only the two ITs force the out-of-scope edit. Adding a
+      test-only recorder accessor to InMemoryAdapter is +1 file (17 named, still
+      <= files_budget 20). Matches plan-writer Risk 1's recommended resolution.
   - date: 2026-06-08
     reason: outline-fail
     reviewer_verdict_excerpt: |
@@ -136,6 +215,52 @@ escalations:
       subsection for direction (a) naming SummaryCommandHandlerTest,
       SummaryIT, and SummaryAdapterScopeIT plus their new expected behavior,
       and add all three to test_plan.modifies.
+  - date: 2026-06-08
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A — developer scope finding at implementation completion (direction
+      (a), full feature; all production code + docs + the five authorized
+      test files written; mvn -B clean verify run). A SIXTH pre-existing
+      green test reverses under direction (a) but is outside files_scope AND
+      outside test_plan.modifies:
+      infochat-provider/src/test/java/app/zcat/infochat/provider/translation/
+      TranslationPipelineIT.java (the `translation` test dir is NOT in
+      files_scope; the file is NOT in test_plan.modifies).
+      Root cause: identical to the SummaryIT / SummaryAdapterScopeIT
+      budget-breach already refined in (the InMemoryAdapter recorder
+      refine). Direction (a) delivers /summary via the notifier's
+      placeholder send -> coalesced update -> finalizeMessage lifecycle, so
+      InMemoryAdapter.sentMessages().get(0) is now the PLACEHOLDER body
+      ("Working on it...") and the real summary lands on finalizedBodies().
+      TranslationPipelineIT has two @Test methods that both
+      `adapter.deliverDm(USER_CONTACT_ID, "/summary -w 24h")` then assert on
+      `adapter.sentMessages().get(0).text()`:
+        - summaryInCsScopeRunsThroughFullTranslationPipeline (:118) asserts
+          the body contains "<cs-translation>";
+        - summaryInEnScopeShortCircuitsTranslator (:161) asserts the body
+          contains "<en-summary>".
+      Both now read the placeholder, not the summary, so both fail
+      (verbatim: "expected: <true> but was: <false> ... Got: Working on
+      it..."). The full suite's ONLY failures are these two; all five
+      authorized test files are green. This is
+      the same test-sweep miss the prior two budget-breach refines caught
+      for SummaryIT/SummaryAdapterScopeIT; the clarity + plan-writer passes
+      (and plan-writer Risk 1) enumerated those two ITs but not this third
+      one. The mvn verify confirms the unit phase is green (the five
+      authorized test files pass, incl. the new StageProgressNotifierTest
+      and RouterNoDoubleSendTest); the failsafe IT phase is where
+      TranslationPipelineIT breaks.
+      Resolution (refine, matching the InMemoryAdapter precedent): add
+      infochat-provider/src/test/java/app/zcat/infochat/provider/translation/
+      TranslationPipelineIT.java to files_scope and to test_plan.modifies,
+      with the new expected behavior documented (assert the cs-/en-summary
+      body against adapter.finalizedBodies().get(0), the finalized message
+      body, NOT sentMessages().get(0) which is now the placeholder; same
+      placeholder->finalize rewrite as SummaryIT/SummaryAdapterScopeIT).
+      files_budget stays 20 (17 -> 18 named files). acceptance criteria,
+      complexity (high), and the plan-writer outline are unchanged, so
+      neither clarity nor plan-writer re-runs (standard budget-breach refine
+      arm — stay in-progress on the branch).
 revisions:
   - date: 2026-06-08
     reason: "clarity-fail rework — TEST-CHANGES-AUTHORIZED blocker: test_plan.modifies listed MessagingSpisLoadTest.java with no body authorization naming per-direction (a/b/c) what happens to it and the new expected behavior. Add an 'Authorized test changes' section covering both load tests (MessagingSpisLoadTest + AllSpisLoadIT, the latter added to test_plan.modifies since direction (c) edits it too) for all three directions; add a 'Direction chosen' placeholder to the body for review orientation (clarity WARN)."
@@ -171,6 +296,22 @@ revisions:
        that both load tests are preserved unchanged and named no edit to
        SummaryCommandHandlerTest / SummaryIT / SummaryAdapterScopeIT.
        test_plan.preserves: "all tests currently green on main".)
+  - date: 2026-06-08
+    reason: "budget-breach rework (direction (a), at implementation start after plan-writer OUTLINE: PASS). One path outside files_scope is required: InMemoryAdapter.java. Under (a), /summary delivers via placeholder send -> coalesced update -> finalizeMessage. InMemoryAdapter records finalize bodies on a per-handle `history` map reachable ONLY via updateHistory(MessageHandle) (the handle is created internally by the notifier); sentMessages() returns only send() bodies, so its single entry is the placeholder, not the summary. SummaryIT (:96-104) and SummaryAdapterScopeIT (:100-102) run against the real InMemoryAdapter via the CDI deployment shape and assert summary content on sentMessages().get(0).text() — they cannot observe the delivered summary without a handle-less recorder accessor. Refine: add infochat-messaging-adapter/.../impl/inmemory/InMemoryAdapter.java to files_scope; the ONLY authorized edit there is a test-only recorder accessor (e.g. finalizedBodies()) exposing finalize-event bodies — no change to the adapter's production send/update/finalize behavior. files_budget unchanged at 20 (17 named files). Matches plan-writer OUTLINE Risk 1's recommended resolution; acceptance criteria, complexity (high), and the plan-writer outline are unchanged, so neither clarity nor plan-writer re-runs (standard budget-breach refine arm — not the gate-preserving override used in the prior complexity-changing refine)."
+    prior_values: |
+      status: escalated
+      files_budget: 20
+      files_scope: (did NOT include
+        infochat-messaging-adapter/.../impl/inmemory/InMemoryAdapter.java)
+  - date: 2026-06-08
+    reason: "budget-breach rework (direction (a), at implementation completion after mvn -B clean verify). A THIRD end-to-end IT pins the OLD return-text/single-send /summary contract and reverses under direction (a), but was outside files_scope AND test_plan.modifies: infochat-provider/.../translation/TranslationPipelineIT.java. Its two @Test methods deliver `/summary -w 24h` then assert on adapter.sentMessages().get(0).text(); under placeholder->finalize that entry is the placeholder ('Working on it...'), so both fail verbatim (summaryInCsScopeRunsThroughFullTranslationPipeline:118 expected <cs-translation>; summaryInEnScopeShortCircuitsTranslator:161 expected <en-summary>; both 'Got: Working on it... expected <true> but was <false>'). These are the suite's ONLY two failures — all five previously-authorized test files (incl. new StageProgressNotifierTest + RouterNoDoubleSendTest) are green. Same test-sweep miss the prior two budget-breach refines caught for SummaryIT/SummaryAdapterScopeIT; clarity + plan-writer Risk 1 enumerated those two ITs but not this third. Refine: add TranslationPipelineIT.java to files_scope and test_plan.modifies; the ONLY authorized edit there is the same placeholder->finalize rewrite as the other two ITs — assert the cs-/en-summary body against adapter.finalizedBodies().get(0) (the finalized body) instead of sentMessages().get(0) (now the placeholder); no other behavioral change to the IT. files_budget unchanged at 20 (17 -> 18 named files). acceptance criteria, complexity (high), and the plan-writer outline are unchanged, so neither clarity nor plan-writer re-runs (standard budget-breach refine arm — stay in-progress on the branch)."
+    prior_values: |
+      status: escalated
+      files_budget: 20
+      files_scope: (did NOT include
+        infochat-provider/.../translation/TranslationPipelineIT.java)
+      test_plan.modifies: (did NOT include
+        infochat-provider/.../translation/TranslationPipelineIT.java)
 ---
 
 # M1-212: ProgressNotifier — implement minimally, defer by amendment, or remove
@@ -268,13 +409,16 @@ Per direction:
   bundle-coverage assertions under `infochat-provider/src/test/.../bundle`. No
   expected-behavior change to either SPI load test.
 
-  **Three pre-existing `/summary` tests are MODIFIED** (added to
+  **Four pre-existing `/summary`-delivering tests are MODIFIED** (added to
   `test_plan.modifies`): direction (a) reverses `SummaryCommandHandler`'s contract
   — `handle()` now returns `@Nullable OutboundMessage` and returns `null` for
   `/summary` (the "already delivered via the notifier" signal), with the summary
   content delivered through `StageProgressNotifier` (placeholder send → coalesced
-  `update` → `complete(scope, finalText)`/`finalizeMessage`). The three tests
-  currently assert the OLD return-text / single-send contract and must be rewritten
+  `update` → `complete(scope, finalText)`/`finalizeMessage`). The first three
+  (`SummaryCommandHandlerTest`, `SummaryIT`, `SummaryAdapterScopeIT`) were authorized
+  by the first two budget-breach refines; the fourth (`TranslationPipelineIT`) by the
+  third refine at implementation completion (see the last `revisions:` entry). These
+  tests currently assert the OLD return-text / single-send contract and must be rewritten
   to observe the notifier's delivered message instead of the handler's return
   value:
   - `SummaryCommandHandlerTest.java` — the ~13 tests doing
@@ -298,9 +442,22 @@ Per direction:
     `.text()` assertion, updated identically: assert against the notifier's
     finalized message delivered to the correct adapter scope rather than a single
     return-text send.
+  - `TranslationPipelineIT.java` (added by the 2026-06-08 budget-breach refine at
+    implementation completion — a THIRD end-to-end IT that the clarity + plan-writer
+    sweep missed). Its two `@Test` methods
+    (`summaryInCsScopeRunsThroughFullTranslationPipeline:118`,
+    `summaryInEnScopeShortCircuitsTranslator:161`) deliver `/summary -w 24h` and
+    assert on `adapter.sentMessages().get(0).text()` — which under
+    placeholder→finalize is the placeholder (`"Working on it..."`), so both fail.
+    **New expected behavior:** identical placeholder→finalize rewrite as
+    `SummaryIT`/`SummaryAdapterScopeIT` — assert the cs-/en-summary body
+    (`<cs-translation>` / `<en-summary>`) against `adapter.finalizedBodies().get(0)`
+    (the finalized message body), not `sentMessages().get(0)`. The `mockLlm`
+    call-count assertions (3 for cs, 2 for en) and the post-body-unchanged
+    assertions are unaffected and stay as-is. No other change to the IT.
 
   `test_plan.preserves` ("all tests currently green on main") continues to bind
-  every test **except** the five now enumerated in `test_plan.modifies`.
+  every test **except** the six now enumerated in `test_plan.modifies`.
 - **(b) DEFER BY AMENDMENT** — surface kept, no code change. Both load tests are
   **unchanged**.
 - **(c) REMOVE** — ProgressNotifier and ProgressStage are deleted, so both load
@@ -316,6 +473,36 @@ Per direction:
     `ENUM_FQNS`; change the total-count assertion (and the javadoc count) from
     fourteen to twelve. New expected behavior: the umbrella IT pins exactly
     twelve cross-module SPI types, none of them ProgressNotifier or ProgressStage.
+
+## Authorized scope change (budget-breach refine, 2026-06-08)
+
+Direction (a) delivers the `/summary` reply through the notifier's
+placeholder→update→`finalizeMessage` lifecycle. The two end-to-end ITs that pin
+the delivered summary content — `SummaryIT` (`:96-104`) and
+`SummaryAdapterScopeIT` (`:100-102`) — run against the **real** `InMemoryAdapter`
+via the CDI deployment shape and assert on `sentMessages().get(0).text()`. Under
+placeholder→finalize that captured entry is the *placeholder*, not the summary:
+`InMemoryAdapter.send` records the body on `sent` (exposed by `sentMessages()`),
+but `update`/`finalizeMessage` record on a per-handle `history` map reachable
+only via `updateHistory(MessageHandle)` — and the handle is created internally by
+the notifier, so the ITs have no way to reach the finalized body.
+
+`InMemoryAdapter.java` is therefore added to `files_scope`. The **only**
+authorized edit there is a **test-only recorder accessor** (e.g.
+`finalizedBodies()` returning the bodies of finalize events across handles) so
+the ITs can observe the delivered summary. No change to the adapter's production
+`send`/`update`/`finalizeMessage`/`setTyping` behavior. `files_budget` is
+unchanged at 20 (17 named files). This is the resolution the plan-writer outline
+recorded as Risk 1. The in-scope notifier/router unit tests use a new recording
+test double under the in-scope provider test dirs (`CapturingAdapter` throws on
+`finalizeMessage` and is not reused for this).
+
+A **third** end-to-end IT, `TranslationPipelineIT`, was found to pin the same
+delivered-summary content via `sentMessages().get(0).text()` and is authorized by
+the 2026-06-08 implementation-completion refine (last `revisions:` entry). It
+consumes the same `InMemoryAdapter.finalizedBodies()` accessor — assert the
+cs-/en-summary body against `finalizedBodies().get(0)` instead of the now-placeholder
+`sentMessages().get(0)`.
 
 ## Notes
 

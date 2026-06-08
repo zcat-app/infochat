@@ -850,6 +850,34 @@ public final class BundleKeys {
     /** Per-user LLM-triggering rate cap exceeded (infochat.chat.llm-rate-cap-per-minute). */
     public static final String ERROR_CHAT_LLM_RATE_CAP = "error.chat.llm_rate_cap";
 
+    // ----- Progress notifier stage strings (M1-212) --------------------------
+    // Per docs/spec/messaging.md §Progress notifications + decision D43.
+    // One key per ProgressStage value; the ProgressNotifier renders each
+    // stage by enum from the deterministic bundle (StageProgressNotifier),
+    // never interpolating user-authored text (security requirement). Both
+    // locales gain all seven via the reflective BundleLoaderTest guard.
+
+    /** Stage string for {@code ProgressStage.STARTED} — placeholder body. */
+    public static final String PROGRESS_STARTED = "progress.started";
+
+    /** Stage string for {@code ProgressStage.RETRIEVING}. */
+    public static final String PROGRESS_RETRIEVING = "progress.retrieving";
+
+    /** Stage string for {@code ProgressStage.GENERATING}. */
+    public static final String PROGRESS_GENERATING = "progress.generating";
+
+    /** Stage string for {@code ProgressStage.TRANSLATING}. */
+    public static final String PROGRESS_TRANSLATING = "progress.translating";
+
+    /** Stage string for {@code ProgressStage.FINALIZING}. */
+    public static final String PROGRESS_FINALIZING = "progress.finalizing";
+
+    /** Stage string for {@code ProgressStage.COMPLETED} (terminal success label). */
+    public static final String PROGRESS_COMPLETED = "progress.completed";
+
+    /** Terminal-failure string rendered by {@code ProgressNotifier.fail} for {@code ProgressStage.FAILED}. */
+    public static final String PROGRESS_FAILED = "progress.failed";
+
     // ----- /clear + /compress + auto-compress (M1-064) -----------------------
     // Per docs/spec/commands.md §Conversation control and
     // docs/design/03-commands.md §3.9 Conversation control.

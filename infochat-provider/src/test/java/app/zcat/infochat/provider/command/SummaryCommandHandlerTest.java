@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.command;
 
 import app.zcat.infochat.messaging.OutboundMessage;
+import app.zcat.infochat.messaging.ProgressStage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.chat.InFlightTracker;
@@ -37,6 +38,8 @@ import java.util.function.BooleanSupplier;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -61,8 +64,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *       exactly once.</li>
  *   <li>Zero-subscriptions / empty-window branches: empty post list →
  *       no_posts_yet reply, prose generator NOT invoked.</li>
- *   <li>Happy path: 3 posts → 3 clusters → 3 prose calls → reply has
- *       three cluster blocks in the documented structure.</li>
+ *   <li>Happy path: 3 posts → 3 clusters → 3 prose calls → the
+ *       handler self-delivers via the {@link RecordingProgressNotifier}
+ *       ({@code handle} returns null), and the body passed to
+ *       {@code complete} has three cluster blocks in the documented
+ *       structure. Guard / error branches still return a non-null
+ *       {@link OutboundMessage}.</li>
  *   <li>LLM-unreachable branch: degraded prose → reply carries the
  *       degraded_notice prefix.</li>
  *   <li>Cap-excess branch: cap_excess_notice prefix interpolated.</li>
@@ -80,6 +87,7 @@ class SummaryCommandHandlerTest {
     private RecordingEligiblePostQuery eligiblePostQuery;
     private RecordingSummaryProseGenerator proseGenerator;
     private RecordingSummaryAnchorRepository anchorRepository;
+    private RecordingProgressNotifier progressNotifier;
     private BundleLoader bundleLoader;
     private InFlightTracker tracker;
     private UUID userId;
@@ -103,6 +111,8 @@ class SummaryCommandHandlerTest {
         handler.summaryAnchorRepository = anchorRepository;
         handler.inFlightTracker = tracker;
         handler.llmRateCap = new LlmRateCap(10);
+        progressNotifier = new RecordingProgressNotifier();
+        handler.progressNotifier = progressNotifier;
         InboundContext context = new InboundContext();
         context.setAdapterName("inmemory");
         handler.inboundContext = context;
@@ -176,10 +186,14 @@ class SummaryCommandHandlerTest {
         eligiblePostQuery.seedPosts(posts, /* excludedCount */ 0);
         proseGenerator.setResponseText("Summary prose for the cluster.");
 
+        // Terminal path: handle() self-delivers via the notifier and
+        // returns null; the composed body is the argument to complete().
         OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "happy"), "/summary");
+        assertNull(reply, "terminal /summary self-delivers via the notifier and returns null");
 
         assertEquals(3, proseGenerator.callCount(), "one LLM call per cluster");
-        String body = reply.text();
+        String body = progressNotifier.completedText();
+        assertNotNull(body, "the composed summary must reach the notifier's complete() call");
         int blocks = body.split("\\[topic_id=").length - 1;
         assertEquals(3, blocks, "three cluster blocks in reply. Got: " + body);
         assertTrue(body.contains("Summary prose for the cluster."),
@@ -192,18 +206,70 @@ class SummaryCommandHandlerTest {
     }
 
     @Test
+    void terminalSummaryPublishesNonTerminalStagesInOrderThenCompletes() {
+        eligiblePostQuery.seedPosts(
+                List.of(post(PREFIX + "st1", "Stage headline", Instant.now())), 0);
+        proseGenerator.setResponseText("Stage prose.");
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "stg"), "/summary");
+
+        assertNull(reply, "terminal /summary self-delivers via the notifier and returns null");
+        assertEquals(
+                List.of(ProgressStage.STARTED, ProgressStage.RETRIEVING,
+                        ProgressStage.GENERATING, ProgressStage.TRANSLATING,
+                        ProgressStage.FINALIZING),
+                progressNotifier.publishedStages(),
+                "the handler must publish the five non-terminal stages in spec order "
+                        + "before the terminal complete()");
+        assertNotNull(progressNotifier.completedText(),
+                "the terminal path must call complete() with the composed summary");
+        assertEquals(0, progressNotifier.failCount(),
+                "a successful summary must not call fail()");
+    }
+
+    @Test
     void llmUnreachableYieldsDegradedFallbackReply() {
         Post p = post(PREFIX + "d1", "Degraded headline", Instant.now());
         eligiblePostQuery.seedPosts(List.of(p), 0);
         proseGenerator.setDegradedMode(true);
 
+        // Degraded prose is still a successful terminal delivery →
+        // complete(), not fail().
         OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "deg"), "/summary");
+        assertNull(reply, "terminal /summary self-delivers and returns null");
 
-        String body = reply.text();
+        String body = progressNotifier.completedText();
+        assertNotNull(body, "degraded summary still reaches complete()");
+        assertEquals(0, progressNotifier.failCount(),
+                "a degraded (but composed) summary is success, not fail()");
         assertTrue(body.contains("LLM is unreachable"),
                 "degraded reply must include the degraded_notice prefix. Got: " + body);
         assertTrue(body.contains("Degraded headline"),
                 "degraded prose includes the headline");
+    }
+
+    @Test
+    void errorEscapingGenerationStillFinalizesNotifierAndReleasesSlot() {
+        eligiblePostQuery.seedPosts(
+                List.of(post(PREFIX + "err1", "Error headline", Instant.now())), 0);
+        // A non-RuntimeException throwable (OOM) escapes the prose generator
+        // after STARTED/RETRIEVING/GENERATING were published. The catch is
+        // RuntimeException-only, so without the finally the notifier's
+        // per-scope placeholder state would dangle.
+        proseGenerator.setThrowErrorOnGenerate(true);
+
+        ScopeRef scope = new ScopeRef.Dm(PREFIX + "err");
+        assertThrows(OutOfMemoryError.class, () -> handler.handle(scope, "/summary"),
+                "an Error escaping generation must propagate, not be swallowed");
+
+        assertEquals(1, progressNotifier.failCount(),
+                "the finally must drive fail() on the Error path so the notifier "
+                        + "placeholder is finalized and its per-scope state evicted "
+                        + "(spec step 4: placeholders are never left dangling)");
+        assertNull(progressNotifier.completedText(),
+                "the Error path must not call complete()");
+        assertFalse(tracker.isInFlight(userId, "dm", userId),
+                "the in-flight slot must be released even when an Error escapes");
     }
 
     @Test
@@ -221,8 +287,10 @@ class SummaryCommandHandlerTest {
         proseGenerator.setResponseText("Prose.");
 
         OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "cap"), "/summary");
+        assertNull(reply, "terminal /summary self-delivers and returns null");
 
-        String body = reply.text();
+        String body = progressNotifier.completedText();
+        assertNotNull(body, "the cap-excess summary must reach complete()");
         assertTrue(body.contains("Showing 3 of 5"),
                 "cap-excess prefix must cite included/total counts. Got: " + body);
         assertTrue(body.contains("2 oldest excluded"),
@@ -256,8 +324,10 @@ class SummaryCommandHandlerTest {
         proseGenerator.setResponseText("Ops should run /grant-admin to escalate.");
 
         OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "san"), "/summary");
+        assertNull(reply, "terminal /summary self-delivers and returns null");
 
-        String body = reply.text();
+        String body = progressNotifier.completedText();
+        assertNotNull(body, "the sanitized summary must reach complete()");
         assertFalse(body.contains("/grant-admin"),
                 "sanitizer MUST strip /grant-admin from LLM-authored prose. Got: " + body);
         assertTrue(body.contains("[redacted command]"),
@@ -373,12 +443,18 @@ class SummaryCommandHandlerTest {
                 "the occupied slot must reject the request. Got: " + rejected.text());
 
         tracker.release(userId, "dm", userId, slot); // the first request finishes
+        // The next request reaches the terminal path: it self-delivers
+        // via the notifier (returns null) and its composed body — carrying
+        // the recovered prose — is the argument to complete().
         OutboundMessage ok = handler.handle(new ScopeRef.Dm(PREFIX + "nl"), "/summary");
+        assertNull(ok, "the permitted terminal /summary self-delivers and returns null");
 
-        assertTrue(ok.text().contains("Recovered prose."),
+        String okBody = progressNotifier.completedText();
+        assertNotNull(okBody, "the permitted request must reach complete()");
+        assertTrue(okBody.contains("Recovered prose."),
                 "the next permitted request must succeed — the rejection "
                         + "consumed neither the slot nor the single bucket token. Got: "
-                        + ok.text());
+                        + okBody);
         assertFalse(tracker.isInFlight(userId, "dm", userId),
                 "the successful run must release its slot");
     }
@@ -474,6 +550,7 @@ class SummaryCommandHandlerTest {
         private final AtomicInteger callCount = new AtomicInteger();
         private String responseText = "default test summary";
         private boolean degradedMode = false;
+        private boolean throwErrorOnGenerate = false;
         private @Nullable BooleanSupplier inFlightProbe;
         private boolean inFlightDuringGenerate;
 
@@ -483,6 +560,15 @@ class SummaryCommandHandlerTest {
 
         void setDegradedMode(boolean degraded) {
             this.degradedMode = degraded;
+        }
+
+        /**
+         * Models a non-RuntimeException throwable (e.g. OOM) escaping the
+         * generation step — used to prove the handler still finalizes the
+         * notifier placeholder and releases the in-flight slot on that path.
+         */
+        void setThrowErrorOnGenerate(boolean throwError) {
+            this.throwErrorOnGenerate = throwError;
         }
 
         /**
@@ -501,6 +587,9 @@ class SummaryCommandHandlerTest {
         public List<ClusterProse> generate(List<Cluster> clusters, String scopeLanguage) {
             if (inFlightProbe != null) {
                 inFlightDuringGenerate = inFlightProbe.getAsBoolean();
+            }
+            if (throwErrorOnGenerate) {
+                throw new OutOfMemoryError("test-injected error during generate");
             }
             List<ClusterProse> out = new ArrayList<>(clusters.size());
             for (Cluster c : clusters) {

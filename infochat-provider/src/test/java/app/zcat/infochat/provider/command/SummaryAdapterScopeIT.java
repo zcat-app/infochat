@@ -97,9 +97,14 @@ class SummaryAdapterScopeIT {
 
         adapter.deliverDm(SHARED_CONTACT_ID, "/summary");
 
+        // The notifier delivers via placeholder send + in-place finalize
+        // on the SAME adapter the inbound arrived through (inmemory). The
+        // summary content lands on the finalized body.
         assertEquals(1, adapter.sentMessages().size(),
-                "exactly one outbound reply must be produced by router → handler chain");
-        String body = adapter.sentMessages().get(0).text();
+                "exactly one placeholder send must be produced by the router → handler chain");
+        assertEquals(1, adapter.finalizedBodies().size(),
+                "exactly one finalized summary delivered to the inmemory adapter scope");
+        String body = adapter.finalizedBodies().get(0);
         assertTrue(body.contains("ALPHA HEADLINE m1-040si"),
                 "router→handler MUST resolve (adapter='inmemory', contact_id=shared) "
                         + "to the inmemory user and surface that user's post. Got: " + body);

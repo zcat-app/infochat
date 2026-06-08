@@ -16,6 +16,7 @@ import app.zcat.infochat.messaging.ScopeRef;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -301,6 +302,29 @@ public final class InMemoryAdapter implements MessagingAdapter {
     /** Snapshot of every {@link TypingEvent} passed to {@link #setTyping}. */
     public List<TypingEvent> typingEventHistory() {
         return List.copyOf(typingEvents);
+    }
+
+    /**
+     * Test-only recorder accessor: the bodies of every
+     * {@link #finalizeMessage} event across all handles, in no
+     * particular cross-handle order. The progress notifier delivers a
+     * {@code /summary} reply as a placeholder {@link #send} followed by
+     * a {@link #finalizeMessage} carrying the real summary; that final
+     * body lands on the per-handle {@code history} (reachable only via
+     * {@link #updateHistory(MessageHandle)} given the internally-created
+     * handle), so tests observing the delivered summary read it here
+     * without needing the handle. No production behavior change.
+     */
+    public List<String> finalizedBodies() {
+        List<String> out = new ArrayList<>();
+        for (List<UpdateEvent> events : history.values()) {
+            for (UpdateEvent event : events) {
+                if (event.isFinal()) {
+                    out.add(event.body());
+                }
+            }
+        }
+        return List.copyOf(out);
     }
 
     /** Reset all adapter state — test fixture isolation. */

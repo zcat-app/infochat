@@ -1,6 +1,5 @@
 package app.zcat.infochat.provider.translation;
 
-import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
 import app.zcat.infochat.provider.testing.TestLlmProvider;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
@@ -111,9 +110,10 @@ class TranslationPipelineIT {
 
         adapter.deliverDm(USER_CONTACT_ID, "/summary -w 24h");
 
-        List<OutboundMessage> sent = adapter.sentMessages();
-        assertEquals(1, sent.size(), "exactly one outbound reply");
-        String body = sent.get(0).text();
+        assertEquals(1, adapter.sentMessages().size(), "exactly one placeholder send");
+        List<String> finalized = adapter.finalizedBodies();
+        assertEquals(1, finalized.size(), "exactly one finalized summary message");
+        String body = finalized.get(0);
 
         assertTrue(body.contains("<cs-translation>"),
                 "cs-scope outbound must contain the translated text. Got: " + body);
@@ -154,9 +154,10 @@ class TranslationPipelineIT {
 
         adapter.deliverDm(USER_CONTACT_ID, "/summary -w 24h");
 
-        List<OutboundMessage> sent = adapter.sentMessages();
-        assertEquals(1, sent.size(), "exactly one outbound reply");
-        String body = sent.get(0).text();
+        assertEquals(1, adapter.sentMessages().size(), "exactly one placeholder send");
+        List<String> finalized = adapter.finalizedBodies();
+        assertEquals(1, finalized.size(), "exactly one finalized summary message");
+        String body = finalized.get(0);
 
         assertTrue(body.contains("<en-summary>"),
                 "en-scope outbound must contain the summarizer output. Got: " + body);

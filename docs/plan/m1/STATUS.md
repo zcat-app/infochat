@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 259 |
+| done | 260 |
 | deferred | 2 |
 | **total** | **265** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-212 — ProgressNotifier pipeline: implement minimally, defer by amendment, or remove (complexity: high, risk: medium)
 - M1-227 — /digest on|off — group-admin toggle to pause/resume the periodic digest (complexity: high, risk: medium)
 - M1-229 — Split inbound rate-cap: per-user vs shared stranger bucket (complexity: high, risk: medium)
 
@@ -394,7 +393,7 @@ M1-206 (done)
 M1-209 (done)
 M1-210 (done)
 M1-211 (done)
-M1-212 (pending) ← runnable
+M1-212 (done)
 M1-213 (done)
 M1-214 (done)
 M1-215 (done)

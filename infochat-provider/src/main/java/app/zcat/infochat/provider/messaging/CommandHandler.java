@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.messaging;
 
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Provider-side dispatch contract for one slash-prefixed command.
@@ -49,7 +50,16 @@ public interface CommandHandler {
      * @param scope   the originating scope (DM or group).
      * @param rawText the post-normalization inbound body including the
      *                leading slash and any arguments.
-     * @return the outbound reply to send via the originating adapter.
+     * @return the outbound reply to send via the originating adapter,
+     *         or {@code null} when the handler has already delivered its
+     *         reply itself (e.g. a long-running handler that owns its
+     *         message lifecycle through the {@link app.zcat.infochat.messaging.ProgressNotifier}
+     *         placeholder &rarr; update &rarr; finalize sequence). On a
+     *         {@code null} return {@link InboundRouter} performs NO send
+     *         for that invocation, so a self-delivering handler does not
+     *         produce a duplicate message. Handlers that return a
+     *         non-null reply are unaffected — the router sends it.
      */
+    @Nullable
     OutboundMessage handle(ScopeRef scope, String rawText);
 }

@@ -92,12 +92,18 @@ class SummaryIT {
 
         adapter.deliverDm(USER_CONTACT_ID, "/summary -w 24h");
 
-        // (b) exactly ONE outbound message.
+        // (b) one visibly-evolving message: the ProgressNotifier sends a
+        // single placeholder (recorded on sentMessages) and finalizes it
+        // in place with the real summary (recorded on finalizedBodies).
+        // The router performs no send of its own — the handler returned
+        // null (self-delivered).
         List<OutboundMessage> sent = adapter.sentMessages();
-        assertEquals(1, sent.size(), "exactly one outbound reply");
-        String body = sent.get(0).text();
+        assertEquals(1, sent.size(), "exactly one placeholder send");
+        List<String> finalized = adapter.finalizedBodies();
+        assertEquals(1, finalized.size(), "exactly one finalized summary message");
+        String body = finalized.get(0);
 
-        // (c) the reply body contains all 4 post UIDs.
+        // (c) the finalized body contains all 4 post UIDs.
         assertTrue(body.contains(PREFIX + "p1"), "reply must cite p1 uid");
         assertTrue(body.contains(PREFIX + "p2"), "reply must cite p2 uid");
         assertTrue(body.contains(PREFIX + "p3"), "reply must cite p3 uid");
@@ -134,7 +140,9 @@ class SummaryIT {
 
         adapter.deliverDm(USER_CONTACT_ID, "/summary -w 24h");
 
-        String body = adapter.sentMessages().get(0).text();
+        // Degraded prose is still a composed (successful) terminal
+        // delivery → finalized in place, not a fail() placeholder.
+        String body = adapter.finalizedBodies().get(0);
         // (g) LLM throws → degraded notice prefix + headline + bare URL + uid.
         assertTrue(body.contains("LLM is unreachable"),
                 "degraded reply must include the degraded_notice prefix. Got: " + body);
