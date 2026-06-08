@@ -115,7 +115,8 @@ public class ReadyPromoter {
      * (each promotion is its own transaction — a failure on one post
      * does not block the rest of the batch).
      */
-    @Scheduled(every = "{infochat.embeddings.poll-interval}")
+    @Scheduled(every = "{infochat.embeddings.poll-interval}",
+        concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     public void onTick() {
         List<PromotionCandidate> pending;
         try {

@@ -119,7 +119,8 @@ public class LinkingJob {
      * A processing failure on one post does not abort the tick — the
      * post stays in the driving set and the next tick re-picks it.
      */
-    @Scheduled(every = "{infochat.linking.interval}")
+    @Scheduled(every = "{infochat.linking.interval}",
+        concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     public void onTick() {
         List<DrivingPost> driving;
         try {

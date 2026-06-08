@@ -163,7 +163,8 @@ public class EmbeddingWorker {
      * the simplest equivalent to the design's "flush when full or on
      * profile-driven timer" — each tick is a flush.
      */
-    @Scheduled(every = "{infochat.embeddings.poll-interval}")
+    @Scheduled(every = "{infochat.embeddings.poll-interval}",
+        concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     public void onTick() {
         List<PostRow> pending;
         try {

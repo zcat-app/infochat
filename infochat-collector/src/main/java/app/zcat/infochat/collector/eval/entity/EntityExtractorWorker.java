@@ -184,7 +184,8 @@ public class EntityExtractorWorker {
      * tick — the post stays {@code entity_done=FALSE} and the next tick
      * re-picks it.
      */
-    @Scheduled(every = "{infochat.llm.entity.poll-interval}")
+    @Scheduled(every = "{infochat.llm.entity.poll-interval}",
+        concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     public void onTick() {
         List<PostRow> pending;
         try {

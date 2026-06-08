@@ -56,7 +56,8 @@ public class AdminReviewTtlJob {
     @ConfigProperty(name = "infochat.reeval.ttl-batch-size", defaultValue = "32")
     int batchSize;
 
-    @Scheduled(every = "{infochat.reeval.ttl-poll-interval}")
+    @Scheduled(every = "{infochat.reeval.ttl-poll-interval}",
+        concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     public void onTick() {
         List<TtlCandidate> candidates;
         try {

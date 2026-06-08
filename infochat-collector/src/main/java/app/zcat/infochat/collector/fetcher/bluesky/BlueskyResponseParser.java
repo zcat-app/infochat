@@ -7,6 +7,7 @@ import org.jspecify.annotations.Nullable;
 
 import java.io.IOException;
 import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -79,7 +80,7 @@ public final class BlueskyResponseParser {
         String text = textOrNull(recordNode, "text");
 
         String indexedAtRaw = textOrNull(postNode, "indexedAt");
-        Instant publishedAt = indexedAtRaw != null ? Instant.parse(indexedAtRaw) : null;
+        Instant publishedAt = parseIndexedAtOrNull(indexedAtRaw);
 
         // AT URI: at://<did>/<collection>/<rkey> — extract rkey for web URL
         String webUrl = buildWebUrl(uri, handle);
@@ -121,6 +122,26 @@ public final class BlueskyResponseParser {
         }
         String rkey = atUri.substring(lastSlash + 1);
         return "https://bsky.app/profile/" + handle + "/post/" + rkey;
+    }
+
+    /**
+     * Parse the upstream {@code indexedAt} into an {@link Instant}, degrading a
+     * single malformed timestamp to {@code null} rather than aborting the whole
+     * batch. The Bluesky response is an untrusted system boundary: one feed
+     * entry with a non-ISO {@code indexedAt} must not throw and kill every
+     * well-formed post in the same page. A null {@code published_at} is already
+     * a valid state (it is also what an absent {@code indexedAt} yields);
+     * downstream ordering falls back to {@code fetched_at}.
+     */
+    private static @Nullable Instant parseIndexedAtOrNull(@Nullable String indexedAtRaw) {
+        if (indexedAtRaw == null) {
+            return null;
+        }
+        try {
+            return Instant.parse(indexedAtRaw);
+        } catch (DateTimeParseException e) {
+            return null;
+        }
     }
 
     private static String requireText(JsonNode node, String field) {

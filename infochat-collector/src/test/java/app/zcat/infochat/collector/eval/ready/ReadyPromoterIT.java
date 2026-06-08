@@ -26,6 +26,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -256,6 +258,63 @@ class ReadyPromoterIT {
         } finally {
             metadataDao.updateSingleton(original.modelIdentifier(), original.dimension());
         }
+    }
+
+    // ---------- 6. forced poller overlap — claim-by-update admits exactly one ----------
+
+    @Test
+    @Order(6)
+    void forcedOverlap_onlyOnePromotionClaimsTheRawRow() throws Exception {
+        // M1-202 item 6: under forced overlap, an overrunning tick cannot be
+        // overlapped by the next tick double-picking the same work item. The
+        // ReadyPromoter is the work-claiming picker exercised here: its
+        // UPDATE ... WHERE status='RAW' is an atomic claim-by-update, so two
+        // concurrent promotions of the same RAW post admit exactly one — the
+        // second's UPDATE matches zero rows once the winner commits status=READY.
+        // (The scheduler-level concurrentExecution=SKIP added to every in-scope
+        // @Scheduled job is the primary policy; this proves the claim is also
+        // overlap-safe at the SQL level for at least one picker.)
+        SeededPost post = seedPickupReadyPost("overlap");
+
+        AtomicInteger claims = new AtomicInteger();
+        CountDownLatch release = new CountDownLatch(1);
+        // The hook runs ONLY on the winning path — after the UPDATE matched a
+        // RAW row, before NOTIFY/commit. Holding the transaction open briefly
+        // guarantees the second tick is genuinely blocked on the row lock when
+        // the winner commits, forcing real overlap rather than incidental
+        // serialization. It is invoked once per successful claim, so the count
+        // is the number of ticks that actually picked the post.
+        ClientProxy.unwrap(readyPromoter).afterUpdateHook = () -> {
+            claims.incrementAndGet();
+            try {
+                Thread.sleep(150);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        };
+
+        Runnable tick = () -> {
+            try {
+                release.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            readyPromoter.promoteOne(post.id, post.fetchedAt);
+        };
+        Thread first = new Thread(tick, "overlap-tick-1");
+        Thread second = new Thread(tick, "overlap-tick-2");
+        first.start();
+        second.start();
+        release.countDown();
+        first.join();
+        second.join();
+
+        assertEquals(1, claims.get(),
+            "exactly one overlapping promotion may claim the RAW row; "
+                + "a second claim would mean the picker double-picked under overlap");
+        PostSnapshot snap = readPost(post.id);
+        assertEquals("READY", snap.status, "the winning claim must leave the post READY");
     }
 
     // ---------- helpers ----------

@@ -182,7 +182,8 @@ public class FetchScheduler {
      * interval; each registered kind is gated by its own configured
      * interval ({@code infochat.fetch.<kind>.interval}).
      */
-    @Scheduled(every = "{infochat.fetch.heartbeat-interval}")
+    @Scheduled(every = "{infochat.fetch.heartbeat-interval}",
+        concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     void onTick() {
         Instant now = Instant.now();
 

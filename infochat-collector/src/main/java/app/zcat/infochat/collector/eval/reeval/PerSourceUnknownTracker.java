@@ -32,6 +32,20 @@ public class PerSourceUnknownTracker {
 
     static final String ERROR_CLASS_SOURCE_UNKNOWN_AUTO_DISABLE = "source-unknown-auto-disable";
 
+    // Slack added to the rolling window when bounding the partition key
+    // (post.fetched_at) so partition pruning applies. fetched_at is the post
+    // partition key; status_changed_at (the recency-of-verdict signal the rate
+    // is actually computed over) is not — so bounding only status_changed_at
+    // forced every tick to scan all partitions. The fetched_at bound must never
+    // exclude a post that is inside the status_changed_at window, so it is
+    // widened by this slack, which must exceed the worst-case lag between a
+    // post's fetched_at and its stage-2 verdict (the eval-pipeline drain time).
+    // Two days is generous: the pipeline drains in seconds/minutes normally and
+    // this still tolerates a long sustained backlog. The trade-off (a post
+    // evaluated now but fetched longer ago than window+slack drops out of the
+    // rate) is argued in the commit message's semantic-delta note.
+    private static final Duration PARTITION_SCAN_SLACK = Duration.ofDays(2);
+
     private static final Logger LOG = LoggerFactory.getLogger(PerSourceUnknownTracker.class);
 
     @Inject
@@ -49,7 +63,8 @@ public class PerSourceUnknownTracker {
     @ConfigProperty(name = "infochat.reeval.unknown-rate-min-sample", defaultValue = "5")
     int minSampleSize;
 
-    @Scheduled(every = "{infochat.reeval.unknown-tracker-poll-interval}")
+    @Scheduled(every = "{infochat.reeval.unknown-tracker-poll-interval}",
+        concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     public void onTick() {
         try {
             checkAllSources();
@@ -64,6 +79,13 @@ public class PerSourceUnknownTracker {
         // Find active sources whose UNKNOWN rate within the window
         // exceeds the threshold. Uses the stage2_verdict column (V22)
         // to count only UNKNOWN verdicts, not INJECTION/MALWARE.
+        //
+        // The p.fetched_at lower bound is the partition-pruning predicate:
+        // fetched_at is the post partition key, status_changed_at is not, so
+        // bounding only status_changed_at made every tick scan all partitions.
+        // fetched_at is widened by PARTITION_SCAN_SLACK so it never excludes a
+        // post inside the status_changed_at window; status_changed_at stays the
+        // precise recency-of-verdict signal the rate is computed over.
         final String sql =
             "SELECT s.id, "
                 + "  COUNT(*) FILTER (WHERE p.stage2_verdict = 'UNKNOWN') AS unknown_count, "
@@ -73,13 +95,16 @@ public class PerSourceUnknownTracker {
                 + "WHERE s.status = 'active' "
                 + "  AND p.stage2_done = TRUE "
                 + "  AND p.stage2_failed = FALSE "
+                + "  AND p.fetched_at >= now() - ?::INTERVAL "
                 + "  AND p.status_changed_at >= now() - ?::INTERVAL "
                 + "GROUP BY s.id "
                 + "HAVING COUNT(*) >= ?";
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, unknownRateWindow.toSeconds() + " seconds");
-            ps.setInt(2, minSampleSize);
+            long windowSeconds = unknownRateWindow.toSeconds();
+            ps.setString(1, (windowSeconds + PARTITION_SCAN_SLACK.toSeconds()) + " seconds");
+            ps.setString(2, windowSeconds + " seconds");
+            ps.setInt(3, minSampleSize);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     UUID sourceId = (UUID) rs.getObject(1);
@@ -101,8 +126,13 @@ public class PerSourceUnknownTracker {
             ps.setObject(1, sourceId);
             int updated = ps.executeUpdate();
             if (updated > 0) {
+                // Per-source coalescing key so two different sources auto-disabled
+                // inside one throttle window each emit their own notification — a
+                // constant key (the error class) would suppress the second source's
+                // notification as a duplicate. The error_class argument stays the
+                // stable constant for operator scrapes keyed on error_class.
                 throttledAdminNotifier.notifyOnce(
-                    ERROR_CLASS_SOURCE_UNKNOWN_AUTO_DISABLE,
+                    ERROR_CLASS_SOURCE_UNKNOWN_AUTO_DISABLE + ":" + sourceId,
                     ERROR_CLASS_SOURCE_UNKNOWN_AUTO_DISABLE,
                     "Source " + sourceId + " auto-disabled: UNKNOWN rate "
                         + String.format("%.2f", observedRate)

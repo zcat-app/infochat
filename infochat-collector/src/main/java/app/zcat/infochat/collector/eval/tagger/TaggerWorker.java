@@ -192,7 +192,8 @@ public class TaggerWorker {
      * flagged) have completed, runs the tagger on each, and writes
      * the per-stage cursor advance.
      */
-    @Scheduled(every = "{infochat.llm.tagger.poll-interval}")
+    @Scheduled(every = "{infochat.llm.tagger.poll-interval}",
+        concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     public void onTick() {
         List<PostRow> pending;
         try {

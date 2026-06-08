@@ -294,12 +294,16 @@ public final class NostrStreamSource implements StreamSource {
                 .connectTimeout(Duration.ofSeconds(10))
                 .build();
 
-        // Default-strict SSRF guard — IpBlocklist refuses loopback,
-        // private, link-local, CGNAT, cloud-metadata, multicast, and the
-        // host's own non-loopback interfaces (security.md §SSRF). One
-        // instance shared across every relay of every source; the guard
-        // is stateless apart from its configuration.
-        private final SsrfGuardedHttpClient ssrfClient = new SsrfGuardedHttpClient();
+        // CDI-managed default-strict SSRF guard, supplied by
+        // CollectorSsrfClientProducer (one shared @Singleton instance) rather
+        // than constructed here — so the Registrar routes through the same
+        // configured guard a test can override, not a privately-newed one.
+        // The guard refuses loopback, private, link-local, CGNAT,
+        // cloud-metadata, multicast, and the host's own non-loopback
+        // interfaces (security.md §SSRF); it is stateless apart from its
+        // configuration.
+        @Inject
+        SsrfGuardedHttpClient ssrfClient;
 
         // Stateless and thread-safe — one verifier shared across every source.
         private final NostrEventVerifier verifier = new NostrEventVerifier();
@@ -358,6 +362,16 @@ public final class NostrStreamSource implements StreamSource {
                 LOG.info("Registered NostrStreamSource for source {} across {} relay(s)",
                         sourceUuid, relays.size());
             }
+        }
+
+        /**
+         * Package-private accessor for the injected SSRF client, used by the
+         * wiring IT to assert the Registrar resolves to the CDI-produced bean.
+         * A method (not a direct field read) so the call dispatches through the
+         * {@code @ApplicationScoped} client proxy to the contextual instance.
+         */
+        SsrfGuardedHttpClient ssrfClient() {
+            return ssrfClient;
         }
 
         /**

@@ -139,17 +139,20 @@ public class AssetSnapshotFetcher {
     // resolution is non-deterministic ordering but stable per JVM.
     private volatile @Nullable Map<String, AssetDataSource> sourcesById;
 
-    @Scheduled(every = "{infochat.assets.refresh.coingecko}")
+    @Scheduled(every = "{infochat.assets.refresh.coingecko}",
+        concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     public void onCoingeckoTick() {
         runHostTick(COINGECKO);
     }
 
-    @Scheduled(every = "{infochat.assets.refresh.kraken}")
+    @Scheduled(every = "{infochat.assets.refresh.kraken}",
+        concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     public void onKrakenTick() {
         runHostTick(KRAKEN);
     }
 
-    @Scheduled(every = "{infochat.assets.refresh.bitfinex}")
+    @Scheduled(every = "{infochat.assets.refresh.bitfinex}",
+        concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     public void onBitfinexTick() {
         runHostTick(BITFINEX);
     }
