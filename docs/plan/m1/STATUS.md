@@ -15,8 +15,8 @@
 | in-review | 0 |
 | escalated | 0 |
 | done | 248 |
-| deferred | 2 |
-| **total** | **259** |
+| deferred | 3 |
+| **total** | **260** |
 
 ---
 
@@ -27,12 +27,12 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-193 — /stop wiring: pg backend pid + statement timeouts + tool conns (complexity: high, risk: medium)
 - M1-198 — Group-scope bot-admin commands: return accurate command_dm_only, keep DM-only (complexity: medium, risk: medium)
 - M1-202 — Collector fetch hygiene: tracker predicates/keys, Bluesky encoding+parse, Registrar CDI, poller overlap (complexity: medium, risk: medium)
-- M1-205 — Adapter rate-limit enforcement: implement §6.3.7 + capability caps, or design-amend (complexity: high, risk: medium)
 - M1-208 — Per-adapter bootstrap-admin contact-id parse validation (SPI surface decision) (complexity: medium, risk: medium)
 - M1-210 — Module-DAG enforcement + doc/config-truth sweep (docs say what the build does) (complexity: medium, risk: medium)
 - M1-211 — MessagingAdapter.assertIdentity: wire the spec-mandated surface or remove it (complexity: medium, risk: medium)
 - M1-212 — ProgressNotifier pipeline: implement minimally, defer by amendment, or remove (complexity: medium, risk: medium)
 - M1-219 — searchPosts window/ordering semantics: bind the spec to a timestamp column (complexity: low, risk: low)
+- M1-224 — Bounded inbound dispatch queue (M1-205 DoS remediation) (complexity: medium, risk: medium)
 
 ---
 
@@ -82,6 +82,9 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 ---
 
 ## Deferred
+
+### blocked-on-new-ticket (1)
+- M1-205 → M1-224
 
 ### decomposed (1)
 - M1-034 → M1-034a
@@ -365,7 +368,7 @@ M1-176 (done)
 M1-177 (done)
   ├── M1-184 (done)
   ├── M1-204 (done)
-  └── M1-205 (pending) ← runnable
+  └── M1-205 (deferred)
 M1-178 (done)
   └── M1-208 (pending) ← runnable
 M1-179 (done)
@@ -409,4 +412,6 @@ M1-218 (done)
 M1-220 (done)
 M1-221 (done)
 M1-223 (done)
+M1-224 (pending) ← runnable
+  └── M1-205 (deferred) [see above]
 ```
