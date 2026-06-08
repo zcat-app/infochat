@@ -3,14 +3,14 @@ id: M1-202
 title: "Collector fetch hygiene: tracker predicates/keys, Bluesky encoding+parse, Registrar CDI, poller overlap"
 status: pending
 created: 2026-06-07
-last_updated: 2026-06-07
+last_updated: 2026-06-08
 blocked_by: []
 files_budget: 18
 files_scope:
   - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/reeval/PerSourceUnknownTracker.java
   - infochat-collector/src/main/java/app/zcat/infochat/collector/fetcher/bluesky/BlueskyFetcher.java
   - infochat-collector/src/main/java/app/zcat/infochat/collector/fetcher/bluesky/BlueskyResponseParser.java
-  - infochat-collector/src/main/java/app/zcat/infochat/collector/fetcher/nostr/NostrStreamSource.java
+  - infochat-collector/src/main/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSource.java
   - infochat-collector/src/main/java/app/zcat/infochat/collector/fetch/FetchScheduler.java
   - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/tagger/TaggerWorker.java
   - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/entity/EntityExtractorWorker.java
@@ -21,7 +21,7 @@ files_scope:
   - infochat-collector/src/main/java/app/zcat/infochat/collector/assets/AssetSnapshotFetcher.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/reeval
   - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/bluesky
-  - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/nostr
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval
 complexity: medium
 risk: medium
@@ -47,7 +47,7 @@ test_plan:
   adds:
     - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/reeval
     - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/bluesky
-    - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/nostr
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr
   preserves:
     - all tests currently green on main
 spec_refs:
@@ -60,6 +60,23 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+escalations:
+  - date: 2026-06-08
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      Caught at /m1-tick start grounding (step 0), before the clarity-reviewer
+      subagent ran. Two files_scope entries (and the matching test_plan.adds
+      entry) point at package fetcher/nostr, which does not exist on disk;
+      NostrStreamSource.java actually lives in stream/nostr. The other 14 scope
+      paths resolve. Recorded as clarity-fail because it is a pre-implementation
+      ticket-validity defect and the refine arm mechanics match (no branch,
+      status returns to pending, re-run start with fresh clarity + plan).
+revisions:
+  - date: 2026-06-08
+    reason: "clarity-fail refine: correct stale fetcher/nostr scope paths to stream/nostr"
+    snapshot_files_scope:
+      - infochat-collector/src/main/java/app/zcat/infochat/collector/fetcher/nostr/NostrStreamSource.java
+      - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/nostr
 ---
 
 # M1-202: Collector fetch hygiene: tracker predicates/keys, Bluesky encoding+parse, Registrar CDI, poller overlap
