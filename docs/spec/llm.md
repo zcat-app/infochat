@@ -30,7 +30,16 @@ The LLM adapter exposes pluggable interfaces (decision D32):
 
 - **`LlmProvider`** — chat completion + structured-output classification.
 - **`EmbeddingProvider`** — text → vector batch.
-- **`TranslationProvider`** — text + (from, to) → text.
+- **`TranslationProvider`** — text + (from, to) → text. **Placement:**
+  unlike the other interfaces in this list, this SPI is owned by the
+  messaging adapter, not the LLM adapter. Translation is a
+  presentation-layer concern (decision D29) and the contract is
+  model-agnostic — an implementation need not call an LLM at all. The
+  LLM-backed implementation is one plug among possible others and
+  dispatches to the `TRANSLATOR` task internally; the two are
+  different surfaces. The SPI stays specified in this file because
+  §Translation flow and the `TRANSLATOR` routing are part of this
+  file's surface.
 - **`ModelTask`** enum — `SECURITY_JUDGE`, `TAGGER`, `ENTITY`,
   `SUMMARIZER`, `CHAT_AGENT`, `TRANSLATOR`. **Scope of the enum:**
   `ModelTask` enumerates `LlmProvider` tasks **only**. The embedder

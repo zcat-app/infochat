@@ -1,9 +1,14 @@
 ---
 id: M1-213
 title: "TranslationProvider module placement: move to the LLM adapter or amend the spec"
-status: pending
+status: done
 created: 2026-06-07
-last_updated: 2026-06-07
+last_updated: 2026-06-08
+clarity_check:
+  date: 2026-06-08
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
 files_budget: 12
 files_scope:
@@ -45,7 +50,20 @@ spec_refs:
 decision_refs:
   - D29
   - D32
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-08
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 22
+      removed: 10
 overrides: []
 aborted_attempts: []
 reopens: []
