@@ -126,6 +126,19 @@ class BanCommandHandlerTest {
         }
     }
 
+    // ----- (M1-198) group scope → command_dm_only, before admin/confirm gate
+
+    @Test
+    void banInGroupScopeReturnsCommandDmOnly() throws Exception {
+        // Bot-global admin command is DM-only: the group-scope guard
+        // precedes the admin gate AND the confirm-gate fork, so `/ban`
+        // (and `/ban confirm`) in a group return the accurate scope error.
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Group(PREFIX + "grp-dm-only"), "/ban " + PREFIX + "victim");
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY), reply.text(),
+                "/ban in group scope must return error.command_dm_only");
+    }
+
     // ----- (2) Non-admin → error.admin_only, no DB write -------------------
 
     @Test

@@ -167,6 +167,14 @@ public class InviteCommandHandler implements CommandHandler {
 
     @Override
     public OutboundMessage handle(ScopeRef scope, String rawText) {
+        // Bot-global admin command: DM-only. A group-scope reply is
+        // visible to every member, and /invite create & /invite list
+        // disclose single-use invite codes verbatim. Return the accurate
+        // scope error before resolving the caller — matching the guard in
+        // the other bot-global admin handlers (Audit, Quarantine, etc.).
+        if (scope instanceof ScopeRef.Group) {
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY));
+        }
         String inboundAdapter = inboundContext.adapterName();
         String callerContactId = contactIdOf(scope);
 

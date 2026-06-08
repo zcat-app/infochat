@@ -148,6 +148,13 @@ public class BanCommandHandler implements CommandHandler {
 
     @Override
     public OutboundMessage handle(ScopeRef scope, String rawText) {
+        // Bot-global admin command: DM-only (a group reply is visible to
+        // every member). Guard before the admin gate AND the confirm-gate
+        // fork so `/ban confirm` in a group also returns the accurate
+        // scope error — matching the other bot-global admin handlers.
+        if (scope instanceof ScopeRef.Group) {
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY));
+        }
         String adapter = inboundContext.adapterName();
         String callerContactId = contactIdOf(scope);
 

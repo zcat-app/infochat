@@ -140,14 +140,18 @@ public class VouchCommandHandler implements CommandHandler {
 
     @Override
     public OutboundMessage handle(ScopeRef scope, String rawText) {
+        // Bot-global admin command: DM-only (a group reply is visible to
+        // every member). Return the accurate scope error before resolving
+        // the caller or opening a transaction — matching the guard in the
+        // other bot-global admin handlers.
+        if (scope instanceof ScopeRef.Group) {
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY));
+        }
         String adapter = inboundContext.adapterName();
         String callerContactId = contactIdOf(scope);
 
-        // Group-scope inbound: callerContactId=null per the M1-044c
-        // DM-only convention. Short-circuit with error.admin_only so
-        // we do not open a transaction just to immediately roll it
-        // back when lookupActorForUpdate(null) inside the tx returns
-        // empty.
+        // contactIdOf is @Nullable; narrow it for the permission pre-check
+        // and the in-tx FOR UPDATE gate below (both require non-null).
         if (callerContactId == null) {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
         }

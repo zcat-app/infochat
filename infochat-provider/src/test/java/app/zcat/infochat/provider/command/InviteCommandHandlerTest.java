@@ -110,6 +110,19 @@ class InviteCommandHandlerTest {
         }
     }
 
+    // ----- (M1-198) group scope → command_dm_only, before caller resolution -
+
+    @Test
+    void inviteInGroupScopeReturnsCommandDmOnly() throws Exception {
+        // Bot-global admin command is DM-only: the group-scope guard
+        // returns the accurate scope error before caller resolution, so
+        // no group member can elicit invite codes from /invite list.
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Group(PREFIX + "grp-dm-only"), "/invite list");
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY), reply.text(),
+                "/invite in group scope must return error.command_dm_only");
+    }
+
     // ----- (21) /invite (no subcommand) → unknown_subcommand --------------
 
     @Test

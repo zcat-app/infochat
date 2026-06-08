@@ -90,6 +90,25 @@ class ListSourcesCommandHandlerTest {
         }
     }
 
+    // ----- (M1-198) privileged flags in group scope → command_dm_only ------
+
+    @Test
+    void listSourcesAdminFlagsInGroupScopeReturnCommandDmOnly() throws Exception {
+        // The privileged --all / --include-deleted listing is DM-only (it
+        // enumerates deployment-wide source URLs); in group scope it
+        // returns the accurate scope error, NOT the admin_only_flag error.
+        // The un-flagged /list-sources stays available in group scope
+        // (covered by listSourcesGroupReturnsGroupSubscriptionsForEveryMember).
+        String expected = bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY);
+        assertEquals(expected, handler.handle(
+                        new ScopeRef.Group(PREFIX + "grp-dm-only"), "/list-sources --all").text(),
+                "/list-sources --all in group scope must return error.command_dm_only");
+        assertEquals(expected, handler.handle(
+                        new ScopeRef.Group(PREFIX + "grp-dm-only"),
+                        "/list-sources --include-deleted").text(),
+                "/list-sources --include-deleted in group scope must return error.command_dm_only");
+    }
+
     // ----- Permission-gate branches (admin-only flag rejections) -----------
 
     @Test

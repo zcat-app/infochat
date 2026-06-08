@@ -99,6 +99,19 @@ class UnbanCommandHandlerTest {
         }
     }
 
+    // ----- (M1-198) group scope → command_dm_only, before admin gate -------
+
+    @Test
+    void unbanInGroupScopeReturnsCommandDmOnly() throws Exception {
+        // Bot-global admin command is DM-only: the group-scope guard
+        // returns the accurate scope error before the admin gate, so the
+        // group_admins_restored reply never discloses cross-group roles.
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Group(PREFIX + "grp-dm-only"), "/unban " + PREFIX + "someone");
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY), reply.text(),
+                "/unban in group scope must return error.command_dm_only");
+    }
+
     // ----- (11) Non-admin /unban → error.admin_only, no DB write ----------
 
     @Test

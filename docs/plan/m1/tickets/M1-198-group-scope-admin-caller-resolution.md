@@ -1,9 +1,15 @@
 ---
 id: M1-198
 title: "Group-scope bot-admin commands: return accurate command_dm_only, keep DM-only"
-status: pending
+status: done
 created: 2026-06-07
 last_updated: 2026-06-08
+clarity_check:
+  date: 2026-06-08
+  verdict: WARN
+  warnings:
+    - "TEST-CHANGES-AUTHORIZED: test_plan.modifies points at the command test dir but there is no formal 'authorized test changes' section; the preserves note implies additions-only (new group-scope tests added to existing handler test classes, no existing assertion changed or removed). Advisory only — an explicit 'additions only' note would remove reviewer ambiguity."
+  blockers: []
 blocked_by: []
 files_budget: 14
 files_scope:
@@ -47,11 +53,42 @@ spec_refs:
   - docs/spec/commands.md §Permission model
   - docs/spec/security.md §Authorization model
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-08
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 11
+      added: 146
+      removed: 27
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-06-08
+    verdict: CLEAN
+    base: f167e39
+    head: 5a16d7e
+    verdict_file: docs/plan/m1/redteam/M1-198-2026-06-08.md
+    out_of_model_count: 0
+    note: |
+      Adversarial audit of the implementation diff (f167e39..5a16d7e, the
+      branch commit pre-merge). CLEAN — the change tightens the trust
+      boundary by adding ScopeRef.Group guards that short-circuit five
+      bot-admin handlers before any caller resolution, transaction, or
+      group-visible disclosing reply. Threat-actor confirmed all 13
+      DM-only handlers (5 changed + 4 already-guarded + the rest) carry the
+      guard, the Ban guard precedes the confirm-fork, and the ListSources
+      base group path still returns only group-scoped subscriptions. No
+      remediation ticket; safe to merge.
+
 revisions:
   - date: 2026-06-08
     reason: premise-fail refine — pivot from "make all nine group-runnable via InboundContext.senderContactId()" to "all nine bot-global admin commands are DM-only; fix the misleading error message". Grounding showed implementing the matrix literally leaks single-use invite codes (/invite create, /invite list), the audit trail (/audit), source URLs (/list-sources --all) and cross-group roles (/unban) into all-member-visible group replies; the four guarded handlers already emit the correct command_dm_only, so the real defect is only the misleading admin_only from the five unguarded ones. User chose end-state B (uniform DM-only).

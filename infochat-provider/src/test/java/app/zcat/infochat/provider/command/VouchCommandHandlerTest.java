@@ -89,6 +89,19 @@ class VouchCommandHandlerTest {
         }
     }
 
+    // ----- (M1-198) group scope → command_dm_only, before caller resolution -
+
+    @Test
+    void vouchInGroupScopeReturnsCommandDmOnly() throws Exception {
+        // Bot-global admin command is DM-only: the group-scope guard
+        // returns the accurate scope error before caller resolution and
+        // before any transaction opens.
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Group(PREFIX + "grp-dm-only"), "/vouch " + PREFIX + "someone");
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY), reply.text(),
+                "/vouch in group scope must return error.command_dm_only");
+    }
+
     // ----- (a) non-admin → error.admin_only, no DB write --------------------
 
     @Test

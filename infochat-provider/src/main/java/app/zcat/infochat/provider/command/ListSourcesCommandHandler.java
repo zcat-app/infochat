@@ -122,13 +122,17 @@ public class ListSourcesCommandHandler implements CommandHandler {
 
         // Admin-only flag-as-identity (spec §Permission model). Both
         // --all and --include-deleted are admin-only; the flag is NOT
-        // silently stripped from a non-admin caller. In group scope
-        // the SPI does not carry the actor's contact id (T2-F lands
-        // the widening), so the admin lookup yields empty and the
-        // rejection surfaces — which matches the spec intent
-        // (admin verification is unavailable in v1 group scope, so
-        // any --all in that scope is rejected).
+        // silently stripped from a non-admin caller.
         if (args.all || args.includeDeleted) {
+            // The privileged listing is DM-only: it enumerates every
+            // source URL across the deployment, which an all-member-
+            // visible group reply must not surface. A caller passing the
+            // flag in group scope gets the accurate scope error (not the
+            // admin_only_flag error). The un-flagged /list-sources stays
+            // available in group scope below.
+            if (scope instanceof ScopeRef.Group) {
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY));
+            }
             Optional<UserRow> actor = lookupUser(adapter, callerContactId);
             if (actor.isEmpty() || !actor.get().isAdmin) {
                 return reply(scope, bundleLoader.get(BundleKeys.ERROR_LIST_SOURCES_ADMIN_ONLY_FLAG));

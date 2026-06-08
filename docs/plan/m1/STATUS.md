@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 8 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 249 |
+| done | 250 |
 | deferred | 3 |
 | **total** | **260** |
 
@@ -25,7 +25,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-193 — /stop wiring: pg backend pid + statement timeouts + tool conns (complexity: high, risk: medium)
-- M1-198 — Group-scope bot-admin commands: return accurate command_dm_only, keep DM-only (complexity: medium, risk: medium)
 - M1-202 — Collector fetch hygiene: tracker predicates/keys, Bluesky encoding+parse, Registrar CDI, poller overlap (complexity: medium, risk: medium)
 - M1-210 — Module-DAG enforcement + doc/config-truth sweep (docs say what the build does) (complexity: medium, risk: medium)
 - M1-211 — MessagingAdapter.assertIdentity: wire the spec-mandated surface or remove it (complexity: medium, risk: medium)
@@ -392,7 +391,7 @@ M1-195 (done)
 M1-196 (done)
 M1-197 (done)
   └── M1-219 (pending) ← runnable
-M1-198 (pending) ← runnable
+M1-198 (done)
 M1-199 (done)
 M1-200 (done)
 M1-201 (done)

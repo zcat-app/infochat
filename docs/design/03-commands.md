@@ -229,8 +229,8 @@ admin in v1).
 | `/get-tags` | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `/get-sources` | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `/list-sources` | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `/list-sources --all` | ❌ | ❌ | ❌ | ✅ | ❌ |
-| `/list-sources --include-deleted` | ❌ | ❌ | ❌ | ✅ (requires `--all`) | ❌ |
+| `/list-sources --all` | ❌ | ❌ | ❌ | ✅ DM only | ❌ |
+| `/list-sources --include-deleted` | ❌ | ❌ | ❌ | ✅ DM only (requires `--all`) | ❌ |
 | `/summary [tag]` | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `/save <uid>` | ✅ self | ✅ self | ✅ self | ✅ self | ❌ |
 | `/saved [tag]` | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -256,20 +256,38 @@ admin in v1).
 | `/retry --digest` | ❌ (DM has no shared digest) | ❌ | ✅ for group | ✅ in group | ❌ |
 | `/promote <contact>` | ❌ | ❌ | ❌ | ✅ in group | ❌ |
 | `/demote <contact>` | ❌ | ❌ | ❌ | ✅ in group | ❌ |
-| `/grant-admin <contact>` | ❌ | ❌ | ❌ | ✅ | ❌ |
-| `/revoke-admin <contact>` | ❌ | ❌ | ❌ | ✅ | ❌ |
-| `/ban <contact> [--reason …]` | ❌ | ❌ | ❌ | ✅ | ❌ |
-| `/unban <contact>` | ❌ | ❌ | ❌ | ✅ | ❌ |
-| `/invite create --adapter <name> --contact <id>` | ❌ | ❌ | ❌ | ✅ | ❌ |
-| `/invite create --adapter <name> --open` | ❌ | ❌ | ❌ | ✅ | ❌ |
-| `/invite list` | ❌ | ❌ | ❌ | ✅ | ❌ |
-| `/invite revoke <code>` | ❌ | ❌ | ❌ | ✅ | ❌ |
-| `/vouch <contact>` | ❌ | ❌ | ❌ | ✅ | ❌ |
-| `/quarantine list` | ❌ | ❌ | ❌ | ✅ | ❌ |
-| `/quarantine list --all` | ❌ | ❌ | ❌ | ✅ | ❌ |
-| `/quarantine approve <id>` | ❌ | ❌ | ❌ | ✅ | ❌ |
-| `/quarantine reject <id>` | ❌ | ❌ | ❌ | ✅ | ❌ |
-| `/audit [-w …]` | ❌ | ❌ | ❌ | ✅ | ❌ |
+| `/grant-admin <contact>` | ❌ | ❌ | ❌ | ✅ DM only | ❌ |
+| `/revoke-admin <contact>` | ❌ | ❌ | ❌ | ✅ DM only | ❌ |
+| `/ban <contact> [--reason …]` | ❌ | ❌ | ❌ | ✅ DM only | ❌ |
+| `/unban <contact>` | ❌ | ❌ | ❌ | ✅ DM only | ❌ |
+| `/invite create --adapter <name> --contact <id>` | ❌ | ❌ | ❌ | ✅ DM only | ❌ |
+| `/invite create --adapter <name> --open` | ❌ | ❌ | ❌ | ✅ DM only | ❌ |
+| `/invite list` | ❌ | ❌ | ❌ | ✅ DM only | ❌ |
+| `/invite revoke <code>` | ❌ | ❌ | ❌ | ✅ DM only | ❌ |
+| `/vouch <contact>` | ❌ | ❌ | ❌ | ✅ DM only | ❌ |
+| `/quarantine list` | ❌ | ❌ | ❌ | ✅ DM only | ❌ |
+| `/quarantine list --all` | ❌ | ❌ | ❌ | ✅ DM only | ❌ |
+| `/quarantine approve <id>` | ❌ | ❌ | ❌ | ✅ DM only | ❌ |
+| `/quarantine reject <id>` | ❌ | ❌ | ❌ | ✅ DM only | ❌ |
+| `/audit [-w …]` | ❌ | ❌ | ❌ | ✅ DM only | ❌ |
+
+**"✅ DM only" for bot-admin commands.** The bot-global admin commands
+(`/grant-admin`, `/revoke-admin`, `/ban`, `/unban`, `/vouch`, the `/invite`
+subcommands, the `/quarantine` subcommands, `/audit`, and the
+`/list-sources --all` / `--include-deleted` privileged listing) run **only
+in DM scope**, even for a bot admin. A reply to a group scope is delivered to
+the whole group (there is no private-reply-to-admin path), and these
+commands' replies disclose material no group audience should see: verbatim
+single-use invite codes (`/invite create`, `/invite list`), the audit trail
+(`/audit`), the quarantine queue, deployment-wide source URLs
+(`/list-sources --all`), and cross-group admin roles (`/unban`). A bot admin
+invoking one of these in a group receives `error.command_dm_only` (the
+accurate scope error, not `error.admin_only`). This is a **scope**
+restriction within the bot-admin tier — these commands remain bot-admin-only
+in the spec's closed privileged-set (`../spec/commands.md` §Permission
+model); the tier is unchanged. Group-*contextual* admin commands
+(`/approve-group`, `/reject-group`, `/promote`, `/demote`) are unaffected and
+keep working in group scope.
 
 **Admin-only flags are part of command identity.** A non-admin caller passing
 `--all` or `--include-deleted` to `/list-sources`, or `--all` to

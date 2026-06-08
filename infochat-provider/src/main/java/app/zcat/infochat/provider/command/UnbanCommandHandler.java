@@ -140,6 +140,13 @@ public class UnbanCommandHandler implements CommandHandler {
 
     @Override
     public OutboundMessage handle(ScopeRef scope, String rawText) {
+        // Bot-global admin command: DM-only. The group_admins_restored
+        // reply discloses the user's group-admin roles in OTHER groups,
+        // which an all-member-visible group reply must not surface.
+        // Return the accurate scope error before resolving the caller.
+        if (scope instanceof ScopeRef.Group) {
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY));
+        }
         String adapter = inboundContext.adapterName();
         String callerContactId = contactIdOf(scope);
 
