@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 11 |
+| pending | 10 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 246 |
+| done | 247 |
 | deferred | 2 |
 | **total** | **259** |
 
@@ -29,7 +29,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-198 — Group-scope bot-admin commands: resolve caller via InboundContext (complexity: medium, risk: medium)
 - M1-202 — Collector fetch hygiene: tracker predicates/keys, Bluesky encoding+parse, Registrar CDI, poller overlap (complexity: medium, risk: medium)
 - M1-205 — Adapter rate-limit enforcement: implement §6.3.7 + capability caps, or design-amend (complexity: high, risk: medium)
-- M1-207 — infochat_admin role: resolve the paper-principal contradiction (decision) (complexity: low, risk: medium)
 - M1-208 — Per-adapter bootstrap-admin contact-id parse validation (SPI surface decision) (complexity: medium, risk: medium)
 - M1-210 — Module-DAG enforcement + doc/config-truth sweep (docs say what the build does) (complexity: medium, risk: medium)
 - M1-211 — MessagingAdapter.assertIdentity: wire the spec-mandated surface or remove it (complexity: medium, risk: medium)
@@ -76,10 +75,10 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-215 | Core hygiene: sanitized key in getState WARN, full-C0 sanitize, single AuditLogWriter constructor | 2026-06-08 | round 1 APPROVE |
 | M1-214 | SSRF small fixes: Location-resolve exception contract, fec0::/10, scheme case-fold, reason()-based test assertions | 2026-06-08 | round 1 APPROVE |
 | M1-213 | TranslationProvider module placement: move to the LLM adapter or amend the spec | 2026-06-08 | round 1 APPROVE |
+| M1-207 | infochat_admin role: resolve the paper-principal contradiction (decision) | 2026-06-08 | round 1 APPROVE |
 | M1-206 | Parameterize SET LOCAL infochat.actor_id (drop UUID string concat) | 2026-06-08 | round 1 APPROVE |
 | M1-204 | Messaging SPI conformance: setTyping no-op, start() exception type, constants drift, jitter, dead stubs | 2026-06-08 | round 1 APPROVE |
 | M1-201 | Ops hardening: drop infochat-dev password fallbacks + readiness probes | 2026-06-08 | round 1 APPROVE |
-| M1-197 | Tool JSON ready_at value + /export paged replies and truncation flag | 2026-06-08 | round 1 APPROVE |
 
 ---
 
@@ -381,7 +380,7 @@ M1-186 (pending) ← runnable
 M1-187 (done)
 M1-188 (done)
 M1-189 (done)
-  └── M1-207 (pending) ← runnable
+  └── M1-207 (done)
 M1-190 (done)
 M1-191 (done)
 M1-192 (done)

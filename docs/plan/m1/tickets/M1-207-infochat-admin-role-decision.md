@@ -1,9 +1,9 @@
 ---
 id: M1-207
 title: "infochat_admin role: resolve the paper-principal contradiction (decision)"
-status: pending
+status: done
 created: 2026-06-07
-last_updated: 2026-06-07
+last_updated: 2026-06-08
 blocked_by: [M1-189]
 files_budget: 5
 files_scope:
@@ -36,11 +36,48 @@ spec_refs:
   - docs/spec/security.md §DB roles
 decision_refs:
   - D34
-reviews: []
+clarity_check:
+  date: 2026-06-08
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE item 1: compound EITHER/OR prose outcome without a named command; checkable by inspection of migration + doc sections but weaker than the preferred runnable form"
+    - "ACCEPTANCE-RUNNABLE item 3: direction (b) criterion leaves 'named grep-style check or IT' open-ended; no IT class name given"
+    - "ACCEPTANCE-RUNNABLE item 4: commit-message criterion is not mechanically testable; checkable only by reading the commit"
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-06-08
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 358
+      removed: 21
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-06-08
+    verdict: CLEAN
+    base: main
+    head: working-tree (uncommitted on m1/M1-207-infochat-admin-role-decision)
+    verdict_file: docs/plan/m1/redteam/M1-207-2026-06-08.md
+    out_of_model_count: 2
+    note: |
+      CLEAN. V43 grants exactly the documented operator surface; no service
+      role is a member of infochat_admin, so the trust boundary holds.
+      Positive + negative role coverage in AdminRoleGrantsIT. Two OUT-OF-MODEL
+      advisories (operator-side destructive DML — heartbeat DELETE,
+      invite_code_attempt TRUNCATE, source hard-DELETE — leaves no audit_log
+      row), both consistent with the spec's "operator psql is trusted"
+      framing; a forensic trail for those would be a spec extension, not a
+      defect in this diff. No remediation ticket warranted.
 ---
 
 # M1-207: infochat_admin role: resolve the paper-principal contradiction (decision)

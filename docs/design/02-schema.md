@@ -25,9 +25,16 @@ Roles referenced below:
   `reject_quarantine` (no `SELECT` on `quarantine.original_html`).
 - `infochat_listen` — `LISTEN/NOTIFY`-only (no DML); used by both services for
   the wake-up channel.
-- `infochat_admin` — operator psql sessions. Only role with `UPDATE` / `DELETE`
-  on `audit_log`, hard-delete on `source`, and `SELECT` on
-  `quarantine.original_html`.
+- `infochat_admin` — the operator privilege bundle (`NOLOGIN`; operators
+  attach via a personal LOGIN role granted membership). Holds `SELECT` on
+  the redacted `audit_log_view`, `EXECUTE` on `approve_quarantine` /
+  `reject_quarantine`, `SELECT` on `quarantine` (raw `original_html`
+  inspection), `SELECT`/`DELETE` on `heartbeat`, `TRUNCATE` on
+  `invite_code_attempt`, and `SELECT`/hard-`DELETE` on `source`
+  (Invariant 4 escape hatch). Ownership-level operations (partition drop,
+  `audit_log` append-only trigger disable, migrations) are not grantable
+  to a non-owner and stay with the owner role
+  ([../spec/security.md](../spec/security.md) §DB roles).
 
 `DELETE` on `users` is revoked from `infochat_collector` and
 `infochat_provider`; the **only** application-issued DELETE permitted by
@@ -352,9 +359,9 @@ CREATE INDEX idx_audit_request       ON audit_log(request_id) WHERE request_id I
 **Append-only enforcement (Invariant 10).** Two layers:
 
 1. **Role grants** — both `infochat_collector` and `infochat_provider` are
-   `INSERT`-only on `audit_log`. `UPDATE` and `DELETE` are revoked. Only the
-   `infochat_admin` role can execute either, and that path is reserved for
-   operator-controlled retention runs.
+   `INSERT`-only on `audit_log`. `UPDATE` and `DELETE` are granted to no
+   application role — `infochat_admin` included — so the
+   operator-controlled retention run is an owner-role action.
 2. **Trigger guard** — defense-in-depth against a misconfigured grant:
 
    ```sql
@@ -371,9 +378,10 @@ CREATE INDEX idx_audit_request       ON audit_log(request_id) WHERE request_id I
      FOR EACH ROW EXECUTE FUNCTION trg_audit_log_append_only();
    ```
 
-   The retention sweep runs as `infochat_admin` and uses `DROP / CREATE
-   TRIGGER` to disable the guard for the duration of its single-batch
-   delete.
+   The retention sweep runs as the owner role — dropping or recreating a
+   trigger requires table ownership, which `infochat_admin` does not hold
+   — and uses `DROP / CREATE TRIGGER` to disable the guard for the
+   duration of its single-batch delete.
 
 Backups must respect Invariant 10: a soft-deletable archive that copies
 audit rows into a mutable target table is forbidden (spec §Invariants — 10).
@@ -931,7 +939,8 @@ UPDATE quarantine
    AND flagged_at < now() - interval '14 days';
 ```
 
-The job runs as `infochat_admin` and emits one `audit_log` row per
+The job runs in the Collector under `infochat_collector` (which holds
+`UPDATE` on `quarantine`) and emits one `audit_log` row per
 auto-rejected quarantine (action `REJECT_QUARANTINE`, target_kind
 `quarantine`, `actor_user_id IS NULL`, `details_json = {"reason":"ttl"}`).
 No NOTIFY fires (the post body is unchanged). The throttled admin notifier
@@ -1619,7 +1628,7 @@ Recorded by `BootstrapLoader` after every successful idempotent load (see
 | `price_snapshot`     | 7 d                                                       | Drop partition (Invariant 6)                                              |
 | `quarantine` `PENDING`        | 14 d (admin-review TTL → auto-`REJECTED`)         | Cron job (§2.5.1)                                                         |
 | `quarantine` `BENIGN_CLOSED`/`APPROVED`/`REJECTED` | indefinite (audit artefact)  | none (forensic record)                                                    |
-| `audit_log`          | 365 d                                                     | Cron job, `infochat_admin` only (Invariant 10)                            |
+| `audit_log`          | 365 d                                                     | Cron job, owner role only (Invariant 10 — trigger disable needs ownership) |
 | `chat_memory`        | 90 d (laptop/vps/remote-llm), 30 d (pi)                   | Cron pruner (D40, Invariant 9)                                            |
 | `chat_session`       | shares `chat_memory` retention                            | Same pruner (Invariant 9)                                                 |
 | `summary_anchor`     | shares `chat_memory` retention                            | Same pruner (Invariant 9)                                                 |

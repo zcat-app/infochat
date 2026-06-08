@@ -1049,8 +1049,25 @@ Three Postgres roles, least-privilege (decision D34):
   `LISTEN/NOTIFY` (consumes `new_post`, `new_price_snapshot`, and
   `quarantine_review` channels per `architecture.md`
   §Inter-service communication).
-- **Admin role** — operator psql sessions only. Used for migrations,
-  raw quarantine inspection, occasional bulk fixes.
+- **Admin role** — the operator's least-privilege principal; never a
+  service login. The role is `NOLOGIN`: it is a privilege bundle
+  operators attach to via a personal LOGIN role granted membership
+  (`GRANT` the admin role `TO` the operator's own login role), so no
+  shared admin credential exists and psql actions stay attributable
+  to a person. Granted surface: `SELECT` on the redacted
+  `audit_log_view` (routine operator audit reads pass through the
+  same redaction the Provider's do); `EXECUTE` on `approve_quarantine`
+  / `reject_quarantine`; `SELECT` on the quarantine table (raw
+  original inspection); `DELETE` on `heartbeat` rows; `TRUNCATE` on
+  `invite_code_attempt` (the only purge path); hard-`DELETE` on
+  `source` (the Invariant 4 escape hatch below). Ownership-level
+  operations — partition drop (Invariant 6 retention), disabling the
+  `audit_log` append-only trigger for retention sweeps, unredacted
+  forensic reads of `audit_log`, and migrations — are intentionally
+  NOT granted: Postgres cannot `GRANT` ownership-gated actions to a
+  non-owner, so they remain owner-role (superuser psql) actions until
+  a partition-rotation/retention feature exists to carry a definer
+  wrapper.
 
 **`audit_log_view`** is a Postgres view that exposes the same columns
 as `audit_log` minus any redacted fields (raw secrets, full contact
