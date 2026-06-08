@@ -19,7 +19,7 @@ import java.util.UUID;
 import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class DigestRetryServiceTest {
 
@@ -51,7 +51,8 @@ class DigestRetryServiceTest {
         RetryResult result = service.retryDigest(GROUP_ID);
 
         assertEquals(RetryResult.SUCCESS, result);
-        assertTrue(deleteExecuted[0], "old cache row must be deleted");
+        assertFalse(deleteExecuted[0],
+                "retry must NOT delete — the worker UPSERT overwrites the row atomically");
         assertEquals(1, digestWorker.executeCount,
                 "DigestWorker.execute must be called once");
         assertEquals(GROUP_ID, digestWorker.lastSlot.groupId());
@@ -72,9 +73,30 @@ class DigestRetryServiceTest {
         RetryResult result = service.retryDigest(GROUP_ID);
 
         assertEquals(RetryResult.SUCCESS, result);
-        assertTrue(deleteExecuted[0], "degraded row must be deleted for replacement");
+        assertFalse(deleteExecuted[0],
+                "retry must NOT delete the degraded row — UPSERT overwrites it in place");
         assertEquals(1, digestWorker.executeCount,
                 "worker must be called to regenerate full prose");
+    }
+
+    @Test
+    void retryDigest_workerSkippedInFlight_returnsAlreadyInProgress_cacheUntouched() {
+        // A concurrent scheduled run holds the worker's in-flight guard, so
+        // the worker reports it did not run. The retry must surface that as
+        // ALREADY_IN_PROGRESS — never SUCCESS — and must not touch the cache.
+        service.dataSource = stubDataSource(
+                SLOT_KIND, SLOT_FIRED_AT, EXPIRES_AT, false,
+                GROUP_TIMEZONE, deleteExecuted);
+        digestWorker.outcome = DigestWorker.SlotOutcome.SKIPPED_IN_FLIGHT;
+
+        RetryResult result = service.retryDigest(GROUP_ID);
+
+        assertEquals(RetryResult.ALREADY_IN_PROGRESS, result,
+                "a skipped worker run must never be reported as SUCCESS");
+        assertEquals(1, digestWorker.executeCount,
+                "worker must be invoked exactly once");
+        assertFalse(deleteExecuted[0],
+                "cache row must be left intact when the worker skips");
     }
 
     @Test
@@ -129,11 +151,22 @@ class DigestRetryServiceTest {
     static class RecordingDigestWorker extends DigestWorker {
         int executeCount = 0;
         DigestSlot lastSlot;
+        SlotOutcome outcome = SlotOutcome.RAN;
 
         @Override
-        public void execute(DigestSlot slot) {
+        public SlotOutcome execute(DigestSlot slot) {
             executeCount++;
             lastSlot = slot;
+            return outcome;
+        }
+
+        // Override the inherited @Observes onDigestSlot WITHOUT the
+        // annotation: an inherited observer method is bean-defining, which
+        // would make this manual test double a competing DigestWorker CDI
+        // bean (AmbiguousResolutionException in the @QuarkusTest deployment).
+        @Override
+        public void onDigestSlot(DigestSlot slot) {
+            // no-op: tests drive execute(...) directly
         }
     }
 

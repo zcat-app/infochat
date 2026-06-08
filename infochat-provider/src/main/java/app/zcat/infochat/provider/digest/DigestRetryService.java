@@ -10,7 +10,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
@@ -35,10 +34,6 @@ public class DigestRetryService {
     private static final String SELECT_GROUP_TIMEZONE =
             "SELECT timezone FROM groups WHERE id = ?";
 
-    private static final String DELETE_CACHE_ROW =
-            "DELETE FROM summary_cache"
-                    + " WHERE group_id = ? AND slot_kind = ? AND slot_fired_at = ?";
-
     // Provider-instance-local lock: cleared on restart per spec
     private final ConcurrentHashMap<UUID, Boolean> inFlight = new ConcurrentHashMap<>();
     // Per-group cooldown: prevents unbounded LLM cost from rapid retries
@@ -54,9 +49,15 @@ public class DigestRetryService {
     Duration retryCooldown;
 
     /**
-     * Retry the most recent digest for the given group. Deletes the
-     * existing cache row and re-executes the digest worker with a
-     * synthetic slot built from the old row's coordinates.
+     * Retry the most recent digest for the given group by re-executing the
+     * digest worker with a synthetic slot built from the old row's
+     * coordinates. The worker overwrites the cache row atomically (UPSERT),
+     * so the existing digest is never deleted ahead of its replacement.
+     *
+     * <p>If the worker skips the run because a concurrent scheduled execution
+     * already holds its in-flight guard, the cache row is left untouched and
+     * this returns {@link RetryResult#ALREADY_IN_PROGRESS} — not SUCCESS, which
+     * would falsely claim a regeneration that never happened.
      */
     public RetryResult retryDigest(UUID groupId) {
         Instant last = lastRetryAt.get(groupId);
@@ -75,11 +76,14 @@ public class DigestRetryService {
             if (timezone == null) {
                 return RetryResult.NO_PRIOR_DIGEST;
             }
-            deleteCacheRow(groupId, coords.slotKind, coords.slotFiredAt);
             DigestSlot slot = new DigestSlot(
                     groupId, timezone, coords.slotKind,
                     coords.slotFiredAt, coords.expiresAt);
-            digestWorker.execute(slot);
+            if (digestWorker.execute(slot) == DigestWorker.SlotOutcome.SKIPPED_IN_FLIGHT) {
+                // A concurrent scheduled run owns the slot — the cache is
+                // intact (we never deleted it) and untouched by this retry.
+                return RetryResult.ALREADY_IN_PROGRESS;
+            }
             lastRetryAt.put(groupId, Instant.now());
             return RetryResult.SUCCESS;
         } finally {
@@ -120,19 +124,6 @@ public class DigestRetryService {
         } catch (SQLException e) {
             throw new IllegalStateException(
                     "DigestRetryService.lookupGroupTimezone failed", e);
-        }
-    }
-
-    private void deleteCacheRow(UUID groupId, String slotKind, Instant slotFiredAt) {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(DELETE_CACHE_ROW)) {
-            ps.setObject(1, groupId);
-            ps.setString(2, slotKind);
-            ps.setTimestamp(3, Timestamp.from(slotFiredAt));
-            ps.executeUpdate();
-        } catch (SQLException e) {
-            throw new IllegalStateException(
-                    "DigestRetryService.deleteCacheRow failed", e);
         }
     }
 

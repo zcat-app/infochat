@@ -1,11 +1,11 @@
 ---
 id: M1-232
 title: "/retry --digest: atomic regenerate, honest skip status"
-status: pending
+status: done
 created: 2026-06-08
 last_updated: 2026-06-09
 blocked_by: []
-files_budget: 7
+files_budget: 8
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestWorker.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestRetryService.java
@@ -14,6 +14,7 @@ files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRetryConcurrencyIT.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestWorkerTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRetryServiceTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/RecordingCacheRepository.java
 complexity: medium
 risk: medium
 round_cap: 2
@@ -38,13 +39,27 @@ test_plan:
   modifies:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestWorkerTest.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRetryServiceTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/RecordingCacheRepository.java
   preserves:
     - all tests currently green on main
 spec_refs:
   - docs/spec/commands.md §Command catalogue
   - docs/spec/commands.md §Periodic group digests
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-09
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 449
+      removed: 60
 escalations:
   - date: 2026-06-08
     reason: premise-fail
@@ -60,6 +75,22 @@ escalations:
       under test by design). Satisfying item 3 requires a new migration
       `GRANT UPDATE ON summary_cache TO infochat_provider`, which contradicts
       migration_touch: false and is absent from files_scope / files_budget: 6.
+  - date: 2026-06-09
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A — budget-breach surfaced during start-step grounding, before any
+      implementation. Acceptance item 3 switches DigestWorker.executeSlot from
+      cacheRepository.insert(...) to a new cacheRepository.upsert(...). The
+      shared test double RecordingCacheRepository.java (the cache repo used by
+      DigestWorkerTest) overrides insert(...) only; once the worker calls
+      upsert(...), that double MUST override upsert(...) too or DigestWorkerTest
+      NPEs on the real (null) datasource, and its insertCount()/lastContent()
+      assertions must track the upsert path. RecordingCacheRepository.java is
+      NOT in files_scope (files_budget: 7), so touching it is a scope breach.
+      Secondary: acceptance item 3 removes delete-then-execute, reversing the
+      behavior pinned by DigestRetryServiceTest's two assertTrue(deleteExecuted)
+      assertions; the §Notes test authorization ("signature-tracking only ...
+      must not weaken assertions") does not cleanly cover that behavior re-pin.
 revisions:
   - date: 2026-06-09
     reason: premise-fail refine — acceptance item 3 mandated an ON CONFLICT DO
@@ -80,11 +111,38 @@ revisions:
       acceptance had 6 items (no grant item; item 3 did not constrain the
         upsert to a new method).
       clarity_check: PASS 2026-06-08 (evaluated the pre-refine 6-item ticket).
+  - date: 2026-06-09
+    reason: budget-breach refine — acceptance item 3 switches the worker from
+      cacheRepository.insert(...) to a new upsert(...). The shared test double
+      RecordingCacheRepository (cache repo for DigestWorkerTest) overrides only
+      insert(...) and would let the worker's upsert(...) hit the real null
+      datasource (DigestWorkerTest NPE). That file was absent from files_scope.
+      Add RecordingCacheRepository.java to files_scope/test_plan.modifies
+      (files_budget 7→8) and broaden the §Notes test authorization to cover (a)
+      the insert→upsert call-site tracking in RecordingCacheRepository +
+      DigestWorkerTest and (b) the DigestRetryServiceTest delete-assertion
+      behavior re-pin mandated by acceptance item 3 (no weakening). No
+      production-code, migration, or acceptance-item change.
+    prior_values: |
+      status: escalated
+      files_budget: 7
+      files_scope (7): DigestWorker.java, DigestRetryService.java,
+        SummaryCacheRepository.java, V46__grant_update_summary_cache.sql,
+        DigestRetryConcurrencyIT.java, DigestWorkerTest.java,
+        DigestRetryServiceTest.java (RecordingCacheRepository.java absent).
+      test_plan.modifies (2): DigestWorkerTest.java, DigestRetryServiceTest.java.
+      §Notes test authorization was "signature-tracking only and must not
+        weaken assertions" (did not cover the test double or the delete re-pin).
+      clarity_check: PASS 2026-06-09 (evaluated the 7-file ticket).
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-09
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-232: /retry --digest: atomic regenerate, honest skip status
@@ -142,6 +200,24 @@ retry atomicity + the worker's run-reporting contract.
 - V46 was the lowest free migration version when this ticket was refined
   (swept across all in-flight worktrees, not just `main`). Re-confirm it is
   still free at `start` time — a parallel worktree may grab it first.
-- Test edits to existing DigestWorker/DigestRetryService tests are
-  authorized by this ticket (execute()'s return type changes); they are
-  signature-tracking only and must not weaken assertions.
+- Test edits to existing DigestWorker/DigestRetryService tests and the
+  shared `RecordingCacheRepository` test double are authorized by this
+  ticket. Two distinct kinds of edit are permitted, neither of which may
+  weaken an assertion:
+  - Signature/call-site tracking. `execute()`'s return type changes and
+    `DigestWorker.executeSlot` switches from `insert(...)` to the new
+    `upsert(...)`. `RecordingCacheRepository` (the cache repo wired into
+    `DigestWorkerTest`) currently overrides only `insert(...)`; it must
+    also override `upsert(...)` so the worker call is captured instead of
+    hitting the real repository's null datasource, and `DigestWorkerTest`'s
+    `insertCount()` / `lastContent()` / degraded / subscription-version
+    assertions move onto the upsert path. `DigestSchedulerTest` and
+    `SummaryCacheRepositoryTest` still use `insert(...)` and are unchanged.
+  - Behavior re-pin for the delete→UPSERT reversal (acceptance item 3).
+    `DigestRetryServiceTest`'s two `assertTrue(deleteExecuted[0], ...)`
+    assertions pin the old delete-then-execute path that this ticket
+    removes. Re-pin them to the new no-destructive-window contract — assert
+    the retry path performs NO `DELETE` (the cache row is overwritten by the
+    worker's UPSERT, not deleted) — while preserving the SUCCESS /
+    worker-invoked-once / coordinate assertions unchanged. This is a
+    behavior reversal mandated by acceptance item 3, not a weakening.

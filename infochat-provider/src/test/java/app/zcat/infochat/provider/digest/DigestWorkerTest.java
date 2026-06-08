@@ -74,7 +74,7 @@ class DigestWorkerTest {
 
         worker.execute(slot);
 
-        assertEquals(1, cacheRepository.insertCount());
+        assertEquals(1, cacheRepository.upsertCount());
         assertEquals("Digest prose summary", cacheRepository.lastContent());
         assertFalse(cacheRepository.lastIsDegraded());
     }
@@ -103,7 +103,7 @@ class DigestWorkerTest {
 
         assertEquals(0, digestRenderer.callCount(),
                 "LLM renderer not invoked on empty posts");
-        assertEquals(1, cacheRepository.insertCount());
+        assertEquals(1, cacheRepository.upsertCount());
         assertEquals(StubBundleLoader.NO_POSTS_TEXT, cacheRepository.lastContent());
         assertFalse(cacheRepository.lastIsDegraded(),
                 "zero-posts is not a degraded result");
@@ -123,7 +123,7 @@ class DigestWorkerTest {
         assertEquals(0, digestRenderer.callCount(),
                 "LLM renderer not invoked when window expired");
         assertEquals(1, degradedRenderer.callCount());
-        assertEquals(1, cacheRepository.insertCount());
+        assertEquals(1, cacheRepository.upsertCount());
         assertEquals("Headlines only", cacheRepository.lastContent());
         assertTrue(cacheRepository.lastIsDegraded());
     }
@@ -155,18 +155,20 @@ class DigestWorkerTest {
                 "first execution must reach the renderer");
 
         // Same group+slot while the first execution is still rendering
-        worker.execute(slot);
-        assertEquals(0, cacheRepository.insertCount(),
+        assertEquals(DigestWorker.SlotOutcome.SKIPPED_IN_FLIGHT, worker.execute(slot),
+                "overlapping same-group execution must report it did not run");
+        assertEquals(0, cacheRepository.upsertCount(),
                 "overlapping same-group execution must be skipped, not processed");
 
         renderRelease.countDown();
         firstExecution.join(5_000);
-        assertEquals(1, cacheRepository.insertCount(),
-                "only the first execution inserts");
+        assertEquals(1, cacheRepository.upsertCount(),
+                "only the first execution upserts");
 
         // Guard must be released after completion: the slot processes again
-        worker.execute(slot);
-        assertEquals(2, cacheRepository.insertCount(),
+        assertEquals(DigestWorker.SlotOutcome.RAN, worker.execute(slot),
+                "guard released — a fresh execution reports it ran");
+        assertEquals(2, cacheRepository.upsertCount(),
                 "guard must be released once the in-flight execution finishes");
     }
 
@@ -182,7 +184,7 @@ class DigestWorkerTest {
         postCollector.seed(testPosts(), 1, 1);
         digestRenderer.setResponse("prose");
         worker.execute(slot);
-        assertEquals(1, cacheRepository.insertCount(),
+        assertEquals(1, cacheRepository.upsertCount(),
                 "guard must be released after a propagated error");
     }
 
@@ -190,7 +192,7 @@ class DigestWorkerTest {
     void execute_logsExpectedSqlFailureWithoutRethrow() {
         postCollector.seed(testPosts(), 1, 1);
         digestRenderer.setResponse("prose");
-        cacheRepository.failNextInsert(new SQLException("connection refused"));
+        cacheRepository.failNextUpsert(new SQLException("connection refused"));
         DigestSlot slot = futureSlot();
 
         assertDoesNotThrow(() -> worker.execute(slot),

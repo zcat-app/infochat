@@ -79,6 +79,56 @@ public class SummaryCacheRepository {
     }
 
     /**
+     * Atomically insert-or-overwrite a summary cache row, keyed by the
+     * {@code (group_id, slot_kind, slot_fired_at)} unique index. Used by
+     * {@link DigestWorker} so a {@code /retry --digest} regeneration replaces
+     * the cached content in a single statement — there is no window where the
+     * row is deleted but not yet rewritten (the delete-then-execute hazard
+     * this method removes).
+     *
+     * <p>Distinct from {@link #insert} on purpose: the missed-slot sentinel
+     * in {@link DigestScheduler} reuses the plain {@code INSERT} and depends on
+     * a unique-index violation to roll its audit+sentinel transaction back, so
+     * it must NOT become an upsert. Requires the {@code UPDATE} privilege on
+     * {@code summary_cache} (granted to {@code infochat_provider} in V46) — the
+     * {@code ON CONFLICT DO UPDATE} clause fails with "permission denied" under
+     * the weak service role without it.
+     */
+    public void upsert(UUID groupId,
+                       String slotKind,
+                       Instant slotFiredAt,
+                       long tagSubscriptionVersion,
+                       long sourceSubscriptionVersion,
+                       String content,
+                       boolean isDegraded,
+                       Instant expiresAt) throws SQLException {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO summary_cache"
+                             + " (group_id, slot_kind, slot_fired_at,"
+                             + "  tag_subscription_version, source_subscription_version,"
+                             + "  content, is_degraded, expires_at)"
+                             + " VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+                             + " ON CONFLICT (group_id, slot_kind, slot_fired_at)"
+                             + " DO UPDATE SET"
+                             + "   tag_subscription_version = EXCLUDED.tag_subscription_version,"
+                             + "   source_subscription_version = EXCLUDED.source_subscription_version,"
+                             + "   content = EXCLUDED.content,"
+                             + "   is_degraded = EXCLUDED.is_degraded,"
+                             + "   expires_at = EXCLUDED.expires_at")) {
+            ps.setObject(1, groupId);
+            ps.setString(2, slotKind);
+            ps.setTimestamp(3, Timestamp.from(slotFiredAt));
+            ps.setLong(4, tagSubscriptionVersion);
+            ps.setLong(5, sourceSubscriptionVersion);
+            ps.setString(6, content);
+            ps.setBoolean(7, isDegraded);
+            ps.setTimestamp(8, Timestamp.from(expiresAt));
+            ps.executeUpdate();
+        }
+    }
+
+    /**
      * Find the latest non-expired cache entry for a group and slot kind
      * within a given window. Returns empty if no valid (non-expired) row
      * exists.

@@ -73,12 +73,32 @@ public class DigestWorker {
     // still running; overlapping same-group processing would double-deliver.
     private final Set<String> inFlightSlots = ConcurrentHashMap.newKeySet();
 
-    public void execute(@Observes DigestSlot slot) {
+    /** Whether a {@link #execute} call actually processed the slot. */
+    public enum SlotOutcome {
+        /** The slot ran (content generated and cached, even if it degraded). */
+        RAN,
+        /** Skipped: the in-flight guard for this (group, slotKind) was held. */
+        SKIPPED_IN_FLIGHT
+    }
+
+    /** Void wrapper for the CDI observer (observer methods must return void). */
+    public void onDigestSlot(@Observes DigestSlot slot) {
+        execute(slot);
+    }
+
+    /**
+     * Process one digest slot, reporting whether it actually ran. Returns
+     * {@link SlotOutcome#SKIPPED_IN_FLIGHT} without touching the cache when a
+     * concurrent execution already holds the in-flight guard — the caller
+     * (e.g. {@link DigestRetryService}) relies on this distinction to avoid
+     * reporting a skipped retry as a success.
+     */
+    public SlotOutcome execute(DigestSlot slot) {
         String inFlightKey = slot.groupId() + ":" + slot.slotKind();
         if (!inFlightSlots.add(inFlightKey)) {
             LOG.warnf("Digest already in flight for group %s slot %s — skipping overlapping execution",
                     slot.groupId(), slot.slotKind());
-            return;
+            return SlotOutcome.SKIPPED_IN_FLIGHT;
         }
         try {
             executeSlot(slot);
@@ -88,6 +108,7 @@ public class DigestWorker {
         } finally {
             inFlightSlots.remove(inFlightKey);
         }
+        return SlotOutcome.RAN;
     }
 
     private void executeSlot(DigestSlot slot) throws SQLException, MessagingException {
@@ -122,7 +143,7 @@ public class DigestWorker {
             }
         }
 
-        cacheRepository.insert(
+        cacheRepository.upsert(
                 slot.groupId(),
                 slot.slotKind(),
                 slot.windowStart(),

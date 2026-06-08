@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 6 |
+| pending | 5 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 269 |
+| done | 270 |
 | deferred | 2 |
 | **total** | **277** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-232 — /retry --digest: atomic regenerate, honest skip status (complexity: medium, risk: medium)
 - M1-236 — infochat-ssrf: read-buffer churn, wss default port, dead null-check (complexity: low, risk: low)
 - M1-238 — Signal adapter: constant-time mention compare + total timestamp parse (complexity: low, risk: low)
 - M1-239 — infochat-provider: NOTIFY discriminator, stale ban comment, locale fold (complexity: low, risk: low)
@@ -69,12 +68,12 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-235 | Migration: denormalize actor cols in delete_preban_user audit row | 2026-06-09 | round 1 APPROVE |
 | M1-234 | Drop the dead new_price_snapshot NOTIFY channel (+ spec) | 2026-06-09 | round 1 APPROVE |
 | M1-233 | Embedding dimensionality mismatch: alert operator, stop spamming | 2026-06-09 | round 1 APPROVE |
+| M1-232 | /retry --digest: atomic regenerate, honest skip status | 2026-06-09 | round 1 APPROVE |
 | M1-231 | Implement /get-tags and /get-sources (advertised, no handler) | 2026-06-09 | round 1 APPROVE |
 | M1-230 | Semantic-link query: use an HNSW index probe, not a self-join | 2026-06-09 | round 1 APPROVE |
 | M1-229 | Split inbound rate-cap: per-user vs shared stranger bucket | 2026-06-08 | round 1 APPROVE |
 | M1-228 | Don't record a missed digest slot for a window the group was paused through | 2026-06-08 | round 1 APPROVE |
 | M1-227 | /digest on|off — group-admin toggle to pause/resume the periodic digest | 2026-06-08 | round 1 APPROVE |
-| M1-226 | Clamp source-claimed published_at to fetched_at at the ingest boundary | 2026-06-08 | round 1 APPROVE |
 
 ---
 
@@ -414,7 +413,7 @@ M1-227 (done)
 M1-229 (done)
 M1-230 (done)
 M1-231 (done)
-M1-232 (pending) ← runnable
+M1-232 (done)
 M1-233 (done)
 M1-234 (done)
 M1-235 (done)

@@ -6,29 +6,31 @@ import java.util.UUID;
 
 /**
  * Recording {@link SummaryCacheRepository} stub: captures the last
- * insert's arguments without touching the DB; can throw a seeded
- * {@link SQLException} on the next insert.
+ * upsert's arguments without touching the DB; can throw a seeded
+ * {@link SQLException} on the next upsert. DigestWorker writes the cache
+ * via {@link SummaryCacheRepository#upsert} (atomic regenerate), so this
+ * double records that call rather than the sentinel-only {@code insert}.
  */
 final class RecordingCacheRepository extends SummaryCacheRepository {
-    private int inserts;
+    private int upserts;
     private String lastContent;
     private boolean lastIsDegraded;
     private long lastTagSubVer;
     private long lastSrcSubVer;
     private SQLException nextFailure;
 
-    int insertCount() { return inserts; }
+    int upsertCount() { return upserts; }
     String lastContent() { return lastContent; }
     boolean lastIsDegraded() { return lastIsDegraded; }
     long lastTagSubVer() { return lastTagSubVer; }
     long lastSrcSubVer() { return lastSrcSubVer; }
 
-    void failNextInsert(SQLException failure) {
+    void failNextUpsert(SQLException failure) {
         this.nextFailure = failure;
     }
 
     @Override
-    public void insert(UUID groupId, String slotKind, Instant slotFiredAt,
+    public void upsert(UUID groupId, String slotKind, Instant slotFiredAt,
                        long tagSubscriptionVersion, long sourceSubscriptionVersion,
                        String content, boolean isDegraded, Instant expiresAt)
             throws SQLException {
@@ -37,7 +39,7 @@ final class RecordingCacheRepository extends SummaryCacheRepository {
             nextFailure = null;
             throw failure;
         }
-        inserts++;
+        upserts++;
         lastContent = content;
         lastIsDegraded = isDegraded;
         lastTagSubVer = tagSubscriptionVersion;

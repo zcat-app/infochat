@@ -1,0 +1,13 @@
+-- V46: Grant UPDATE on summary_cache to the Provider service role (M1-232).
+--
+-- /retry --digest regenerates a cached digest by overwriting its row
+-- atomically (INSERT ... ON CONFLICT DO UPDATE) instead of delete-then-write,
+-- closing the window where the cache was deleted but not yet rewritten.
+-- Postgres requires the UPDATE privilege on the SET columns for the
+-- ON CONFLICT DO UPDATE branch; V23 granted only SELECT/INSERT/DELETE to the
+-- deliberately-weak infochat_provider role (the role the default datasource
+-- connects as in both %test and production), so without this grant the upsert
+-- fails at runtime with "permission denied for table summary_cache".
+--
+-- The V23 SELECT/INSERT/DELETE grant is otherwise unchanged.
+GRANT UPDATE ON summary_cache TO infochat_provider;
