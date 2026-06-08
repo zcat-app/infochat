@@ -272,15 +272,24 @@ final class SignalJsonRpcClient {
     }
 
     MessageHandle send(OutboundMessage msg) throws MessagingException {
-        String recipient = recipientFromDmScope(msg.scope(), "send");
+        ScopeRef scope = msg.scope();
+        // The address signal-cli delivers to: a contact id for DM scope, an
+        // adapter group id for group scope. signal-cli's `send` carries a DM
+        // in a `recipient` array but a group in a single `groupId` string —
+        // the two are mutually exclusive on the wire, so the scope selects
+        // the encoder. The address is stored on the handle so editMessage
+        // re-addresses subsequent edits to the same destination.
+        String destination = destination(scope);
         long rpcId = rpcIdGen.incrementAndGet();
-        String request = codec.encodeSend(rpcId, account, recipient, msg.text());
+        String request = scope instanceof ScopeRef.Group
+                ? codec.encodeGroupSend(rpcId, account, destination, msg.text())
+                : codec.encodeSend(rpcId, account, destination, msg.text());
         SignalMessageCodec.JsonRpcMessage.Response response = call(rpcId, request);
         long timestamp = extractLong(response.result(), "timestamp", "send");
         long handleSerial = handleIdGen.incrementAndGet();
         MessageHandle handle = new MessageHandle(OPAQUE_PREFIX + handleSerial);
         synchronized (handles) {
-            handles.put(handle.opaqueValue(), new SignalMessageHandle(timestamp, recipient, msg));
+            handles.put(handle.opaqueValue(), new SignalMessageHandle(timestamp, destination, msg));
         }
         return handle;
     }
@@ -304,8 +313,9 @@ final class SignalJsonRpcClient {
 
     void setTyping(ScopeRef scope, boolean typing) {
         if (!(scope instanceof ScopeRef.Dm dm)) {
-            // Group typing is M1-108; setTyping is best-effort per SPI,
-            // so we drop the call rather than fail.
+            // Group typing indicators are intentionally not sent: setTyping is
+            // best-effort per the SPI, so a non-DM scope drops the call rather
+            // than fail.
             return;
         }
         long rpcId = rpcIdGen.incrementAndGet();
@@ -321,18 +331,23 @@ final class SignalJsonRpcClient {
 
     private void editMessage(SignalMessageHandle internal, String body) throws MessagingException {
         long rpcId = rpcIdGen.incrementAndGet();
-        String request = codec.encodeUpdateMessage(
-                rpcId, account, internal.recipient(), internal.timestamp(), body);
+        // internal.recipient() is the address the original send targeted — a
+        // contact id for DM, an adapter group id for group. The original
+        // scope selects which signal-cli addressing field that identifier
+        // rides in: the `recipient` array (DM) or the `groupId` string.
+        String request = internal.original().scope() instanceof ScopeRef.Group
+                ? codec.encodeGroupUpdateMessage(
+                        rpcId, account, internal.recipient(), internal.timestamp(), body)
+                : codec.encodeUpdateMessage(
+                        rpcId, account, internal.recipient(), internal.timestamp(), body);
         call(rpcId, request);
     }
 
-    private String recipientFromDmScope(ScopeRef scope, String method) throws MessagingException {
-        if (!(scope instanceof ScopeRef.Dm dm)) {
-            throw new MessagingException(
-                    FailureCategory.PERMANENT,
-                    method + ": group scope not supported in M1-107 (lands in M1-108)");
-        }
-        return dm.contactId();
+    private static String destination(ScopeRef scope) {
+        return switch (scope) {
+            case ScopeRef.Dm dm -> dm.contactId();
+            case ScopeRef.Group group -> group.adapterGroupId();
+        };
     }
 
     private SignalMessageHandle lookupOpen(MessageHandle handle) throws MessagingException {

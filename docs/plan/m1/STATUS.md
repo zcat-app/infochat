@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 10 |
+| pending | 9 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 247 |
+| done | 248 |
 | deferred | 2 |
 | **total** | **259** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-186 — Signal group outbound send path (complexity: medium, risk: medium)
 - M1-193 — /stop wiring: pg backend pid + statement timeouts + tool conns (complexity: high, risk: medium)
 - M1-198 — Group-scope bot-admin commands: return accurate command_dm_only, keep DM-only (complexity: medium, risk: medium)
 - M1-202 — Collector fetch hygiene: tracker predicates/keys, Bluesky encoding+parse, Registrar CDI, poller overlap (complexity: medium, risk: medium)
@@ -376,7 +375,7 @@ M1-182 (done)
 M1-183 (done)
   └── M1-222 (done)
 M1-185 (done)
-M1-186 (pending) ← runnable
+M1-186 (done)
 M1-187 (done)
 M1-188 (done)
 M1-189 (done)

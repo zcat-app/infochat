@@ -1,6 +1,7 @@
 package app.zcat.infochat.messaging.impl.signal;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -464,21 +465,126 @@ class SignalJsonRpcClientTest {
     }
 
     @Test
-    void groupScopeSendRejectedPermanent() throws Exception {
-        // M1-107 is DM-only; group send must throw PERMANENT (M1-108
-        // owns the group send path).
+    void groupSendCarriesGroupIdAndReturnsHandle() throws Exception {
         try (FakeSignalCli fake = new FakeSignalCli()) {
             SignalJsonRpcClient client = new SignalJsonRpcClient(
                     fake.endpoint(), "+15551111111", new SignalMessageCodec(), TEST_RESPONSE_TIMEOUT);
             client.connect();
             try {
+                AtomicReference<MessageHandle> sentHandle = new AtomicReference<>();
+                AtomicReference<Exception> sendFailure = new AtomicReference<>();
                 OutboundMessage groupMsg = new OutboundMessage(
-                        new ScopeRef.Group("group-1"),
-                        "hi group",
-                        Instant.now(),
-                        "g1");
-                MessagingException e = assertThrows(MessagingException.class, () -> client.send(groupMsg));
-                assertEquals(FailureCategory.PERMANENT, e.category());
+                        new ScopeRef.Group("group-1"), "hi group", Instant.now(), "g1");
+                Thread sender = new Thread(() -> {
+                    try {
+                        sentHandle.set(client.send(groupMsg));
+                    } catch (MessagingException e) {
+                        sendFailure.set(e);
+                    }
+                }, "group-sender");
+                sender.start();
+
+                JsonObject request = fake.nextOutbound(QUEUE_WAIT_MS);
+                assertEquals("send", request.getString("method"));
+                JsonObject params = request.getJsonObject("params");
+                assertEquals("group-1", params.getString("groupId"),
+                        "group send must address the group by groupId");
+                assertFalse(params.containsKey("recipient"),
+                        "group send must not carry a recipient array — groupId replaces it");
+                fake.respondSuccess(request.getString("id"),
+                        Json.createObjectBuilder().add("timestamp", 1700000002500L).build());
+
+                sender.join(QUEUE_WAIT_MS);
+                if (sendFailure.get() != null) {
+                    fail("group send() failed: " + sendFailure.get());
+                }
+                MessageHandle handle = sentHandle.get();
+                assertNotNull(handle, "group send() must return a handle within " + QUEUE_WAIT_MS + " ms");
+                assertTrue(handle.opaqueValue().startsWith("signal-"),
+                        "Signal handle prefix is required for cross-adapter handle namespacing");
+            } finally {
+                client.disconnect();
+            }
+        }
+    }
+
+    @Test
+    void groupSendUpdateFinalizeCycleSucceeds() throws Exception {
+        try (FakeSignalCli fake = new FakeSignalCli()) {
+            SignalJsonRpcClient client = new SignalJsonRpcClient(
+                    fake.endpoint(), "+15551111111", new SignalMessageCodec(), TEST_RESPONSE_TIMEOUT);
+            client.connect();
+            try {
+                AtomicReference<MessageHandle> sentHandle = new AtomicReference<>();
+                AtomicReference<Exception> failure = new AtomicReference<>();
+                OutboundMessage groupMsg = new OutboundMessage(
+                        new ScopeRef.Group("group-7"), "hi group", Instant.now(), "g7");
+                Thread sender = new Thread(() -> {
+                    try {
+                        sentHandle.set(client.send(groupMsg));
+                    } catch (MessagingException e) {
+                        failure.set(e);
+                    }
+                }, "group-sender");
+                sender.start();
+
+                JsonObject sendRequest = fake.nextOutbound(QUEUE_WAIT_MS);
+                assertEquals("group-7", sendRequest.getJsonObject("params").getString("groupId"));
+                fake.respondSuccess(sendRequest.getString("id"),
+                        Json.createObjectBuilder().add("timestamp", 1700000002500L).build());
+                sender.join(QUEUE_WAIT_MS);
+                if (failure.get() != null) {
+                    fail("group send() failed: " + failure.get());
+                }
+                MessageHandle handle = sentHandle.get();
+                assertNotNull(handle, "group send() must return a handle");
+
+                // update() on a group handle must re-address by groupId and
+                // target the original send's timestamp.
+                Thread updater = new Thread(() -> {
+                    try {
+                        client.update(handle, "hi group (edited)");
+                    } catch (MessagingException e) {
+                        failure.set(e);
+                    }
+                }, "group-updater");
+                updater.start();
+                JsonObject editRequest = fake.nextOutbound(QUEUE_WAIT_MS);
+                assertEquals("updateMessage", editRequest.getString("method"));
+                JsonObject editParams = editRequest.getJsonObject("params");
+                assertEquals("group-7", editParams.getString("groupId"),
+                        "group update must re-address by groupId");
+                assertFalse(editParams.containsKey("recipient"),
+                        "group update must not carry a recipient array");
+                assertEquals(1700000002500L,
+                        editParams.getJsonNumber("targetSentTimestamp").longValueExact(),
+                        "group update must target the timestamp returned by the original group send");
+                fake.respondSuccess(editRequest.getString("id"),
+                        Json.createObjectBuilder().add("timestamp", 1700000003000L).build());
+                updater.join(QUEUE_WAIT_MS);
+                if (failure.get() != null) {
+                    fail("group update() failed: " + failure.get());
+                }
+
+                // finalize() likewise edits by groupId, then evicts the handle.
+                Thread finalizer = new Thread(() -> {
+                    try {
+                        client.finalizeHandle(handle, "hi group (final)");
+                    } catch (MessagingException e) {
+                        failure.set(e);
+                    }
+                }, "group-finalizer");
+                finalizer.start();
+                JsonObject finalRequest = fake.nextOutbound(QUEUE_WAIT_MS);
+                assertEquals("updateMessage", finalRequest.getString("method"));
+                assertEquals("group-7", finalRequest.getJsonObject("params").getString("groupId"),
+                        "group finalize must re-address by groupId");
+                fake.respondSuccess(finalRequest.getString("id"),
+                        Json.createObjectBuilder().add("timestamp", 1700000003500L).build());
+                finalizer.join(QUEUE_WAIT_MS);
+                if (failure.get() != null) {
+                    fail("group finalize() failed: " + failure.get());
+                }
             } finally {
                 client.disconnect();
             }

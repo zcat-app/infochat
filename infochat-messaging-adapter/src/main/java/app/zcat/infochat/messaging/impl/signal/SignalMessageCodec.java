@@ -24,7 +24,8 @@ import org.jspecify.annotations.Nullable;
  * <p>signal-cli speaks line-delimited JSON on its TCP daemon endpoint:
  * each JSON-RPC envelope (request, response, notification) is one
  * object terminated by a literal {@code "\n"}. {@link #encodeSend},
- * {@link #encodeUpdateMessage}, and {@link #encodeSendTyping} emit
+ * {@link #encodeGroupSend}, {@link #encodeUpdateMessage},
+ * {@link #encodeGroupUpdateMessage}, and {@link #encodeSendTyping} emit
  * the object WITHOUT the trailing newline — the caller frames at the
  * stream layer. {@link #decode} accepts a single line (one object).</p>
  *
@@ -51,11 +52,43 @@ final class SignalMessageCodec {
         return encodeRequest(rpcId, "send", params);
     }
 
+    /**
+     * Group variant of {@link #encodeSend}: signal-cli's {@code send}
+     * addresses a group by a single {@code groupId} string in place of
+     * the {@code recipient} array — the two are mutually exclusive on
+     * the wire, so the group destination is never an array.
+     */
+    String encodeGroupSend(long rpcId, String account, String groupId, String message) {
+        JsonObject params = Json.createObjectBuilder()
+                .add("account", account)
+                .add("groupId", groupId)
+                .add("message", message)
+                .build();
+        return encodeRequest(rpcId, "send", params);
+    }
+
     String encodeUpdateMessage(long rpcId, String account, String recipient,
                                long targetSentTimestamp, String message) {
         JsonObject params = Json.createObjectBuilder()
                 .add("account", account)
                 .add("recipient", Json.createArrayBuilder().add(recipient))
+                .add("targetSentTimestamp", targetSentTimestamp)
+                .add("message", message)
+                .build();
+        return encodeRequest(rpcId, "updateMessage", params);
+    }
+
+    /**
+     * Group variant of {@link #encodeUpdateMessage}: edits a prior
+     * group message addressed by {@code groupId} instead of the
+     * {@code recipient} array, targeting the {@code targetSentTimestamp}
+     * signal-cli returned for the original group send.
+     */
+    String encodeGroupUpdateMessage(long rpcId, String account, String groupId,
+                                    long targetSentTimestamp, String message) {
+        JsonObject params = Json.createObjectBuilder()
+                .add("account", account)
+                .add("groupId", groupId)
                 .add("targetSentTimestamp", targetSentTimestamp)
                 .add("message", message)
                 .build();
@@ -135,9 +168,8 @@ final class SignalMessageCodec {
     /**
      * Try to extract a DM-scope inbound message from a
      * {@code method=receive} notification. Returns empty when the
-     * envelope is a group message (group support is M1-108), a
-     * sync/typing/receipt notification, or otherwise lacks a usable
-     * sender ACI + body.
+     * envelope is a group message, a sync/typing/receipt notification,
+     * or otherwise lacks a usable sender ACI + body.
      */
     Optional<ReceivedDm> extractDm(JsonObject receiveParams) {
         // This method must be total over arbitrary inbound frame shapes:
@@ -155,7 +187,8 @@ final class SignalMessageCodec {
         if (!(envelope.get("dataMessage") instanceof JsonObject dataMessage)) {
             return Optional.empty();
         }
-        // Group messages carry groupInfo / groupV2 — skip; group is M1-108.
+        // Group messages carry groupInfo / groupV2 — skip (not a DM); the
+        // group route handles them.
         if (dataMessage.containsKey("groupInfo") || dataMessage.containsKey("groupV2")) {
             return Optional.empty();
         }
