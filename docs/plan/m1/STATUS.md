@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 5 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 258 |
 | deferred | 2 |
-| **total** | **264** |
+| **total** | **265** |
 
 ---
 
@@ -27,6 +27,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-205 — Adapter rate-limit enforcement: implement §6.3.7 + capability caps, or design-amend (complexity: high, risk: medium)
 - M1-212 — ProgressNotifier pipeline: implement minimally, defer by amendment, or remove (complexity: medium, risk: medium)
 - M1-227 — /digest on|off — group-admin toggle to pause/resume the periodic digest (complexity: high, risk: medium)
+- M1-229 — Split inbound rate-cap: per-user vs shared stranger bucket (complexity: high, risk: medium)
 
 ---
 
@@ -408,4 +409,5 @@ M1-225 (done)
 M1-226 (done)
 M1-227 (pending) ← runnable
   └── M1-228 (pending)
+M1-229 (pending) ← runnable
 ```
