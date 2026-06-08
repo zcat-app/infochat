@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 10 |
+| pending | 11 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 264 |
 | deferred | 2 |
-| **total** | **276** |
+| **total** | **277** |
 
 ---
 
@@ -34,6 +34,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-238 — Signal adapter: constant-time mention compare + total timestamp parse (complexity: low, risk: low)
 - M1-239 — infochat-provider: NOTIFY discriminator, stale ban comment, locale fold (complexity: low, risk: low)
 - M1-240 — infochat-collector: span-offset doc, unused asset-refresh fields (complexity: low, risk: low)
+- M1-241 — List /get-tags and /get-sources in the /help catalogue (complexity: low, risk: low)
 
 ---
 
@@ -427,4 +428,5 @@ M1-237 (pending) ← runnable
 M1-238 (pending) ← runnable
 M1-239 (pending) ← runnable
 M1-240 (pending) ← runnable
+M1-241 (pending) ← runnable
 ```
