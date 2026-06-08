@@ -194,9 +194,6 @@ public final class SsrfGuardedHttpClient {
                                  long bodyCap,
                                  int redirectCap,
                                  Function<String, List<InetAddress>> resolverSeam) {
-        if (blocklist == null) {
-            throw new IllegalArgumentException("blocklist must be configured");
-        }
         if (connectTimeout == null || connectTimeout.isZero() || connectTimeout.isNegative()) {
             throw new IllegalArgumentException("connect timeout must be configured");
         }
@@ -446,12 +443,28 @@ public final class SsrfGuardedHttpClient {
             || effectivePort(from) != effectivePort(to);
     }
 
-    private static int effectivePort(URI uri) {
+    // Package-private (not private) so EffectivePortWssTest can assert the
+    // scheme→default-port mapping directly, matching canonicalizeHost's
+    // same-package test-access idiom. The wss branch is unreachable through
+    // get() (http/https only), so a direct call is the only clean way to
+    // pin the mapping.
+    static int effectivePort(URI uri) {
         int port = uri.getPort();
         if (port != -1) {
             return port;
         }
-        return "https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80;
+        // wss shares the 443 default with https; ws and http (and any other
+        // scheme reaching here) default to 80. Aligning wss with https keeps
+        // a future WS origin/credential-scrub reuse from misjudging
+        // wss://h/ vs wss://h:443/ as cross-origin. {@code to} in
+        // isCrossOrigin is an unvalidated redirect target, so its scheme may
+        // be null — treat that as the 80 default, matching the prior
+        // equalsIgnoreCase(null)==false behavior.
+        String scheme = uri.getScheme();
+        return switch (scheme == null ? "" : scheme.toLowerCase(Locale.ROOT)) {
+            case "https", "wss" -> 443;
+            default -> 80;
+        };
     }
 
     private static boolean isCredentialHeader(String name) {
@@ -527,7 +540,13 @@ public final class SsrfGuardedHttpClient {
         long bodyReadStartNanos = System.nanoTime();
         try (InputStream in = response.body();
              ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-            byte[] buf = new byte[8192];
+            // 64 KiB buffer: each in.read() runs on its own virtual thread
+            // (see the watchdog note above), so a larger buffer means ~8x
+            // fewer reads — and ~8x fewer thread spins / FutureTask
+            // allocations — to drain the same body. The per-read
+            // min(readTimeout, remaining) clamp and the total bodyReadDeadline
+            // are unchanged; only the read granularity changes.
+            byte[] buf = new byte[64 * 1024];
             long total = 0;
             while (true) {
                 long elapsedNanos = System.nanoTime() - bodyReadStartNanos;

@@ -1,9 +1,9 @@
 ---
 id: M1-236
 title: "infochat-ssrf: read-buffer churn, wss default port, dead null-check"
-status: pending
+status: done
 created: 2026-06-08
-last_updated: 2026-06-08
+last_updated: 2026-06-09
 blocked_by: []
 files_budget: 3
 files_scope:
@@ -34,12 +34,31 @@ spec_refs:
   - docs/spec/security.md §SSRF and outbound connections
 decision_refs:
   - D48
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-09
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 112
+      removed: 15
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-09
+  verdict: WARN
+  warnings:
+    - "S-F1 acceptance item does not name a specific test verifying the thread/allocation churn reduction; implementer may choose 64 KiB buffer or reused-thread."
+    - "security_relevant: false may slightly under-claim the intent of S-F2 (wss cross-origin drift closure), though the fix is not currently on the active security path."
+  blockers: []
 ---
 
 # M1-236: infochat-ssrf — read-buffer churn, wss default port, dead null-check
