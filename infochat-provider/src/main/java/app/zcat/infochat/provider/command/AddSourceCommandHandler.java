@@ -49,8 +49,11 @@ import java.util.UUID;
  *       {@code is_banned}/{@code is_admin} flags by
  *       {@code contact_id} alone (MVP single-adapter assumption;
  *       see the inline note below).</li>
- *   <li>Ban check — defense-in-depth; the upstream T2-A ban gate
- *       is not yet wired so the handler reads the flag itself.</li>
+ *   <li>Ban check — defense-in-depth. {@code InboundRouter} step 4
+ *       ({@code BanCheck.isBanned}) is authoritative and blocks
+ *       banned senders before any handler runs; this re-check covers
+ *       a ban that lands between that intake check and this handler's
+ *       actor lookup within the same dispatch.</li>
  *   <li>Permission gate per scope: DM is any non-banned caller;
  *       Group is group-admin-only.</li>
  *   <li>Kind resolution via {@link KindResolver}; AMBIGUOUS short-

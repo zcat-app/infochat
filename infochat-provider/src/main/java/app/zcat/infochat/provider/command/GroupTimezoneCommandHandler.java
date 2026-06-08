@@ -25,6 +25,7 @@ import java.time.ZoneId;
 import java.time.DateTimeException;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -195,17 +196,21 @@ public class GroupTimezoneCommandHandler implements CommandHandler {
     }
 
     static String fuzzySuggestions(String input) {
-        String lowerInput = input.toLowerCase();
+        // Locale.ROOT folding per commands.md §Surface conventions: the
+        // default-locale toLowerCase() breaks IANA-zone matching on a
+        // Turkish-locale JVM (dotless-i), where "Istanbul" would not
+        // fold to "istanbul".
+        String lowerInput = input.toLowerCase(Locale.ROOT);
         List<String> matches = ZoneId.getAvailableZoneIds().stream()
-                .filter(z -> z.toLowerCase().contains(lowerInput)
-                        || lowerInput.contains(z.toLowerCase().replace("/", "")))
+                .filter(z -> z.toLowerCase(Locale.ROOT).contains(lowerInput)
+                        || lowerInput.contains(z.toLowerCase(Locale.ROOT).replace("/", "")))
                 .sorted(Comparator.comparingInt(String::length))
                 .limit(MAX_SUGGESTIONS)
                 .collect(Collectors.toList());
         if (matches.isEmpty()) {
             matches = ZoneId.getAvailableZoneIds().stream()
-                    .filter(z -> levenshtein(z.toLowerCase(), lowerInput) <= 3)
-                    .sorted(Comparator.comparingInt(z -> levenshtein(z.toLowerCase(), lowerInput)))
+                    .filter(z -> levenshtein(z.toLowerCase(Locale.ROOT), lowerInput) <= 3)
+                    .sorted(Comparator.comparingInt(z -> levenshtein(z.toLowerCase(Locale.ROOT), lowerInput)))
                     .limit(MAX_SUGGESTIONS)
                     .collect(Collectors.toList());
         }

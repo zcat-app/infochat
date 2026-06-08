@@ -1,9 +1,9 @@
 ---
 id: M1-239
 title: "infochat-provider: NOTIFY discriminator, stale ban comment, locale fold"
-status: pending
+status: done
 created: 2026-06-08
-last_updated: 2026-06-08
+last_updated: 2026-06-09
 blocked_by: []
 files_budget: 6
 files_scope:
@@ -37,12 +37,29 @@ spec_refs:
   - docs/spec/architecture.md §Inter-service communication
   - docs/spec/commands.md §Surface conventions
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-09
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 151
+      removed: 20
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-09
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-239: infochat-provider — NOTIFY discriminator, stale ban comment, locale fold

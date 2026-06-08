@@ -269,9 +269,11 @@ public class QuarantineReviewListener {
 
     /**
      * Validates the wire shape: all three payload fields must be
-     * present and well-formed (the emit side's closed contract). The
-     * parsed {@code new_status} is retained for shape validation only
-     * — actionability comes from the row (class javadoc §Row truth).
+     * present and well-formed (the emit side's closed contract), and
+     * {@code target_kind} must name one of the two enumerated base
+     * tables. The parsed {@code new_status} is retained for shape
+     * validation only — actionability comes from the row (class
+     * javadoc §Row truth).
      */
     static Payload parsePayload(String json) {
         Matcher kindMatcher = TARGET_KIND_PATTERN.matcher(json);
@@ -282,8 +284,18 @@ public class QuarantineReviewListener {
                     "quarantine_review payload must contain target_kind, target_id, "
                             + "and new_status fields; got: " + json);
         }
+        // Reject an out-of-set discriminator at the wire boundary so it
+        // is dropped-with-log by dispatch, never silently routed: a
+        // target_kind other than "quarantine" would otherwise fall
+        // through to the "post" base-table lookup in lookupRowState.
+        String targetKind = kindMatcher.group(1);
+        if (!"quarantine".equals(targetKind) && !"post".equals(targetKind)) {
+            throw new IllegalArgumentException(
+                    "quarantine_review payload target_kind must be \"quarantine\" "
+                            + "or \"post\"; got: " + json);
+        }
         return new Payload(
-                kindMatcher.group(1),
+                targetKind,
                 UUID.fromString(idMatcher.group(1)),
                 statusMatcher.group(1));
     }
