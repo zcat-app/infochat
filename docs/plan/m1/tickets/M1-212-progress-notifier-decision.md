@@ -52,6 +52,9 @@ test_plan:
   modifies:
     - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/MessagingSpisLoadTest.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/spi/AllSpisLoadIT.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryCommandHandlerTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryIT.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryAdapterScopeIT.java
   preserves:
     - all tests currently green on main
 spec_refs:
@@ -96,6 +99,43 @@ escalations:
       RESOLUTION is fine (AdapterRegistry.activatedAdapters() is a public
       CDI seam already used by 4 handlers); only the duplicate-send problem
       forces the out-of-scope edits.
+  - date: 2026-06-08
+    reason: outline-fail
+    reviewer_verdict_excerpt: |
+      ## OUTLINE FAILED — plan-writer, direction (a) IMPLEMENT.
+      Direction (a) changes SummaryCommandHandler.handle from returning the
+      composed summary OutboundMessage (SummaryCommandHandler.java:138) to
+      returning null and self-delivering via StageProgressNotifier
+      (placeholder send -> coalesced update -> finalizeMessage). This reverses
+      the contract that THREE pre-existing, currently-green test files assert,
+      none of which are authorized for modification:
+        - SummaryCommandHandlerTest (16 @Test; ~13 do
+          OutboundMessage reply = handler.handle(...) then reply.text()...,
+          which NPE once handle() returns null).
+        - SummaryIT (SummaryIT.java:96-104: asserts
+          adapter.sentMessages().size()==1 and the single captured body
+          contains the summary content — a placeholder/finalize flow changes
+          the send count and/or makes the captured send() body a stage label).
+        - SummaryAdapterScopeIT (SummaryAdapterScopeIT.java:100-102: same
+          sentMessages().size()==1 + .text() assertion).
+      The ticket's "Authorized test changes" section authorizes ONLY the two
+      SPI load tests (MessagingSpisLoadTest, AllSpisLoadIT) and only under
+      direction (c); under direction (a) it explicitly states both load tests
+      are preserved unchanged and names no other test edits, while
+      test_plan.preserves commits to "all tests currently green on main."
+      Direction (a) is NOT implementable without modifying these three
+      pre-existing green tests; the required modifications and their new
+      expected behavior (assert against the notifier's placeholder/finalize
+      sequence and the finalized body, not the handler's return value) are
+      neither named nor authorized. TEST-CHANGES-AUTHORIZED blocker.
+      Verified against disk by the developer: handle() returns OutboundMessage
+      at line 138; all three test files exist; SummaryCommandHandlerTest has
+      16 @Test and 37 handle()/.text() references; SummaryIT.java:96 and
+      SummaryAdapterScopeIT.java:100 both assert sentMessages().size()==1.
+      SUGGESTED ESCALATION: refine — add an "Authorized test changes"
+      subsection for direction (a) naming SummaryCommandHandlerTest,
+      SummaryIT, and SummaryAdapterScopeIT plus their new expected behavior,
+      and add all three to test_plan.modifies.
 revisions:
   - date: 2026-06-08
     reason: "clarity-fail rework — TEST-CHANGES-AUTHORIZED blocker: test_plan.modifies listed MessagingSpisLoadTest.java with no body authorization naming per-direction (a/b/c) what happens to it and the new expected behavior. Add an 'Authorized test changes' section covering both load tests (MessagingSpisLoadTest + AllSpisLoadIT, the latter added to test_plan.modifies since direction (c) edits it too) for all three directions; add a 'Direction chosen' placeholder to the body for review orientation (clarity WARN)."
@@ -119,6 +159,18 @@ revisions:
         - infochat-provider/.../spi/AllSpisLoadIT.java
         - infochat-provider/.../provider/command
       (acceptance had no dispatch-contract / router-double-send item)
+  - date: 2026-06-08
+    reason: "outline-fail rework — TEST-CHANGES-AUTHORIZED blocker (plan-writer, direction (a)). Direction (a) reverses SummaryCommandHandler's return-text / single-send contract: handle() returns null and self-delivers via StageProgressNotifier (placeholder -> coalesced update -> finalizeMessage). Three pre-existing green tests pin the OLD contract and would break: SummaryCommandHandlerTest (16 @Test, ~13 do handler.handle(...).text() -> NPE on null), SummaryIT.java:96-104 (sentMessages().size()==1 + body contains summary), SummaryAdapterScopeIT.java:100-102 (same). The 'Authorized test changes' section authorized only the two SPI load tests, and only under direction (c); test_plan.preserves said 'all tests currently green on main'. Refine: add a direction-(a) 'Authorized test changes' subsection naming the three /summary tests and their NEW expected behavior (assert against the notifier's placeholder/finalize sequence and the finalized body, not the handler's return value), and add all three to test_plan.modifies. Re-entry via /m1-tick start re-runs clarity + a fresh plan-writer pass."
+    prior_values: |
+      status: in-progress (escalated)
+      test_plan.modifies:
+        - infochat-messaging-adapter/.../MessagingSpisLoadTest.java
+        - infochat-provider/.../spi/AllSpisLoadIT.java
+      ("Authorized test changes" section authorized ONLY the two SPI load
+       tests, and only under direction (c); it stated under direction (a)
+       that both load tests are preserved unchanged and named no edit to
+       SummaryCommandHandlerTest / SummaryIT / SummaryAdapterScopeIT.
+       test_plan.preserves: "all tests currently green on main".)
 ---
 
 # M1-212: ProgressNotifier — implement minimally, defer by amendment, or remove
@@ -204,17 +256,51 @@ Per direction:
 
 - **(a) IMPLEMENT (full feature)** — interface and enum are kept. The
   `ProgressNotifier` SPI gains terminal methods (`complete`/`fail`) but stays an
-  interface, and `ProgressStage` keeps its seven values, so **both load tests are
-  unchanged** (the pinned surface still exists — interface-ness and the
-  seven-value count both hold). New behavior is proven by **added** tests (not by
-  editing the load tests): notifier/handler behavior under
-  `infochat-provider/src/test/.../command` (placeholder send, typing-on, coalesced
-  update, finalize + typing-off via try/finally — spec steps 1–4 — plus the
-  injection-prevention assertion and the SPI-payload assertion), the router
-  no-double-send test under `infochat-provider/src/test/.../messaging`, and the
-  cadence-floor + bundle-coverage assertions under
-  `infochat-provider/src/test/.../bundle`. No expected-behavior change to either
-  SPI load test.
+  interface, and `ProgressStage` keeps its seven values, so **both SPI load tests
+  (`MessagingSpisLoadTest`, `AllSpisLoadIT`) are unchanged** (the pinned surface
+  still exists — interface-ness and the seven-value count both hold). New surface
+  behavior is proven by **added** tests (not by editing the load tests):
+  notifier/handler behavior under `infochat-provider/src/test/.../command`
+  (placeholder send, typing-on, coalesced update, finalize + typing-off via
+  try/finally — spec steps 1–4 — plus the injection-prevention assertion and the
+  SPI-payload assertion), the router no-double-send test under
+  `infochat-provider/src/test/.../messaging`, and the cadence-floor +
+  bundle-coverage assertions under `infochat-provider/src/test/.../bundle`. No
+  expected-behavior change to either SPI load test.
+
+  **Three pre-existing `/summary` tests are MODIFIED** (added to
+  `test_plan.modifies`): direction (a) reverses `SummaryCommandHandler`'s contract
+  — `handle()` now returns `@Nullable OutboundMessage` and returns `null` for
+  `/summary` (the "already delivered via the notifier" signal), with the summary
+  content delivered through `StageProgressNotifier` (placeholder send → coalesced
+  `update` → `complete(scope, finalText)`/`finalizeMessage`). The three tests
+  currently assert the OLD return-text / single-send contract and must be rewritten
+  to observe the notifier's delivered message instead of the handler's return
+  value:
+  - `SummaryCommandHandlerTest.java` — the ~13 tests doing
+    `OutboundMessage reply = handler.handle(...)` then `reply.text().contains(...)`
+    are rewritten to observe the notifier's terminal payload. **New expected
+    behavior:** `handle()` for `/summary` returns `null`; the composed summary text
+    is the argument to the notifier's terminal `complete(scope, finalText)` call,
+    and the finalized message body (captured via the test notifier / in-memory
+    adapter) — not the handler return — carries the summary content (post UIDs,
+    source display names, etc.). Tests for non-self-sending paths (error/guard
+    branches that still return text) keep asserting on the returned text.
+  - `SummaryIT.java` (`:96-104`) — the `adapter.sentMessages().size()==1` +
+    "single body contains the summary" assertion is updated for the
+    placeholder→update→finalize lifecycle. **New expected behavior:** the in-memory
+    adapter's captured outbound reflects the notifier sequence (a placeholder send
+    followed by `finalizeMessage` carrying the real summary); the assertion targets
+    the **finalized** message body for the post-UID / source-name checks, not a
+    single return-text send. The exact send-count expectation follows the chosen
+    notifier mechanism (placeholder + in-place finalize), pinned by the test.
+  - `SummaryAdapterScopeIT.java` (`:100-102`) — same `sentMessages().size()==1` +
+    `.text()` assertion, updated identically: assert against the notifier's
+    finalized message delivered to the correct adapter scope rather than a single
+    return-text send.
+
+  `test_plan.preserves` ("all tests currently green on main") continues to bind
+  every test **except** the five now enumerated in `test_plan.modifies`.
 - **(b) DEFER BY AMENDMENT** — surface kept, no code change. Both load tests are
   **unchanged**.
 - **(c) REMOVE** — ProgressNotifier and ProgressStage are deleted, so both load
