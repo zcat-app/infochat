@@ -1,9 +1,9 @@
 ---
 id: M1-231
 title: "Implement /get-tags and /get-sources (advertised, no handler)"
-status: pending
+status: done
 created: 2026-06-08
-last_updated: 2026-06-08
+last_updated: 2026-06-09
 blocked_by: []
 files_budget: 8
 complexity: medium
@@ -33,12 +33,29 @@ spec_refs:
   - docs/spec/commands.md §Discovery
   - docs/spec/commands.md §Command catalogue
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-09
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 765
+      removed: 0
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-08
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-231: Implement /get-tags and /get-sources (advertised, no handler)

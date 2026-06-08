@@ -594,6 +594,12 @@ public final class BundleKeys {
     /** Reply when zero rows would be returned for the requested view. */
     public static final String REPLY_LIST_SOURCES_EMPTY = "reply.list_sources.empty";
 
+    /** {@code /get-tags} header line printed before the per-tag rows (explains the {@code *} followed-marker). */
+    public static final String REPLY_GET_TAGS_HEADER = "reply.get_tags.header";
+
+    /** {@code /get-tags} reply when the controlled vocabulary (the {@code tag} table) is empty. */
+    public static final String REPLY_GET_TAGS_EMPTY = "reply.get_tags.empty";
+
     /** {@code /remove-source <id>}: parse failure on the positional {@code <id>} (not a UUID literal). */
     public static final String ERROR_REMOVE_SOURCE_UNKNOWN_ID = "error.remove_source.unknown_id";
 
