@@ -1,9 +1,9 @@
 ---
 id: M1-230
 title: "Semantic-link query: use an HNSW index probe, not a self-join"
-status: pending
+status: done
 created: 2026-06-08
-last_updated: 2026-06-08
+last_updated: 2026-06-09
 blocked_by: []
 files_budget: 4
 files_scope:
@@ -34,12 +34,29 @@ spec_refs:
   - docs/spec/architecture.md §Inter-service communication
   - docs/spec/llm.md §Embedding pipeline
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-09
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 382
+      removed: 34
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-08
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-230: Semantic-link query: use an HNSW index probe, not a self-join

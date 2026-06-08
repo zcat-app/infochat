@@ -6,6 +6,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -47,7 +48,7 @@ import java.util.UUID;
  * {@code infochat.linking.semantic-threshold}. Score is
  * {@code 1 - cosine_distance} (similarity). Driving posts without a
  * {@code post_embedding} row produce zero semantic candidates — the
- * join over a missing {@code pe1} simply returns no rows.
+ * driving-vector PK read finds no row, so no ANN probe is issued.
  *
  * <p>{@code 'repost'} (Nostr kind-6 cross-source linking) lands in
  * M1-100 and is out of scope here; the V29 CHECK constraint already
@@ -98,6 +99,20 @@ public class LinkingJob {
      * app.zcat.infochat.collector.eval.reeval.AdminReviewTtlJob} pattern.
      */
     private static final int DRIVING_BATCH_SIZE = 64;
+
+    /**
+     * Over-fetch factor for the semantic ANN probe. The HNSW top-k scan
+     * returns the k nearest embeddings by cosine distance; the wrapping
+     * query then drops candidates over the distance threshold or already
+     * linked (the {@code NOT EXISTS} dedup). Requesting
+     * {@code maxLinksPerPost} × this factor leaves recall headroom so
+     * dedup-eliminated rows and HNSW approximate-recall misses do not
+     * starve the final per-post cap. The distance-threshold exclusion is
+     * monotonic in distance (every farther row is also over the
+     * threshold) so it needs no headroom; the dedup filter is not
+     * monotonic, hence the multiple.
+     */
+    private static final int SEMANTIC_PROBE_OVERFETCH = 4;
 
     @Inject
     DataSource dataSource;
@@ -241,48 +256,68 @@ public class LinkingJob {
     }
 
     /**
-     * Semantic-match candidate query. Joins {@code post_embedding} to
-     * itself; the score is {@code 1 - cosine_distance}
-     * ({@code pgvector}'s {@code <=>} operator returns distance, not
-     * similarity). The semantic window narrows the candidate set
-     * (semantic links are most valuable on co-temporal posts); the
-     * threshold filter discards low-similarity matches. The NOT EXISTS
-     * clause + LIMIT shape mirrors the entity query.
+     * Semantic-match candidate query. Two SQL round-trips: read the
+     * driving post's embedding by PK, then run an indexable top-k ANN
+     * probe with that vector bound as a {@code ?::vector} parameter. The
+     * score is {@code 1 - cosine_distance} ({@code pgvector}'s
+     * {@code <=>} operator returns distance, not similarity).
+     *
+     * <p>Binding the driving vector as a plan-time parameter (rather than
+     * referencing a second {@code post_embedding} column in a self-join)
+     * is what lets PostgreSQL drive {@code ORDER BY embedding <=> ?
+     * LIMIT k} through {@code idx_post_embedding_hnsw}; a column-vs-column
+     * {@code <=>} cannot use the index and degrades to a full distance
+     * scan of the window per driving post. The inner probe carries only
+     * the index-compatible window/self filters and a distance-only
+     * ORDER BY (the HNSW shape); the wrapping query then applies the
+     * distance threshold, the {@code NOT EXISTS} dedup, and the
+     * deterministic {@code (distance, post_id)} tie-break + cap over the
+     * ≤ {@code maxLinksPerPost × SEMANTIC_PROBE_OVERFETCH} returned rows.
      *
      * <p>A driving post without a {@code post_embedding} row produces
-     * zero candidates here — the {@code pe1.post_id = ?} predicate
-     * fails to find {@code pe1} so the JOIN yields no rows. Acceptance
-     * item [9] + LinkingJobTest.noEmbedding_semanticSkipped_entityStillWorks.
+     * zero candidates: the PK read finds no row, so the method returns an
+     * empty list <i>without issuing the probe</i>. Acceptance item [9] +
+     * LinkingJobTest.noEmbedding_semanticSkipped_entityStillWorks.
      */
     List<Candidate> findSemanticCandidates(Connection conn, DrivingPost driving) throws SQLException {
+        String drivingVector = readDrivingEmbedding(conn, driving);
+        if (drivingVector == null) {
+            return List.of();
+        }
         Instant lookbackCutoff = Instant.now().minus(Duration.ofDays(lookbackDays));
         Instant semanticCutoff = Instant.now().minus(Duration.ofHours(semanticWindowHours));
         final String sql =
-            "SELECT pe2.post_id, (pe1.embedding <=> pe2.embedding) AS distance "
-                + "  FROM post_embedding pe1 "
-                + "  JOIN post_embedding pe2 ON pe2.post_id <> pe1.post_id "
-                + " WHERE pe1.post_id = ? "
-                + "   AND pe1.fetched_at = ? "
-                + "   AND pe2.fetched_at >= ? "
-                + "   AND (pe1.embedding <=> pe2.embedding) < ? "
+            "SELECT post_id, distance "
+                + "  FROM ( "
+                + "    SELECT pe.post_id AS post_id, "
+                + "           (pe.embedding <=> ?::vector) AS distance "
+                + "      FROM post_embedding pe "
+                + "     WHERE pe.post_id <> ? "
+                + "       AND pe.fetched_at >= ? "
+                + "     ORDER BY pe.embedding <=> ?::vector "
+                + "     LIMIT ? "
+                + "  ) probe "
+                + " WHERE probe.distance < ? "
                 + "   AND NOT EXISTS ( "
                 + "       SELECT 1 FROM post_reference pr "
                 + "        WHERE pr.from_post = ? "
-                + "          AND pr.to_post = pe2.post_id "
+                + "          AND pr.to_post = probe.post_id "
                 + "          AND pr.link_type = 'semantic' "
                 + "          AND pr.created_at > ? "
                 + "   ) "
-                + " ORDER BY distance ASC, pe2.post_id ASC "
+                + " ORDER BY probe.distance ASC, probe.post_id ASC "
                 + " LIMIT ?";
         List<Candidate> out = new ArrayList<>();
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setObject(1, driving.id());
-            ps.setTimestamp(2, Timestamp.from(driving.fetchedAt()));
+            ps.setString(1, drivingVector);
+            ps.setObject(2, driving.id());
             ps.setTimestamp(3, Timestamp.from(semanticCutoff));
-            ps.setDouble(4, semanticThreshold);
-            ps.setObject(5, driving.id());
-            ps.setTimestamp(6, Timestamp.from(lookbackCutoff));
-            ps.setInt(7, maxLinksPerPost);
+            ps.setString(4, drivingVector);
+            ps.setInt(5, maxLinksPerPost * SEMANTIC_PROBE_OVERFETCH);
+            ps.setDouble(6, semanticThreshold);
+            ps.setObject(7, driving.id());
+            ps.setTimestamp(8, Timestamp.from(lookbackCutoff));
+            ps.setInt(9, maxLinksPerPost);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     UUID candidateId = (UUID) rs.getObject(1);
@@ -293,6 +328,29 @@ public class LinkingJob {
             }
         }
         return out;
+    }
+
+    /**
+     * Read the driving post's embedding by PK as its {@code pgvector}
+     * text literal ({@code [v0,v1,...]}), suitable for re-binding through
+     * a {@code ?::vector} cast on the probe. Returns {@code null} when the
+     * post has no {@code post_embedding} row — the caller treats that as
+     * "no semantic candidates" and skips the probe.
+     */
+    @Nullable
+    private String readDrivingEmbedding(Connection conn, DrivingPost driving) throws SQLException {
+        final String sql =
+            "SELECT embedding::text FROM post_embedding WHERE post_id = ? AND fetched_at = ?";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setObject(1, driving.id());
+            ps.setTimestamp(2, Timestamp.from(driving.fetchedAt()));
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return null;
+                }
+                return rs.getString(1);
+            }
+        }
     }
 
     /**
