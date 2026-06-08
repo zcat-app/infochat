@@ -540,7 +540,12 @@ final class SignalJsonRpcClient {
         SignalMessageCodec.JsonRpcMessage msg;
         try {
             msg = codec.decode(line);
-        } catch (IllegalArgumentException e) {
+        } catch (RuntimeException e) {
+            // RuntimeException, not just the codec's IllegalArgumentException:
+            // any NPE/CCE a hostile frame provokes out of decode must cost the
+            // line, never the reader thread — signal-cli stays alive when its
+            // stream carries garbage, so a dead reader is a permanently deaf
+            // adapter that no restart machinery notices.
             // The raw line may carry user-content from a chat-mode message
             // body or signal-cli error text; per D37 and §"User content in
             // exceptions" we must NOT log the bytes themselves or the

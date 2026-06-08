@@ -2,6 +2,7 @@ package app.zcat.infochat.messaging.impl.signal;
 
 
 import jakarta.json.Json;
+import jakarta.json.JsonNumber;
 import jakarta.json.JsonObject;
 import jakarta.json.JsonObjectBuilder;
 import jakarta.json.JsonReader;
@@ -10,6 +11,8 @@ import jakarta.json.JsonValue;
 import java.io.StringReader;
 import java.util.Locale;
 import java.util.Optional;
+
+import org.jspecify.annotations.Nullable;
 
 /**
  * Pure JSON-RPC 2.0 framing for signal-cli's daemon protocol. No I/O,
@@ -84,32 +87,41 @@ final class SignalMessageCodec {
     /**
      * Decode one line of the daemon stream. Throws
      * {@link IllegalArgumentException} on malformed JSON or on an
-     * envelope that fits no JSON-RPC 2.0 shape — the reader treats
-     * the throw as a transport-level corruption and disconnects.
+     * envelope that fits no JSON-RPC 2.0 shape — the reader logs the
+     * exception class name and drops the line. The raw line is user
+     * content (chat-mode bodies ride in it), so per D37 and the
+     * security spec §User content in exceptions the thrown message is
+     * fixed text: no frame bytes, and no parser cause either — the
+     * parser's own message embeds the offending token.
      */
     JsonRpcMessage decode(String line) {
         JsonObject obj;
         try (JsonReader reader = Json.createReader(new StringReader(line))) {
             obj = reader.readObject();
         } catch (RuntimeException e) {
-            throw new IllegalArgumentException("Malformed JSON-RPC envelope: " + line, e);
+            throw new IllegalArgumentException("Malformed JSON-RPC envelope");
         }
         String method = obj.getString("method", null);
         if (method != null) {
-            JsonObject params = obj.getJsonObject("params");
-            if (params == null) {
-                params = JsonValue.EMPTY_JSON_OBJECT;
-            }
+            // instanceof doubles as the null-check and the type check: a
+            // wrong-typed (non-object) params member is treated like an
+            // absent one rather than letting getJsonObject throw CCE.
+            JsonObject params = obj.get("params") instanceof JsonObject p
+                    ? p
+                    : JsonValue.EMPTY_JSON_OBJECT;
             return new JsonRpcMessage.Notification(method, params);
         }
         // Response: id is present per spec; signal-cli echoes the string id
         // we sent. Absent ids fail below.
         String id = obj.getString("id", null);
         if (id == null) {
-            throw new IllegalArgumentException("JSON-RPC envelope missing both method and id: " + line);
+            throw new IllegalArgumentException("JSON-RPC envelope missing both method and id");
         }
-        if (obj.containsKey("error")) {
-            JsonObject err = obj.getJsonObject("error");
+        // A wrong-typed (non-object) error member falls through to the
+        // Response branch: the frame carried our id, and an empty-result
+        // Response fails the caller fast with a classified error instead
+        // of leaving its future to time out.
+        if (obj.get("error") instanceof JsonObject err) {
             int code = err.getInt("code", -32603);
             String msg = err.getString("message", "(no message)");
             return new JsonRpcMessage.ErrorResponse(id, code, msg);
@@ -128,16 +140,19 @@ final class SignalMessageCodec {
      * sender ACI + body.
      */
     Optional<ReceivedDm> extractDm(JsonObject receiveParams) {
-        JsonObject envelope = receiveParams.getJsonObject("envelope");
-        if (envelope == null) {
+        // This method must be total over arbitrary inbound frame shapes:
+        // the daemon stream is a trust boundary, and an NPE/CCE escaping
+        // here used to kill the thread that processes inbound frames while
+        // the subprocess stayed alive — a permanently deaf adapter with no
+        // restart trigger. instanceof doubles as null-check + type check.
+        if (!(receiveParams.get("envelope") instanceof JsonObject envelope)) {
             return Optional.empty();
         }
         String sourceUuid = envelope.getString("sourceUuid", null);
         if (sourceUuid == null) {
             return Optional.empty();
         }
-        JsonObject dataMessage = envelope.getJsonObject("dataMessage");
-        if (dataMessage == null) {
+        if (!(envelope.get("dataMessage") instanceof JsonObject dataMessage)) {
             return Optional.empty();
         }
         // Group messages carry groupInfo / groupV2 — skip; group is M1-108.
@@ -148,10 +163,35 @@ final class SignalMessageCodec {
         if (body == null || body.isEmpty()) {
             return Optional.empty();
         }
-        long timestamp = envelope.containsKey("timestamp")
-                ? envelope.getJsonNumber("timestamp").longValueExact()
-                : dataMessage.getJsonNumber("timestamp").longValueExact();
+        Long timestamp = usableTimestamp(envelope, dataMessage);
+        if (timestamp == null) {
+            return Optional.empty();
+        }
         return Optional.of(new ReceivedDm(canonicalizeAci(sourceUuid), body, timestamp));
+    }
+
+    /**
+     * Millisecond timestamp from {@code envelope.timestamp}, falling
+     * back to {@code dataMessage.timestamp}; null when neither field
+     * holds a usable (integral, long-range) JSON number — the caller
+     * drops the frame instead of letting a typed accessor throw
+     * NPE (absent) or CCE (wrong-typed).
+     */
+    private static @Nullable Long usableTimestamp(JsonObject envelope, JsonObject dataMessage) {
+        Long fromEnvelope = integralLong(envelope.get("timestamp"));
+        return fromEnvelope != null ? fromEnvelope : integralLong(dataMessage.get("timestamp"));
+    }
+
+    private static @Nullable Long integralLong(@Nullable JsonValue value) {
+        if (!(value instanceof JsonNumber number)) {
+            return null;
+        }
+        try {
+            return number.longValueExact();
+        } catch (ArithmeticException e) {
+            // Fractional or beyond-long-range — not a usable timestamp.
+            return null;
+        }
     }
 
     /**

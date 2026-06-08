@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 15 |
+| pending | 14 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 241 |
+| done | 242 |
 | deferred | 2 |
 | **total** | **258** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-184 — Signal reader/codec hardening against malformed frames (complexity: low, risk: medium)
 - M1-186 — Signal group outbound send path (complexity: medium, risk: medium)
 - M1-193 — /stop wiring: pg backend pid + statement timeouts + tool conns (complexity: high, risk: medium)
 - M1-198 — Group-scope bot-admin commands: resolve caller via InboundContext (complexity: medium, risk: medium)
@@ -80,10 +79,10 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-206 | Parameterize SET LOCAL infochat.actor_id (drop UUID string concat) | 2026-06-08 | round 1 APPROVE |
 | M1-201 | Ops hardening: drop infochat-dev password fallbacks + readiness probes | 2026-06-08 | round 1 APPROVE |
 | M1-197 | Tool JSON ready_at value + /export paged replies and truncation flag | 2026-06-08 | round 1 APPROVE |
+| M1-184 | Signal reader/codec hardening against malformed frames | 2026-06-08 | round 1 APPROVE |
 | M1-222 | Per-group LLM rate cap (D47) on the group chat path | 2026-06-07 | round 2 OVERRIDE-APPROVE |
 | M1-221 | LLM retry-once backoff: sleep before the single retry (M1-192 redteam F2) | 2026-06-07 | round 2 OVERRIDE-APPROVE |
 | M1-220 | [INVESTIGATE] Bluesky source identifier: URL (per D38) vs bare DID/handle (per the fetcher) | 2026-06-07 | round 1 APPROVE |
-| M1-217 | LLM-adapter lows: Entry nullability contradiction, joinPath/preview dedup, Anthropic multi-block content | 2026-06-07 | round 1 APPROVE |
 
 ---
 
@@ -369,7 +368,7 @@ M1-173 (done)
   └── M1-175 (done)
 M1-176 (done)
 M1-177 (done)
-  ├── M1-184 (pending) ← runnable
+  ├── M1-184 (done)
   ├── M1-204 (pending) ← runnable
   └── M1-205 (pending) ← runnable
 M1-178 (done)
