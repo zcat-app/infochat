@@ -172,7 +172,20 @@ public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
             }
             float[] vector = new float[embedding.size()];
             for (int j = 0; j < embedding.size(); j++) {
-                vector[j] = (float) embedding.get(j).asDouble();
+                JsonNode coordinate = embedding.get(j);
+                // A non-numeric coordinate (string, boolean, object, JSON null)
+                // would coerce to 0.0 under the lenient asDouble(), persisting a
+                // silently corrupt vector that passes the size check below and
+                // pollutes cosine scoring. Validate the JSON type tag and read
+                // via doubleValue() so element-type divergence becomes a batch
+                // failure at the seam, like the size divergence guarded below.
+                if (!coordinate.isNumber()) {
+                    throw new EmbeddingCallFailedException(
+                        "OpenAiCompatibleEmbeddingProvider: data[" + i + "].embedding[" + j
+                            + "] is not numeric from " + uri + "; preview: "
+                            + LlmHttpSupport.preview(responseBody));
+                }
+                vector[j] = (float) coordinate.doubleValue();
             }
             results.add(new EmbeddingResult(vector));
         }

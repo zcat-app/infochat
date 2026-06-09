@@ -1,7 +1,7 @@
 ---
 id: M1-256
 title: "Embedding vector elements: validate numeric before coercion"
-status: pending
+status: done
 created: 2026-06-09
 last_updated: 2026-06-09
 blocked_by: []
@@ -31,12 +31,47 @@ spec_refs:
   - docs/spec/llm.md §Embedding pipeline
   - docs/spec/llm.md §Failure handling (recap)
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-09
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 67
+      removed: 9
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-09
+    verdict: CLEAN
+    base: main
+    head: working tree of m1/M1-256-embedding-vector-elements-vali (uncommitted)
+    verdict_file: docs/plan/m1/redteam/M1-256-2026-06-09.md
+    out_of_model_count: 1
+    note: |
+      CLEAN. The diff tightens the LLM↔system-state boundary by converting a
+      silently-corrupting non-numeric embedding coordinate into an explicit
+      EmbeddingCallFailedException, mirroring the two pre-existing shape guards
+      on the same parse path; the resulting batch failure routes to the spec's
+      documented "Embedding failure → release without a vector" path. One
+      OUT-OF-MODEL advisory: the guard embeds a bounded 200-char response
+      preview in the exception, byte-identical to the pre-existing sibling
+      guards (verified live), so no new disclosure surface — a pre-existing
+      operator-side SafeLog/logging-level residual, not a finding. No
+      remediation ticket warranted.
+clarity_check:
+  date: 2026-06-09
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-256: Embedding vector elements: validate numeric before coercion

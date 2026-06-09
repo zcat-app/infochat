@@ -140,6 +140,49 @@ class OpenAiCompatibleEmbeddingProviderTest {
         assertEquals(new EmbeddingResult(new float[] {0.5f, 0.6f}), results.get(0));
     }
 
+    @Test
+    void embedThrowsWhenEmbeddingElementNonNumeric() {
+        // A non-numeric coordinate (string or JSON null) must become a batch
+        // failure at the seam — the same EmbeddingCallFailedException a
+        // missing-data[]/size-mismatch reply throws — rather than coercing to
+        // 0.0 and persisting a silently corrupt vector. One server answers
+        // three sequential calls: a string element, a JSON null element, then
+        // a well-formed numeric reply that must still parse unchanged.
+        AtomicInteger callCount = new AtomicInteger();
+        mockServer.createContext("/embeddings", exchange -> {
+            String json = switch (callCount.getAndIncrement()) {
+                case 0 -> "{\"data\":[{\"embedding\":[\"x\",\"y\",\"z\"]}]}";
+                case 1 -> "{\"data\":[{\"embedding\":[0.1,null,0.3]}]}";
+                default -> "{\"data\":[{\"embedding\":[0.1,0.2]}]}";
+            };
+            byte[] resp = json.getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, resp.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(resp);
+            }
+        });
+        mockServer.start();
+
+        OpenAiCompatibleEmbeddingProvider provider = provider();
+
+        EmbeddingCallFailedException stringEx = assertThrows(EmbeddingCallFailedException.class,
+            () -> provider.embed(List.of("text")));
+        assertTrue(stringEx.getMessage().contains("not numeric"),
+            "a string embedding element must throw naming the non-numeric coordinate; got: "
+                + stringEx.getMessage());
+
+        EmbeddingCallFailedException nullEx = assertThrows(EmbeddingCallFailedException.class,
+            () -> provider.embed(List.of("text")));
+        assertTrue(nullEx.getMessage().contains("not numeric"),
+            "a JSON null embedding element must throw naming the non-numeric coordinate; got: "
+                + nullEx.getMessage());
+
+        List<EmbeddingResult> results = provider.embed(List.of("text"));
+        assertEquals(1, results.size(), "a well-formed numeric reply still parses to one result");
+        assertEquals(new EmbeddingResult(new float[] {0.1f, 0.2f}), results.get(0),
+            "a well-formed numeric reply parses to the same float[] as before");
+    }
+
     private void respondWith(String json) {
         mockServer.createContext("/embeddings", exchange -> {
             byte[] resp = json.getBytes(StandardCharsets.UTF_8);
