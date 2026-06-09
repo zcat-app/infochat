@@ -334,6 +334,7 @@ class DigestWorkerTest {
         @Override public String name() { return name; }
         @Override public app.zcat.infochat.messaging.CapabilityFlags capabilities() { return null; }
         @Override public AdapterTrustLevel trustLevel() { return AdapterTrustLevel.HIGH; }
+        @Override public boolean isWellFormedContactId(String contactId) { return true; }
         @Override public MessageHandle send(OutboundMessage msg) {
             sent.add(msg);
             return null;

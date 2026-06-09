@@ -180,6 +180,11 @@ public final class SimpleXAdapter implements MessagingAdapter {
         return AdapterTrustLevel.HIGH;
     }
 
+    @Override
+    public boolean isWellFormedContactId(String contactId) {
+        return SimpleXIdentity.isWellFormed(contactId);
+    }
+
     /**
      * Start the simplex-chat subprocess, wait for its WebSocket endpoint
      * to become reachable, then open the WebSocket. Acceptance items 5 +

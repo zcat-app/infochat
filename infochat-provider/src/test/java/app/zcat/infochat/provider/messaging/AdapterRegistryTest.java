@@ -243,6 +243,11 @@ class AdapterRegistryTest {
         }
 
         @Override
+        public boolean isWellFormedContactId(String contactId) {
+            return true;
+        }
+
+        @Override
         public MessageHandle send(OutboundMessage msg) {
             return new MessageHandle("fake-x");
         }
@@ -279,6 +284,11 @@ class AdapterRegistryTest {
         @Override
         public AdapterTrustLevel trustLevel() {
             return AdapterTrustLevel.HIGH;
+        }
+
+        @Override
+        public boolean isWellFormedContactId(String contactId) {
+            return true;
         }
 
         @Override

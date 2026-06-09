@@ -6,8 +6,6 @@ import app.zcat.infochat.messaging.CapabilityFlags;
 import app.zcat.infochat.messaging.MembershipEvent;
 import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
-import app.zcat.infochat.messaging.impl.signal.SignalIdentity;
-import app.zcat.infochat.messaging.impl.simplex.SimpleXIdentity;
 import app.zcat.infochat.provider.group.MembershipEventHandler;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Any;
@@ -276,12 +274,13 @@ public class AdapterRegistry {
         // has an unreachable admin, exactly the failure this fail-fast
         // sentence exists to prevent. Runs only on non-blank admin values,
         // so the gate-7 union semantics above are unchanged (an adapter
-        // with no configured admin is never rejected here). Dispatch on
-        // adapter.name() follows the existing INMEMORY_NAME / gate-5
-        // name-coupling precedent rather than widening the MessagingAdapter
-        // SPI for this single in-tree caller; "inmemory" (and any future
-        // test adapter) is permissive by design — its contact-id format is
-        // free-form.
+        // with no configured admin is never rejected here). Dispatch is
+        // the MessagingAdapter.isWellFormedContactId SPI method — abstract
+        // on the interface, so a future adapter cannot silently skip
+        // validation the way the prior name-keyed switch's permissive
+        // default allowed. AdminBootstrap (priority 200) runs the same SPI
+        // validation before any users/audit write; this gate is the
+        // registry-side backstop for the same deployment.md promise.
         for (MessagingAdapter adapter : activating) {
             String admin = config.getOptionalValue(
                     "infochat.adapters." + adapter.name() + ".admin",
@@ -289,12 +288,7 @@ public class AdapterRegistry {
             if (admin.isBlank()) {
                 continue;
             }
-            boolean wellFormed = switch (adapter.name()) {
-                case "signal" -> SignalIdentity.isWellFormed(admin);
-                case "simplex" -> SimpleXIdentity.isWellFormed(admin);
-                default -> true;
-            };
-            if (!wellFormed) {
+            if (!adapter.isWellFormedContactId(admin)) {
                 // Do NOT echo the offending value: the property key is the
                 // operator's repair pointer, and naming the adapter +
                 // property satisfies the deployment.md fail-fast contract

@@ -27,6 +27,11 @@ final class NoopAdapter implements MessagingAdapter {
     }
 
     @Override
+    public boolean isWellFormedContactId(String contactId) {
+        return true;
+    }
+
+    @Override
     public MessageHandle send(OutboundMessage msg) {
         return null;
     }

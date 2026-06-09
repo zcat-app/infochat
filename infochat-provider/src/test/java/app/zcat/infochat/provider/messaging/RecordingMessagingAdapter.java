@@ -45,6 +45,11 @@ final class RecordingMessagingAdapter implements MessagingAdapter {
     }
 
     @Override
+    public boolean isWellFormedContactId(String contactId) {
+        return true;
+    }
+
+    @Override
     public MessageHandle send(OutboundMessage msg) {
         sends.add(msg.text());
         return new MessageHandle("rec-" + handleIds.incrementAndGet());

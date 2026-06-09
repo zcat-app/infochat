@@ -63,11 +63,16 @@ class BootstrapAdminParseGateTest {
             // Placeholder filesystem / port values satisfy the
             // ProductionAdapterBeans @ConfigProperty injection points;
             // MessagingStartup is excluded so adapter.start() — and thus the
-            // subprocess launch + bot-identity validation — never fires. The
-            // only values this test depends on are the two .admin entries.
+            // subprocess launch + bot-identity validation — never fires.
+            // AdminBootstrap is excluded too: it validates the same .admin
+            // values at boot (before any write), so the deliberately
+            // malformed signal.admin below would otherwise abort this test
+            // app's startup before the gate under test ever runs. The only
+            // values this test depends on are the two .admin entries.
             return Map.ofEntries(
                     Map.entry("quarkus.arc.exclude-types",
-                            "app.zcat.infochat.provider.messaging.MessagingStartup"),
+                            "app.zcat.infochat.provider.messaging.MessagingStartup,"
+                                    + "app.zcat.infochat.provider.startup.AdminBootstrap"),
                     Map.entry("infochat.adapters", "simplex,signal"),
                     Map.entry("infochat.adapters.inmemory.allow-low-trust", "true"),
                     Map.entry("infochat.adapters.simplex.binary", "/bin/sh"),

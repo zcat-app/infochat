@@ -176,6 +176,11 @@ public final class SignalAdapter implements MessagingAdapter {
         return AdapterTrustLevel.HIGH;
     }
 
+    @Override
+    public boolean isWellFormedContactId(String contactId) {
+        return SignalIdentity.isWellFormed(contactId);
+    }
+
     /**
      * Start the signal-cli subprocess, wait for its TCP JSON-RPC
      * endpoint to become reachable, then open the JSON-RPC client.

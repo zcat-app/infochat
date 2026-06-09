@@ -42,6 +42,11 @@ final class CapturingAdapter implements MessagingAdapter {
     }
 
     @Override
+    public boolean isWellFormedContactId(String contactId) {
+        return true;
+    }
+
+    @Override
     public MessageHandle send(OutboundMessage msg) {
         captured.add(msg);
         return null;

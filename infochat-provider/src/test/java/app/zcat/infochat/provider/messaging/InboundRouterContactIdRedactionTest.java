@@ -249,6 +249,11 @@ class InboundRouterContactIdRedactionTest {
         }
 
         @Override
+        public boolean isWellFormedContactId(String contactId) {
+            return true;
+        }
+
+        @Override
         public MessageHandle send(OutboundMessage msg) throws MessagingException {
             throw new MessagingException(FailureCategory.TRANSIENT, "send failure");
         }

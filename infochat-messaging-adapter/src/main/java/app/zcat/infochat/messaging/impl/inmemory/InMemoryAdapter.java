@@ -119,6 +119,18 @@ public final class InMemoryAdapter implements MessagingAdapter {
         return trustLevel;
     }
 
+    /**
+     * The in-memory adapter's contact-id format is free-form by
+     * design — tests pick arbitrary human-readable ids — so every
+     * value is well-formed. This is the explicit per-adapter
+     * statement of permissiveness the SPI requires in place of a
+     * permissive interface default.
+     */
+    @Override
+    public boolean isWellFormedContactId(String contactId) {
+        return true;
+    }
+
     @Override
     public MessageHandle send(OutboundMessage msg) throws MessagingException {
         long id = handleIdGen.incrementAndGet();

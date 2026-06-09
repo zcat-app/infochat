@@ -14,10 +14,11 @@ package app.zcat.infochat.messaging;
  * {@code docs/design/06-messaging.md} §6.2. The minimum surface every
  * adapter implements: an adapter-selection {@link #name()}, an
  * instance-level {@link #trustLevel()}, a {@link #capabilities()}
- * accessor, {@link #send} / {@link #update} / {@link #finalizeMessage}
- * for outbound replies, {@link #setTyping} for the typing-indicator
- * pulse, and {@link #setInboundHandler} for Provider to register its
- * inbound dispatch callback. Transport lifecycle is {@link #start()} /
+ * accessor, a {@link #isWellFormedContactId} format probe for
+ * operator-configured contact ids, {@link #send} / {@link #update} /
+ * {@link #finalizeMessage} for outbound replies, {@link #setTyping}
+ * for the typing-indicator pulse, and {@link #setInboundHandler} for
+ * Provider to register its inbound dispatch callback. Transport lifecycle is {@link #start()} /
  * {@link #stop()} — no-op defaults so transportless adapters (the
  * in-memory test double) are unaffected.</p>
  *
@@ -83,6 +84,30 @@ public interface MessagingAdapter {
      * @return the adapter's trust level; never null.
      */
     AdapterTrustLevel trustLevel();
+
+    /**
+     * Whether the given string is a well-formed contact id for this
+     * adapter's transport — a pure format check (no network, no
+     * persistence): canonical lowercase UUID for a Signal ACI,
+     * URL-safe-base64 queue address of cryptographic length for
+     * SimpleX, free-form for the in-memory test adapter. Provider
+     * calls this to validate operator-configured contact ids
+     * ({@code infochat.adapters.<name>.admin}) at startup, BEFORE any
+     * row derived from the value is written — the fail-fast promise
+     * in {@code docs/spec/deployment.md} §Operator inputs item 2
+     * ("each value MUST be parseable by its own adapter").
+     *
+     * <p>Deliberately abstract, no permissive default: a default
+     * returning true would let a future adapter silently skip
+     * validation, which is exactly the gap this method closes.
+     * An adapter whose contact-id format is genuinely free-form
+     * states that explicitly by returning true.</p>
+     *
+     * @param contactId the candidate contact id; never null.
+     * @return true iff the value is parseable as this adapter's
+     *         contact-id format.
+     */
+    boolean isWellFormedContactId(String contactId);
 
     /**
      * Send a new message to the given scope.

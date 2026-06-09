@@ -172,6 +172,11 @@ class StartupGatesTest {
         }
 
         @Override
+        public boolean isWellFormedContactId(String contactId) {
+            return true;
+        }
+
+        @Override
         public MessageHandle send(OutboundMessage msg) {
             return new MessageHandle("bad-md");
         }
@@ -212,6 +217,11 @@ class StartupGatesTest {
         }
 
         @Override
+        public boolean isWellFormedContactId(String contactId) {
+            return true;
+        }
+
+        @Override
         public MessageHandle send(OutboundMessage msg) {
             return new MessageHandle("bad-mention");
         }
@@ -249,6 +259,11 @@ class StartupGatesTest {
         @Override
         public AdapterTrustLevel trustLevel() {
             return AdapterTrustLevel.HIGH;
+        }
+
+        @Override
+        public boolean isWellFormedContactId(String contactId) {
+            return true;
         }
 
         @Override

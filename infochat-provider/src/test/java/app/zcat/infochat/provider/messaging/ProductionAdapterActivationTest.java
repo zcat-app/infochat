@@ -252,6 +252,11 @@ class ProductionAdapterActivationTest {
         }
 
         @Override
+        public boolean isWellFormedContactId(String contactId) {
+            return true;
+        }
+
+        @Override
         public MessageHandle send(OutboundMessage msg) {
             return new MessageHandle(name);
         }

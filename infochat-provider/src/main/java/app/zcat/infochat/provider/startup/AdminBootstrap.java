@@ -3,10 +3,13 @@ package app.zcat.infochat.provider.startup;
 import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
+import app.zcat.infochat.messaging.MessagingAdapter;
 import io.quarkus.runtime.Startup;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Priority;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Any;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.Config;
 import org.eclipse.microprofile.config.ConfigProvider;
@@ -20,7 +23,9 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -49,12 +54,19 @@ import java.util.UUID;
  * stale bootstrap admins is an explicit operator action via
  * {@code /revoke-admin}, never an automatic startup effect.</p>
  *
- * <p><b>Contact ids are opaque here.</b> The adapter-specific
- * contact-id format validation the spec promises ("each value MUST be
- * parseable by its own adapter") needs a parsing surface on the
- * messaging SPI that does not exist yet; this bean treats the
- * configured value as an opaque string, exactly like Gate 7 in
- * {@link app.zcat.infochat.provider.messaging.AdapterRegistry}.</p>
+ * <p><b>Validate before write.</b> The adapter-specific contact-id
+ * format validation the spec promises ("each value MUST be parseable
+ * by its own adapter") runs here via the shared
+ * {@link MessagingAdapter#isWellFormedContactId} SPI method — the
+ * same dispatch Gate 7b in
+ * {@link app.zcat.infochat.provider.messaging.AdapterRegistry} uses —
+ * and it runs for EVERY configured admin BEFORE the first users/audit
+ * write. Order is the security property: a malformed value aborts
+ * startup with nothing committed, where a write-then-validate order
+ * would leave the malformed admin row (and its audit entry) surviving
+ * the failed boot into the next one. An adapter name that resolves to
+ * no registered bean cannot be validated here; its value stays opaque
+ * and activation rejects the unknown name instead (registry gate 2).</p>
  */
 @Startup
 @Priority(200)
@@ -92,6 +104,10 @@ public class AdminBootstrap {
     @Inject
     AuditLogWriter auditLogWriter;
 
+    @Inject
+    @Any
+    Instance<MessagingAdapter> discoveredAdapters;
+
     @ConfigProperty(name = "infochat.adapters")
     String adaptersCsv;
 
@@ -113,6 +129,22 @@ public class AdminBootstrap {
      */
     public void seed(String csv) {
         Config config = ConfigProvider.getConfig();
+        // Validate-then-write, never write-then-validate: every
+        // configured contact id is checked against its owning
+        // adapter's SPI validator before the connection is even
+        // opened, so a malformed value in ANY slot aborts startup
+        // with no users/audit residue from the well-formed ones.
+        Map<String, String> adminByAdapter = new LinkedHashMap<>();
+        for (String adapterName : parseAdaptersList(csv)) {
+            String contactId = config.getOptionalValue(
+                    "infochat.adapters." + adapterName + ".admin",
+                    String.class).orElse("");
+            if (contactId.isBlank()) {
+                continue;
+            }
+            validateContactId(adapterName, contactId);
+            adminByAdapter.put(adapterName, contactId);
+        }
         try (Connection conn = dataSource.getConnection()) {
             // All adapters seed in one transaction: a failure on any
             // adapter aborts startup anyway, and partial seeding would
@@ -120,14 +152,8 @@ public class AdminBootstrap {
             // never durably created.
             conn.setAutoCommit(false);
             try {
-                for (String adapterName : parseAdaptersList(csv)) {
-                    String contactId = config.getOptionalValue(
-                            "infochat.adapters." + adapterName + ".admin",
-                            String.class).orElse("");
-                    if (contactId.isBlank()) {
-                        continue;
-                    }
-                    ensureAdmin(conn, adapterName, contactId);
+                for (Map.Entry<String, String> entry : adminByAdapter.entrySet()) {
+                    ensureAdmin(conn, entry.getKey(), entry.getValue());
                 }
                 conn.commit();
             } catch (SQLException e) {
@@ -140,6 +166,34 @@ public class AdminBootstrap {
             // message (contact-id redaction discipline, security.md
             // §Secrets handling).
             throw new IllegalStateException("bootstrap admin seeding failed", e);
+        }
+    }
+
+    /**
+     * Reject a configured contact id its owning adapter cannot parse,
+     * via {@link MessagingAdapter#isWellFormedContactId}. An adapter
+     * name that resolves to no registered bean is skipped: there is
+     * no validator to consult, and the unknown name itself is gate
+     * 2's failure to report at activation — this bean's contract is
+     * the contact-id format, not adapter-name resolution. The
+     * exception names the adapter and the property but never echoes
+     * the offending value (contact-id redaction discipline,
+     * security.md §Secrets handling), mirroring registry gate 7b.
+     */
+    private void validateContactId(String adapterName, String contactId) {
+        for (MessagingAdapter adapter : discoveredAdapters) {
+            if (!adapter.name().equals(adapterName)) {
+                continue;
+            }
+            if (!adapter.isWellFormedContactId(contactId)) {
+                throw new IllegalStateException(
+                        "Bootstrap admin: infochat.adapters." + adapterName
+                                + ".admin is not a well-formed " + adapterName
+                                + " contact id (per docs/spec/deployment.md"
+                                + " §Operator inputs — each value MUST be"
+                                + " parseable by its own adapter)");
+            }
+            return;
         }
     }
 
