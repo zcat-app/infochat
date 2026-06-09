@@ -1,7 +1,7 @@
 ---
 id: M1-246
 title: "Quarantine stored procedures: audit-before-effect reorder"
-status: pending
+status: done
 created: 2026-06-09
 last_updated: 2026-06-09
 blocked_by: []
@@ -31,12 +31,47 @@ test_plan:
 spec_refs:
   - docs/spec/schema.md §Invariants
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-09
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 416
+      removed: 8
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-09
+    verdict: CLEAN
+    base: main
+    head: m1/M1-246-quarantine-sp-audit-before-effect
+    verdict_file: docs/plan/m1/redteam/M1-246-2026-06-09.md
+    out_of_model_count: 1
+    note: |
+      In-progress branch audit (working tree vs main) between review
+      APPROVE and commit. CLEAN — narrow behavior-preserving reorder
+      moving the audit_log INSERT ahead of the UPDATEs in
+      approve_quarantine / reject_quarantine, restoring Invariant 7. All
+      security-relevant elements (actor-admin gate, FOR UPDATE lock, status
+      guards, SECURITY DEFINER + pinned search_path, param list / GRANTs,
+      NOTIFY payloads) carried forward identically. One OUT-OF-MODEL note
+      (procedure-level is_admin check lacks an is_banned predicate); ruled
+      not-a-finding — ban gate is upstream in Java intake and /revoke-admin
+      clears is_admin before a ban. No remediation ticket required.
+clarity_check:
+  date: 2026-06-09
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-246: Quarantine stored procedures — audit-before-effect reorder

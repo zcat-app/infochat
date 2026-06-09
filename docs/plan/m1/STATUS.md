@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 287 |
+| done | 288 |
 | deferred | 2 |
 | **total** | **290** |
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-246 — Quarantine stored procedures: audit-before-effect reorder (complexity: medium, risk: medium)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -68,8 +68,8 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-249 | Provider lows: RateCapBucket dedup, ban null-guard, NOTIFY parse | 2026-06-09 | round 1 APPROVE |
 | M1-248 | Flyway V20 gap: comment-only no-op placeholder | 2026-06-09 | round 1 APPROVE |
 | M1-247 | infochat-ssrf: body-cap default reconciliation + module lows | 2026-06-09 | round 1 APPROVE |
+| M1-246 | Quarantine stored procedures: audit-before-effect reorder | 2026-06-09 | round 1 APPROVE |
 | M1-245 | Re-evaluation candidate scan: fetched_at window + partial index | 2026-06-09 | round 1 APPROVE |
-| M1-244 | InboundRouter: fold is_banned into snapshot + command body cap | 2026-06-09 | round 1 APPROVE |
 
 ---
 
@@ -424,7 +424,7 @@ M1-243 (done)
 M1-244 (done)
   └── M1-254 (done)
 M1-245 (done)
-M1-246 (pending) ← runnable
+M1-246 (done)
 M1-247 (done)
 M1-248 (done)
 M1-249 (done)
