@@ -10,12 +10,12 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 291 |
-| deferred | 2 |
+| deferred | 3 |
 | **total** | **297** |
 
 ---
@@ -26,7 +26,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-256 — Embedding vector elements: validate numeric before coercion (complexity: low, risk: medium)
 - M1-257 — ReEvaluationJob: SKIP concurrent ticks to bound attempt burn (complexity: low, risk: low)
-- M1-258 — ThrottledAdminNotifier: fold suppressed_count bump into the UPSERT (complexity: low, risk: low)
 - M1-261 — Consistency code lows: IpBlocklist per-pass enum, router name case (complexity: low, risk: low)
 
 ---
@@ -83,6 +82,9 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 ### post-mvp-hardening (1)
 - M1-031 → unspecified
+
+### wont-do-infeasible (1)
+- M1-258 → unspecified
 
 ---
 
@@ -438,7 +440,7 @@ M1-253 (done)
 M1-255 (done)
 M1-256 (pending) ← runnable
 M1-257 (pending) ← runnable
-M1-258 (pending) ← runnable
+M1-258 (deferred)
 M1-259 (done)
 M1-260 (done)
 M1-261 (pending) ← runnable
