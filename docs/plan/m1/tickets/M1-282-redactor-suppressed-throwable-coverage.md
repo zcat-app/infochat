@@ -1,9 +1,42 @@
 ---
 id: M1-282
 title: "Redactor suppressed-throwable coverage"
-status: pending
+status: done
 created: 2026-06-10
 last_updated: 2026-06-10
+clarity_check:
+  date: 2026-06-10
+  verdict: PASS
+  warnings: []
+  blockers: []
+reviews:
+  - round: 1
+    date: 2026-06-10
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 270
+      removed: 56
+redteam_findings: []
+redteam_audits:
+  - date: 2026-06-10
+    verdict: CLEAN
+    base: d5010c1 (fork point of m1/M1-282-redactor-suppressed-throwable)
+    head: working tree (pre-commit, post-APPROVE round 1)
+    verdict_file: docs/plan/m1/redteam/M1-282-2026-06-10.md
+    out_of_model_count: 1
+    note: |
+      Pre-commit audit of the suppressed-throwable coverage fix
+      (remediates M1-272's medium INFO-LEAK). No findings at any
+      severity; the single OUT-OF-MODEL observation is advisory and
+      recorded verbatim in the verdict file. Nothing feeds a
+      remediation ticket.
 blocked_by: []
 remediates: M1-272
 files_budget: 3

@@ -3,8 +3,9 @@ package app.zcat.infochat.core.log;
 import io.quarkus.logging.LoggingFilter;
 import org.jspecify.annotations.Nullable;
 
-import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.logging.Filter;
 import java.util.logging.LogRecord;
 import java.util.regex.Matcher;
@@ -158,77 +159,140 @@ public final class Redactor implements Filter {
         return true;
     }
 
-    // Caps the thrown-chain walk so a cyclic or absurdly deep cause
-    // chain cannot stall the filter; anything past the cap is dropped
-    // from the replacement chain rather than reaching the console
-    // unscanned (fail-closed truncation).
+    // Caps the thrown-graph walk by TOTAL visited nodes — the cause
+    // chain plus suppressed throwables, recursively — so a cyclic
+    // graph (incl. a mutually-suppressing pair, which a per-branch
+    // depth counter would never terminate on) or an absurdly large one
+    // cannot stall the filter; anything past the cap is dropped from
+    // the replacement rather than reaching the console unscanned
+    // (fail-closed truncation).
     static final int MAX_THROWN_CHAIN_DEPTH = 16;
 
     /**
-     * Run every message in {@code thrown}'s cause chain through the
-     * catalogue. Returns {@code thrown} itself when nothing matched
-     * (the common path — the original object, stack frames and all,
-     * reaches the formatter untouched). When any message redacts, the
-     * whole chain is rebuilt as {@link RedactedThrown} nodes carrying
-     * {@code "<originalClassName>: <redactedMessage>"} plus the
-     * original stack frames — a {@link Throwable}'s message cannot be
-     * mutated in place, so substitution is the only way the redacted
-     * text (and never the raw text) reaches the console formatter.
-     * Returns {@code null} when any scan timed out (caller fails
-     * closed).
+     * Run every message in {@code thrown}'s graph — the cause chain
+     * plus suppressed throwables, including suppressed nodes' own
+     * causes and nested suppressed — through the catalogue. Returns
+     * {@code thrown} itself when nothing matched (the common path —
+     * the original object, stack frames and all, reaches the formatter
+     * untouched). When any message redacts or the graph overflows the
+     * node budget, the whole graph is rebuilt as {@link RedactedThrown}
+     * nodes carrying {@code "<originalClassName>: <redactedMessage>"}
+     * plus the original stack frames — a {@link Throwable}'s message
+     * cannot be mutated in place, so substitution is the only way the
+     * redacted text (and never the raw text) reaches the console
+     * formatter. Returns {@code null} when any scan timed out (caller
+     * fails closed).
      */
     private static @Nullable Throwable redactThrownChain(Throwable thrown) {
-        List<Throwable> chain = new ArrayList<>();
-        for (Throwable t = thrown; t != null && chain.size() < MAX_THROWN_CHAIN_DEPTH; t = t.getCause()) {
-            chain.add(t);
+        // Both phases traverse pre-order (node, cause subtree, then
+        // suppressed subtrees) and consume the node budget identically,
+        // so every node the rebuild reaches was scanned in phase 1: a
+        // missing map entry there means "message was null", never
+        // "never scanned". Memoizing by node identity keeps revisits in
+        // cyclic graphs from re-scanning (and re-deciding) a message.
+        Map<Throwable, String> redactedByNode = new IdentityHashMap<>();
+        int[] budget = {MAX_THROWN_CHAIN_DEPTH};
+        ScanOutcome outcome = scanGraph(thrown, budget, redactedByNode);
+        if (outcome == ScanOutcome.TIMED_OUT) {
+            return null;
         }
-        boolean truncated = chain.get(chain.size() - 1).getCause() != null;
-
-        List<@Nullable String> redactedMessages = new ArrayList<>(chain.size());
-        boolean changed = truncated;
-        for (Throwable t : chain) {
-            String message = t.getMessage();
-            if (message == null) {
-                redactedMessages.add(null);
-                continue;
-            }
-            String redacted = redact(message);
-            if (TIMEOUT_SENTINEL.equals(redacted)) {
-                return null;
-            }
-            changed |= !redacted.equals(message);
-            redactedMessages.add(redacted);
-        }
-        if (!changed) {
+        if (outcome == ScanOutcome.CLEAN) {
             return thrown;
         }
+        budget[0] = MAX_THROWN_CHAIN_DEPTH;
+        return rebuildGraph(thrown, budget, redactedByNode);
+    }
 
-        Throwable rebuilt = truncated
-                ? new RedactedThrown("[cause chain truncated at depth " + MAX_THROWN_CHAIN_DEPTH + "]", null)
-                : null;
-        for (int i = chain.size() - 1; i >= 0; i--) {
-            Throwable original = chain.get(i);
-            String message = redactedMessages.get(i);
-            String text = message == null
-                    ? original.getClass().getName()
-                    : original.getClass().getName() + ": " + message;
-            RedactedThrown copy = new RedactedThrown(text, rebuilt);
-            copy.setStackTrace(original.getStackTrace());
-            rebuilt = copy;
+    private enum ScanOutcome { CLEAN, CHANGED, TIMED_OUT }
+
+    private static ScanOutcome scanGraph(Throwable node, int[] budget,
+            Map<Throwable, String> redactedByNode) {
+        if (budget[0] == 0) {
+            // Past-cap nodes are unscanned and must not be emitted —
+            // report a change so the rebuild arm runs and truncates at
+            // the same point.
+            return ScanOutcome.CHANGED;
         }
-        return rebuilt;
+        budget[0]--;
+        boolean changed = false;
+        String message = node.getMessage();
+        if (message != null) {
+            String redacted = redactedByNode.get(node);
+            if (redacted == null) {
+                redacted = redact(message);
+                if (TIMEOUT_SENTINEL.equals(redacted)) {
+                    return ScanOutcome.TIMED_OUT;
+                }
+                redactedByNode.put(node, redacted);
+            }
+            changed = !redacted.equals(message);
+        }
+        Throwable cause = node.getCause();
+        if (cause != null) {
+            ScanOutcome causeOutcome = scanGraph(cause, budget, redactedByNode);
+            if (causeOutcome == ScanOutcome.TIMED_OUT) {
+                return ScanOutcome.TIMED_OUT;
+            }
+            changed |= causeOutcome == ScanOutcome.CHANGED;
+        }
+        for (Throwable suppressed : node.getSuppressed()) {
+            ScanOutcome suppressedOutcome = scanGraph(suppressed, budget, redactedByNode);
+            if (suppressedOutcome == ScanOutcome.TIMED_OUT) {
+                return ScanOutcome.TIMED_OUT;
+            }
+            changed |= suppressedOutcome == ScanOutcome.CHANGED;
+        }
+        return changed ? ScanOutcome.CHANGED : ScanOutcome.CLEAN;
     }
 
     /**
-     * Replacement node for a thrown chain that contained catalogue
+     * Rebuild {@code node}'s subtree as {@link RedactedThrown} copies
+     * under the shared node budget. Returns {@code null} when the
+     * budget is exhausted: the caller replaces a cut cause with a
+     * truncation-marker node and drops a cut suppressed entry — either
+     * way nothing unscanned reaches the formatter.
+     */
+    private static @Nullable Throwable rebuildGraph(Throwable node, int[] budget,
+            Map<Throwable, String> redactedByNode) {
+        if (budget[0] == 0) {
+            return null;
+        }
+        budget[0]--;
+        String redactedMessage = redactedByNode.get(node);
+        String text = redactedMessage == null
+                ? node.getClass().getName()
+                : node.getClass().getName() + ": " + redactedMessage;
+        Throwable cause = node.getCause();
+        Throwable rebuiltCause = null;
+        if (cause != null) {
+            rebuiltCause = rebuildGraph(cause, budget, redactedByNode);
+            if (rebuiltCause == null) {
+                rebuiltCause = new RedactedThrown(
+                        "[thrown graph truncated at " + MAX_THROWN_CHAIN_DEPTH + " nodes]", null);
+            }
+        }
+        RedactedThrown copy = new RedactedThrown(text, rebuiltCause);
+        copy.setStackTrace(node.getStackTrace());
+        for (Throwable suppressed : node.getSuppressed()) {
+            Throwable rebuiltSuppressed = rebuildGraph(suppressed, budget, redactedByNode);
+            if (rebuiltSuppressed != null) {
+                copy.addSuppressed(rebuiltSuppressed);
+            }
+        }
+        return copy;
+    }
+
+    /**
+     * Replacement node for a thrown graph that contained catalogue
      * matches. The original class identity moves into the message text
      * so the console line still names what was thrown; suppression is
-     * disabled because suppressed throwables on the original were not
-     * scanned and must not ride along into the formatter.
+     * enabled because suppressed throwables are scanned and rebuilt
+     * like cause nodes, so the redacted copies ride along into the
+     * formatter's {@code Suppressed:} frames in place of the originals.
      */
     static final class RedactedThrown extends Throwable {
         RedactedThrown(String message, @Nullable Throwable cause) {
-            super(message, cause, false, true);
+            super(message, cause, true, true);
         }
     }
 

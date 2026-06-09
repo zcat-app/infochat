@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 11 |
+| pending | 10 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 304 |
+| done | 305 |
 | deferred | 3 |
 | **total** | **318** |
 
@@ -34,7 +34,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-279 — §7/§7a sweep: defensive checks, broad catches, test seams (complexity: medium, risk: low)
 - M1-280 — Provider mediums: Gate 4, usage replies, price label, bucket (complexity: medium, risk: medium)
 - M1-281 — Core contracts: contact-id redaction parity, Fetcher rename (complexity: low, risk: low)
-- M1-282 — Redactor suppressed-throwable coverage (complexity: low, risk: low)
 
 ---
 
@@ -70,6 +69,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-282 | Redactor suppressed-throwable coverage | 2026-06-10 | round 1 APPROVE |
 | M1-277 | SSRF: shared client, pin fast path, redirect scrub, ranges | 2026-06-10 | round 2 APPROVE |
 | M1-273 | Transport classification matrix + Signal start race | 2026-06-10 | round 1 APPROVE |
 | M1-272 | Redactor thrown-chain coverage + log hygiene sweep | 2026-06-10 | round 1 APPROVE |
@@ -79,7 +79,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-264 | Compress: no JDBC tx across LLM call; ceiling gate | 2026-06-10 | round 1 APPROVE |
 | M1-266 | new_post cursor: single clock for ready_at | 2026-06-09 | round 1 APPROVE |
 | M1-263 | Digest correctness: collection window, cache TTL, caps | 2026-06-09 | round 1 APPROVE |
-| M1-262 | Chat agent: include conversation history in the prompt | 2026-06-09 | round 1 APPROVE |
 
 ---
 
@@ -472,5 +471,5 @@ M1-278 (pending) ← runnable
 M1-279 (pending) ← runnable
 M1-280 (pending) ← runnable
 M1-281 (pending) ← runnable
-M1-282 (pending) ← runnable
+M1-282 (done)
 ```
