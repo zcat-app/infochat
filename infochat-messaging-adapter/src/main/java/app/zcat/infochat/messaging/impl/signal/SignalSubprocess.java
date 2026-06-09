@@ -260,17 +260,29 @@ final class SignalSubprocess {
     }
 
     /**
-     * Full-jitter backoff [0, base × factor^(attempt-1)), capped at
-     * {@link BackoffPolicy#capMs()}. Per design §6.3.6: full-jitter
-     * prevents thundering-herd among parallel adapter instances when
-     * a shared dependency (signal-cli's signaling server) recovers.
+     * Equal-jitter backoff: delay uniform in [exp/2, exp] where
+     * exp = base × factor^(attempt-1), capped at
+     * {@link BackoffPolicy#capMs()}. Per design §6.4.6 (supervisor
+     * crash-respawn rule): the delay floor still grows per attempt, so
+     * a fast-crashing child never enters a tight respawn loop. This
+     * deliberately differs from §6.3.6's full-jitter [0, exp) outbound
+     * retries — those de-synchronize a herd contending against a shared
+     * remote dependency; a local child respawn has no herd to avoid but
+     * must keep a growing minimum delay. Mirrors
+     * {@code SimpleXSubprocess}'s jitter (one supervisor discipline,
+     * two adapters).
+     *
+     * <p>Package-private so tests can pin the sampled delay within the
+     * [exp/2, exp] bound without a {@code Random} injection seam.</p>
      */
-    private long computeBackoffDelay(int attempt) {
+    long computeBackoffDelay(int attempt) {
         double raw = backoff.baseMs() * Math.pow(backoff.factor(), attempt - 1);
-        long upperBound = Math.min((long) raw, backoff.capMs());
-        // nextLong requires a positive bound; we treat a degenerate
-        // base=0 / factor=0 config as "no delay" rather than failing.
-        return upperBound <= 0 ? 0L : ThreadLocalRandom.current().nextLong(0, upperBound);
+        long exp = Math.min((long) raw, backoff.capMs());
+        long half = exp / 2;
+        // nextLong requires a positive bound; a degenerate base=0 /
+        // factor=0 config means "no delay" rather than failing.
+        long jitter = half <= 0 ? 0L : ThreadLocalRandom.current().nextLong(half + 1);
+        return half + jitter;
     }
 
     /**
@@ -349,8 +361,9 @@ final class SignalSubprocess {
     }
 
     /**
-     * Exponential backoff parameters. Full jitter [0, base ×
-     * factor^attempt), capped at {@code capMs}.
+     * Exponential backoff parameters. Equal jitter [exp/2, exp] with
+     * exp = base × factor^(attempt-1), capped at {@code capMs} — see
+     * {@link #computeBackoffDelay}.
      */
     record BackoffPolicy(long baseMs, double factor, long capMs) {
 

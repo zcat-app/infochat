@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 15 |
+| pending | 14 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 299 |
+| done | 300 |
 | deferred | 3 |
 | **total** | **317** |
 
@@ -30,7 +30,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-270 — Validate bootstrap admin ids before any write; SPI hoist (complexity: medium, risk: medium)
 - M1-271 — Design/spec reconciliation + comment-truth sweep (complexity: low, risk: low)
 - M1-272 — Redactor thrown-chain coverage + log hygiene sweep (complexity: medium, risk: medium)
-- M1-273 — Transport classification matrix + Signal start race (complexity: medium, risk: medium)
 - M1-274 — Capability flags: reconcile with design, prune speculative (complexity: medium, risk: low)
 - M1-275 — DB hygiene: SET LOCAL timeouts, per-dispatch conn reuse (complexity: medium, risk: high)
 - M1-276 — Collector mediums: re-eval splice, scan bounds, vocab, edges (complexity: medium, risk: medium)
@@ -74,6 +73,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-273 | Transport classification matrix + Signal start race | 2026-06-10 | round 1 APPROVE |
 | M1-269 | Pin the price_snapshot role-privilege matrix in DbRoleMatrixIT | 2026-06-10 | round 1 APPROVE |
 | M1-265 | LLM routing guard closure + provider hygiene | 2026-06-10 | round 1 APPROVE |
 | M1-266 | new_post cursor: single clock for ready_at | 2026-06-09 | round 1 APPROVE |
@@ -83,7 +83,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-260 | Build/doc-truth lows: sibling DAG enforcer, Flyway dup, gate javadoc | 2026-06-09 | round 1 APPROVE |
 | M1-259 | searchPosts: EXPLICIT empty tag-intersection yields zero posts | 2026-06-09 | round 1 APPROVE |
 | M1-257 | ReEvaluationJob: SKIP concurrent ticks to bound attempt burn | 2026-06-09 | round 1 APPROVE |
-| M1-256 | Embedding vector elements: validate numeric before coercion | 2026-06-09 | round 1 APPROVE |
 
 ---
 
@@ -467,7 +466,7 @@ M1-269 (done)
 M1-270 (pending) ← runnable
 M1-271 (pending) ← runnable
 M1-272 (pending) ← runnable
-M1-273 (pending) ← runnable
+M1-273 (done)
 M1-274 (pending) ← runnable
 M1-275 (pending) ← runnable
 M1-276 (pending) ← runnable

@@ -181,7 +181,13 @@ final class SignalMessageCodec {
         // Response fails the caller fast with a classified error instead
         // of leaving its future to time out.
         if (obj.get("error") instanceof JsonObject err) {
-            int code = err.getInt("code", -32603);
+            // A missing or non-numeric "code" member cannot prove the
+            // daemon's transient -32603 case, so it must fall to the spec's
+            // default-PERMANENT rule (FailureCategory). Surface it as 0 —
+            // unassigned in JSON-RPC, classified PERMANENT like every
+            // non--32603 code — never as a synthesized -32603, which would
+            // misclassify an unprovable error as TRANSIENT.
+            int code = err.get("code") instanceof JsonNumber n ? n.intValue() : 0;
             String msg = err.getString("message", "(no message)");
             return new JsonRpcMessage.ErrorResponse(id, code, msg);
         }

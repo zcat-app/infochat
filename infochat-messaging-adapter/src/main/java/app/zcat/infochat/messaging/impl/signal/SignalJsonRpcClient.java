@@ -43,6 +43,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
+import jakarta.json.JsonNumber;
 import jakarta.json.JsonObject;
 
 /**
@@ -84,10 +85,14 @@ import jakarta.json.JsonObject;
  * found, {@code -32602} invalid params, and signal-cli's custom
  * codes for blocked-recipient / identity-revoked / policy-rejection)
  * map to {@link FailureCategory#PERMANENT} per the spec's
- * "default to PERMANENT when uncertain" forcing function. Network
- * failures (write {@link IOException}, response timeout) classify as
- * {@link FailureCategory#TRANSIENT} so Provider's retry policy gets
- * a chance to recover the call.</p>
+ * "default to PERMANENT when uncertain" forcing function — as does an
+ * error response whose code is missing or non-numeric (the codec
+ * surfaces it as code 0). Network failures (write {@link IOException},
+ * response timeout) classify as {@link FailureCategory#TRANSIENT} so
+ * Provider's retry policy gets a chance to recover the call; the
+ * cross-adapter states (interrupted-awaiting-ack → TRANSIENT,
+ * closed-before-ack → PERMANENT) follow the classification matrix in
+ * {@link FailureCategory}.</p>
  */
 final class SignalJsonRpcClient {
 
@@ -308,8 +313,15 @@ final class SignalJsonRpcClient {
         // Runs BEFORE the dispatcher shutdown: a dispatch thread blocked in
         // call() (a handler replying synchronously) is parked on one of
         // these futures and must be released for the shutdown to complete.
+        // PERMANENT per the FailureCategory classification matrix
+        // (closed-before-ack): the connection that would have acked these
+        // calls is gone, so retrying cannot succeed until the transport is
+        // rebuilt —
+        // the same category SimpleX stamps when close() drains its pending
+        // commands. call() unwraps this exception to preserve the category.
         pending.forEach((id, f) -> f.completeExceptionally(
-                new IOException("SignalJsonRpcClient disconnected")));
+                new MessagingException(FailureCategory.PERMANENT,
+                        "SignalJsonRpcClient disconnected before response (closed-before-ack)")));
         pending.clear();
         ExecutorService executor = dispatchExecutor;
         if (executor != null) {
@@ -466,10 +478,21 @@ final class SignalJsonRpcClient {
         } catch (InterruptedException e) {
             pending.remove(id);
             Thread.currentThread().interrupt();
+            // TRANSIENT per the FailureCategory classification matrix
+            // (interrupted-awaiting-ack): the interrupt is a local
+            // lifecycle event, not a verdict on the transport or the
+            // message — same category SimpleX stamps on this state.
             throw new MessagingException(
-                    FailureCategory.PERMANENT, "Interrupted awaiting JSON-RPC response", e);
+                    FailureCategory.TRANSIENT, "Interrupted awaiting JSON-RPC response", e);
         } catch (ExecutionException e) {
+            // Unwrap MessagingException raised by disconnect()'s pending
+            // drain so the caller sees its category (closed-before-ack →
+            // PERMANENT per the FailureCategory matrix), mirroring
+            // SimpleXWebSocketClient.sendCommand's unwrap.
             Throwable cause = e.getCause();
+            if (cause instanceof MessagingException me) {
+                throw me;
+            }
             throw new MessagingException(
                     FailureCategory.TRANSIENT,
                     "JSON-RPC call failed: " + (cause == null ? e.getMessage() : cause.getMessage()),
@@ -512,8 +535,9 @@ final class SignalJsonRpcClient {
         // JSON-RPC -32603 ("Internal error") covers signal-cli transient
         // faults from its upstream signaling server; retry has a chance.
         // Everything else — protocol errors, recipient-unknown, blocked,
-        // identity revoked — is PERMANENT per the spec's default-to-
-        // PERMANENT rule.
+        // identity revoked, and a missing/non-numeric code (which the
+        // codec surfaces as 0, never as -32603) — is PERMANENT per the
+        // spec's default-to-PERMANENT rule.
         if (err.code() == -32603) {
             return FailureCategory.TRANSIENT;
         }
@@ -526,7 +550,24 @@ final class SignalJsonRpcClient {
                     FailureCategory.PERMANENT,
                     method + " response missing required field: " + key);
         }
-        return obj.getJsonNumber(key).longValueExact();
+        // instanceof, not getJsonNumber: this is daemon output at a trust
+        // boundary, and a wrong-typed field must surface as the SPI's
+        // classified MessagingException, never as a ClassCastException
+        // escaping send(). Same for a non-integral number below — the
+        // value is a millisecond timestamp, so a fractional or oversized
+        // number is equally malformed (longValueExact throws on both).
+        if (!(obj.get(key) instanceof JsonNumber number)) {
+            throw new MessagingException(
+                    FailureCategory.PERMANENT,
+                    method + " response field is not a number: " + key);
+        }
+        try {
+            return number.longValueExact();
+        } catch (ArithmeticException e) {
+            throw new MessagingException(
+                    FailureCategory.PERMANENT,
+                    method + " response field is not a long: " + key, e);
+        }
     }
 
     private void readerLoop() {

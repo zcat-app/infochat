@@ -1,9 +1,9 @@
 ---
 id: M1-273
 title: "Transport classification matrix + Signal start race"
-status: pending
+status: done
 created: 2026-06-09
-last_updated: 2026-06-09
+last_updated: 2026-06-10
 blocked_by: []
 files_budget: 14
 files_scope:
@@ -12,6 +12,8 @@ files_scope:
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalSubprocess.java
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXAdapter.java
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXWebSocketClient.java
+  - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalMessageCodec.java
+  - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/FailureCategory.java
   - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging
 complexity: medium
 risk: medium
@@ -40,12 +42,66 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-10
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 14
+      added: 610
+      removed: 47
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+revisions:
+  - date: 2026-06-09
+    reason: |
+      refine after budget-breach (pre-implementation; widen files_scope by two
+      files). (1) SignalMessageCodec.java — acceptance item 5 (missing JSON-RPC
+      error code -> PERMANENT) is only implementable at decode: the
+      err.getInt("code", -32603) default destroys the "code was absent"
+      information before SignalJsonRpcClient.classify sees it.
+      (2) FailureCategory.java — acceptance item 4's classification matrix doc
+      home per ticket §Notes ("javadoc on the shared classification contract");
+      FailureCategory already carries the default-to-PERMANENT contract text.
+      files_budget 14 unchanged (estimate ~12 files incl. both additions).
+    snapshot:
+      files_budget: 14
+      files_scope:
+        - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalAdapter.java
+        - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalJsonRpcClient.java
+        - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalSubprocess.java
+        - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXAdapter.java
+        - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXWebSocketClient.java
+        - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging
+escalations:
+  - date: 2026-06-09
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A — pre-implementation files_scope gap found during the survey.
+      (1) Acceptance item 5 (missing JSON-RPC error code -> PERMANENT) is only
+      implementable in SignalMessageCodec.decode — the `err.getInt("code", -32603)`
+      default at SignalMessageCodec.java:184 destroys the "code was absent"
+      information before SignalJsonRpcClient.classify ever sees it.
+      SignalMessageCodec.java is not in files_scope.
+      (2) Acceptance item 4's matrix doc home per ticket §Notes ("javadoc on the
+      shared classification contract or a package doc in the messaging module")
+      is FailureCategory.java or a new package-info.java — both outside
+      files_scope. In-scope fallback (javadoc on the shared contract test) is a
+      weaker documentation location.
+clarity_check:
+  date: 2026-06-09
+  verdict: WARN
+  warnings:
+    - "TEST-CHANGES-AUTHORIZED: test_plan.modifies covers the entire test directory but does not name which pre-existing test methods pin the OLD classification behavior that acceptance item 4 changes (interrupted-awaiting-ack and closed-before-ack divergence). Naming the specific test methods (or confirming no existing test asserts the old divergent behavior) would eliminate developer uncertainty about whether a failing test is an authorized change or a regression."
+  blockers: []
 ---
 
 # M1-273: Transport classification matrix + Signal start race

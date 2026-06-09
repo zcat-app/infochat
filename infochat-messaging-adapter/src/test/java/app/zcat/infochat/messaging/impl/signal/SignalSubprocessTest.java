@@ -33,6 +33,34 @@ class SignalSubprocessTest {
             new InetSocketAddress("127.0.0.1", 0);
 
     @Test
+    void respawnBackoffDelaySamplesWithinEqualJitterBound() {
+        // Equal jitter per design 06 §6.4.6 (supervisor crash-respawn
+        // rule): every sampled delay lies in [exp/2, exp] with
+        // exp = base × factor^(attempt-1) capped at capMs — never the
+        // §6.3.6 full-jitter [0, exp) the comment used to cite, whose
+        // floor of 0 permits a tight respawn loop.
+        SignalSubprocess sp = new SignalSubprocess(
+                new ProcessBuilder("/bin/sh", "-c", "exit 0"),
+                NEVER_PROBED, FAST_BACKOFF, /* maxRestarts */ 0);
+        try {
+            for (int attempt = 1; attempt <= 6; attempt++) {
+                long exp = Math.min(
+                        (long) (FAST_BACKOFF.baseMs() * Math.pow(FAST_BACKOFF.factor(), attempt - 1)),
+                        FAST_BACKOFF.capMs());
+                long floor = exp / 2;
+                for (int sample = 0; sample < 200; sample++) {
+                    long delay = sp.computeBackoffDelay(attempt);
+                    assertTrue(delay >= floor && delay <= exp,
+                            "attempt " + attempt + " sampled " + delay
+                                    + " outside equal-jitter bound [" + floor + ", " + exp + "]");
+                }
+            }
+        } finally {
+            sp.stop();
+        }
+    }
+
+    @Test
     void startsAndStopsProcess() throws Exception {
         // A subprocess that lives for 30 s so the test can observe it
         // alive, then asserts stop() terminates it within a bounded

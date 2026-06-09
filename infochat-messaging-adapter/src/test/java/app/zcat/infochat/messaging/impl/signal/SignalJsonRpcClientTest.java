@@ -3,6 +3,7 @@ package app.zcat.infochat.messaging.impl.signal;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -245,6 +246,89 @@ class SignalJsonRpcClientTest {
                         FailureCategory.PERMANENT,
                         e.category(),
                         "non-internal JSON-RPC errors default to PERMANENT");
+            } finally {
+                client.disconnect();
+            }
+        }
+    }
+
+    @Test
+    void errorResponseMissingCodeClassifiesPermanent() throws Exception {
+        try (FakeSignalCli fake = new FakeSignalCli()) {
+            SignalJsonRpcClient client = new SignalJsonRpcClient(
+                    fake.endpoint(), "+15551111111", new SignalMessageCodec(), TEST_RESPONSE_TIMEOUT);
+            client.connect();
+            try {
+                AtomicReference<MessagingException> caught = new AtomicReference<>();
+                Thread sender = new Thread(() -> {
+                    try {
+                        client.send(new OutboundMessage(
+                                new ScopeRef.Dm("aabbccdd-1111-2222-3333-444455556666"),
+                                "msg",
+                                Instant.now(),
+                                "c-no-code"));
+                    } catch (MessagingException e) {
+                        caught.set(e);
+                    }
+                }, "missing-code-sender");
+                sender.start();
+                JsonObject req = fake.nextOutbound(QUEUE_WAIT_MS);
+                // An error object with NO "code" member: a transient cause
+                // cannot be proven, so it must fall to the documented
+                // default-PERMANENT rule — never into the synthesized
+                // -32603→TRANSIENT branch.
+                fake.pushRawLine("{\"jsonrpc\":\"2.0\",\"id\":\"" + req.getString("id")
+                        + "\",\"error\":{\"message\":\"boom\"}}");
+                sender.join(QUEUE_WAIT_MS);
+                MessagingException e = caught.get();
+                assertNotNull(e, "send must throw on JSON-RPC error response");
+                assertEquals(
+                        FailureCategory.PERMANENT,
+                        e.category(),
+                        "an error response missing its code must default to PERMANENT");
+            } finally {
+                client.disconnect();
+            }
+        }
+    }
+
+    @Test
+    void sendRejectsNonNumericTimestampWithMessagingException() throws Exception {
+        try (FakeSignalCli fake = new FakeSignalCli()) {
+            SignalJsonRpcClient client = new SignalJsonRpcClient(
+                    fake.endpoint(), "+15551111111", new SignalMessageCodec(), TEST_RESPONSE_TIMEOUT);
+            client.connect();
+            try {
+                AtomicReference<MessagingException> caughtMessaging = new AtomicReference<>();
+                AtomicReference<RuntimeException> escaped = new AtomicReference<>();
+                Thread sender = new Thread(() -> {
+                    try {
+                        client.send(new OutboundMessage(
+                                new ScopeRef.Dm("aabbccdd-1111-2222-3333-444455556666"),
+                                "msg",
+                                Instant.now(),
+                                "c-bad-ts"));
+                    } catch (MessagingException e) {
+                        caughtMessaging.set(e);
+                    } catch (RuntimeException e) {
+                        escaped.set(e);
+                    }
+                }, "bad-timestamp-sender");
+                sender.start();
+                JsonObject req = fake.nextOutbound(QUEUE_WAIT_MS);
+                fake.respondSuccess(req.getString("id"), Json.createObjectBuilder()
+                        .add("timestamp", "not-a-number")
+                        .build());
+                sender.join(QUEUE_WAIT_MS);
+                assertNull(escaped.get(),
+                        "a wrong-typed daemon field must never escape send() as an"
+                                + " unclassified RuntimeException (was: " + escaped.get() + ")");
+                MessagingException e = caughtMessaging.get();
+                assertNotNull(e, "send must throw MessagingException on a non-numeric timestamp");
+                assertEquals(
+                        FailureCategory.PERMANENT,
+                        e.category(),
+                        "a malformed daemon response is not retriable");
             } finally {
                 client.disconnect();
             }

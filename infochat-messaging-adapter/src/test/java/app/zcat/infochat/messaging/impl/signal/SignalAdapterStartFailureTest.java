@@ -2,6 +2,7 @@ package app.zcat.infochat.messaging.impl.signal;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import app.zcat.infochat.messaging.FailureCategory;
 import app.zcat.infochat.messaging.MessagingException;
@@ -70,6 +71,25 @@ class SignalAdapterStartFailureTest {
                 "a refused connect right after a successful endpoint probe is a recoverable outage");
         assertEquals(SignalSubprocess.State.STOPPED, subprocess.state(),
                 "a failed connect must tear the just-started subprocess down");
+    }
+
+    @Test
+    void startFailsOnMalformedBotAci() throws IOException {
+        // The malformed-ACI guard must run BEFORE the subprocess spawn:
+        // with this nonexistent binary, a wrong validation order would
+        // surface as the spawn's MessagingException instead of the
+        // config-error IllegalStateException asserted here.
+        SignalAdapter adapter = new SignalAdapter(
+                "/nonexistent/signal-cli-binary",
+                "/tmp",
+                "+15550000000",
+                "not-a-uuid",
+                unusedLoopbackEndpoint());
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class, adapter::start);
+
+        assertTrue(ex.getMessage().contains("bot-aci"),
+                "the failure must name the property the operator has to fix");
     }
 
     @Test

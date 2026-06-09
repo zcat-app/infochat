@@ -185,7 +185,7 @@ public final class SignalAdapter implements MessagingAdapter {
      *         reachable within the probe timeout, or JSON-RPC connect
      *         failure.
      * @throws IllegalStateException if the capability-only constructor
-     *         was used, or on invalid operator config (blank bot ACI) —
+     *         was used, or on invalid operator config (malformed bot ACI) —
      *         programming/config errors, not transport failures.
      */
     @Override
@@ -196,17 +196,18 @@ public final class SignalAdapter implements MessagingAdapter {
                     "SignalAdapter.start() requires the production constructor "
                             + "(binary, dataDir, account, botAci, daemonEndpoint).");
         }
-        // D10 trust anchor: the bot's ACI must be a real Signal account
-        // identifier, never blank. A blank ACI breaks the ACI-anchored
-        // mention recognition group handler builds (lower-cased compare
-        // in SignalGroupHandler) and conflates the bot's identity with
-        // any operator-supplied blank-default. Property key is named so
-        // the operator can fix it directly.
-        if (botAci.isBlank()) {
+        // D10 trust anchor: the bot's ACI must be a well-formed Signal
+        // account identifier — a canonical UUID (the constructor already
+        // lower-cased the operator value). A blank or mistyped ACI breaks
+        // the ACI-anchored mention recognition group handler builds
+        // (lower-cased compare in SignalGroupHandler) silently: no mention
+        // ever matches the bot. Failing startup is the only observable
+        // moment; property key is named so the operator can fix it directly.
+        if (!SignalIdentity.isWellFormed(botAci)) {
             throw new IllegalStateException(
                     "infochat.adapters.signal.bot-aci must be set to the"
-                            + " bot's own Signal ACI (distinct from the"
-                            + " bootstrap admin's ACI in"
+                            + " bot's own Signal ACI — a canonical UUID"
+                            + " (distinct from the bootstrap admin's ACI in"
                             + " infochat.adapters.signal.admin)");
         }
         ProcessBuilder pb = new ProcessBuilder(
@@ -244,8 +245,12 @@ public final class SignalAdapter implements MessagingAdapter {
         SignalJsonRpcClient c = new SignalJsonRpcClient(
                 daemonEndpoint, account, new SignalMessageCodec(), JSONRPC_RESPONSE_TIMEOUT,
                 sp::restartHung);
-        connectClient(c, sp);
+        // Attach BEFORE connect: connect() starts the reader thread, and
+        // signal-cli can flush queued envelopes the moment the connection
+        // opens — a handler wired only after connect loses those envelopes
+        // to the client's "no InboundHandler set" drop path.
         attachClient(c);
+        connectClient(c, sp);
         LOG.infof("Signal adapter started; daemon endpoint=%s", daemonEndpoint);
     }
 
@@ -254,8 +259,9 @@ public final class SignalAdapter implements MessagingAdapter {
      * {@link IOException} to the SPI's checked {@link MessagingException}
      * (TRANSIENT: the daemon answered the endpoint probe moments earlier,
      * so a refused/reset connect is a recoverable outage shape) and
-     * tearing the just-started subprocess down so a failed {@link #start()}
-     * leaves no orphaned child.
+     * tearing the just-started subprocess down — and detaching the
+     * already-attached client — so a failed {@link #start()} leaves no
+     * orphaned child and no half-wired transport.
      *
      * <p>Package-private seam mirroring {@link #attachClient} /
      * {@link #attachSubprocess}: a daemon that vanishes between the
@@ -269,6 +275,7 @@ public final class SignalAdapter implements MessagingAdapter {
         } catch (IOException e) {
             sp.stop();
             this.subprocess = null;
+            this.client = null;
             throw new MessagingException(FailureCategory.TRANSIENT,
                     "Failed to connect SignalJsonRpcClient", e);
         }
@@ -354,9 +361,11 @@ public final class SignalAdapter implements MessagingAdapter {
     }
 
     /**
-     * Wire a connected JSON-RPC client into this adapter: store it,
-     * register the currently-set inbound handler, and route non-DM
-     * receive notifications into a {@link SignalGroupHandler}. The
+     * Wire a JSON-RPC client into this adapter: store it, register the
+     * currently-set inbound handler, and route non-DM receive
+     * notifications into a {@link SignalGroupHandler}. {@link #start()}
+     * runs this BEFORE the client connects so no envelope the daemon
+     * flushes at connect time can race the handler wiring. The
      * group route builds a fresh handler per notification so callbacks
      * registered after {@link #start()} are still seen — mirrors
      * {@link #setInboundHandler}'s live re-wire, and
@@ -426,8 +435,11 @@ public final class SignalAdapter implements MessagingAdapter {
             // Teardown-before-serve: disconnect() joins the old reader and
             // shuts the dispatch executor before connect() builds fresh
             // ones, so a half-dead prior connection can never interleave
-            // with (or double-deliver into) the new one. Sends during this
-            // window classify TRANSIENT inside the client.
+            // with (or double-deliver into) the new one. NEW sends during
+            // this window classify TRANSIENT inside the client (write
+            // failure on a dead socket); calls already awaiting an ack are
+            // drained PERMANENT by disconnect() per the FailureCategory
+            // matrix (closed-before-ack).
             c.disconnect();
             try {
                 c.connect();
