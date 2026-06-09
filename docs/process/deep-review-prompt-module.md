@@ -1,6 +1,6 @@
 # Senior-developer subagent prompt template — module lens
 
-Used when `/deep-code-review module <name>` or `/deep-code-review path <path>` spawns the senior-developer subagent. The `deep-code-review` skill substitutes the placeholders below and passes the result as the `prompt` argument to `Agent(subagent_type: "senior-developer", ...)`. The agent's identity, tool allowlist, and model pinning are declared in [`.claude/agents/senior-developer.md`](../../.claude/agents/senior-developer.md).
+Used when `/deep-code-review module <name>` or `/deep-code-review path <path>` spawns the senior-developer subagent. The `deep-code-review` skill renders the fenced template below via `scripts/m1-render-prompt.py` (substituting only metadata, paths, and the file inventory) and spawns `Agent(subagent_type: "senior-developer", ...)` with a short stub pointing at the rendered file. The agent's identity, tool allowlist, and model pinning are declared in [`.claude/agents/senior-developer.md`](../../.claude/agents/senior-developer.md).
 
 This lens differs from the diff lens: there is no `BASE..HEAD` diff. The reviewer reads the entire module/directory top-to-bottom and evaluates every file as it stands today. The expected output is line-precise findings across the module.
 
@@ -46,10 +46,10 @@ the report is short and says so honestly.
 What you must apply
 ----------------------------------------------------------------------
 
-The project's canonical engineering rules and test-integrity rules
-follow verbatim. Violations of §1–§8 are real findings.
-
-{{ENGINEERING_RULES_VERBATIM}}
+The project's canonical engineering rules and test-integrity rules are
+at docs/process/engineering-rules-verbatim.md. Read that file FIRST —
+it is the rule-text-of-record; apply every rule it carries, not just
+the convenient ones. Violations of §1–§8 are real findings.
 
 In addition, you apply:
 
@@ -231,8 +231,9 @@ file in the inventory, then write the report to {{REPORT_PATH}}.
 |---|---|
 | `{{TARGET}}` | The literal target arg (`module infochat-collector`, `path src/main/java/...`) |
 | `{{MODULE_PATH}}` | For `module <name>`: `<name>/` (Maven module root). For `path <p>`: `<p>` |
-| `{{MODULE_FILE_INVENTORY}}` | Newline-separated list of every Java/Kotlin/SQL/`.properties`/`.json` file under MODULE_PATH (use `find` or `git ls-files`). Each line: `<path>` (relative to repo root). |
+| `{{MODULE_FILE_INVENTORY}}` | Newline-separated list of every Java/Kotlin/SQL/`.properties`/`.json` file under MODULE_PATH (use `git ls-files`, redirected to a file under `<run-dir>/inputs/` and passed via the render script's `@file` form). Each line: `<path>` (relative to repo root). |
 | `{{REPORT_PATH}}` | `.reviews/deep-review/<target-slug>-<YYYY-MM-DD-HHmm>/report.md` (for standalone runs) OR `.reviews/deep-review/full-<YYYY-MM-DD-HHmm>/<NN>-module-<name>.md` (when invoked as part of `full` mode) |
-| `{{ENGINEERING_RULES_VERBATIM}}` | Verbatim contents of `docs/process/engineering-rules-verbatim.md` |
+
+The engineering rules are NOT substituted — the template instructs the agent to Read `docs/process/engineering-rules-verbatim.md` in its own context.
 
 If `{{MODULE_FILE_INVENTORY}}` is empty (module not yet implemented), the skill refuses with a clear error rather than spawning an agent against an empty target.

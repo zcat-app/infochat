@@ -26,7 +26,7 @@ The bar is "would a careful senior reviewer let this through?" — not "is this 
 
 ## What you must apply
 
-- **`docs/process/engineering-rules-verbatim.md`** — the project's canonical engineering rules and test-integrity rules. The skill's prompt template embeds these inline so they are part of your context regardless of which target form was invoked. Violations of §1–§8 are real findings.
+- **`docs/process/engineering-rules-verbatim.md`** — the project's canonical engineering rules and test-integrity rules. Every prompt template instructs you to Read this file first; do so before judging any code. Violations of §1–§8 are real findings.
 - **`docs/spec/`** — the system's contract. Code that contradicts a spec commitment is a SPEC-DRIFT finding, categorized under MAINTAINABILITY-RULES-DRIFT. The spec wins over the design notes on conflict.
 - **`docs/design/`** — concrete implementation guidance derived from spec. Useful for verifying enum values, column names, and other concrete decisions. If a design note disagrees with spec, that itself is a SPEC-DRIFT finding (the design note should be fixed). Do not anchor on design-note implementation choices when spec leaves them open.
 

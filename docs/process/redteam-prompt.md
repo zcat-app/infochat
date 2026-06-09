@@ -1,6 +1,6 @@
 # Red-team (threat-actor) subagent prompt template
 
-Used when `/redteam <target>` spawns the threat-actor subagent. The `/redteam` skill substitutes the placeholders below and passes the result as the `prompt` argument to `Agent(subagent_type: "threat-actor", ...)`. The agent's identity, tool allowlist (Read/Grep/Glob), and model pinning are declared in [`.claude/agents/threat-actor.md`](../../.claude/agents/threat-actor.md) — those are harness-level enforcement.
+Used when `/redteam <target>` spawns the threat-actor subagent. The `/redteam` skill renders the fenced template below via `scripts/m1-render-prompt.py` — substituting only metadata, paths, and the small sensitive-surface inventories — and spawns `Agent(subagent_type: "threat-actor", ...)` with a short stub that points at the rendered file. The threat model and the diff are NOT inlined; the subagent Reads them in its own fresh context, so their bytes never enter the main-session transcript. The agent's identity, tool allowlist (Read/Grep/Glob + Write constrained to the verdict file), and model pinning are declared in [`.claude/agents/threat-actor.md`](../../.claude/agents/threat-actor.md) — those are harness-level enforcement.
 
 The adversary starts with **zero conversation context and zero implementation context**. It sees the threat model and the diff, nothing else. The framing — "you are looking for the gap between what the system *promised* to defend against and what it actually delivers" — is what makes this different from the engineering-rules reviewer (`code-reviewer`); both reviewers run in fresh context, but this one applies an adversarial threat-model lens rather than an implementation-rules lens.
 
@@ -30,9 +30,12 @@ Mindset:
 
 ---
 
-## Threat model (verbatim from docs/spec/security.md)
+## Threat model
 
-{{SECURITY_SPEC_CONTENT}}
+Read docs/spec/security.md IN FULL with the Read tool BEFORE reading
+the diff. That file is the threat model — the system's commitments you
+audit against. It is large; read it in slices if needed, but read all
+of it. Do not audit from memory of similar systems.
 
 ---
 
@@ -42,7 +45,8 @@ Target: {{TARGET}}        # milestone-ID, id-range, or single ticket-ID
 Base:   {{BASE_REF}}
 Head:   {{HEAD_REF}}
 
-{{DIFF_OUTPUT}}
+Read the diff from this file with the Read tool:
+    {{DIFF_FILE_PATH}}
 
 ---
 
@@ -82,7 +86,12 @@ do not assume it is exhaustive.
 
 ---
 
-## Return exactly this format
+## Write the full verdict to the verdict file
+
+Write the complete structured verdict in exactly the format below to
+this path using the Write tool, BEFORE returning your chat reply:
+    {{VERDICT_FILE_PATH}}
+Write nothing to any other path.
 
 RED-TEAM VERDICT: <CLEAN | FINDINGS>
 
@@ -116,8 +125,21 @@ user as design discussions; the user decides which findings warrant
 new tickets, spec amendments, or are accepted with documented residual
 risk.
 
-Return ONLY the structured verdict above. No preamble. No remediation
-write-up beyond SUGGESTED-FIX-CLASS. The skill parses the output literally.
+---
+
+## Return exactly this short chat reply
+
+After Writing the verdict file, return ONLY these four lines in chat
+(the full verdict lives in the file, never in the reply):
+
+RED-TEAM VERDICT: <CLEAN | FINDINGS>
+Verdict file: {{VERDICT_FILE_PATH}}
+Findings: critical=<n> high=<n> medium=<n> low=<n>
+Out-of-model: <n>
+
+No preamble. No remediation write-up beyond SUGGESTED-FIX-CLASS in the
+verdict file. The skill parses both the chat reply and the verdict file
+literally; any deviation fails parsing and wastes the audit run.
 ```
 
 ---
@@ -125,8 +147,8 @@ write-up beyond SUGGESTED-FIX-CLASS. The skill parses the output literally.
 ## Skill responsibilities (what `/redteam` does around the prompt)
 
 1. Resolves the target into a base→head git range. The exact algorithm — including how a single-ticket target's range is computed for both merged and unmerged states — lives in [`.claude/skills/redteam/SKILL.md`](../../.claude/skills/redteam/SKILL.md) §1 "Resolve the diff range". The resolved refs are substituted into `{{BASE_REF}}` and `{{HEAD_REF}}`.
-2. Reads `docs/spec/security.md` and substitutes `{{SECURITY_SPEC_CONTENT}}`.
-3. Greps the diff for sensitive-surface markers and substitutes `{{AUTH_PATHS}}`, `{{AUTHZ_PATHS}}`, `{{INPUT_PATHS}}`, `{{BAN_PATHS}}`, `{{AUDIT_PATHS}}`. The canonical pattern list for each placeholder is below — when this list changes, the `/redteam` SKILL's grep step must be updated in lockstep.
+2. Captures the diff to a file via shell redirection and substitutes its path into `{{DIFF_FILE_PATH}}`; pre-allocates the verdict path substituted into `{{VERDICT_FILE_PATH}}`. The threat model is never substituted — the subagent Reads `docs/spec/security.md` itself.
+3. Greps the diff for sensitive-surface markers (redirected to per-placeholder files, passed via the render script's `@file` form) and substitutes `{{AUTH_PATHS}}`, `{{AUTHZ_PATHS}}`, `{{INPUT_PATHS}}`, `{{BAN_PATHS}}`, `{{AUDIT_PATHS}}`. The canonical pattern list for each placeholder is below — when this list changes, the `/redteam` SKILL's grep step must be updated in lockstep.
 
 ### Sensitive-surface patterns (canonical)
 
@@ -139,11 +161,11 @@ write-up beyond SUGGESTED-FIX-CLASS. The skill parses the output literally.
 | `{{AUDIT_PATHS}}` | Audit log writes | writes to the `audit_log` table; `AuditLogger.*` calls |
 
 For each placeholder, the SKILL collects `file:line` tuples and emits one per line into the substitution. If a surface has no matches in the diff, the substitution is the literal string `(none touched)`. The list is intentionally non-exhaustive — it is a focusing aid, not a guarantee. The adversary subagent is reminded in the prompt body not to assume the list is complete.
-4. Spawns `Agent(subagent_type: "threat-actor", prompt: <substituted>, description: "Red-team <target>")`. Foreground.
-5. Parses the structured verdict.
+4. Renders the template with `scripts/m1-render-prompt.py` and spawns `Agent(subagent_type: "threat-actor", ...)` with a short stub pointing at the rendered file. Foreground.
+5. Parses the four-line short chat reply; the full structured verdict lives in the verdict file the subagent Wrote.
 6. Records findings in:
    - For single-ticket targets: the ticket's `redteam_findings:` frontmatter list.
    - For milestone targets: `docs/plan/<active-milestone>/redteam/<target-slug>-<YYYY-MM-DD>.md` (a new directory; the skill creates it if absent).
 7. Escalates each finding via the standard escalation menu, but with the trigger reason `redteam-finding`.
 
-The red-team subagent never edits files or runs commands. It reads the prompt, returns the verdict, and exits.
+The red-team subagent never edits implementation files or runs commands. Its only write is the full structured verdict at the prompt-supplied verdict path; it reads the rendered prompt, Writes the verdict file, returns the short reply, and exits.

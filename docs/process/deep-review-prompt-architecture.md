@@ -1,6 +1,6 @@
 # Senior-developer subagent prompt template — architecture lens
 
-Used when `/deep-code-review architecture` spawns the senior-developer subagent (also used for the architecture pass within `/deep-code-review full`). The `deep-code-review` skill substitutes the placeholders below and passes the result as the `prompt` argument to `Agent(subagent_type: "senior-developer", ...)`. The agent's identity, tool allowlist, and model pinning are declared in [`.claude/agents/senior-developer.md`](../../.claude/agents/senior-developer.md).
+Used when `/deep-code-review architecture` spawns the senior-developer subagent (also used for the architecture pass within `/deep-code-review full`). The `deep-code-review` skill renders the fenced template below via `scripts/m1-render-prompt.py` (substituting only metadata, paths, and the seed inventories) and spawns `Agent(subagent_type: "senior-developer", ...)` with a short stub pointing at the rendered file. The agent's identity, tool allowlist, and model pinning are declared in [`.claude/agents/senior-developer.md`](../../.claude/agents/senior-developer.md).
 
 This lens differs from module and diff lenses: the reviewer focuses on the cross-module contract surface — SPI interfaces, schema, NOTIFY channel payloads, capability flags, property-key shape, the 6-module DAG, layering. Module-internal smells belong to the module lens, not this one.
 
@@ -46,10 +46,10 @@ the report is short and says so honestly.
 What you must apply
 ----------------------------------------------------------------------
 
-The project's canonical engineering rules and test-integrity rules
-follow verbatim. Violations of §1–§8 are real findings.
-
-{{ENGINEERING_RULES_VERBATIM}}
+The project's canonical engineering rules and test-integrity rules are
+at docs/process/engineering-rules-verbatim.md. Read that file FIRST —
+it is the rule-text-of-record; apply every rule it carries, not just
+the convenient ones. Violations of §1–§8 are real findings.
 
 In addition, you apply:
 
@@ -312,12 +312,13 @@ the seven surfaces above. Then write the report to {{REPORT_PATH}}.
 |---|---|
 | `{{TARGET}}` | Always `architecture` |
 | `{{REPORT_PATH}}` | `.reviews/deep-review/architecture-<YYYY-MM-DD-HHmm>/report.md` (standalone) OR `.reviews/deep-review/full-<YYYY-MM-DD-HHmm>/01-architecture.md` (full mode) |
-| `{{ENGINEERING_RULES_VERBATIM}}` | Verbatim contents of `docs/process/engineering-rules-verbatim.md` |
 | `{{SPI_INVENTORY}}` | `git ls-files '*/src/main/java/**/spi/*.java'` results, one per line. `(none yet)` if empty. |
 | `{{MIGRATION_INVENTORY}}` | `git ls-files '*/src/main/resources/db/migration/*.sql'` results. `(none yet)` if empty. |
 | `{{NOTIFY_INVENTORY}}` | `git grep -nE 'NOTIFY |LISTEN ' -- '*.java'` results, deduplicated. `(none yet)` if empty. |
 | `{{CAPABILITY_INVENTORY}}` | `git grep -nE 'supports(MarkdownLinks|CodeFormatting|MembershipEvents|MentionByContactId|MessageEdit)' -- '*.java'` results. `(none yet)` if empty. |
 | `{{PROPERTY_INVENTORY}}` | `git ls-files '*application*.properties'` + `git grep -nE '@ConfigProperty' -- '*.java'` results. `(none yet)` if empty. |
 | `{{POM_INVENTORY}}` | `git ls-files 'pom.xml' '*/pom.xml'` results. |
+
+Each inventory is redirected to its own file under `<run-dir>/inputs/` and passed via the render script's `@file` form. The engineering rules are NOT substituted — the template instructs the agent to Read `docs/process/engineering-rules-verbatim.md` in its own context.
 
 If `{{SPI_INVENTORY}}` is empty AND `{{POM_INVENTORY}}` has fewer than 2 modules, the architecture surface is too thin to review. The skill should print a warning ("only N modules exist — architecture review will be sparse") but still spawn the agent; the agent will produce a brief report saying so.

@@ -1,8 +1,8 @@
 # Senior-developer subagent prompt template — diff lens
 
-Used when `/deep-code-review uncommitted | ticket <id> | range <a>..<b>` spawns the senior-developer subagent. The `deep-code-review` skill substitutes the placeholders below and passes the result as the `prompt` argument to `Agent(subagent_type: "senior-developer", ...)`. The agent's identity, tool allowlist, and model pinning are declared in [`.claude/agents/senior-developer.md`](../../.claude/agents/senior-developer.md).
+Used when `/deep-code-review uncommitted | ticket <id> | range <a>..<b>` spawns the senior-developer subagent. The `deep-code-review` skill renders the fenced template below via `scripts/m1-render-prompt.py` (substituting only metadata and paths) and spawns `Agent(subagent_type: "senior-developer", ...)` with a short stub pointing at the rendered file. The agent's identity, tool allowlist, and model pinning are declared in [`.claude/agents/senior-developer.md`](../../.claude/agents/senior-developer.md).
 
-The reviewer starts with **zero conversation context**. It sees the diff, the engineering rules, the path it must write to, and is told it may read the rest of the codebase / spec / design notes via Read/Grep/Glob to verify claims and gather context.
+The reviewer starts with **zero conversation context**. It receives the paths to the diff and the engineering rules (Reading both in its own context — their bytes never enter the main-session transcript), the path it must write to, and is told it may read the rest of the codebase / spec / design notes via Read/Grep/Glob to verify claims and gather context.
 
 ---
 
@@ -45,10 +45,10 @@ the report is short and says so honestly.
 What you must apply
 ----------------------------------------------------------------------
 
-The project's canonical engineering rules and test-integrity rules
-follow verbatim. Violations of §1–§8 are real findings.
-
-{{ENGINEERING_RULES_VERBATIM}}
+The project's canonical engineering rules and test-integrity rules are
+at docs/process/engineering-rules-verbatim.md. Read that file FIRST —
+it is the rule-text-of-record; apply every rule it carries, not just
+the convenient ones. Violations of §1–§8 are real findings.
 
 In addition, you apply:
 
@@ -116,10 +116,12 @@ critical | high | medium | low. No synonyms.
 Diff under review
 ----------------------------------------------------------------------
 
-The diff between BASE_REF and HEAD_REF follows. Read it carefully,
-then use Read/Grep/Glob to gather context — surrounding files, the
-spec sections the change implements, the engineering rules it might
-violate, etc.
+Read the diff between BASE_REF and HEAD_REF from this file with the
+Read tool:
+    {{DIFF_FILE_PATH}}
+Read it carefully, then use Read/Grep/Glob to gather context —
+surrounding files, the spec sections the change implements, the
+engineering rules it might violate, etc.
 
 Notes on diff lens:
 
@@ -136,8 +138,6 @@ Notes on diff lens:
 - Surgical-changes (§1) applies: every changed line must trace to
   the ticket's acceptance, the user's request, or an orphan the diff
   itself created. Unrelated polish in the diff is a finding.
-
-{{DIFF_OUTPUT}}
 
 ----------------------------------------------------------------------
 Output contract
@@ -244,8 +244,9 @@ When the skill prepares this prompt:
 |---|---|
 | `{{TARGET}}` | The literal target arg (`uncommitted`, `ticket M1-007`, `range HEAD~3..HEAD`) |
 | `{{BASE_REF}}` / `{{HEAD_REF}}` | Resolved per target form (see SKILL.md §Diff range resolution) |
-| `{{DIFF_OUTPUT}}` | `git diff <BASE_REF>...<HEAD_REF>` (for uncommitted: `git diff HEAD` + `git status --short`) |
+| `{{DIFF_FILE_PATH}}` | Path of the diff file the skill captured via shell redirection: `git diff <BASE_REF>...<HEAD_REF> > <run-dir>/inputs/diff.patch` (for uncommitted: `git diff HEAD` plus `git status --short`, both redirected into the same file) |
 | `{{REPORT_PATH}}` | `.reviews/deep-review/<target-slug>-<YYYY-MM-DD-HHmm>/report.md` |
-| `{{ENGINEERING_RULES_VERBATIM}}` | Verbatim contents of `docs/process/engineering-rules-verbatim.md` |
+
+The engineering rules are NOT substituted — the template instructs the agent to Read `docs/process/engineering-rules-verbatim.md` in its own context.
 
 If any placeholder cannot be resolved, the skill refuses with a clear error rather than substituting empty.

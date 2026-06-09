@@ -40,7 +40,7 @@ If the args don't match, print the table above and stop.
 | `id-range <a..b>` | commit before `a` landed | commit when `b` landed |
 | `release <tag>` | previous release tag | `<tag>` (or `main` if not yet tagged) |
 
-Capture: `git diff <base>...<head>`.
+Capture via shell redirection so the diff bytes never enter the main-session transcript: `git diff <base>...<head> > target/redteam-diff-<target-slug>.diff` (`<target-slug>` per the slug rule in step 7).
 
 **Single-ticket diff-range algorithm.** Run in order; stop at the first form that succeeds:
 
@@ -73,60 +73,62 @@ The canonical pattern list — what to grep for and which prompt placeholder eac
 
 Mechanic:
 
-1. For each placeholder in the canonical table (`{{AUTH_PATHS}}`, `{{AUTHZ_PATHS}}`, `{{INPUT_PATHS}}`, `{{BAN_PATHS}}`, `{{AUDIT_PATHS}}`), run `git grep -n` (or equivalent) of each pattern restricted to files appearing in the diff (`git diff --name-only <base>...<head>`).
-2. Collect `file:line` tuples per placeholder, deduplicate, and join with newlines.
-3. If a placeholder has no matches, set its substitution to the literal string `(none touched)` rather than an empty string.
+1. For each placeholder in the canonical table (`{{AUTH_PATHS}}`, `{{AUTHZ_PATHS}}`, `{{INPUT_PATHS}}`, `{{BAN_PATHS}}`, `{{AUDIT_PATHS}}`), run `git grep -n` (or equivalent) of each pattern restricted to files appearing in the diff (`git diff --name-only <base>...<head>`), redirecting each placeholder's deduplicated `file:line` tuples to its own file: `target/redteam-inv-<auth|authz|input|ban|audit>-<target-slug>.txt`.
+2. If a placeholder's file is empty (no matches), overwrite it with the literal string `(none touched)`: `[ -s <file> ] || echo '(none touched)' > <file>`.
 
-Substitute the resulting blocks in step 4. The patterns are deliberately conservative; the adversary subagent's prompt reminds it not to treat the list as exhaustive.
+Step 4 passes each file via the render script's `@file` form. The patterns are deliberately conservative; the adversary subagent's prompt reminds it not to treat the list as exhaustive.
 
-### 4. Substitute prompt placeholders
+### 4. Render the prompt
 
-Read `docs/process/redteam-prompt.md`. Substitute:
+Pre-allocate the verdict path at `target/redteam-verdict-<target-slug>.txt`. Render via Bash — do NOT Read `docs/process/redteam-prompt.md` (or `docs/spec/security.md`, or the diff) into main-session context; the script extracts the fenced template body and substitutes only metadata, paths, and the small inventories. The subagent Reads the threat model and the diff in its own fresh context:
 
-- `{{TARGET}}` — the literal target arg
-- `{{BASE_REF}}` / `{{HEAD_REF}}` — the resolved git refs
-- `{{SECURITY_SPEC_CONTENT}}` — the verbatim contents of `docs/spec/security.md`
-- `{{DIFF_OUTPUT}}` — the captured diff
-- `{{AUTH_PATHS}}` / `{{AUTHZ_PATHS}}` / `{{INPUT_PATHS}}` / `{{BAN_PATHS}}` / `{{AUDIT_PATHS}}` — the inventory from step 3 (one path-or-tuple per line, or `(none touched)`)
+```
+python3 scripts/m1-render-prompt.py \
+  docs/process/redteam-prompt.md \
+  target/redteam-prompt-<target-slug>.txt \
+  TARGET=<literal target arg> \
+  BASE_REF=<base> HEAD_REF=<head> \
+  DIFF_FILE_PATH=target/redteam-diff-<target-slug>.diff \
+  VERDICT_FILE_PATH=target/redteam-verdict-<target-slug>.txt \
+  AUTH_PATHS=@target/redteam-inv-auth-<target-slug>.txt \
+  AUTHZ_PATHS=@target/redteam-inv-authz-<target-slug>.txt \
+  INPUT_PATHS=@target/redteam-inv-input-<target-slug>.txt \
+  BAN_PATHS=@target/redteam-inv-ban-<target-slug>.txt \
+  AUDIT_PATHS=@target/redteam-inv-audit-<target-slug>.txt
+```
 
 ### 5. Spawn the adversary subagent
 
 ```
 Agent(
   subagent_type: "threat-actor",
-  prompt: <substituted>,
-  description: "Red-team <target>"
+  description: "Red-team <target>",
+  prompt: "Read target/redteam-prompt-<target-slug>.txt and execute the instructions in that file. Everything you need (threat-model path, diff path, verdict path, sensitive-surface inventories) is in that file."
 )
 ```
 
-The `threat-actor` agent is defined at `.claude/agents/threat-actor.md` (read-only tool allowlist, opus model). It is intentionally distinct from `code-reviewer`: the framing is adversarial, the inputs are limited to the threat model + diff (no implementation context), and the verdict format is bucketed findings rather than APPROVE/REWORK.
+The `threat-actor` agent is defined at `.claude/agents/threat-actor.md` (Read/Grep/Glob + Write constrained to the verdict file, opus model). It is intentionally distinct from `code-reviewer`: the framing is adversarial, the inputs are limited to the threat model + diff (no implementation context), and the verdict format is bucketed findings rather than APPROVE/REWORK.
 
 Foreground. The verdict gates the next steps.
 
-### 6. Parse the structured verdict
+### 6. Parse the short chat reply
 
-Expected format:
+Expected four-line reply (the full structured verdict — FINDINGS entries with PROMISE/GAP/REPRO, OUT-OF-MODEL items — lives in the verdict file the subagent Wrote, NOT in the reply):
 
 ```
 RED-TEAM VERDICT: <CLEAN | FINDINGS>
-
-FINDINGS: (omit on CLEAN)
-  - CATEGORY: <AUTH-BYPASS | INFO-LEAK | INJECTION | DOS | PERM-ESCAL | AUDIT-EVASION>
-    SEVERITY: <critical | high | medium | low>
-    PROMISE: <quote from threat model>
-    GAP: <file:line evidence>
-    REPRO: <attack sequence>
-    SUGGESTED-FIX-CLASS: <input-sanitization | trust-boundary-tightening | missing-auth-check | rate-limit | audit-log-coverage | other>
-
-OUT-OF-MODEL: (optional)
-  - <attacks outside the documented threat model>
+Verdict file: target/redteam-verdict-<target-slug>.txt
+Findings: critical=<n> high=<n> medium=<n> low=<n>
+Out-of-model: <n>
 ```
 
-If the output doesn't parse, treat as MANUAL: print verbatim, ask the user how to proceed, do not write findings to frontmatter.
+Verify the verdict file exists and is non-empty. If the reply doesn't parse or the file is missing/empty, treat as MANUAL: print the reply verbatim, ask the user how to proceed, do not persist anything.
+
+On `FINDINGS`, Read the verdict file from disk — this is the single point where finding text enters main-session context, and only when there are findings to transcribe. On `CLEAN`, do NOT read the verdict file; the counts in the reply are everything steps 7–8 need.
 
 ### 7. Persist findings
 
-**Every audit — regardless of target form and regardless of verdict (CLEAN or FINDINGS) — writes the verbatim verdict to a per-audit markdown file under `docs/plan/<active-milestone>/redteam/<target-slug>-<YYYY-MM-DD>.md`.** Slug rule: target form's args, lowercased, hyphenated:
+**Every audit — regardless of target form and regardless of verdict (CLEAN or FINDINGS) — persists the verbatim verdict to a per-audit markdown file under `docs/plan/<active-milestone>/redteam/<target-slug>-<YYYY-MM-DD>.md`.** Assemble it via Bash so the verdict body never has to round-trip through main-session context: write the frontmatter block (fields below; values come from the short chat reply plus the resolved refs) to the destination with a heredoc, then append the verbatim verdict with `cat target/redteam-verdict-<target-slug>.txt >> <destination>`. Slug rule: target form's args, lowercased, hyphenated:
 
 | Target form | Slug |
 |---|---|
@@ -135,7 +137,7 @@ If the output doesn't parse, treat as MANUAL: print verbatim, ask the user how t
 | `id-range <a..b>` | `id-range-<a>-to-<b>` (e.g. `id-range-M1-005-to-M1-012`), lowercased |
 | `release <tag>` | `release-<tag>`, lowercased, dots → hyphens (e.g. `release-v0-1-0`) |
 
-The verdict file's frontmatter carries `target`, `date`, `base`, `head`, `verdict`, `findings_count` (per-severity), `out_of_model_count`, and a free-form `disposition:` note for any follow-up reasoning (e.g. which findings were fixed on the branch before squash-merge, which were deferred to a remediation ticket). The body is the verbatim verdict the threat-actor returned. This file is the durable audit record; ticket frontmatter pointers index into it.
+The verdict file's frontmatter carries `target`, `date`, `base`, `head`, `verdict`, `findings_count` (per-severity), `out_of_model_count`, and a free-form `disposition:` note for any follow-up reasoning (e.g. which findings were fixed on the branch before squash-merge, which were deferred to a remediation ticket). The body is the verbatim verdict the threat-actor Wrote to the `target/` scratch path (appended via `cat`, per the assembly mechanic above — `target/` is wiped by `mvn clean`, which is why the durable copy lives here). This file is the durable audit record; ticket frontmatter pointers index into it.
 
 **Single-ticket targets ALSO update the ticket frontmatter** in two ways:
 
@@ -213,7 +215,7 @@ The adversary subagent never edits files, runs commands, or fires escalations on
 
 ## Cross-cutting rules this skill must obey
 
-- **Read-only on implementation surfaces.** This skill never edits code, commits, or pushes. It only reads, spawns the subagent, and writes audit artifacts: the verbatim verdict file under `docs/plan/<active-milestone>/redteam/<slug>-<date>.md` (always, per step 7), and on single-ticket targets the `redteam_findings:` + `redteam_audits:` frontmatter blocks on the ticket file. No source-code, test, or property-file writes.
+- **Read-only on implementation surfaces.** This skill never edits code, commits, or pushes. It only reads, spawns the subagent, writes workflow scratch under `target/` (captured diff, inventory files, rendered prompt; the subagent Writes the raw verdict there), and writes audit artifacts: the assembled verdict file under `docs/plan/<active-milestone>/redteam/<slug>-<date>.md` (always, per step 7), and on single-ticket targets the `redteam_findings:` + `redteam_audits:` frontmatter blocks on the ticket file. No source-code, test, or property-file writes.
 - **Fresh context for the adversary.** The subagent must NOT be given conversation history, design notes (`docs/design/**`), or ticket bodies. It sees only the threat model and the diff. Anchoring it on implementer rationale defeats the point.
 - **No auto-escalation.** Recommend, don't execute. The user (or Claude in the next turn) decides which findings become tickets.
 - **If `docs/spec/security.md` does not exist or is empty, REFUSE.** The threat model is the system's commitments; without it the audit has nothing to compare against.

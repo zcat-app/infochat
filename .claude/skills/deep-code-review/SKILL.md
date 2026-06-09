@@ -89,17 +89,30 @@ The run directory depends on the target:
 | `architecture` | `.reviews/deep-review/architecture-<slug>/` |
 | `full` | `.reviews/deep-review/full-<slug>/` |
 
-Create the directory. For all single-target forms, the report file is `<run-dir>/report.md`. For `full`, the directory holds multiple reports (see step 5).
+Create the directory, plus an `inputs/` subdirectory for workflow scratch (captured diff, inventory files, rendered prompts) — everything stays inside `.reviews/`, honoring the never-write-outside-`.reviews/` rule. For all single-target forms, the report file is `<run-dir>/report.md`. For `full`, the directory holds multiple reports (see step 5).
 
-### 3. Build the prompt-template substitutions
+### 3. Capture inputs and render the prompt
 
-Read the appropriate prompt template from `docs/process/`. Substitute the placeholders per each template's substitution checklist:
+Do NOT Read the prompt templates, the engineering rules, the diff, or the inventories into main-session context. Capture the big inputs to files via shell redirection, then render the template with `scripts/m1-render-prompt.py` (same pattern as `/m1-tick`: the script extracts the fenced template body, substitutes `{{KEY}}` args, and supports `@/path/file` values for multi-line content). The engineering rules are never substituted — each template instructs the agent to Read `docs/process/engineering-rules-verbatim.md` in its own fresh context.
 
-- **diff lens** — `{{TARGET}}`, `{{BASE_REF}}`, `{{HEAD_REF}}`, `{{DIFF_OUTPUT}}`, `{{REPORT_PATH}}`, `{{ENGINEERING_RULES_VERBATIM}}`.
-- **module lens** — `{{TARGET}}`, `{{MODULE_PATH}}`, `{{MODULE_FILE_INVENTORY}}`, `{{REPORT_PATH}}`, `{{ENGINEERING_RULES_VERBATIM}}`.
-- **architecture lens** — `{{TARGET}}`, `{{REPORT_PATH}}`, `{{ENGINEERING_RULES_VERBATIM}}`, plus the six inventories (`{{SPI_INVENTORY}}`, `{{MIGRATION_INVENTORY}}`, `{{NOTIFY_INVENTORY}}`, `{{CAPABILITY_INVENTORY}}`, `{{PROPERTY_INVENTORY}}`, `{{POM_INVENTORY}}`).
+Per lens:
 
-Inventory commands (run from repo root, results dedup'd, sorted, joined with newlines; `(none yet)` substitution if the result is empty):
+- **diff lens** — capture the diff: `git diff <BASE_REF>...<HEAD_REF> > <run-dir>/inputs/diff.patch` (for `uncommitted`: `git diff HEAD > <run-dir>/inputs/diff.patch && git status --short >> <run-dir>/inputs/diff.patch`). Then render:
+
+  ```
+  python3 scripts/m1-render-prompt.py \
+    docs/process/deep-review-prompt-diff.md \
+    <run-dir>/inputs/prompt.txt \
+    TARGET=<target> BASE_REF=<base> HEAD_REF=<head> \
+    DIFF_FILE_PATH=<run-dir>/inputs/diff.patch \
+    REPORT_PATH=<run-dir>/report.md
+  ```
+
+- **module lens** — capture the file inventory (command below) to `<run-dir>/inputs/inventory.txt`, then render `docs/process/deep-review-prompt-module.md` with `TARGET`, `MODULE_PATH`, `REPORT_PATH`, and `MODULE_FILE_INVENTORY=@<run-dir>/inputs/inventory.txt`.
+
+- **architecture lens** — capture each of the six inventories (commands below) to `<run-dir>/inputs/<name>.txt`; if a file comes out empty, overwrite it with the literal `(none yet)` (`[ -s <file> ] || echo '(none yet)' > <file>`). Then render `docs/process/deep-review-prompt-architecture.md` with `TARGET`, `REPORT_PATH`, and each inventory as `@file`.
+
+Inventory commands (run from repo root, results dedup'd, sorted, redirected to the `inputs/` file):
 
 - SPI: `git ls-files '*/src/main/java/**/spi/*.java' '*/src/main/kotlin/**/spi/*.kt'`
 - Migrations: `git ls-files '*/src/main/resources/db/migration/*.sql'`
@@ -109,7 +122,7 @@ Inventory commands (run from repo root, results dedup'd, sorted, joined with new
 - POMs: `git ls-files 'pom.xml' '*/pom.xml'`
 - Module file inventory (module/path lens): `git ls-files '<MODULE_PATH>/**/*.java' '<MODULE_PATH>/**/*.kt' '<MODULE_PATH>/**/*.sql' '<MODULE_PATH>/**/*.properties' '<MODULE_PATH>/**/*.json' '<MODULE_PATH>/**/*.xml'`
 
-If any required substitution is empty for the lens being invoked (e.g. `{{DIFF_OUTPUT}}` empty for diff lens), the skill refuses rather than spawning an agent against an empty target.
+If a required input file is empty for the lens being invoked (e.g. `<run-dir>/inputs/diff.patch` for diff lens, `inventory.txt` for module lens — check with `[ -s <file> ]`), the skill refuses rather than spawning an agent against an empty target. (The `(none yet)` fallback applies only to the architecture lens's individual seed inventories, which may legitimately be empty.)
 
 ### 4. Spawn the senior-developer subagent (single-target forms)
 
@@ -118,8 +131,8 @@ For `uncommitted`, `ticket`, `range`, `module`, `path`, `architecture`:
 ```
 Agent(
   subagent_type: "senior-developer",
-  prompt: <substituted prompt>,
-  description: "Deep-review <target>"
+  description: "Deep-review <target>",
+  prompt: "Read <run-dir>/inputs/prompt.txt and execute the instructions in that file. Everything you need (lens, input paths, report path) is in that file."
 )
 ```
 
@@ -172,38 +185,51 @@ Proceed? (yes/no)
 
 Wait for the user to type `yes` (case-insensitive, exact match) before continuing. Any other response aborts cleanly without spawning agents.
 
-#### 5c. Spawn all reviewer agents in parallel
+#### 5c. Render all prompts, then spawn all reviewer agents in parallel
 
-In ONE message, spawn N+1 Agent calls in a single tool-use batch:
+First render N+1 prompt files per step 3's mechanics (inputs and rendered prompts all under `<run-dir>/inputs/`):
 
-- 1 architecture agent (using the architecture prompt template, REPORT_PATH = `<run-dir>/01-architecture.md`)
-- N module agents (one per implemented module, using the module prompt template, REPORT_PATH = `<run-dir>/<NN>-module-<name>.md` with NN starting at 02)
+- 1 architecture prompt → `<run-dir>/inputs/prompt-01-architecture.txt` (REPORT_PATH = `<run-dir>/01-architecture.md`; the six inventories captured once, shared by this render)
+- N module prompts → `<run-dir>/inputs/prompt-<NN>-module-<name>.txt` (REPORT_PATH = `<run-dir>/<NN>-module-<name>.md` with NN starting at 02; per-module inventory at `<run-dir>/inputs/inventory-<name>.txt`)
 
-All agents share the same `senior-developer` subagent type. Each gets its own fresh-context spawn — they cannot see each other.
+Then, in ONE message, spawn N+1 Agent calls in a single tool-use batch — each a one-line stub pointing at its rendered prompt file (same stub form as step 4). All agents share the same `senior-developer` subagent type. Each gets its own fresh-context spawn — they cannot see each other.
 
 Wait for all to complete. Track which succeeded (report file exists and is non-empty) and which failed (no report, or empty report).
 
 #### 5d. Build the synthesizer manifest
 
+Write the two manifest lists to files so they ride the render script's `@file` form:
+
 ```
-{{REPORT_FILES}} = newline-separated <role>:<path> for every successful report
-{{FAILED_TARGETS}} = newline-separated <role>:<reason> for every failure (empty if all succeeded)
-{{RUN_DIR}} = the full-mode run directory
+<run-dir>/inputs/report-files.txt   = newline-separated <role>:<path> for every successful report
+<run-dir>/inputs/failed-targets.txt = newline-separated <role>:<reason> for every failure (empty file if all succeeded)
+{{RUN_DIR}} = the full-mode run directory (inline substitution)
 ```
 
-If `{{REPORT_FILES}}` is empty (all agents failed), do NOT spawn the synthesizer. Print the failure summary to the user, list all FAILED_TARGETS with reasons, suggest re-running individual targets, stop.
+If `report-files.txt` is empty (all agents failed), do NOT spawn the synthesizer. Print the failure summary to the user, list all failed targets with reasons, suggest re-running individual targets, stop.
 
-If `{{REPORT_FILES}}` contains exactly one report, do NOT spawn the synthesizer. Print "only one report succeeded — synthesis skipped, open the single report directly: <path>", stop.
+If `report-files.txt` contains exactly one report, do NOT spawn the synthesizer. Print "only one report succeeded — synthesis skipped, open the single report directly: <path>", stop.
 
 Otherwise (≥ 2 reports succeeded), spawn the synthesizer:
 
 #### 5e. Spawn the synthesizer (sequential, after all reviewers)
 
+Render the synthesizer prompt:
+
+```
+python3 scripts/m1-render-prompt.py \
+  docs/process/deep-review-synthesizer-prompt.md \
+  <run-dir>/inputs/prompt-00-synth.txt \
+  RUN_DIR=<run-dir> \
+  REPORT_FILES=@<run-dir>/inputs/report-files.txt \
+  FAILED_TARGETS=@<run-dir>/inputs/failed-targets.txt
+```
+
 ```
 Agent(
   subagent_type: "review-synthesizer",
-  prompt: <substituted synthesizer prompt>,
-  description: "Synthesize deep-review-full-<slug>"
+  description: "Synthesize deep-review-full-<slug>",
+  prompt: "Read <run-dir>/inputs/prompt-00-synth.txt and execute the instructions in that file. Everything you need (report list, failed targets, summary path) is in that file."
 )
 ```
 
@@ -244,7 +270,7 @@ for line-precise detail.
 
 ## Cross-cutting rules this skill must obey
 
-- **Read-only as far as code goes.** This skill never edits source code, never commits, never pushes, never invokes mvn. It only reads, spawns subagents, and writes reports under `.reviews/deep-review/`.
+- **Read-only as far as code goes.** This skill never edits source code, never commits, never pushes, never invokes mvn. It only reads, spawns subagents, and writes under `.reviews/deep-review/` (workflow inputs — captured diffs, inventories, rendered prompts — under `<run-dir>/inputs/`; the agents write the reports).
 - **No auto-escalation.** Findings are advisory. The skill does not file tickets, does not write to ticket frontmatter, does not call `/m1-tick escalate`. The user decides what becomes a ticket.
 - **Fresh context per spawn.** Every senior-developer and review-synthesizer subagent runs in fresh context. Never pass conversation history, never reuse a prior agent's notes.
 - **Honesty is enforced in the prompt, not by the skill.** The skill cannot verify whether a report is honest. The prompt templates and agent personas embed the "don't soften, don't invent" rule. If a future user complaint surfaces that reports are sycophantic or padded, fix the prompt template, not the skill.
@@ -252,7 +278,7 @@ for line-precise detail.
 - **Never delete prior reports.** The `.reviews/deep-review/` directory accumulates. The user can `rm -rf .reviews/deep-review/` themselves if they want a clean slate; the skill never does so.
 - **Cost-confirm only for `full`.** Single-target forms run without confirmation — they are cheap enough that prompting would be more friction than the actual cost. `full` is the only form that fans out N+1 spawns.
 - **If a per-target agent fails in `full` mode, the run continues.** The synthesizer runs on the successes and flags the failure in its header. The user re-runs the failed target individually.
-- **Refuse rather than substitute empty.** If any required placeholder is empty (no diff, no module files, no SPI inventory at all), refuse with a clear message rather than spawning an agent against nothing.
+- **Refuse rather than substitute empty.** If a required input file is empty (no diff for the diff lens, no module files for the module lens), refuse with a clear message rather than spawning an agent against nothing. Architecture seed inventories may be individually empty (`(none yet)` fallback per step 3); the architecture-too-thin case is governed by the preconditions, not this rule.
 - **Never spawn the threat-actor or code-reviewer subagents.** Those belong to `/redteam` and `/m1-tick review` respectively. This skill spawns only senior-developer and review-synthesizer.
 
 ## When this skill is the right tool
