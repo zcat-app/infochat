@@ -2,6 +2,7 @@ package app.zcat.infochat.collector.eval.stage1;
 
 import app.zcat.infochat.collector.eval.stage2.Stage2Worker;
 import app.zcat.infochat.collector.outbox.PostPersister;
+import io.smallrye.common.annotation.RunOnVirtualThread;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.reactive.messaging.Incoming;
@@ -82,8 +83,23 @@ public class Stage1Worker {
      * {@code eval-queue}, load the parent post's columns, and run
      * Stage 1. The {@code @Incoming} method's parameter type matches
      * the producer's emit shape exactly.
+     *
+     * <p>{@code @RunOnVirtualThread} hops each key off the emitting
+     * thread. Without it, SmallRye in-memory channels run the
+     * subscriber inline on the emitter's thread, so one Stage-1 regex
+     * hit parks the fetch dispatcher (or the Nostr delivery loop) for
+     * the full Stage-2 LLM duration — the slowest stage executing on
+     * the fastest stage's thread. The annotation implies blocking
+     * dispatch, one virtual thread per message, unordered. Unordered
+     * is safe here: keys are independent, and a rehydrator re-enqueue
+     * of an already-processed post is absorbed by the
+     * {@code stage1_done} short-circuit below. Stage-2 parallelism is
+     * NOT governed by this dispatch — {@code Stage2Worker}'s
+     * per-profile semaphore still bounds concurrent LLM calls, and a
+     * permit-holder's backoff sleep still back-pressures the queue.
      */
     @Incoming("eval-queue")
+    @RunOnVirtualThread
     public void onPostKey(PostPersister.PersistedPostKey key) {
         if (key == null) {
             return;

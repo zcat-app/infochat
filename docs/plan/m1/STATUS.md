@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 12 |
+| pending | 11 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 302 |
+| done | 303 |
 | deferred | 3 |
 | **total** | **317** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-267 — Stage 2 judge off the emitter thread (complexity: medium, risk: medium)
 - M1-268 — Thread /lang through bundle lookups (D43) (complexity: high, risk: medium)
 - M1-270 — Validate bootstrap admin ids before any write; SPI hoist (complexity: medium, risk: medium)
 - M1-271 — Design/spec reconciliation + comment-truth sweep (complexity: low, risk: low)
@@ -74,13 +73,13 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-273 | Transport classification matrix + Signal start race | 2026-06-10 | round 1 APPROVE |
 | M1-272 | Redactor thrown-chain coverage + log hygiene sweep | 2026-06-10 | round 1 APPROVE |
 | M1-269 | Pin the price_snapshot role-privilege matrix in DbRoleMatrixIT | 2026-06-10 | round 1 APPROVE |
+| M1-267 | Stage 2 judge off the emitter thread | 2026-06-10 | round 1 APPROVE |
 | M1-265 | LLM routing guard closure + provider hygiene | 2026-06-10 | round 1 APPROVE |
 | M1-264 | Compress: no JDBC tx across LLM call; ceiling gate | 2026-06-10 | round 1 APPROVE |
 | M1-266 | new_post cursor: single clock for ready_at | 2026-06-09 | round 1 APPROVE |
 | M1-263 | Digest correctness: collection window, cache TTL, caps | 2026-06-09 | round 1 APPROVE |
 | M1-262 | Chat agent: include conversation history in the prompt | 2026-06-09 | round 1 APPROVE |
 | M1-261 | Consistency code lows: IpBlocklist per-pass enum, router name case | 2026-06-09 | round 1 APPROVE |
-| M1-260 | Build/doc-truth lows: sibling DAG enforcer, Flyway dup, gate javadoc | 2026-06-09 | round 1 APPROVE |
 
 ---
 
@@ -458,7 +457,7 @@ M1-263 (done)
 M1-264 (done)
 M1-265 (done)
 M1-266 (done)
-M1-267 (pending) ← runnable
+M1-267 (done)
 M1-268 (pending) ← runnable
 M1-269 (done)
 M1-270 (pending) ← runnable

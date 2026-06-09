@@ -6,11 +6,15 @@ import app.zcat.infochat.llm.ModelTask;
 import jakarta.annotation.Priority;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Alternative;
+import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Shared test stub for the LLM evaluation pipeline. Replaces the
@@ -58,11 +62,22 @@ public final class StubLlmProvider implements LlmProvider {
     private final Deque<String> queuedResponses = new ArrayDeque<>();
     private final List<ModelTask> calls = new ArrayList<>();
     private boolean failAll = false;
+    // Thread-name capture + gate are read/written across threads once
+    // the eval queue dispatches on virtual threads, so unlike the
+    // single-thread fields above they must be thread-safe.
+    private final List<CapturedCall> capturedCalls = new CopyOnWriteArrayList<>();
+    private volatile @Nullable CountDownLatch gate;
+
+    /** One {@link #generate} invocation: which task, on which thread. */
+    public record CapturedCall(ModelTask task, String threadName) {
+    }
 
     public void reset() {
         queuedResponses.clear();
         calls.clear();
+        capturedCalls.clear();
         failAll = false;
+        releaseHeldCalls();
     }
 
     public void setNextResponse(String reply) {
@@ -83,9 +98,44 @@ public final class StubLlmProvider implements LlmProvider {
         return calls.size();
     }
 
+    /**
+     * Park every subsequent {@link #generate} call (after its
+     * thread name is recorded) until {@link #releaseHeldCalls()}.
+     * Lets a test prove a caller thread is NOT the thread executing
+     * the LLM call — e.g. the eval-queue emitter-thread-hop
+     * assertion. The hold is bounded (10 s) so a test that forgets
+     * to release fails loudly instead of hanging the suite.
+     */
+    public void holdCallsUntilReleased() {
+        this.gate = new CountDownLatch(1);
+    }
+
+    public void releaseHeldCalls() {
+        CountDownLatch held = this.gate;
+        if (held != null) {
+            held.countDown();
+            this.gate = null;
+        }
+    }
+
+    /**
+     * Thread names observed by {@link #generate} for one task, in
+     * call order. Filtering by task keeps a concurrently-polling
+     * worker (e.g. the 5s Tagger scheduler) from polluting another
+     * worker's capture.
+     */
+    public List<String> callThreadNames(ModelTask task) {
+        return capturedCalls.stream()
+            .filter(call -> call.task() == task)
+            .map(CapturedCall::threadName)
+            .toList();
+    }
+
     @Override
     public LlmResponse generate(ModelTask task, String systemPrompt, String userPrompt) {
         calls.add(task);
+        capturedCalls.add(new CapturedCall(task, Thread.currentThread().getName()));
+        awaitGateIfHeld();
         if (failAll) {
             throw new RuntimeException(
                 "StubLlmProvider: simulated LLM unreachable (call #" + calls.size() + ")");
@@ -95,5 +145,22 @@ public final class StubLlmProvider implements LlmProvider {
                 "StubLlmProvider: no queued response for call #" + calls.size());
         }
         return new LlmResponse(queuedResponses.pollFirst());
+    }
+
+    private void awaitGateIfHeld() {
+        CountDownLatch held = gate;
+        if (held == null) {
+            return;
+        }
+        try {
+            if (!held.await(10, TimeUnit.SECONDS)) {
+                throw new RuntimeException(
+                    "StubLlmProvider: held call was never released within 10s");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(
+                "StubLlmProvider: interrupted while held at the gate", e);
+        }
     }
 }
