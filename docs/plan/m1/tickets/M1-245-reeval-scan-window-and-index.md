@@ -1,7 +1,7 @@
 ---
 id: M1-245
 title: "Re-evaluation candidate scan: fetched_at window + partial index"
-status: pending
+status: done
 created: 2026-06-09
 last_updated: 2026-06-09
 blocked_by: []
@@ -31,12 +31,29 @@ test_plan:
 spec_refs:
   - docs/spec/architecture.md §Pipelines
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-09
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 3
+      added: 204
+      removed: 2
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-09
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-245: Re-evaluation candidate scan — window bound + partial index

@@ -23,6 +23,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -71,6 +72,19 @@ public class ReEvaluationJob {
     static final String ERROR_CLASS_REEVAL_RELEASED = "re-eval-released";
     static final String ERROR_CLASS_NEEDS_REVIEW_DEPTH = "needs-review-depth";
 
+    // Slack added to the post retention horizon when bounding the partition
+    // key (fetched_at) on the candidate scan so the planner can prune
+    // partitions instead of scanning every live one each tick. fetched_at is
+    // the post partition key; the retention horizon
+    // (infochat.partitions.retention-days.post) is the live-data span. The
+    // floor is widened past the exact horizon by this slack — its value
+    // mirrors PerSourceUnknownTracker's documented PARTITION_SCAN_SLACK so the
+    // two re-eval scans share one partition-pruning convention rather than
+    // each inventing a knob. The semantic trade-off (a candidate fetched
+    // longer ago than horizon+slack drops out of the scan) is the same one
+    // PerSourceUnknownTracker accepts and is argued in the commit message.
+    private static final Duration PARTITION_SCAN_SLACK = Duration.ofDays(2);
+
     private static final Logger LOG = LoggerFactory.getLogger(ReEvaluationJob.class);
 
     @Inject
@@ -99,6 +113,13 @@ public class ReEvaluationJob {
 
     @ConfigProperty(name = "infochat.reeval.needs-review-depth-threshold")
     int needsReviewDepthThreshold;
+
+    // The post partition retention horizon (live-data span). Reused as the
+    // candidate-scan window so the fetched_at floor never excludes a live
+    // post; no re-eval-specific knob is introduced. Same property
+    // PartitionPruner uses to age partitions out.
+    @ConfigProperty(name = "infochat.partitions.retention-days.post")
+    int postRetentionDays;
 
     @Scheduled(every = "{infochat.reeval.poll-interval}")
     public void onTick() {
@@ -441,9 +462,18 @@ public class ReEvaluationJob {
         // transitionToNeedsReview flips status to NEEDS_REVIEW, which
         // excludes the row from both branches on the next tick — so a
         // cap-exhausted row is enumerated exactly once more, then drops out.
+        //
+        // The fetched_at >= now() - (retention horizon + slack) bound is the
+        // partition-pruning predicate: post is RANGE(fetched_at) partitioned,
+        // so without a fetched_at floor the planner scans every live partition
+        // each tick. The window spans the full retention horizon so no live
+        // candidate is excluded; the partial index paired with this scan in
+        // the V47 migration carries the disjunction below so the planner can
+        // use it inside the surviving partitions.
         final String sql =
             "SELECT id, fetched_at, stage2_failed, re_eval_attempts, stage2_verdict FROM post "
-                + "WHERE ("
+                + "WHERE fetched_at >= now() - ?::INTERVAL"
+                + "  AND ("
                 + "  (stage2_failed = TRUE AND status != 'NEEDS_REVIEW')"
                 + "  OR "
                 + "  (status = 'QUARANTINED' AND stage2_done = TRUE AND stage2_failed = FALSE"
@@ -452,7 +482,8 @@ public class ReEvaluationJob {
         List<ReEvalCandidate> candidates = new ArrayList<>();
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setInt(1, batchSize);
+            ps.setString(1, (postRetentionDays + PARTITION_SCAN_SLACK.toDays()) + " days");
+            ps.setInt(2, batchSize);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     candidates.add(new ReEvalCandidate(
