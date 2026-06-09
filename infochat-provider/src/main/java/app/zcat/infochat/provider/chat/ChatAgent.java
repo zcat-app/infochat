@@ -138,6 +138,14 @@ public class ChatAgent {
     }
 
     private String doHandle(UUID userId, String scopeKind, UUID scopeId, String userMessage) {
+        // Ceiling gate: a failed auto-compress left this session at its
+        // token ceiling — reject the turn outright (no LLM call, no
+        // persist) instead of silently growing past the ceiling. Clears
+        // when a compress succeeds or /clear empties the session.
+        if (autoCompressTrigger.isCeilingGated(userId, scopeKind, scopeId)) {
+            return bundleLoader.get(BundleKeys.ERROR_COMPRESS_FAILED);
+        }
+
         String scopeLanguage = readScopeLanguage(scopeKind, scopeId);
 
         // 1. Build prompt (pre-fetches memory internally)

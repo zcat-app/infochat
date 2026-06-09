@@ -20,6 +20,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @QuarkusTest
@@ -125,6 +126,78 @@ class AutoCompressTriggerTest {
             }
         }
         // If LLM succeeded, the session is compressed (also valid).
+    }
+
+    @Test
+    void failedAutoCompressAtCeilingGatesSessionUntilCompressSucceeds() throws Exception {
+        String contactId = PREFIX + "gate-actor";
+        UUID userId = seedUser(contactId);
+        int aboveThreshold = compressAtThreshold + 50;
+        seedChatSessionWithTokens(userId, "dm", userId, aboveThreshold);
+        seedChatMessage(userId, "dm", userId, 0, "user", "hello", aboveThreshold);
+
+        // Deterministic compress outcome, flipped mid-test.
+        class TogglingCompressHandler extends CompressCommandHandler {
+            boolean fail = true;
+
+            @Override
+            public CompressResult compress(UUID u, String scopeKind,
+                                           UUID scopeId, String scopeLanguage) {
+                return fail ? new CompressResult.Failure()
+                        : new CompressResult.Success(1);
+            }
+        }
+        TogglingCompressHandler compressHandler = new TogglingCompressHandler();
+        AutoCompressTrigger gateTrigger = new AutoCompressTrigger(
+                compressAtThreshold, bundleLoader, compressHandler, dataSource);
+
+        assertFalse(gateTrigger.isCeilingGated(userId, "dm", userId),
+                "no gate before any compress failure");
+
+        Optional<String> notice = gateTrigger.checkAndCompress(userId, "dm", userId, "en");
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_COMPRESS_FAILED),
+                notice.orElseThrow());
+        assertTrue(gateTrigger.isCeilingGated(userId, "dm", userId),
+                "failed auto-compress at the ceiling must gate the session");
+        assertFalse(gateTrigger.isCeilingGated(userId, "group", UUID.randomUUID()),
+                "the gate is per-(user, scope) — other scopes stay open");
+
+        // A later successful auto-compress clears the gate eagerly.
+        compressHandler.fail = false;
+        Optional<String> success = gateTrigger.checkAndCompress(userId, "dm", userId, "en");
+        assertEquals(bundleLoader.get(BundleKeys.REPLY_AUTO_COMPRESS_NOTICE),
+                success.orElseThrow());
+        assertFalse(gateTrigger.isCeilingGated(userId, "dm", userId),
+                "a successful compress must clear the gate");
+    }
+
+    @Test
+    void ceilingGateClearsWhenTokenCountFallsBelowThreshold() throws Exception {
+        String contactId = PREFIX + "gate-lazy-actor";
+        UUID userId = seedUser(contactId);
+        int aboveThreshold = compressAtThreshold + 50;
+        seedChatSessionWithTokens(userId, "dm", userId, aboveThreshold);
+        seedChatMessage(userId, "dm", userId, 0, "user", "hello", aboveThreshold);
+
+        AutoCompressTrigger gateTrigger = new AutoCompressTrigger(
+                compressAtThreshold, bundleLoader,
+                new CompressCommandHandler() {
+                    @Override
+                    public CompressResult compress(UUID u, String scopeKind,
+                                                   UUID scopeId, String scopeLanguage) {
+                        return new CompressResult.Failure();
+                    }
+                }, dataSource);
+
+        gateTrigger.checkAndCompress(userId, "dm", userId, "en");
+        assertTrue(gateTrigger.isCeilingGated(userId, "dm", userId));
+
+        // A successful manual /compress or /clear resets token_count
+        // without passing through checkAndCompress — the gate must
+        // clear lazily on the next consult.
+        seedChatSessionWithTokens(userId, "dm", userId, 0);
+        assertFalse(gateTrigger.isCeilingGated(userId, "dm", userId),
+                "gate must clear once token_count falls below the threshold");
     }
 
     // ---- seeding helpers --------------------------------------------------

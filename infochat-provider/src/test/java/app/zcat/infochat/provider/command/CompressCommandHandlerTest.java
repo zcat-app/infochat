@@ -1,5 +1,8 @@
 package app.zcat.infochat.provider.command;
 
+import app.zcat.infochat.llm.LlmProvider;
+import app.zcat.infochat.llm.ModelTask;
+import app.zcat.infochat.llm.routing.LlmRouter;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
@@ -17,9 +20,13 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @QuarkusTest
@@ -86,7 +93,10 @@ class CompressCommandHandlerTest {
                 assertTrue(countMemory(conn, userId, "dm", userId) >= 1,
                         "After compress, a chat_memory row should exist");
 
-                // Session counters reset
+                // token_count drained by the counter trigger's per-row
+                // DELETE decrement; next_seq is intentionally NOT reset
+                // (the 4 seed inserts advanced it to 4) so turns persisted
+                // concurrently with a compress keep increasing seqs.
                 try (PreparedStatement ps = conn.prepareStatement(
                         "SELECT token_count, next_seq FROM chat_session "
                                 + "WHERE user_id = ? AND scope_kind = ? AND scope_id = ?")) {
@@ -96,7 +106,7 @@ class CompressCommandHandlerTest {
                     try (ResultSet rs = ps.executeQuery()) {
                         assertTrue(rs.next());
                         assertEquals(0, rs.getInt("token_count"));
-                        assertEquals(0, rs.getInt("next_seq"));
+                        assertEquals(4, rs.getInt("next_seq"));
                     }
                 }
             }
@@ -139,6 +149,105 @@ class CompressCommandHandlerTest {
         }
         // If the LLM is actually reachable (CI with Ollama), success is also fine —
         // the invariant "failure preserves session" is vacuously true.
+    }
+
+    @Test
+    void turnPersistedDuringLlmCallSurvivesCompression() throws Exception {
+        String contactId = PREFIX + "concurrent-actor";
+        UUID userId = seedUser(contactId);
+        seedChatSession(userId, "dm", userId);
+        seedChatMessage(userId, "dm", userId, 0, "user", "first", 5);
+        seedChatMessage(userId, "dm", userId, 1, "assistant", "second", 5);
+
+        // While the LLM call is in flight, another worker persists seq 2.
+        CompressCommandHandler testHandler = buildHandler(
+                StubCompressLlmProvider.succeeding(
+                        "SUMMARY: s\nKEYWORDS: k\nREFERENCES: NONE",
+                        () -> {
+                            try {
+                                seedChatMessage(userId, "dm", userId, 2,
+                                        "user", "concurrent", 7);
+                            } catch (Exception e) {
+                                throw new IllegalStateException(e);
+                            }
+                        }));
+
+        CompressCommandHandler.CompressResult result =
+                testHandler.compress(userId, "dm", userId, "en");
+
+        assertInstanceOf(CompressCommandHandler.CompressResult.Success.class, result);
+        try (Connection conn = dataSource.getConnection()) {
+            assertEquals(1, countMessages(conn, userId, "dm", userId),
+                    "the turn persisted while the LLM call was in flight "
+                            + "must survive compression un-deleted");
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT seq, content FROM chat_message "
+                            + "WHERE user_id = ? AND scope_kind = ? AND scope_id = ?")) {
+                ps.setObject(1, userId);
+                ps.setString(2, "dm");
+                ps.setObject(3, userId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    assertTrue(rs.next());
+                    assertEquals(2, rs.getInt("seq"));
+                    assertEquals("concurrent", rs.getString("content"));
+                }
+            }
+            assertTrue(countMemory(conn, userId, "dm", userId) >= 1,
+                    "the summarized turns must be checkpointed to chat_memory");
+            // Counter trigger keeps the session consistent: token_count is
+            // the surviving turn's tokens, next_seq stays monotonic.
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT token_count, next_seq FROM chat_session "
+                            + "WHERE user_id = ? AND scope_kind = ? AND scope_id = ?")) {
+                ps.setObject(1, userId);
+                ps.setString(2, "dm");
+                ps.setObject(3, userId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    assertTrue(rs.next());
+                    assertEquals(7, rs.getInt("token_count"));
+                    assertEquals(3, rs.getInt("next_seq"));
+                }
+            }
+        }
+    }
+
+    @Test
+    void llmFailureDeletesNothingAndWritesNoSummary() throws Exception {
+        String contactId = PREFIX + "llm-failure-actor";
+        UUID userId = seedUser(contactId);
+        seedChatSession(userId, "dm", userId);
+        seedChatMessage(userId, "dm", userId, 0, "user", "hello", 5);
+        seedChatMessage(userId, "dm", userId, 1, "assistant", "hi", 3);
+
+        CompressCommandHandler testHandler =
+                buildHandler(StubCompressLlmProvider.failing());
+
+        CompressCommandHandler.CompressResult result =
+                testHandler.compress(userId, "dm", userId, "en");
+
+        assertInstanceOf(CompressCommandHandler.CompressResult.Failure.class, result);
+        try (Connection conn = dataSource.getConnection()) {
+            assertEquals(2, countMessages(conn, userId, "dm", userId),
+                    "on LLM failure no turns may be deleted");
+            assertEquals(0, countMemory(conn, userId, "dm", userId),
+                    "on LLM failure no summary may be written");
+        }
+    }
+
+    // ---- manual wiring (same-package field access) -------------------------
+
+    private CompressCommandHandler buildHandler(LlmProvider provider) {
+        CompressCommandHandler testHandler = new CompressCommandHandler();
+        testHandler.dataSource = dataSource;
+        testHandler.llmRouter = new LlmRouter(
+                List.of(new LlmRouter.Entry("test", provider, Set.of("en"))),
+                key -> Optional.empty()) {
+            @Override
+            public LlmProvider forTask(ModelTask task, String lang) {
+                return provider;
+            }
+        };
+        return testHandler;
     }
 
     // ---- seeding helpers --------------------------------------------------

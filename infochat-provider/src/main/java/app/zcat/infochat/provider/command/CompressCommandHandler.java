@@ -38,9 +38,9 @@ import java.util.UUID;
  * <p>Forces an immediate {@code chat_memory} checkpoint: reads
  * the session's {@code chat_message} history, calls the LLM to
  * compress it into (summary, keywords, referenced_posts), inserts
- * a {@code chat_memory} row, deletes all {@code chat_message}
- * rows, and resets session counters. On LLM failure the session
- * is left unchanged.</p>
+ * a {@code chat_memory} row, and deletes the summarized
+ * {@code chat_message} rows. On LLM failure the session is left
+ * unchanged.</p>
  *
  * <p>The compression logic is exposed as a public method
  * ({@link #compress}) so {@link app.zcat.infochat.provider.chat.AutoCompressTrigger}
@@ -56,7 +56,7 @@ public class CompressCommandHandler implements CommandHandler {
                     + "AND removed_at IS NULL";
 
     private static final String SELECT_MESSAGES_SQL =
-            "SELECT role, content FROM chat_message "
+            "SELECT seq, role, content FROM chat_message "
                     + "WHERE user_id = ? AND scope_kind = ? AND scope_id = ? "
                     + "ORDER BY seq ASC";
 
@@ -65,13 +65,15 @@ public class CompressCommandHandler implements CommandHandler {
                     + "(user_id, scope_kind, scope_id, summary, keywords, referenced_posts) "
                     + "VALUES (?, ?, ?, ?, ?, ?)";
 
+    // Bounded by the max seq actually summarized so turns persisted while
+    // the LLM call was in flight survive un-deleted. The chat_message
+    // counter trigger decrements chat_session.token_count per deleted row
+    // and next_seq is never reset, so surviving and future turns keep
+    // monotonically increasing seqs.
     private static final String DELETE_MESSAGES_SQL =
             "DELETE FROM chat_message "
-                    + "WHERE user_id = ? AND scope_kind = ? AND scope_id = ?";
-
-    private static final String RESET_SESSION_SQL =
-            "UPDATE chat_session SET token_count = 0, next_seq = 0, updated_at = now() "
-                    + "WHERE user_id = ? AND scope_kind = ? AND scope_id = ?";
+                    + "WHERE user_id = ? AND scope_kind = ? AND scope_id = ? "
+                    + "AND seq <= ?";
 
     static final String COMPRESS_SYSTEM_PROMPT =
             "Compress the following conversation into a memory entry. "
@@ -130,48 +132,63 @@ public class CompressCommandHandler implements CommandHandler {
     /**
      * Shared compression logic used by both {@code /compress} and
      * {@link app.zcat.infochat.provider.chat.AutoCompressTrigger}.
-     * Reads messages, calls the LLM, writes chat_memory, truncates
-     * chat_message, resets session counters. On LLM failure the
-     * session is left unchanged.
+     * Two-transaction shape: transaction 1 reads the turns and records
+     * the max seq they cover; the LLM call then runs with no JDBC
+     * connection held (a multi-second call must not pin a pool
+     * connection — auto-compress drives this on the hot chat path);
+     * transaction 2 writes the chat_memory row and deletes only
+     * {@code seq <=} that max, so turns persisted while the LLM call
+     * was in flight survive. On LLM failure nothing has been written
+     * or deleted — the session is left unchanged.
      */
     public CompressResult compress(UUID userId, String scopeKind,
                                    UUID scopeId, String scopeLanguage) {
+        // Transaction 1: read the turns to summarize. The single SELECT
+        // is its own transaction; the connection returns to the pool
+        // before the LLM call.
+        List<MessageRow> messages;
+        try (Connection conn = dataSource.getConnection()) {
+            messages = readMessages(conn, userId, scopeKind, scopeId);
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "CompressCommandHandler.compress failed for userId=" + userId, e);
+        }
+        if (messages.isEmpty()) {
+            return new CompressResult.NoMessages();
+        }
+        int maxSummarizedSeq = messages.getLast().seq();
+
+        // Build conversation text for the LLM
+        StringBuilder conversationText = new StringBuilder();
+        for (MessageRow msg : messages) {
+            conversationText.append(msg.role()).append(": ")
+                    .append(msg.content()).append("\n");
+        }
+
+        // Call LLM with no connection held — failure leaves the session
+        // unchanged because nothing has been written or deleted yet.
+        ParsedCompression parsed;
+        try {
+            LlmProvider provider = llmRouter.forTask(ModelTask.CHAT_AGENT, scopeLanguage);
+            LlmResponse response = provider.generate(
+                    ModelTask.CHAT_AGENT, COMPRESS_SYSTEM_PROMPT,
+                    conversationText.toString());
+            parsed = parseCompression(response.text());
+        } catch (Exception e) {
+            SafeLog.warn(log, "Compression LLM call failed for userId=" + userId, e);
+            return new CompressResult.Failure();
+        }
+
+        // Transaction 2: summary write + bounded delete, atomically.
+        // Idempotent if retried: the delete is bounded by the seq set
+        // already summarized. The counter trigger maintains
+        // chat_session.token_count and updated_at on each deleted row.
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                List<MessageRow> messages = readMessages(conn, userId, scopeKind, scopeId);
-                if (messages.isEmpty()) {
-                    conn.commit();
-                    return new CompressResult.NoMessages();
-                }
-
-                // Build conversation text for the LLM
-                StringBuilder conversationText = new StringBuilder();
-                for (MessageRow msg : messages) {
-                    conversationText.append(msg.role()).append(": ")
-                            .append(msg.content()).append("\n");
-                }
-
-                // Call LLM — failure leaves session unchanged
-                ParsedCompression parsed;
-                try {
-                    LlmProvider provider = llmRouter.forTask(ModelTask.CHAT_AGENT, scopeLanguage);
-                    LlmResponse response = provider.generate(
-                            ModelTask.CHAT_AGENT, COMPRESS_SYSTEM_PROMPT,
-                            conversationText.toString());
-                    parsed = parseCompression(response.text());
-                } catch (Exception e) {
-                    SafeLog.warn(log, "Compression LLM call failed for userId=" + userId, e);
-                    conn.rollback();
-                    return new CompressResult.Failure();
-                }
-
                 insertMemory(conn, userId, scopeKind, scopeId, parsed);
-                deleteMessages(conn, userId, scopeKind, scopeId);
-                resetSession(conn, userId, scopeKind, scopeId);
-
+                deleteMessages(conn, userId, scopeKind, scopeId, maxSummarizedSeq);
                 conn.commit();
-                return new CompressResult.Success(messages.size());
             } catch (SQLException e) {
                 conn.rollback();
                 throw e;
@@ -180,6 +197,7 @@ public class CompressCommandHandler implements CommandHandler {
             throw new IllegalStateException(
                     "CompressCommandHandler.compress failed for userId=" + userId, e);
         }
+        return new CompressResult.Success(messages.size());
     }
 
     private List<MessageRow> readMessages(Connection conn, UUID userId,
@@ -191,7 +209,8 @@ public class CompressCommandHandler implements CommandHandler {
             ps.setObject(3, scopeId);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
-                    messages.add(new MessageRow(rs.getString("role"), rs.getString("content")));
+                    messages.add(new MessageRow(rs.getInt("seq"),
+                            rs.getString("role"), rs.getString("content")));
                 }
             }
         }
@@ -211,22 +230,13 @@ public class CompressCommandHandler implements CommandHandler {
         }
     }
 
-    private void deleteMessages(Connection conn, UUID userId,
-                                String scopeKind, UUID scopeId) throws SQLException {
+    private void deleteMessages(Connection conn, UUID userId, String scopeKind,
+                                UUID scopeId, int maxSummarizedSeq) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(DELETE_MESSAGES_SQL)) {
             ps.setObject(1, userId);
             ps.setString(2, scopeKind);
             ps.setObject(3, scopeId);
-            ps.executeUpdate();
-        }
-    }
-
-    private void resetSession(Connection conn, UUID userId,
-                              String scopeKind, UUID scopeId) throws SQLException {
-        try (PreparedStatement ps = conn.prepareStatement(RESET_SESSION_SQL)) {
-            ps.setObject(1, userId);
-            ps.setString(2, scopeKind);
-            ps.setObject(3, scopeId);
+            ps.setInt(4, maxSummarizedSeq);
             ps.executeUpdate();
         }
     }
@@ -266,7 +276,7 @@ public class CompressCommandHandler implements CommandHandler {
 
     record ParsedCompression(String summary, String[] keywords, String[] referencedPosts) {}
 
-    record MessageRow(String role, String content) {}
+    record MessageRow(int seq, String role, String content) {}
 
     private String readScopeLanguage(String scopeKind, UUID scopeId) {
         try (Connection conn = dataSource.getConnection();

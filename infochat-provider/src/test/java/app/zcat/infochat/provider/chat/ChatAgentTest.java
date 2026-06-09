@@ -45,6 +45,7 @@ class ChatAgentTest {
     private int auditCalls;
     private AuditAction lastAuditAction;
     private final List<String> persistedTexts = new ArrayList<>();
+    private boolean ceilingGated;
     private TestChatAgent agent;
 
     @BeforeEach
@@ -61,6 +62,7 @@ class ChatAgentTest {
         dispatcherCalls = 0;
         auditCalls = 0;
         lastAuditAction = null;
+        ceilingGated = false;
 
         agent = buildAgent("en");
     }
@@ -324,6 +326,31 @@ class ChatAgentTest {
                 "final call system prompt must not contain tool list");
     }
 
+    @Test
+    void turnOnCeilingStuckSessionRejectedWithFailureNoticeUntilCompressSucceeds() {
+        ceilingGated = true;
+        llmProvider.responses.add(new LlmResponse("recovered reply"));
+
+        String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "hi");
+
+        assertEquals(BundleKeys.ERROR_COMPRESS_FAILED, reply,
+                "a ceiling-stuck session must reject the turn with the failure notice");
+        assertEquals(0, sessionPersistCalls,
+                "the rejected turn must not be silently appended to the session");
+        assertEquals(0, llmProvider.callCount,
+                "the rejected turn must not reach the LLM");
+        assertFalse(inFlightTracker.isInFlight(USER_ID, SCOPE_KIND, SCOPE_ID),
+                "in-flight slot must be released after a gated rejection");
+
+        // Once a compress succeeds the gate clears and turns flow again.
+        ceilingGated = false;
+        String recovered = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "hi again");
+
+        assertEquals("recovered reply", recovered);
+        assertEquals(2, sessionPersistCalls,
+                "after the gate clears, turns persist normally");
+    }
+
     // --- factory + test subclass ---
 
     private TestChatAgent buildAgent(String language) {
@@ -403,13 +430,19 @@ class ChatAgentTest {
             @Override public String get(String key, String langCode) { return key; }
         };
 
-        // No-op trigger that never fires (threshold unreachable)
+        // No-op trigger that never fires (threshold unreachable); the
+        // ceiling gate is driven by the test's ceilingGated field.
         AutoCompressTrigger noopTrigger = new AutoCompressTrigger(
                 Integer.MAX_VALUE, bundle, null, null) {
             @Override
             public java.util.Optional<String> checkAndCompress(
                     UUID u, String sk, UUID si, String sl) {
                 return java.util.Optional.empty();
+            }
+
+            @Override
+            public boolean isCeilingGated(UUID u, String sk, UUID si) {
+                return ceilingGated;
             }
         };
 
