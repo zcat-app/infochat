@@ -9,7 +9,9 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 
@@ -79,5 +81,47 @@ class DbRoleMatrixIT {
         assertEquals(Set.of("infochat_collector", "infochat_provider"), withLogin,
             "V31 must grant LOGIN to exactly the two service roles and leave "
                 + "infochat_admin NOLOGIN; roles with LOGIN: " + withLogin);
+    }
+
+    /**
+     * Pins the effective DML privilege matrix on {@code price_snapshot} for
+     * both service roles, the grants end-state of V17 (SELECT+INSERT to the
+     * Collector, SELECT to the Provider, DELETE revoked everywhere — retention
+     * is operator-driven partition drop, schema Invariant 6) plus V39's
+     * UPDATE revoke from the Collector (snapshots are immutable history).
+     * A privilege appearing in neither expected set must test false, so a
+     * future migration that widens either role's write surface fails here.
+     */
+    @Test
+    void priceSnapshotPrivilegeMatrixMatchesImmutabilityGrants() throws Exception {
+        Map<String, Set<String>> expectedGranted = Map.of(
+            "infochat_collector", Set.of("SELECT", "INSERT"),
+            "infochat_provider", Set.of("SELECT"));
+
+        Map<String, Set<String>> actualGranted = new HashMap<>();
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT has_table_privilege(?, 'price_snapshot', ?)")) {
+            for (String role : expectedGranted.keySet()) {
+                Set<String> rolePrivileges = new TreeSet<>();
+                for (String privilege : new String[] {"SELECT", "INSERT", "UPDATE", "DELETE"}) {
+                    ps.setString(1, role);
+                    ps.setString(2, privilege);
+                    try (ResultSet rs = ps.executeQuery()) {
+                        rs.next();
+                        if (rs.getBoolean(1)) {
+                            rolePrivileges.add(privilege);
+                        }
+                    }
+                }
+                actualGranted.put(role, rolePrivileges);
+            }
+        }
+
+        assertEquals(expectedGranted, actualGranted,
+            "price_snapshot must stay INSERT-only for the Collector (V17 grant, "
+                + "V39 UPDATE revoke) and SELECT-only for the Provider, with DELETE "
+                + "denied to both (retention is operator partition-drop); "
+                + "effective grants: " + actualGranted);
     }
 }
