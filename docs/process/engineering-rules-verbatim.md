@@ -18,7 +18,7 @@ This file is the **single editing source** for the engineering rules and the tes
 
 - When tests fail, fix the code or escalate — never weaken, disable, or bypass the test. The forbidden test-integrity patterns are enumerated in §8 and enforced by the reviewer.
 - When a constraint blocks progress, escalate via the workflow — never use destructive shortcuts (`--no-verify`, `-DskipTests`, `--skip-tests`, force-push) to make obstacles disappear.
-- Never sacrifice performance, security, or simplicity to reach a goal.
+- Never trade away a security property the spec states, or a performance budget the spec or ticket states, to reach a goal. Where performance and simplicity conflict and no budget is stated, prefer simplicity.
 
 ## §3 Better alternatives surface as proposals, not scope expansion
 
@@ -31,6 +31,8 @@ If the requested approach has a materially simpler equivalent that meets the sam
 ## §5 Run the full test suite before declaring done
 
 A ticket is not done when its own new tests pass. Run the full pre-existing suite (`mvn verify` from the repo root) and report regressions, not just the new green checks.
+
+If a pre-existing test unrelated to the diff fails, first rule out environment causes: another `mvn verify` running in a parallel worktree (Quarkus ITs bind the shared test port 8081 — check `pgrep -af "clean verify"`), or stale sibling-module SNAPSHOTs pulled from the shared `~/.m2` (always add `-am` to module-targeted runs). With the environment clean, re-run once: if green, report the flake (test name, failure mode) alongside the result — do not "fix" the flaky test inline (§1 applies). A second clean-environment failure of the same test is a regression: escalate.
 
 ## §6 Never trade rules against each other
 
@@ -84,7 +86,7 @@ The reviewer's `TEST-INTEGRITY-CHECK` fails if the diff introduces any of the fo
 - On round-N review (N ≥ 2), the diff is compared to round-(N−1) along three dimensions: files-touched count, net lines added, and net lines removed. Every rework round is a *fix-only* round; if the rework grew along **all three** dimensions simultaneously vs the previous round, that is scope-creep-during-rework and `SCOPE-DRIFT-CHECK` fails automatically. Growth along all three is the **only** failure condition — growth along one or two dimensions, or holding all three equal, is permitted (the rework is still convergent overall).
 - This applies to round 2 (default cap) AND to round 3 (only reachable when the ticket sets `round_cap: 3`). Round-cap-3 tickets are typically `complexity: high` or `risk: high` — under-specifying must-shrink on round 3 would weaken the rule precisely when stakes are highest.
 - The reviewer's prompt receives both the current-round and previous-round diff stats so the comparison is mechanical. On round 1 the previous-round substitution is the literal sentinel `(N/A — round 1, no previous round)` and the rule does not apply.
-- Exception: if the round-(N−1) REWORK explicitly required a refactor that legitimately grows the diff (e.g. "extract this into a helper used by three callers"), the developer must cite that REWORK item in the round-N commit message. Without the citation, growth → fail.
+- Exception: growth is permitted when required by a citable mandate — a round-(N−1) REWORK item whose fix necessarily grows the diff (e.g. "extract this into a helper used by three callers", "add the missing coverage for case X"), or an in-branch redteam-finding remediation the user accepted. The developer must cite the REWORK item or finding ID in the round-N commit message. Without the citation, growth → fail.
 
 ### Test-integrity violations are not developer-overridable
 

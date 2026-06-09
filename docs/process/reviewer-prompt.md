@@ -251,9 +251,10 @@ SCOPE-DRIFT-CHECK: <PASS | FAIL>
    or files_budget, or PASS if all do. If FAIL, name specific files/lines.
    On round N ≥ 2, also FAIL if the diff grew along ALL THREE of
    files-touched, lines added, AND lines removed vs round-(N−1) and the
-   prior round's REWORK did not authorize a refactor (must-shrink:
-   growth along all three is the only failure condition; holding
-   equal or shrinking along any dimension is convergent).>
+   round-N commit message cites no authorizing mandate — a prior-round
+   REWORK item or a user-accepted redteam finding (must-shrink: growth
+   along all three is the only failure condition; holding equal or
+   shrinking along any dimension is convergent).>
 
 TEST-INTEGRITY-CHECK: <PASS | FAIL>
   <one paragraph: any forbidden patterns introduced (see

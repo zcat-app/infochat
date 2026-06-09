@@ -112,7 +112,7 @@ The verbatim text of every rule below — plus the full test-integrity rule list
 ### No workarounds, no shortcuts
 - When tests fail, fix the code or escalate — never weaken, disable, or bypass the test. The forbidden test-integrity patterns are enumerated in [engineering-rules-verbatim.md §8](docs/process/engineering-rules-verbatim.md) and enforced by the reviewer.
 - When a constraint blocks progress, escalate via the workflow — never use destructive shortcuts (`--no-verify`, `-DskipTests`, `--skip-tests`, force-push) to make obstacles disappear.
-- Never sacrifice performance, security, or simplicity to reach a goal.
+- Never trade away a security property the spec states, or a performance budget the spec or ticket states, to reach a goal. Where performance and simplicity conflict and no budget is stated, prefer simplicity.
 
 ### Better alternatives surface as proposals, not scope expansion
 - If you spot a better approach mid-implementation, complete the ticket as written. Record the alternative in the commit message under an `Alternatives considered:` trailer or file a new ticket. Never silently expand scope to chase the better idea.
@@ -163,7 +163,7 @@ These are project-level coding-style preferences. They are NOT reviewer-enforced
 - The benefit is reduced indentation: the main logic lives at the function's base indent rather than nested inside a happy-path `if`. A reader can scan the guards and skip to the meat.
 
 ### Simplify aggressively
-- Already covered by the §Engineering rules: §"No workarounds" ("Never sacrifice ... simplicity to reach a goal"), §"Push back when simpler exists" (surface a simpler design before implementing), and the system-prompt rule "Don't add features, refactor, or introduce abstractions beyond what the task requires."
+- Already covered by the §Engineering rules: §"No workarounds" ("Where performance and simplicity conflict ... prefer simplicity"), §"Push back when simpler exists" (surface a simpler design before implementing), and the system-prompt rule "Don't add features, refactor, or introduce abstractions beyond what the task requires."
 - The bias holds at every level — design, structure, line-by-line. If a simpler form meets the same goal, prefer it. Three similar lines beats a premature abstraction. A flat function beats an unnecessary class. The simpler the implementation, the less commenting it needs (which is the point of pairing this with the comment policy above).
 
 ## Context budget heuristics
