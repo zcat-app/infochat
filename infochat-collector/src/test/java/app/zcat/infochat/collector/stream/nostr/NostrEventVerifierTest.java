@@ -5,6 +5,11 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -183,6 +188,48 @@ class NostrEventVerifierTest {
         assertFalse(verifier.verify(new NostrEvent(valid.id(), valid.pubkey(), valid.createdAt(),
                         valid.kind(), null, valid.content(), valid.sig())),
                 "null tags rejected");
+    }
+
+    /**
+     * T24: the verifier reuses a per-thread {@link java.security.MessageDigest}
+     * across {@code verify()} calls instead of allocating one each time. Hammer
+     * the single shared verifier from several threads with interleaved known-good
+     * and known-bad events; every result must equal the single-call outcome. A
+     * shared non-thread-safe digest, or digest state bleeding between reused
+     * calls, would corrupt a computed id and flip a result.
+     */
+    @Test
+    void digestReuseAcrossConcurrentVerifications_unchanged() throws Exception {
+        NostrEvent good = NostrSignedEventFixtures.VALID_KIND_1_EVENT;
+        // Appended content: the relay-supplied id no longer matches the
+        // canonical serialization, so verify() must reject it.
+        NostrEvent bad = new NostrEvent(good.id(), good.pubkey(), good.createdAt(),
+                good.kind(), good.tags(), good.content() + " tampered", good.sig());
+        // The single-call outcomes the concurrent run must reproduce.
+        assertTrue(verifier.verify(good), "known-good event verifies single-threaded");
+        assertFalse(verifier.verify(bad), "known-bad event is rejected single-threaded");
+
+        int threads = 4;
+        int iterationsPerThread = 100;
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        try {
+            List<Future<Boolean>> futures = new ArrayList<>();
+            for (int t = 0; t < threads; t++) {
+                futures.add(pool.submit(() -> {
+                    for (int i = 0; i < iterationsPerThread; i++) {
+                        if (!verifier.verify(good) || verifier.verify(bad)) {
+                            return false;
+                        }
+                    }
+                    return true;
+                }));
+            }
+            for (Future<Boolean> future : futures) {
+                assertTrue(future.get(), "every concurrent verify matched its single-call outcome");
+            }
+        } finally {
+            pool.shutdownNow();
+        }
     }
 
     private static byte[] hexToBytes(String hex) {

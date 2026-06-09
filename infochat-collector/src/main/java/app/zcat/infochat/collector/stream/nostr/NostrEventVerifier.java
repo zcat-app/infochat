@@ -38,6 +38,16 @@ public final class NostrEventVerifier {
     private static final BigInteger N = CURVE.getN();
     private static final ECPoint G = CURVE.getG();
 
+    // verify() runs on many stream threads against one shared verifier, and
+    // MessageDigest is not thread-safe — so each thread gets its own reusable
+    // SHA-256 instance instead of allocating one per call. digest(input)
+    // resets the engine after producing, leaving no state to bleed between
+    // successive calls on the same thread. Declared before CHALLENGE_TAG_PREFIX
+    // because the double-tag-hash precompute below calls sha256() during class
+    // initialization.
+    private static final ThreadLocal<MessageDigest> SHA256 =
+            ThreadLocal.withInitial(NostrEventVerifier::newSha256);
+
     // BIP-340 tagged-hash prefix for the challenge: SHA256(tag) || SHA256(tag).
     // Precomputed so verify() never re-hashes the literal "BIP0340/challenge".
     private static final byte[] CHALLENGE_TAG_PREFIX = doubleTagHash("BIP0340/challenge");
@@ -281,8 +291,12 @@ public final class NostrEventVerifier {
     }
 
     private static byte[] sha256(byte[] input) {
+        return SHA256.get().digest(input);
+    }
+
+    private static MessageDigest newSha256() {
         try {
-            return MessageDigest.getInstance("SHA-256").digest(input);
+            return MessageDigest.getInstance("SHA-256");
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 not available", e);
         }

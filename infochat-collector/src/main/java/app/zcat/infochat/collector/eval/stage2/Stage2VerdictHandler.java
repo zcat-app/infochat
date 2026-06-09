@@ -6,6 +6,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -133,8 +134,7 @@ public class Stage2VerdictHandler {
 
     private void applyBenign(UUID postId, Instant postFetchedAt) {
         TransactionHelper.inTransaction(dataSource, "Stage2VerdictHandler", conn -> {
-            updatePostStage2DoneRaw(conn, postId, postFetchedAt, /* stage2Failed */ false);
-            setStage2Verdict(conn, postId, postFetchedAt, "BENIGN");
+            updatePostStage2DoneRaw(conn, postId, postFetchedAt, /* stage2Failed */ false, "BENIGN");
             closeStage1QuarantineRowsAndEmit(conn, postId);
         });
         LOG.infof("Stage 2 verdict: BENIGN post_id=%s — released to Tagger/Embedding (stage2_done=true, status=RAW)",
@@ -142,10 +142,8 @@ public class Stage2VerdictHandler {
     }
 
     private void applyQuarantineVerdict(UUID postId, Instant postFetchedAt, Verdict verdict) {
-        TransactionHelper.inTransaction(dataSource, "Stage2VerdictHandler", conn -> {
-            updatePostQuarantined(conn, postId, postFetchedAt, /* stage2Failed */ false);
-            setStage2Verdict(conn, postId, postFetchedAt, verdict.name());
-        });
+        TransactionHelper.inTransaction(dataSource, "Stage2VerdictHandler", conn ->
+            updatePostQuarantined(conn, postId, postFetchedAt, /* stage2Failed */ false, verdict.name()));
         LOG.infof("Stage 2 verdict: %s post_id=%s — quarantined (stage2_done=true, status=QUARANTINED)",
             verdict, postId);
     }
@@ -153,13 +151,13 @@ public class Stage2VerdictHandler {
     private void applyInfraFailure(UUID postId, Instant postFetchedAt) {
         if (releaseOnStage2Failure) {
             TransactionHelper.inTransaction(dataSource, "Stage2VerdictHandler", conn ->
-                updatePostStage2DoneRaw(conn, postId, postFetchedAt, /* stage2Failed */ true));
+                updatePostStage2DoneRaw(conn, postId, postFetchedAt, /* stage2Failed */ true, /* stage2Verdict */ null));
             LOG.warnf("Stage 2 infrastructure failure (error_class=%s) post_id=%s — released with Stage 1 redactions "
                     + "(stage2_done=true, stage2_failed=true, status=RAW); release-on-stage2-failure=true",
                 ERROR_CLASS_STAGE2_INFRA_FAILURE, postId);
         } else {
             TransactionHelper.inTransaction(dataSource, "Stage2VerdictHandler", conn ->
-                updatePostQuarantined(conn, postId, postFetchedAt, /* stage2Failed */ true));
+                updatePostQuarantined(conn, postId, postFetchedAt, /* stage2Failed */ true, /* stage2Verdict */ null));
             LOG.warnf("Stage 2 infrastructure failure (error_class=%s) post_id=%s — quarantined "
                     + "(stage2_done=true, stage2_failed=true, status=QUARANTINED); release-on-stage2-failure=false",
                 ERROR_CLASS_STAGE2_INFRA_FAILURE, postId);
@@ -167,54 +165,57 @@ public class Stage2VerdictHandler {
     }
 
     /**
-     * UPDATE post SET stage2_done=TRUE [, stage2_failed=TRUE] — the
-     * RAW-retained release path. Used by BENIGN and the
-     * release-on-stage2-failure=true infra-failure branch. Status
-     * stays RAW because Tagger and Embedding still need to run
-     * (Invariant 5 — the literal flip to READY is M1-034 Stage 5).
+     * UPDATE post SET stage2_done=TRUE [, stage2_failed=TRUE]
+     * [, stage2_verdict=?] — the RAW-retained release path. Used by
+     * BENIGN and the release-on-stage2-failure=true infra-failure
+     * branch. Status stays RAW because Tagger and Embedding still
+     * need to run (Invariant 5 — the literal flip to READY is M1-034
+     * Stage 5). The verdict write is folded into this UPDATE rather
+     * than issued as a second statement on the same (id, fetched_at)
+     * row; {@code COALESCE(?, stage2_verdict)} leaves the column
+     * untouched when {@code stage2Verdict} is null (the infra-failure
+     * branch, where the judge produced no verdict).
      */
     private static void updatePostStage2DoneRaw(Connection conn, UUID postId, Instant postFetchedAt,
-                                                boolean stage2Failed) throws SQLException {
+                                                boolean stage2Failed, @Nullable String stage2Verdict)
+            throws SQLException {
         final String sql =
-            "UPDATE post SET stage2_done = TRUE, stage2_failed = ? "
+            "UPDATE post SET stage2_done = TRUE, stage2_failed = ?, "
+                + "       stage2_verdict = COALESCE(?, stage2_verdict) "
                 + "WHERE id = ? AND fetched_at = ?";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setBoolean(1, stage2Failed);
-            ps.setObject(2, postId);
-            ps.setTimestamp(3, Timestamp.from(postFetchedAt));
+            ps.setString(2, stage2Verdict);
+            ps.setObject(3, postId);
+            ps.setTimestamp(4, Timestamp.from(postFetchedAt));
             ps.executeUpdate();
         }
     }
 
     /**
      * UPDATE post SET status='QUARANTINED', stage2_done=TRUE
-     * [, stage2_failed=TRUE]. Used by INJECTION / MALWARE / UNKNOWN
-     * verdicts and the release-on-stage2-failure=false infra-failure
-     * branch. {@code status_changed_at} is advanced so the future
-     * NEEDS_REVIEW transition's NOTIFY cursor (M2 quarantine_review
-     * listener) sees the new state.
+     * [, stage2_failed=TRUE] [, stage2_verdict=?]. Used by INJECTION /
+     * MALWARE / UNKNOWN verdicts and the release-on-stage2-failure=false
+     * infra-failure branch. {@code status_changed_at} is advanced so the
+     * future NEEDS_REVIEW transition's NOTIFY cursor (M2 quarantine_review
+     * listener) sees the new state. The verdict write is folded into this
+     * UPDATE rather than issued as a second statement on the same
+     * (id, fetched_at) row; {@code COALESCE(?, stage2_verdict)} leaves the
+     * column untouched when {@code stage2Verdict} is null (the infra-failure
+     * branch, where the judge produced no verdict).
      */
     private static void updatePostQuarantined(Connection conn, UUID postId, Instant postFetchedAt,
-                                              boolean stage2Failed) throws SQLException {
+                                              boolean stage2Failed, @Nullable String stage2Verdict)
+            throws SQLException {
         final String sql =
             "UPDATE post SET status = 'QUARANTINED', stage2_done = TRUE, stage2_failed = ?, "
-                + "       status_changed_at = now() "
+                + "       stage2_verdict = COALESCE(?, stage2_verdict), status_changed_at = now() "
                 + "WHERE id = ? AND fetched_at = ?";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setBoolean(1, stage2Failed);
-            ps.setObject(2, postId);
-            ps.setTimestamp(3, Timestamp.from(postFetchedAt));
-            ps.executeUpdate();
-        }
-    }
-
-    private static void setStage2Verdict(Connection conn, UUID postId, Instant postFetchedAt,
-                                          String verdict) throws SQLException {
-        final String sql = "UPDATE post SET stage2_verdict = ? WHERE id = ? AND fetched_at = ?";
-        try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, verdict);
-            ps.setObject(2, postId);
-            ps.setTimestamp(3, Timestamp.from(postFetchedAt));
+            ps.setString(2, stage2Verdict);
+            ps.setObject(3, postId);
+            ps.setTimestamp(4, Timestamp.from(postFetchedAt));
             ps.executeUpdate();
         }
     }

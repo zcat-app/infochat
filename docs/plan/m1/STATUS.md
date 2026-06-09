@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 282 |
+| done | 283 |
 | deferred | 2 |
 | **total** | **289** |
 
@@ -27,7 +27,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-244 — InboundRouter: fold is_banned into snapshot + command body cap (complexity: medium, risk: medium)
 - M1-245 — Re-evaluation candidate scan: fetched_at window + partial index (complexity: medium, risk: medium)
 - M1-246 — Quarantine stored procedures: audit-before-effect reorder (complexity: medium, risk: medium)
-- M1-252 — Collector lows: Nostr digest reuse, Stage2 redundant UPDATE, ssrf producer (complexity: low, risk: low)
 - M1-253 — Messaging-adapter consistency lows: virtual threads + Random (complexity: low, risk: low)
 
 ---
@@ -64,6 +63,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-252 | Collector lows: Nostr digest reuse, Stage2 redundant UPDATE, ssrf producer | 2026-06-09 | round 1 APPROVE |
 | M1-251 | LLM-adapter lows: finish embedding pipeline dedup + extract StubConfig | 2026-06-09 | round 1 APPROVE |
 | M1-250 | Core lows: Redactor scan/cadence + notifier phantom javadoc | 2026-06-09 | round 1 APPROVE |
 | M1-249 | Provider lows: RateCapBucket dedup, ban null-guard, NOTIFY parse | 2026-06-09 | round 1 APPROVE |
@@ -73,7 +73,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-242 | Signal inbound decode hardening + oversize outcome | 2026-06-09 | round 1 APPROVE |
 | M1-241 | List /get-tags and /get-sources in the /help catalogue | 2026-06-09 | round 1 APPROVE |
 | M1-240 | infochat-collector: span-offset doc, unused asset-refresh fields | 2026-06-09 | round 1 APPROVE |
-| M1-239 | infochat-provider: NOTIFY discriminator, stale ban comment, locale fold | 2026-06-09 | round 1 APPROVE |
 
 ---
 
@@ -433,6 +432,6 @@ M1-248 (done)
 M1-249 (done)
 M1-250 (done)
 M1-251 (done)
-M1-252 (pending) ← runnable
+M1-252 (done)
 M1-253 (pending) ← runnable
 ```
