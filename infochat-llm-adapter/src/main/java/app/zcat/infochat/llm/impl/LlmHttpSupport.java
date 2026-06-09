@@ -3,6 +3,7 @@ package app.zcat.infochat.llm.impl;
 import app.zcat.infochat.llm.LlmResponse;
 import org.eclipse.microprofile.config.Config;
 import org.jboss.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 import java.io.IOException;
 import java.net.URI;
@@ -89,17 +90,70 @@ final class LlmHttpSupport {
     }
 
     /**
+     * Builds a provider-specific call-failure exception. {@code cause} is
+     * {@code null} on the non-2xx path (a status check, no transport
+     * exception to chain) and non-null on the transport / interrupt paths.
+     * Each provider supplies its own exception type — chat providers throw
+     * {@link OpenAiCompatibleProvider.LlmCallFailedException}, the embedding
+     * provider its own {@code EmbeddingCallFailedException} — so the shared
+     * {@link #sendForBody} pipeline can surface the failure under the type
+     * the caller's downstream (LLM router vs. EmbeddingWorker) expects.
+     */
+    @FunctionalInterface
+    interface CallFailureFactory {
+        RuntimeException create(String message, @Nullable Throwable cause);
+    }
+
+    /**
+     * The shared send + clamp + non-2xx pipeline for all three HTTP
+     * providers ({@link AnthropicProvider}, {@link OpenAiCompatibleProvider}
+     * via {@link #executeJsonCall}, and {@link OpenAiCompatibleEmbeddingProvider}
+     * directly): send {@code request} with the
+     * {@linkplain #boundedStringHandler(long) bounded} body handler capped at
+     * {@code cap} bytes, map a transport failure or a non-2xx status onto the
+     * caller's exception via {@code failure}, and return the 2xx body for the
+     * caller to parse. Single-sourced here so the response-cap and
+     * failure-surface contract cannot drift across the providers; each one
+     * supplies only its fully-built {@code request}, its already-clamped
+     * {@code cap}, its {@code providerLabel}, and its exception
+     * {@code failure} factory.
+     *
+     * <p>{@code providerLabel} prefixes every log line and exception message
+     * so the failing provider stays identifiable now that the call site is
+     * shared.
+     */
+    static String sendForBody(HttpClient http, HttpRequest request, long cap,
+                              String providerLabel, CallFailureFactory failure) {
+        URI uri = request.uri();
+        HttpResponse<String> response;
+        try {
+            response = http.send(request, boundedStringHandler(cap));
+        } catch (IOException e) {
+            throw failure.create(providerLabel + ": HTTP call failed for " + uri, e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw failure.create(providerLabel + ": HTTP call interrupted for " + uri, e);
+        }
+
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            String preview = preview(response.body());
+            LOG.warnf("%s: non-2xx %d from %s; body preview: %s",
+                providerLabel, response.statusCode(), uri, preview);
+            throw failure.create(providerLabel + ": non-2xx status " + response.statusCode()
+                + " from " + uri + ": " + preview, null);
+        }
+
+        return response.body();
+    }
+
+    /**
      * The shared HTTP call pipeline for the two chat-completion HTTP
      * providers ({@link AnthropicProvider} and
      * {@link OpenAiCompatibleProvider}): read and clamp the
-     * operator-configurable body cap, send {@code request} with the
-     * {@linkplain #boundedStringHandler(long) bounded} body handler, map
-     * a transport failure or a non-2xx status onto
-     * {@link OpenAiCompatibleProvider.LlmCallFailedException}, and hand a
-     * 2xx body to {@code parser}. Single-sourced here so the response-cap
-     * and failure-surface contract cannot drift between the two providers;
-     * each provider supplies only its fully-built {@code request} and its
-     * response-text {@code parser}.
+     * operator-configurable body cap, run the send / non-2xx surface through
+     * {@link #sendForBody} under {@link OpenAiCompatibleProvider.LlmCallFailedException},
+     * and hand the 2xx body to {@code parser}. Each provider supplies only
+     * its fully-built {@code request} and its response-text {@code parser}.
      *
      * <p>{@code providerLabel} prefixes every log line and exception
      * message so the failing provider stays identifiable now that the
@@ -107,32 +161,14 @@ final class LlmHttpSupport {
      */
     static LlmResponse executeJsonCall(HttpClient http, Config config, HttpRequest request,
                                        String providerLabel, LlmResponseParser parser) {
-        URI uri = request.uri();
         long cap = clampBodyCapBytes(
             config.getOptionalValue("infochat.llm.max-response-bytes", Long.class)
                 .orElse(DEFAULT_BODY_CAP_BYTES));
-        HttpResponse<String> response;
-        try {
-            response = http.send(request, boundedStringHandler(cap));
-        } catch (IOException e) {
-            throw new OpenAiCompatibleProvider.LlmCallFailedException(
-                providerLabel + ": HTTP call failed for " + uri, e);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new OpenAiCompatibleProvider.LlmCallFailedException(
-                providerLabel + ": HTTP call interrupted for " + uri, e);
-        }
-
-        if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            String preview = preview(response.body());
-            LOG.warnf("%s: non-2xx %d from %s; body preview: %s",
-                providerLabel, response.statusCode(), uri, preview);
-            throw new OpenAiCompatibleProvider.LlmCallFailedException(
-                providerLabel + ": non-2xx status " + response.statusCode()
-                    + " from " + uri + ": " + preview);
-        }
-
-        return parser.parse(response.body(), uri);
+        String body = sendForBody(http, request, cap, providerLabel, (message, cause) ->
+            cause == null
+                ? new OpenAiCompatibleProvider.LlmCallFailedException(message)
+                : new OpenAiCompatibleProvider.LlmCallFailedException(message, cause));
+        return parser.parse(body, request.uri());
     }
 
     /**

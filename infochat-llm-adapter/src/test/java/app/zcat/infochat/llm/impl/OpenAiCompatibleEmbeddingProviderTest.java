@@ -12,6 +12,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -94,6 +95,49 @@ class OpenAiCompatibleEmbeddingProviderTest {
             () -> provider.embed(List.of("text")));
         assertTrue(ex.getMessage().contains("503"),
             "exception must name the unavailable status; got: " + ex.getMessage());
+    }
+
+    @Test
+    void embedRoutesNon2xxAndOkThroughSharedPipeline() {
+        // T19: the embedding provider now delegates its send / non-2xx surface
+        // to LlmHttpSupport.sendForBody — the same pipeline the chat providers
+        // use — rather than a private duplicate. One server answers two
+        // sequential calls: first a 500 (non-2xx), then a valid 2xx body.
+        //
+        // Non-2xx half: the thrown EmbeddingCallFailedException must carry the
+        // shared throw-site wording ("non-2xx status <code>") AND the appended
+        // body preview. The pre-migration copy threw a status-only message with
+        // no preview, so the preview substring is what proves the call now
+        // flows through the shared path. 2xx half: a well-formed reply still
+        // parses to one EmbeddingResult per input, unchanged.
+        AtomicInteger callCount = new AtomicInteger();
+        mockServer.createContext("/embeddings", exchange -> {
+            boolean firstCall = callCount.getAndIncrement() == 0;
+            String json = firstCall
+                ? "{\"error\":\"server boom\"}"
+                : "{\"data\":[{\"embedding\":[0.5,0.6]}]}";
+            byte[] resp = json.getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(firstCall ? 500 : 200, resp.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(resp);
+            }
+        });
+        mockServer.start();
+
+        OpenAiCompatibleEmbeddingProvider provider = provider();
+
+        EmbeddingCallFailedException ex = assertThrows(EmbeddingCallFailedException.class,
+            () -> provider.embed(List.of("text")));
+        assertTrue(ex.getMessage().contains("non-2xx status 500"),
+            "non-2xx must carry the shared LlmHttpSupport throw-site wording + status; got: "
+                + ex.getMessage());
+        assertTrue(ex.getMessage().contains("server boom"),
+            "non-2xx must append the shared body preview, proving it routes through the shared "
+                + "path rather than the old status-only copy; got: " + ex.getMessage());
+
+        List<EmbeddingResult> results = provider.embed(List.of("text"));
+        assertEquals(1, results.size(), "a 2xx reply still parses to one EmbeddingResult per input");
+        assertEquals(new EmbeddingResult(new float[] {0.5f, 0.6f}), results.get(0));
     }
 
     private void respondWith(String json) {

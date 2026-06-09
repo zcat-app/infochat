@@ -9,13 +9,11 @@ import app.zcat.infochat.llm.EmbeddingProvider;
 import app.zcat.infochat.llm.EmbeddingResult;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -75,8 +73,6 @@ import java.util.Optional;
  */
 @ApplicationScoped
 public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
-
-    private static final Logger LOG = Logger.getLogger(OpenAiCompatibleEmbeddingProvider.class);
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
@@ -142,29 +138,14 @@ public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
         }
         HttpRequest request = reqBuilder.build();
 
-        HttpResponse<String> response;
-        try {
-            response = http.send(request,
-                LlmHttpSupport.boundedStringHandler(LlmHttpSupport.clampBodyCapBytes(maxResponseBytes)));
-        } catch (IOException e) {
-            throw new EmbeddingCallFailedException(
-                "OpenAiCompatibleEmbeddingProvider: HTTP call failed for " + uri, e);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new EmbeddingCallFailedException(
-                "OpenAiCompatibleEmbeddingProvider: HTTP call interrupted for " + uri, e);
-        }
+        String responseBody = LlmHttpSupport.sendForBody(http, request,
+            LlmHttpSupport.clampBodyCapBytes(maxResponseBytes),
+            "OpenAiCompatibleEmbeddingProvider",
+            (message, cause) -> cause == null
+                ? new EmbeddingCallFailedException(message)
+                : new EmbeddingCallFailedException(message, cause));
 
-        if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            String preview = LlmHttpSupport.preview(response.body());
-            LOG.warnf("OpenAiCompatibleEmbeddingProvider: non-2xx %d from %s; body preview: %s",
-                response.statusCode(), uri, preview);
-            throw new EmbeddingCallFailedException(
-                "OpenAiCompatibleEmbeddingProvider: non-2xx status " + response.statusCode()
-                    + " from " + uri);
-        }
-
-        return parseEmbeddings(response.body(), uri, texts.size());
+        return parseEmbeddings(responseBody, uri, texts.size());
     }
 
     private static List<EmbeddingResult> parseEmbeddings(String responseBody, URI uri, int expectedCount) {
