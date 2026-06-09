@@ -107,7 +107,73 @@ reviews:
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
+redteam_findings:
+  - date: 2026-06-10
+    category: INFO-LEAK
+    severity: medium
+    promise: |
+      security.md §Secrets handling — "Stdout console logs pass through
+      the closed API-key catalogue redactor, fail-closed on regex
+      timeout (whole message replaced with a fixed sentinel). The
+      audit_log writer consumes the same Redactor utility so the two
+      cannot drift." The promise is that every API-key-shaped value
+      reaching a console log line is scanned and redacted by the
+      Redactor.
+    gap: |
+      The new thrown-chain redaction in Redactor.redactThrownChain
+      (infochat-core/src/main/java/app/zcat/infochat/core/log/Redactor.java:180-220)
+      walks only the getCause() chain — it never inspects
+      getSuppressed(). The console formatter (SimpleFormatter / JBoss
+      formatter, via Throwable.printStackTrace) DOES render suppressed
+      throwables ("Suppressed: ..."). Two sub-paths: (1) When no
+      catalogue match is found in the main cause chain,
+      redactThrownChain returns the ORIGINAL throwable unchanged
+      (Redactor.java:202-204), so its suppressed exceptions ride
+      through to the formatter completely unscanned. (2) The rebuilt
+      path constructs RedactedThrown with super(message, cause, false,
+      true) (Redactor.java:231) which disables suppression — so
+      suppressed nodes are silently DROPPED rather than scanned-and-
+      preserved. The net effect: a suppressed throwable carrying an
+      API-key-shaped string is never run through the catalogue, and on
+      the unchanged path it reaches the console raw. The
+      RedactorThrownChainTest added in this diff exercises only
+      getCause() nesting; no test covers getSuppressed().
+    repro: |
+      A try-with-resources block over a JDBC/HTTP resource throws a
+      primary exception whose message is clean, but the resource's
+      close() throws a secondary exception whose message echoes a
+      connection string or driver error containing a value matching the
+      generic "...password=<32+ chars>" / "bearer <token>" catalogue
+      shape (or an `sk-...` / `AKIA...` literal). Java records the
+      close() exception as a SUPPRESSED throwable on the primary. The
+      primary's own message and cause chain contain no catalogue match,
+      so redactThrownChain takes the unchanged arm and returns the
+      original Throwable. The console formatter renders the
+      "Suppressed:" frame verbatim, putting the secret on stdout. The
+      spec commits that console logs are redacted of the catalogue
+      shapes; this surface is not.
+    suggested_fix_class: trust-boundary-tightening
+redteam_audits:
+  - date: 2026-06-10
+    verdict: FINDINGS
+    base: f3bc0e7b7e11a6b6351f49f1eb840a0a18cd3662
+    head: f27ee7918b9ce3ce0e2931fcb28b5505176dd45d
+    verdict_file: docs/plan/m1/redteam/M1-272-2026-06-10.md
+    findings_count: 1
+    out_of_model_count: 1
+    note: |
+      One medium INFO-LEAK: redactThrownChain never inspects
+      getSuppressed(), so a suppressed throwable whose message carries
+      a catalogue-shaped secret reaches the console unscanned on the
+      no-match arm (and is dropped, not scanned-and-preserved, on the
+      rebuilt arm). Verified against the committed Redactor.java before
+      transcription (gap/repro line numbers corrected from
+      diff-relative to file-relative). M1-272 is done, so the fix is a
+      new remediation ticket (remediates: M1-272) extending the chain
+      walk to suppressed throwables plus a getSuppressed() test in
+      RedactorThrownChainTest. Out-of-model item (prose in suppressed
+      throwables) is advisory — same structural fix covers it for
+      catalogue shapes; prose hygiene stays a SafeLog call-site duty.
 clarity_check:
   date: 2026-06-09
   verdict: PASS
