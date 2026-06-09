@@ -15,7 +15,7 @@ files_scope:
 complexity: low
 risk: low
 round_cap: 2
-security_relevant: false
+security_relevant: true
 migration_touch: false
 out_of_scope:
   - InboundRouter and BanCheck — owned by M1-244; this ticket does not touch the intake path.
@@ -28,13 +28,35 @@ acceptance:
   - "mvn -B clean verify from the repo root exits 0."
 test_plan:
   adds:
-    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/RateCapBucketTest.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/outbox/NewPostListenerParseTest.java
+  modifies:
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/RateCapBucketTest.java
   preserves:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
 reviews: {}
+escalations:
+  - date: 2026-06-09
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      TEST-CHANGES-AUTHORIZED: FAIL — test_plan.adds lists RateCapBucketTest.java
+      but that file already exists (555 lines, 18 @Test). T11 requires adding a
+      tryAcquireGroupReply cap/refill test that does not yet exist, so the file
+      will be MODIFIED, not created.
+revisions:
+  - date: 2026-06-09
+    reason: "clarity-fail rework — clarity FAIL (TEST-CHANGES-AUTHORIZED) flagged RateCapBucketTest.java as a pre-existing 555-line / 18-@Test file wrongly listed under test_plan.adds. T11's acceptance requires asserting the group-reply bucket (tryAcquireGroupReply, RateCapBucket.java:346) enforces its cap and refills, but the existing test file has no group-reply test, so the file will be MODIFIED. Fix: move RateCapBucketTest.java adds→modifies and add an Authorized-test-changes section naming the new group-reply test method(s). Clarity WARN folded in: T29 touches BanCommandHandler (ban-handling), so security_relevant false→true for audit traceability (change itself non-behavioral)."
+    prior_values: |
+      status (pre-refine, transient): escalated (clarity-fail; never committed as in-progress)
+      security_relevant (pre-refine): false
+      test_plan (pre-refine):
+        adds:
+          - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/RateCapBucketTest.java
+          - infochat-provider/src/test/java/app/zcat/infochat/provider/outbox/NewPostListenerParseTest.java
+        preserves:
+          - all tests currently green on main
+      (no test_plan.modifies block; no Authorized-test-changes section in body)
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -76,6 +98,16 @@ keep raw JSON out of logs/exceptions. Named tests pin behavior; `mvn verify` is
 
 See frontmatter. The intake path (M1-244), bucket tuning values, and the NOTIFY
 emit side are untouched.
+
+## Authorized test changes
+
+- `RateCapBucketTest.java` (pre-existing, 555 lines / 18 @Test — `modifies`):
+  add a `tryAcquireGroupReply` cap/refill test so T11's "group … still enforces
+  its cap and refills on its window" is pinned (the file currently has no
+  group-reply coverage), e.g. `groupReplyOverCapReturnsFalseAfterExhaustion`
+  and `groupReplyRefillsOverWindow`. The pattern mirrors the existing
+  group-llm / group-command tests. All 18 pre-existing @Test methods remain
+  green — no existing assertion is changed, weakened, or deleted.
 
 ## Notes
 
