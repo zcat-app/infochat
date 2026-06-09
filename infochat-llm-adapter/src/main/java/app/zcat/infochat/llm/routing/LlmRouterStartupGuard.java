@@ -17,6 +17,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -24,32 +25,36 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Collector-side @Startup guard that fails Quarkus boot when
- * {@code infochat.llm.local-only=true} is set alongside ANY off-host
- * LLM or embedding route: a per-task {@code base-url} or the
- * {@code infochat.embeddings.base-url} that resolves to a non-loopback
- * host, OR a per-task provider override or the
+ * @Startup guard, run by BOTH the Collector and the Provider, that
+ * fails Quarkus boot when {@code infochat.llm.local-only=true} is set
+ * alongside ANY off-host LLM or embedding route: a per-task
+ * {@code base-url} or the {@code infochat.embeddings.base-url} that
+ * resolves to a non-loopback host, a per-task provider override or the
  * {@code infochat.llm.default.provider} default naming a cloud-only
- * provider (e.g. {@code anthropic}). When local-only is NOT set, a remote
- * embedding endpoint instead emits the spec-promised confirmation log
- * line so operators see when post title+summary start leaving the host.
- * Per {@code docs/spec/llm.md} §Per-task routing rules: "Local-only
- * is the most-restrictive posture. When the operator sets the
- * explicit local-only property, the router never picks a remote
- * provider — and a per-task override pointing to a remote provider
- * while local-only is set is a configuration conflict that fails
- * Provider startup with a fatal log line identifying the offending
+ * provider (e.g. {@code anthropic}), OR a cloud-only provider made
+ * reachable for non-English scopes via its
+ * {@code infochat.llm.<provider>.languages} capability key (the
+ * router's priority-2 branch selects it with no override naming it).
+ * When local-only is NOT set, a remote embedding endpoint instead emits
+ * the spec-promised confirmation log line so operators see when post
+ * title+summary start leaving the host. Per {@code docs/spec/llm.md}
+ * §Per-task routing rules: "Local-only is the most-restrictive posture.
+ * When the operator sets the explicit local-only property, the router
+ * never picks a remote provider — and a per-task override pointing to
+ * a remote provider while local-only is set is a configuration conflict
+ * that fails startup with a fatal log line identifying the offending
  * task and provider. This is checked once at startup, not per call."
  *
- * <h2>Collector-vs-Provider placement</h2>
- * <p>Earlier spec wording said "fails Provider startup"; this is
- * reconciled in {@code docs/spec/llm.md} §Per-task routing rules — the
- * guard runs on the <b>Collector</b> startup chain, not the Provider.
- * Both the Stage 2 security-judge LLM call site AND embedding generation
- * (title + summary → vector) run in the collector ingest pipeline, so
- * the off-host routes this guard inspects — the per-task LLM
- * base-urls/provider overrides and {@code infochat.embeddings.base-url}
- * — are all Collector-side configuration. The
+ * <h2>Collector-and-Provider placement</h2>
+ * <p>The guard runs on BOTH services' startup chains, intentionally:
+ * the llm-adapter jar is CDI-indexed by the Collector AND the Provider,
+ * and each service routes live LLM calls — the Stage 2 security judge,
+ * tagging, entity extraction, and embedding generation (title + summary
+ * → vector) in the Collector's ingest pipeline; chat, summarizer, and
+ * translator call sites in the Provider. Each service therefore
+ * validates the configuration it boots with; see
+ * {@code docs/spec/llm.md} §Per-task routing rules (which earlier
+ * documented the guard as Collector-only). On the Collector, the
  * {@link #PRIORITY_BETWEEN_FLYWAY_AND_OUTBOX} is the @Priority slot
  * between Flyway (100) and OutboxRehydrator (300) — router
  * misconfiguration is caught BEFORE any post reaches the eval queue and
@@ -59,7 +64,8 @@ import java.util.Set;
  * <p>Beyond the local-only conflict, the guard also calls
  * {@link LlmRouter#assertAllTasksResolve()} so a per-task provider
  * override naming an unregistered provider (a misrouted {@code TAGGER},
- * say) fails Collector startup here rather than at the first call that
+ * say) — or a language-reachable provider whose per-task config is
+ * incomplete — fails startup here rather than at the first call that
  * routes that task. Same @Priority slot, same fail-before-the-eval-queue
  * intent as the local-only check.
  *
@@ -107,22 +113,23 @@ public class LlmRouterStartupGuard {
     private static final Logger LOG = Logger.getLogger(LlmRouterStartupGuard.class);
 
     /**
-     * The set of per-task base-url keys the guard inspects. v1 only
-     * wires {@link ModelTask#SECURITY_JUDGE} in property surface
-     * (M1-033's first call site); each future ticket that lands a
-     * new task's call site adds its base-url key here so the
-     * local-only conflict is caught for that task too. Keyed by
-     * {@link ModelTask} so the rejection log line can name the
-     * offending task by enum value.
+     * The per-task base-url keys the guard inspects, derived from
+     * {@link ModelTask#keySegment()} for every task — the single-source
+     * promise the enum documents, so the guard's key surface cannot
+     * drift from the router's and the providers'. A future ticket that
+     * adds a {@link ModelTask} value gets its base-url scanned here
+     * with no guard edit. Keyed by {@link ModelTask} so the rejection
+     * log line can name the offending task by enum value.
      */
-    private static final Map<ModelTask, String> PER_TASK_BASE_URL_KEYS = Map.of(
-        ModelTask.SECURITY_JUDGE, "infochat.llm.security.base-url",
-        ModelTask.TAGGER, "infochat.llm.tagger.base-url",
-        ModelTask.ENTITY, "infochat.llm.entity.base-url",
-        ModelTask.SUMMARIZER, "infochat.llm.summarizer.base-url",
-        ModelTask.CHAT_AGENT, "infochat.llm.chat.base-url",
-        ModelTask.TRANSLATOR, "infochat.llm.translator.base-url"
-    );
+    private static final Map<ModelTask, String> PER_TASK_BASE_URL_KEYS = perTaskBaseUrlKeys();
+
+    private static Map<ModelTask, String> perTaskBaseUrlKeys() {
+        Map<ModelTask, String> keys = new EnumMap<>(ModelTask.class);
+        for (ModelTask task : ModelTask.values()) {
+            keys.put(task, baseUrlKeyFor(task));
+        }
+        return Map.copyOf(keys);
+    }
 
     /**
      * Operator-facing embedding endpoint base-url. Embedding generation
@@ -163,8 +170,10 @@ public class LlmRouterStartupGuard {
      * snapshot and throws {@link LocalOnlyConflictException} when
      * {@code infochat.llm.local-only=true} is set alongside any
      * off-host route — a per-task or embedding base-url resolving to a
-     * non-loopback host, or a per-task provider override naming a
-     * cloud-only provider. When local-only is unset, a remote embedding
+     * non-loopback host, a per-task provider override naming a
+     * cloud-only provider, or a cloud-only provider declaring a
+     * non-English language that makes it reachable via the router's
+     * priority-2 branch. When local-only is unset, a remote embedding
      * endpoint instead emits the confirmation log line. Returns
      * normally otherwise.
      *
@@ -217,11 +226,25 @@ public class LlmRouterStartupGuard {
             // A per-task provider override naming a cloud-only provider is
             // a conflict regardless of that task's base-url (the operator
             // selected a remote provider while claiming local-only).
-            String providerKey = providerKeyFor(kv.getValue());
+            String providerKey = providerKeyFor(kv.getKey());
             String providerName = stripOrEmpty(snapshot.get(providerKey)).toLowerCase(Locale.ROOT);
             if (REMOTE_PROVIDER_NAMES.contains(providerName)) {
                 offenders.add("task=" + kv.getKey().name()
                     + " key=" + providerKey + " provider=" + providerName);
+            }
+        }
+        // A cloud-only provider that declares any non-English language is
+        // selectable through the router's priority-2 language-capability
+        // branch even when no override or default names it — the languages
+        // key alone routes non-"en" SUMMARIZER/TRANSLATOR calls to it, so
+        // under local-only it is the same conflict as an explicit override.
+        for (String remoteProvider : REMOTE_PROVIDER_NAMES) {
+            String languagesKey = languagesKeyFor(remoteProvider);
+            String reachableLanguages = nonEnglishLanguages(snapshot.get(languagesKey));
+            if (!reachableLanguages.isEmpty()) {
+                offenders.add("languages key=" + languagesKey
+                    + " provider=" + remoteProvider
+                    + " languages=" + reachableLanguages);
             }
         }
         if (embeddingRemote) {
@@ -248,20 +271,40 @@ public class LlmRouterStartupGuard {
             }
             msg.append(offenders.get(i));
         }
-        msg.append(". Refusing Collector startup.");
+        msg.append(". Refusing startup.");
         String fatal = msg.toString();
         LOG.fatal(fatal);
         throw new LocalOnlyConflictException(fatal);
     }
 
     /**
-     * Map a per-task {@code base-url} key to its sibling provider-override
-     * key ({@code infochat.llm.<task>.base-url} →
-     * {@code infochat.llm.<task>.provider}). Derived from
-     * {@link #PER_TASK_BASE_URL_KEYS} so the two key surfaces cannot drift.
+     * The per-task base-url key:
+     * {@code infochat.llm.<keySegment>.base-url}. Package-private so
+     * the key-derivation test can pin the derived form for every task
+     * against the hand-spelled operator-facing literals.
      */
-    private static String providerKeyFor(String baseUrlKey) {
-        return baseUrlKey.replace(".base-url", ".provider");
+    static String baseUrlKeyFor(ModelTask task) {
+        return "infochat.llm." + task.keySegment() + ".base-url";
+    }
+
+    /**
+     * The per-task provider-override key:
+     * {@code infochat.llm.<keySegment>.provider}. Derived from
+     * {@link ModelTask#keySegment()} directly (not by string-replace
+     * over the base-url key) so the two key surfaces cannot drift.
+     */
+    static String providerKeyFor(ModelTask task) {
+        return "infochat.llm." + task.keySegment() + ".provider";
+    }
+
+    /**
+     * The per-provider language-capability key:
+     * {@code infochat.llm.<providerName>.languages} — the same key
+     * {@code LlmRouter#supportedLanguagesFor} reads to build the
+     * priority-2 capability set.
+     */
+    static String languagesKeyFor(String providerName) {
+        return "infochat.llm." + providerName + ".languages";
     }
 
     /**
@@ -329,6 +372,32 @@ public class LlmRouterStartupGuard {
     }
 
     /**
+     * The non-English subset of a comma-separated languages value, in
+     * declaration order, normalized to lowercase. Only non-{@code "en"}
+     * languages make a provider reachable via the router's priority-2
+     * branch (the branch is skipped entirely for {@code "en"} scopes),
+     * so an {@code en}-only declaration is NOT a local-only conflict.
+     */
+    private static String nonEnglishLanguages(@Nullable String raw) {
+        String value = stripOrEmpty(raw);
+        if (value.isEmpty()) {
+            return "";
+        }
+        StringBuilder out = new StringBuilder();
+        for (String part : value.split(",")) {
+            String language = part.trim().toLowerCase(Locale.ROOT);
+            if (language.isEmpty() || language.equals("en")) {
+                continue;
+            }
+            if (out.length() > 0) {
+                out.append(',');
+            }
+            out.append(language);
+        }
+        return out.toString();
+    }
+
+    /**
      * Materialize the keys the guard cares about into a small map
      * so {@link #validateLocalOnlyConfiguration(Map)} can run as a
      * pure function. Includes the master switch, the embedding
@@ -343,10 +412,14 @@ public class LlmRouterStartupGuard {
             config.getOptionalValue(CONFIG_KEY_EMBEDDINGS_BASE_URL, String.class).orElse(""));
         snap.put(LlmRouter.CONFIG_KEY_DEFAULT_PROVIDER,
             config.getOptionalValue(LlmRouter.CONFIG_KEY_DEFAULT_PROVIDER, String.class).orElse(""));
-        for (String key : PER_TASK_BASE_URL_KEYS.values()) {
-            snap.put(key, config.getOptionalValue(key, String.class).orElse(""));
-            String providerKey = providerKeyFor(key);
+        for (Map.Entry<ModelTask, String> kv : PER_TASK_BASE_URL_KEYS.entrySet()) {
+            snap.put(kv.getValue(), config.getOptionalValue(kv.getValue(), String.class).orElse(""));
+            String providerKey = providerKeyFor(kv.getKey());
             snap.put(providerKey, config.getOptionalValue(providerKey, String.class).orElse(""));
+        }
+        for (String remoteProvider : REMOTE_PROVIDER_NAMES) {
+            String languagesKey = languagesKeyFor(remoteProvider);
+            snap.put(languagesKey, config.getOptionalValue(languagesKey, String.class).orElse(""));
         }
         return snap;
     }

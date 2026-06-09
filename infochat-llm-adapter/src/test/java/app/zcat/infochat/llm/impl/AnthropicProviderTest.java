@@ -1,8 +1,10 @@
 package app.zcat.infochat.llm.impl;
 
+import app.zcat.infochat.llm.LlmProvider;
 import app.zcat.infochat.llm.LlmResponse;
 import app.zcat.infochat.llm.ModelTask;
 import app.zcat.infochat.llm.impl.OpenAiCompatibleProvider.LlmCallFailedException;
+import app.zcat.infochat.llm.routing.LlmRouter;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
@@ -17,12 +19,15 @@ import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -299,6 +304,63 @@ class AnthropicProviderTest {
         assertEquals("ok", summaryReply.text());
         assertEquals("claude-opus-4-8", lastModel.get(),
             "SUMMARIZER must resolve the summarizer model key");
+    }
+
+    @Test
+    void blankSystemPromptOmitsSystemField() throws Exception {
+        // The Messages API rejects an empty system text block; a blank
+        // system prompt (the translation call shape) must omit the
+        // field entirely, not serialize an empty text block.
+        AtomicReference<String> capturedBody = new AtomicReference<>();
+        mockServer.createContext("/messages", exchange -> {
+            capturedBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            byte[] resp = successResponse("ok").getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, resp.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(resp);
+            }
+        });
+        mockServer.start();
+
+        AnthropicProvider provider = providerFor(ModelTask.SUMMARIZER, API_KEY);
+        provider.generate(ModelTask.SUMMARIZER, "", "user prompt");
+
+        JsonNode root = JSON.readTree(capturedBody.get());
+        assertNull(root.get("system"),
+            "a blank system prompt must omit the top-level system field entirely; got: "
+                + root.get("system"));
+        assertEquals("user prompt", root.get("messages").get(0).get("content").asText(),
+            "the user message must be unaffected by the system-field omission");
+    }
+
+    @Test
+    void remoteLlmShapedConfigResolvesTranslatorForCzech() {
+        // Mirrors the %remote-llm translator block (base-url, max-tokens,
+        // model, provider override; api-key arrives via environment in
+        // production): the router must resolve TRANSLATOR for "cs" to the
+        // anthropic provider, whose TRANSLATOR config must resolve without
+        // throwing on missing keys — at startup, not at the first /lang
+        // translation.
+        Config cfg = new StubConfig(Map.of(
+            "infochat.llm.translator.base-url", "https://api.anthropic.com/v1",
+            "infochat.llm.translator.max-tokens", "4096",
+            "infochat.llm.translator.model", "claude-sonnet-4-6"));
+        AnthropicProvider anthropic = new AnthropicProvider(cfg, HttpClient.newHttpClient());
+        LlmRouter router = new LlmRouter(
+            List.of(
+                new LlmRouter.Entry(OpenAiCompatibleProvider.PROVIDER_NAME,
+                    new OpenAiCompatibleProvider(cfg), Set.of("en")),
+                new LlmRouter.Entry(AnthropicProvider.PROVIDER_NAME,
+                    anthropic, Set.of("en", "cs"))),
+            LlmRouter.ConfigReader.fromMap(Map.of(
+                "infochat.llm.translator.provider", AnthropicProvider.PROVIDER_NAME)));
+
+        LlmProvider resolved = router.forTask(ModelTask.TRANSLATOR, "cs");
+
+        assertSame(anthropic, resolved,
+            "remote-llm-shaped config must route TRANSLATOR/cs to the anthropic provider");
+        assertDoesNotThrow(() -> resolved.assertTaskConfigResolvable(ModelTask.TRANSLATOR),
+            "the resolved provider's TRANSLATOR config must not throw on missing keys");
     }
 
     private AnthropicProvider providerFor(ModelTask task, String apiKey) {

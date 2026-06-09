@@ -153,13 +153,17 @@ emits an explicit confirmation log line on startup so operators see when
 post bodies start leaving the host.
 
 The local-only conflict check and the remote-embedding confirmation
-log both run on **Collector** startup, not Provider startup: embedding
-generation (title + summary → vector) and the Stage 2 security-judge
-call both run in the collector ingest pipeline, so the off-host routes
-the guard inspects — the per-task LLM base-urls/providers and the
-embedding base-url — are all Collector-side configuration. The guard's
-scan therefore covers the per-task base-urls, the embedding base-url,
-and per-task provider overrides that name a cloud-only provider.
+log run on **both** services' startups — Collector and Provider. This
+is intentional, not incidental: each service routes live LLM calls
+(the Stage 2 security judge, tagging, entity extraction, and embedding
+generation run in the Collector's ingest pipeline; the chat, summarizer,
+and translator call sites run in the Provider), and both services load
+the same LLM adapter, so each validates the configuration it boots
+with. The guard's scan covers the per-task base-urls, the embedding
+base-url, per-task provider overrides (and the configured default
+provider) that name a cloud-only provider, and cloud-only providers
+made reachable for non-English scopes via a per-provider language
+capability key.
 
 **No fallback chain in v1.** The router resolves `(ModelTask,
 scope_language)` to **exactly one** `LlmProvider`; an unreachable

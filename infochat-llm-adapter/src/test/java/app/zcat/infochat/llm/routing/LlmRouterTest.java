@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
 
@@ -290,6 +291,53 @@ class LlmRouterTest {
     }
 
     /**
+     * The startup scan must also validate the priority-2 language
+     * branch: a provider reachable only through its declared languages
+     * (no per-task override, not the default) must have its per-task
+     * config asserted at startup. Before the language sweep, the
+     * broken TRANSLATOR config below surfaced only at the first
+     * non-English call.
+     */
+    @Test
+    void assertAllTasksResolveValidatesLanguageBranchPerTaskConfig() {
+        LlmRouter router = new LlmRouter(
+            List.of(
+                new LlmRouter.Entry(NAME_DEFAULT, new StubProvider(), Set.of("en")),
+                new LlmRouter.Entry(NAME_CZECH,
+                    new UnresolvableTaskConfigStubProvider(ModelTask.TRANSLATOR),
+                    Set.of("cs"))),
+            LlmRouter.ConfigReader.fromMap(Map.of(
+                LlmRouter.CONFIG_KEY_DEFAULT_PROVIDER, NAME_DEFAULT)));
+
+        assertThrows(NoSuchElementException.class, router::assertAllTasksResolve,
+            "the cs-reachable provider's unresolvable TRANSLATOR config must fail "
+                + "the startup scan via the language-branch sweep");
+    }
+
+    /**
+     * The language sweep probes only languages some registered entry
+     * declares. The same broken-TRANSLATOR provider with an empty
+     * language set is unreachable via priority 2, so the scan must
+     * pass — over-probing would fail deployments for providers no
+     * route can select.
+     */
+    @Test
+    void assertAllTasksResolveSkipsLanguagesNoEntryDeclares() {
+        LlmRouter router = new LlmRouter(
+            List.of(
+                new LlmRouter.Entry(NAME_DEFAULT, new StubProvider(), Set.of("en")),
+                new LlmRouter.Entry(NAME_CZECH,
+                    new UnresolvableTaskConfigStubProvider(ModelTask.TRANSLATOR),
+                    Set.of())),
+            LlmRouter.ConfigReader.fromMap(Map.of(
+                LlmRouter.CONFIG_KEY_DEFAULT_PROVIDER, NAME_DEFAULT)));
+
+        assertDoesNotThrow(router::assertAllTasksResolve,
+            "a provider declaring no languages is unreachable via priority 2 "
+                + "and must not be probed by the language sweep");
+    }
+
+    /**
      * Lightweight test stub: implements {@link LlmProvider} so the
      * router's resolution chain can be exercised end-to-end without
      * pulling Quarkus or constructing an
@@ -304,6 +352,36 @@ class LlmRouterTest {
         public LlmResponse generate(ModelTask task, String systemPrompt, String userPrompt) {
             throw new UnsupportedOperationException(
                 "StubProvider.generate must not be invoked by router-resolution tests");
+        }
+    }
+
+    /**
+     * Stub whose per-task config check fails for one designated task,
+     * mirroring a provider with a missing required property (the real
+     * providers throw {@link NoSuchElementException} from the config
+     * read). Lets the scan tests prove a given (task, language) pair
+     * is actually probed.
+     */
+    private static final class UnresolvableTaskConfigStubProvider implements LlmProvider {
+        private final ModelTask unresolvableTask;
+
+        UnresolvableTaskConfigStubProvider(ModelTask unresolvableTask) {
+            this.unresolvableTask = unresolvableTask;
+        }
+
+        @Override
+        public LlmResponse generate(ModelTask task, String systemPrompt, String userPrompt) {
+            throw new UnsupportedOperationException(
+                "UnresolvableTaskConfigStubProvider.generate must not be invoked "
+                    + "by router-resolution tests");
+        }
+
+        @Override
+        public void assertTaskConfigResolvable(ModelTask task) {
+            if (task == unresolvableTask) {
+                throw new NoSuchElementException(
+                    "stub: no per-task config for " + task);
+            }
         }
     }
 

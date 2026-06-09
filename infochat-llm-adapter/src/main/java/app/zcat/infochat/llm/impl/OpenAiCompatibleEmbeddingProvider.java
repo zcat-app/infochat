@@ -104,7 +104,17 @@ public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
     long maxResponseBytes;
 
     public OpenAiCompatibleEmbeddingProvider() {
-        this.http = HttpClient.newHttpClient();
+        // Explicit connect-timeout, same rationale as the chat-completions
+        // sibling: the per-call request timeout cannot bound a hanging
+        // HTTP/1.1 TCP connect to an unroutable endpoint.
+        this.http = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(10))
+            .build();
+    }
+
+    /** Test seam: exposes the shared client so tests can pin its construction. */
+    HttpClient httpClient() {
+        return http;
     }
 
     @Override

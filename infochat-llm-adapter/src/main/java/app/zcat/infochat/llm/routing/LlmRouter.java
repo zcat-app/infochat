@@ -228,10 +228,30 @@ public class LlmRouter {
      * live call, where workers' retry-then-fallback catch converts the
      * permanent misconfiguration into an indefinite silent fallback.
      * Driven by {@link LlmRouterStartupGuard}.
+     *
+     * <p>Beyond the {@code "en"} sweep, every language-aware task is
+     * also probed for each non-English language any registered entry
+     * declares — the exact pairs the priority-2 capability branch can
+     * resolve at runtime. A deployment whose languages config routes,
+     * say, TRANSLATOR to a provider with an incomplete per-task config
+     * fails here at startup instead of at the first non-English call.
+     * Only configured languages are probed: enumerating languages no
+     * entry declares would validate providers no route can reach.
      */
     public void assertAllTasksResolve() {
+        Set<String> configuredLanguages = new LinkedHashSet<>();
+        for (Entry e : entries) {
+            configuredLanguages.addAll(e.supportedLanguages());
+        }
+        configuredLanguages.remove("en");
         for (ModelTask task : ModelTask.values()) {
             forTask(task, "en").assertTaskConfigResolvable(task);
+            if (!isLanguageAwareTask(task)) {
+                continue;
+            }
+            for (String language : configuredLanguages) {
+                forTask(task, language).assertTaskConfigResolvable(task);
+            }
         }
     }
 

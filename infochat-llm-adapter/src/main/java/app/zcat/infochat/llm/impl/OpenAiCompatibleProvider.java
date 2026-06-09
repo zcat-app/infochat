@@ -99,11 +99,10 @@ public class OpenAiCompatibleProvider implements LlmProvider {
     /**
      * java.net.http.HttpClient is thread-safe and the connection
      * pool is bounded internally — one shared instance per bean is
-     * correct. Constructed without a connect-timeout because the
-     * per-call read timeout below covers both connect and read on
-     * HTTP/2 multiplexed connections; HTTP/1.1 falls back to
-     * default connect behavior which is sufficient for the local
-     * Ollama / remote endpoint mix.
+     * correct. Constructed WITH an explicit connect-timeout: the
+     * per-call request timeout caps the full exchange, but on
+     * HTTP/1.1 an unroutable endpoint would otherwise hang on the
+     * OS connect default before the request timeout can apply.
      */
     private final HttpClient http;
 
@@ -112,7 +111,14 @@ public class OpenAiCompatibleProvider implements LlmProvider {
     @Inject
     public OpenAiCompatibleProvider(Config config) {
         this.config = config;
-        this.http = HttpClient.newHttpClient();
+        this.http = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(10))
+            .build();
+    }
+
+    /** Test seam: exposes the shared client so tests can pin its construction. */
+    HttpClient httpClient() {
+        return http;
     }
 
     @Override

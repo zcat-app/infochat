@@ -41,6 +41,8 @@ import java.time.Duration;
  *   ]
  * }
  * }</pre>
+ * The top-level {@code system} array is omitted entirely when the
+ * system prompt is blank — the API rejects an empty text block.
  *
  * <h2>Auth</h2>
  * <p>{@code anthropic-version} carries the stable API version;
@@ -77,13 +79,23 @@ public class AnthropicProvider implements LlmProvider {
 
     @Inject
     public AnthropicProvider(Config config) {
-        this(config, HttpClient.newHttpClient());
+        // Explicit connect-timeout: the per-call .timeout(...) caps the
+        // full exchange per request, but on HTTP/1.1 an unroutable
+        // endpoint would otherwise hang on the OS connect default.
+        this(config, HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(10))
+            .build());
     }
 
     /** Test seam: caller-supplied HttpClient targets a local mock server. */
     AnthropicProvider(Config config, HttpClient http) {
         this.config = config;
         this.http = http;
+    }
+
+    /** Test seam: exposes the shared client so tests can pin its construction. */
+    HttpClient httpClient() {
+        return http;
     }
 
     @Override
@@ -125,12 +137,17 @@ public class AnthropicProvider implements LlmProvider {
             root.put("model", cfg.model());
             root.put("max_tokens", cfg.maxTokens());
 
-            ArrayNode system = root.putArray("system");
-            ObjectNode systemBlock = system.addObject();
-            systemBlock.put("type", "text");
-            systemBlock.put("text", systemPrompt);
-            ObjectNode cacheControl = systemBlock.putObject("cache_control");
-            cacheControl.put("type", "ephemeral");
+            // The Messages API rejects an empty system text block, and a
+            // blank system prompt is a real call shape (translation passes
+            // one) — omit the field entirely rather than sending text:"".
+            if (!systemPrompt.isBlank()) {
+                ArrayNode system = root.putArray("system");
+                ObjectNode systemBlock = system.addObject();
+                systemBlock.put("type", "text");
+                systemBlock.put("text", systemPrompt);
+                ObjectNode cacheControl = systemBlock.putObject("cache_control");
+                cacheControl.put("type", "ephemeral");
+            }
 
             ArrayNode messages = root.putArray("messages");
             ObjectNode user = messages.addObject();

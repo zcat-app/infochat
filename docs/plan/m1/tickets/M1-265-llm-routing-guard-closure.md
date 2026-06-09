@@ -1,9 +1,9 @@
 ---
 id: M1-265
 title: "LLM routing guard closure + provider hygiene"
-status: pending
+status: done
 created: 2026-06-09
-last_updated: 2026-06-09
+last_updated: 2026-06-10
 blocked_by: []
 files_budget: 14
 files_scope:
@@ -20,6 +20,7 @@ risk: medium
 round_cap: 3
 security_relevant: true
 migration_touch: false
+outline_file: target/m1-tick-outline-M1-265.md
 out_of_scope:
   - The routing priority order (per-task override > language > default) — unchanged; only its validation coverage widens.
   - Per-call local-only enforcement — spec-conformant by explicit decision ("checked once at startup, not per call", docs/spec/llm.md); do not add it.
@@ -43,12 +44,43 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-09
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 15
+      added: 497
+      removed: 81
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-09
+    verdict: CLEAN
+    base: cccc741 (fork point; work uncommitted on branch)
+    head: working tree
+    verdict_file: docs/plan/m1/redteam/M1-265-2026-06-09.md
+    out_of_model_count: 2
+    note: |
+      Pre-commit (--in-progress) audit of the full working-tree diff vs the
+      fork point. CLEAN — zero findings at every severity. Two advisory
+      out-of-model observations recorded in the verdict file; no remediation
+      or spec amendment required unless the threat model is extended.
+clarity_check:
+  date: 2026-06-09
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE item 6: no named test for 'all HttpClients have connectTimeout'; verifiable only by diff inspection. Add a named test or restate as a diff-reviewable criterion with specific class names."
+    - "ACCEPTANCE-RUNNABLE item 7: doc-only reconciliation item has no runnable verification criterion. Name exactly what the class-level Javadoc and spec paragraph must say so the diff can be checked."
+    - "TEST-CHANGES-AUTHORIZED: test_plan.modifies covers a directory, not specific test classes/methods. If any pre-existing test pins the old incomplete validation behavior, it needs explicit authorization with the new expected behavior named."
 ---
 
 # M1-265: LLM routing guard closure + provider hygiene

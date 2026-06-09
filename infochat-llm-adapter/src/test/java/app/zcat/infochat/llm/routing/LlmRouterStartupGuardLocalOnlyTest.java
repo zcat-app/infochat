@@ -130,6 +130,43 @@ class LlmRouterStartupGuardLocalOnlyTest {
     }
 
     @Test
+    void localOnlyTrueWithRemoteProviderReachableViaLanguagesKeyRefusesStartup() {
+        // A cloud-only provider declaring a non-English language is
+        // selectable through the router's priority-2 capability branch
+        // with no override or default naming it — the same conflict as
+        // an explicit override, previously invisible to the guard.
+        Map<String, String> conflict = new LinkedHashMap<>();
+        conflict.put(LlmRouterStartupGuard.CONFIG_KEY_LOCAL_ONLY, "true");
+        conflict.put("infochat.llm.anthropic.languages", "en,cs");
+
+        LlmRouterStartupGuard.LocalOnlyConflictException ex = assertThrows(
+            LlmRouterStartupGuard.LocalOnlyConflictException.class,
+            () -> LlmRouterStartupGuard.validateLocalOnlyConfiguration(conflict),
+            "remote provider reachable via the languages key under local-only=true must throw");
+        String msg = ex.getMessage();
+        assertTrue(msg.contains("infochat.llm.anthropic.languages"),
+            "fatal message must name the offending languages key; got: " + msg);
+        assertTrue(msg.contains(AnthropicProvider.PROVIDER_NAME),
+            "fatal message must name the offending provider; got: " + msg);
+        assertTrue(msg.contains("languages=cs"),
+            "fatal message must list only the non-English reachable languages; got: " + msg);
+    }
+
+    @Test
+    void localOnlyTrueWithEnglishOnlyLanguagesDeclarationDoesNotThrow() {
+        // The priority-2 branch never runs for "en" scopes, so an
+        // en-only declaration does not make the remote provider
+        // reachable — flagging it would over-constrain valid configs.
+        Map<String, String> ok = new LinkedHashMap<>();
+        ok.put(LlmRouterStartupGuard.CONFIG_KEY_LOCAL_ONLY, "true");
+        ok.put("infochat.llm.anthropic.languages", "en");
+
+        assertDoesNotThrow(
+            () -> LlmRouterStartupGuard.validateLocalOnlyConfiguration(ok),
+            "an en-only languages declaration is unreachable via priority 2 and must NOT throw");
+    }
+
+    @Test
     void localOnlyTrueAllOnHostDoesNotThrow() {
         // Loopback embedding + loopback base-url + the host-neutral
         // openai-compatible provider — nothing leaves the host.
