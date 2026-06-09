@@ -13,6 +13,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
 import java.util.OptionalLong;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
@@ -111,7 +112,7 @@ class NostrSsrfTest {
 
         // Second connect (simulated reconnect): seam now returns
         // 192.168.99.99, which the LoopbackPermittingBlocklist still
-        // refuses via super.isBlocked. The gate must raise before any
+        // refuses via super.isBlockedAgainst. The gate must raise before any
         // WebSocket handshake.
         SsrfPolicyException ex = assertThrows(SsrfPolicyException.class,
                 connection::connectAndSubscribe);
@@ -187,11 +188,11 @@ class NostrSsrfTest {
     private static final class LoopbackPermittingBlocklist extends IpBlocklist {
 
         @Override
-        public boolean isBlocked(InetAddress addr) {
+        protected boolean isBlockedAgainst(InetAddress addr, Set<InetAddress> hostInterfaces) {
             if (addr.isLoopbackAddress()) {
                 return false;
             }
-            return super.isBlocked(addr);
+            return super.isBlockedAgainst(addr, hostInterfaces);
         }
     }
 }

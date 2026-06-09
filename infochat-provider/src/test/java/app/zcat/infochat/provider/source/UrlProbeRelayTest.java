@@ -7,6 +7,7 @@ import app.zcat.infochat.ssrf.SsrfGuardedHttpClient;
 import org.junit.jupiter.api.Test;
 
 import java.net.InetAddress;
+import java.util.Set;
 import java.net.ServerSocket;
 import java.net.URI;
 import java.time.Duration;
@@ -108,11 +109,11 @@ class UrlProbeRelayTest {
     private static final class LoopbackPermitting extends IpBlocklist {
 
         @Override
-        public boolean isBlocked(InetAddress addr) {
+        protected boolean isBlockedAgainst(InetAddress addr, Set<InetAddress> hostInterfaces) {
             if (addr.isLoopbackAddress()) {
                 return false;
             }
-            return super.isBlocked(addr);
+            return super.isBlockedAgainst(addr, hostInterfaces);
         }
     }
 }

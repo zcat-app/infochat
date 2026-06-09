@@ -13,6 +13,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
 import java.util.OptionalLong;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
@@ -169,7 +170,7 @@ class NostrSsrfIT {
             // the link-local arm of the default IpBlocklist
             // (169.254.0.0/16). LoopbackPermittingBlocklist only
             // carves out loopback; the metadata range is still
-            // refused via super.isBlocked.
+            // refused via super.isBlockedAgainst.
             return InetAddress.getByName("169.254.169.254");
         } catch (UnknownHostException e) {
             throw new IllegalStateException(e);
@@ -194,11 +195,11 @@ class NostrSsrfIT {
     private static final class LoopbackPermittingBlocklist extends IpBlocklist {
 
         @Override
-        public boolean isBlocked(InetAddress addr) {
+        protected boolean isBlockedAgainst(InetAddress addr, Set<InetAddress> hostInterfaces) {
             if (addr.isLoopbackAddress()) {
                 return false;
             }
-            return super.isBlocked(addr);
+            return super.isBlockedAgainst(addr, hostInterfaces);
         }
     }
 }

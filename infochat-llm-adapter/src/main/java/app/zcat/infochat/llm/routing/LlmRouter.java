@@ -111,9 +111,15 @@ public class LlmRouter {
         }
         this.entries = List.copyOf(entries);
         this.config = config;
+        // Key by the lower-cased provider name so lookups are
+        // case-insensitive, agreeing with LlmRouterStartupGuard (which
+        // lower-cases the operator-supplied name before matching the
+        // remote-provider set). Without this, a mixed-case
+        // default.provider / <task>.provider value that the guard treats
+        // as a known provider would resolve to no Entry here.
         Map<String, Entry> byName = new LinkedHashMap<>();
         for (Entry e : this.entries) {
-            byName.put(e.name(), e);
+            byName.put(e.name().toLowerCase(Locale.ROOT), e);
         }
         this.entriesByName = Map.copyOf(byName);
     }
@@ -142,7 +148,7 @@ public class LlmRouter {
         String overrideKey = perTaskOverrideKey(task);
         Optional<String> overrideName = config.get(overrideKey);
         if (overrideName.isPresent() && !overrideName.get().isEmpty()) {
-            Entry entry = entriesByName.get(overrideName.get());
+            Entry entry = entriesByName.get(overrideName.get().toLowerCase(Locale.ROOT));
             if (entry == null) {
                 throw new IllegalStateException(
                     "LlmRouter: per-task override " + overrideKey + "=" + overrideName.get()
@@ -167,7 +173,7 @@ public class LlmRouter {
         Optional<String> configuredDefault = config.get(CONFIG_KEY_DEFAULT_PROVIDER)
             .filter(s -> !s.isEmpty());
         String defaultName = configuredDefault.orElse(OpenAiCompatibleProvider.PROVIDER_NAME);
-        Entry defaultEntry = entriesByName.get(defaultName);
+        Entry defaultEntry = entriesByName.get(defaultName.toLowerCase(Locale.ROOT));
         if (defaultEntry == null) {
             // M1-042 audit-loud-fallback posture: when the operator
             // EXPLICITLY configured infochat.llm.default.provider but

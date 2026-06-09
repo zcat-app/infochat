@@ -1,6 +1,7 @@
 package app.zcat.infochat.ssrf;
 
 import java.net.InetAddress;
+import java.util.Set;
 
 /**
  * Test-only {@link IpBlocklist} subclass that permits loopback so the
@@ -12,11 +13,15 @@ import java.net.InetAddress;
  */
 class LoopbackPermittingBlocklist extends IpBlocklist {
 
+    // Override the shared core check rather than isBlocked(addr): both
+    // the single-address isBlocked and the batch firstBlocked funnel
+    // through isBlockedAgainst, so carving out loopback here applies to
+    // whichever path SsrfGuardedHttpClient uses to consult the blocklist.
     @Override
-    public boolean isBlocked(InetAddress addr) {
+    protected boolean isBlockedAgainst(InetAddress addr, Set<InetAddress> hostInterfaces) {
         if (addr.isLoopbackAddress()) {
             return false;
         }
-        return super.isBlocked(addr);
+        return super.isBlockedAgainst(addr, hostInterfaces);
     }
 }

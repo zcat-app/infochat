@@ -16,6 +16,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.OptionalLong;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
@@ -221,11 +222,11 @@ class NostrStreamSourceTest {
     private static final class LoopbackPermittingBlocklist extends IpBlocklist {
 
         @Override
-        public boolean isBlocked(InetAddress addr) {
+        protected boolean isBlockedAgainst(InetAddress addr, Set<InetAddress> hostInterfaces) {
             if (addr.isLoopbackAddress()) {
                 return false;
             }
-            return super.isBlocked(addr);
+            return super.isBlockedAgainst(addr, hostInterfaces);
         }
     }
 }

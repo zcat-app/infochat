@@ -3,6 +3,7 @@ package app.zcat.infochat.collector.fetcher.reddit;
 import app.zcat.infochat.ssrf.IpBlocklist;
 
 import java.net.InetAddress;
+import java.util.Set;
 
 /**
  * Test-only blocklist that permits loopback addresses so the
@@ -12,10 +13,10 @@ import java.net.InetAddress;
 final class LoopbackPermittingBlocklist extends IpBlocklist {
 
     @Override
-    public boolean isBlocked(InetAddress addr) {
+    protected boolean isBlockedAgainst(InetAddress addr, Set<InetAddress> hostInterfaces) {
         if (addr.isLoopbackAddress()) {
             return false;
         }
-        return super.isBlocked(addr);
+        return super.isBlockedAgainst(addr, hostInterfaces);
     }
 }

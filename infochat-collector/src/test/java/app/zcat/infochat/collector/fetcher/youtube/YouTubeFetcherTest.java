@@ -18,6 +18,7 @@ import java.nio.file.Paths;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -137,11 +138,11 @@ class YouTubeFetcherTest {
     private static final class LoopbackPermittingBlocklist extends IpBlocklist {
 
         @Override
-        public boolean isBlocked(InetAddress addr) {
+        protected boolean isBlockedAgainst(InetAddress addr, Set<InetAddress> hostInterfaces) {
             if (addr.isLoopbackAddress()) {
                 return false;
             }
-            return super.isBlocked(addr);
+            return super.isBlockedAgainst(addr, hostInterfaces);
         }
     }
 }

@@ -4,6 +4,7 @@ import org.jspecify.annotations.Nullable;
 
 import java.net.InetAddress;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Set;
 import java.util.function.Supplier;
 
@@ -107,7 +108,47 @@ public class IpBlocklist {
         // attached cloud EIP) are seen on the very next isBlocked.
         // M1-025 snapshotted at construction; spec is present-tense
         // ("are checked") with no startup-snapshot qualifier.
+        return isBlockedAgainst(addr, hostInterfacesProvider.get());
+    }
+
+    /**
+     * Batch check for one validation pass: returns the first blocked
+     * address in {@code candidates}, or {@code null} if none are
+     * blocked. The host-interface set is enumerated EXACTLY ONCE for
+     * the whole pass (one {@code hostInterfacesProvider.get()} call)
+     * rather than once per candidate — the interface set cannot change
+     * between two addresses checked microseconds apart in the same
+     * pass, so the per-address re-enumeration {@link #isBlocked} would
+     * do is avoidable work. Per-request freshness is preserved: each
+     * call to this method takes its own fresh snapshot, so a pass that
+     * runs after an interface comes up sees the new interface.
+     *
+     * <p>The offending {@link InetAddress} is returned (not a boolean)
+     * so the caller can name it in its policy-violation message without
+     * a second scan.
+     */
+    @Nullable
+    public InetAddress firstBlocked(List<InetAddress> candidates) {
         Set<InetAddress> hostInterfaces = hostInterfacesProvider.get();
+        for (InetAddress addr : candidates) {
+            if (isBlockedAgainst(addr, hostInterfaces)) {
+                return addr;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Core range + host-interface match against a CALLER-SUPPLIED
+     * host-interface snapshot. Both the single-address {@link #isBlocked}
+     * and the batch {@link #firstBlocked} funnel through here, so a
+     * test subclass that carves out a range (e.g. permitting loopback)
+     * overrides this one method and the carve-out applies to both
+     * paths. {@code protected} (not package-private) so the loopback-
+     * permitting doubles in the collector/provider test packages can
+     * override the seam from outside this package.
+     */
+    protected boolean isBlockedAgainst(InetAddress addr, Set<InetAddress> hostInterfaces) {
         if (hostInterfaces.contains(addr)) {
             return true;
         }

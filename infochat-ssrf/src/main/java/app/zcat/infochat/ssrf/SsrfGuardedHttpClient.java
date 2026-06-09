@@ -543,11 +543,16 @@ public final class SsrfGuardedHttpClient {
             throw new SsrfPolicyException(
                 SsrfPolicyException.Reason.UNKNOWN_HOST, "unknown host: " + canonicalHost);
         }
-        for (InetAddress addr : addresses) {
-            if (blocklist.isBlocked(addr)) {
-                throw new SsrfPolicyException(
-                    SsrfPolicyException.Reason.BLOCKED_IP, "blocked IP: " + addr.getHostAddress());
-            }
+        // Enumerate the host-interface set ONCE for this validation pass
+        // (firstBlocked snapshots internally) rather than once per
+        // resolved address: a k-address host triggers one enumeration,
+        // not k. The block/allow decision is identical to a per-address
+        // scan, and per-request freshness is preserved (each pass takes
+        // its own fresh snapshot).
+        InetAddress blocked = blocklist.firstBlocked(addresses);
+        if (blocked != null) {
+            throw new SsrfPolicyException(
+                SsrfPolicyException.Reason.BLOCKED_IP, "blocked IP: " + blocked.getHostAddress());
         }
         return new ResolvedHost(canonicalHost, addresses);
     }

@@ -4,10 +4,15 @@ import org.junit.jupiter.api.Test;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -351,5 +356,54 @@ class IpBlocklistTest {
             + "per-call Supplier.get() invocation. If the M1-025 "
             + "snapshot-at-construction semantics had survived, "
             + "this assertion would fail");
+    }
+
+    // -----------------------------------------------------------------
+    // M1-261 per-pass enumeration. firstBlocked validates a whole
+    // resolved-address set against a SINGLE host-interface snapshot:
+    // a k-address host triggers one enumeration per validation pass,
+    // not k. The block/allow outcome is identical to the per-address
+    // isBlocked scan it replaces.
+    // -----------------------------------------------------------------
+
+    @Test
+    void firstBlockedEnumeratesHostInterfacesOncePerPass() throws UnknownHostException {
+        // Counting Supplier: records every host-interface enumeration.
+        // The set is empty, so only the static ranges decide block/allow.
+        AtomicInteger enumerations = new AtomicInteger(0);
+        IpBlocklist counting = new IpBlocklist(() -> {
+            enumerations.incrementAndGet();
+            return Set.of();
+        });
+
+        // All-allowed pass: three public addresses for one host. None is
+        // in a blocked range or the (empty) host set, so firstBlocked
+        // reports none blocked — and the counter proves a single
+        // enumeration covered all three addresses.
+        List<InetAddress> allowed = List.of(
+            InetAddress.getByName("8.8.8.8"),
+            InetAddress.getByName("1.1.1.1"),
+            InetAddress.getByName("9.9.9.9"));
+        assertNull(counting.firstBlocked(allowed),
+            "no candidate is in a blocked range or the (empty) host set, "
+            + "so firstBlocked must report none blocked");
+        assertEquals(1, enumerations.get(),
+            "a 3-address pass must enumerate the host-interface set "
+            + "exactly once, not once per address");
+
+        // Block/allow parity: a pass containing a blocked address returns
+        // that exact address (matching the per-address isBlocked outcome)
+        // and still enumerates only once.
+        enumerations.set(0);
+        InetAddress blockedAddr = InetAddress.getByName("169.254.169.254");
+        List<InetAddress> withBlocked = List.of(
+            InetAddress.getByName("8.8.8.8"), blockedAddr,
+            InetAddress.getByName("1.1.1.1"));
+        assertSame(blockedAddr, counting.firstBlocked(withBlocked),
+            "firstBlocked must return the first blocked address "
+            + "(link-local 169.254.169.254), matching the per-address "
+            + "isBlocked outcome");
+        assertEquals(1, enumerations.get(),
+            "the blocked-address pass must also enumerate exactly once");
     }
 }

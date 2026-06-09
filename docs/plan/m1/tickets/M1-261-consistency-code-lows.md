@@ -1,21 +1,44 @@
 ---
 id: M1-261
 title: "Consistency code lows: IpBlocklist per-pass enum, router name case"
-status: pending
+status: done
 created: 2026-06-09
 last_updated: 2026-06-09
 blocked_by: []
-files_budget: 7
+files_budget: 24
 files_scope:
   - infochat-ssrf/src/main/java/app/zcat/infochat/ssrf/IpBlocklist.java
   - infochat-ssrf/src/main/java/app/zcat/infochat/ssrf/SsrfGuardedHttpClient.java
   - infochat-ssrf/src/test/java/app/zcat/infochat/ssrf
   - infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/routing/LlmRouter.java
   - infochat-llm-adapter/src/test/java/app/zcat/infochat/llm/routing
+  # Refine 2026-06-09: the IpBlocklist seam move (override point relocated
+  # from public isBlocked(addr) to protected isBlockedAgainst(addr,
+  # snapshot)) orphans every loopback-permitting IpBlocklist test double.
+  # 17 such doubles live across the collector/provider test packages — each
+  # gets the identical mechanical rename. Listed file-by-file (not by dir)
+  # so the scope is exactly the touched set. Policy byte-identical; build is proof.
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/bluesky/BlueskyFetcherTest.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/nitter/NitterFetcherTest.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/odysee/OdyseeFetcherTest.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/reddit/LoopbackPermittingBlocklist.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/rss/RssFetcherTest.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/youtube/YouTubeFetcherTest.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrDedupIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrDegradationIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrSsrfIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrSsrfTest.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSourceIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSourceTest.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSourceVerificationIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/AddSourceIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/AddSourceNostrProbeIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/source/UrlProbeRelayTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/source/UrlProbeTest.java
 complexity: low
 risk: low
 round_cap: 2
-security_relevant: false
+security_relevant: true
 migration_touch: false
 out_of_scope:
   - The per-call (per-request) freshness contract of the host-interface set — PRESERVED; the fix enumerates once per validation pass, NOT once per construction. M1-026 Finding 3 requires per-request freshness; this only removes the redundant per-address re-enumeration within a single pass.
@@ -31,16 +54,116 @@ test_plan:
   adds:
     - infochat-ssrf/src/test/java/app/zcat/infochat/ssrf
     - infochat-llm-adapter/src/test/java/app/zcat/infochat/llm/routing
+  modifies:
+    - infochat-ssrf/src/test/java/app/zcat/infochat/ssrf/LoopbackPermittingBlocklist.java
+    # Refine 2026-06-09: sibling loopback-permitting doubles in the
+    # collector/provider modules that override isBlocked(addr) — all moved
+    # to override the new isBlockedAgainst(addr, snapshot) seam.
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/bluesky/BlueskyFetcherTest.java
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/nitter/NitterFetcherTest.java
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/odysee/OdyseeFetcherTest.java
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/reddit/LoopbackPermittingBlocklist.java
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/rss/RssFetcherTest.java
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/youtube/YouTubeFetcherTest.java
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrDedupIT.java
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrDegradationIT.java
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrSsrfIT.java
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrSsrfTest.java
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSourceIT.java
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSourceTest.java
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSourceVerificationIT.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/command/AddSourceIT.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/command/AddSourceNostrProbeIT.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/source/UrlProbeRelayTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/source/UrlProbeTest.java
   preserves:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-09
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 25
+      added: 311
+      removed: 60
 overrides: []
 aborted_attempts: []
 reopens: []
+escalations:
+  - date: 2026-06-09
+    reason: scope-expansion (call-site sweep miss)
+    summary: |
+      During implementation, `mvn -B clean verify` failed: the IpBlocklist
+      seam move (production now calls firstBlocked → package-private
+      isBlockedAgainst instead of the per-address public isBlocked) orphans
+      every loopback-permitting IpBlocklist test double, since they all
+      override the now-bypassed isBlocked(addr). The ticket's Notes
+      anticipated this for the ONE LoopbackPermittingBlocklist in
+      infochat-ssrf (listed in files_scope) but the drafter never grepped
+      sibling modules: 17 more such doubles exist in infochat-collector (13)
+      and infochat-provider (4), all outside files_scope, all failing with
+      `SsrfPolicyException: blocked IP: 127.0.0.1` when their loopback
+      carve-out stopped being consulted.
+
+      No safe design avoids the sweep: the doubles override the exact
+      single-arg method whose internal enumeration IS the cost being
+      removed, so enumerating once requires not virtual-dispatching through
+      it. The only override-preserving alternative (a per-pass passSnapshot
+      field on IpBlocklist) is thread-unsafe on a shared security singleton
+      and was rejected. The seam move is therefore the correct design; the
+      17 edits are its unavoidable mechanical tail, not independent work.
+
+      Resolution: refine (user-authorized 2026-06-09) — expand files_scope
+      to the collector/provider test dirs, raise files_budget 7 → 24, list
+      the 17 doubles in test_plan.modifies, apply the identical rename
+      (`public boolean isBlocked(InetAddress addr)` →
+      `boolean isBlockedAgainst(InetAddress addr, Set<InetAddress> hostInterfaces)`,
+      `super.isBlocked(addr)` → `super.isBlockedAgainst(addr, hostInterfaces)`)
+      to each. Policy is byte-identical; the green build is the proof.
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-09
+    verdict: CLEAN
+    base: 650b4cd
+    head: m1/M1-261-consistency-code-lows working tree (uncommitted)
+    verdict_file: docs/plan/m1/redteam/M1-261-2026-06-09.md
+    out_of_model_count: 1
+    note: |
+      --in-progress audit before commit (security_relevant: true; touches the
+      SSRF enforcement path). CLEAN — the diff is a behavior-preserving
+      consistency refactor: SSRF block/allow decision byte-identical, per-pass
+      enumeration correctness-neutral, per-redirect TOCTOU defense unaffected,
+      the 18 loopback doubles override the new protected isBlockedAgainst seam
+      (no test weakened), and the LlmRouter case fix touches no trust boundary.
+      One OUT-OF-MODEL advisory (case-only provider-name collision) was
+      falsified post-audit — entry names are compile-time constants, not
+      operator strings — so no guard and no remediation ticket.
+revisions:
+  - date: 2026-06-09
+    reason: scope-expansion refine snapshot (sibling test-double sweep)
+    summary: |
+      Pre-refine frontmatter: files_budget=7; files_scope limited to
+      infochat-ssrf + infochat-llm-adapter; test_plan.modifies listed only
+      infochat-ssrf/.../LoopbackPermittingBlocklist.java. The refine raised
+      files_budget to 24, added the collector fetcher/nostr-stream and
+      provider command/source test dirs to files_scope, and enumerated the
+      17 sibling loopback-permitting doubles under test_plan.modifies. See
+      the escalation entry above for the full reasoning.
+clarity_check:
+  date: 2026-06-09
+  verdict: WARN
+  warnings:
+    - "SECURITY-FLAG-CONSISTENT: IpBlocklist and SsrfGuardedHttpClient are SSRF security enforcement classes; even though block/allow policy is asserted byte-identical, consider security_relevant: true so the post-commit redteam runs."
+    - "TEST-CHANGES-AUTHORIZED (advisory): if the implementation changes the existing LoopbackPermittingBlocklist test subclass override, that modification must be listed in test_plan.modifies."
+  blockers: []
 ---
 
 # M1-261: Consistency code lows
@@ -96,10 +219,13 @@ preserved.
   preserves per-call freshness); add a batch entry point (e.g. `anyBlocked(List)`)
   that snapshots the interface set once. The `LoopbackPermittingBlocklist` test
   subclass currently overrides `isBlocked` — route the batch through a
-  package-private `isBlockedAgainst(addr, snapshot)` so the override point moves
-  there and the batch does not re-introduce per-address enumeration. If the
-  BLOCKED_IP exception message needs the specific offending address, return the
-  offending `InetAddress` from the batch method instead of a boolean.
+  `protected isBlockedAgainst(addr, snapshot)` seam so the override point moves
+  there and the batch does not re-introduce per-address enumeration. (The seam
+  is `protected`, not package-private: the refine below found loopback-permitting
+  doubles in the collector/provider test packages that must override it from
+  OUTSIDE `app.zcat.infochat.ssrf`, which a package-private method cannot allow.)
+  If the BLOCKED_IP exception message needs the specific offending address,
+  return the offending `InetAddress` from the batch method instead of a boolean.
 - Router: lower-casing the registered name key and the override/default lookups
   is the simplest alignment (report Option A). Option B (make the guard
   case-sensitive instead) is rejected — it would let a mixed-case `Anthropic`

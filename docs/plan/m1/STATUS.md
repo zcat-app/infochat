@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 293 |
+| done | 294 |
 | deferred | 3 |
 | **total** | **297** |
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-261 — Consistency code lows: IpBlocklist per-pass enum, router name case (complexity: low, risk: low)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -60,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-261 | Consistency code lows: IpBlocklist per-pass enum, router name case | 2026-06-09 | round 1 APPROVE |
 | M1-260 | Build/doc-truth lows: sibling DAG enforcer, Flyway dup, gate javadoc | 2026-06-09 | round 1 APPROVE |
 | M1-259 | searchPosts: EXPLICIT empty tag-intersection yields zero posts | 2026-06-09 | round 1 APPROVE |
 | M1-257 | ReEvaluationJob: SKIP concurrent ticks to bound attempt burn | 2026-06-09 | round 1 APPROVE |
@@ -69,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-253 | Messaging-adapter consistency: virtual-thread dispatch parity | 2026-06-09 | round 1 APPROVE |
 | M1-252 | Collector lows: Nostr digest reuse, Stage2 redundant UPDATE, ssrf producer | 2026-06-09 | round 1 APPROVE |
 | M1-251 | LLM-adapter lows: finish embedding pipeline dedup + extract StubConfig | 2026-06-09 | round 1 APPROVE |
-| M1-250 | Core lows: Redactor scan/cadence + notifier phantom javadoc | 2026-06-09 | round 1 APPROVE |
 
 ---
 
@@ -441,5 +441,5 @@ M1-257 (done)
 M1-258 (deferred)
 M1-259 (done)
 M1-260 (done)
-M1-261 (pending) ← runnable
+M1-261 (done)
 ```

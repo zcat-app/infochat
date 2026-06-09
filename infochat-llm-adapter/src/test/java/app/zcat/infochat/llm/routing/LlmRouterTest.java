@@ -324,6 +324,36 @@ class LlmRouterTest {
     }
 
     /**
+     * M1-261: provider-name resolution is case-insensitive, agreeing
+     * with the already-case-insensitive {@link LlmRouterStartupGuard}.
+     * A mixed-case per-task override ("Anthropic") must resolve to the
+     * SAME registered Entry as its lower-case form ("anthropic") — the
+     * two collaborators must not reason about the same operator string
+     * under different normalization.
+     */
+    @Test
+    void mixedCaseProviderNameResolvesSameEntryAsLowerCase() {
+        StubProvider defaultProvider = new StubProvider();
+        StubProvider anthropicProvider = new StubProvider();
+        List<LlmRouter.Entry> entries = List.of(
+            new LlmRouter.Entry(NAME_DEFAULT, defaultProvider, Set.of("en")),
+            new LlmRouter.Entry(NAME_ANTHROPIC, anthropicProvider, Set.of("en")));
+
+        LlmRouter lowerCase = new LlmRouter(entries,
+            LlmRouter.ConfigReader.fromMap(Map.of(
+                "infochat.llm.security.provider", "anthropic")));
+        LlmRouter mixedCase = new LlmRouter(entries,
+            LlmRouter.ConfigReader.fromMap(Map.of(
+                "infochat.llm.security.provider", "Anthropic")));
+
+        assertSame(anthropicProvider, lowerCase.forTask(ModelTask.SECURITY_JUDGE, "en"),
+            "lower-case 'anthropic' override resolves the anthropic entry (baseline)");
+        assertSame(anthropicProvider, mixedCase.forTask(ModelTask.SECURITY_JUDGE, "en"),
+            "mixed-case 'Anthropic' override must resolve the SAME entry as "
+            + "'anthropic', agreeing with the case-insensitive startup guard");
+    }
+
+    /**
      * Minimal MicroProfile {@link Config} stub backed by a fixed map.
      * Only {@link #getOptionalValue(String, Class)} is implemented —
      * the router's {@code supportedLanguagesFor} helper uses that
