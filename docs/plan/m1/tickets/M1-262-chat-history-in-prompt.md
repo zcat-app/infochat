@@ -1,7 +1,7 @@
 ---
 id: M1-262
 title: "Chat agent: include conversation history in the prompt"
-status: pending
+status: done
 created: 2026-06-09
 last_updated: 2026-06-09
 blocked_by: []
@@ -33,12 +33,41 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-09
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 293
+      removed: 19
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-09
+    verdict: CLEAN
+    base: cccc741cc91026767c5cff36cd994308394f0066
+    head: m1/M1-262-chat-agent-include-conversatio (uncommitted working tree)
+    verdict_file: docs/plan/m1/redteam/M1-262-2026-06-09.md
+    out_of_model_count: 2
+    note: |
+      Pre-commit audit of the approved round-1 working tree. CLEAN: no
+      findings at any severity. Two OUT-OF-MODEL observations recorded in
+      the verdict file as advisory only; nothing feeds a remediation
+      ticket. Proceed to /m1-tick commit.
+clarity_check:
+  date: 2026-06-09
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-262: Chat agent: include conversation history in the prompt

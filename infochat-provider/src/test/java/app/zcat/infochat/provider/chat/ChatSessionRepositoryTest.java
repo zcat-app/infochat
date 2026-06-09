@@ -10,6 +10,7 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -122,6 +123,41 @@ class ChatSessionRepositoryTest {
                 assertEquals(3, rs.getInt("next_seq"));
                 assertEquals(4, rs.getInt("token_count"));
             }
+        }
+    }
+
+    @Test
+    void readTurnsReturnsOnlyOwnUserAndScopeInSeqOrder() throws Exception {
+        repository.persistTurn(USER_ID, SCOPE_KIND, SCOPE_ID, "user", "mine first", 2);
+        repository.persistTurn(USER_ID, SCOPE_KIND, SCOPE_ID, "assistant", "mine second", 3);
+
+        // Same user, different scope id
+        UUID otherScope = UUID.randomUUID();
+        repository.persistTurn(USER_ID, SCOPE_KIND, otherScope, "user", "other scope turn", 2);
+
+        // Different user, same scope id
+        UUID otherUser = UUID.randomUUID();
+        seedUserRow(otherUser);
+        repository.persistTurn(otherUser, SCOPE_KIND, SCOPE_ID, "user", "other user turn", 2);
+
+        List<ChatSessionRepository.Turn> turns =
+                repository.readTurns(USER_ID, SCOPE_KIND, SCOPE_ID);
+
+        assertEquals(2, turns.size(),
+                "readTurns must return only the caller's (user, scope) turns");
+        assertEquals(new ChatSessionRepository.Turn("user", "mine first", 2), turns.get(0));
+        assertEquals(new ChatSessionRepository.Turn("assistant", "mine second", 3), turns.get(1));
+    }
+
+    private void seedUserRow(UUID userId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO users (id, adapter, contact_id, registration_state) "
+                   + "VALUES (?, 'inmemory', ?, 'vouched') "
+                   + "ON CONFLICT (id) DO NOTHING")) {
+            ps.setObject(1, userId);
+            ps.setString(2, "csr-" + userId);
+            ps.executeUpdate();
         }
     }
 

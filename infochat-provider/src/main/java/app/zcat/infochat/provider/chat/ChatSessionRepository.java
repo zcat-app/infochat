@@ -8,12 +8,15 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
-// Persists chat turns (user + assistant) as chat_message rows and creates
-// a chat_session on first message per (user, scope). The DB trigger
-// trg_chat_session_counters manages next_seq and token_count — this code
-// reads next_seq to supply the seq column but does NOT increment it.
+// Persists and reads chat turns (user + assistant) as chat_message rows
+// and creates a chat_session on first message per (user, scope). The DB
+// trigger trg_chat_session_counters manages next_seq and token_count —
+// this code reads next_seq to supply the seq column but does NOT
+// increment it.
 @ApplicationScoped
 public class ChatSessionRepository {
 
@@ -34,6 +37,13 @@ public class ChatSessionRepository {
     private static final String INSERT_MESSAGE =
             "INSERT INTO chat_message (user_id, scope_kind, scope_id, seq, role, content, tokens) "
           + "VALUES (?, ?, ?, ?, ?, ?, ?)";
+
+    private static final String SELECT_TURNS =
+            "SELECT role, content, tokens FROM chat_message "
+          + "WHERE user_id = ? AND scope_kind = ? AND scope_id = ? "
+          + "ORDER BY seq ASC";
+
+    public record Turn(String role, String content, int tokens) {}
 
     private final DataSource dataSource;
 
@@ -96,6 +106,30 @@ public class ChatSessionRepository {
             }
         } catch (SQLException e) {
             throw new IllegalStateException("ChatSessionRepository.persistTurn failed", e);
+        }
+    }
+
+    /**
+     * Read all persisted turns for the (user, scope) session in seq order
+     * (oldest first). Returns an empty list when no session exists.
+     */
+    public List<Turn> readTurns(UUID userId, String scopeKind, UUID scopeId) {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(SELECT_TURNS)) {
+            ps.setObject(1, userId);
+            ps.setString(2, scopeKind);
+            ps.setObject(3, scopeId);
+            try (ResultSet rs = ps.executeQuery()) {
+                List<Turn> turns = new ArrayList<>();
+                while (rs.next()) {
+                    turns.add(new Turn(rs.getString("role"),
+                            rs.getString("content"),
+                            rs.getInt("tokens")));
+                }
+                return turns;
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("ChatSessionRepository.readTurns failed", e);
         }
     }
 

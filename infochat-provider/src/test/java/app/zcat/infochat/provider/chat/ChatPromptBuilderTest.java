@@ -6,12 +6,15 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ChatPromptBuilderTest {
 
     private static final UUID USER_ID = UUID.randomUUID();
+    private static final UUID SCOPE_ID = UUID.randomUUID();
+    private static final int TOKEN_BUDGET = 16384;
 
     private static ChatMemoryPreFetcher noOpPreFetcher() {
         return new ChatMemoryPreFetcher() {
@@ -23,9 +26,20 @@ class ChatPromptBuilderTest {
         };
     }
 
+    private static ChatSessionRepository emptyRepository() {
+        return new StubChatSessionRepository(List.of());
+    }
+
+    private static StubChatSessionRepository.StoredTurn ownTurn(
+            String role, String content, int tokens) {
+        return new StubChatSessionRepository.StoredTurn(USER_ID, "dm", SCOPE_ID,
+                new ChatSessionRepository.Turn(role, content, tokens));
+    }
+
     @Test
     void markerIsRandomPerCall() {
-        ChatPromptBuilder builder = new ChatPromptBuilder(noOpPreFetcher());
+        ChatPromptBuilder builder = new ChatPromptBuilder(
+                noOpPreFetcher(), emptyRepository(), TOKEN_BUDGET);
 
         ChatPromptBuilder.BuiltPrompt prompt1 =
                 builder.build(USER_ID, "dm", USER_ID, "hello");
@@ -40,7 +54,8 @@ class ChatPromptBuilderTest {
 
     @Test
     void systemPromptContainsRefusalInstruction() {
-        ChatPromptBuilder builder = new ChatPromptBuilder(noOpPreFetcher());
+        ChatPromptBuilder builder = new ChatPromptBuilder(
+                noOpPreFetcher(), emptyRepository(), TOKEN_BUDGET);
 
         ChatPromptBuilder.BuiltPrompt prompt =
                 builder.build(USER_ID, "dm", USER_ID, "test");
@@ -64,7 +79,8 @@ class ChatPromptBuilderTest {
                 ));
             }
         };
-        ChatPromptBuilder builder = new ChatPromptBuilder(preFetcherWithResults);
+        ChatPromptBuilder builder = new ChatPromptBuilder(
+                preFetcherWithResults, emptyRepository(), TOKEN_BUDGET);
 
         ChatPromptBuilder.BuiltPrompt prompt =
                 builder.build(USER_ID, "dm", USER_ID, "tell me about crypto");
@@ -87,5 +103,105 @@ class ChatPromptBuilderTest {
         int userMsgPos = up.indexOf("tell me about crypto");
         assertTrue(userMsgPos > secondWrapper,
                 "User message must be inside the second UNTRUSTED_CONTENT block");
+    }
+
+    @Test
+    void priorTurnsAppearInBuiltPromptNewestLast() {
+        ChatSessionRepository repository = new StubChatSessionRepository(List.of(
+                ownTurn("user", "what is zcash", 4),
+                ownTurn("assistant", "a privacy-focused cryptocurrency", 8)));
+        ChatPromptBuilder builder = new ChatPromptBuilder(
+                noOpPreFetcher(), repository, TOKEN_BUDGET);
+
+        ChatPromptBuilder.BuiltPrompt prompt =
+                builder.build(USER_ID, "dm", SCOPE_ID, "tell me more");
+
+        String up = prompt.userPrompt();
+        int userTurnPos = up.indexOf("user: what is zcash");
+        int assistantTurnPos = up.indexOf("assistant: a privacy-focused cryptocurrency");
+        int currentMessagePos = up.indexOf("tell me more");
+        assertTrue(userTurnPos >= 0, "Prior user turn must appear in the built prompt");
+        assertTrue(assistantTurnPos > userTurnPos,
+                "Prior assistant turn must follow the user turn (oldest first)");
+        assertTrue(currentMessagePos > assistantTurnPos,
+                "Current message must come after all history turns (newest-last)");
+    }
+
+    @Test
+    void overBudgetSessionDropsOldestTurnsFirst() {
+        ChatSessionRepository repository = new StubChatSessionRepository(List.of(
+                ownTurn("user", "oldest turn content", 6),
+                ownTurn("assistant", "middle turn content", 4),
+                ownTurn("user", "newest turn content", 4)));
+        // Budget of 10 fits newest (4) + middle (4) but not oldest (6 more)
+        ChatPromptBuilder builder = new ChatPromptBuilder(
+                noOpPreFetcher(), repository, 10);
+
+        ChatPromptBuilder.BuiltPrompt prompt =
+                builder.build(USER_ID, "dm", SCOPE_ID, "next question");
+
+        String up = prompt.userPrompt();
+        assertFalse(up.contains("oldest turn content"),
+                "Oldest turn must be dropped first when the session exceeds the budget");
+        assertTrue(up.contains("middle turn content"),
+                "Turns within the budget must be kept");
+        assertTrue(up.contains("newest turn content"),
+                "Newest turn must always survive the oldest-first drop");
+    }
+
+    @Test
+    void historyWrappedInUntrustedContentDelimiters() {
+        ChatSessionRepository repository = new StubChatSessionRepository(List.of(
+                ownTurn("user", "remembered history fact", 4)));
+        ChatPromptBuilder builder = new ChatPromptBuilder(
+                noOpPreFetcher(), repository, TOKEN_BUDGET);
+
+        ChatPromptBuilder.BuiltPrompt prompt =
+                builder.build(USER_ID, "dm", SCOPE_ID, "follow-up");
+
+        String up = prompt.userPrompt();
+        // No memory hits, so the first untrusted block is the history block
+        // and the second wraps the current message.
+        int historyOpen = up.indexOf("<<<UNTRUSTED_CONTENT id=\"");
+        int historyClose = up.indexOf("<<<END");
+        int historyPos = up.indexOf("user: remembered history fact");
+        assertTrue(historyPos > historyOpen && historyPos < historyClose,
+                "History content must sit inside an UNTRUSTED_CONTENT block");
+
+        // The history block carries its own random marker, distinct from
+        // the current-message marker.
+        String openPrefix = "<<<UNTRUSTED_CONTENT id=\"";
+        String historyMarker = up.substring(historyOpen + openPrefix.length(),
+                up.indexOf('"', historyOpen + openPrefix.length()));
+        assertNotEquals(prompt.marker(), historyMarker,
+                "History block must use its own marker, not the user-message marker");
+    }
+
+    @Test
+    void turnsFromDifferentUserOrScopeNeverAppear() {
+        UUID otherUser = UUID.randomUUID();
+        UUID otherScope = UUID.randomUUID();
+        ChatSessionRepository repository = new StubChatSessionRepository(List.of(
+                new StubChatSessionRepository.StoredTurn(otherUser, "dm", SCOPE_ID,
+                        new ChatSessionRepository.Turn("user", "other users secret", 3)),
+                new StubChatSessionRepository.StoredTurn(USER_ID, "dm", otherScope,
+                        new ChatSessionRepository.Turn("user", "other scope secret", 3)),
+                new StubChatSessionRepository.StoredTurn(USER_ID, "group", SCOPE_ID,
+                        new ChatSessionRepository.Turn("user", "group scope secret", 3))));
+        ChatPromptBuilder builder = new ChatPromptBuilder(
+                noOpPreFetcher(), repository, TOKEN_BUDGET);
+
+        ChatPromptBuilder.BuiltPrompt prompt =
+                builder.build(USER_ID, "dm", SCOPE_ID, "hello");
+
+        String up = prompt.userPrompt();
+        assertFalse(up.contains("other users secret"),
+                "Another user's turns must never enter the prompt");
+        assertFalse(up.contains("other scope secret"),
+                "Turns from a different scope of the same user must never enter the prompt");
+        assertFalse(up.contains("group scope secret"),
+                "Turns from a different scope kind must never enter the prompt");
+        assertFalse(up.contains("Conversation history"),
+                "No history block should be emitted when the session has no turns");
     }
 }

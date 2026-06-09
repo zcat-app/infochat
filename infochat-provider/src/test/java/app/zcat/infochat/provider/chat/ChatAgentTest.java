@@ -334,7 +334,9 @@ class ChatAgentTest {
                             UUID u, String sk, UUID si, String q) {
                         return List.of();
                     }
-                }) {
+                },
+                new ChatSessionRepository(null),
+                16384) {
             @Override
             public BuiltPrompt build(UUID u, String sk, UUID si, String msg) {
                 promptBuilderCalls++;
