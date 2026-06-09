@@ -19,6 +19,7 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -28,6 +29,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -83,13 +85,13 @@ class ReadyPromoterIT {
     void reset() throws Exception {
         // Field writes on a CDI proxy do not reach the contextual
         // instance — same pattern as Stage2WorkerIT.releaseOnStage2Failure.
-        ClientProxy.unwrap(readyPromoter).afterUpdateHook = () -> {};
+        ClientProxy.unwrap(readyPromoter).afterUpdateHook = conn -> {};
         clearItPosts();
     }
 
     @AfterEach
     void clearAfter() throws Exception {
-        ClientProxy.unwrap(readyPromoter).afterUpdateHook = () -> {};
+        ClientProxy.unwrap(readyPromoter).afterUpdateHook = conn -> {};
         clearItPosts();
     }
 
@@ -133,7 +135,7 @@ class ReadyPromoterIT {
     @Order(2)
     void sameTransactionRollsBackBothUpdateAndNotify() throws Exception {
         SeededPost post = seedPickupReadyPost("rollback");
-        ClientProxy.unwrap(readyPromoter).afterUpdateHook = () -> {
+        ClientProxy.unwrap(readyPromoter).afterUpdateHook = conn -> {
             throw new RuntimeException("simulated failure between UPDATE and NOTIFY");
         };
 
@@ -284,7 +286,7 @@ class ReadyPromoterIT {
         // the winner commits, forcing real overlap rather than incidental
         // serialization. It is invoked once per successful claim, so the count
         // is the number of ticks that actually picked the post.
-        ClientProxy.unwrap(readyPromoter).afterUpdateHook = () -> {
+        ClientProxy.unwrap(readyPromoter).afterUpdateHook = conn -> {
             claims.incrementAndGet();
             try {
                 Thread.sleep(150);
@@ -315,6 +317,77 @@ class ReadyPromoterIT {
                 + "a second claim would mean the picker double-picked under overlap");
         PostSnapshot snap = readPost(post.id);
         assertEquals("READY", snap.status, "the winning claim must leave the post READY");
+    }
+
+    // ---------- 7. single clock — ready_at is assigned by the database ----------
+
+    @Test
+    @Order(7)
+    void promotedReadyAtIsAssignedByTheDatabaseClock() throws Exception {
+        SeededPost post = seedPickupReadyPost("db-clock");
+
+        // Observe transaction_timestamp() on the promoting connection
+        // while its transaction is still open: now() inside the UPDATE
+        // and this SELECT both evaluate to the transaction's start
+        // time, so a DB-assigned ready_at must equal the observation
+        // EXACTLY at microsecond precision. A JVM-assigned ready_at
+        // (Instant.now()) samples a different clock read and cannot
+        // collide with the transaction timestamp.
+        //
+        // The seam is shared with the LIVE scheduler, whose ticks may
+        // concurrently promote leftover fixture rows from other ITs in
+        // this JVM. The hook therefore reads OUR row's in-transaction
+        // ready_at and records the timestamp only when it is non-null —
+        // i.e. only inside the transaction that promoted our post —
+        // with first-set-wins so a later stray tick (which sees the
+        // committed non-null ready_at) cannot overwrite it.
+        AtomicReference<Instant> dbTransactionTimestamp = new AtomicReference<>();
+        ClientProxy.unwrap(readyPromoter).afterUpdateHook = conn -> {
+            try (PreparedStatement ps = conn.prepareStatement(
+                     "SELECT transaction_timestamp(), ready_at FROM post WHERE id = ?")) {
+                ps.setObject(1, post.id);
+                try (ResultSet rs = ps.executeQuery()) {
+                    rs.next();
+                    if (rs.getTimestamp(2) != null) {
+                        dbTransactionTimestamp.compareAndSet(null, rs.getTimestamp(1).toInstant());
+                    }
+                }
+            } catch (SQLException e) {
+                throw new IllegalStateException("failed to observe transaction_timestamp()", e);
+            }
+        };
+
+        try (Connection listenConn = dataSource.getConnection()) {
+            listenConn.setAutoCommit(true);
+            try (Statement s = listenConn.createStatement()) {
+                s.execute("LISTEN new_post");
+            }
+            PGConnection pg = listenConn.unwrap(PGConnection.class);
+
+            readyPromoter.promoteOne(post.id, post.fetchedAt);
+
+            PostSnapshot snap = readPost(post.id);
+            assertEquals("READY", snap.status);
+            assertNotNull(dbTransactionTimestamp.get(),
+                "the seam must have observed the promoting transaction's timestamp");
+            assertEquals(dbTransactionTimestamp.get(), snap.readyAt,
+                "ready_at must equal the DB transaction timestamp observed inside the promoting "
+                    + "transaction — i.e. produced by the database clock, not Instant.now()");
+            assertEquals(snap.readyAt, snap.statusChangedAt,
+                "status_changed_at must carry the same DB-assigned timestamp");
+
+            // The NOTIFY payload is built from the UPDATE's RETURNING
+            // value, so it must carry the same DB-assigned instant —
+            // the Provider-side handler's existence check compares
+            // payload.ready_at against the stored column for equality.
+            // Poll for OUR post's notification specifically: concurrent
+            // scheduler ticks promoting stray fixture rows emit NOTIFYs
+            // on the same channel.
+            String payload = awaitNotificationForPost(pg, post.id);
+            assertNotNull(payload, "the promotion must emit a NOTIFY for the promoted post");
+            assertTrue(payload.contains("\"ready_at\":\"" + snap.readyAt.toString() + "\""),
+                "payload ready_at must equal the DB-assigned column value: " + payload);
+        }
     }
 
     // ---------- helpers ----------
@@ -440,6 +513,27 @@ class ReadyPromoterIT {
             }
         }
         return collected.isEmpty() ? null : collected.toArray(new PGNotification[0]);
+    }
+
+    /**
+     * Poll {@code getNotifications} until a notification whose payload
+     * carries the given post id arrives OR the bounded wait elapses.
+     * Returns that notification's payload, or {@code null} on timeout.
+     */
+    private String awaitNotificationForPost(PGConnection pg, UUID postId) throws Exception {
+        long deadlineNanos = System.nanoTime() + 10_000_000_000L;
+        String marker = "\"post_id\":\"" + postId + "\"";
+        while (System.nanoTime() < deadlineNanos) {
+            PGNotification[] batch = pg.getNotifications(500);
+            if (batch != null) {
+                for (PGNotification n : batch) {
+                    if (n.getParameter().contains(marker)) {
+                        return n.getParameter();
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     private record SeededPost(UUID id, String uid, Instant fetchedAt) {

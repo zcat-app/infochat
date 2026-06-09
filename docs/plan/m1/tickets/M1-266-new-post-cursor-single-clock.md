@@ -1,7 +1,7 @@
 ---
 id: M1-266
 title: "new_post cursor: single clock for ready_at"
-status: pending
+status: done
 created: 2026-06-09
 last_updated: 2026-06-09
 blocked_by: []
@@ -32,12 +32,30 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-09
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 384
+      removed: 41
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-09
+  verdict: WARN
+  warnings:
+    - "TEST-CHANGES-AUTHORIZED: Acceptance item 2's 'amended existing reconciler test' branch could modify a pre-existing test (likely NewPostReconcilerIT.java) without an explicit test_plan.modifies entry naming the file and old behavior. Implementer should prefer adding a new named test; if amending, add a modifies entry before implementation begins."
+  blockers: []
 ---
 
 # M1-266: new_post cursor: single clock for ready_at

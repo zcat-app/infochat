@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 18 |
+| pending | 17 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 296 |
+| done | 297 |
 | deferred | 3 |
 | **total** | **317** |
 
@@ -26,7 +26,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-264 — Compress: no JDBC tx across LLM call; ceiling gate (complexity: medium, risk: medium)
 - M1-265 — LLM routing guard closure + provider hygiene (complexity: high, risk: medium)
-- M1-266 — new_post cursor: single clock for ready_at (complexity: medium, risk: medium)
 - M1-267 — Stage 2 judge off the emitter thread (complexity: medium, risk: medium)
 - M1-268 — Thread /lang through bundle lookups (D43) (complexity: high, risk: medium)
 - M1-269 — Revoke UPDATE on price_snapshot from collector role (complexity: low, risk: low)
@@ -77,6 +76,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-266 | new_post cursor: single clock for ready_at | 2026-06-09 | round 1 APPROVE |
 | M1-263 | Digest correctness: collection window, cache TTL, caps | 2026-06-09 | round 1 APPROVE |
 | M1-262 | Chat agent: include conversation history in the prompt | 2026-06-09 | round 1 APPROVE |
 | M1-261 | Consistency code lows: IpBlocklist per-pass enum, router name case | 2026-06-09 | round 1 APPROVE |
@@ -86,7 +86,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-256 | Embedding vector elements: validate numeric before coercion | 2026-06-09 | round 1 APPROVE |
 | M1-255 | Signal membership-event ACIs: apply canonical-UUID gate | 2026-06-09 | round 1 APPROVE |
 | M1-254 | Remove orphaned BanCheck (intake step-4 ban folded into snapshot by M1-244) | 2026-06-09 | round 1 APPROVE |
-| M1-253 | Messaging-adapter consistency: virtual-thread dispatch parity | 2026-06-09 | round 1 APPROVE |
 
 ---
 
@@ -463,7 +462,7 @@ M1-262 (done)
 M1-263 (done)
 M1-264 (pending) ← runnable
 M1-265 (pending) ← runnable
-M1-266 (pending) ← runnable
+M1-266 (done)
 M1-267 (pending) ← runnable
 M1-268 (pending) ← runnable
 M1-269 (pending) ← runnable

@@ -17,6 +17,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 /**
  * Collector-side scheduled poller for Stage 5 of the eval pipeline:
@@ -99,16 +100,17 @@ public class ReadyPromoter {
     DataSource dataSource;
 
     /**
-     * Test-only seam: a Runnable invoked AFTER the UPDATE succeeds
-     * but BEFORE the {@code pg_notify} statement. Production code
-     * never sets this — the default no-op runs in every production
-     * promotion. {@code ReadyPromoterIT} uses it to throw a
+     * Test-only seam: invoked with the in-transaction connection AFTER
+     * the UPDATE succeeds but BEFORE the {@code pg_notify} statement.
+     * Production code never sets this — the default no-op runs in every
+     * production promotion. {@code ReadyPromoterIT} uses it to throw a
      * RuntimeException inside the explicit transaction
      * to assert that the UPDATE rolls back AND no NOTIFY is
-     * delivered. Package-private so cross-package tests cannot
-     * reach in.
+     * delivered, and to observe the transaction timestamp the
+     * DB-assigned {@code ready_at} must equal. Package-private so
+     * cross-package tests cannot reach in.
      */
-    Runnable afterUpdateHook = () -> {};
+    Consumer<Connection> afterUpdateHook = conn -> {};
 
     /**
      * Scheduled tick. Enumerates pending posts and promotes each one
@@ -148,7 +150,6 @@ public class ReadyPromoter {
      * in the same SQL session against the same row.
      */
     public void promoteOne(UUID postId, Instant fetchedAt) {
-        Instant readyAt = Instant.now();
         try (Connection conn = dataSource.getConnection()) {
             // Explicit transaction boundary: the UPDATE and the
             // pg_notify('new_post') below must commit or roll back as
@@ -157,36 +158,53 @@ public class ReadyPromoter {
             // it off so both statements ride a single commit.
             conn.setAutoCommit(false);
             try {
-                int rowsUpdated;
+                // Single clock for ready_at: the DB's now() — the same
+                // transaction-timestamp source the approve_quarantine
+                // SQL function uses — so every ready_at writer stamps
+                // from one ordered timeline and JVM↔DB clock skew
+                // cannot land a row below the Provider's
+                // already-advanced (ready_at, id) cursor. RETURNING
+                // feeds the DB-assigned value into the NOTIFY payload
+                // so payload and column stay byte-identical.
+                // Residual the single clock does NOT close: now() is
+                // transaction-START time, so a writer transaction that
+                // begins before another's but commits after it can
+                // still publish a ready_at below an already-advanced
+                // cursor (e.g. a slow approve_quarantine overlapping a
+                // fast promotion). The strictly-monotonic cursor CAS
+                // classifies such a row as out-of-order; a real
+                // new_post consumer must tolerate that (lag-window
+                // scan and/or per-post dedupe) before it attaches.
+                Instant readyAt;
                 try (PreparedStatement ps = conn.prepareStatement(
                     "UPDATE post "
                         + "   SET status = 'READY', "
-                        + "       ready_at = ?, "
-                        + "       status_changed_at = ? "
+                        + "       ready_at = now(), "
+                        + "       status_changed_at = now() "
                         + " WHERE id = ? "
                         + "   AND fetched_at = ? "
-                        + "   AND status = 'RAW'")) {
-                    Timestamp ts = Timestamp.from(readyAt);
-                    ps.setTimestamp(1, ts);
-                    ps.setTimestamp(2, ts);
-                    ps.setObject(3, postId);
-                    ps.setTimestamp(4, Timestamp.from(fetchedAt));
-                    rowsUpdated = ps.executeUpdate();
-                }
-                if (rowsUpdated == 0) {
-                    // The post was no longer RAW (concurrent promotion
-                    // by another tick, or status flipped to QUARANTINED
-                    // between enumeratePending and this UPDATE). No
-                    // NOTIFY — the same-transaction rule cuts both
-                    // ways: no UPDATE means no NOTIFY for this id.
-                    conn.rollback();
-                    return;
+                        + "   AND status = 'RAW' "
+                        + " RETURNING ready_at")) {
+                    ps.setObject(1, postId);
+                    ps.setTimestamp(2, Timestamp.from(fetchedAt));
+                    try (ResultSet rs = ps.executeQuery()) {
+                        if (!rs.next()) {
+                            // The post was no longer RAW (concurrent promotion
+                            // by another tick, or status flipped to QUARANTINED
+                            // between enumeratePending and this UPDATE). No
+                            // NOTIFY — the same-transaction rule cuts both
+                            // ways: no UPDATE means no NOTIFY for this id.
+                            conn.rollback();
+                            return;
+                        }
+                        readyAt = rs.getTimestamp(1).toInstant();
+                    }
                 }
                 // Test-only seam: production sets this to a no-op
-                // (declared above). The IT injects a throwing Runnable
+                // (declared above). The IT injects a throwing hook
                 // here to assert the same-transaction rule rolls back
                 // both the UPDATE and any pending NOTIFY.
-                afterUpdateHook.run();
+                afterUpdateHook.accept(conn);
                 String payload = "{\"ready_at\":\"" + readyAt.toString()
                     + "\",\"post_id\":\"" + postId.toString() + "\"}";
                 try (PreparedStatement ps = conn.prepareStatement(
