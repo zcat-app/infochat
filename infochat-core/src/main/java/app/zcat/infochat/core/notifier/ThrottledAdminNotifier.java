@@ -153,12 +153,13 @@ public class ThrottledAdminNotifier {
      * {@code ON CONFLICT DO UPDATE ... WHERE <window-elapsed>}
      * runs the UPDATE only when the conditional is true; if false,
      * the row is locked but no SET applies and RETURNING produces
-     * NO ROW. So the Java side observes:
+     * NO ROW. So the Java side observes only whether a row came back
+     * ({@code rs.next()}) — it inspects no column to distinguish
+     * INSERT from UPDATE, because both mean an emit happened:
      * <ul>
-     *   <li>RETURNING returned a row + {@code xmax = 0} → fresh
-     *       INSERT (first time for this key) → EMITTED.</li>
-     *   <li>RETURNING returned a row + {@code xmax != 0} → UPDATE
-     *       fired (window had elapsed) → EMITTED.</li>
+     *   <li>RETURNING returned a row → fresh INSERT (first time for
+     *       this key) or an UPDATE that fired because the window had
+     *       elapsed → EMITTED.</li>
      *   <li>RETURNING returned NO ROW → CONFLICT but WHERE filtered
      *       out the UPDATE → within-window → SUPPRESSED.</li>
      * </ul>

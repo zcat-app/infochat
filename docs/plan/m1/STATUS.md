@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 12 |
+| pending | 11 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 275 |
+| done | 276 |
 | deferred | 2 |
 | **total** | **289** |
 
@@ -32,7 +32,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-247 — infochat-ssrf: body-cap default reconciliation + module lows (complexity: low, risk: low)
 - M1-248 — Flyway V20 gap: comment-only no-op placeholder (complexity: low, risk: low)
 - M1-249 — Provider lows: RateCapBucket dedup, ban null-guard, NOTIFY parse (complexity: low, risk: low)
-- M1-250 — Core lows: Redactor scan/cadence + notifier phantom javadoc (complexity: low, risk: low)
 - M1-251 — LLM-adapter lows: finish embedding pipeline dedup + extract StubConfig (complexity: low, risk: low)
 - M1-252 — Collector lows: Nostr digest reuse, Stage2 redundant UPDATE, ssrf producer (complexity: low, risk: low)
 - M1-253 — Messaging-adapter consistency lows: virtual threads + Random (complexity: low, risk: low)
@@ -71,6 +70,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-250 | Core lows: Redactor scan/cadence + notifier phantom javadoc | 2026-06-09 | round 1 APPROVE |
 | M1-241 | List /get-tags and /get-sources in the /help catalogue | 2026-06-09 | round 1 APPROVE |
 | M1-240 | infochat-collector: span-offset doc, unused asset-refresh fields | 2026-06-09 | round 1 APPROVE |
 | M1-239 | infochat-provider: NOTIFY discriminator, stale ban comment, locale fold | 2026-06-09 | round 1 APPROVE |
@@ -80,7 +80,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-235 | Migration: denormalize actor cols in delete_preban_user audit row | 2026-06-09 | round 1 APPROVE |
 | M1-234 | Drop the dead new_price_snapshot NOTIFY channel (+ spec) | 2026-06-09 | round 1 APPROVE |
 | M1-233 | Embedding dimensionality mismatch: alert operator, stop spamming | 2026-06-09 | round 1 APPROVE |
-| M1-232 | /retry --digest: atomic regenerate, honest skip status | 2026-06-09 | round 1 APPROVE |
 
 ---
 
@@ -438,7 +437,7 @@ M1-246 (pending) ← runnable
 M1-247 (pending) ← runnable
 M1-248 (pending) ← runnable
 M1-249 (pending) ← runnable
-M1-250 (pending) ← runnable
+M1-250 (done)
 M1-251 (pending) ← runnable
 M1-252 (pending) ← runnable
 M1-253 (pending) ← runnable

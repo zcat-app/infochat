@@ -83,13 +83,18 @@ public final class Redactor implements Filter {
         try {
             for (Pattern pattern : CATALOGUE) {
                 Matcher m = pattern.matcher(new InterruptibleCharSequence(current, deadlineNanos));
-                if (m.find()) {
-                    if (m.groupCount() > 0) {
-                        current = m.replaceAll("$1" + Matcher.quoteReplacement(REDACTED));
-                    } else {
-                        current = m.replaceAll(Matcher.quoteReplacement(REDACTED));
-                    }
-                }
+                // Single pass per pattern: replaceAll scans the input once
+                // and is a no-op (returns an equal string) when nothing
+                // matches, so the prior find()-then-replaceAll double scan
+                // is redundant. groupCount() is a property of the compiled
+                // pattern — it needs no prior match — so the keyword-
+                // preserving "$1" replacement for the generic catch-all
+                // (the only pattern with a capturing group) is selected
+                // without a separate scan. Output is byte-identical.
+                String replacement = m.groupCount() > 0
+                        ? "$1" + Matcher.quoteReplacement(REDACTED)
+                        : Matcher.quoteReplacement(REDACTED);
+                current = m.replaceAll(replacement);
             }
         } catch (RegexInterruptedException e) {
             return TIMEOUT_SENTINEL;
@@ -136,13 +141,29 @@ public final class Redactor implements Filter {
     }
 
     /**
-     * Wraps a string with a wall-clock deadline. Every
-     * {@code charAt} call checks the clock and throws after the
-     * deadline. Same pattern as Stage 1 and the audit redaction hook.
+     * Wraps a string with a wall-clock deadline. {@code charAt}
+     * samples the clock every {@link #CLOCK_CHECK_INTERVAL}-th call
+     * and throws once the deadline has passed. Same pattern as Stage 1
+     * and the audit redaction hook.
      */
     static final class InterruptibleCharSequence implements CharSequence {
+
+        // Sample the wall clock every Nth charAt instead of on every
+        // call: System.nanoTime() dominates the per-char cost, while
+        // catastrophic backtracking invokes charAt far more than once
+        // per input position. Checking one char in CLOCK_CHECK_INTERVAL
+        // bounds the post-deadline overshoot to at most this many extra
+        // charAt calls — a few thousand array reads plus their regex
+        // work complete in well under a millisecond, i.e. a sub-percent
+        // fraction of the 100ms DEFAULT_TIMEOUT_MS budget, the same
+        // order of magnitude the old per-char check guaranteed. The
+        // first call (counter 0) always checks, so a zero-budget
+        // deadline is still caught immediately even on a short input.
+        static final int CLOCK_CHECK_INTERVAL = 1024;
+
         private final CharSequence delegate;
         private final long deadlineNanos;
+        private int charsUntilClockCheck;
 
         InterruptibleCharSequence(CharSequence delegate, long deadlineNanos) {
             this.delegate = delegate;
@@ -156,9 +177,13 @@ public final class Redactor implements Filter {
 
         @Override
         public char charAt(int index) {
-            if (System.nanoTime() > deadlineNanos) {
-                throw new RegexInterruptedException();
+            if (charsUntilClockCheck == 0) {
+                if (System.nanoTime() > deadlineNanos) {
+                    throw new RegexInterruptedException();
+                }
+                charsUntilClockCheck = CLOCK_CHECK_INTERVAL;
             }
+            charsUntilClockCheck--;
             return delegate.charAt(index);
         }
 
