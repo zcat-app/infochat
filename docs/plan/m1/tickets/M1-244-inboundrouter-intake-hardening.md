@@ -1,7 +1,7 @@
 ---
 id: M1-244
 title: "InboundRouter: fold is_banned into snapshot + command body cap"
-status: in-progress
+status: done
 created: 2026-06-09
 last_updated: 2026-06-09
 blocked_by: []
@@ -65,7 +65,20 @@ spec_refs:
   - docs/spec/security.md §Authorization model
   - docs/spec/commands.md §Surface conventions
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-09
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 15
+      added: 278
+      removed: 102
 escalations:
   - date: 2026-06-09
     reason: clarity-fail
@@ -97,6 +110,22 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-06-09
+    verdict: CLEAN
+    base: main (8173b68)
+    head: working tree (uncommitted, branch m1/M1-244-inboundrouter-intake-hardening)
+    verdict_file: docs/plan/m1/redteam/M1-244-2026-06-09.md
+    out_of_model_count: 2
+    note: |
+      Pre-commit (--in-progress) audit, post-APPROVE. CLEAN — no findings.
+      Two OUT-OF-MODEL advisories, both confirmed within the current spec
+      (not gaps): (1) snapshot-served ban TOCTOU is the spec's documented
+      "ban takes effect on next inbound" behavior, same read-to-reply window
+      the old live BanCheck query had; (2) infochat.command.body-cap value is
+      operator/design-tier config, not a spec commitment. No remediation
+      ticket; no spec amendment. Verbatim verdict + disposition in the
+      verdict_file.
 revisions:
   - date: 2026-06-09
     reason: clarity-fail rework

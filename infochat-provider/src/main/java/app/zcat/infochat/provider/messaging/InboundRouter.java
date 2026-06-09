@@ -75,8 +75,9 @@ import java.util.concurrent.atomic.AtomicLong;
  *       registration (D47 gate #1, spec §Authorization model). A
  *       registered ({@code invited}/{@code vouched}) group sender
  *       falls through carrying the snapshot resolved at step 1;</li>
- *   <li>4 ban check via {@link BanCheck#isBanned}; a banned user
- *       receives the fixed {@code error.ban.fixed} reply and stops
+ *   <li>4 ban check from the step-1 snapshot ({@code isBanned}); a
+ *       banned user receives the fixed {@code error.ban.fixed} reply
+ *       and stops
  *       (spec §User ban: "one fixed reply per inbound message").
  *       <b>Execution position:</b> step 4 fires after step 3 and
  *       BEFORE step 3.5 per spec §Authorization model — a banned
@@ -109,6 +110,11 @@ import java.util.concurrent.atomic.AtomicLong;
  *       (5), the confirm drain (4.5), and the anchor clear (4.6) —
  *       {@code commands.md} §Input length caps forbids any DB write
  *       for an oversized chat-mode message;</li>
+ *   <li>command body cap: a slash body longer than
+ *       {@code infochat.command.body-cap} gets the fixed
+ *       {@code error.command.body_too_large} reply and stops at the
+ *       same position as the chat-mode cap — before the parser
+ *       ({@code handleSlash}) and any DB write;</li>
  *   <li>5 slow-start probation gate (M1-045): if {@link ProbationCheck}
  *       reports {@code inProbation == true} AND the command is NOT in
  *       {@link CommandPermissions}'s allowed-during-probation set, the
@@ -130,11 +136,12 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * <p><b>Users-row SELECT count per dispatch.</b> The dispatch path is
  * exactly one users-row SELECT per inbound. Steps 2 (DM emptiness),
- * 3 (group unregistered/preban drop), and 5 (probation gate) all
- * consume the SAME {@link UserSnapshot} resolved at step 1. The step 4
- * ban predicate consults {@link BanCheck#isBanned} directly per spec
- * (a separate query that sees the freshest {@code is_banned} state for
- * a banned-mid-dispatch race).</p>
+ * 3 (group unregistered/preban drop), 4 (ban check), and 5 (probation
+ * gate) all consume the SAME {@link UserSnapshot} resolved at step 1.
+ * The step-1 SELECT projects {@code is_banned} so the step 4 ban
+ * predicate reads {@code snapshot.isBanned()} rather than issuing a
+ * second query; the step-1→step-4 TOCTOU is microseconds and the ban
+ * takes effect on the next inbound regardless.</p>
  *
  * <p><b>Body-size cap (defense in depth, preserved from M1-038).</b>
  * After the rate-cap check, {@link #onMessage} drops any inbound
@@ -216,9 +223,9 @@ public class InboundRouter {
     /** The pre-banned registration state: a group message from such a contact is silently dropped at step 3. */
     private static final String REGISTRATION_STATE_PREBAN = "preban";
 
-    /** Single users-row lookup feeding steps 2, 3, and 5 from one SELECT. */
+    /** Single users-row lookup feeding steps 2, 3, 4, and 5 from one SELECT. */
     private static final String USER_SNAPSHOT_SQL =
-            "SELECT id, registration_state FROM users "
+            "SELECT id, registration_state, is_banned FROM users "
                     + "WHERE adapter = ? AND contact_id = ?";
 
     private static final String SELECT_GROUP_SQL =
@@ -243,9 +250,6 @@ public class InboundRouter {
 
     @Inject
     InviteCodeConsumer inviteCodeConsumer;
-
-    @Inject
-    BanCheck banCheck;
 
     @Inject
     BundleLoader bundleLoader;
@@ -285,6 +289,9 @@ public class InboundRouter {
 
     @ConfigProperty(name = "infochat.chat.body-cap", defaultValue = "2048")
     int chatBodyCap;
+
+    @ConfigProperty(name = "infochat.command.body-cap", defaultValue = "8192")
+    int commandBodyCap;
 
     /**
      * Defense-in-depth body cap. The default is below the in-memory
@@ -393,9 +400,8 @@ public class InboundRouter {
         }
 
         // Single users-row SELECT feeds steps 2 (DM emptiness), 3
-        // (group unregistered/preban drop), and 5 (probation gate).
-        // Step 4 consults BanCheck.isBanned directly per spec — see
-        // class-level Javadoc.
+        // (group unregistered/preban drop), 4 (ban check), and 5
+        // (probation gate) — see class-level Javadoc.
         Optional<UserSnapshot> snapshot = lookupUser(adapterName, contactId);
 
         // Step 2 — DM unknown contact + invite-code consume.
@@ -447,7 +453,16 @@ public class InboundRouter {
         // "Step labels are stable cross-reference identifiers, not
         // execution-order indices"; execution order is the source-
         // code order in this method.
-        if (banCheck.isBanned(adapterName, contactId)) {
+        //
+        // is_banned is served from the step-1 snapshot (one users-row
+        // SELECT per dispatch) instead of a second live query. Spec-
+        // legal: §Authorization model requires the ban check at step-4
+        // ordering, not a separate query. The step-1→step-4 TOCTOU is
+        // microseconds inside this synchronous handler; a ban landing in
+        // that window lets at most this one in-flight message through and
+        // takes effect on the next inbound. snapshot is guaranteed present
+        // here — DM-empty returns at step 2, group-empty/preban at step 3.
+        if (snapshot.get().isBanned()) {
             sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_BAN_FIXED), adapterName);
             return;
         }
@@ -494,6 +509,16 @@ public class InboundRouter {
         // precedence over the cap reply.
         if (!normalized.startsWith("/") && normalized.length() > chatBodyCap) {
             sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_CHAT_BODY_TOO_LARGE), adapterName);
+            return;
+        }
+
+        // Slash-command body cap (commands.md §Input length caps): a
+        // slash body longer than infochat.command.body-cap gets the
+        // fixed error.command.body_too_large reply and stops BEFORE the
+        // parser (handleSlash) — same ordering rationale as the chat cap
+        // above (after the authorization gates, before any DB write).
+        if (normalized.startsWith("/") && normalized.length() > commandBodyCap) {
+            sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_COMMAND_BODY_TOO_LARGE), adapterName);
             return;
         }
 
@@ -716,7 +741,8 @@ public class InboundRouter {
                 }
                 return Optional.of(new UserSnapshot(
                         rs.getObject("id", UUID.class),
-                        rs.getString("registration_state")));
+                        rs.getString("registration_state"),
+                        rs.getBoolean("is_banned")));
             }
         } catch (SQLException e) {
             throw new IllegalStateException(
@@ -726,15 +752,14 @@ public class InboundRouter {
     }
 
     /**
-     * Per-dispatch snapshot of one users-row's state. Captures only
-     * the columns the splice needs: {@code id} (for downstream audit
-     * hooks if any) and {@code registration_state} (step 3 group
-     * unregistered/preban drop predicate). The ban decision is NOT
-     * snapshotted — step 4 consults {@link BanCheck#isBanned} live.
-     * Package-private so test subclasses can construct instances
-     * when overriding {@link #lookupUser}.
+     * Per-dispatch snapshot of one users-row's state. Captures the
+     * columns the splice needs: {@code id} (for downstream audit
+     * hooks if any), {@code registration_state} (step 3 group
+     * unregistered/preban drop predicate), and {@code is_banned}
+     * (step 4 ban check). Package-private so test subclasses can
+     * construct instances when overriding {@link #lookupUser}.
      */
-    record UserSnapshot(UUID id, String registrationState) {}
+    record UserSnapshot(UUID id, String registrationState, boolean isBanned) {}
 
     private void sendReply(ScopeRef scope, String body, String adapterName) {
         MessagingAdapter target = replyTargets.get(adapterName);

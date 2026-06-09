@@ -87,7 +87,6 @@ class InboundRouterProbationOrderingTest {
                         "setAdapterName",
                         "rateCapBucket.tryAcquire",
                         "lookupUser",
-                        "banCheck.isBanned",
                         "probationCheck.inProbation",
                         "commandPermissions.allowedDuringProbation(add-source)",
                         "probationCheck.probationExpiry",
@@ -120,7 +119,6 @@ class InboundRouterProbationOrderingTest {
                         "setAdapterName",
                         "rateCapBucket.tryAcquire",
                         "lookupUser",
-                        "banCheck.isBanned",
                         "probationCheck.inProbation",
                         "commandPermissions.allowedDuringProbation(help)",
                         "handler.handle(help)"),
@@ -151,7 +149,6 @@ class InboundRouterProbationOrderingTest {
                         "setAdapterName",
                         "rateCapBucket.tryAcquire",
                         "lookupUser",
-                        "banCheck.isBanned",
                         "probationCheck.inProbation",
                         "probationCheck.clearIfPromoted",
                         "handler.handle(add-source)"),
@@ -243,7 +240,6 @@ class InboundRouterProbationOrderingTest {
                         "setAdapterName",
                         "rateCapBucket.tryAcquire",
                         "lookupUser",
-                        "banCheck.isBanned",
                         "groupApprovalCheck.check",
                         "probationCheck.inProbation",
                         "commandPermissions.allowedDuringProbation(add-source)",
@@ -277,7 +273,6 @@ class InboundRouterProbationOrderingTest {
                         "setAdapterName",
                         "rateCapBucket.tryAcquire",
                         "lookupUser",
-                        "banCheck.isBanned",
                         "bundleLoader.get(error.ban.fixed)"),
                 log.calls,
                 "step 4 ban check must fire BEFORE step 5 probation check — "
@@ -301,14 +296,14 @@ class InboundRouterProbationOrderingTest {
                 log.calls.add("lookupUser");
                 return Optional.of(new UserSnapshot(
                         snapshot.id(),
-                        snapshot.registrationState()));
+                        snapshot.registrationState(),
+                        banned));
             }
         };
         router.commandHandlers = new SingletonInstance<>();
         router.inboundContext = new RecordingInboundContext(log);
         router.rateCapBucket = new CountingRateCapBucket(log);
         router.inviteCodeConsumer = new FakeInviteCodeConsumer(log);
-        router.banCheck = new FakeBanCheck(log, banned);
         router.bundleLoader = new FakeBundleLoader(log);
         router.confirmStateService = new NoopConfirmStateService();
         router.commandPermissions = new RecordingCommandPermissions(log, allowedDuringProbation);
@@ -323,6 +318,7 @@ class InboundRouterProbationOrderingTest {
             @Override public void clear(UUID userId, String scopeKind, UUID scopeId) {}
         };
         router.maxInboundBodyBytes = 65536;
+        router.commandBodyCap = 65536;
         return router;
     }
 
@@ -362,7 +358,6 @@ class InboundRouterProbationOrderingTest {
         router.inboundContext = new RecordingInboundContext(log);
         router.rateCapBucket = new CountingRateCapBucket(log);
         router.inviteCodeConsumer = new FakeInviteCodeConsumer(log);
-        router.banCheck = new FakeBanCheck(log, false);
         router.bundleLoader = new FakeBundleLoader(log);
         router.confirmStateService = new NoopConfirmStateService();
         router.commandPermissions = new RecordingCommandPermissions(log, true);
@@ -377,6 +372,7 @@ class InboundRouterProbationOrderingTest {
             @Override public void clear(UUID userId, String scopeKind, UUID scopeId) {}
         };
         router.maxInboundBodyBytes = 65536;
+        router.commandBodyCap = 65536;
         return router;
     }
 

@@ -14,9 +14,9 @@
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 283 |
+| done | 284 |
 | deferred | 2 |
-| **total** | **289** |
+| **total** | **290** |
 
 ---
 
@@ -24,10 +24,10 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-244 — InboundRouter: fold is_banned into snapshot + command body cap (complexity: medium, risk: medium)
 - M1-245 — Re-evaluation candidate scan: fetched_at window + partial index (complexity: medium, risk: medium)
 - M1-246 — Quarantine stored procedures: audit-before-effect reorder (complexity: medium, risk: medium)
 - M1-253 — Messaging-adapter consistency lows: virtual threads + Random (complexity: low, risk: low)
+- M1-254 — Remove orphaned BanCheck (intake step-4 ban folded into snapshot by M1-244) (complexity: low, risk: low)
 
 ---
 
@@ -69,10 +69,10 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-249 | Provider lows: RateCapBucket dedup, ban null-guard, NOTIFY parse | 2026-06-09 | round 1 APPROVE |
 | M1-248 | Flyway V20 gap: comment-only no-op placeholder | 2026-06-09 | round 1 APPROVE |
 | M1-247 | infochat-ssrf: body-cap default reconciliation + module lows | 2026-06-09 | round 1 APPROVE |
+| M1-244 | InboundRouter: fold is_banned into snapshot + command body cap | 2026-06-09 | round 1 APPROVE |
 | M1-243 | LlmRouterStartupGuard: require every resolved IP to be loopback | 2026-06-09 | round 1 APPROVE |
 | M1-242 | Signal inbound decode hardening + oversize outcome | 2026-06-09 | round 1 APPROVE |
 | M1-241 | List /get-tags and /get-sources in the /help catalogue | 2026-06-09 | round 1 APPROVE |
-| M1-240 | infochat-collector: span-offset doc, unused asset-refresh fields | 2026-06-09 | round 1 APPROVE |
 
 ---
 
@@ -424,7 +424,8 @@ M1-240 (done)
 M1-241 (done)
 M1-242 (done)
 M1-243 (done)
-M1-244 (pending) ← runnable
+M1-244 (done)
+  └── M1-254 (pending) ← runnable
 M1-245 (pending) ← runnable
 M1-246 (pending) ← runnable
 M1-247 (done)

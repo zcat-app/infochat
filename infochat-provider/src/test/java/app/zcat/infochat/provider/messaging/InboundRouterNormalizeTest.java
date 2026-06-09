@@ -311,15 +311,15 @@ class InboundRouterNormalizeTest {
     /**
      * Helper for {@link #bodyAtExactlyTheCapIsAcceptedAndNormalizeRuns}
      * (the one M1-035b @Test method that calls {@code onMessage} on
-     * an at-cap body). The M1-044b splice introduces four new
-     * mandatory CDI-injected collaborators on {@link InboundRouter}
-     * (rateCapBucket, inviteCodeConsumer, banCheck, bundleLoader)
+     * an at-cap body). The M1-044b splice wires mandatory
+     * CDI-injected collaborators on {@link InboundRouter}
+     * (rateCapBucket, inviteCodeConsumer, bundleLoader)
      * plus a {@link javax.sql.DataSource} used by the new
      * {@code lookupUser} method. The helper returns a router whose
      * {@code lookupUser} is overridden to return a fixed "vouched"
      * snapshot — that skips step 2 (DM unknown) and lets the at-cap
      * chat-mode body flow into the chat-mode-not-in-MVP reply path.
-     * The four new collaborator
+     * The collaborator
      * fields receive no-op fakes (the per-method assertion is purely
      * about the normalize-invocation counter, not about which fakes
      * were consulted, so the fakes just need to not NPE).
@@ -328,12 +328,11 @@ class InboundRouterNormalizeTest {
         InboundRouter router = new InboundRouter() {
             @Override
             Optional<UserSnapshot> lookupUser(String adapter, String contactId) {
-                return Optional.of(new UserSnapshot(UUID.randomUUID(), "vouched"));
+                return Optional.of(new UserSnapshot(UUID.randomUUID(), "vouched", false));
             }
         };
         router.rateCapBucket = new NoopRateCapBucket();
         router.inviteCodeConsumer = new NoopInviteCodeConsumer();
-        router.banCheck = new NoopBanCheck();
         router.bundleLoader = new NoopBundleLoader();
         // M1-051: step 4.5 confirm-cancel sweep peek call would NPE on
         // a null @Inject field. A Noop returning Optional.empty() keeps

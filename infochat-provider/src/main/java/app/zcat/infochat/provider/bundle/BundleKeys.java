@@ -859,6 +859,9 @@ public final class BundleKeys {
     /** Non-slash message body exceeds the profile-driven chat-mode body cap (context_window / 8 chars). */
     public static final String ERROR_CHAT_BODY_TOO_LARGE = "error.chat.body_too_large";
 
+    /** Slash-command body exceeds the profile-driven command body cap (infochat.command.body-cap). */
+    public static final String ERROR_COMMAND_BODY_TOO_LARGE = "error.command.body_too_large";
+
     /** Per-user LLM-triggering rate cap exceeded (infochat.chat.llm-rate-cap-per-minute). */
     public static final String ERROR_CHAT_LLM_RATE_CAP = "error.chat.llm_rate_cap";
 

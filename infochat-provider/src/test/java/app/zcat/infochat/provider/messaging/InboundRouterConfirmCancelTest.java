@@ -141,14 +141,13 @@ class InboundRouterConfirmCancelTest {
         InboundRouter router = new InboundRouter() {
             @Override
             Optional<UserSnapshot> lookupUser(String adapter, String contactId) {
-                return Optional.of(new UserSnapshot(ACTOR_ID, "vouched"));
+                return Optional.of(new UserSnapshot(ACTOR_ID, "vouched", false));
             }
         };
         router.commandHandlers = new SingletonInstance<>();
         router.inboundContext = new InboundContext();
         router.rateCapBucket = new NoopRateCapBucket();
         router.inviteCodeConsumer = new NoopInviteCodeConsumer();
-        router.banCheck = new NoopBanCheck();
         router.bundleLoader = new CancellationBundleLoader();
         router.confirmStateService = confirmState;
         // M1-045: step 5 probation gate would NPE on null @Inject
@@ -164,6 +163,7 @@ class InboundRouterConfirmCancelTest {
             @Override public void clear(UUID userId, String scopeKind, UUID scopeId) {}
         };
         router.maxInboundBodyBytes = 65536;
+        router.commandBodyCap = 65536;
         router.setReplyTarget(target);
         return router;
     }

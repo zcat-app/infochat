@@ -49,22 +49,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *       router) owns the UUID-parse. Step 4 ban check NOT consulted.</li>
  *   <li>(f) {@code knownBannedDmStops} — DM, known is_banned=true
  *       contact; flow runs rateCap → normalize → users lookup
- *       → banCheck (true) → ban-fixed reply. No {@code handleSlash}.</li>
+ *       → snapshot ban check (true) → ban-fixed reply. No
+ *       {@code handleSlash}.</li>
  *   <li>(g) {@code unregisteredGroupSenderIsSilentlyDropped} — Group,
  *       unknown contact (no users row), body {@code /help}; flow runs
  *       rateCap → normalize → users lookup → D47 step-3 silent drop.
- *       No outbound, no {@code banCheck}, no {@code handleSlash}
+ *       No outbound, no step-4 ban check, no {@code handleSlash}
  *       (D47 gate #1).</li>
  *   <li>(h) {@code registeredGroupSenderDispatchesNormally} — Group,
  *       known {@code vouched} contact; flow runs rateCap → normalize
- *       → users lookup → banCheck (false) → groupApprovalCheck →
+ *       → users lookup → snapshot ban check (false) → groupApprovalCheck →
  *       handleSlash → dispatch reply (the step-3 drop does not over-
  *       fire for registered senders; step 4 fires BEFORE step 3.5
  *       per the M1-112-redteam ordering swap).</li>
  *   <li>(i) {@code bannedRegisteredGroupSenderShortCircuitsAtBanCheckBeforeStep35}
  *       — Group, registered but banned contact; flow runs rateCap →
- *       normalize → users lookup → banCheck (true) → ban-fixed reply.
- *       {@code groupApprovalCheck.check} MUST NOT appear — step 4
+ *       normalize → users lookup → snapshot ban check (true) → ban-fixed
+ *       reply. {@code groupApprovalCheck.check} MUST NOT appear — step 4
  *       short-circuits before step 3.5, closing the M1-112-redteam
  *       PERM-ESCAL surface where banned users could trigger group
  *       row INSERTs and admin notifications before the ban check.</li>
@@ -292,10 +293,7 @@ class InboundRouterIntakeOrderingTest {
     void knownBannedDmStopsWithFixedReplyAndNoHandleSlash() {
         CallLog log = new CallLog();
         InboundRouter router = newRouterWithLog(log,
-                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), "vouched")));
-        // BanCheck returns true regardless of the snapshot.is_banned column —
-        // step 4 consults the live SQL per spec.
-        ((FakeBanCheck) router.banCheck).banned = true;
+                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), "vouched", true)));
         CapturingAdapter target = new CapturingAdapter();
         router.setReplyTarget(target);
 
@@ -311,7 +309,6 @@ class InboundRouterIntakeOrderingTest {
                         "setAdapterName",
                         "rateCapBucket.tryAcquire",
                         "lookupUser",
-                        "banCheck.isBanned",
                         "bundleLoader.get(error.ban.fixed)"),
                 log.calls,
                 "banned path must call exactly these collaborators in order — inviteCodeConsumer and "
@@ -350,7 +347,7 @@ class InboundRouterIntakeOrderingTest {
     void registeredGroupSenderDispatchesNormally() {
         CallLog log = new CallLog();
         InboundRouter router = newRouterWithLog(log,
-                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), "vouched")));
+                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), "vouched", false)));
         router.commandHandlers = new SingletonInstance<>(new RecordingCommandHandler(log, "help"));
         CapturingAdapter target = new CapturingAdapter();
         router.setReplyTarget(target);
@@ -366,7 +363,6 @@ class InboundRouterIntakeOrderingTest {
                         "setAdapterName",
                         "rateCapBucket.tryAcquire",
                         "lookupUser",
-                        "banCheck.isBanned",
                         "groupApprovalCheck.check",
                         "handler.handle(help)"),
                 log.calls,
@@ -390,10 +386,7 @@ class InboundRouterIntakeOrderingTest {
     void bannedRegisteredGroupSenderShortCircuitsAtBanCheckBeforeStep35() {
         CallLog log = new CallLog();
         InboundRouter router = newRouterWithLog(log,
-                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), "vouched")));
-        // BanCheck consults the live row per spec; step 4's is_banned=true
-        // comes from the fake.
-        ((FakeBanCheck) router.banCheck).banned = true;
+                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), "vouched", true)));
         router.commandHandlers = new SingletonInstance<>(new RecordingCommandHandler(log, "help"));
         CapturingAdapter target = new CapturingAdapter();
         router.setReplyTarget(target);
@@ -410,7 +403,6 @@ class InboundRouterIntakeOrderingTest {
                         "setAdapterName",
                         "rateCapBucket.tryAcquire",
                         "lookupUser",
-                        "banCheck.isBanned",
                         "bundleLoader.get(error.ban.fixed)"),
                 log.calls,
                 "banned group sender must short-circuit at step 4 BEFORE step 3.5 — "
@@ -430,7 +422,7 @@ class InboundRouterIntakeOrderingTest {
     void replyRoutesThroughInboundAdapterNeverAnotherActivatedAdapter() {
         CallLog log = new CallLog();
         InboundRouter router = newRouterWithLog(log,
-                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), "vouched")));
+                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), "vouched", false)));
         CapturingAdapter inboundAdapter = new CapturingAdapter("inmemory");
         CapturingAdapter otherAdapter = new CapturingAdapter("other");
         router.setReplyTarget(inboundAdapter);
@@ -460,8 +452,7 @@ class InboundRouterIntakeOrderingTest {
     void bannedUserFixedReplyDeliveredThroughInboundAdapterNotDroppedOrCrossRouted() {
         CallLog log = new CallLog();
         InboundRouter router = newRouterWithLog(log,
-                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), "vouched")));
-        ((FakeBanCheck) router.banCheck).banned = true;
+                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), "vouched", true)));
         CapturingAdapter inboundAdapter = new CapturingAdapter("inmemory");
         CapturingAdapter otherAdapter = new CapturingAdapter("other");
         router.setReplyTarget(inboundAdapter);
@@ -492,7 +483,7 @@ class InboundRouterIntakeOrderingTest {
     void groupChatMessageWithVanishedGroupRowIsSilentlyDroppedNotThrown() {
         CallLog log = new CallLog();
         InboundRouter router = newRouterWithLog(log,
-                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), "vouched")),
+                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), "vouched", false)),
                 Optional.empty());
         // Outside CDI the chat-mode body-cap config field defaults to 0
         // and the LLM rate-cap collaborator is null; lift both so the
@@ -549,7 +540,6 @@ class InboundRouterIntakeOrderingTest {
         router.inboundContext = new RecordingInboundContext(log);
         router.rateCapBucket = new CountingRateCapBucket(log);
         router.inviteCodeConsumer = new FakeInviteCodeConsumer(log);
-        router.banCheck = new FakeBanCheck(log);
         router.bundleLoader = new FakeBundleLoader(log);
         // M1-051: step 4.5 confirm-cancel sweep peek call would NPE on
         // a null @Inject field. The Noop returns Optional.empty() AND
@@ -580,6 +570,7 @@ class InboundRouterIntakeOrderingTest {
             @Override public void clear(UUID userId, String scopeKind, UUID scopeId) {}
         };
         router.maxInboundBodyBytes = 65536;
+        router.commandBodyCap = 65536;
         return router;
     }
 

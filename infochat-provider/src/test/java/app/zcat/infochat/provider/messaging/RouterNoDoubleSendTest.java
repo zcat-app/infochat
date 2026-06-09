@@ -77,14 +77,13 @@ class RouterNoDoubleSendTest {
         InboundRouter router = new InboundRouter() {
             @Override
             Optional<UserSnapshot> lookupUser(String adapter, String contactId) {
-                return Optional.of(new UserSnapshot(ACTOR_ID, "vouched"));
+                return Optional.of(new UserSnapshot(ACTOR_ID, "vouched", false));
             }
         };
         router.commandHandlers = new SingletonInstance<>();
         router.inboundContext = new InboundContext();
         router.rateCapBucket = new NoopRateCapBucket();
         router.inviteCodeConsumer = new NoopInviteCodeConsumer();
-        router.banCheck = new NoopBanCheck();
         router.bundleLoader = new NoopBundleLoader();
         router.confirmStateService = new NoopConfirmStateService();
         router.commandPermissions = new NoopCommandPermissions();
@@ -93,6 +92,7 @@ class RouterNoDoubleSendTest {
             @Override public void clear(UUID userId, String scopeKind, UUID scopeId) {}
         };
         router.maxInboundBodyBytes = 65536;
+        router.commandBodyCap = 65536;
         router.setReplyTarget(target);
         return router;
     }

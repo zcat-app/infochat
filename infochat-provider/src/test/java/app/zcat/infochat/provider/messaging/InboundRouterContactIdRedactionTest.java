@@ -151,7 +151,7 @@ class InboundRouterContactIdRedactionTest {
         InboundRouter router = new InboundRouter() {
             @Override
             Optional<UserSnapshot> lookupUser(String adapter, String contactId) {
-                return Optional.of(new UserSnapshot(UUID.randomUUID(), "vouched"));
+                return Optional.of(new UserSnapshot(UUID.randomUUID(), "vouched", false));
             }
         };
         router.commandHandlers = new SingletonInstance<>();
@@ -160,9 +160,9 @@ class InboundRouterContactIdRedactionTest {
         // @RequestScoped marker only matters when ARC proxies it.
         router.inboundContext = new InboundContext();
         router.maxInboundBodyBytes = 65536;
+        router.commandBodyCap = 65536;
         router.rateCapBucket = new NoopRateCapBucket();
         router.inviteCodeConsumer = new NoopInviteCodeConsumer();
-        router.banCheck = new NoopBanCheck();
         router.bundleLoader = new NoopBundleLoader();
         // M1-051: step 4.5 confirm-cancel sweep peek call would NPE on
         // a null @Inject field. The Noop returns Optional.empty() so
