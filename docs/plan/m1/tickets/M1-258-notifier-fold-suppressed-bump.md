@@ -32,7 +32,51 @@ spec_refs: []
 decision_refs: []
 reviews: {}
 overrides: []
-aborted_attempts: []
+aborted_attempts:
+  - date: 2026-06-09
+    prior_status: escalated
+    reason: |
+      Single-statement fold is infeasible; ticket abandoned. The deep-review F1
+      premise ("the conflicting row is already located by the UPSERT, so the
+      second statement is avoidable") is FALSE. Two independent premise-fails
+      confirmed it:
+      (1) AC1's single ON CONFLICT DO UPDATE ... RETURNING is invalid PostgreSQL
+          (EXCLUDED is out of scope in RETURNING), and any "last_notified_at ==
+          now" discriminator regresses the simultaneous-instant concurrent test.
+      (2) The refined CTE fold was implemented and run: the new lifecycle test and
+          the three per-scenario tests passed, but the PRESERVED concurrent test
+          regressed — concurrentNotifyOnceRaceSafeForSameKey expected
+          suppressed_count 19, got 18 (one lost bump). Root cause is fundamental:
+          a single CTE shares one READ COMMITTED snapshot, so the bump CTE's plain
+          UPDATE cannot see a row a concurrent thread inserted after the snapshot
+          began. The original second statement's FRESH per-statement snapshot is
+          what makes the concurrent bump correct — it is load-bearing.
+      A correct emit/suppress discriminator cannot be returned from a single
+      statement in the simultaneous-instant case without xmax (rejected, M1-250,
+      out_of_scope) or a schema column (out_of_scope); MERGE/pre-read-CTE/JDBC-
+      pipeline variants were all checked and fail the same squeeze. The only
+      correct one-round-trip path is a server-side PL/pgSQL function (migration +
+      Java/SQL logic split), judged not worth the marginal win on this rare,
+      lightweight-UPDATE path. Deep-review finding F1 is NOT actionable as written.
+    reviews_at_abort: {}
+    clarity_check_at_abort:
+      date: 2026-06-09
+      verdict: PASS
+      warnings: []
+      blockers: []
+    revisions_at_abort:
+      - date: 2026-06-09
+        reason: premise-fail rework (AC1 prescribed an infeasible single ON CONFLICT DO UPDATE; refined to a CTE single-statement fold, which then hit premise-fail #2)
+        snapshot:
+          status: escalated
+          escalation_reason: premise-fail
+    escalations_at_abort:
+      - date: 2026-06-09
+        reason: premise-fail
+        note: "Pre-implementation: AC1's single ON CONFLICT DO UPDATE ... RETURNING is invalid SQL (EXCLUDED out of scope in RETURNING); any last_notified_at==now discriminator breaks the simultaneous-instant concurrent test. Resolved via refine to a CTE fold."
+      - date: 2026-06-09
+        reason: premise-fail
+        note: "Round-1: refined CTE fold implemented; preserved concurrent test regressed (suppressed_count 18 vs 19) — the bump CTE's shared snapshot can't see a concurrently-inserted row. Single-statement fold fundamentally infeasible without xmax/schema column. Aborted."
 reopens: []
 redteam_findings: []
 clarity_check: {}
