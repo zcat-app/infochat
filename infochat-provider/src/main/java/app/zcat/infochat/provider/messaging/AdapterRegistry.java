@@ -33,7 +33,7 @@ import java.util.Set;
  * {@code docs/design/06-messaging.md} §6.7. Discovers every CDI bean
  * implementing {@link MessagingAdapter}, filters to the subset whose
  * {@link MessagingAdapter#name()} appears in {@code infochat.adapters},
- * applies the six startup gates in the §6.7 documented order, and
+ * applies the startup gates in their documented order, and
  * registers the {@link InboundRouter} as the inbound handler on each
  * activated adapter. A connection failure on one adapter does not
  * prevent the others from coming up — that resilience loop lives in
@@ -59,10 +59,13 @@ import java.util.Set;
  * lifecycle wiring is shape-only — T3-A's SimpleX/Signal beans will
  * exercise the resilience loop in earnest.</p>
  *
- * <p><b>Gate order.</b> The gates are evaluated in §6.7's
- * documented order; the first failure short-circuits with the most
+ * <p><b>Gate order.</b> The gates are evaluated in their documented
+ * order; the first failure short-circuits with the most
  * specific {@link IllegalStateException} the implementation can
- * raise at that point. Each gate has a dedicated {@code @Test} in
+ * raise at that point. Each gate carries an inline citation to its
+ * source section ({@code docs/design/06-messaging.md} for most,
+ * {@code docs/spec/deployment.md} §Operator inputs for the
+ * bootstrap-admin gates). Each gate has a dedicated {@code @Test} in
  * {@code StartupGatesTest}.</p>
  */
 @ApplicationScoped
@@ -117,7 +120,7 @@ public class AdapterRegistry {
 
     /**
      * Production entry point. Reads the injected {@code infochat.adapters}
-     * value and applies the six startup gates. {@link MessagingStartup}
+     * value and applies the startup gates. {@link MessagingStartup}
      * calls this at {@code @PostConstruct}.
      */
     public void start() {
@@ -125,7 +128,7 @@ public class AdapterRegistry {
     }
 
     /**
-     * Apply the six startup gates from §6.7 in order against the given
+     * Apply the startup gates in order against the given
      * comma-separated adapter list, then wire each activated adapter's
      * inbound handler to the {@link InboundRouter} and emit the §6.8
      * activation log line. The parameterized form exists so tests can

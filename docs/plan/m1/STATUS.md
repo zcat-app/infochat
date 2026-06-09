@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 7 |
+| pending | 6 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 288 |
+| done | 289 |
 | deferred | 2 |
 | **total** | **297** |
 
@@ -29,7 +29,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-257 — ReEvaluationJob: SKIP concurrent ticks to bound attempt burn (complexity: low, risk: low)
 - M1-258 — ThrottledAdminNotifier: fold suppressed_count bump into the UPSERT (complexity: low, risk: low)
 - M1-259 — searchPosts: EXPLICIT empty tag-intersection yields zero posts (complexity: low, risk: low)
-- M1-260 — Build/doc-truth lows: sibling DAG enforcer, Flyway dup, gate javadoc (complexity: low, risk: low)
 - M1-261 — Consistency code lows: IpBlocklist per-pass enum, router name case (complexity: low, risk: low)
 
 ---
@@ -66,6 +65,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-260 | Build/doc-truth lows: sibling DAG enforcer, Flyway dup, gate javadoc | 2026-06-09 | round 1 APPROVE |
 | M1-254 | Remove orphaned BanCheck (intake step-4 ban folded into snapshot by M1-244) | 2026-06-09 | round 1 APPROVE |
 | M1-253 | Messaging-adapter consistency: virtual-thread dispatch parity | 2026-06-09 | round 1 APPROVE |
 | M1-252 | Collector lows: Nostr digest reuse, Stage2 redundant UPDATE, ssrf producer | 2026-06-09 | round 1 APPROVE |
@@ -75,7 +75,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-248 | Flyway V20 gap: comment-only no-op placeholder | 2026-06-09 | round 1 APPROVE |
 | M1-247 | infochat-ssrf: body-cap default reconciliation + module lows | 2026-06-09 | round 1 APPROVE |
 | M1-246 | Quarantine stored procedures: audit-before-effect reorder | 2026-06-09 | round 1 APPROVE |
-| M1-245 | Re-evaluation candidate scan: fetched_at window + partial index | 2026-06-09 | round 1 APPROVE |
 
 ---
 
@@ -443,6 +442,6 @@ M1-256 (pending) ← runnable
 M1-257 (pending) ← runnable
 M1-258 (pending) ← runnable
 M1-259 (pending) ← runnable
-M1-260 (pending) ← runnable
+M1-260 (done)
 M1-261 (pending) ← runnable
 ```

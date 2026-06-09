@@ -100,6 +100,44 @@
     <build>
         <plugins>
             <!--
+                 Module-DAG enforcement (docs/design/09-reference.md §9.1): the
+                 three sibling shared modules — infochat-ssrf,
+                 infochat-llm-adapter, infochat-messaging-adapter — MUST NOT
+                 depend on each other. maven-enforcer bannedDependencies
+                 evaluates per running module, so the rule banning the OTHER two
+                 siblings lives HERE; a parent-level ban would also break
+                 infochat-collector / infochat-provider, which depend on these
+                 siblings legitimately. Mirrors the proven collector→
+                 messaging-adapter execution. Version is managed in the parent
+                 <pluginManagement>. Build-time only; no effect on the shipped
+                 runtime artifact.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>ban-sibling-shared-modules</id>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <bannedDependencies>
+                                    <excludes>
+                                        <exclude>app.zcat.infochat:infochat-ssrf</exclude>
+                                        <exclude>app.zcat.infochat:infochat-messaging-adapter</exclude>
+                                    </excludes>
+                                    <message>infochat-llm-adapter must not depend on its sibling shared modules (infochat-ssrf, infochat-messaging-adapter) — the three siblings form a no-cross-edge DAG (module-DAG rule, docs/design/09-reference.md §9.1).</message>
+                                </bannedDependencies>
+                            </rules>
+                            <fail>true</fail>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <!--
                  NullAway + Error Prone (decision D48). The full config lives in
                  the parent <pluginManagement> and Maven applies it to the
                  lifecycle compile execution of EVERY module, so

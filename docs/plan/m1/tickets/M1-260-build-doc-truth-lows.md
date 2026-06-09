@@ -1,7 +1,7 @@
 ---
 id: M1-260
 title: "Build/doc-truth lows: sibling DAG enforcer, Flyway dup, gate javadoc"
-status: pending
+status: done
 created: 2026-06-09
 last_updated: 2026-06-09
 blocked_by: []
@@ -33,12 +33,29 @@ test_plan:
 spec_refs:
   - docs/design/09-reference.md §9.1
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-09
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 123
+      removed: 11
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-09
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-260: Build/doc-truth lows
