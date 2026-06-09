@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 290 |
+| done | 291 |
 | deferred | 2 |
 | **total** | **297** |
 
@@ -27,7 +27,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-256 — Embedding vector elements: validate numeric before coercion (complexity: low, risk: medium)
 - M1-257 — ReEvaluationJob: SKIP concurrent ticks to bound attempt burn (complexity: low, risk: low)
 - M1-258 — ThrottledAdminNotifier: fold suppressed_count bump into the UPSERT (complexity: low, risk: low)
-- M1-259 — searchPosts: EXPLICIT empty tag-intersection yields zero posts (complexity: low, risk: low)
 - M1-261 — Consistency code lows: IpBlocklist per-pass enum, router name case (complexity: low, risk: low)
 
 ---
@@ -65,6 +64,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-260 | Build/doc-truth lows: sibling DAG enforcer, Flyway dup, gate javadoc | 2026-06-09 | round 1 APPROVE |
+| M1-259 | searchPosts: EXPLICIT empty tag-intersection yields zero posts | 2026-06-09 | round 1 APPROVE |
 | M1-255 | Signal membership-event ACIs: apply canonical-UUID gate | 2026-06-09 | round 1 APPROVE |
 | M1-254 | Remove orphaned BanCheck (intake step-4 ban folded into snapshot by M1-244) | 2026-06-09 | round 1 APPROVE |
 | M1-253 | Messaging-adapter consistency: virtual-thread dispatch parity | 2026-06-09 | round 1 APPROVE |
@@ -73,7 +73,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-250 | Core lows: Redactor scan/cadence + notifier phantom javadoc | 2026-06-09 | round 1 APPROVE |
 | M1-249 | Provider lows: RateCapBucket dedup, ban null-guard, NOTIFY parse | 2026-06-09 | round 1 APPROVE |
 | M1-248 | Flyway V20 gap: comment-only no-op placeholder | 2026-06-09 | round 1 APPROVE |
-| M1-247 | infochat-ssrf: body-cap default reconciliation + module lows | 2026-06-09 | round 1 APPROVE |
 
 ---
 
@@ -440,7 +439,7 @@ M1-255 (done)
 M1-256 (pending) ← runnable
 M1-257 (pending) ← runnable
 M1-258 (pending) ← runnable
-M1-259 (pending) ← runnable
+M1-259 (done)
 M1-260 (done)
 M1-261 (pending) ← runnable
 ```

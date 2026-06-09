@@ -4,6 +4,7 @@ import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import app.zcat.infochat.provider.chat.CancellationService;
 import app.zcat.infochat.provider.chat.InFlightTracker;
+import app.zcat.infochat.provider.summary.EligiblePostQuery;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,14 +22,21 @@ import java.sql.SQLException;
 import java.sql.SQLFeatureNotSupportedException;
 import java.sql.Statement;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.logging.Logger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -48,6 +56,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class SearchPostsToolTest {
 
     private static final String PREFIX = "search-posts-test/";
+    /** Tag names disallow '/', so the tag namespace uses a hyphenated prefix. */
+    private static final String TAG_PREFIX = "spt-";
     /** All fixtures share one fetched_at so they land in the V11/V28/V29 May 2026 partition. */
     private static final Instant FETCHED_AT = Instant.parse("2026-05-22T12:00:00Z");
 
@@ -64,9 +74,22 @@ class SearchPostsToolTest {
     @Inject
     InFlightTracker inFlightTracker;
 
+    @Inject
+    EligiblePostQuery eligiblePostQuery;
+
     @BeforeEach
     void cleanup() throws Exception {
         try (Connection conn = dataSource.getConnection()) {
+            // scope_tag references tag(id), so it must be cleared before the
+            // tag rows; both scope deletes target the prior run's prefixed
+            // users, which still exist until the users delete below.
+            exec(conn,
+                "DELETE FROM scope_tag WHERE scope_id IN "
+                    + "(SELECT id FROM users WHERE contact_id LIKE '" + PREFIX + "%')");
+            exec(conn,
+                "DELETE FROM scope_preferences WHERE scope_id IN "
+                    + "(SELECT id FROM users WHERE contact_id LIKE '" + PREFIX + "%')");
+            exec(conn, "DELETE FROM tag WHERE name LIKE '" + TAG_PREFIX + "%'");
             exec(conn,
                 "DELETE FROM source_subscription WHERE source_id IN "
                     + "(SELECT id FROM source WHERE identifier LIKE '" + PREFIX + "%')");
@@ -181,6 +204,116 @@ class SearchPostsToolTest {
                 + "first), not by ready_at; got: " + json);
     }
 
+    @Test
+    void explicitModeRequestingUnfollowedTagReturnsEmpty() throws Exception {
+        UUID userId = seedUser("explicit-miss");
+        UUID sourceId = seedSource("explicit-miss-src", "Explicit-miss source");
+        seedSubscription("dm", userId, sourceId);
+        // Scope follows alpha only; beta is a known tag the scope does NOT
+        // follow. A beta-tagged, subscribed, in-window post is present, so if
+        // the empty intersection were treated as "no filter" it would surface.
+        UUID alpha = seedTag(TAG_PREFIX + "alpha");
+        seedTag(TAG_PREFIX + "beta");
+        followTag("dm", userId, alpha);
+        setExplicitMode("dm", userId);
+        Instant publishedAt = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+                .minus(1, ChronoUnit.HOURS);
+        seedReadyPostWithTags("beta-post", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES), TAG_PREFIX + "beta");
+
+        String json = tool.execute(userId, "dm", userId,
+                Map.of("tags", List.of(TAG_PREFIX + "beta")));
+
+        assertEquals("[]", json,
+            "EXPLICIT mode requesting a tag the scope does not follow has an empty "
+                + "intersection and must yield zero posts, not the unfiltered feed; got: " + json);
+    }
+
+    @Test
+    void explicitModeRequestingFollowedTagReturnsOnlyMatchingPosts() throws Exception {
+        UUID userId = seedUser("explicit-hit");
+        UUID sourceId = seedSource("explicit-hit-src", "Explicit-hit source");
+        seedSubscription("dm", userId, sourceId);
+        UUID alpha = seedTag(TAG_PREFIX + "alpha");
+        seedTag(TAG_PREFIX + "beta");
+        followTag("dm", userId, alpha);
+        setExplicitMode("dm", userId);
+        Instant publishedAt = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+                .minus(1, ChronoUnit.HOURS);
+        seedReadyPostWithTags("alpha-post", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES), TAG_PREFIX + "alpha");
+        seedReadyPostWithTags("beta-post", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES), TAG_PREFIX + "beta");
+
+        String json = tool.execute(userId, "dm", userId,
+                Map.of("tags", List.of(TAG_PREFIX + "alpha")));
+
+        assertTrue(json.contains(PREFIX + "alpha-post"),
+            "EXPLICIT mode requesting a followed tag must return matching posts; got: " + json);
+        assertFalse(json.contains(PREFIX + "beta-post"),
+            "EXPLICIT mode requesting a followed tag must exclude non-matching posts; got: " + json);
+    }
+
+    @Test
+    void allModeNoTagsReturnsFullSubscribedFeed() throws Exception {
+        UUID userId = seedUser("all-mode");
+        UUID sourceId = seedSource("all-mode-src", "All-mode source");
+        seedSubscription("dm", userId, sourceId);
+        // No scope_preferences row → tag_mode defaults to ALL; no requested
+        // tags → the unconstrained subscribed feed (the path that must stay
+        // unchanged). Posts carry distinct tags to prove no tag filter applies.
+        Instant publishedAt = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+                .minus(1, ChronoUnit.HOURS);
+        seedReadyPostWithTags("alpha-post", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES), TAG_PREFIX + "alpha");
+        seedReadyPostWithTags("beta-post", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES), TAG_PREFIX + "beta");
+
+        String json = tool.execute(userId, "dm", userId, Map.of());
+
+        assertTrue(json.contains(PREFIX + "alpha-post") && json.contains(PREFIX + "beta-post"),
+            "ALL mode with no tags must return the full subscribed feed regardless of tags; "
+                + "got: " + json);
+    }
+
+    @Test
+    void explicitSearchPostsMatchesSummaryEligiblePostQueryForSameScopeState() throws Exception {
+        UUID userId = seedUser("parity");
+        UUID sourceId = seedSource("parity-src", "Parity source");
+        seedSubscription("dm", userId, sourceId);
+        UUID alpha = seedTag(TAG_PREFIX + "alpha");
+        seedTag(TAG_PREFIX + "beta");
+        followTag("dm", userId, alpha);
+        setExplicitMode("dm", userId);
+        Instant publishedAt = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+                .minus(1, ChronoUnit.HOURS);
+        seedReadyPostWithTags("alpha-post", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES), TAG_PREFIX + "alpha");
+        seedReadyPostWithTags("beta-post", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES), TAG_PREFIX + "beta");
+
+        // searchPosts in EXPLICIT mode with no requested tags filters by the
+        // scope's followed set; EligiblePostQuery (the deterministic /summary
+        // sibling) with no positional tag does the same. For one scope state
+        // the two must agree on the post set.
+        String json = tool.execute(userId, "dm", userId,
+                Map.of("window", "PT24H"));
+        Set<String> searchUids = uidsFromJson(json);
+
+        EligiblePostQuery.Result summaryResult = eligiblePostQuery.fetch(
+                "dm", userId, Optional.empty(), Duration.ofHours(24));
+        Set<String> summaryUids = summaryResult.posts().stream()
+                .map(EligiblePostQuery.Post::uid)
+                .collect(Collectors.toSet());
+
+        assertEquals(summaryUids, searchUids,
+            "EXPLICIT searchPosts and the /summary EligiblePostQuery must return the same "
+                + "post set for the same scope state; search=" + searchUids
+                + " summary=" + summaryUids);
+        assertEquals(Set.of(PREFIX + "alpha-post"), searchUids,
+            "both must return only the followed-tag post; got: " + searchUids);
+    }
+
     // ---------- helpers ----------
 
     private UUID seedUser(String suffix) throws Exception {
@@ -240,6 +373,72 @@ class SearchPostsToolTest {
             ps.setTimestamp(8, Timestamp.from(readyAt));
             ps.executeUpdate();
         }
+    }
+
+    private void seedReadyPostWithTags(String slug, UUID sourceId, Instant publishedAt,
+                                       Instant readyAt, String... tags) throws Exception {
+        String tagLiteral = "{" + String.join(",", tags) + "}";
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "INSERT INTO post (uid, source_id, title, body, url, published_at, "
+                     + "fetched_at, status, ready_at, tags) "
+                     + "VALUES (?, ?, ?, ?, ?, ?, ?, 'READY', ?, ?::TEXT[])")) {
+            ps.setString(1, PREFIX + slug);
+            ps.setObject(2, sourceId);
+            ps.setString(3, "Title " + slug);
+            ps.setString(4, "Body " + slug);
+            ps.setString(5, "https://example.com/" + slug);
+            ps.setTimestamp(6, Timestamp.from(publishedAt));
+            ps.setTimestamp(7, Timestamp.from(FETCHED_AT));
+            ps.setTimestamp(8, Timestamp.from(readyAt));
+            ps.setString(9, tagLiteral);
+            ps.executeUpdate();
+        }
+    }
+
+    private UUID seedTag(String name) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "INSERT INTO tag (name, display) VALUES (?, ?) RETURNING id")) {
+            ps.setString(1, name);
+            ps.setString(2, name);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return (UUID) rs.getObject(1);
+            }
+        }
+    }
+
+    private void followTag(String scopeKind, UUID scopeId, UUID tagId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "INSERT INTO scope_tag (scope_kind, scope_id, tag_id) VALUES (?, ?, ?)")) {
+            ps.setString(1, scopeKind);
+            ps.setObject(2, scopeId);
+            ps.setObject(3, tagId);
+            ps.executeUpdate();
+        }
+    }
+
+    private void setExplicitMode(String scopeKind, UUID scopeId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "INSERT INTO scope_preferences (scope_kind, scope_id, tag_mode) "
+                     + "VALUES (?, ?, 'EXPLICIT')")) {
+            ps.setString(1, scopeKind);
+            ps.setObject(2, scopeId);
+            ps.executeUpdate();
+        }
+    }
+
+    /** Extract the {@code uid} values from a searchPosts result JSON array. */
+    private static Set<String> uidsFromJson(String json) {
+        Set<String> uids = new HashSet<>();
+        Matcher m = Pattern.compile("\"uid\":\"([^\"]*)\"").matcher(json);
+        while (m.find()) {
+            uids.add(m.group(1));
+        }
+        return uids;
     }
 
     private static void exec(Connection conn, String sql) throws Exception {

@@ -1,7 +1,7 @@
 ---
 id: M1-259
 title: "searchPosts: EXPLICIT empty tag-intersection yields zero posts"
-status: pending
+status: done
 created: 2026-06-09
 last_updated: 2026-06-09
 blocked_by: []
@@ -32,12 +32,30 @@ spec_refs:
   - docs/spec/commands.md §Per-scope tag preferences
   - docs/spec/security.md §Prompt-injection defenses (LLM call sites)
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-09
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 2
+      added: 226
+      removed: 9
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-09
+  verdict: WARN
+  warnings:
+    - "SECURITY-FLAG-CONSISTENT: ticket labels its defect an intra-scope policy bypass and cites docs/spec/security.md §Prompt-injection defenses; consider security_relevant: true. Low severity — fix narrows results (fewer posts), not exploitable."
+  blockers: []
 ---
 
 # M1-259: searchPosts: EXPLICIT empty tag-intersection yields zero posts

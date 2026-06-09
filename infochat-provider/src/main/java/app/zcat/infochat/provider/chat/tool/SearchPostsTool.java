@@ -70,7 +70,7 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
             }
 
             TagMode tagMode = readTagMode(conn, scopeKind, scopeId);
-            List<String> effectiveTags =
+            EffectiveTags effectiveTags =
                     computeEffectiveTags(conn, tags, tagMode, scopeKind, scopeId);
             Instant cutoff = Instant.now().minus(window);
 
@@ -104,7 +104,17 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
         }
     }
 
-    private List<String> computeEffectiveTags(Connection conn, List<String> requestedTags,
+    /**
+     * The resolved tag filter for a search. {@code constrained} separates
+     * "no tag constraint was requested" (ALL mode, no tags → the unfiltered
+     * subscribed feed) from "a constraint that resolved to the empty set"
+     * (EXPLICIT mode whose intersection or followed-set is empty → zero
+     * posts). Both leave {@code tags} empty, so the flag — not the list's
+     * emptiness — decides whether {@code queryPosts} applies the tag clause.
+     */
+    private record EffectiveTags(List<String> tags, boolean constrained) {}
+
+    private EffectiveTags computeEffectiveTags(Connection conn, List<String> requestedTags,
                                                TagMode tagMode, String scopeKind, UUID scopeId)
             throws SQLException {
         if (!requestedTags.isEmpty()) {
@@ -114,14 +124,19 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
                 for (String tag : requestedTags) {
                     if (scopeTags.contains(tag)) intersection.add(tag);
                 }
-                return intersection;
+                // EXPLICIT mode narrows the request to the scope's followed
+                // tags; an empty intersection is a constraint that matched
+                // nothing, so it must yield zero posts — not the unfiltered
+                // feed that an unconstrained empty list would yield.
+                return new EffectiveTags(intersection, true);
             }
-            return requestedTags;
+            return new EffectiveTags(requestedTags, true);
         }
         if (tagMode == TagMode.EXPLICIT) {
-            return new ArrayList<>(readScopeTags(conn, scopeKind, scopeId));
+            return new EffectiveTags(
+                    new ArrayList<>(readScopeTags(conn, scopeKind, scopeId)), true);
         }
-        return List.of();
+        return new EffectiveTags(List.of(), false);
     }
 
     private Set<String> readScopeTags(Connection conn, String scopeKind, UUID scopeId)
@@ -141,7 +156,7 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
     }
 
     private String queryPosts(Connection conn, String scopeKind, UUID scopeId,
-                               List<String> effectiveTags, Instant cutoff,
+                               EffectiveTags effectiveTags, Instant cutoff,
                                int limit) throws SQLException {
         StringBuilder sql = new StringBuilder();
         // published_at stays the window filter and sort key below; the
@@ -159,9 +174,12 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
         params.add(scopeKind);
         params.add(scopeId);
 
-        if (!effectiveTags.isEmpty()) {
+        if (effectiveTags.constrained()) {
+            // A constrained empty list binds an empty TEXT[]; p.tags && '{}'
+            // overlaps nothing, so the EXPLICIT empty-intersection case yields
+            // zero posts (mirroring EligiblePostQuery's followed-set filter).
             sql.append("AND p.tags && ?::TEXT[] ");
-            params.add(effectiveTags.toArray(new String[0]));
+            params.add(effectiveTags.tags().toArray(new String[0]));
         }
 
         sql.append("ORDER BY p.published_at DESC, p.id DESC LIMIT ?");
