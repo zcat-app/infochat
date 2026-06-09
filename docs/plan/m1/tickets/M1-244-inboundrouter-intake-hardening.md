@@ -28,12 +28,12 @@ round_cap: 2
 security_relevant: true
 migration_touch: false
 out_of_scope:
-  - The admin confirm-leg ban paths that do their own FOR UPDATE reads — they keep using BanCheck; only the intake step-4 read is served from the snapshot.
+  - The admin confirm-leg ban paths (BanCommandHandler) that do their own SELECT ... FOR UPDATE reads — unchanged; they never used BanCheck (they hand-roll their own locking read), and only the intake step-4 read is what moves to the snapshot.
   - The step-4 execution ordering relative to step 3/3.5 (security.md §Authorization model) — unchanged; only the SOURCE of the is_banned value moves from a second SELECT to the step-1 snapshot.
   - The generic 64 KiB byte cap and the existing chat-mode cap (chatBodyCap) — unchanged; this adds the slash-command cap that is currently missing.
   - BanCommandHandler and RateCapBucket — owned by M1-249.
 acceptance:
-  - "T4: USER_SNAPSHOT_SQL selects is_banned alongside id, registration_state, and UserSnapshot carries an isBanned field; the intake step-4 ban check reads the snapshot value instead of issuing a second SELECT is_banned FROM users per inbound. Because step 4 was the SOLE InboundRouter use of the injected BanCheck, the now-unused @Inject BanCheck field (and its import) is removed from InboundRouter — BanCheck the class is retained for the M1-249 confirm-leg FOR UPDATE paths. A code comment at the step-4 site records that the snapshot-served ban is spec-legal (the step-1→step-4 TOCTOU is accepted; the ban takes effect on the next inbound). InboundRouterBanSnapshotTest asserts a banned user's inbound is rejected at step 4 with the fixed reply and no LLM/parse/further DB query, using only the single snapshot read. The class javadoc (and UserSnapshot doc) drops the \"separate live is_banned query\" rationale."
+  - "T4: USER_SNAPSHOT_SQL selects is_banned alongside id, registration_state, and UserSnapshot carries an isBanned field; the intake step-4 ban check reads the snapshot value instead of issuing a second SELECT is_banned FROM users per inbound. Because step 4 was the SOLE InboundRouter use of the injected BanCheck, the now-unused @Inject BanCheck field (and its import) is removed from InboundRouter. BanCheck the class is left in place by this ticket (not deleted); after the fold it has no remaining production consumer (InboundRouter step 4 was its sole caller), and its removal is tracked by follow-up M1-254. A code comment at the step-4 site records that the snapshot-served ban is spec-legal (the step-1→step-4 TOCTOU is accepted; the ban takes effect on the next inbound). InboundRouterBanSnapshotTest asserts a banned user's inbound is rejected at step 4 with the fixed reply and no LLM/parse/further DB query, using only the single snapshot read. The class javadoc (and UserSnapshot doc) drops the \"separate live is_banned query\" rationale."
   - "T4-tests: because the intake call ordering no longer includes banCheck.isBanned (the ban is served from the snapshot) and the BanCheck field is removed, every `router.banCheck = ...` assignment in the six tests is removed. InboundRouterIntakeOrderingTest and InboundRouterProbationOrderingTest additionally drop banCheck.isBanned from their step-4 call-log expectations and seed banned state via UserSnapshot.isBanned instead of FakeBanCheck.banned; InboundRouterConfirmCancelTest, InboundRouterNormalizeTest, RouterNoDoubleSendTest, InboundRouterContactIdRedactionTest take the UserSnapshot constructor-arg update plus the banCheck-assignment removal. The two test doubles FakeBanCheck.java and NoopBanCheck.java — referenced only by these six tests — become orphaned and are deleted. No other behavior in those tests changes."
   - "T6: a profile-driven char cap infochat.command.body-cap (per-profile defaults laptop 8192 / vps 4096 / pi 2048 / remote-llm 16384, per docs/design/03-commands.md) is applied to slash-command bodies after normalization and before handleSlash; an over-cap slash body is rejected with a friendly error bundle key and does not reach the parser. InboundRouterCommandCapTest asserts an over-cap slash body is rejected with the error reply and an under-cap slash body is parsed normally. The bundle key is added to BundleKeys plus the en and cs bundles (parity); the per-profile values (and a %test value for a deterministic test cap) are added to application.properties alongside infochat.chat.body-cap."
   - "mvn -B clean verify from the repo root exits 0."
@@ -56,7 +56,7 @@ test_plan:
       why: "Constructs UserSnapshot at ~154 and sets router.banCheck = new NoopBanCheck() (~165). Add the isBanned constructor arg and remove the router.banCheck assignment (field gone)."
   deletes:
     - file: infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/FakeBanCheck.java
-      why: "Test double for the InboundRouter BanCheck field, referenced only by InboundRouterIntakeOrderingTest and InboundRouterProbationOrderingTest. T4 removes that field, so the double is orphaned. Deleted to avoid leaving dead test infrastructure (resurrectable from git history if M1-249's confirm-leg tests need it)."
+      why: "Test double for the InboundRouter BanCheck field, referenced only by InboundRouterIntakeOrderingTest and InboundRouterProbationOrderingTest. T4 removes that field, so the double is orphaned. Deleted to avoid leaving dead test infrastructure (resurrectable from git history if a future ticket needs a BanCheck double)."
     - file: infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/NoopBanCheck.java
       why: "Null-object test double for the InboundRouter BanCheck field, referenced only by the four compile-only tests above. Orphaned once the field is removed; deleted."
   preserves:
@@ -183,8 +183,9 @@ tickets on one file). Source: `deep-code-review/v3/` UNIFIED-REPORT.md T4 (mimo
 ## Acceptance
 
 See frontmatter. In prose: add `is_banned` to the snapshot and serve the intake
-ban check from it (keeping `BanCheck` for the admin confirm-leg `FOR UPDATE`
-paths); add the profile-driven slash-command char cap mirroring the existing
+ban check from it (the `BanCheck` class is left in place but, after the fold, has
+no remaining production consumer — its removal is tracked by follow-up M1-254);
+add the profile-driven slash-command char cap mirroring the existing
 chat-cap shape and the design per-profile values. Named tests pin both; `mvn
 verify` is 0.
 
@@ -205,8 +206,10 @@ Because step 4 was the **sole** `InboundRouter` use of the injected `BanCheck`,
 the fold removes the `@Inject BanCheck banCheck` field entirely. That makes every
 `router.banCheck = ...` assignment in the six tests stop compiling, and it
 orphans the two test doubles (`FakeBanCheck`, `NoopBanCheck`) that exist only to
-feed that field. The doubles are deleted; `BanCheck` the class survives for the
-M1-249 confirm-leg `FOR UPDATE` paths.
+feed that field. The doubles are deleted; `BanCheck` the class is left in place by
+this ticket but has no remaining production consumer after the fold (the
+confirm-leg `FOR UPDATE` paths in `BanCommandHandler` hand-roll their own locking
+read and never used it) — its removal is tracked by follow-up M1-254.
 
 - **Behavioral** (call-log + construction + assignment): `InboundRouterIntakeOrderingTest`,
   `InboundRouterProbationOrderingTest` — drop `banCheck.isBanned` from the
@@ -219,8 +222,8 @@ M1-249 confirm-leg `FOR UPDATE` paths.
   to its single `UserSnapshot(...)` construction and removes its
   `router.banCheck = new NoopBanCheck()` line; no assertion changes.
 - **Deleted doubles**: `FakeBanCheck.java`, `NoopBanCheck.java` — orphaned by the
-  field removal; resurrectable from git history if M1-249 needs a `BanCheck`
-  double.
+  field removal; resurrectable from git history if a future ticket needs a
+  `BanCheck` double.
 
 ## Notes
 
