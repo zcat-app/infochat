@@ -80,6 +80,8 @@ Reply with: <number> [optional notes]
 
      All three arms preserve the snapshot under `revisions:` for the audit trail.
 
+     **Cross-worktree variant for the two refine-to-`main` arms (clarity-fail, outline-fail).** When the session runs inside a per-ticket worktree, the `git checkout main` these arms assume is impossible — `main` is checked out in the primary and git refuses. Instead: commit the refined ticket file on the current (empty) per-ticket branch, fast-forward the primary's `main` — `git -C <main-host> merge --ff-only m1/M1-NNN-<slug>` (resolve `<main-host>` via `git worktree list` as in [`merge.md`](merge.md) step 2; the branch carries exactly the one refine commit beyond `main`, so `--ff-only` succeeds) — then `git checkout --detach` to free the branch ref while keeping the refined ticket on disk in this worktree, and finally `git branch -D m1/M1-NNN-<slug>`. If `main` has moved since the fork, `--ff-only` refuses — fall back to `git -C <main-host> checkout m1/M1-NNN-<slug> -- docs/plan/m1/tickets/M1-NNN-<slug>.md` and commit on the host (the defer-landing pattern, M1-224). (Observed: M1-125, 2026-06-02.)
+
    - **`2` (override).** **Eligibility gate (run first).** Read the most recent entry in `escalations:` and inspect its `reason`. Override is reviewer-judgment-correction only — it applies iff `reason ∈ {round-cap, manual-verdict}`. For any other reason, refuse:
 
      ```

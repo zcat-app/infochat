@@ -28,8 +28,9 @@ Branch: {{BRANCH}}
    the short chat reply with MANUAL + Rework items: 0. Do NOT proceed
    with the per-check evaluation.
 2. Read the diff file at {{DIFF_FILE_PATH}} with the Read tool. The
-   diff is `git diff main` — working tree vs main, on branch
-   {{BRANCH}}. This is the full diff under review.
+   diff is working tree vs the branch's fork point from main
+   (`git diff $(git merge-base main HEAD)`), on branch {{BRANCH}}.
+   This is the full diff under review.
 3. Test log (mvn verify from repo root): {{TEST_LOG_PATH}}
    Use the Read tool. The build summary, any failures, and surrounding
    context are at the bottom of the file. Use Grep to scope if the
