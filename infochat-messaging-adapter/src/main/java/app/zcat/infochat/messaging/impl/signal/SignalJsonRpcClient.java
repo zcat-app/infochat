@@ -280,7 +280,7 @@ final class SignalJsonRpcClient {
         this.dispatchQueue = queue;
         this.dispatchExecutor = new ThreadPoolExecutor(
                 1, 1, 0L, TimeUnit.MILLISECONDS, queue,
-                Thread.ofPlatform().daemon().name("signal-inbound-dispatch").factory());
+                Thread.ofVirtual().name("signal-inbound-dispatch").factory());
         Thread t = new Thread(this::readerLoop, "signal-jsonrpc-reader");
         t.setDaemon(true);
         this.readerThread = t;

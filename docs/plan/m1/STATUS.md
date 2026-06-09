@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 286 |
+| done | 287 |
 | deferred | 2 |
 | **total** | **290** |
 
@@ -25,7 +25,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-246 — Quarantine stored procedures: audit-before-effect reorder (complexity: medium, risk: medium)
-- M1-253 — Messaging-adapter consistency lows: virtual threads + Random (complexity: low, risk: low)
 
 ---
 
@@ -62,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-254 | Remove orphaned BanCheck (intake step-4 ban folded into snapshot by M1-244) | 2026-06-09 | round 1 APPROVE |
+| M1-253 | Messaging-adapter consistency: virtual-thread dispatch parity | 2026-06-09 | round 1 APPROVE |
 | M1-252 | Collector lows: Nostr digest reuse, Stage2 redundant UPDATE, ssrf producer | 2026-06-09 | round 1 APPROVE |
 | M1-251 | LLM-adapter lows: finish embedding pipeline dedup + extract StubConfig | 2026-06-09 | round 1 APPROVE |
 | M1-250 | Core lows: Redactor scan/cadence + notifier phantom javadoc | 2026-06-09 | round 1 APPROVE |
@@ -70,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-247 | infochat-ssrf: body-cap default reconciliation + module lows | 2026-06-09 | round 1 APPROVE |
 | M1-245 | Re-evaluation candidate scan: fetched_at window + partial index | 2026-06-09 | round 1 APPROVE |
 | M1-244 | InboundRouter: fold is_banned into snapshot + command body cap | 2026-06-09 | round 1 APPROVE |
-| M1-243 | LlmRouterStartupGuard: require every resolved IP to be loopback | 2026-06-09 | round 1 APPROVE |
 
 ---
 
@@ -432,5 +431,5 @@ M1-249 (done)
 M1-250 (done)
 M1-251 (done)
 M1-252 (done)
-M1-253 (pending) ← runnable
+M1-253 (done)
 ```

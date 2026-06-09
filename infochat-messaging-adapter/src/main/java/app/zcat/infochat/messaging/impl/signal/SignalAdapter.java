@@ -399,9 +399,9 @@ public final class SignalAdapter implements MessagingAdapter {
      * join, so it must hop to its own thread or crash detection stalls.
      */
     private void onSubprocessRestart() {
-        Thread t = new Thread(this::reconnect, "signal-adapter-reconnect");
-        t.setDaemon(true);
-        t.start();
+        Thread.ofVirtual()
+                .name("signal-adapter-reconnect")
+                .start(this::reconnect);
     }
 
     private void reconnect() {

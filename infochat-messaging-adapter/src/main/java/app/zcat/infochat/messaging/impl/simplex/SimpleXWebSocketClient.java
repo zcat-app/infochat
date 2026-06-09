@@ -166,7 +166,7 @@ final class SimpleXWebSocketClient {
         this.dispatchQueue = new LinkedBlockingQueue<>(inboundQueueCapacity);
         this.dispatchExecutor = new ThreadPoolExecutor(
                 1, 1, 0L, TimeUnit.MILLISECONDS, dispatchQueue,
-                Thread.ofPlatform().daemon().name("simplex-inbound-dispatch").factory());
+                Thread.ofVirtual().name("simplex-inbound-dispatch").factory());
     }
 
     /**
