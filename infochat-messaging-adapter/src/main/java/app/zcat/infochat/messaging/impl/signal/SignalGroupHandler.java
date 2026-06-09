@@ -137,11 +137,19 @@ final class SignalGroupHandler {
         // Inbound group-message branch — requires sender ACI + body +
         // bot-mention. Anything missing → silent drop per spec.
         String sourceUuid = envelope.getString("sourceUuid", null);
-        if (sourceUuid == null) {
+        if (sourceUuid == null || !SignalMessageCodec.isAcceptableAci(sourceUuid)) {
+            // v1 accepts only canonical-UUID ACIs as join keys; a group
+            // sender whose identity cannot be asserted is dropped at
+            // decode, mirroring the DM path (SignalMessageCodec.extractDm).
             return;
         }
         String body = dataMessage.getString("message", null);
         if (body == null || body.isEmpty()) {
+            return;
+        }
+        if (SignalMessageCodec.exceedsInboundByteCap(body)) {
+            // Decoded-body UTF-8 byte cap, mirroring the DM path and
+            // SimpleX — the coarse envelope-line cap does not bound the body.
             return;
         }
         if (!SignalMentionParser.botMentioned(dataMessage, botAci)) {

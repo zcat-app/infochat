@@ -9,8 +9,10 @@ import jakarta.json.JsonReader;
 import jakarta.json.JsonValue;
 
 import java.io.StringReader;
+import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 import org.jspecify.annotations.Nullable;
 
@@ -36,12 +38,36 @@ import org.jspecify.annotations.Nullable;
  * not a per-call invention.</p>
  *
  * <p>ACIs surfaced by signal-cli's {@code envelope.sourceUuid} are
- * normalized via {@link #canonicalizeAci} to a lowercase UUID string
- * so the cross-adapter join key {@code (adapter, contact_id)} from
- * {@code docs/spec/messaging.md} §Per-adapter trust level cannot be
- * broken by case-folding upstream.</p>
+ * gated at decode by {@link #isAcceptableAci} (v1 accepts canonical
+ * UUID identities only) and normalized via {@link #canonicalizeAci} to
+ * a lowercase UUID string, so the cross-adapter join key
+ * {@code (adapter, contact_id)} from {@code docs/spec/messaging.md}
+ * §Per-adapter trust level cannot be broken by case-folding upstream,
+ * and a wire value that cannot be asserted as a UUID is dropped rather
+ * than persisted as a join key.</p>
  */
 final class SignalMessageCodec {
+
+    /**
+     * Inbound decoded-body cap in UTF-8 bytes — the byte-domain
+     * enforcement of the {@code maxInboundMessageBytes} capability on
+     * the laptop profile, mirroring SimpleX's {@code MAX_INBOUND_TEXT_BYTES}.
+     * The coarse char-domain line cap in {@link SignalJsonRpcClient}
+     * bounds the raw envelope line against an unterminated-line OOM; this
+     * bounds the decoded message body so the Provider's downstream
+     * budgets plan against a real ceiling rather than the line cap.
+     */
+    static final int MAX_INBOUND_TEXT_BYTES = 16_384;
+
+    /**
+     * Canonical UUID charset gate for v1 inbound identities. Signal
+     * binds an ACI (a UUID) to each account; v1 accepts UUID identities
+     * only (M1-242 §Notes), so a wire {@code sourceUuid} that is not a
+     * canonical UUID is dropped at decode rather than asserted as a join
+     * key. Matched case-insensitively (the value is lowercased first).
+     */
+    private static final Pattern CANONICAL_UUID =
+            Pattern.compile("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
 
     String encodeSend(long rpcId, String account, String recipient, String message) {
         JsonObject params = Json.createObjectBuilder()
@@ -181,7 +207,10 @@ final class SignalMessageCodec {
             return Optional.empty();
         }
         String sourceUuid = envelope.getString("sourceUuid", null);
-        if (sourceUuid == null) {
+        if (sourceUuid == null || !isAcceptableAci(sourceUuid)) {
+            // v1 accepts only canonical-UUID identities: an inbound ACI
+            // that cannot be asserted is dropped at decode rather than
+            // becoming a permanent (adapter, contact_id) join key.
             return Optional.empty();
         }
         if (!(envelope.get("dataMessage") instanceof JsonObject dataMessage)) {
@@ -194,6 +223,12 @@ final class SignalMessageCodec {
         }
         String body = dataMessage.getString("message", null);
         if (body == null || body.isEmpty()) {
+            return Optional.empty();
+        }
+        if (exceedsInboundByteCap(body)) {
+            // Decoded-body UTF-8 byte cap (the maxInboundMessageBytes
+            // capability), mirroring SimpleX — the coarse char-domain line
+            // cap in SignalJsonRpcClient does not bound the body.
             return Optional.empty();
         }
         Long timestamp = usableTimestamp(envelope, dataMessage);
@@ -239,6 +274,27 @@ final class SignalMessageCodec {
      */
     String canonicalizeAci(String aci) {
         return aci.toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * True when {@code body}'s UTF-8 encoding exceeds
+     * {@link #MAX_INBOUND_TEXT_BYTES}. Shared by the DM path
+     * ({@link #extractDm}) and the group path ({@link SignalGroupHandler})
+     * so both reject an oversize decoded body the same way SimpleX does.
+     */
+    static boolean exceedsInboundByteCap(String body) {
+        return body.getBytes(StandardCharsets.UTF_8).length > MAX_INBOUND_TEXT_BYTES;
+    }
+
+    /**
+     * True when {@code aci} is acceptable as a v1 inbound identity: a
+     * canonical UUID, matched case-insensitively against
+     * {@link #CANONICAL_UUID}. Shared by the DM path and the group path
+     * so both drop an unassertable identity at decode instead of
+     * persisting it as an {@code (adapter, contact_id)} join key.
+     */
+    static boolean isAcceptableAci(String aci) {
+        return CANONICAL_UUID.matcher(aci.toLowerCase(Locale.ROOT)).matches();
     }
 
     /** Decoded JSON-RPC 2.0 envelope. Sealed for exhaustive dispatch. */

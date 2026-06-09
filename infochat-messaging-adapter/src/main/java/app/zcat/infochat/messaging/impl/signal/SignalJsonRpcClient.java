@@ -96,14 +96,21 @@ final class SignalJsonRpcClient {
     private static final String OPAQUE_PREFIX = "signal-";
 
     /**
-     * Hard cap on the per-line character count read from the daemon
-     * socket. Matches the {@code maxInboundMessageBytes=16384}
-     * capability flag declared by SignalAdapter — the capability is a
-     * contract, not documentation, and is enforced here at the
-     * transport boundary. Lines exceeding the cap are drained and
-     * dropped without being passed to the JSON codec, preventing
-     * heap-exhaustion DoS from a buggy / compromised peer on the
-     * loopback daemon port.
+     * Coarse hard cap on the per-line UTF-16 character count read from
+     * the daemon socket: a stream-layer guard against a peer that never
+     * emits a newline, which would otherwise grow the line buffer until
+     * OOM. Lines exceeding the cap are drained and dropped without being
+     * passed to the JSON codec, bounding heap cost from a buggy /
+     * compromised peer on the loopback daemon port.
+     *
+     * <p>This is a char-domain bound on the whole JSON-RPC envelope line,
+     * NOT the {@code maxInboundMessageBytes} capability. That capability
+     * is a UTF-8 byte budget on the decoded message body and is enforced
+     * in {@link SignalMessageCodec#exceedsInboundByteCap} on both the DM
+     * and group paths (mirroring SimpleX). The two are independent: an
+     * envelope line under this char cap can still carry a body over the
+     * byte cap (multi-byte chars, or envelope framing overhead the body
+     * does not pay), so the body cap is enforced separately at decode.</p>
      */
     private static final int MAX_INBOUND_LINE_CHARS = 16_384;
 
