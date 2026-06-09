@@ -1,7 +1,7 @@
 ---
 id: M1-255
 title: "Signal membership-event ACIs: apply canonical-UUID gate"
-status: pending
+status: done
 created: 2026-06-09
 last_updated: 2026-06-09
 blocked_by: []
@@ -33,12 +33,45 @@ spec_refs:
   - docs/spec/messaging.md §Identity and groups
   - docs/spec/messaging.md §Failure handling
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-09
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 145
+      removed: 14
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-09
+    verdict: CLEAN
+    base: main (650b4cd)
+    head: working tree on branch m1/M1-255-signal-membership-aci-gate (uncommitted, --in-progress)
+    verdict_file: docs/plan/m1/redteam/M1-255-2026-06-09.md
+    out_of_model_count: 1
+    note: |
+      CLEAN — diff is a focused security tightening (canonical-UUID gate on the
+      membership member-delta parser, matching DM/group-message paths). One
+      OUT-OF-MODEL observation: membership join/leave dispatch has no bot-mention
+      gate (unlike the group-message path); verified accurate but correctly out of
+      model (signal-cli is the trusted identity boundary; membership events have no
+      mention semantics). Not a gap in this diff, no remediation ticket. Provider-side
+      membership-event reconciliation vs authorized group state is a possible future
+      spec-coverage question for the user, not an action item for M1-255.
+clarity_check:
+  date: 2026-06-09
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-255: Signal membership-event ACIs: apply canonical-UUID gate

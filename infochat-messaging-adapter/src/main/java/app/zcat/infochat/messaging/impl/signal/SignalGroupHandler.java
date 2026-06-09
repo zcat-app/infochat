@@ -274,13 +274,24 @@ final class SignalGroupHandler {
         // strings or full {uuid, ...} objects depending on version;
         // accept both shapes so a future signal-cli upgrade does not
         // silently drop the event.
-        return switch (entry.getValueType()) {
-            case STRING -> ((JsonString) entry).getString().toLowerCase(Locale.ROOT);
-            case OBJECT -> {
-                String uuid = ((JsonObject) entry).getString("uuid", null);
-                yield uuid == null ? null : uuid.toLowerCase(Locale.ROOT);
-            }
+        String raw = switch (entry.getValueType()) {
+            case STRING -> ((JsonString) entry).getString();
+            case OBJECT -> ((JsonObject) entry).getString("uuid", null);
             default -> null;
         };
+        // Gate the member-delta ACI exactly as the DM (extractDm) and
+        // group-message (handleReceive) paths do: an entry that is not a
+        // canonical UUID is dropped at decode rather than becoming a
+        // (adapter, contact_id) join key. Provider keys group_membership
+        // row operations on that tuple, so a non-canonical memberLeft
+        // entry could otherwise mutate authorization-adjacent state it
+        // can never reconcile against a real users.contact_id.
+        if (raw == null || !SignalMessageCodec.isAcceptableAci(raw)) {
+            return null;
+        }
+        // isAcceptableAci lower-cases internally for the match; emit the
+        // lower-cased canonical form only after the gate passes, matching
+        // the other inbound paths' join-key shape.
+        return raw.toLowerCase(Locale.ROOT);
     }
 }
