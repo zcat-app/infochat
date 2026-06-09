@@ -3,7 +3,7 @@ id: M1-276
 title: "Collector mediums: re-eval splice, scan bounds, vocab, edges"
 status: pending
 created: 2026-06-09
-last_updated: 2026-06-09
+last_updated: 2026-06-10
 blocked_by: []
 files_budget: 16
 files_scope:
@@ -26,19 +26,25 @@ out_of_scope:
   - The Reddit fetch pipeline beyond the created_utc handling.
   - The eval-queue threading (M1-267).
 acceptance:
-  - "ReEvaluationJob.reconstructOriginalBody is a single-pass position-anchored splice: a named test with a quarantined span whose content contains a placeholder-shaped literal ([REDACTED:<other-id>]) reconstructs the original bytes exactly (today's order-dependent global String.replace corrupts them)."
-  - "The NEEDS_REVIEW depth check bounds its scan (fetched_at bound or equivalent) so partition pruning applies; the 5-minute count no longer scans every partition."
+  - "ReEvaluationJob.reconstructOriginalBody is a single-pass position-anchored splice: a named test with a quarantined span whose content contains a placeholder-shaped literal ([REDACTED:<other-id>]) reconstructs the original bytes exactly (today's order-dependent global String.replace corrupts them). The new test lands in the pre-existing ReEvaluationJobTest.java; its existing reconstruction assertions (non-colliding placeholders) are preserved, not weakened."
+  - "The NEEDS_REVIEW depth check bounds its scan (fetched_at bound or equivalent) so partition pruning applies; the 5-minute count no longer scans every partition; a named test asserts the bounded count excludes NEEDS_REVIEW rows older than the bound and still counts rows within it."
   - "TagVocabulary refreshes at runtime: a tag added via /add-source becomes visible to the tagger without a Collector restart (periodic reload or NOTIFY-driven; see Notes); named test."
-  - "Kind6Handler persists the post and its repost edge atomically: a failure between the two writes cannot leave a committed post without its edge; a named test injects an edge-write failure and asserts the post write rolled back (or the edge is recovered — one semantics, pinned)."
-  - "RedditFetcher handles missing created_utc explicitly (skip the item with a counted/logged reason, or substitute fetch time — pick one in the diff and pin it) instead of silently storing 1970-01-01; named test."
-  - "latestPublishedAtEpochSeconds no longer forces an all-partition MAX(published_at) scan on every relay reconnect (fetched_at/recency bound or equivalent partition-pruned form), with the cursor semantics preserved."
+  - "Kind6Handler persists the post and its repost edge atomically: a failure between the two writes cannot leave a committed post without its edge; a named test injects an edge-write failure and asserts the post write rolled back (or the edge is recovered — one semantics, pinned). The failure-injection test lands alongside the pre-existing Kind6HandlerTest.java, whose unresolved-edge-shape assertions are preserved (fixtures/wiring may adjust if the two writes collapse into one transaction); Kind6RepostResolutionIT/Kind6LinkingIT are modified only if shared fixture shape changes."
+  - "RedditFetcher handles missing created_utc explicitly (skip the item with a counted/logged reason, or substitute fetch time — pick one in the diff and pin it) instead of silently storing 1970-01-01; named test. The test lands in the pre-existing RedditFetcherTest.java; no existing assertion pins the 1970-01-01 behavior, and existing test methods are not modified."
+  - "latestPublishedAtEpochSeconds no longer forces an all-partition MAX(published_at) scan on every relay reconnect (fetched_at/recency bound or equivalent partition-pruned form), with the cursor semantics preserved; a named test covers the stale-source path (source with no recent posts: falls back to the unbounded query or a persisted cursor, cursor semantics intact)."
   - "A new migration rebuilds V34's unresolved-repost-edge unique index with NULLS NOT DISTINCT so duplicate unresolved edges are rejected; named test inserts a duplicate and asserts rejection."
   - "mvn -B clean verify from the repo root exits 0."
 test_plan:
   adds:
     - infochat-collector/src/test/java/app/zcat/infochat/collector
   modifies:
-    - infochat-collector/src/test/java/app/zcat/infochat/collector
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/reeval/ReEvaluationJobTest.java
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/Kind6HandlerTest.java
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/fetcher/reddit/RedditFetcherTest.java
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/reeval/ReEvaluationJobWindowTest.java
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/reeval/ReEvaluationJobScheduledPathIT.java
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/Kind6RepostResolutionIT.java
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/Kind6LinkingIT.java
   preserves:
     - all tests currently green on main
 spec_refs: []
@@ -47,6 +53,37 @@ reviews: {}
 overrides: []
 aborted_attempts: []
 reopens: []
+revisions:
+  - date: 2026-06-10
+    reason: clarity-fail refine (test_plan.modifies named only a directory; scan-bound items 2/6 had no named test; stale V50 migration note)
+    snapshot: |
+      Pre-refine test_plan.modifies listed only the directory
+      infochat-collector/src/test/java/app/zcat/infochat/collector.
+      Pre-refine acceptance items 2 and 6 verbatim:
+        2: "The NEEDS_REVIEW depth check bounds its scan (fetched_at bound or
+            equivalent) so partition pruning applies; the 5-minute count no
+            longer scans every partition."
+        6: "latestPublishedAtEpochSeconds no longer forces an all-partition
+            MAX(published_at) scan on every relay reconnect (fetched_at/recency
+            bound or equivalent partition-pruned form), with the cursor
+            semantics preserved."
+      Items 1, 4, 5 lacked the pre-existing-test naming appended by the refine.
+      Pre-refine Notes migration bullet targeted V50 ("M1-269 takes the next
+      free version (V49 at drafting time); this ticket takes the one after").
+      All other frontmatter fields unchanged by the refine.
+escalations:
+  - date: 2026-06-10
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      TEST-CHANGES-AUTHORIZED: FAIL — test_plan.modifies lists only the directory
+      infochat-collector/src/test/java/app/zcat/infochat/collector rather than the
+      specific existing test files and methods that will be changed. At a minimum,
+      identify which of the following existing tests are being modified and describe
+      what assertion changes: ReEvaluationJobTest.java (item 1 body-reconstruction
+      fix), RedditFetcherTest.java (item 5 missing-utc fix), Kind6HandlerTest.java or
+      Kind6RepostResolutionIT.java (item 4 atomicity fix). For each modified
+      pre-existing test, state the old expected behavior being replaced and the new
+      one being installed.
 redteam_findings: []
 clarity_check: {}
 ---
@@ -102,9 +139,29 @@ See frontmatter.
 - M-K7's bound must not break the reconnect cursor when a source has no
   recent posts — fall back to the unbounded query or a persisted cursor in
   that case; the named test should cover the stale-source path.
-- Migration version: M1-269 takes the next free version (V49 at drafting
-  time); this ticket takes the one after (V50). Re-sweep worktrees at
-  implementation time; `migration_touch: true` serializes the two starts.
+- Migration version: V49 (re-swept 2026-06-10 — M1-269 landed with no
+  migration; highest version on disk across main and all worktrees is V48).
+  Re-sweep worktrees again at implementation time.
+- Pre-existing test modifications (old → new):
+  - `ReEvaluationJobTest.java` — old: reconstruction pinned only with
+    non-colliding placeholders (`assertPostBodyContains` on
+    `[REDACTED:placeholder-1/2]`); new: those assertions stay green, the
+    colliding-literal splice test (item 1) joins the file; shared fixtures
+    may extend.
+  - `Kind6HandlerTest.java` — old: pins the persist→edge two-write shape and
+    the unresolved-edge invariants (`to_post` NULL, score 1.0); new: the same
+    edge-shape assertions hold under the pinned atomic semantics;
+    wiring/fixtures adjust if the two writes collapse into one transaction.
+  - `RedditFetcherTest.java` — old: fixtures always supply `created_utc`;
+    nothing pins the 1970-01-01 fallback; new: the missing-created_utc named
+    test (item 5) joins the file; existing methods untouched.
+  - `ReEvaluationJobWindowTest.java` / `ReEvaluationJobScheduledPathIT.java`
+    — modified only if the item-2 fetched_at bound changes which fixture rows
+    the depth count sees (old: unbounded count sees all NEEDS_REVIEW rows;
+    new: rows older than the bound are excluded).
+  - `Kind6RepostResolutionIT.java` / `Kind6LinkingIT.java` — modified only if
+    shared fixture shape changes; their resolution/linking assertions are
+    preserved.
 
 ## Pre-flight self-check (author-side)
 
