@@ -4,6 +4,46 @@ title: "Redactor thrown-chain coverage + log hygiene sweep"
 status: pending
 created: 2026-06-09
 last_updated: 2026-06-09
+revisions:
+  - date: 2026-06-09
+    reason: clarity-fail refine (files_scope gap + unauthorized test modify + unnamed tests on items 6-7)
+    snapshot: |
+      Pre-refine files_scope listed only NostrRelayConnection.java for the
+      nostr production tree (NostrMessage.java absent). Pre-refine acceptance
+      items 4, 6, 7 verbatim:
+        4: "NostrRelayConnection never lets raw relay bytes reach WARN logs:
+            malformed-frame failures log a fixed reason code or a
+            control-char-stripped summary (MalformedFrameException no longer
+            embeds unstripped frame bytes in its message); named test with a
+            control-char/ANSI frame."
+        6: "MembershipEventHandler redacts adapterGroupId at the
+            UserLeft/BotRemoved warn sites (:72, :138), matching its other
+            sites."
+        7: "The heartbeat host_id is sanitized before log interpolation."
+      All other frontmatter fields unchanged by the refine.
+escalations:
+  - date: 2026-06-09
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      CLARITY VERDICT: FAIL
+      BLOCKERS:
+        1. FILES-BUDGET-PLAUSIBLE / files_scope gap: Acceptance item 4 requires
+           changing MalformedFrameException so it no longer embeds raw frame
+           bytes in its message. MalformedFrameException is a nested class of
+           NostrMessage.java (infochat-collector/src/main/java/app/zcat/infochat/collector/stream/nostr/NostrMessage.java),
+           which is not in files_scope. Add it. (If the fix instead routes
+           through NostrRelayConnection.java alone — e.g., catching and
+           re-throwing with a sanitized message at the call site — the
+           acceptance item should be reworded to describe that approach so the
+           scope exclusion is coherent.)
+        2. TEST-CHANGES-AUTHORIZED: test_plan.modifies lists
+           infochat-provider/src/test/java/app/zcat/infochat/provider/group
+           (contains MembershipEventHandlerTest.java) but no acceptance item
+           names a test in that directory, and no body section describes what
+           the pre-existing test is being changed to assert. Add an explicit
+           acceptance item (or a Notes subsection) naming
+           MembershipEventHandlerTest and describing the new expected behavior
+           it will pin.
 blocked_by: []
 files_budget: 16
 files_scope:
@@ -13,6 +53,7 @@ files_scope:
   - infochat-core/src/main/java/app/zcat/infochat/core/startup/AbstractInstanceLockGuard.java
   - infochat-core/src/test/java/app/zcat/infochat/core
   - infochat-collector/src/main/java/app/zcat/infochat/collector/stream/nostr/NostrRelayConnection.java
+  - infochat-collector/src/main/java/app/zcat/infochat/collector/stream/nostr/NostrMessage.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr
   - infochat-provider/src/main/java/app/zcat/infochat/provider/outbox/QuarantineReviewListener.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/group/MembershipEventHandler.java
@@ -32,10 +73,10 @@ acceptance:
   - "Redactor covers the thrown chain: messages of record.getThrown() and its cause chain pass through the same catalogue scan as the message and params before reaching the console; a named test asserts an API-key-shaped string inside a nested cause's message is redacted in console output."
   - "ThrottledAdminNotifier no longer binds the raw throwable around the redactor, and AbstractInstanceLockGuard no longer interpolates raw e.getMessage() into its fatal line — both routes are covered by the redaction/sanitization path; named tests."
   - "The core sanitize() helper strips DEL and C1 controls (including 0x9B CSI), matching its 'leaves no gaps' comment; named test with C1 bytes."
-  - "NostrRelayConnection never lets raw relay bytes reach WARN logs: malformed-frame failures log a fixed reason code or a control-char-stripped summary (MalformedFrameException no longer embeds unstripped frame bytes in its message); named test with a control-char/ANSI frame."
+  - "NostrRelayConnection never lets raw relay bytes reach WARN logs: malformed-frame failures log a fixed reason code or a control-char-stripped summary. The throw sites in NostrMessage.java that embed summarize(frame) / summarize(filterSpec) into MalformedFrameException messages (:51, :54, :79, :99, :102) strip controls (C0, DEL, C1) from the summarized bytes; named test with a control-char/ANSI frame."
   - "QuarantineReviewListener reaches NewPostListener parity: no raw NOTIFY payload echoed in ERROR logs or exception messages at the three cited sites (:255-256, :285, :295); named test."
-  - "MembershipEventHandler redacts adapterGroupId at the UserLeft/BotRemoved warn sites (:72, :138), matching its other sites."
-  - "The heartbeat host_id is sanitized before log interpolation."
+  - "MembershipEventHandler redacts adapterGroupId at the UserLeft/BotRemoved warn sites (:72, :138), matching its other sites; the pre-existing MembershipEventHandlerTest gains named tests asserting the UserLeft and BotRemoved unknown-group warn lines do not contain the raw adapterGroupId. Existing test methods are not modified."
+  - "AbstractInstanceLockGuard sanitizes the heartbeat host_id before interpolating it into the lock-holder fatal line (:250-251); the pre-existing InstanceLockLivenessTest gains a named test asserting a control-char-bearing host_id is rendered stripped. Existing test methods are not modified."
   - "mvn -B clean verify from the repo root exits 0."
 test_plan:
   adds:
@@ -44,6 +85,7 @@ test_plan:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/outbox
   modifies:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/group
+    - infochat-core/src/test/java/app/zcat/infochat/core
   preserves:
     - all tests currently green on main
 spec_refs: []
