@@ -515,6 +515,59 @@ class RateCapBucketTest {
                 "no rebirth-at-full: the next acquire before the window elapses still fails");
     }
 
+    // ----- D47 step 3.5 per-group reply bucket (M1-112) -------------------
+    // Per docs/spec/security.md §Rate limiting "per-group reply": one
+    // sub-bucket per group bounding outbound reply volume across approval
+    // states. Driven through the 6-arg test seam with a small cap against
+    // the controllable TestClock, mirroring the group-LLM / group-command
+    // tests above. (The reply bucket had no direct coverage before T11.)
+
+    private static final int GROUP_REPLY_CAP = 3;
+    private static final Duration GROUP_REPLY_REFILL_WINDOW = Duration.ofMinutes(15);
+
+    private static RateCapBucket bucketWithGroupReplySeam(TestClock clock) {
+        return new RateCapBucket(clock, CAP, REFILL_WINDOW, EVICTION_THRESHOLD,
+                GROUP_REPLY_CAP, GROUP_REPLY_REFILL_WINDOW);
+    }
+
+    @Test
+    void groupReplyOverCapReturnsFalseAfterExhaustion() {
+        TestClock clock = new TestClock(Instant.parse("2026-06-07T00:00:00Z"));
+        RateCapBucket bucket = bucketWithGroupReplySeam(clock);
+        UUID groupId = UUID.randomUUID();
+
+        for (int i = 0; i < GROUP_REPLY_CAP; i++) {
+            assertTrue(bucket.tryAcquireGroupReply(groupId),
+                    "the first " + GROUP_REPLY_CAP + " group-reply acquires must succeed (i=" + i + ")");
+        }
+        assertFalse(bucket.tryAcquireGroupReply(groupId),
+                "the (cap+1)-th group-reply acquire without time advance must return false");
+    }
+
+    @Test
+    void groupReplyRefillsOverWindow() {
+        TestClock clock = new TestClock(Instant.parse("2026-06-07T00:00:00Z"));
+        RateCapBucket bucket = bucketWithGroupReplySeam(clock);
+        UUID groupId = UUID.randomUUID();
+
+        // Drain the group-reply bucket.
+        for (int i = 0; i < GROUP_REPLY_CAP; i++) {
+            assertTrue(bucket.tryAcquireGroupReply(groupId));
+        }
+        assertFalse(bucket.tryAcquireGroupReply(groupId),
+                "group-reply bucket drained; next acquire without refill must fail");
+
+        // Advance past the 15-minute reply window — cap tokens added back.
+        clock.advance(GROUP_REPLY_REFILL_WINDOW);
+
+        for (int i = 0; i < GROUP_REPLY_CAP; i++) {
+            assertTrue(bucket.tryAcquireGroupReply(groupId),
+                    "after a full refill window elapses, cap acquires succeed again (i=" + i + ")");
+        }
+        assertFalse(bucket.tryAcquireGroupReply(groupId),
+                "the post-refill group-reply bucket is also bounded at cap");
+    }
+
     /**
      * Test seam — a mutable Clock whose {@link #millis()} reading
      * advances only when the test calls {@link #advance(Duration)}.

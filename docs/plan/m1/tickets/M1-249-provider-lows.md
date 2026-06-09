@@ -1,7 +1,7 @@
 ---
 id: M1-249
 title: "Provider lows: RateCapBucket dedup, ban null-guard, NOTIFY parse"
-status: pending
+status: done
 created: 2026-06-09
 last_updated: 2026-06-09
 blocked_by: []
@@ -35,7 +35,20 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-09
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 172
+      removed: 105
 escalations:
   - date: 2026-06-09
     reason: clarity-fail
@@ -61,7 +74,26 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-09
+    verdict: CLEAN
+    base: b1ce1c1
+    head: working-tree on m1/M1-249-provider-lows (uncommitted, pre-commit)
+    verdict_file: docs/plan/m1/redteam/M1-249-2026-06-09.md
+    out_of_model_count: 1
+    note: |
+      Pre-commit adversarial audit of the three legs. CLEAN: T29 removed an
+      unreachable adapter==null arm (no AUTH-BYPASS/PERM-ESCAL/INJECTION
+      regression), T11 is a behavior-preserving rate-cap extraction that
+      preserves the M1-044a key-space DOS defense, T30 tightens INFO-LEAK
+      hygiene on the internal NOTIFY boundary. One OUT-OF-MODEL note (NOTIFY
+      forging needs DB NOTIFY rights, outside the trust boundary) — advisory
+      only, no follow-up ticket.
+clarity_check:
+  date: 2026-06-09
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-249: Provider lows

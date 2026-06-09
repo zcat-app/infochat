@@ -319,8 +319,10 @@ public class NewPostListener {
         try {
             payload = parsePayload(n.getParameter());
         } catch (RuntimeException e) {
-            LOG.errorf(e, "NewPostListener: unparseable payload (dropped): %s",
-                n.getParameter());
+            // The exception carries a shape-only message (parsePayload no
+            // longer echoes the raw payload); keep the raw NOTIFY bytes out
+            // of the log too — info-leak hygiene on this boundary.
+            LOG.error("NewPostListener: unparseable new_post payload (dropped)", e);
             return;
         }
         try {
@@ -344,9 +346,12 @@ public class NewPostListener {
         Matcher readyAtMatcher = READY_AT_PATTERN.matcher(json);
         Matcher postIdMatcher = POST_ID_PATTERN.matcher(json);
         if (!readyAtMatcher.find() || !postIdMatcher.find()) {
+            // Do NOT echo the raw payload into the exception message: this is
+            // the NOTIFY-deserialization boundary and the unparseable bytes
+            // flow into the dispatch log below. Info-leak hygiene over a
+            // shape error needs no payload content to be actionable.
             throw new IllegalArgumentException(
-                "new_post payload must contain both 'ready_at' and 'post_id' fields; got: "
-                    + json);
+                "new_post payload must contain both 'ready_at' and 'post_id' fields");
         }
         return new Payload(
             UUID.fromString(postIdMatcher.group(1)),

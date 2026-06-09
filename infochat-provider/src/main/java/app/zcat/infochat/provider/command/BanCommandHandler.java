@@ -391,7 +391,7 @@ public class BanCommandHandler implements CommandHandler {
     }
 
     private Optional<UserRow> lookupUser(String adapter, @Nullable String contactId) {
-        if (adapter == null || contactId == null) {
+        if (contactId == null) {
             return Optional.empty();
         }
         return userRepository.findByAdapterAndContactId(adapter, contactId)

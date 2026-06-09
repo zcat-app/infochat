@@ -264,36 +264,47 @@ public class RateCapBucket {
             return tryAcquireStranger(adapter);
         }
         Key key = new Key(adapter, contactId);
-        Bucket existing = buckets.get(key);
-        Bucket bucket;
-        if (existing != null) {
-            bucket = existing;
-        } else {
-            // New key — enforce the pre-auth key-space cap before creating.
-            // A full map drops the new contact like an over-cap inbound:
-            // silent, no throw, no outbound. The size-check / putIfAbsent
-            // window is benign for a flood bound — one dispatch thread per
-            // adapter, so any overshoot is bounded by the few concurrent
-            // callers, never unbounded.
-            if (buckets.size() >= maxContactBuckets) {
-                return false;
-            }
-            Bucket created = new Bucket(inboundPerMinute, clock.millis());
-            Bucket prev = buckets.putIfAbsent(key, created);
-            bucket = prev != null ? prev : created;
+        // Pre-auth key-space cap: a NEW contact is dropped (silent, no
+        // throw, no outbound) once the map is full, exactly like an
+        // over-cap inbound; an EXISTING key always proceeds. This check
+        // precedes the computeIfAbsent inside tryAcquireFrom so a full map
+        // cannot mint a fresh entry. The containsKey / size / create window
+        // is benign for a flood bound — one dispatch thread per adapter, so
+        // any overshoot is bounded by the few concurrent callers, never the
+        // unbounded growth the M1-044a DOS shape needs.
+        if (!buckets.containsKey(key) && buckets.size() >= maxContactBuckets) {
+            return false;
         }
+        return tryAcquireFrom(buckets, key, inboundPerMinute, refillWindow);
+    }
+
+    /**
+     * Single source of the token-bucket refill + decrement body shared by
+     * every acquire path — the contact bucket, the shared stranger
+     * limiter, and the three per-group sub-buckets. Resolves the bucket
+     * for {@code key} in {@code map} (minting a full one on first touch),
+     * then under the bucket monitor lazily refills {@code cap} tokens per
+     * {@code refillWindow} elapsed — advancing
+     * {@code lastRefillEpochMillis} by exactly the time the added tokens
+     * consume so sub-token elapsed carries forward to the next call — and
+     * decrements one token on success. A refill-semantics change lives
+     * here only.
+     *
+     * @return {@code true} iff a token was available after refill (one is
+     *         consumed); {@code false} on an empty bucket — the caller
+     *         drops the inbound.
+     */
+    private <K> boolean tryAcquireFrom(ConcurrentHashMap<K, Bucket> map, K key,
+                                       int cap, Duration refillWindow) {
+        Bucket bucket = map.computeIfAbsent(key, k -> new Bucket(cap, clock.millis()));
         synchronized (bucket) {
             long now = clock.millis();
             long elapsed = Math.max(0L, now - bucket.lastRefillEpochMillis);
             long windowMs = refillWindow.toMillis();
-            // Continuous refill: cap tokens added per refillWindow elapsed.
-            // refillCount = elapsed * cap / windowMs; advance lastRefill by
-            // exactly the time consumed by those tokens so leftover sub-token
-            // elapsed carries forward to the next call.
-            long refillCount = elapsed * (long) inboundPerMinute / windowMs;
+            long refillCount = elapsed * (long) cap / windowMs;
             if (refillCount > 0) {
-                bucket.tokens = (int) Math.min((long) inboundPerMinute, (long) bucket.tokens + refillCount);
-                bucket.lastRefillEpochMillis += refillCount * windowMs / (long) inboundPerMinute;
+                bucket.tokens = (int) Math.min((long) cap, (long) bucket.tokens + refillCount);
+                bucket.lastRefillEpochMillis += refillCount * windowMs / (long) cap;
             }
             if (bucket.tokens > 0) {
                 bucket.tokens--;
@@ -312,23 +323,7 @@ public class RateCapBucket {
      * flood of distinct contact ids the way the per-id map could.
      */
     private boolean tryAcquireStranger(String adapter) {
-        Bucket bucket = strangerBuckets.computeIfAbsent(
-                adapter, k -> new Bucket(inboundPerMinute, clock.millis()));
-        synchronized (bucket) {
-            long now = clock.millis();
-            long elapsed = Math.max(0L, now - bucket.lastRefillEpochMillis);
-            long windowMs = refillWindow.toMillis();
-            long refillCount = elapsed * (long) inboundPerMinute / windowMs;
-            if (refillCount > 0) {
-                bucket.tokens = (int) Math.min((long) inboundPerMinute, (long) bucket.tokens + refillCount);
-                bucket.lastRefillEpochMillis += refillCount * windowMs / (long) inboundPerMinute;
-            }
-            if (bucket.tokens > 0) {
-                bucket.tokens--;
-                return true;
-            }
-            return false;
-        }
+        return tryAcquireFrom(strangerBuckets, adapter, inboundPerMinute, refillWindow);
     }
 
     /**
@@ -344,23 +339,7 @@ public class RateCapBucket {
      * per-minute. The two maps share the eviction sweep below.</p>
      */
     public boolean tryAcquireGroupReply(UUID groupId) {
-        Bucket bucket = groupBuckets.computeIfAbsent(
-                groupId, k -> new Bucket(groupReplyCap, clock.millis()));
-        synchronized (bucket) {
-            long now = clock.millis();
-            long elapsed = Math.max(0L, now - bucket.lastRefillEpochMillis);
-            long windowMs = groupReplyRefillWindow.toMillis();
-            long refillCount = elapsed * (long) groupReplyCap / windowMs;
-            if (refillCount > 0) {
-                bucket.tokens = (int) Math.min((long) groupReplyCap, (long) bucket.tokens + refillCount);
-                bucket.lastRefillEpochMillis += refillCount * windowMs / (long) groupReplyCap;
-            }
-            if (bucket.tokens > 0) {
-                bucket.tokens--;
-                return true;
-            }
-            return false;
-        }
+        return tryAcquireFrom(groupBuckets, groupId, groupReplyCap, groupReplyRefillWindow);
     }
 
     /**
@@ -377,23 +356,7 @@ public class RateCapBucket {
      * this bucket.
      */
     public boolean tryAcquireGroupLlm(UUID groupId) {
-        Bucket bucket = groupLlmBuckets.computeIfAbsent(
-                groupId, k -> new Bucket(groupLlmCap, clock.millis()));
-        synchronized (bucket) {
-            long now = clock.millis();
-            long elapsed = Math.max(0L, now - bucket.lastRefillEpochMillis);
-            long windowMs = groupLlmRefillWindow.toMillis();
-            long refillCount = elapsed * (long) groupLlmCap / windowMs;
-            if (refillCount > 0) {
-                bucket.tokens = (int) Math.min((long) groupLlmCap, (long) bucket.tokens + refillCount);
-                bucket.lastRefillEpochMillis += refillCount * windowMs / (long) groupLlmCap;
-            }
-            if (bucket.tokens > 0) {
-                bucket.tokens--;
-                return true;
-            }
-            return false;
-        }
+        return tryAcquireFrom(groupLlmBuckets, groupId, groupLlmCap, groupLlmRefillWindow);
     }
 
     /**
@@ -408,23 +371,7 @@ public class RateCapBucket {
      * bucket. DM slash dispatch never consults it.
      */
     public boolean tryAcquireGroupCommand(UUID groupId) {
-        Bucket bucket = groupCommandBuckets.computeIfAbsent(
-                groupId, k -> new Bucket(groupCommandCap, clock.millis()));
-        synchronized (bucket) {
-            long now = clock.millis();
-            long elapsed = Math.max(0L, now - bucket.lastRefillEpochMillis);
-            long windowMs = groupCommandRefillWindow.toMillis();
-            long refillCount = elapsed * (long) groupCommandCap / windowMs;
-            if (refillCount > 0) {
-                bucket.tokens = (int) Math.min((long) groupCommandCap, (long) bucket.tokens + refillCount);
-                bucket.lastRefillEpochMillis += refillCount * windowMs / (long) groupCommandCap;
-            }
-            if (bucket.tokens > 0) {
-                bucket.tokens--;
-                return true;
-            }
-            return false;
-        }
+        return tryAcquireFrom(groupCommandBuckets, groupId, groupCommandCap, groupCommandRefillWindow);
     }
 
     /**
