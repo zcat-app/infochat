@@ -39,6 +39,8 @@ class DigestPostCollectorTest {
     @BeforeEach
     void setUp() {
         collector = new DigestPostCollector();
+        collector.cancellationService = new NoopCancellationService();
+        collector.clusterCap = 200;
     }
 
     @Test
@@ -139,7 +141,7 @@ class DigestPostCollectorTest {
                     PreparedStatement.class.getClassLoader(),
                     new Class<?>[]{PreparedStatement.class},
                     (proxy, method, args) -> switch (method.getName()) {
-                        case "setObject", "setString" -> null;
+                        case "setObject", "setString", "setInt" -> null;
                         case "setTimestamp" -> {
                             capturedTimestamp.set((Timestamp) args[1]);
                             yield null;

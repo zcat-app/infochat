@@ -156,13 +156,16 @@ class DigestRoundtripIT {
         int llmBefore = testLlmProvider.callCount();
 
         // Evening slot: center=12:00 UTC (Profile config), same day as morning.
-        // Move the post's published_at into the evening window so the
-        // collector picks it up — the morning window is 12h earlier.
+        // Move the post's published_at BETWEEN the two slots — after the
+        // morning window closed, before the evening window opens. The
+        // collector's lower bound is the previous digest boundary (the
+        // morning row), so the between-slots post must still appear in the
+        // evening digest (M1-263 acceptance item 1).
         ZonedDateTime futureNoon = futureMidnight.plusHours(12);
         Instant eveningWindowStart = futureNoon.minusMinutes(WINDOW_HALF).toInstant();
         Instant eveningWindowEnd = futureNoon.plusMinutes(WINDOW_HALF).toInstant();
         Instant eveningTick = eveningWindowEnd.minusSeconds(1);
-        updatePostPublishedAt(eveningWindowStart.plusSeconds(60));
+        updatePostPublishedAt(futureMidnight.plusHours(6).toInstant());
 
         awaitDispatches(scheduler.tickAt(eveningTick));
 

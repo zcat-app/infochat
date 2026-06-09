@@ -167,6 +167,32 @@ public class SummaryCacheRepository {
     }
 
     /**
+     * Latest {@code slot_fired_at} strictly before the given instant for the
+     * group, across slot kinds and regardless of expiry — the previous digest
+     * boundary {@link DigestWorker} collects from. Sentinel rows written for
+     * missed slots count as boundaries on purpose: skip-not-catch-up
+     * (commands.md §Periodic group digests) means a missed window's period is
+     * not folded into the next digest.
+     */
+    public Optional<Instant> findPreviousBoundary(UUID groupId, Instant before)
+            throws SQLException {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT max(slot_fired_at) FROM summary_cache"
+                             + " WHERE group_id = ? AND slot_fired_at < ?")) {
+            ps.setObject(1, groupId);
+            ps.setTimestamp(2, Timestamp.from(before));
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                Timestamp boundary = rs.getTimestamp(1);
+                return boundary == null
+                        ? Optional.empty()
+                        : Optional.of(boundary.toInstant());
+            }
+        }
+    }
+
+    /**
      * Check whether a summary_cache row exists for the given group, slot
      * kind, and fired-at instant — regardless of expiration. Used by
      * {@link DigestScheduler} to determine if a slot has already fired

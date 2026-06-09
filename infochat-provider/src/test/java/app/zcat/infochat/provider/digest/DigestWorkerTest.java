@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
 import java.sql.SQLException;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -38,6 +39,7 @@ class DigestWorkerTest {
     private static final UUID GROUP_ID = UUID.randomUUID();
     private static final String ADAPTER_NAME = "inmemory";
     private static final String UPSTREAM_GROUP_ID = "group-456";
+    private static final Duration RETRY_HORIZON = Duration.ofMinutes(10);
 
     private DigestWorker worker;
     private RecordingPostCollector postCollector;
@@ -64,6 +66,7 @@ class DigestWorkerTest {
         worker.bundleLoader = bundleLoader;
         worker.adapterRegistry = new StubAdapterRegistry(recordingAdapter);
         worker.dataSource = new StubGroupDataSource(ADAPTER_NAME, UPSTREAM_GROUP_ID, "en");
+        worker.retryHorizon = RETRY_HORIZON;
     }
 
     @Test
@@ -126,6 +129,82 @@ class DigestWorkerTest {
         assertEquals(1, cacheRepository.upsertCount());
         assertEquals("Headlines only", cacheRepository.lastContent());
         assertTrue(cacheRepository.lastIsDegraded());
+    }
+
+    @Test
+    void execute_includesPostPublishedBetweenSlots() {
+        // The previous digest boundary is 12h before this slot; the post was
+        // published between the two slots, OUTSIDE this slot's own window.
+        DigestSlot slot = futureSlot();
+        Instant previousBoundary = slot.windowStart().minusSeconds(12 * 3600);
+        cacheRepository.seedPreviousBoundary(previousBoundary);
+        postCollector.seed(
+                List.of(postPublishedAt(slot.windowStart().minusSeconds(6 * 3600))), 1, 1);
+        digestRenderer.setResponse("prose covering the inter-digest period");
+
+        worker.execute(slot);
+
+        assertEquals(previousBoundary, postCollector.lastSince(),
+                "collection lower bound must be the previous digest boundary, not windowStart");
+        assertEquals(1, digestRenderer.callCount(),
+                "the between-slots post must reach the renderer, not the no-posts reply");
+        assertEquals("prose covering the inter-digest period", cacheRepository.lastContent(),
+                "a post published between two digest slots must appear in the next digest");
+    }
+
+    @Test
+    void execute_collectsFromWindowStartWhenNoPreviousDigest() {
+        postCollector.seed(testPosts(), 1, 1);
+        digestRenderer.setResponse("prose");
+        DigestSlot slot = futureSlot();
+
+        worker.execute(slot);
+
+        assertEquals(slot.windowStart(), postCollector.lastSince(),
+                "first-ever digest falls back to the slot window");
+    }
+
+    @Test
+    void execute_cacheExpiryOutlivesWindowEndByRetryHorizon() {
+        postCollector.seed(testPosts(), 1, 1);
+        digestRenderer.setResponse("prose");
+        DigestSlot slot = futureSlot();
+
+        worker.execute(slot);
+
+        assertEquals(slot.windowEnd().plus(RETRY_HORIZON), cacheRepository.lastExpiresAt(),
+                "expires_at must outlive the slot window by the retry horizon");
+    }
+
+    @Test
+    void retryAfterWindowEnd_withinRetryHorizon_rendersFullProse() {
+        // Scheduled run whose window already closed: it degrades, but writes
+        // expires_at = windowEnd + horizon, which is still in the future.
+        postCollector.seed(testPosts(), 1, 1);
+        degradedRenderer.setResponse("Headlines only");
+        digestRenderer.setResponse("Full retry prose");
+        DigestSlot missed = pastSlot();
+
+        worker.execute(missed);
+        assertTrue(cacheRepository.lastIsDegraded(),
+                "a closed window degrades the scheduled run");
+
+        // /retry --digest rebuilds the slot from the cache row's coordinates
+        // with windowEnd = the row's expires_at (pinned by
+        // DigestRetryServiceTest.retryDigest_replacesCacheRow). Within the
+        // horizon that instant is still ahead, so the retry renders full
+        // prose instead of degrading again.
+        Instant expiresAt = cacheRepository.lastExpiresAt();
+        assertTrue(expiresAt.isAfter(Instant.now()),
+                "the cache row must be non-expired after windowEnd");
+        DigestSlot retrySlot = new DigestSlot(
+                GROUP_ID, "UTC", "morning", missed.windowStart(), expiresAt);
+
+        worker.execute(retrySlot);
+
+        assertFalse(cacheRepository.lastIsDegraded(),
+                "a retry within the horizon must render full prose, not degrade");
+        assertEquals("Full retry prose", cacheRepository.lastContent());
     }
 
     @Test
@@ -211,6 +290,12 @@ class DigestWorkerTest {
         Instant windowStart = Instant.now().minusSeconds(7200);
         Instant windowEnd = Instant.now().minusSeconds(1);
         return new DigestSlot(GROUP_ID, "UTC", "morning", windowStart, windowEnd);
+    }
+
+    private static Post postPublishedAt(Instant publishedAt) {
+        return new Post(UUID.randomUUID(), "uid-between", UUID.randomUUID(),
+                "TechCrunch", "Between slots", "https://tc.com/between",
+                "body", publishedAt, List.of("crypto"));
     }
 
     private static List<Post> testPosts() {

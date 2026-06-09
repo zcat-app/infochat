@@ -12,7 +12,9 @@ import java.util.UUID;
 
 import javax.sql.DataSource;
 
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 
+import app.zcat.infochat.provider.chat.CancellationService;
 import app.zcat.infochat.provider.summary.EligiblePostQuery;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -22,6 +24,16 @@ public class DigestPostCollector {
 
     @Inject
     DataSource dataSource;
+
+    @Inject
+    CancellationService cancellationService;
+
+    // Same cap the on-demand /summary path applies in EligiblePostQuery: the
+    // SQL LIMIT bounds the rows — and with it the renderer's per-cluster LLM
+    // fan-out — before post bodies leave the database; the DESC ordering
+    // keeps the freshest posts and drops the oldest.
+    @ConfigProperty(name = "infochat.summary.cluster-cap", defaultValue = "200")
+    int clusterCap;
 
     public record CollectionResult(
             List<EligiblePostQuery.Post> posts,
@@ -35,6 +47,9 @@ public class DigestPostCollector {
     public CollectionResult collectForGroup(UUID groupId, Instant since)
             throws SQLException {
         try (Connection conn = dataSource.getConnection()) {
+            // Same profile-driven statement_timeout the other provider read
+            // paths run under (EligiblePostQuery, chat-mode tool calls).
+            cancellationService.applyStatementTimeout(conn);
             String tagMode = "ALL";
             long tagSubVer = 0;
             long srcSubVer = 0;
@@ -56,8 +71,9 @@ public class DigestPostCollector {
                 ps.setTimestamp(idx++, Timestamp.from(since));
                 ps.setObject(idx++, groupId);
                 if ("EXPLICIT".equals(tagMode)) {
-                    ps.setObject(idx, groupId);
+                    ps.setObject(idx++, groupId);
                 }
+                ps.setInt(idx, clusterCap);
 
                 List<EligiblePostQuery.Post> posts = new ArrayList<>();
                 try (ResultSet rs = ps.executeQuery()) {
@@ -102,7 +118,8 @@ public class DigestPostCollector {
                AND p.published_at >= ?
                AND p.source_id IN (SELECT source_id FROM source_subscription
                                     WHERE scope_kind = 'group' AND scope_id = ?)
-             ORDER BY p.published_at DESC, p.id DESC""";
+             ORDER BY p.published_at DESC, p.id DESC
+             LIMIT ?""";
 
     // Source-subscription + EXPLICIT tag-subscription filter.
     private static final String POSTS_EXPLICIT_SQL = """
@@ -118,5 +135,6 @@ public class DigestPostCollector {
                                 FROM scope_tag st
                                 JOIN tag t ON t.id = st.tag_id
                                WHERE st.scope_kind = 'group' AND st.scope_id = ?)
-             ORDER BY p.published_at DESC, p.id DESC""";
+             ORDER BY p.published_at DESC, p.id DESC
+             LIMIT ?""";
 }

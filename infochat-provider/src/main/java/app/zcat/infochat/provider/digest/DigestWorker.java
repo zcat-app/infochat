@@ -18,6 +18,7 @@ import java.util.concurrent.TimeoutException;
 
 import javax.sql.DataSource;
 
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 import org.jspecify.annotations.Nullable;
 
@@ -29,6 +30,7 @@ import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.digest.DigestPostCollector.CollectionResult;
 import app.zcat.infochat.provider.messaging.AdapterRegistry;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
@@ -44,7 +46,10 @@ public class DigestWorker {
 
     private static final Logger LOG = Logger.getLogger(DigestWorker.class);
 
-    private static final ExecutorService RENDER_EXECUTOR =
+    // Bean-owned, not static: the executor's lifetime is tied to this
+    // @ApplicationScoped bean (shut down in @PreDestroy with the application),
+    // so render threads cannot outlive CDI shutdown.
+    private final ExecutorService renderExecutor =
             Executors.newVirtualThreadPerTaskExecutor();
 
     @Inject
@@ -68,6 +73,14 @@ public class DigestWorker {
     @Inject
     DataSource dataSource;
 
+    // How long the cache row stays findable (non-expired) past the slot
+    // window for /retry --digest. Reuses DigestRetryService's cooldown
+    // property rather than introducing a new constant: the row's expires_at
+    // becomes the synthetic retry slot's windowEnd, so it must outlive the
+    // window the retry the cooldown permits is issued in.
+    @ConfigProperty(name = "infochat.digest.retry-cooldown", defaultValue = "PT2M")
+    Duration retryHorizon;
+
     // In-flight guard (ConcurrentHashMap-backed, keyed groupId+slotKind): a
     // scheduler tick overrun re-fires a slot whose previous execution is
     // still running; overlapping same-group processing would double-deliver.
@@ -84,6 +97,11 @@ public class DigestWorker {
     /** Void wrapper for the CDI observer (observer methods must return void). */
     public void onDigestSlot(@Observes DigestSlot slot) {
         execute(slot);
+    }
+
+    @PreDestroy
+    void shutdownRenderExecutor() {
+        renderExecutor.shutdown();
     }
 
     /**
@@ -112,8 +130,17 @@ public class DigestWorker {
     }
 
     private void executeSlot(DigestSlot slot) throws SQLException, MessagingException {
+        // Collect the full inter-digest period, not just the slot window: the
+        // lower bound is the previous digest boundary (latest summary_cache
+        // row before this slot), so posts published between two slots appear
+        // in the next digest. First-ever digest falls back to the slot
+        // window; a missed slot's sentinel row counts as a boundary
+        // (skip-not-catch-up — its period is not folded into the next digest).
+        Instant collectFrom = cacheRepository
+                .findPreviousBoundary(slot.groupId(), slot.windowStart())
+                .orElse(slot.windowStart());
         CollectionResult collection =
-                postCollector.collectForGroup(slot.groupId(), slot.windowStart());
+                postCollector.collectForGroup(slot.groupId(), collectFrom);
         GroupMetadata meta = readGroupMetadata(slot.groupId());
 
         String content;
@@ -131,7 +158,7 @@ public class DigestWorker {
                     content = CompletableFuture
                             .supplyAsync(
                                     () -> digestRenderer.render(collection.posts(), meta.language()),
-                                    RENDER_EXECUTOR)
+                                    renderExecutor)
                             .get(remaining.toMillis(), TimeUnit.MILLISECONDS);
                 } catch (TimeoutException | ExecutionException | InterruptedException e) {
                     if (e instanceof InterruptedException) {
@@ -151,7 +178,10 @@ public class DigestWorker {
                 collection.sourceSubscriptionVersion(),
                 content,
                 isDegraded,
-                slot.windowEnd());
+                // Outlive the slot window by the retry horizon so a
+                // /retry --digest issued after windowEnd still finds a
+                // non-expired row instead of degrading immediately.
+                slot.windowEnd().plus(retryHorizon));
 
         MessagingAdapter adapter = findAdapter(meta.adapterName());
         if (adapter == null) {
