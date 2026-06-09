@@ -1,9 +1,9 @@
 ---
 id: M1-272
 title: "Redactor thrown-chain coverage + log hygiene sweep"
-status: pending
+status: done
 created: 2026-06-09
-last_updated: 2026-06-09
+last_updated: 2026-06-10
 revisions:
   - date: 2026-06-09
     reason: clarity-fail refine (files_scope gap + unauthorized test modify + unnamed tests on items 6-7)
@@ -90,12 +90,29 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-10
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 17
+      added: 890
+      removed: 45
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-09
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-272: Redactor thrown-chain coverage + log hygiene sweep

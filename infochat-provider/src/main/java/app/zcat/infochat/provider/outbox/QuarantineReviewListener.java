@@ -246,14 +246,17 @@ public class QuarantineReviewListener {
         }
     }
 
-    private void dispatch(PGNotification n) {
+    // Package-private for unit testing, like parsePayload.
+    void dispatch(PGNotification n) {
         if (!CHANNEL.equals(n.getName())) return;
         Payload payload;
         try {
             payload = parsePayload(n.getParameter());
         } catch (RuntimeException e) {
-            LOG.errorf(e, "QuarantineReviewListener: unparseable payload (dropped): %s",
-                    n.getParameter());
+            // Do NOT echo the raw payload (NewPostListener parity): the
+            // unparseable bytes need no payload content to be actionable
+            // and must stay out of the operator's log.
+            LOG.error("QuarantineReviewListener: unparseable payload (dropped)", e);
             return;
         }
         try {
@@ -280,9 +283,12 @@ public class QuarantineReviewListener {
         Matcher idMatcher = TARGET_ID_PATTERN.matcher(json);
         Matcher statusMatcher = NEW_STATUS_PATTERN.matcher(json);
         if (!kindMatcher.find() || !idMatcher.find() || !statusMatcher.find()) {
+            // No payload echo (NewPostListener parity): this is the
+            // NOTIFY-deserialization boundary and the message flows into
+            // the dispatch log above.
             throw new IllegalArgumentException(
                     "quarantine_review payload must contain target_kind, target_id, "
-                            + "and new_status fields; got: " + json);
+                            + "and new_status fields");
         }
         // Reject an out-of-set discriminator at the wire boundary so it
         // is dropped-with-log by dispatch, never silently routed: a
@@ -292,7 +298,7 @@ public class QuarantineReviewListener {
         if (!"quarantine".equals(targetKind) && !"post".equals(targetKind)) {
             throw new IllegalArgumentException(
                     "quarantine_review payload target_kind must be \"quarantine\" "
-                            + "or \"post\"; got: " + json);
+                            + "or \"post\"");
         }
         return new Payload(
                 targetKind,

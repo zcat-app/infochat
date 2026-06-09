@@ -1,5 +1,6 @@
 package app.zcat.infochat.core.notifier;
 
+import app.zcat.infochat.core.log.SafeLog;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Produces;
@@ -97,16 +98,17 @@ public class ThrottledAdminNotifier {
 
     /**
      * Defend the ADMIN-NOTIFY log line and the persisted row against
-     * externally-influenced inputs. Replaces every C0 control
-     * character (0x00–0x1F) with a single space — CR/LF would break
-     * the line-boundary semantics any operator grep relies on (a
+     * externally-influenced inputs. Replaces every control character —
+     * C0 (0x00–0x1F), DEL (0x7F), and C1 (0x80–0x9F) via
+     * {@link SafeLog#stripControls} — with a single space: CR/LF would
+     * break the line-boundary semantics any operator grep relies on (a
      * future caller forwarding feed-body text or a driver-supplied
      * error message cannot forge a second ADMIN-NOTIFY line), and
-     * ESC (0x1B) would open an ANSI escape sequence that can forge
-     * or visually overwrite terminal output when an operator scrapes
-     * the log — and caps the result at {@code maxLen}, appending
-     * {@link #TRUNCATION_SUFFIX} when truncation fires so the trim
-     * is visible to a reader.
+     * ESC (0x1B) or the single-byte CSI (0x9B) would open an ANSI
+     * escape sequence that can forge or visually overwrite terminal
+     * output when an operator scrapes the log — and caps the result at
+     * {@code maxLen}, appending {@link #TRUNCATION_SUFFIX} when
+     * truncation fires so the trim is visible to a reader.
      *
      * <p>Applied at the boundary between caller-supplied strings and
      * the log/DB sinks per CLAUDE.md §"No defensive code" — the
@@ -116,17 +118,9 @@ public class ThrottledAdminNotifier {
      * forgery vulnerability the moment one caller forgets.</p>
      */
     private static String sanitize(String s, int maxLen) {
-        // Full C0 sweep, not an enumerated blacklist: every control
-        // below 0x20 either breaks the one-line scrape contract or is
-        // a terminal-control character with no legitimate place in a
-        // key/error/message; replacing the whole range leaves no gaps.
-        StringBuilder stripped = new StringBuilder(s.length());
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            stripped.append(c < 0x20 ? ' ' : c);
-        }
+        String stripped = SafeLog.stripControls(s);
         if (stripped.length() <= maxLen) {
-            return stripped.toString();
+            return stripped;
         }
         int keep = Math.max(0, maxLen - TRUNCATION_SUFFIX.length());
         return stripped.substring(0, keep) + TRUNCATION_SUFFIX;
@@ -243,14 +237,16 @@ public class ThrottledAdminNotifier {
             // original failure under a notifier failure. Emit on the
             // canonical ADMIN-NOTIFY shape with PERSISTENCE_FAILED_KEY
             // so operator scrapes keyed on `grep ADMIN-NOTIFY` catch
-            // the notifier-cannot-persist case. The exception is
-            // bound as the log throwable so stack trace + cause chain
-            // reach the operator's log. SQLException.getMessage() is
+            // the notifier-cannot-persist case. The exception is NOT
+            // bound as the log throwable — a bound throwable renders
+            // its raw message and cause-chain text around the
+            // sanitized line (the SafeLog convention: class name yes,
+            // message body no). SQLException.getMessage() is
             // sanitized — JDBC driver errors are a system-boundary
             // input (per CLAUDE.md §"No defensive code") whose text
             // we don't fully trust to be line-boundary safe.
             String exceptionMessage = e.getMessage() == null ? "" : e.getMessage();
-            LOG.warnf(e, "ADMIN-NOTIFY key=%s error=%s message=%s",
+            LOG.warnf("ADMIN-NOTIFY key=%s error=%s message=%s",
                 PERSISTENCE_FAILED_KEY,
                 e.getClass().getSimpleName(),
                 sanitize(exceptionMessage, MAX_MESSAGE_LENGTH));
@@ -357,8 +353,11 @@ public class ThrottledAdminNotifier {
             // safeKey, not key: this WARN is part of the same sanitized
             // scrape surface as the ADMIN-NOTIFY lines — a raw key here
             // would be the one sink that lets a caller-supplied line
-            // break or control character reach the operator's log.
-            LOG.warnf(e, "ThrottledAdminNotifier: failed to read state for key=%s", safeKey);
+            // break or control character reach the operator's log. The
+            // exception is not bound (class name only, SafeLog
+            // convention) so its raw message text stays out too.
+            LOG.warnf("ThrottledAdminNotifier: failed to read state for key=%s error=%s",
+                safeKey, e.getClass().getSimpleName());
             return Optional.empty();
         }
     }

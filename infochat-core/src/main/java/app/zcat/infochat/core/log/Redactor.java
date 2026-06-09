@@ -1,7 +1,9 @@
 package app.zcat.infochat.core.log;
 
 import io.quarkus.logging.LoggingFilter;
+import org.jspecify.annotations.Nullable;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Filter;
 import java.util.logging.LogRecord;
@@ -137,7 +139,97 @@ public final class Redactor implements Filter {
                 }
             }
         }
+
+        Throwable thrown = record.getThrown();
+        if (thrown != null) {
+            Throwable replacement = redactThrownChain(thrown);
+            if (replacement == null) {
+                // A chain message timed out in the catalogue scan —
+                // same fail-closed arm as message/params.
+                record.setMessage(TIMEOUT_SENTINEL);
+                record.setParameters(null);
+                record.setThrown(null);
+                return true;
+            }
+            if (replacement != thrown) {
+                record.setThrown(replacement);
+            }
+        }
         return true;
+    }
+
+    // Caps the thrown-chain walk so a cyclic or absurdly deep cause
+    // chain cannot stall the filter; anything past the cap is dropped
+    // from the replacement chain rather than reaching the console
+    // unscanned (fail-closed truncation).
+    static final int MAX_THROWN_CHAIN_DEPTH = 16;
+
+    /**
+     * Run every message in {@code thrown}'s cause chain through the
+     * catalogue. Returns {@code thrown} itself when nothing matched
+     * (the common path — the original object, stack frames and all,
+     * reaches the formatter untouched). When any message redacts, the
+     * whole chain is rebuilt as {@link RedactedThrown} nodes carrying
+     * {@code "<originalClassName>: <redactedMessage>"} plus the
+     * original stack frames — a {@link Throwable}'s message cannot be
+     * mutated in place, so substitution is the only way the redacted
+     * text (and never the raw text) reaches the console formatter.
+     * Returns {@code null} when any scan timed out (caller fails
+     * closed).
+     */
+    private static @Nullable Throwable redactThrownChain(Throwable thrown) {
+        List<Throwable> chain = new ArrayList<>();
+        for (Throwable t = thrown; t != null && chain.size() < MAX_THROWN_CHAIN_DEPTH; t = t.getCause()) {
+            chain.add(t);
+        }
+        boolean truncated = chain.get(chain.size() - 1).getCause() != null;
+
+        List<@Nullable String> redactedMessages = new ArrayList<>(chain.size());
+        boolean changed = truncated;
+        for (Throwable t : chain) {
+            String message = t.getMessage();
+            if (message == null) {
+                redactedMessages.add(null);
+                continue;
+            }
+            String redacted = redact(message);
+            if (TIMEOUT_SENTINEL.equals(redacted)) {
+                return null;
+            }
+            changed |= !redacted.equals(message);
+            redactedMessages.add(redacted);
+        }
+        if (!changed) {
+            return thrown;
+        }
+
+        Throwable rebuilt = truncated
+                ? new RedactedThrown("[cause chain truncated at depth " + MAX_THROWN_CHAIN_DEPTH + "]", null)
+                : null;
+        for (int i = chain.size() - 1; i >= 0; i--) {
+            Throwable original = chain.get(i);
+            String message = redactedMessages.get(i);
+            String text = message == null
+                    ? original.getClass().getName()
+                    : original.getClass().getName() + ": " + message;
+            RedactedThrown copy = new RedactedThrown(text, rebuilt);
+            copy.setStackTrace(original.getStackTrace());
+            rebuilt = copy;
+        }
+        return rebuilt;
+    }
+
+    /**
+     * Replacement node for a thrown chain that contained catalogue
+     * matches. The original class identity moves into the message text
+     * so the console line still names what was thrown; suppression is
+     * disabled because suppressed throwables on the original were not
+     * scanned and must not ride along into the formatter.
+     */
+    static final class RedactedThrown extends Throwable {
+        RedactedThrown(String message, @Nullable Throwable cause) {
+            super(message, cause, false, true);
+        }
     }
 
     /**

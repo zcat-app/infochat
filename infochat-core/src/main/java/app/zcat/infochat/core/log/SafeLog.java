@@ -20,6 +20,26 @@ public final class SafeLog {
 
     private SafeLog() {}
 
+    /**
+     * Replace every control character with a single space: C0
+     * (0x00–0x1F), DEL (0x7F), and C1 (0x80–0x9F). The C1 range
+     * matters because 0x9B is the single-byte CSI — it opens an ANSI
+     * escape sequence exactly like ESC-[ does, so stripping C0 alone
+     * leaves terminal-control forgery open. Full-range sweeps, not an
+     * enumerated blacklist: no control character has a legitimate
+     * place in a one-line log value, and replacing the whole ranges
+     * leaves no gaps.
+     */
+    public static String stripControls(String s) {
+        StringBuilder stripped = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            boolean control = c < 0x20 || (c >= 0x7F && c <= 0x9F);
+            stripped.append(control ? ' ' : c);
+        }
+        return stripped.toString();
+    }
+
     public static void error(Logger logger, String msg, Throwable t) {
         logger.error(formatSafe(msg, t));
     }

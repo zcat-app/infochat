@@ -1,5 +1,6 @@
 package app.zcat.infochat.core.startup;
 
+import app.zcat.infochat.core.log.SafeLog;
 import io.quarkus.runtime.Quarkus;
 import io.quarkus.runtime.Startup;
 import jakarta.annotation.PostConstruct;
@@ -179,9 +180,12 @@ public abstract class AbstractInstanceLockGuard {
                     owned = rs.getBoolean(1);
                 }
             } catch (SQLException e) {
+                // Class name only, never e.getMessage() — driver/server error
+                // text can carry connection-string secrets and control chars
+                // (the SafeLog convention for exception bodies).
                 log.fatal(String.format(
                     "held lock session for %s is dead (%s); exiting to avoid running as a zombie",
-                    lockKeyHashInput(), e.getMessage()));
+                    lockKeyHashInput(), e.getClass().getName()));
                 exitHook.exit(1);
                 return;
             }
@@ -246,9 +250,12 @@ public abstract class AbstractInstanceLockGuard {
     public void logContention(Optional<Holder> holder) {
         if (holder.isPresent()) {
             Holder h = holder.get();
+            // host_id is read back from the heartbeat row — control-strip it
+            // so a poisoned row cannot forge log lines or ANSI sequences in
+            // the operator's terminal.
             log.fatal(String.format(
                 "pg_try_advisory_lock(%s) failed; current holder is host_id='%s' pid=%d last_seen_at=%s",
-                lockKeyHashInput(), h.hostId(), h.pid(), h.lastSeenAt()));
+                lockKeyHashInput(), SafeLog.stripControls(h.hostId()), h.pid(), h.lastSeenAt()));
         } else {
             log.fatal(String.format(
                 "pg_try_advisory_lock(%s) failed but no heartbeat row was found — the prior holder may have crashed before its first heartbeat upsert",

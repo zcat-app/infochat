@@ -16,8 +16,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  * <p>Pins that {@code target_kind} is validated against the enumerated
  * base-table set {@code {"quarantine","post"}}: an out-of-set value is
  * rejected with an {@link IllegalArgumentException} (a
- * {@link RuntimeException}, so {@code dispatch} logs the raw payload and
- * drops it) rather than falling through to the {@code post} base-table
+ * {@link RuntimeException}, so {@code dispatch} drops it with a log line
+ * that omits the payload) rather than falling through to the {@code post} base-table
  * lookup in {@code lookupRowState} — the silent mis-route the validation
  * closes.
  */

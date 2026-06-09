@@ -5,9 +5,19 @@ import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
+import java.lang.reflect.Proxy;
 import java.sql.Connection;
+import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -84,6 +94,96 @@ class InstanceLockLivenessTest {
                 }
             }
         }
+    }
+
+    @Test
+    void contentionFatalLineStripsControlCharsFromHostId() {
+        char esc = (char) 0x1B;
+        char csi = (char) 0x9B;
+        String poisonedHostId = "evil" + esc + "[2J" + csi + "31mhost";
+
+        TestLockGuard guard = new TestLockGuard();
+        List<LogRecord> captured = captureFatalRecords(() ->
+                guard.logContention(Optional.of(new AbstractInstanceLockGuard.Holder(
+                        poisonedHostId, 42, Instant.now()))));
+
+        assertEquals(1, captured.size(), "exactly one contention fatal line expected");
+        String message = captured.get(0).getMessage();
+        assertTrue(message.indexOf(esc) < 0 && message.indexOf(csi) < 0,
+                "control characters from a poisoned heartbeat host_id must be stripped");
+        assertTrue(message.contains("evil [2J 31mhost"),
+                "host_id content must survive with controls replaced by spaces");
+    }
+
+    @Test
+    void deadHeldConnectionFatalLineOmitsExceptionMessage() {
+        String driverSecret = "FATAL: password=hunter2 rejected for db.internal";
+        Connection throwingConnection = (Connection) Proxy.newProxyInstance(
+                getClass().getClassLoader(),
+                new Class<?>[] {Connection.class},
+                (proxy, method, args) -> {
+                    throw new SQLException(driverSecret);
+                });
+
+        RecordingExitHook exit = new RecordingExitHook();
+        TestLockGuard guard = new TestLockGuard();
+        guard.primeForTest(throwingConnection, exit);
+
+        List<LogRecord> captured = captureFatalRecords(guard::probeHeldSession);
+
+        assertEquals(1, exit.lastCode(), "a dead held session must still exit(1)");
+        assertEquals(1, captured.size(), "exactly one dead-session fatal line expected");
+        String message = captured.get(0).getMessage();
+        assertFalse(message.contains(driverSecret),
+                "raw SQLException message text must not reach the fatal line");
+        assertFalse(message.contains("hunter2"),
+                "driver-echoed secrets must not reach the fatal line");
+        assertTrue(message.contains(SQLException.class.getName()),
+                "the fatal line must still name the exception class");
+    }
+
+    // Captures records at SEVERE-and-above (JBoss FATAL sits above JUL
+    // SEVERE) on the TestLockGuard category — the guard logs on
+    // Logger.getLogger(getClass()), i.e. the concrete subclass.
+    private List<LogRecord> captureFatalRecords(Runnable action) {
+        List<LogRecord> captured = Collections.synchronizedList(new ArrayList<>());
+        Handler capture = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                if (record.getLevel().intValue() >= Level.SEVERE.intValue()) {
+                    captured.add(record);
+                }
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        // jboss-logging routes through the JBoss LogManager only when it
+        // is installed as the JVM's LogManager; otherwise it falls back
+        // to stock JUL. Attach to both hierarchies — the identity check
+        // prevents double capture when they are the same logger object.
+        java.util.logging.Logger jul = java.util.logging.Logger
+                .getLogger(TestLockGuard.class.getName());
+        java.util.logging.Logger ctx = org.jboss.logmanager.LogContext.getLogContext()
+                .getLogger(TestLockGuard.class.getName());
+        jul.addHandler(capture);
+        if (ctx != jul) {
+            ctx.addHandler(capture);
+        }
+        try {
+            action.run();
+        } finally {
+            jul.removeHandler(capture);
+            if (ctx != jul) {
+                ctx.removeHandler(capture);
+            }
+        }
+        return captured;
     }
 
     private static final class TestLockGuard extends AbstractInstanceLockGuard {

@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.group;
 
 import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.log.ContactIds;
 import app.zcat.infochat.messaging.MembershipEvent;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
@@ -14,6 +15,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
@@ -374,6 +376,84 @@ class MembershipEventHandlerTest {
                 "contact id must not leak into the operator signal");
         assertFalse(signal.contains("simulated audit-write failure"),
                 "SQLException message text must not leak into the operator signal");
+    }
+
+    @Test
+    void userLeft_unknownGroupWarnRedactsAdapterGroupId() {
+        String secretGroupId = "meh-secret-upstream-" + UUID.randomUUID();
+
+        List<LogRecord> captured = captureWarnRecords(() -> handler.handle(
+                new MembershipEvent.UserLeft(secretGroupId, contactId),
+                TEST_ADAPTER));
+
+        assertEquals(1, captured.size(), "exactly one unknown-group WARN expected");
+        String text = captured.get(0).getMessage() + " "
+                + Arrays.toString(captured.get(0).getParameters());
+        assertFalse(text.contains(secretGroupId),
+                "the raw adapterGroupId must not reach the WARN line");
+        assertTrue(text.contains(ContactIds.redact(secretGroupId)),
+                "the redacted form must reach the WARN line");
+    }
+
+    @Test
+    void botRemoved_unknownGroupWarnRedactsAdapterGroupId() {
+        String secretGroupId = "meh-secret-upstream-" + UUID.randomUUID();
+
+        List<LogRecord> captured = captureWarnRecords(() -> handler.handle(
+                new MembershipEvent.BotRemoved(secretGroupId),
+                TEST_ADAPTER));
+
+        assertEquals(1, captured.size(), "exactly one unknown-group WARN expected");
+        String text = captured.get(0).getMessage() + " "
+                + Arrays.toString(captured.get(0).getParameters());
+        assertFalse(text.contains(secretGroupId),
+                "the raw adapterGroupId must not reach the WARN line");
+        assertTrue(text.contains(ContactIds.redact(secretGroupId)),
+                "the redacted form must reach the WARN line");
+    }
+
+    // Captures WARNING-and-above records on the handler's category via
+    // the jboss-logmanager LogContext (see the ordering note on the
+    // SafeLog capture in userLeft_transactionFailureEmitsSafeLogOperatorSignal).
+    private List<LogRecord> captureWarnRecords(Runnable action) {
+        List<LogRecord> captured = Collections.synchronizedList(new ArrayList<>());
+        Handler capture = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                if (record.getLevel().intValue() >= Level.WARNING.intValue()) {
+                    captured.add(record);
+                }
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        // Attach to BOTH the stock JUL hierarchy and the LogContext one —
+        // which hierarchy is live depends on whether jboss-logmanager won
+        // the LogManager slot in this JVM; the identity check prevents
+        // double capture when they are the same logger object.
+        java.util.logging.Logger jul = java.util.logging.Logger
+                .getLogger(MembershipEventHandler.class.getName());
+        java.util.logging.Logger ctx = org.jboss.logmanager.LogContext.getLogContext()
+                .getLogger(MembershipEventHandler.class.getName());
+        jul.addHandler(capture);
+        if (ctx != jul) {
+            ctx.addHandler(capture);
+        }
+        try {
+            action.run();
+        } finally {
+            jul.removeHandler(capture);
+            if (ctx != jul) {
+                ctx.removeHandler(capture);
+            }
+        }
+        return captured;
     }
 
     // Polls pg_locks until some backend is waiting on an ungranted lock

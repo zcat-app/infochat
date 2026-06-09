@@ -1,5 +1,6 @@
 package app.zcat.infochat.collector.stream.nostr;
 
+import app.zcat.infochat.core.log.SafeLog;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -58,7 +59,9 @@ public sealed interface NostrMessage
             case "EVENT" -> parseEvent(root);
             case "EOSE" -> new Eose(requireText(root, 1, frame));
             case "NOTICE" -> new Notice(requireText(root, 1, frame));
-            default -> throw new MalformedFrameException("unknown NIP-01 verb '" + verb + "'");
+            // The verb is raw relay bytes too — same strip-and-cap as the
+            // frame summaries.
+            default -> throw new MalformedFrameException("unknown NIP-01 verb '" + summarize(verb) + "'");
         };
     }
 
@@ -116,7 +119,13 @@ public sealed interface NostrMessage
     }
 
     private static String summarize(String frame) {
-        return frame.length() <= 120 ? frame : frame.substring(0, 120) + "…";
+        // Control-strip BEFORE embedding relay bytes in an exception
+        // message: the message reaches WARN logs via the read loop's
+        // catch, and the console Redactor scans for API-key shapes
+        // only — without the strip an untrusted relay could forge log
+        // lines or ANSI sequences (C0, DEL, C1 incl. 0x9B CSI).
+        String stripped = SafeLog.stripControls(frame);
+        return stripped.length() <= 120 ? stripped : stripped.substring(0, 120) + "…";
     }
 
     /**

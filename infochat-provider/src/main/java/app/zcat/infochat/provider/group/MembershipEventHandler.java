@@ -69,7 +69,8 @@ public class MembershipEventHandler {
     private void handleUserLeft(MembershipEvent.UserLeft event, String adapter) {
         UUID groupId = resolveGroup(adapter, event.adapterGroupId());
         if (groupId == null) {
-            log.warn("UserLeft: unknown group adapter={} groupId={}", adapter, event.adapterGroupId());
+            log.warn("UserLeft: unknown group adapter={} groupId={}",
+                    adapter, ContactIds.redact(event.adapterGroupId()));
             return;
         }
         UUID userId = resolveUser(adapter, event.contactId());
@@ -135,7 +136,8 @@ public class MembershipEventHandler {
     private void handleBotRemoved(MembershipEvent.BotRemoved event, String adapter) {
         UUID groupId = resolveGroup(adapter, event.adapterGroupId());
         if (groupId == null) {
-            log.warn("BotRemoved: unknown group adapter={} groupId={}", adapter, event.adapterGroupId());
+            log.warn("BotRemoved: unknown group adapter={} groupId={}",
+                    adapter, ContactIds.redact(event.adapterGroupId()));
             return;
         }
         // One transaction, audit row INSERTed BEFORE the mutation per
