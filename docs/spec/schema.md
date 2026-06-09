@@ -519,9 +519,11 @@ coordinated change.
     §Secrets handling).
   - `target_contact_id` — same redaction.
   - `details_json` — passed through the secrets-catalogue redactor
-    (`security.md` §Secrets handling) so any matched API-key shape
-    or contact-id-shaped value is masked before the Provider sees
-    the row.
+    (`security.md` §Secrets handling) so any matched API-key shape is
+    masked before the Provider sees the row. Contact ids are NOT
+    written into `details_json`; a contact id that must appear in an
+    audit row goes in `actor_contact_id` / `target_contact_id`, which
+    the view redacts via `redact_contact_id`.
   Non-redacted columns surface unchanged (timestamp, actor user id,
   action verb, target kind, target id, scope id, request id). The
   exact redactor regexes and the SQL view body live in
