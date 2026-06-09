@@ -252,7 +252,8 @@ SCOPE-DRIFT-CHECK: <PASS | FAIL>
    On round N ≥ 2, also FAIL if the diff grew along ALL THREE of
    files-touched, lines added, AND lines removed vs round-(N−1) and the
    prior round's REWORK did not authorize a refactor (must-shrink:
-   smaller along at least one dimension is required).>
+   growth along all three is the only failure condition; holding
+   equal or shrinking along any dimension is convergent).>
 
 TEST-INTEGRITY-CHECK: <PASS | FAIL>
   <one paragraph: any forbidden patterns introduced (see

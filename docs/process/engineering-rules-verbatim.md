@@ -1,8 +1,8 @@
 # Engineering rules — canonical verbatim text
 
-This file is the **single editing source** for the engineering rules and the test-integrity rules. The text below is what `CLAUDE.md` summarises and what `docs/process/reviewer-prompt.md` embeds inline. If `CLAUDE.md` and this file disagree on a rule's wording, this file is wrong — sync it. If the reviewer prompt's embedded copy disagrees with this file, the prompt is stale — re-render it.
+This file is the **single editing source** for the engineering rules and the test-integrity rules. The text below is what `CLAUDE.md` summarises; the code-reviewer subagent reads this file directly at runtime (input #4 of `docs/process/reviewer-prompt.md`). If `CLAUDE.md` and this file disagree on a rule's wording, this file wins — sync `CLAUDE.md`.
 
-> **Why the duplication exists.** The reviewer subagent runs in fresh context and cannot read `CLAUDE.md` or this file at runtime; the rules must be embedded in the prompt the skill substitutes. This file's job is to make that embedding mechanically faithful.
+> **Why the CLAUDE.md duplication exists.** The `CLAUDE.md` summary is always-loaded context for the developer session; this file carries the full verbatim text the reviewer applies. Only the summary is duplicated — the reviewer reads this file itself, so there is no embedded copy of the rules in the reviewer prompt.
 
 ---
 
@@ -16,7 +16,7 @@ This file is the **single editing source** for the engineering rules and the tes
 
 ## §2 No workarounds, no shortcuts
 
-- When tests fail, fix the code or escalate — never weaken, disable, or bypass the test. The forbidden test-integrity patterns are enumerated in §7 and enforced by the reviewer.
+- When tests fail, fix the code or escalate — never weaken, disable, or bypass the test. The forbidden test-integrity patterns are enumerated in §8 and enforced by the reviewer.
 - When a constraint blocks progress, escalate via the workflow — never use destructive shortcuts (`--no-verify`, `-DskipTests`, `--skip-tests`, force-push) to make obstacles disappear.
 - Never sacrifice performance, security, or simplicity to reach a goal.
 
@@ -81,7 +81,7 @@ The reviewer's `TEST-INTEGRITY-CHECK` fails if the diff introduces any of the fo
 
 ### Round-N must-shrink (applies to every rework round, N ≥ 2)
 
-- On round-N review (N ≥ 2), the diff MUST be smaller than round-(N−1) along at least one of: files-touched count, net lines added, or net lines removed. Every rework round is a *fix-only* round; if the rework grew along **all three** dimensions simultaneously vs the previous round, that is scope-creep-during-rework and `SCOPE-DRIFT-CHECK` fails automatically. Growth along one or two dimensions while shrinking along the remaining one is permitted (the rework is still convergent overall).
+- On round-N review (N ≥ 2), the diff is compared to round-(N−1) along three dimensions: files-touched count, net lines added, and net lines removed. Every rework round is a *fix-only* round; if the rework grew along **all three** dimensions simultaneously vs the previous round, that is scope-creep-during-rework and `SCOPE-DRIFT-CHECK` fails automatically. Growth along all three is the **only** failure condition — growth along one or two dimensions, or holding all three equal, is permitted (the rework is still convergent overall).
 - This applies to round 2 (default cap) AND to round 3 (only reachable when the ticket sets `round_cap: 3`). Round-cap-3 tickets are typically `complexity: high` or `risk: high` — under-specifying must-shrink on round 3 would weaken the rule precisely when stakes are highest.
 - The reviewer's prompt receives both the current-round and previous-round diff stats so the comparison is mechanical. On round 1 the previous-round substitution is the literal sentinel `(N/A — round 1, no previous round)` and the rule does not apply.
 - Exception: if the round-(N−1) REWORK explicitly required a refactor that legitimately grows the diff (e.g. "extract this into a helper used by three callers"), the developer must cite that REWORK item in the round-N commit message. Without the citation, growth → fail.
@@ -98,4 +98,4 @@ A `FAIL` on `TEST-INTEGRITY-CHECK` is never `REWORK`-able by the developer alone
 - A new shortcut pattern is observed in practice and needs codifying.
 - The stack changes (e.g. Postgres swapped for something else; the pgvector rule above must be re-evaluated).
 
-When this file changes, the reviewer prompt's embedded copy must be re-rendered in lockstep. The two are kept in sync by the maintainer; there is no automated check yet.
+When this file changes, no re-render is needed — the reviewer reads this file directly at runtime. Keep the `CLAUDE.md` summary, the `docs/process/workflow.md` §Round-N must-shrink paragraph, the m1-tick `SKILL.md` must-shrink bullet, and the reviewer prompt's brief must-shrink restatement (verdict-format section) in sync by hand; there is no automated check.
