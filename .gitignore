@@ -5,6 +5,7 @@ target/
 docker-compose.override.yml
 scripts/__pycache__/
 .reviews/
+deep-code-review/
 .scratch/
 .claude/scheduled_tasks.lock
 .claude/worktrees/
