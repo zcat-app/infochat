@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 20 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 294 |
 | deferred | 3 |
-| **total** | **297** |
+| **total** | **317** |
 
 ---
 
@@ -24,7 +24,26 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-262 — Chat agent: include conversation history in the prompt (complexity: medium, risk: medium)
+- M1-263 — Digest correctness: collection window, cache TTL, caps (complexity: medium, risk: medium)
+- M1-264 — Compress: no JDBC tx across LLM call; ceiling gate (complexity: medium, risk: medium)
+- M1-265 — LLM routing guard closure + provider hygiene (complexity: high, risk: medium)
+- M1-266 — new_post cursor: single clock for ready_at (complexity: medium, risk: medium)
+- M1-267 — Stage 2 judge off the emitter thread (complexity: medium, risk: medium)
+- M1-268 — Thread /lang through bundle lookups (D43) (complexity: high, risk: medium)
+- M1-269 — Revoke UPDATE on price_snapshot from collector role (complexity: low, risk: low)
+- M1-270 — Validate bootstrap admin ids before any write; SPI hoist (complexity: medium, risk: medium)
+- M1-271 — Design/spec reconciliation + comment-truth sweep (complexity: low, risk: low)
+- M1-272 — Redactor thrown-chain coverage + log hygiene sweep (complexity: medium, risk: medium)
+- M1-273 — Transport classification matrix + Signal start race (complexity: medium, risk: medium)
+- M1-274 — Capability flags: reconcile with design, prune speculative (complexity: medium, risk: low)
+- M1-275 — DB hygiene: SET LOCAL timeouts, per-dispatch conn reuse (complexity: medium, risk: high)
+- M1-276 — Collector mediums: re-eval splice, scan bounds, vocab, edges (complexity: medium, risk: medium)
+- M1-277 — SSRF: shared client, pin fast path, redirect scrub, ranges (complexity: medium, risk: medium)
+- M1-278 — Ops posture: health truth, endpoint gating, drop counters (complexity: medium, risk: medium)
+- M1-279 — §7/§7a sweep: defensive checks, broad catches, test seams (complexity: medium, risk: low)
+- M1-280 — Provider mediums: Gate 4, usage replies, price label, bucket (complexity: medium, risk: medium)
+- M1-281 — Core contracts: contact-id redaction parity, Fetcher rename (complexity: low, risk: low)
 
 ---
 
@@ -442,4 +461,24 @@ M1-258 (deferred)
 M1-259 (done)
 M1-260 (done)
 M1-261 (done)
+M1-262 (pending) ← runnable
+M1-263 (pending) ← runnable
+M1-264 (pending) ← runnable
+M1-265 (pending) ← runnable
+M1-266 (pending) ← runnable
+M1-267 (pending) ← runnable
+M1-268 (pending) ← runnable
+M1-269 (pending) ← runnable
+M1-270 (pending) ← runnable
+M1-271 (pending) ← runnable
+M1-272 (pending) ← runnable
+M1-273 (pending) ← runnable
+M1-274 (pending) ← runnable
+M1-275 (pending) ← runnable
+M1-276 (pending) ← runnable
+M1-277 (pending) ← runnable
+M1-278 (pending) ← runnable
+M1-279 (pending) ← runnable
+M1-280 (pending) ← runnable
+M1-281 (pending) ← runnable
 ```
