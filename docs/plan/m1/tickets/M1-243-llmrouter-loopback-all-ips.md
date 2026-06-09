@@ -1,7 +1,7 @@
 ---
 id: M1-243
 title: "LlmRouterStartupGuard: require every resolved IP to be loopback"
-status: pending
+status: done
 created: 2026-06-09
 last_updated: 2026-06-09
 blocked_by: []
@@ -29,12 +29,47 @@ test_plan:
 spec_refs:
   - docs/spec/security.md §SSRF and outbound connections
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-09
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 107
+      removed: 19
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-09
+    verdict: CLEAN
+    base: df83e13f
+    head: working-tree-M1-243-in-progress
+    verdict_file: docs/plan/m1/redteam/M1-243-2026-06-09.md
+    out_of_model_count: 1
+    note: |
+      Pre-commit --in-progress audit. CLEAN — strict fail-closed hardening of
+      the startup loopback check (getByName first-record-only → getAllByName +
+      everyAddressLoopback requiring every resolved address loopback, empty
+      resolution rejected); closes the multi-A-record first-IP-only leak, no
+      threat-model commitment newly violated. One OUT-OF-MODEL advisory: the
+      startup-only DNS-rebind window is pre-existing and explicitly accepted in
+      docs/spec/llm.md §Per-task routing rules (per-call SSRF defense lives in
+      SsrfGuardedHttpClient); advisory only, no remediation ticket. Diff taken
+      against fork point df83e13 (main had moved to b1ce1c1, M1-249 doc refine)
+      per the worktree-diff-base rule.
+clarity_check:
+  date: 2026-06-09
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-243: LlmRouterStartupGuard — require every resolved IP to be loopback

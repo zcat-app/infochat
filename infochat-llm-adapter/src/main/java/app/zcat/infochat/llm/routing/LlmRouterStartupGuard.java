@@ -64,10 +64,12 @@ import java.util.Set;
  * intent as the local-only check.
  *
  * <h2>Loopback check</h2>
- * <p>The "non-loopback host" check DNS-resolves the URI host and
- * tests {@link InetAddress#isLoopbackAddress()}. This catches the
- * common literals ({@code localhost}, {@code 127.0.0.1}, {@code ::1})
- * plus any /etc/hosts alias that resolves to a loopback IP. The
+ * <p>The "non-loopback host" check DNS-resolves the URI host via
+ * {@link InetAddress#getAllByName(String)} and treats it as loopback
+ * only when EVERY resolved address {@link InetAddress#isLoopbackAddress()
+ * is loopback} — a multi-record host with any public sibling is off-host.
+ * This catches the common literals ({@code localhost}, {@code 127.0.0.1},
+ * {@code ::1}) plus any /etc/hosts alias that resolves to a loopback IP. The
  * DNS-rebind window (host resolves to loopback at startup but to a
  * remote IP at call time) is documented in {@code docs/spec/llm.md}
  * §Per-task routing rules as acceptable here: "checked once at
@@ -263,11 +265,16 @@ public class LlmRouterStartupGuard {
     }
 
     /**
-     * Resolve the URI's host via DNS and check whether the resulting
-     * IP is loopback. Catches the {@code localhost} / {@code 127.0.0.1}
-     * / {@code ::1} literals plus any /etc/hosts alias. A malformed
-     * URI counts as NON-loopback so an operator typo doesn't slip
-     * past the guard.
+     * Resolve the URI's host via DNS and check whether it is on-host.
+     * Resolution uses {@link InetAddress#getAllByName(String)} (not
+     * {@code getByName}, which returns only the first record): a host is
+     * loopback only when EVERY resolved address is loopback. A multi-A-record
+     * host whose first record sorts loopback but which also carries a public
+     * sibling would otherwise pass the guard while the per-call client connects
+     * to the public address — the silent post-body leak this guard prevents.
+     * Catches the {@code localhost} / {@code 127.0.0.1} / {@code ::1} literals
+     * plus any /etc/hosts alias. A malformed URI counts as NON-loopback so an
+     * operator typo doesn't slip past the guard.
      */
     private static boolean isLoopback(String baseUrl) {
         URI uri;
@@ -283,13 +290,38 @@ public class LlmRouterStartupGuard {
             return false;
         }
         try {
-            InetAddress addr = InetAddress.getByName(host);
-            return addr.isLoopbackAddress();
+            return everyAddressLoopback(InetAddress.getAllByName(host));
         } catch (UnknownHostException e) {
             LOG.warnf("LlmRouterStartupGuard: DNS resolution failed for '%s' (treated as non-loopback): %s",
                 host, e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * The loopback decision primitive: true only when the resolution is
+     * non-empty AND every resolved address is a loopback address. Any single
+     * non-loopback sibling makes the whole host off-host. Package-private and
+     * static so {@code LlmRouterStartupGuardLoopbackTest} can pin the
+     * single-loopback, empty, and mixed-result cases directly with a
+     * hand-built address array — the mixed case cannot be produced
+     * deterministically through real DNS resolution.
+     *
+     * <p>The empty guard is explicit rather than relying on
+     * {@code getAllByName} throwing {@link UnknownHostException} on an
+     * unresolvable host: it keeps the "at least one address, all loopback"
+     * contract self-evident and independent of that JDK behaviour.
+     */
+    static boolean everyAddressLoopback(InetAddress[] addresses) {
+        if (addresses.length == 0) {
+            return false;
+        }
+        for (InetAddress address : addresses) {
+            if (!address.isLoopbackAddress()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static String stripOrEmpty(@Nullable String s) {
