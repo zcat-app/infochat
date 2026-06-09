@@ -67,6 +67,10 @@ public final class HostInterfaceSet {
                 out.add(addr);
             }
         }
-        return Set.copyOf(out);
+        // No defensive Set.copyOf: this is called per isBlocked /
+        // firstBlocked pass (M1-277, T-SSRF-HARDEN), the set is freshly
+        // built here, and the only consumers read it within one
+        // validation pass.
+        return out;
     }
 }

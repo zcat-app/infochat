@@ -14,9 +14,9 @@
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 303 |
+| done | 304 |
 | deferred | 3 |
-| **total** | **317** |
+| **total** | **318** |
 
 ---
 
@@ -30,11 +30,11 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-274 — Capability flags: reconcile with design, prune speculative (complexity: medium, risk: low)
 - M1-275 — DB hygiene: SET LOCAL timeouts, per-dispatch conn reuse (complexity: medium, risk: high)
 - M1-276 — Collector mediums: re-eval splice, scan bounds, vocab, edges (complexity: medium, risk: medium)
-- M1-277 — SSRF: shared client, pin fast path, redirect scrub, ranges (complexity: medium, risk: medium)
 - M1-278 — Ops posture: health truth, endpoint gating, drop counters (complexity: medium, risk: medium)
 - M1-279 — §7/§7a sweep: defensive checks, broad catches, test seams (complexity: medium, risk: low)
 - M1-280 — Provider mediums: Gate 4, usage replies, price label, bucket (complexity: medium, risk: medium)
 - M1-281 — Core contracts: contact-id redaction parity, Fetcher rename (complexity: low, risk: low)
+- M1-282 — Redactor suppressed-throwable coverage (complexity: low, risk: low)
 
 ---
 
@@ -70,6 +70,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-277 | SSRF: shared client, pin fast path, redirect scrub, ranges | 2026-06-10 | round 2 APPROVE |
 | M1-273 | Transport classification matrix + Signal start race | 2026-06-10 | round 1 APPROVE |
 | M1-272 | Redactor thrown-chain coverage + log hygiene sweep | 2026-06-10 | round 1 APPROVE |
 | M1-269 | Pin the price_snapshot role-privilege matrix in DbRoleMatrixIT | 2026-06-10 | round 1 APPROVE |
@@ -79,7 +80,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-266 | new_post cursor: single clock for ready_at | 2026-06-09 | round 1 APPROVE |
 | M1-263 | Digest correctness: collection window, cache TTL, caps | 2026-06-09 | round 1 APPROVE |
 | M1-262 | Chat agent: include conversation history in the prompt | 2026-06-09 | round 1 APPROVE |
-| M1-261 | Consistency code lows: IpBlocklist per-pass enum, router name case | 2026-06-09 | round 1 APPROVE |
 
 ---
 
@@ -467,9 +467,10 @@ M1-273 (done)
 M1-274 (pending) ← runnable
 M1-275 (pending) ← runnable
 M1-276 (pending) ← runnable
-M1-277 (pending) ← runnable
+M1-277 (done)
 M1-278 (pending) ← runnable
 M1-279 (pending) ← runnable
 M1-280 (pending) ← runnable
 M1-281 (pending) ← runnable
+M1-282 (pending) ← runnable
 ```

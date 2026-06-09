@@ -29,6 +29,20 @@ import java.util.function.Supplier;
  *   <li>IPv4 private {@code 10.0.0.0/8}, {@code 172.16.0.0/12},
  *       {@code 192.168.0.0/16}</li>
  *   <li>IPv4 CGNAT {@code 100.64.0.0/10}</li>
+ *   <li>IPv4 special-use hardening (M1-277, extra-spec):
+ *       {@code 192.0.0.0/24} (IETF protocol assignments, RFC 6890),
+ *       TEST-NET-1/2/3 ({@code 192.0.2.0/24}, {@code 198.51.100.0/24},
+ *       {@code 203.0.113.0/24}, RFC 5737), {@code 198.18.0.0/15}
+ *       (benchmarking, RFC 2544), {@code 240.0.0.0/4} (reserved
+ *       class E)</li>
+ *   <li>Explicit cloud-metadata entries mandated by
+ *       {@code docs/design/04-security.md} §SSRF rule 2:
+ *       {@code 100.100.100.200} (Alibaba Cloud) and
+ *       {@code fd00:ec2::254} (AWS IMDSv2 IPv6) — both also
+ *       range-covered (CGNAT / unique-local)</li>
+ *   <li>IPv6 NAT64 local-use prefix {@code 64:ff9b:1::/48}
+ *       (RFC 8215), blocked outright — a local-use translator is the
+ *       operator's own infrastructure</li>
  *   <li>IPv6 loopback {@code ::1}</li>
  *   <li>IPv6 unspecified {@code ::} — the IPv6 analog of
  *       {@code 0.0.0.0}; kernel-level bypass of loopback.</li>
@@ -203,6 +217,15 @@ public class IpBlocklist {
         int b2 = raw[2] & 0xFF;
         int b3 = raw[3] & 0xFF;
 
+        // 100.100.100.200 — Alibaba Cloud instance metadata, listed
+        // explicitly per docs/design/04-security.md §SSRF rule 2. Also
+        // range-covered by CGNAT 100.64.0.0/10 below; the explicit
+        // entry pins the design's mandate so the endpoint stays
+        // named-and-blocked even if the covering range is ever
+        // narrowed.
+        if (b0 == 100 && b1 == 100 && b2 == 100 && b3 == 200) {
+            return true;
+        }
         // 0.0.0.0/8 — unspecified / "this host" (RFC 1122).
         if (b0 == 0) {
             return true;
@@ -239,10 +262,49 @@ public class IpBlocklist {
         if (b0 >= 224 && b0 <= 239) {
             return true;
         }
+        // 192.0.0.0/24 — IETF protocol assignments (RFC 6890): DS-Lite
+        // AFTR, NAT64/DNS64 discovery, etc. — infrastructure-internal.
+        if (b0 == 192 && b1 == 0 && b2 == 0) {
+            return true;
+        }
+        // 192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24 — TEST-NET-1/2/3
+        // (RFC 5737), reserved for documentation, never routed; a feed
+        // resolving here is misconfigured or probing.
+        if (b0 == 192 && b1 == 0 && b2 == 2) {
+            return true;
+        }
+        if (b0 == 198 && b1 == 51 && b2 == 100) {
+            return true;
+        }
+        if (b0 == 203 && b1 == 0 && b2 == 113) {
+            return true;
+        }
+        // 198.18.0.0/15 — benchmarking (RFC 2544); only ever assigned
+        // inside isolated test networks.
+        if (b0 == 198 && (b1 == 18 || b1 == 19)) {
+            return true;
+        }
+        // 240.0.0.0/4 — reserved "Class E" (RFC 1112); some kernels
+        // route it locally, none route it globally.
+        if (b0 >= 240) {
+            return true;
+        }
         return false;
     }
 
+    // fd00:ec2::254 — AWS IMDSv2 IPv6 endpoint, listed explicitly per
+    // docs/design/04-security.md §SSRF rule 2. Also range-covered by
+    // unique-local fc00::/7; the explicit entry pins the design's
+    // mandate so the endpoint stays named-and-blocked even if the
+    // covering range is ever narrowed.
+    private static final byte[] AWS_IMDSV2_V6 = {
+        (byte) 0xFD, 0x00, 0x0E, (byte) 0xC2, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0x02, 0x54 };
+
     private static boolean isBlockedV6(byte[] raw) {
+        if (Arrays.equals(raw, AWS_IMDSV2_V6)) {
+            return true;
+        }
         if (isAllZeroV6(raw)) {
             return true;
         }
@@ -265,6 +327,19 @@ public class IpBlocklist {
         }
         // ff00::/8 — multicast.
         if (b0 == 0xFF) {
+            return true;
+        }
+        // 64:ff9b:1::/48 — NAT64 local-use prefix (RFC 8215). Blocked
+        // OUTRIGHT rather than decoded like the well-known prefix: a
+        // local-use translator is by definition the operator's own
+        // internal infrastructure, so the whole prefix is off-limits
+        // regardless of which IPv4 the suffix embeds (strictly wider
+        // than a decode, which would admit public embedded targets).
+        // Arbitrary operator-chosen NAT64 prefixes are inherently
+        // undetectable and stay out of scope.
+        if (b0 == 0x00 && b1 == 0x64
+                && (raw[2] & 0xFF) == 0xFF && (raw[3] & 0xFF) == 0x9B
+                && raw[4] == 0x00 && raw[5] == 0x01) {
             return true;
         }
         return false;

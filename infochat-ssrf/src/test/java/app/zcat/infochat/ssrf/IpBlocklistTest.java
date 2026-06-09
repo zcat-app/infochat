@@ -170,6 +170,82 @@ class IpBlocklistTest {
             "IPv4-compatible ::127.0.0.1 must block via the embedded-IPv4 decode");
     }
 
+    // -----------------------------------------------------------------
+    // M1-277 special-use hardening (T-SSRF-HARDEN): reserved /
+    // special-use IPv4 ranges previously absent from isBlockedV4, the
+    // RFC 8215 NAT64 local-use prefix (blocked outright), and the two
+    // explicit cloud-metadata entries design 04 §SSRF rule 2 mandates.
+    // The explicit entries are also range-covered (CGNAT /
+    // unique-local); the named entries pin the design's mandate.
+    // -----------------------------------------------------------------
+
+    @Test
+    void blocksIetfProtocolAssignmentsRange() throws UnknownHostException {
+        assertTrue(blocklist.isBlocked(InetAddress.getByName("192.0.0.8")),
+            "192.0.0.0/24 is the IETF protocol-assignments block "
+            + "(RFC 6890) — infrastructure-internal addresses");
+    }
+
+    @Test
+    void blocksTestNet1Range() throws UnknownHostException {
+        assertTrue(blocklist.isBlocked(InetAddress.getByName("192.0.2.1")),
+            "192.0.2.0/24 is TEST-NET-1 (RFC 5737), never routed");
+    }
+
+    @Test
+    void blocksTestNet2Range() throws UnknownHostException {
+        assertTrue(blocklist.isBlocked(InetAddress.getByName("198.51.100.7")),
+            "198.51.100.0/24 is TEST-NET-2 (RFC 5737), never routed");
+    }
+
+    @Test
+    void blocksTestNet3Range() throws UnknownHostException {
+        assertTrue(blocklist.isBlocked(InetAddress.getByName("203.0.113.5")),
+            "203.0.113.0/24 is TEST-NET-3 (RFC 5737), never routed");
+    }
+
+    @Test
+    void blocksBenchmarkingRange() throws UnknownHostException {
+        assertTrue(blocklist.isBlocked(InetAddress.getByName("198.18.0.1")),
+            "198.18.0.0/15 is the RFC 2544 benchmarking range");
+        assertTrue(blocklist.isBlocked(InetAddress.getByName("198.19.255.254")),
+            "198.18.0.0/15 must extend up through 198.19.x.x");
+    }
+
+    @Test
+    void blocksClassEReservedRange() throws UnknownHostException {
+        assertTrue(blocklist.isBlocked(InetAddress.getByName("240.0.0.1")),
+            "240.0.0.0/4 is reserved class E (RFC 1112)");
+        assertTrue(blocklist.isBlocked(InetAddress.getByName("250.1.2.3")),
+            "the whole 240.0.0.0/4 range must block, not just 240.x");
+    }
+
+    @Test
+    void blocksNat64LocalUsePrefix() throws UnknownHostException {
+        // Embedded IPv4 is PUBLIC (8.8.8.8): the local-use prefix is
+        // blocked outright (the translator is operator-internal
+        // infrastructure), not decoded like the well-known prefix.
+        assertTrue(blocklist.isBlocked(InetAddress.getByName("64:ff9b:1::8.8.8.8")),
+            "64:ff9b:1::/48 (RFC 8215 NAT64 local-use) must block "
+            + "outright, regardless of the embedded IPv4");
+    }
+
+    @Test
+    void blocksAlibabaMetadataExplicitEntry() throws UnknownHostException {
+        assertTrue(blocklist.isBlocked(InetAddress.getByName("100.100.100.200")),
+            "100.100.100.200 (Alibaba Cloud instance metadata) is an "
+            + "explicit blocklist entry per design 04 §SSRF rule 2 "
+            + "(also covered by CGNAT 100.64.0.0/10)");
+    }
+
+    @Test
+    void blocksAwsImdsV2Ipv6ExplicitEntry() throws UnknownHostException {
+        assertTrue(blocklist.isBlocked(InetAddress.getByName("fd00:ec2::254")),
+            "fd00:ec2::254 (AWS IMDSv2 IPv6) is an explicit blocklist "
+            + "entry per design 04 §SSRF rule 2 (also covered by "
+            + "unique-local fc00::/7)");
+    }
+
     @Test
     void allowsGooglePublicDns() throws UnknownHostException {
         assertFalse(blocklist.isBlocked(InetAddress.getByName("8.8.8.8")),
@@ -197,13 +273,13 @@ class IpBlocklistTest {
 
     @Test
     void hostInterfaceIpIsBlocked() throws UnknownHostException {
-        // 203.0.113.5 is TEST-NET-3 (RFC 5737), reserved for
-        // documentation and never assigned in the real internet —
-        // so it cannot be the test machine's actual interface IP
-        // by accident.
-        InetAddress hostIp = InetAddress.getByName("203.0.113.5");
+        // 11.22.33.44 is public, unreserved space in no blocked range
+        // (M1-277 range-blocked TEST-NET-3, the previous sentinel).
+        // The host set is injected via the Supplier seam, so the real
+        // machine's interfaces never enter the check.
+        InetAddress hostIp = InetAddress.getByName("11.22.33.44");
         IpBlocklist withHost = new IpBlocklist(() -> Set.of(hostIp));
-        assertTrue(withHost.isBlocked(InetAddress.getByName("203.0.113.5")),
+        assertTrue(withHost.isBlocked(InetAddress.getByName("11.22.33.44")),
             "an IP in the host-interface set must block; "
             + "spec's \"host's own non-loopback interfaces\" clause");
     }
@@ -212,7 +288,7 @@ class IpBlocklistTest {
     void nonHostPublicIpStillAllowed() throws UnknownHostException {
         // Negative control: the host-IP seam adds host IPs WITHOUT
         // affecting the public-IP allowlist. 8.8.8.8 must still pass.
-        InetAddress hostIp = InetAddress.getByName("203.0.113.5");
+        InetAddress hostIp = InetAddress.getByName("11.22.33.44");
         IpBlocklist withHost = new IpBlocklist(() -> Set.of(hostIp));
         assertFalse(withHost.isBlocked(InetAddress.getByName("8.8.8.8")),
             "a public IP not in the host-interface set must remain "
@@ -228,50 +304,51 @@ class IpBlocklistTest {
     // host's v4 binding; the decoded IPv4 must therefore also be matched
     // against the host-interface set. The IPv4-mapped form escapes this
     // because the JDK normalizes ::ffff:a.b.c.d to an Inet4Address.
-    // 203.0.113.5 (cb.00.71.05) is TEST-NET-3 (RFC 5737): a public-shaped
-    // address in no blocked range, so isBlockedV4 alone returns false and
-    // only the host-interface hop can block it.
+    // 11.22.33.44 (0b.16.21.2c) is public, unreserved space in no blocked
+    // range, so isBlockedV4 alone returns false and only the
+    // host-interface hop can block it. (The previous sentinel 203.0.113.5
+    // is TEST-NET-3, range-blocked since M1-277.)
     // -----------------------------------------------------------------
 
     @Test
     void hostInterfaceVia6to4IsBlocked() throws UnknownHostException {
-        // 2002:cb00:7105:: — 6to4 wrapping the host IP 203.0.113.5.
-        InetAddress hostIp = InetAddress.getByName("203.0.113.5");
+        // 2002:0b16:212c:: — 6to4 wrapping the host IP 11.22.33.44.
+        InetAddress hostIp = InetAddress.getByName("11.22.33.44");
         IpBlocklist withHost = new IpBlocklist(() -> Set.of(hostIp));
-        assertTrue(withHost.isBlocked(InetAddress.getByName("2002:cb00:7105::")),
+        assertTrue(withHost.isBlocked(InetAddress.getByName("2002:0b16:212c::")),
             "6to4 spelling of a host interface IP must block via the "
             + "embedded-IPv4 host-interface check");
     }
 
     @Test
     void hostInterfaceViaTeredoIsBlocked() throws UnknownHostException {
-        // 2001:0:0:0:0:0:34ff:8efa — Teredo whose obfuscated client IPv4
-        // (0x34ff8efa XOR 0xffffffff) is 203.0.113.5, the host IP.
-        InetAddress hostIp = InetAddress.getByName("203.0.113.5");
+        // 2001:0:0:0:0:0:f4e9:ded3 — Teredo whose obfuscated client IPv4
+        // (0xf4e9ded3 XOR 0xffffffff) is 11.22.33.44, the host IP.
+        InetAddress hostIp = InetAddress.getByName("11.22.33.44");
         IpBlocklist withHost = new IpBlocklist(() -> Set.of(hostIp));
-        assertTrue(withHost.isBlocked(InetAddress.getByName("2001:0:0:0:0:0:34ff:8efa")),
+        assertTrue(withHost.isBlocked(InetAddress.getByName("2001:0:0:0:0:0:f4e9:ded3")),
             "Teredo spelling of a host interface IP must block via the "
             + "embedded-IPv4 host-interface check");
     }
 
     @Test
     void hostInterfaceViaNat64IsBlocked() throws UnknownHostException {
-        // 64:ff9b::203.0.113.5 — NAT64 well-known prefix wrapping the
-        // host IP 203.0.113.5 in the low 32 bits.
-        InetAddress hostIp = InetAddress.getByName("203.0.113.5");
+        // 64:ff9b::11.22.33.44 — NAT64 well-known prefix wrapping the
+        // host IP 11.22.33.44 in the low 32 bits.
+        InetAddress hostIp = InetAddress.getByName("11.22.33.44");
         IpBlocklist withHost = new IpBlocklist(() -> Set.of(hostIp));
-        assertTrue(withHost.isBlocked(InetAddress.getByName("64:ff9b::203.0.113.5")),
+        assertTrue(withHost.isBlocked(InetAddress.getByName("64:ff9b::11.22.33.44")),
             "NAT64 spelling of a host interface IP must block via the "
             + "embedded-IPv4 host-interface check");
     }
 
     @Test
     void hostInterfaceViaIpv4CompatibleIsBlocked() throws UnknownHostException {
-        // ::203.0.113.5 — deprecated IPv4-compatible form wrapping the
-        // host IP 203.0.113.5.
-        InetAddress hostIp = InetAddress.getByName("203.0.113.5");
+        // ::11.22.33.44 — deprecated IPv4-compatible form wrapping the
+        // host IP 11.22.33.44.
+        InetAddress hostIp = InetAddress.getByName("11.22.33.44");
         IpBlocklist withHost = new IpBlocklist(() -> Set.of(hostIp));
-        assertTrue(withHost.isBlocked(InetAddress.getByName("::203.0.113.5")),
+        assertTrue(withHost.isBlocked(InetAddress.getByName("::11.22.33.44")),
             "IPv4-compatible spelling of a host interface IP must block "
             + "via the embedded-IPv4 host-interface check");
     }
@@ -281,7 +358,7 @@ class IpBlocklistTest {
         // Negative control: the embedded-IPv4 host-interface hop must not
         // over-block. 8.8.8.8 (not in the host set, no blocked range) in
         // 6to4 form must still pass.
-        InetAddress hostIp = InetAddress.getByName("203.0.113.5");
+        InetAddress hostIp = InetAddress.getByName("11.22.33.44");
         IpBlocklist withHost = new IpBlocklist(() -> Set.of(hostIp));
         assertFalse(withHost.isBlocked(InetAddress.getByName("2002:0808:0808::")),
             "a public IP not in the host-interface set, spelled in 6to4 "
@@ -332,17 +409,17 @@ class IpBlocklistTest {
 
     @Test
     void hostInterfaceAddedAfterStartupIsBlocked() throws UnknownHostException {
-        // 203.0.113.5 is TEST-NET-3 (RFC 5737), reserved for
-        // documentation and never assigned in the real internet —
-        // so it cannot be the test machine's actual interface IP
-        // by accident.
-        InetAddress later = InetAddress.getByName("203.0.113.5");
+        // 11.22.33.44 is public, unreserved space in no blocked range
+        // (M1-277 range-blocked TEST-NET-3, the previous sentinel).
+        // The host set is injected via the Supplier seam, so the real
+        // machine's interfaces never enter the check.
+        InetAddress later = InetAddress.getByName("11.22.33.44");
         AtomicReference<Set<InetAddress>> ref = new AtomicReference<>(Set.of());
         IpBlocklist blocklist = new IpBlocklist(ref::get);
 
         assertFalse(blocklist.isBlocked(later),
-            "203.0.113.5 is TEST-NET-3 (not in any blocked range) "
-            + "and the host-interface set is initially empty; "
+            "11.22.33.44 is public unreserved space (not in any blocked "
+            + "range) and the host-interface set is initially empty; "
             + "isBlocked must return false");
 
         // Simulate an interface coming up post-startup (VPN, NIC,

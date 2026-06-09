@@ -609,11 +609,12 @@ class SsrfGuardedHttpClientTest {
     }
 
     // -----------------------------------------------------------------
-    // Cross-origin credential-header scrub (C-EXTRAHEADERS-REDIRECT). A
-    // redirect to a different host/port/scheme must NOT replay
-    // Authorization / Cookie / Proxy-Authorization headers the caller
-    // injected for the original origin; non-credential headers still
-    // ride along.
+    // Cross-origin header scrub (C-EXTRAHEADERS-REDIRECT, widened by
+    // M1-277 M-S3). A redirect to a different host/port/scheme must NOT
+    // replay ANY caller-supplied header injected for the original
+    // origin — the cross-origin safe set is empty. Only the wrapper's
+    // own Accept / User-Agent defaults ride every hop; caller headers
+    // ride same-origin hops only.
     // -----------------------------------------------------------------
 
     @Test
@@ -658,6 +659,110 @@ class SsrfGuardedHttpClientTest {
         } finally {
             second.stop(0);
         }
+    }
+
+    @Test
+    void extraHeaderDoesNotCrossOriginRedirect() throws Exception {
+        // M1-277 (M-S3): a caller-supplied NON-credential header (Range)
+        // must also be dropped on a cross-origin hop — the safe set is
+        // empty, not "everything except the 3 credential headers".
+        HttpServer second = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        int secondPort = second.getAddress().getPort();
+        AtomicReference<String> rangeOnSecond = new AtomicReference<>("ABSENT-SENTINEL");
+        AtomicReference<String> userAgentOnSecond = new AtomicReference<>();
+        second.createContext("/end", exchange -> {
+            rangeOnSecond.set(exchange.getRequestHeaders().getFirst("Range"));
+            userAgentOnSecond.set(exchange.getRequestHeaders().getFirst("User-Agent"));
+            byte[] body = "ok".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, body.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(body);
+            }
+        });
+        second.start();
+
+        server.createContext("/start", exchange -> {
+            exchange.getResponseHeaders().add("Location",
+                "http://127.0.0.1:" + secondPort + "/end");
+            exchange.sendResponseHeaders(302, -1);
+            exchange.close();
+        });
+
+        try {
+            SsrfGuardedHttpClient client = testModeClient();
+            HttpResponse<byte[]> response = client.get(
+                URI.create("http://127.0.0.1:" + port + "/start"),
+                Map.of("Range", "bytes=0-0"));
+
+            assertEquals(200, response.statusCode(),
+                "the cross-origin redirect must still be followed");
+            assertNull(rangeOnSecond.get(),
+                "Range must NOT cross origins — every caller-supplied "
+                + "header is origin-scoped; the cross-origin safe set "
+                + "is empty");
+            assertNotNull(userAgentOnSecond.get(),
+                "the wrapper's own User-Agent default must still ride "
+                + "every hop");
+        } finally {
+            second.stop(0);
+        }
+    }
+
+    @Test
+    void extraHeadersRideSameOriginRedirects() throws Exception {
+        // The complement that pins the contract's other half: a
+        // SAME-origin redirect keeps caller-supplied headers (the scrub
+        // fires on origin change only).
+        AtomicReference<String> rangeOnTarget = new AtomicReference<>();
+        server.createContext("/hopA", exchange -> {
+            exchange.getResponseHeaders().add("Location", "/hopB");
+            exchange.sendResponseHeaders(302, -1);
+            exchange.close();
+        });
+        server.createContext("/hopB", exchange -> {
+            rangeOnTarget.set(exchange.getRequestHeaders().getFirst("Range"));
+            byte[] body = "ok".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, body.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(body);
+            }
+        });
+
+        SsrfGuardedHttpClient client = testModeClient();
+        HttpResponse<byte[]> response = client.get(
+            URI.create("http://127.0.0.1:" + port + "/hopA"),
+            Map.of("Range", "bytes=0-0"));
+
+        assertEquals(200, response.statusCode());
+        assertEquals("bytes=0-0", rangeOnTarget.get(),
+            "caller-supplied headers must ride same-origin redirect hops "
+            + "(the cross-origin scrub must not fire on a same-origin hop)");
+    }
+
+    // -----------------------------------------------------------------
+    // M1-277 (M-S1) shared HttpClient: one client per wrapper instance,
+    // reused by every get() call. The lifecycle regression this guards:
+    // if the client were closed after the first call (the old per-call
+    // try-with-resources), the second get() on the same instance would
+    // throw.
+    // -----------------------------------------------------------------
+
+    @Test
+    void sharedClientServesSequentialGetCalls() throws Exception {
+        server.createContext("/again", exchange -> {
+            byte[] body = "ok".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, body.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(body);
+            }
+        });
+
+        SsrfGuardedHttpClient client = testModeClient();
+        URI target = URI.create("http://127.0.0.1:" + port + "/again");
+        assertEquals(200, client.get(target).statusCode());
+        assertEquals(200, client.get(target).statusCode(),
+            "the second get() on the same wrapper instance must succeed "
+            + "— the shared HttpClient is never closed between calls");
     }
 
     @Test

@@ -67,12 +67,13 @@ import java.util.function.Function;
  *       not re-resolve DNS during body read on an already-established
  *       connection, so a pin held there would only be stale
  *       state.</li>
- *   <li><strong>HTTP send</strong> via a per-call
- *       {@link HttpClient} with non-zero connect + request timeouts,
- *       {@code Redirect.NEVER}, a per-read length- AND wall-clock-
- *       bounded body reader, AND a total wall-clock
- *       {@code bodyReadDeadline} (M1-026 Finding 1 drip-body-read
- *       remediation).</li>
+ *   <li><strong>HTTP send</strong> via the wrapper's shared
+ *       {@link HttpClient} (one per wrapper instance — see the
+ *       {@code httpClient} field for the lifecycle rationale) with
+ *       non-zero connect + request timeouts, {@code Redirect.NEVER},
+ *       a per-read length- AND wall-clock-bounded body reader, AND a
+ *       total wall-clock {@code bodyReadDeadline} (M1-026 Finding 1
+ *       drip-body-read remediation).</li>
  *   <li><strong>Redirect handling</strong> — on 3xx the wrapper
  *       parses the {@code Location} header, increments a per-call
  *       counter, and re-enters the pipeline from step 1,
@@ -138,8 +139,6 @@ public final class SsrfGuardedHttpClient {
 
     private final IpBlocklist blocklist;
 
-    private final Duration connectTimeout;
-
     private final Duration requestTimeout;
 
     private final Duration readTimeout;
@@ -151,6 +150,22 @@ public final class SsrfGuardedHttpClient {
     private final int redirectCap;
 
     private final Function<String, List<InetAddress>> resolverSeam;
+
+    // B-HTTP-CLIENT (M1-277, M-S1): ONE HttpClient per wrapper instance,
+    // built at construction and reused by every get() call — previously
+    // one client (and one SelectorManager thread) was created per call.
+    // Lifecycle: the client lives as long as the wrapper and is never
+    // closed — the terminal hop's body InputStream must stay readable
+    // for readBounded after the hop loop exits, and production wrappers
+    // are effectively JVM-lifetime, so there is no close point that
+    // would not race a body read. Compatibility with the JVM-wide pin
+    // map: pinning is resolver-level (PinnedDnsResolver SPI), consulted
+    // whenever the client opens a NEW connection; every hop still runs
+    // resolveAndValidate + pin before its send, and a pooled connection
+    // reused without re-resolution is one whose peer IP passed
+    // validation when the connection was established — DNS cannot
+    // re-bind an already-open socket.
+    private final HttpClient httpClient;
 
     public SsrfGuardedHttpClient() {
         this(new IpBlocklist(),
@@ -219,13 +234,16 @@ public final class SsrfGuardedHttpClient {
             throw new IllegalArgumentException("redirect cap must be configured");
         }
         this.blocklist = blocklist;
-        this.connectTimeout = connectTimeout;
         this.requestTimeout = requestTimeout;
         this.readTimeout = readTimeout;
         this.bodyReadDeadline = bodyReadDeadline;
         this.bodyCap = bodyCap;
         this.redirectCap = redirectCap;
         this.resolverSeam = resolverSeam;
+        this.httpClient = HttpClient.newBuilder()
+            .connectTimeout(connectTimeout)
+            .followRedirects(HttpClient.Redirect.NEVER)
+            .build();
     }
 
     private static List<InetAddress> defaultResolve(String host) {
@@ -317,8 +335,10 @@ public final class SsrfGuardedHttpClient {
      * resolution + {@link IpBlocklist} check, DNS pinning, redirect
      * loop with per-hop re-validation, pin-released body read with
      * the same bounds. The extra headers are attached on every
-     * redirect hop (matching how the default {@code Accept} /
-     * {@code User-Agent} propagate).
+     * SAME-origin redirect hop; the first cross-origin hop drops all
+     * of them — the cross-origin safe set is empty, so only the
+     * wrapper's own {@code Accept} / {@code User-Agent} defaults
+     * cross origins (M1-277, M-S3).
      *
      * <p>The JDK's {@link HttpRequest.Builder#header(String, String)}
      * is additive: passing {@code Map.of("Accept", "text/xml")} adds
@@ -332,99 +352,98 @@ public final class SsrfGuardedHttpClient {
     public HttpResponse<byte[]> get(URI uri, Map<String, String> extraHeaders)
             throws IOException, InterruptedException {
         HttpResponse<InputStream> terminalResponse;
-        // Mutable per-call copy of the caller's headers: credential
-        // headers are scrubbed from it when a redirect crosses origin so
-        // they are not replayed to a different host/port/scheme (browsers
-        // and curl do the same). The caller's map is never mutated.
+        // Mutable per-call copy of the caller's headers: caller-supplied
+        // headers are origin-scoped. On a cross-origin redirect the copy
+        // is cleared — the cross-origin safe set is EMPTY, so nothing
+        // the caller injected (credentials, Range, anything) is replayed
+        // to a different host/port/scheme; only the wrapper's own
+        // Accept / User-Agent defaults ride every hop. The caller's map
+        // is never mutated.
         Map<String, String> hopHeaders = new LinkedHashMap<>(extraHeaders);
-        // B-HTTP-CLIENT: build ONE HttpClient before the redirect loop,
-        // reuse it across hops (so the connection pool and the
-        // SelectorManager thread are shared), and close it after the
-        // body read. The body InputStream stays valid until readBounded
-        // drains it, so the close() must happen after that — hence the
-        // try-with-resources spans the whole method, not just the loop.
-        try (HttpClient perCallClient = HttpClient.newBuilder()
-                .connectTimeout(connectTimeout)
-                .followRedirects(HttpClient.Redirect.NEVER)
-                .build()) {
-            // One pin handle per hop: each hop's freshly validated
-            // host REPLACES the previous hop's pin (release-then-pin),
-            // and the finally releases whichever pin is held when the
-            // loop exits or throws — in particular BEFORE readBounded
-            // (M1-026 Finding 1: the JDK does not re-resolve DNS on an
-            // established connection, so the body-read phase needs no
-            // pin).
-            PinnedDnsResolver.Provider.PinHandle hopPin = null;
-            try {
-                URI current = uri;
-                int redirectCount = 0;
-                while (true) {
-                    ResolvedHost resolved = resolveAndValidate(current, HTTP_SCHEMES);
-                    if (hopPin != null) {
-                        hopPin.release();
-                    }
-                    hopPin = PinnedDnsResolver.Provider.pin(
-                        resolved.canonicalHost(), resolved.addresses());
-
-                    HttpRequest.Builder reqBuilder = HttpRequest.newBuilder()
-                        .uri(current)
-                        .timeout(requestTimeout)
-                        .header("Accept", ACCEPT_HEADER)
-                        .header("User-Agent", USER_AGENT)
-                        .GET();
-                    hopHeaders.forEach(reqBuilder::header);
-                    HttpRequest request = reqBuilder.build();
-                    HttpResponse<InputStream> response =
-                        perCallClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
-
-                    int status = response.statusCode();
-                    if (isFollowableRedirect(status)) {
-                        try (InputStream discard = response.body()) {
-                            // Drain via close(); redirect bodies carry
-                            // no payload we need.
-                        }
-                        redirectCount++;
-                        if (redirectCount > redirectCap) {
-                            throw new SsrfPolicyException(
-                                SsrfPolicyException.Reason.REDIRECT_CAP_EXCEEDED,
-                                "redirect cap exceeded");
-                        }
-                        String location = response.headers().firstValue("Location")
-                            .orElseThrow(() -> new SsrfPolicyException(
-                                SsrfPolicyException.Reason.REDIRECT_LOCATION_MISSING,
-                                "redirect response missing Location header"));
-                        // URI.resolve raises IllegalArgumentException on a
-                        // syntactically malformed Location; wrap it so the
-                        // attacker-controlled header cannot escape the
-                        // wrapper's SsrfPolicyException/IOException contract
-                        // (matching the INVALID_HOST wrapping of IDN.toASCII).
-                        URI next;
-                        try {
-                            next = current.resolve(location);
-                        } catch (IllegalArgumentException e) {
-                            throw new SsrfPolicyException(
-                                SsrfPolicyException.Reason.REDIRECT_LOCATION_INVALID,
-                                "invalid redirect Location: " + location, e);
-                        }
-                        if (isCrossOrigin(current, next)) {
-                            hopHeaders.keySet().removeIf(SsrfGuardedHttpClient::isCredentialHeader);
-                        }
-                        current = next;
-                        continue;
-                    }
-
-                    terminalResponse = response;
-                    break;
-                }
-            } finally {
+        // One pin handle per hop: each hop's freshly validated
+        // host REPLACES the previous hop's pin (release-then-pin),
+        // and the finally releases whichever pin is held when the
+        // loop exits or throws — in particular BEFORE readBounded
+        // (M1-026 Finding 1: the JDK does not re-resolve DNS on an
+        // established connection, so the body-read phase needs no
+        // pin).
+        PinnedDnsResolver.Provider.PinHandle hopPin = null;
+        try {
+            URI current = uri;
+            int redirectCount = 0;
+            while (true) {
+                ResolvedHost resolved = resolveAndValidate(current, HTTP_SCHEMES);
                 if (hopPin != null) {
                     hopPin.release();
                 }
-            }
+                hopPin = PinnedDnsResolver.Provider.pin(
+                    resolved.canonicalHost(), resolved.addresses());
 
-            byte[] body = readBounded(terminalResponse);
-            return new BoundedByteArrayResponse(terminalResponse, body);
+                HttpRequest.Builder reqBuilder = HttpRequest.newBuilder()
+                    .uri(current)
+                    .timeout(requestTimeout)
+                    .header("Accept", ACCEPT_HEADER)
+                    .header("User-Agent", USER_AGENT)
+                    .GET();
+                hopHeaders.forEach(reqBuilder::header);
+                HttpRequest request = reqBuilder.build();
+                HttpResponse<InputStream> response =
+                    httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+
+                int status = response.statusCode();
+                if (isFollowableRedirect(status)) {
+                    try (InputStream discard = response.body()) {
+                        // Drain via close(); redirect bodies carry
+                        // no payload we need.
+                    }
+                    redirectCount++;
+                    if (redirectCount > redirectCap) {
+                        throw new SsrfPolicyException(
+                            SsrfPolicyException.Reason.REDIRECT_CAP_EXCEEDED,
+                            "redirect cap exceeded");
+                    }
+                    String location = response.headers().firstValue("Location")
+                        .orElseThrow(() -> new SsrfPolicyException(
+                            SsrfPolicyException.Reason.REDIRECT_LOCATION_MISSING,
+                            "redirect response missing Location header"));
+                    // URI.resolve raises IllegalArgumentException on a
+                    // syntactically malformed Location; wrap it so the
+                    // attacker-controlled header cannot escape the
+                    // wrapper's SsrfPolicyException/IOException contract
+                    // (matching the INVALID_HOST wrapping of IDN.toASCII).
+                    URI next;
+                    try {
+                        next = current.resolve(location);
+                    } catch (IllegalArgumentException e) {
+                        throw new SsrfPolicyException(
+                            SsrfPolicyException.Reason.REDIRECT_LOCATION_INVALID,
+                            "invalid redirect Location: " + location, e);
+                    }
+                    if (isCrossOrigin(current, next)) {
+                        // M1-277 (M-S3): the cross-origin safe set is
+                        // empty — drop EVERY caller-supplied header, not
+                        // just the three credential headers. Caller
+                        // headers were injected for the original origin;
+                        // a structurally unknown header (today only
+                        // Range) must not leak to a host the caller
+                        // never addressed.
+                        hopHeaders.clear();
+                    }
+                    current = next;
+                    continue;
+                }
+
+                terminalResponse = response;
+                break;
+            }
+        } finally {
+            if (hopPin != null) {
+                hopPin.release();
+            }
         }
+
+        byte[] body = readBounded(terminalResponse);
+        return new BoundedByteArrayResponse(terminalResponse, body);
     }
 
     // 3xx statuses this wrapper follows. 300 (Multiple Choices), 304
@@ -497,12 +516,6 @@ public final class SsrfGuardedHttpClient {
             case "https", "wss" -> 443;
             default -> 80;
         };
-    }
-
-    private static boolean isCredentialHeader(String name) {
-        return name.equalsIgnoreCase("Authorization")
-            || name.equalsIgnoreCase("Cookie")
-            || name.equalsIgnoreCase("Proxy-Authorization");
     }
 
     private ResolvedHost resolveAndValidate(URI uri, Set<String> allowedSchemes) {

@@ -42,10 +42,11 @@ import java.util.stream.Stream;
  * slow or adversarial host cannot stall the JVM's outbound plane.
  *
  * <p>Production callers never instantiate this class directly; the
- * forwarding resolver inside {@link Provider} constructs an ephemeral
- * {@link PinnedDnsResolver} per lookup when a pin is active. The
- * public constructor exists so the class is independently testable
- * (pin-or-delegate behavior in isolation).
+ * forwarding resolver inside {@link Provider} probes the live pin map
+ * with the same canonicalize-then-get-then-delegate policy this class
+ * implements (M1-277 removed the per-lookup ephemeral composition).
+ * The public constructor exists so the class is independently
+ * testable (pin-or-delegate behavior in isolation).
  */
 public final class PinnedDnsResolver implements InetAddressResolver {
 
@@ -172,13 +173,13 @@ public final class PinnedDnsResolver implements InetAddressResolver {
         /**
          * Snapshot of the hosts currently pinned → their validated
          * addresses, in the {@code Map} shape
-         * {@link PinnedDnsResolver} consumes. The forwarding resolver
-         * composes an ephemeral {@link PinnedDnsResolver} over this
-         * snapshot per lookup so the canonicalize-before-get logic
-         * (M1-026 Finding 2) lives in exactly one place. Weakly
-         * consistent like the underlying map — but a caller's own pin
-         * is always visible to its own dial's lookup, because the pin
-         * is installed happens-before the send that needs it.
+         * {@link PinnedDnsResolver} consumes. Test seam: lets tests
+         * compose a {@link PinnedDnsResolver} over the live pin state
+         * (the forwarding resolver itself probes the live map directly
+         * since M1-277 — no per-lookup snapshot). Weakly consistent
+         * like the underlying map — but a caller's own pin is always
+         * visible to its own dial's lookup, because the pin is
+         * installed happens-before the send that needs it.
          */
         static Map<String, List<InetAddress>> activePinsSnapshot() {
             Map<String, List<InetAddress>> snapshot = new HashMap<>();
@@ -239,14 +240,34 @@ public final class PinnedDnsResolver implements InetAddressResolver {
             @Override
             public Stream<InetAddress> lookupByName(String host, LookupPolicy lookupPolicy)
                     throws UnknownHostException {
-                // Fast path: every lookup in the JVM (DB, LLM
-                // endpoints, ...) routes through this provider; skip
-                // the snapshot allocation when no pin is active.
+                // Every lookup in the JVM (DB pool, LLM endpoints, ...)
+                // routes through this provider. No-pin fast path first;
+                // then (M1-277, M-S2) an exact probe of the live map —
+                // previously any active pin made EVERY JVM-wide lookup
+                // pay a HashMap snapshot + ephemeral PinnedDnsResolver +
+                // Map.copyOf. Canonicalize BEFORE the get (M1-026
+                // Finding 2): the pin map is keyed by canonical form,
+                // and the JDK may pass a case / trailing-dot / IDN
+                // variant here. The same canonicalize-then-get-then-
+                // delegate policy as PinnedDnsResolver.lookupByName,
+                // applied to the live map instead of a snapshot.
                 if (PINS.isEmpty()) {
                     return BUILTIN.lookupByName(host, lookupPolicy);
                 }
-                return new PinnedDnsResolver(activePinsSnapshot(), BUILTIN)
-                    .lookupByName(host, lookupPolicy);
+                String canonicalHost;
+                try {
+                    canonicalHost = SsrfGuardedHttpClient.canonicalizeHost(host);
+                } catch (IllegalArgumentException e) {
+                    // Not canonicalizable -> cannot be in the pin map
+                    // (always keyed by the canonical form); the builtin
+                    // may reject or accept on its own terms.
+                    return BUILTIN.lookupByName(host, lookupPolicy);
+                }
+                PinEntry entry = PINS.get(canonicalHost);
+                if (entry != null) {
+                    return entry.addresses().stream();
+                }
+                return BUILTIN.lookupByName(host, lookupPolicy);
             }
 
             @Override

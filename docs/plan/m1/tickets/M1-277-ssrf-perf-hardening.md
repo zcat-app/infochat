@@ -1,9 +1,9 @@
 ---
 id: M1-277
 title: "SSRF: shared client, pin fast path, redirect scrub, ranges"
-status: pending
+status: done
 created: 2026-06-09
-last_updated: 2026-06-09
+last_updated: 2026-06-10
 blocked_by: []
 files_budget: 10
 files_scope:
@@ -12,6 +12,7 @@ files_scope:
   - infochat-ssrf/src/main/java/app/zcat/infochat/ssrf/IpBlocklist.java
   - infochat-ssrf/src/main/java/app/zcat/infochat/ssrf/HostInterfaceSet.java
   - infochat-ssrf/src/test/java/app/zcat/infochat/ssrf
+  - infochat-ssrf/src/test/java/app/zcat/infochat/ssrf/IpBlocklistTest.java
   - docs/design/04-security.md
 complexity: medium
 risk: medium
@@ -34,16 +35,99 @@ acceptance:
 test_plan:
   adds:
     - infochat-ssrf/src/test/java/app/zcat/infochat/ssrf
+  modifies:
+    - "infochat-ssrf/src/test/java/app/zcat/infochat/ssrf/IpBlocklistTest.java
+      — host-interface seam tests (hostInterfaceIpIsBlocked,
+      nonHostPublicIpStillAllowed, hostInterfaceVia6to4IsBlocked,
+      hostInterfaceViaTeredoIsBlocked, hostInterfaceViaNat64IsBlocked,
+      hostInterfaceViaIpv4CompatibleIsBlocked,
+      nonHostPublicIpViaTransitionFormStillAllowed,
+      hostInterfaceAddedAfterStartupIsBlocked): swap the 203.0.113.5
+      (TEST-NET-3) sentinel — which acceptance item 4 newly range-blocks —
+      for a public, non-reserved IPv4 outside every blocked range (old and
+      new), recomputing the 6to4/Teredo hex encodings to match. The sentinel
+      must remain outside every blocked range so only the host-interface hop
+      can block it (the tests stay non-vacuous). No assertion direction
+      changes."
   preserves:
-    - all tests currently green on main
+    - all tests currently green on main, modulo the authorized sentinel
+      swap above
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-10
+    verdict: REWORK
+    checks:
+      scope_drift: FAIL
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 579
+      removed: 167
+  - round: 2
+    date: 2026-06-10
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 604
+      removed: 171
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-10
+    verdict: CLEAN
+    base: 50335394de1bff6ae4b5b7a45dfabaa819823a74
+    head: worktree@m1/M1-277-ssrf-shared-client-pin-fast-pa
+    verdict_file: docs/plan/m1/redteam/M1-277-2026-06-10.md
+    out_of_model_count: 2
+    note: |
+      Pre-commit audit of the round-2-approved working tree. CLEAN —
+      the diff only widens the SSRF block surface (new ranges, explicit
+      metadata entries, scrub-all cross-origin headers) and the shared
+      client / pin fast path preserve the resolver-level pin model.
+      Two advisory out-of-model observations recorded in the verdict
+      file; no remediation required.
+clarity_check:
+  date: 2026-06-10
+  verdict: PASS
+  warnings: []
+  blockers: []
+revisions:
+  - date: 2026-06-10
+    reason: premise-fail rework — authorize the IpBlocklistTest TEST-NET-3
+      sentinel swap that acceptance item 4 forces
+    snapshot:
+      status: escalated
+      test_plan:
+        adds:
+          - infochat-ssrf/src/test/java/app/zcat/infochat/ssrf
+        preserves:
+          - all tests currently green on main
+escalations:
+  - date: 2026-06-10
+    reason: premise-fail
+    reviewer_verdict_excerpt: |
+      N/A — pre-implementation discovery. Acceptance item 4 adds the
+      TEST-NET ranges to IpBlocklist, but IpBlocklistTest's host-interface
+      seam tests use 203.0.113.5 (TEST-NET-3) as their "public-shaped,
+      in-no-blocked-range" sentinel. hostInterfaceAddedAfterStartupIsBlocked
+      asserts assertFalse(isBlocked(203.0.113.5)) with an empty host set
+      and will hard-fail; six sibling host-interface tests turn vacuous
+      (the new range block shadows the host-interface hop they pin).
+      test_plan has no `modifies` authorization, so `preserves: all tests
+      currently green on main` is unsatisfiable as written.
 ---
 
 # M1-277: SSRF: shared client, pin fast path, redirect scrub, ranges
@@ -98,6 +182,21 @@ doesn't rediscover them.
 - Design 04 §150's own rationale is wrong (the entries ARE range-covered);
   the acceptance keeps the explicit entries AND fixes the sentence so design
   and code stop disagreeing in both directions.
+- Acceptance item 4's TEST-NET ranges collide with the existing
+  host-interface tests' 203.0.113.5 sentinel (chosen on main precisely for
+  being in no blocked range); `test_plan.modifies` authorizes the sentinel
+  swap discovered at start-time (see `revisions[0]`).
+
+## Round 1 rework
+
+1. Remove the now-orphaned `private final Duration connectTimeout;` field
+   (SsrfGuardedHttpClient.java:142) and its assignment `this.connectTimeout =
+   connectTimeout;` (line 239). After moving HttpClient construction into the
+   constructor, the field is read nowhere — the constructor uses the local
+   parameter `connectTimeout` directly (line 247). Error Prone already flags it
+   (`[UnusedVariable]`, test log line 629); §1 requires cleaning up variables
+   the diff's own change made unused. Keep the constructor parameter and its
+   validation; drop only the dead field and its assignment.
 
 ## Pre-flight self-check (author-side)
 
