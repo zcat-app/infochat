@@ -247,6 +247,27 @@ def main(argv: list[str]) -> int:
 
     runnable_ids = sorted(tid for tid, t in tickets_by_id.items() if is_runnable(t, tickets_by_id))
     runnable_set = set(runnable_ids)
+
+    # blocked_by validation: warn about pending tickets that can never become
+    # runnable because a blocker is dangling or deferred. Emitted on stderr so
+    # the four-line stdout summary contract is unchanged. /m1-tick next relays
+    # these verbatim.
+    blocker_warnings = []
+    for tid in sorted(tickets_by_id):
+        t = tickets_by_id[tid]
+        if t.get("status") != "pending":
+            continue
+        for b in t.get("blocked_by") or []:
+            blocker = tickets_by_id.get(b)
+            if blocker is None:
+                blocker_warnings.append(
+                    f"WARNING: {tid} references unknown blocker {b} "
+                    f"(no such ticket file)")
+            elif blocker.get("status") == "deferred":
+                blocker_warnings.append(
+                    f"WARNING: {tid}'s blocker {b} is deferred "
+                    f"(status: deferred); {tid} stays unrunnable until the "
+                    f"blocker is reopened and completed")
     in_flight_ids = sorted(tid for tid, t in tickets_by_id.items()
                            if t.get("status") in ("in-progress", "in-review"))
     blocked_ids = sorted(tid for tid, t in tickets_by_id.items()
@@ -419,6 +440,8 @@ def main(argv: list[str]) -> int:
     else:
         print("Runnable: 0 tickets")
     print(f"In flight: {', '.join(in_flight_ids) if in_flight_ids else 'none'}")
+    for warning in blocker_warnings:
+        print(warning, file=sys.stderr)
     return 0
 
 

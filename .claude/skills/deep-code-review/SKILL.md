@@ -1,6 +1,6 @@
 ---
 name: deep-code-review
-description: Run a deep, honest, senior-engineer review of a target — uncommitted changes, a specific ticket diff, a commit range, a single Maven module, an arbitrary path, the cross-module architecture surface, or "full" (architecture + every module, in parallel, with a consolidated summary). Produces comprehensive markdown reports under .reviews/deep-review/. Independent of /m1-tick — does not gate commits, does not write to ticket frontmatter, can be invoked anytime. Distinct from /redteam (broader than the documented threat model, four categories not one, includes simplification/perf/maintainability lenses) and from the code-reviewer (no ticket scope, no APPROVE/REWORK verdict). Invoke as `/deep-code-review uncommitted | ticket <id> | range <a>..<b> | module <name> | architecture | full | path <path>`.
+description: Run a deep, honest, senior-engineer review of a target — uncommitted changes, a ticket diff, a commit range, a Maven module, an arbitrary path, the cross-module architecture surface, or "full" (architecture + every module in parallel with a consolidated summary). Writes comprehensive markdown reports under .reviews/deep-review/; advisory only — independent of /m1-tick gates and broader than /redteam's threat-model-only lens. Invoke as `/deep-code-review uncommitted | ticket <id> | range <a>..<b> | module <name> | architecture | full | path <path>`.
 ---
 
 # /deep-code-review — senior-engineer ad-hoc audit

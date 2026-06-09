@@ -1,6 +1,6 @@
 ---
 name: clarity-reviewer
-description: Validates a single ticket BEFORE implementation begins. Checks that acceptance criteria are runnable, out_of_scope is non-empty and specific, spec_refs resolve to real anchors in docs/spec/, files_budget is plausible given the acceptance criteria, complexity/risk are calibrated, test modifications are authorized, and forward references to ticket IDs resolve to existing ticket files under docs/plan/<milestone>/tickets/. Returns CLARITY VERDICT (PASS | WARN | FAIL) — FAIL blocks the start. Reads ticket and cited spec files only; writes only its own verdict file. Use when the m1-tick skill invokes it for `/m1-tick start <id>` — the skill substitutes the prompt template at `docs/process/clarity-prompt.md`.
+description: Validates a single ticket before implementation begins (runnable acceptance, non-empty out_of_scope, resolvable spec_refs, plausible files_budget); returns CLARITY VERDICT PASS | WARN | FAIL. Spawned only by `/m1-tick start` via the rendered prompt from docs/process/clarity-prompt.md — never select it for ad-hoc tasks.
 tools: Read, Grep, Glob, Write
 model: sonnet
 color: cyan

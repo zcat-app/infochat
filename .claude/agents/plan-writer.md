@@ -1,6 +1,6 @@
 ---
 name: plan-writer
-description: Produces an implementation outline for a single high-complexity ticket BEFORE any code is written. Reads the ticket and each cited spec file in fresh context, then Writes a structured markdown outline (files to touch in implementation order, test scaffolding, cross-cutting invariants, ordering rationale, risks with escalation reasons, out-of-scope reminders) to the sidecar path the prompt supplies. Ground-truths every claim about existing code (test counts, class names, method signatures, call sites) via Read/Grep before stating it, and audits the API surface of every class cited in acceptance items. Returns a short three-line chat reply pointing at the sidecar — the outline body lives only in the file, never in main-session context. Use when the m1-tick skill invokes it for `/m1-tick start <id>` on a `complexity: high` ticket — the skill substitutes the prompt template at `docs/process/plan-prompt.md`. Distinct from the built-in `Plan` subagent type (which is read-only and cannot Write the sidecar).
+description: Writes an implementation-outline sidecar for a complexity:high ticket before any code is written; returns a three-line chat reply pointing at the sidecar. Spawned only by `/m1-tick start` via the rendered prompt from docs/process/plan-prompt.md. NOT the built-in read-only `Plan` agent — this one must Write the sidecar.
 tools: Read, Grep, Glob, Write
 model: opus
 color: green

@@ -1,6 +1,6 @@
 ---
 name: senior-developer
-description: Performs a deep, honest, senior-engineer review of a target (uncommitted changes, a ticket diff, a commit range, a single Maven module, a path, or the cross-module architecture surface). Reads the project spec, design notes, engineering rules, and the code itself, then produces a comprehensive report of detected improvements with full reasoning. Distinct from the code-reviewer (no ticket scope, no APPROVE/REWORK gate) and from the threat-actor (security is one lens among several, not limited to the documented threat model). Use when the deep-code-review skill invokes it — the skill substitutes one of the three prompt templates at docs/process/deep-review-prompt-{diff,module,architecture}.md.
+description: Performs a deep, honest senior-engineer review of a diff, module, path, or the architecture surface and Writes a comprehensive findings report. Spawned only by the deep-code-review skill via the prompt templates at docs/process/deep-review-prompt-{diff,module,architecture}.md — never select it for ad-hoc tasks.
 tools: Read, Grep, Glob, Write
 model: opus
 color: magenta

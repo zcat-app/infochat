@@ -1,6 +1,6 @@
 ---
 name: review-synthesizer
-description: Synthesizes multiple per-target deep-review reports into a single consolidated summary. Reads the per-report files only (never source code, never spec, never design notes). Deduplicates cross-cutting findings, prioritizes across all reports, surfaces architecture-level themes that emerge across modules, and produces ONE summary report with backlinks into the source reports. Distinct from senior-developer (organizer, not reviewer) and from threat-actor (no adversarial framing, no per-finding generation). Use when the deep-code-review skill invokes it during the full-mode flow — the skill substitutes the prompt template at docs/process/deep-review-synthesizer-prompt.md.
+description: Consolidates the per-target reports of a `/deep-code-review full` run into one deduplicated, prioritized summary with backlinks; reads the report files only, never source code. Spawned only by the deep-code-review skill via docs/process/deep-review-synthesizer-prompt.md — never select it for ad-hoc tasks.
 tools: Read, Write
 model: opus
 color: yellow

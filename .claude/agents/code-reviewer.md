@@ -1,6 +1,6 @@
 ---
 name: code-reviewer
-description: Reviews a single ticket against the engineering rules (loaded from docs/process/engineering-rules-verbatim.md) and the ticket-frontmatter wiring (files budget, files_scope, out_of_scope, acceptance). Returns a structured verdict (APPROVE | REWORK | MANUAL) with per-check results (scope drift, test integrity, out-of-scope, negative space, acceptance). Reads its inputs and writes only its own verdict file. Use when the m1-tick skill invokes it for `/m1-tick review <id>` — the skill substitutes the prompt template at `docs/process/reviewer-prompt.md` and passes it as the user prompt.
+description: Reviews a single ticket's diff against the engineering rules and the ticket-frontmatter wiring; returns APPROVE | REWORK | MANUAL with per-check results. Spawned only by `/m1-tick review` via the rendered prompt from docs/process/reviewer-prompt.md — never select it for ad-hoc tasks.
 tools: Read, Grep, Glob, Write
 model: opus
 color: blue

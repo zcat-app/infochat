@@ -1,6 +1,6 @@
 ---
 name: redteam
-description: Run an adversarial security review on pending changes. Spawns a fresh-context threat-actor subagent that reads the project's threat model (docs/spec/security.md) and the diff, then flags gaps between what the threat model promises and what the diff actually defends against. Use when the user asks for a "red-team", "security review", "threat-model audit", "adversarial review", or "vulnerability check"; runs naturally at milestone boundaries, on tickets flagged security_relevant: true, and before tagging a release. Findings are bucketed by category (AUTH-BYPASS, INFO-LEAK, INJECTION, DOS, PERM-ESCAL, AUDIT-EVASION) and severity (critical|high|medium|low). Invoke as `/redteam <ticket-id | milestone <name> | id-range <a..b> | release <tag>>`. Distinct from the engineering-rules code reviewer — adversarial framing only, no implementation context, no APPROVE/REWORK verdict.
+description: Run an adversarial security review — a fresh-context threat-actor subagent reads the project's threat model (docs/spec/security.md) and the diff, then flags gaps between what the model promises and what the diff delivers, bucketed by category and severity. Use when the user asks for a "red-team", "security review", "threat-model audit", "adversarial review", or "vulnerability check"; natural at milestone boundaries, on tickets flagged security_relevant: true, and before tagging a release. Invoke as `/redteam <ticket-id | milestone <name> | id-range <a..b> | release <tag>>`.
 ---
 
 # /redteam — adversarial security review

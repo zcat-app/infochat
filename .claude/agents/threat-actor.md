@@ -1,6 +1,6 @@
 ---
 name: threat-actor
-description: Adversarial security review of a diff. Reads the project threat model (docs/spec/security.md) and the diff, then reports gaps between what the threat model promises to defend against and what the diff actually delivers. Returns bucketed findings (AUTH-BYPASS, INFO-LEAK, INJECTION, DOS, PERM-ESCAL, AUDIT-EVASION) with severity (critical|high|medium|low). Distinct from code-reviewer — no implementation context, adversarial framing, no APPROVE/REWORK verdict. Read-only. Use when the redteam skill invokes it — the skill substitutes the prompt template at `docs/process/redteam-prompt.md`.
+description: Adversarial security review of a diff against the documented threat model (docs/spec/security.md); returns bucketed findings by category and severity. Read-only. Spawned only by the /redteam skill via the prompt template at docs/process/redteam-prompt.md — never select it for ad-hoc tasks.
 tools: Read, Grep, Glob
 model: opus
 color: red
