@@ -23,6 +23,7 @@ import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -35,7 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * fixture bound to {@code 127.0.0.1}. Because the strict
  * {@link IpBlocklist} blocks {@code 127.0.0.0/8}, every test that
  * needs to reach the loopback fixture constructs the wrapper via the
- * package-private constructor with a {@link LoopbackPermitting}
+ * package-private constructor with a {@link LoopbackPermittingBlocklist}
  * blocklist. The strict-mode tests use the no-arg constructor.
  */
 class SsrfGuardedHttpClientTest {
@@ -90,7 +91,7 @@ class SsrfGuardedHttpClientTest {
         // real DNS lookup runs.
         InetAddress loopback = InetAddress.getByName("127.0.0.1");
         SsrfGuardedHttpClient client = new SsrfGuardedHttpClient(
-            new LoopbackPermitting(),
+            new LoopbackPermittingBlocklist(),
             Duration.ofSeconds(2),
             Duration.ofSeconds(5),
             Duration.ofSeconds(5),
@@ -145,7 +146,7 @@ class SsrfGuardedHttpClientTest {
         });
 
         SsrfGuardedHttpClient client = new SsrfGuardedHttpClient(
-            new LoopbackPermitting(),
+            new LoopbackPermittingBlocklist(),
             Duration.ofSeconds(2),
             Duration.ofSeconds(2),
             Duration.ofSeconds(5),
@@ -327,7 +328,7 @@ class SsrfGuardedHttpClientTest {
         };
 
         SsrfGuardedHttpClient client = new SsrfGuardedHttpClient(
-            new LoopbackPermitting(),
+            new LoopbackPermittingBlocklist(),
             Duration.ofSeconds(2),
             Duration.ofSeconds(5),
             Duration.ofSeconds(5),
@@ -400,7 +401,7 @@ class SsrfGuardedHttpClientTest {
         // hand-picked tolerance against scheduler jitter.
         Duration requestTimeout = Duration.ofSeconds(30);
         SsrfGuardedHttpClient client = new SsrfGuardedHttpClient(
-            new LoopbackPermitting(),
+            new LoopbackPermittingBlocklist(),
             Duration.ofSeconds(2),
             requestTimeout,
             readTimeout,
@@ -468,7 +469,7 @@ class SsrfGuardedHttpClientTest {
         });
 
         SsrfGuardedHttpClient client = new SsrfGuardedHttpClient(
-            new LoopbackPermitting(),
+            new LoopbackPermittingBlocklist(),
             Duration.ofSeconds(2),
             // Long request-timeout so the failure cannot be the
             // request-level timeout instead of the body-read deadline.
@@ -534,7 +535,7 @@ class SsrfGuardedHttpClientTest {
         };
 
         SsrfGuardedHttpClient client = new SsrfGuardedHttpClient(
-            new LoopbackPermitting(),
+            new LoopbackPermittingBlocklist(),
             Duration.ofSeconds(2),
             Duration.ofSeconds(5),
             Duration.ofSeconds(5),
@@ -664,33 +665,83 @@ class SsrfGuardedHttpClientTest {
         assertEquals(Duration.ofSeconds(5), SsrfGuardedHttpClient.DEFAULT_CONNECT_TIMEOUT);
     }
 
+    // -----------------------------------------------------------------
+    // T8 body-cap default reconciliation. DEFAULT_BODY_CAP must equal
+    // the canonical 5 MiB value the design note documents
+    // (docs/design/04-security.md §"Body size cap"), and the no-arg
+    // constructor — which passes DEFAULT_BODY_CAP — must enforce that
+    // exact cap: a body one byte over it is rejected. The no-arg client
+    // blocks loopback, so the enforcement leg drives a loopback-permitting
+    // client configured with the SAME DEFAULT_BODY_CAP the no-arg
+    // constructor inherits.
+    // -----------------------------------------------------------------
+
+    @Test
+    void noArgClientInheritsCanonicalBodyCapAndRejectsOneByteOver() throws IOException {
+        assertEquals(5L * 1024 * 1024, SsrfGuardedHttpClient.DEFAULT_BODY_CAP,
+            "the canonical default body cap is 5 MiB; the no-arg constructor "
+            + "inherits exactly DEFAULT_BODY_CAP, which must match the "
+            + "design-note infochat.fetch.max-body-bytes default");
+
+        byte[] oneByteOverCap = new byte[(int) (SsrfGuardedHttpClient.DEFAULT_BODY_CAP + 1)];
+        server.createContext("/atcap", exchange -> {
+            exchange.sendResponseHeaders(200, oneByteOverCap.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(oneByteOverCap);
+            } catch (IOException e) {
+                // Expected once the wrapper trips the cap and closes the
+                // connection mid-write — the wrapper has already raised.
+            }
+        });
+
+        SsrfGuardedHttpClient client = new SsrfGuardedHttpClient(
+            new LoopbackPermittingBlocklist(),
+            Duration.ofSeconds(2),
+            Duration.ofSeconds(5),
+            Duration.ofSeconds(5),
+            Duration.ofMinutes(2),
+            SsrfGuardedHttpClient.DEFAULT_BODY_CAP,
+            3);
+
+        SsrfPolicyException ex = assertThrows(SsrfPolicyException.class,
+            () -> client.get(URI.create("http://127.0.0.1:" + port + "/atcap")));
+        assertEquals(SsrfPolicyException.Reason.BODY_CAP_EXCEEDED, ex.reason(),
+            "a body one byte over the canonical cap must surface BODY_CAP_EXCEEDED");
+    }
+
+    // -----------------------------------------------------------------
+    // T15 isCrossOrigin host canonicalization. The cross-origin check
+    // must compare canonicalized hosts (the same IDN/case/trailing-dot
+    // fold the pin map keys by) rather than raw getHost(), so a redirect
+    // to the SAME host differing only by case or a trailing dot is not
+    // misread as cross-origin and does not spuriously scrub credentials.
+    // A genuinely different host must still read as cross-origin so the
+    // scrub fires where it should.
+    // -----------------------------------------------------------------
+
+    @Test
+    void sameHostDifferingByCaseOrTrailingDotIsNotCrossOrigin() {
+        assertFalse(SsrfGuardedHttpClient.isCrossOrigin(
+                URI.create("https://Example.COM/a"),
+                URI.create("https://example.com./b")),
+            "same host differing only by case + trailing dot must NOT be "
+            + "treated as cross-origin (raw getHost() comparison would "
+            + "spuriously scrub credentials)");
+        assertTrue(SsrfGuardedHttpClient.isCrossOrigin(
+                URI.create("https://example.com/a"),
+                URI.create("https://evil.example.org/b")),
+            "a genuinely different host must still be treated as cross-origin "
+            + "so the credential scrub fires where it should");
+    }
+
     private SsrfGuardedHttpClient testModeClient() {
         return new SsrfGuardedHttpClient(
-            new LoopbackPermitting(),
+            new LoopbackPermittingBlocklist(),
             Duration.ofSeconds(2),
             Duration.ofSeconds(5),
             Duration.ofSeconds(5),
             Duration.ofMinutes(2),
             10L * 1024,
             3);
-    }
-
-    /**
-     * Test-only {@link IpBlocklist} subclass that permits 127.0.0.1
-     * so the localhost {@link com.sun.net.httpserver.HttpServer
-     * com.sun.net.httpserver.HttpServer} fixture can be dialed,
-     * while still blocking every other range (e.g.
-     * {@code 169.254.169.254}, which the redirect re-validation
-     * test depends on).
-     */
-    private static final class LoopbackPermitting extends IpBlocklist {
-
-        @Override
-        public boolean isBlocked(InetAddress addr) {
-            if (addr.isLoopbackAddress()) {
-                return false;
-            }
-            return super.isBlocked(addr);
-        }
     }
 }

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 10 |
+| pending | 9 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 277 |
+| done | 278 |
 | deferred | 2 |
 | **total** | **289** |
 
@@ -28,7 +28,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-244 — InboundRouter: fold is_banned into snapshot + command body cap (complexity: medium, risk: medium)
 - M1-245 — Re-evaluation candidate scan: fetched_at window + partial index (complexity: medium, risk: medium)
 - M1-246 — Quarantine stored procedures: audit-before-effect reorder (complexity: medium, risk: medium)
-- M1-247 — infochat-ssrf: body-cap default reconciliation + module lows (complexity: low, risk: low)
 - M1-248 — Flyway V20 gap: comment-only no-op placeholder (complexity: low, risk: low)
 - M1-249 — Provider lows: RateCapBucket dedup, ban null-guard, NOTIFY parse (complexity: low, risk: low)
 - M1-251 — LLM-adapter lows: finish embedding pipeline dedup + extract StubConfig (complexity: low, risk: low)
@@ -70,6 +69,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-250 | Core lows: Redactor scan/cadence + notifier phantom javadoc | 2026-06-09 | round 1 APPROVE |
+| M1-247 | infochat-ssrf: body-cap default reconciliation + module lows | 2026-06-09 | round 1 APPROVE |
 | M1-243 | LlmRouterStartupGuard: require every resolved IP to be loopback | 2026-06-09 | round 1 APPROVE |
 | M1-241 | List /get-tags and /get-sources in the /help catalogue | 2026-06-09 | round 1 APPROVE |
 | M1-240 | infochat-collector: span-offset doc, unused asset-refresh fields | 2026-06-09 | round 1 APPROVE |
@@ -78,7 +78,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-237 | infochat-llm-adapter: dedup HTTP providers, drop dead null-check, fix comment | 2026-06-09 | round 1 APPROVE |
 | M1-236 | infochat-ssrf: read-buffer churn, wss default port, dead null-check | 2026-06-09 | round 1 APPROVE |
 | M1-235 | Migration: denormalize actor cols in delete_preban_user audit row | 2026-06-09 | round 1 APPROVE |
-| M1-234 | Drop the dead new_price_snapshot NOTIFY channel (+ spec) | 2026-06-09 | round 1 APPROVE |
 
 ---
 
@@ -433,7 +432,7 @@ M1-243 (done)
 M1-244 (pending) ← runnable
 M1-245 (pending) ← runnable
 M1-246 (pending) ← runnable
-M1-247 (pending) ← runnable
+M1-247 (done)
 M1-248 (pending) ← runnable
 M1-249 (pending) ← runnable
 M1-250 (done)

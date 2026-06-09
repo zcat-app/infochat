@@ -1,7 +1,7 @@
 ---
 id: M1-247
 title: "infochat-ssrf: body-cap default reconciliation + module lows"
-status: pending
+status: done
 created: 2026-06-09
 last_updated: 2026-06-09
 blocked_by: []
@@ -32,12 +32,44 @@ test_plan:
 spec_refs:
   - docs/spec/security.md §SSRF and outbound connections
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-09
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 128
+      removed: 42
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-09
+    verdict: CLEAN
+    base: df83e13 (fork point / merge-base with main)
+    head: working tree on m1/M1-247-ssrf-body-cap-and-lows (uncommitted, pre-commit, --in-progress)
+    verdict_file: docs/plan/m1/redteam/M1-247-2026-06-09.md
+    out_of_model_count: 0
+    note: |
+      Adversarial audit on the in-flight branch (post-APPROVE, pre-commit) because
+      T15 host-compare + T8 body-cap touch the SSRF outbound trust boundary. CLEAN:
+      no gap vs §"SSRF and outbound connections". The credential-scrub-suppression
+      worry on the isCrossOrigin canonicalization was specifically falsified and
+      found sound (canonicalization narrows, never collapses, the cross-origin set;
+      null/invalid host fails safe to scrub). Nothing feeds a remediation ticket.
+clarity_check:
+  date: 2026-06-09
+  verdict: WARN
+  warnings:
+    - "COMPLEXITY-RISK-CALIBRATED: risk: low on a security-surface host-comparison fix (T15 isCrossOrigin) may be under-calibrated; T15 directly affects credential scrubbing behavior, risk: medium would be more conservative. Low is defensible given the narrow single-method scope, but a wrong change here has a security impact."
+  blockers: []
 ---
 
 # M1-247: infochat-ssrf — body-cap default reconciliation + module lows

@@ -97,14 +97,20 @@ public final class SsrfGuardedHttpClient {
     private static final Duration DEFAULT_READ_TIMEOUT = Duration.ofSeconds(30);
 
     // 2 minutes — large enough for a well-behaved feed to deliver a
-    // full 10 MiB body over a slow but legitimate link; small enough
+    // full 5 MiB body over a slow but legitimate link; small enough
     // to bound the worst-case attacker-controlled body-read phase.
     // Without a total deadline, a drip attacker delivering one byte
     // every (readTimeout - epsilon) bypasses the per-read watchdog
     // and can hold the call open for ~9.6 years at default settings.
     private static final Duration DEFAULT_BODY_READ_DEADLINE = Duration.ofMinutes(2);
 
-    private static final long DEFAULT_BODY_CAP = 10L * 1024 * 1024;
+    // 5 MiB — the canonical outbound body cap, kept in lockstep with
+    // docs/design/04-security.md §"Body size cap" (the
+    // infochat.fetch.max-body-bytes default). Every no-arg consumer
+    // inherits exactly this value via the no-arg constructor; code and
+    // design state the same number so the documented exposure matches
+    // the enforced one. Package-private so the test can pin the value.
+    static final long DEFAULT_BODY_CAP = 5L * 1024 * 1024;
 
     private static final int DEFAULT_REDIRECT_CAP = 3;
 
@@ -435,12 +441,38 @@ public final class SsrfGuardedHttpClient {
     // A redirect crosses origin when the scheme, host, or effective port
     // differs. {@code from} is always validated (it was resolved this
     // hop); {@code to} is an as-yet-unvalidated redirect target, so its
-    // scheme/host may be null — String.equalsIgnoreCase(null) is false,
-    // which fails safe to "cross-origin" (scrub credentials when unsure).
-    private static boolean isCrossOrigin(URI from, URI to) {
+    // scheme/host may be null. The host comparison runs through
+    // canonicalizeHost (via sameCanonicalHost) so case / trailing-dot /
+    // IDN variants of the SAME host are not misread as cross-origin —
+    // the same canonicalization the pin map keys by, so the credential
+    // scrub fires on a genuine origin change and not on a normalization
+    // artifact. A null {@code to} scheme still fails safe via
+    // equalsIgnoreCase(null) == false, and a null or un-canonicalizable
+    // {@code to} host fails safe inside sameCanonicalHost — both scrub
+    // credentials when unsure. Package-private so the same-origin
+    // canonicalization can be asserted directly (matching effectivePort's
+    // same-package test access).
+    static boolean isCrossOrigin(URI from, URI to) {
         return !from.getScheme().equalsIgnoreCase(to.getScheme())
-            || !from.getHost().equalsIgnoreCase(to.getHost())
+            || !sameCanonicalHost(from.getHost(), to.getHost())
             || effectivePort(from) != effectivePort(to);
+    }
+
+    // True when both hosts canonicalize to the same value under the
+    // module's host fold (IDN.toASCII -> lowercase(Locale.ROOT) ->
+    // trailing-dot strip). A null host, or one canonicalizeHost rejects
+    // as syntactically invalid, returns false so isCrossOrigin fails safe
+    // to "different host" (scrub credentials when unsure), preserving the
+    // prior getHost().equalsIgnoreCase(null) == false behavior.
+    private static boolean sameCanonicalHost(String fromHost, String toHost) {
+        if (fromHost == null || toHost == null) {
+            return false;
+        }
+        try {
+            return canonicalizeHost(fromHost).equals(canonicalizeHost(toHost));
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
     }
 
     // Package-private (not private) so EffectivePortWssTest can assert the
