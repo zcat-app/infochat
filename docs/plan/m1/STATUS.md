@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 292 |
+| done | 293 |
 | deferred | 3 |
 | **total** | **297** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-257 — ReEvaluationJob: SKIP concurrent ticks to bound attempt burn (complexity: low, risk: low)
 - M1-261 — Consistency code lows: IpBlocklist per-pass enum, router name case (complexity: low, risk: low)
 
 ---
@@ -63,6 +62,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 |---|---|---|---|
 | M1-260 | Build/doc-truth lows: sibling DAG enforcer, Flyway dup, gate javadoc | 2026-06-09 | round 1 APPROVE |
 | M1-259 | searchPosts: EXPLICIT empty tag-intersection yields zero posts | 2026-06-09 | round 1 APPROVE |
+| M1-257 | ReEvaluationJob: SKIP concurrent ticks to bound attempt burn | 2026-06-09 | round 1 APPROVE |
 | M1-256 | Embedding vector elements: validate numeric before coercion | 2026-06-09 | round 1 APPROVE |
 | M1-255 | Signal membership-event ACIs: apply canonical-UUID gate | 2026-06-09 | round 1 APPROVE |
 | M1-254 | Remove orphaned BanCheck (intake step-4 ban folded into snapshot by M1-244) | 2026-06-09 | round 1 APPROVE |
@@ -70,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-252 | Collector lows: Nostr digest reuse, Stage2 redundant UPDATE, ssrf producer | 2026-06-09 | round 1 APPROVE |
 | M1-251 | LLM-adapter lows: finish embedding pipeline dedup + extract StubConfig | 2026-06-09 | round 1 APPROVE |
 | M1-250 | Core lows: Redactor scan/cadence + notifier phantom javadoc | 2026-06-09 | round 1 APPROVE |
-| M1-249 | Provider lows: RateCapBucket dedup, ban null-guard, NOTIFY parse | 2026-06-09 | round 1 APPROVE |
 
 ---
 
@@ -438,7 +437,7 @@ M1-252 (done)
 M1-253 (done)
 M1-255 (done)
 M1-256 (done)
-M1-257 (pending) ← runnable
+M1-257 (done)
 M1-258 (deferred)
 M1-259 (done)
 M1-260 (done)

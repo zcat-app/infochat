@@ -121,7 +121,8 @@ public class ReEvaluationJob {
     @ConfigProperty(name = "infochat.partitions.retention-days.post")
     int postRetentionDays;
 
-    @Scheduled(every = "{infochat.reeval.poll-interval}")
+    @Scheduled(every = "{infochat.reeval.poll-interval}",
+        concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     public void onTick() {
         List<ReEvalCandidate> candidates;
         try {

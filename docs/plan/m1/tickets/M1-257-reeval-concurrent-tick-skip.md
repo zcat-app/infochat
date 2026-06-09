@@ -1,7 +1,7 @@
 ---
 id: M1-257
 title: "ReEvaluationJob: SKIP concurrent ticks to bound attempt burn"
-status: pending
+status: done
 created: 2026-06-09
 last_updated: 2026-06-09
 blocked_by: []
@@ -12,7 +12,7 @@ files_scope:
 complexity: low
 risk: low
 round_cap: 2
-security_relevant: false
+security_relevant: true
 migration_touch: false
 out_of_scope:
   - The candidate-enumeration scan and its index (fetched_at window + partial index) — owned by M1-245; unchanged.
@@ -31,12 +31,44 @@ test_plan:
 spec_refs:
   - docs/spec/security.md §Re-evaluation job
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-09
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 2
+      added: 33
+      removed: 1
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-09
+    verdict: CLEAN
+    base: 650b4cd (HEAD, working tree)
+    head: working tree (uncommitted, in-progress)
+    verdict_file: docs/plan/m1/redteam/M1-257-2026-06-09.md
+    out_of_model_count: 1
+    note: |
+      CLEAN. SKIP closes the within-instance attempt-counter double-burn the
+      diff targets; audit/notify paths untouched; pinning test weakens nothing.
+      One OUT-OF-MODEL item (cross-instance double-burn) is out of scope —
+      architecture.md:106 commits v1 to a single advisory-lock-enforced
+      Collector, and the ticket already defers FOR UPDATE SKIP LOCKED leasing
+      (Option B) to a future v2 ticket. No remediation ticket needed.
+clarity_check:
+  date: 2026-06-09
+  verdict: WARN
+  warnings:
+    - "SECURITY-FLAG-CONSISTENT: concurrent double-increment corrupts the `attempt` field in RE_EVAL_RELEASED audit_log rows (security.md §Re-evaluation job specifies details_json={ ..., attempt }). Consider security_relevant: true; leaving it false is an under-declaration, not a blocker."
+  blockers: []
 ---
 
 # M1-257: ReEvaluationJob: SKIP concurrent ticks to bound attempt burn
