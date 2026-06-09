@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 288 |
 | deferred | 2 |
-| **total** | **290** |
+| **total** | **297** |
 
 ---
 
@@ -24,7 +24,13 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-255 — Signal membership-event ACIs: apply canonical-UUID gate (complexity: low, risk: medium)
+- M1-256 — Embedding vector elements: validate numeric before coercion (complexity: low, risk: medium)
+- M1-257 — ReEvaluationJob: SKIP concurrent ticks to bound attempt burn (complexity: low, risk: low)
+- M1-258 — ThrottledAdminNotifier: fold suppressed_count bump into the UPSERT (complexity: low, risk: low)
+- M1-259 — searchPosts: EXPLICIT empty tag-intersection yields zero posts (complexity: low, risk: low)
+- M1-260 — Build/doc-truth lows: sibling DAG enforcer, Flyway dup, gate javadoc (complexity: low, risk: low)
+- M1-261 — Consistency code lows: IpBlocklist per-pass enum, router name case (complexity: low, risk: low)
 
 ---
 
@@ -432,4 +438,11 @@ M1-250 (done)
 M1-251 (done)
 M1-252 (done)
 M1-253 (done)
+M1-255 (pending) ← runnable
+M1-256 (pending) ← runnable
+M1-257 (pending) ← runnable
+M1-258 (pending) ← runnable
+M1-259 (pending) ← runnable
+M1-260 (pending) ← runnable
+M1-261 (pending) ← runnable
 ```
