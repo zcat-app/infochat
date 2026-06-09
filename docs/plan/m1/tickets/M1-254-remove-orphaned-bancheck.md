@@ -1,7 +1,7 @@
 ---
 id: M1-254
 title: "Remove orphaned BanCheck (intake step-4 ban folded into snapshot by M1-244)"
-status: pending
+status: done
 created: 2026-06-09
 last_updated: 2026-06-09
 blocked_by: [M1-244]
@@ -32,13 +32,46 @@ test_plan:
     - all tests currently green on main EXCEPT BanCheckTest (which covers the deleted class)
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-09
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 3
+      added: 2
+      removed: 147
 escalations: []
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-09
+    verdict: CLEAN
+    base: main
+    head: working tree (uncommitted, branch m1/M1-254-remove-orphaned-bancheck)
+    verdict_file: docs/plan/m1/redteam/M1-254-2026-06-09.md
+    out_of_model_count: 1
+    note: |
+      CLEAN. Orphaned-dead-code removal (BanCheck + IT) plus a stale-comment
+      reword. Adversary ground-truthed that the live step-4 ban gate
+      (InboundRouter, M1-244 step-1 snapshot SELECT) is intact, BanCheck had
+      no production callers, and AddSourceCommandHandler keeps its own
+      defense-in-depth SELECT. One OUT-OF-MODEL note: the step-1→step-4
+      snapshot TOCTOU window is a pre-existing M1-244 design choice, not
+      introduced here and within the documented threat model — no remediation
+      ticket warranted.
+clarity_check:
+  date: 2026-06-09
+  verdict: PASS
+  warnings: []
+  blockers: []
 revisions: []
 ---
 

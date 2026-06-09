@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 284 |
+| done | 285 |
 | deferred | 2 |
 | **total** | **290** |
 
@@ -27,7 +27,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-245 — Re-evaluation candidate scan: fetched_at window + partial index (complexity: medium, risk: medium)
 - M1-246 — Quarantine stored procedures: audit-before-effect reorder (complexity: medium, risk: medium)
 - M1-253 — Messaging-adapter consistency lows: virtual threads + Random (complexity: low, risk: low)
-- M1-254 — Remove orphaned BanCheck (intake step-4 ban folded into snapshot by M1-244) (complexity: low, risk: low)
 
 ---
 
@@ -63,6 +62,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-254 | Remove orphaned BanCheck (intake step-4 ban folded into snapshot by M1-244) | 2026-06-09 | round 1 APPROVE |
 | M1-252 | Collector lows: Nostr digest reuse, Stage2 redundant UPDATE, ssrf producer | 2026-06-09 | round 1 APPROVE |
 | M1-251 | LLM-adapter lows: finish embedding pipeline dedup + extract StubConfig | 2026-06-09 | round 1 APPROVE |
 | M1-250 | Core lows: Redactor scan/cadence + notifier phantom javadoc | 2026-06-09 | round 1 APPROVE |
@@ -72,7 +72,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-244 | InboundRouter: fold is_banned into snapshot + command body cap | 2026-06-09 | round 1 APPROVE |
 | M1-243 | LlmRouterStartupGuard: require every resolved IP to be loopback | 2026-06-09 | round 1 APPROVE |
 | M1-242 | Signal inbound decode hardening + oversize outcome | 2026-06-09 | round 1 APPROVE |
-| M1-241 | List /get-tags and /get-sources in the /help catalogue | 2026-06-09 | round 1 APPROVE |
 
 ---
 
@@ -425,7 +424,7 @@ M1-241 (done)
 M1-242 (done)
 M1-243 (done)
 M1-244 (done)
-  └── M1-254 (pending) ← runnable
+  └── M1-254 (done)
 M1-245 (pending) ← runnable
 M1-246 (pending) ← runnable
 M1-247 (done)

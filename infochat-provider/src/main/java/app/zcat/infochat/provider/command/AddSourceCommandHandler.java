@@ -50,7 +50,8 @@ import java.util.UUID;
  *       {@code contact_id} alone (MVP single-adapter assumption;
  *       see the inline note below).</li>
  *   <li>Ban check — defense-in-depth. {@code InboundRouter} step 4
- *       ({@code BanCheck.isBanned}) is authoritative and blocks
+ *       (the {@code is_banned} flag folded into the step-1
+ *       {@code UserSnapshot}) is authoritative and blocks
  *       banned senders before any handler runs; this re-check covers
  *       a ban that lands between that intake check and this handler's
  *       actor lookup within the same dispatch.</li>
