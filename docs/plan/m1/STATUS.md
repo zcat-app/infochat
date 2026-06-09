@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 12 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 275 |
 | deferred | 2 |
-| **total** | **277** |
+| **total** | **289** |
 
 ---
 
@@ -24,7 +24,18 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-242 — Signal inbound decode hardening + oversize outcome (complexity: medium, risk: medium)
+- M1-243 — LlmRouterStartupGuard: require every resolved IP to be loopback (complexity: low, risk: medium)
+- M1-244 — InboundRouter: fold is_banned into snapshot + command body cap (complexity: medium, risk: medium)
+- M1-245 — Re-evaluation candidate scan: fetched_at window + partial index (complexity: medium, risk: medium)
+- M1-246 — Quarantine stored procedures: audit-before-effect reorder (complexity: medium, risk: medium)
+- M1-247 — infochat-ssrf: body-cap default reconciliation + module lows (complexity: low, risk: low)
+- M1-248 — Flyway V20 gap: comment-only no-op placeholder (complexity: low, risk: low)
+- M1-249 — Provider lows: RateCapBucket dedup, ban null-guard, NOTIFY parse (complexity: low, risk: low)
+- M1-250 — Core lows: Redactor scan/cadence + notifier phantom javadoc (complexity: low, risk: low)
+- M1-251 — LLM-adapter lows: finish embedding pipeline dedup + extract StubConfig (complexity: low, risk: low)
+- M1-252 — Collector lows: Nostr digest reuse, Stage2 redundant UPDATE, ssrf producer (complexity: low, risk: low)
+- M1-253 — Messaging-adapter consistency lows: virtual threads + Random (complexity: low, risk: low)
 
 ---
 
@@ -419,4 +430,16 @@ M1-238 (done)
 M1-239 (done)
 M1-240 (done)
 M1-241 (done)
+M1-242 (pending) ← runnable
+M1-243 (pending) ← runnable
+M1-244 (pending) ← runnable
+M1-245 (pending) ← runnable
+M1-246 (pending) ← runnable
+M1-247 (pending) ← runnable
+M1-248 (pending) ← runnable
+M1-249 (pending) ← runnable
+M1-250 (pending) ← runnable
+M1-251 (pending) ← runnable
+M1-252 (pending) ← runnable
+M1-253 (pending) ← runnable
 ```
