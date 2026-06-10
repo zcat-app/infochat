@@ -44,6 +44,17 @@ class RedditFetcherTest {
         """
         {"kind":"Listing","data":{"after":null,"children":[]}}""";
 
+    // One item with NO created_utc field — the malformed shape that used
+    // to silently parse as epoch 0 (1970-01-01).
+    private static final String MISSING_CREATED_UTC_JSON = """
+        {"kind":"Listing","data":{"after":null,"children":[
+          {"kind":"t3","data":{"name":"t3_noutc","title":"No Created Utc",
+           "selftext":"missing timestamp body",
+           "permalink":"/r/testsub/comments/noutc/no_created_utc/",
+           "author":"user4","score":0,"num_comments":0,
+           "subreddit":"testsub"}}
+        ]}}""";
+
     // An `after` cursor whose value contains the URL metacharacters & # ?
     // that would inject or truncate the next-page query if unencoded.
     private static final String CRAFTED_CURSOR = "next&after=evil#?x";
@@ -195,6 +206,30 @@ class RedditFetcherTest {
         List<NormalizedPost> posts = fetcher.fetch(42L, baseUrl() + "/r/empty/new");
 
         assertTrue(posts.isEmpty());
+    }
+
+    @Test
+    void missingCreatedUtcSubstitutesFetchTimeNotEpochZero() {
+        // The context is registered here (not in startServer) so the
+        // pre-existing fixture methods stay untouched.
+        byte[] body = MISSING_CREATED_UTC_JSON.getBytes(StandardCharsets.UTF_8);
+        server.createContext("/r/missingutc/new.json", exchange -> {
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(body);
+            }
+        });
+
+        RedditFetcher fetcher = testModeFetcher(1);
+        List<NormalizedPost> posts = fetcher.fetch(7L, baseUrl() + "/r/missingutc/new");
+
+        assertEquals(1, posts.size());
+        // Pinned semantics: a missing created_utc substitutes the fetch
+        // time — the item is kept, dated at receipt — instead of the old
+        // silent epoch-0 (1970-01-01) from MissingNode.asDouble().
+        assertEquals(posts.get(0).fetchedAt(), posts.get(0).publishedAt(),
+            "missing created_utc must substitute the fetch time, not epoch 0");
     }
 
     @Test

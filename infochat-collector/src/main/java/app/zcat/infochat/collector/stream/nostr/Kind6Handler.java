@@ -125,50 +125,63 @@ public class Kind6Handler {
      */
     public Optional<PostPersister.PersistedPostKey> handle(NormalizedPost post,
                                                            UUID sourceUuid) {
-        Optional<PostPersister.PersistedPostKey> persisted = postPersister.persist(sourceUuid, post);
-        if (persisted.isEmpty()) {
-            // ON CONFLICT branch: duplicate (source_id, upstream_identifier,
-            // fetched_at) — the kind-6 was already persisted on a prior
-            // tick of this same fetched_at second. Do NOT write a fresh
-            // post_reference row (it would duplicate the prior one) and
-            // do NOT re-emit to the eval queue (the prior delivery already did).
-            return persisted;
-        }
-        PostPersister.PersistedPostKey key = persisted.get();
         String repostTarget = post.rawMetadata().get(NostrEvent.META_REPOST_TARGET);
-        if (repostTarget != null && !repostTarget.isEmpty()) {
-            writeRepostEdge(key.id(), repostTarget);
+        // Post INSERT and edge INSERT share ONE transaction: an
+        // edge-write failure rolls the post back, so a committed kind-6
+        // post can never be missing its repost edge. Rollback (not
+        // recovery) is the pinned semantics — the repost target exists
+        // only in rawMetadata, which is never persisted, so an edgeless
+        // committed post would leave a later sweep nothing to recover
+        // from. The event itself stays recoverable across restarts: the
+        // since cursor never advanced past it.
+        PostPersister.PersistedPostKey[] persistedKey = new PostPersister.PersistedPostKey[1];
+        TransactionHelper.inTransaction(dataSource, "Kind6Handler", conn -> {
+            Optional<PostPersister.PersistedPostKey> persisted =
+                postPersister.persist(conn, sourceUuid, post);
+            if (persisted.isEmpty()) {
+                // ON CONFLICT branch: duplicate (source_id, upstream_identifier,
+                // fetched_at) — the kind-6 was already persisted on a prior
+                // tick of this same fetched_at second. Do NOT write a fresh
+                // post_reference row (it would duplicate the prior one) and
+                // do NOT re-emit to the eval queue (the prior delivery already did).
+                return;
+            }
+            persistedKey[0] = persisted.get();
+            if (repostTarget != null && !repostTarget.isEmpty()) {
+                insertRepostEdge(conn, persistedKey[0].id(), repostTarget);
+            }
+        });
+        if (persistedKey[0] == null) {
+            return Optional.empty();
         }
-        evalQueueProducer.emit(key);
-        return persisted;
+        if (repostTarget != null && !repostTarget.isEmpty()) {
+            // Original-first arrival order: the original is already stored,
+            // so the committed edge resolves right away. The resolver's
+            // UPDATE (not a resolved-at-INSERT value) keeps this side
+            // symmetric with the repost-first order and closes the
+            // cross-source race — see the class javadoc.
+            repostEdgeResolver.findNostrOriginalPostId(repostTarget)
+                .ifPresent(originalPostId ->
+                    repostEdgeResolver.resolveEdgesPointingTo(originalPostId, repostTarget));
+        }
+        evalQueueProducer.emit(persistedKey[0]);
+        return Optional.of(persistedKey[0]);
     }
 
     /**
      * Insert one unresolved {@code post_reference} row carrying the
-     * original event id verbatim, then resolve it in place if the
-     * original is already persisted. The transaction wraps a single
-     * INSERT — TransactionHelper is the project convention for
-     * raw-JDBC writes; using it here keeps the SQL-failure surface
-     * consistent with LinkingJob.
+     * original event id verbatim, on the caller's transaction — the
+     * same one that wrote the post row.
      */
-    private void writeRepostEdge(UUID fromPostId, String originalEventId) {
-        TransactionHelper.inTransaction(dataSource, "Kind6Handler", conn -> {
-            final String sql =
-                "INSERT INTO post_reference (from_post, to_post, to_upstream_identifier, link_type, score) "
-                    + "VALUES (?, NULL, ?, 'repost', 1.0)";
-            try (PreparedStatement ps = conn.prepareStatement(sql)) {
-                ps.setObject(1, fromPostId);
-                ps.setString(2, originalEventId);
-                ps.executeUpdate();
-            }
-        });
-        // Original-first arrival order: the original is already stored,
-        // so the edge resolves right away. The resolver's UPDATE (not a
-        // resolved-at-INSERT value) keeps this side symmetric with the
-        // repost-first order and closes the cross-source race — see the
-        // class javadoc.
-        repostEdgeResolver.findNostrOriginalPostId(originalEventId)
-            .ifPresent(originalPostId ->
-                repostEdgeResolver.resolveEdgesPointingTo(originalPostId, originalEventId));
+    private static void insertRepostEdge(Connection conn, UUID fromPostId, String originalEventId)
+            throws SQLException {
+        final String sql =
+            "INSERT INTO post_reference (from_post, to_post, to_upstream_identifier, link_type, score) "
+                + "VALUES (?, NULL, ?, 'repost', 1.0)";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setObject(1, fromPostId);
+            ps.setString(2, originalEventId);
+            ps.executeUpdate();
+        }
     }
 }

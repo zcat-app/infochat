@@ -1,5 +1,7 @@
 package app.zcat.infochat.collector.stream.nostr;
 
+import app.zcat.infochat.collector.outbox.EvalQueueProducer;
+import app.zcat.infochat.collector.outbox.PostPersister;
 import app.zcat.infochat.collector.outbox.TestEvalQueueConsumer;
 import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import app.zcat.infochat.core.ingest.NormalizedPost;
@@ -21,6 +23,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -61,6 +64,15 @@ class Kind6HandlerTest {
 
     @Inject
     Kind6Handler kind6Handler;
+
+    @Inject
+    PostPersister postPersister;
+
+    @Inject
+    EvalQueueProducer evalQueueProducer;
+
+    @Inject
+    RepostEdgeResolver repostEdgeResolver;
 
     @Inject
     TestEvalQueueConsumer evalConsumer;
@@ -137,7 +149,51 @@ class Kind6HandlerTest {
                 "to_post is still NULL while the original event is not stored");
     }
 
+    /**
+     * Edge-write failure inside the post-plus-edge transaction rolls the
+     * post write back (the pinned atomicity semantics): a committed
+     * kind-6 post can never exist without its repost edge. Nothing is
+     * committed, nothing reaches the eval queue. The handler is
+     * constructed by hand around {@link EdgeWriteFailingDataSource} so
+     * only the transaction's DataSource differs from production wiring.
+     */
+    @Test
+    void edgeWriteFailure_rollsBackPostWrite() throws Exception {
+        UUID sourceUuid = seedNostrSource("kind6-handler-test/edgeFail");
+        String originalEventId = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        String upstreamIdentifier = UID_PREFIX_PARTIAL + "edgeFailEvent";
+        NormalizedPost post = kind6Post(upstreamIdentifier, "doomed commentary", originalEventId);
+
+        Kind6Handler failingHandler = new Kind6Handler();
+        failingHandler.dataSource = new EdgeWriteFailingDataSource(dataSource);
+        failingHandler.postPersister = postPersister;
+        failingHandler.evalQueueProducer = evalQueueProducer;
+        failingHandler.repostEdgeResolver = repostEdgeResolver;
+
+        assertThrows(IllegalStateException.class,
+            () -> failingHandler.handle(post, sourceUuid),
+            "the injected edge-write failure must propagate out of the transaction");
+
+        assertEquals(0, countPosts(sourceUuid, upstreamIdentifier),
+            "the post write must roll back when the edge write fails — no edgeless post is committed");
+        assertEquals(0, evalConsumer.size(),
+            "nothing may reach the eval queue when the transaction rolled back");
+    }
+
     // ---------- helpers ----------
+
+    private int countPosts(UUID sourceUuid, String upstreamIdentifier) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT COUNT(*) FROM post WHERE source_id = ? AND upstream_identifier = ?")) {
+            ps.setObject(1, sourceUuid);
+            ps.setString(2, upstreamIdentifier);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getInt(1);
+            }
+        }
+    }
 
     /**
      * Build a NormalizedPost shaped like {@link NostrEvent#toNormalizedPost}

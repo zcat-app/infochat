@@ -6,6 +6,7 @@ import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import app.zcat.infochat.llm.LlmProvider;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,6 +38,9 @@ class ReEvaluationJobTest {
 
     @Inject
     LlmProvider llmProvider;
+
+    @ConfigProperty(name = "infochat.partitions.retention-days.post")
+    int postRetentionDays;
 
     private StubLlmProvider stub() {
         return (StubLlmProvider) llmProvider;
@@ -177,14 +181,56 @@ class ReEvaluationJobTest {
 
     @Test
     void needsReviewDepthAlert_firesWhenQueueExceedsThreshold() throws Exception {
-        // Seed posts exceeding threshold (5).
+        // Seed posts exceeding threshold (5). fetched_at = now(): the depth
+        // count is bounded by the retention+slack scan window, so the rows
+        // must sit inside it (a fixed past date would rot out of the window
+        // as the wall clock advances).
         for (int i = 0; i < 6; i++) {
-            seedNeedsReviewPost("depth-" + i);
+            seedNeedsReviewPost("depth-" + i, Instant.now());
         }
 
         reEvaluationJob.checkNeedsReviewDepth();
 
         assertAdminNotification(ReEvaluationJob.ERROR_CLASS_NEEDS_REVIEW_DEPTH);
+    }
+
+    @Test
+    void needsReviewDepthCount_excludesRowsOlderThanScanWindow() throws Exception {
+        // The depth COUNT carries the same fetched_at floor as the candidate
+        // scan so partition pruning applies; rows below the floor stop
+        // counting toward the alert. Oldest bootstrap partition (May 2026)
+        // is always below the ~32-day floor, same fixture convention as
+        // ReEvaluationJobWindowTest.
+        Instant belowFloor = Instant.parse("2026-05-01T00:00:00Z");
+        assertTrue(belowFloor.isBefore(Instant.now().minusSeconds((postRetentionDays + 2L) * 86400)),
+            "test fixture invalid: belowFloor is inside the depth scan window");
+        clearNeedsReviewPosts();
+        seedNeedsReviewPost("count-in-window-a", Instant.now());
+        seedNeedsReviewPost("count-in-window-b", Instant.now());
+        seedNeedsReviewPost("count-below-floor", belowFloor);
+
+        assertEquals(2, reEvaluationJob.countNeedsReviewWithinScanWindow(),
+            "rows older than the retention+slack floor must be excluded; in-window rows counted");
+    }
+
+    @Test
+    void reconstructOriginalBody_splicesCollidingPlaceholderLiteralByteExact() throws Exception {
+        // A quarantined span whose CONTENT contains a placeholder-shaped
+        // literal naming the post's other placeholder. The old global
+        // String.replace loop would, when processing collide-a first,
+        // substitute collide-b's original into the literal inside
+        // collide-a's just-spliced content; the position-anchored splice
+        // only ever substitutes at token positions of the stored body.
+        SeededPost post = seedInfraFailurePost("splice-collide");
+        setPostBody(post, "A [REDACTED:collide-a] B [REDACTED:collide-b] C");
+        seedQuarantineRow(post, "collide-a", "x [REDACTED:collide-b] y");
+        seedQuarantineRow(post, "collide-b", "z");
+
+        String reconstructed = reEvaluationJob.reconstructOriginalBody(candidateFor(post, true, 0));
+
+        assertEquals("A x [REDACTED:collide-b] y B z C", reconstructed,
+            "spliced content must be byte-exact: a placeholder-shaped literal inside "
+                + "quarantined content is user content, never a substitution site");
     }
 
     @Test
@@ -274,9 +320,8 @@ class ReEvaluationJobTest {
         }
     }
 
-    private void seedNeedsReviewPost(String slug) throws Exception {
+    private void seedNeedsReviewPost(String slug, Instant fetchedAt) throws Exception {
         UUID sourceId = seedSource(slug);
-        Instant fetchedAt = Instant.parse("2026-05-20T12:00:00Z");
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                  "INSERT INTO post ("
@@ -331,6 +376,28 @@ class ReEvaluationJobTest {
                 rs.next();
                 return (UUID) rs.getObject(1);
             }
+        }
+    }
+
+    private void clearNeedsReviewPosts() throws Exception {
+        // The depth count sees the whole shared test DB; start the
+        // exclusion assertion from a clean NEEDS_REVIEW slate (nothing
+        // references these rows, so the delete is FK-safe).
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "DELETE FROM post WHERE status = 'NEEDS_REVIEW'")) {
+            ps.executeUpdate();
+        }
+    }
+
+    private void setPostBody(SeededPost post, String body) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "UPDATE post SET body = ? WHERE id = ? AND fetched_at = ?")) {
+            ps.setString(1, body);
+            ps.setObject(2, post.id);
+            ps.setTimestamp(3, Timestamp.from(post.fetchedAt));
+            ps.executeUpdate();
         }
     }
 

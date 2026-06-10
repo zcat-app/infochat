@@ -2,6 +2,7 @@ package app.zcat.infochat.collector.eval.tagger;
 
 import app.zcat.infochat.core.util.TagNormalizer;
 import io.quarkus.runtime.Startup;
+import io.quarkus.scheduler.Scheduled;
 import jakarta.annotation.Priority;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -18,9 +19,11 @@ import java.util.Set;
 
 /**
  * Controlled-vocabulary cache for the Tagger pipeline. Loads
- * {@code SELECT name FROM tag} once at startup into an immutable
+ * {@code SELECT name FROM tag} at startup into an immutable
  * {@link Set} so per-post tagger validation is an O(1) hash lookup
- * rather than a per-call DB round-trip.
+ * rather than a per-call DB round-trip, then refreshes the set on a
+ * schedule so a tag added at runtime (e.g. via {@code /add-source})
+ * becomes visible to the tagger without a Collector restart.
  *
  * <h2>Normalization rule (load-bearing)</h2>
  *
@@ -64,10 +67,47 @@ public class TagVocabulary {
     @Inject
     DataSource dataSource;
 
-    private Set<String> names = Set.of();
+    // volatile: the scheduled refresh swaps the (immutable) set from the
+    // scheduler thread while tagger worker threads read it; each reader
+    // sees either the old or the new complete set, never a partial one.
+    private volatile Set<String> names = Set.of();
 
     @PostConstruct
     void load() {
+        // Startup load failure is fatal (the tagger must never run with
+        // an empty vocabulary it would interpret as "reject everything").
+        this.names = loadFromDatabase();
+        LOG.infof("TagVocabulary: loaded %d controlled-vocabulary tags", names.size());
+    }
+
+    /**
+     * Periodic reload so tags added at runtime ({@code /add-source})
+     * enter the vocabulary without a restart. A transient DB failure
+     * keeps the last good set — serving a slightly stale vocabulary
+     * beats dropping it mid-flight. Only the exception class is logged:
+     * an SQLException message can echo bound parameters.
+     */
+    @Scheduled(every = "{infochat.tagger.vocabulary-refresh-interval:5m}",
+        concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
+    void refresh() {
+        Set<String> reloaded;
+        try {
+            reloaded = loadFromDatabase();
+        } catch (IllegalStateException e) {
+            Throwable cause = e.getCause();
+            Throwable rootCause = cause != null ? cause : e;
+            LOG.warnf("TagVocabulary: refresh failed (%s); keeping previous %d-tag vocabulary",
+                rootCause.getClass().getName(), names.size());
+            return;
+        }
+        if (reloaded.size() != names.size()) {
+            LOG.infof("TagVocabulary: refreshed vocabulary, %d -> %d tags",
+                names.size(), reloaded.size());
+        }
+        this.names = reloaded;
+    }
+
+    private Set<String> loadFromDatabase() {
         Set<String> loaded = new LinkedHashSet<>();
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
@@ -84,8 +124,7 @@ public class TagVocabulary {
             throw new IllegalStateException(
                 "TagVocabulary: failed to load tag table", e);
         }
-        this.names = Set.copyOf(loaded);
-        LOG.infof("TagVocabulary: loaded %d controlled-vocabulary tags", names.size());
+        return Set.copyOf(loaded);
     }
 
     /**

@@ -26,7 +26,9 @@ import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -411,6 +413,7 @@ public class ReEvaluationJob {
     String reconstructOriginalBody(ReEvalCandidate candidate) {
         try (Connection conn = dataSource.getConnection()) {
             String body = readPostBody(conn, candidate);
+            Map<String, String> originalsByPlaceholderId = new HashMap<>();
             final String sql =
                 "SELECT placeholder_id, original_html FROM quarantine "
                     + "WHERE post_id = ? AND original_html IS NOT NULL";
@@ -421,16 +424,56 @@ public class ReEvaluationJob {
                         String placeholderId = rs.getString(1);
                         String originalHtml = rs.getString(2);
                         if (placeholderId != null && originalHtml != null) {
-                            body = body.replace("[REDACTED:" + placeholderId + "]", originalHtml);
+                            originalsByPlaceholderId.put(placeholderId, originalHtml);
                         }
                     }
                 }
             }
-            return body;
+            return splicePlaceholders(body, originalsByPlaceholderId);
         } catch (SQLException e) {
             throw new IllegalStateException(
                 "ReEvaluationJob: failed to reconstruct body for post_id=" + candidate.postId(), e);
         }
+    }
+
+    /**
+     * Single-pass, position-anchored splice of {@code [REDACTED:<id>]}
+     * tokens. Spliced original_html is emitted straight to the output
+     * and never rescanned — original_html is untrusted quarantined
+     * content, and a span containing a placeholder-shaped literal must
+     * survive byte-exact (an order-dependent sequence of global
+     * String.replace calls would substitute into already-spliced
+     * content). A token whose id has no quarantine row is user content
+     * wearing a placeholder costume: emitted verbatim, with the scan
+     * resuming one char past its '[' so a real token overlapping it is
+     * still found.
+     */
+    private static String splicePlaceholders(String body,
+                                             Map<String, String> originalsByPlaceholderId) {
+        final String prefix = "[REDACTED:";
+        StringBuilder reconstructed = new StringBuilder(body.length());
+        int cursor = 0;
+        while (true) {
+            int tokenStart = body.indexOf(prefix, cursor);
+            if (tokenStart < 0) {
+                break;
+            }
+            int tokenEnd = body.indexOf(']', tokenStart + prefix.length());
+            if (tokenEnd < 0) {
+                break;
+            }
+            String placeholderId = body.substring(tokenStart + prefix.length(), tokenEnd);
+            String originalHtml = originalsByPlaceholderId.get(placeholderId);
+            if (originalHtml == null) {
+                reconstructed.append(body, cursor, tokenStart + 1);
+                cursor = tokenStart + 1;
+                continue;
+            }
+            reconstructed.append(body, cursor, tokenStart).append(originalHtml);
+            cursor = tokenEnd + 1;
+        }
+        reconstructed.append(body, cursor, body.length());
+        return reconstructed.toString();
     }
 
     private String readPostBody(Connection conn, ReEvalCandidate candidate) throws SQLException {
@@ -483,7 +526,7 @@ public class ReEvaluationJob {
         List<ReEvalCandidate> candidates = new ArrayList<>();
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, (postRetentionDays + PARTITION_SCAN_SLACK.toDays()) + " days");
+            ps.setString(1, partitionScanWindow());
             ps.setInt(2, batchSize);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
@@ -500,26 +543,49 @@ public class ReEvaluationJob {
     }
 
     void checkNeedsReviewDepth() {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(
-                 "SELECT COUNT(*) FROM post WHERE status = 'NEEDS_REVIEW'")) {
-            try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
-                    long depth = rs.getLong(1);
-                    if (depth > needsReviewDepthThreshold) {
-                        throttledAdminNotifier.notifyOnce(
-                            ERROR_CLASS_NEEDS_REVIEW_DEPTH,
-                            ERROR_CLASS_NEEDS_REVIEW_DEPTH,
-                            "NEEDS_REVIEW queue depth " + depth
-                                + " exceeds threshold " + needsReviewDepthThreshold);
-                    }
-                }
-            }
+        long depth;
+        try {
+            depth = countNeedsReviewWithinScanWindow();
         } catch (SQLException e) {
             // SafeLog, never the raw Throwable (docs/spec/security.md
             // §Secrets handling — User content in exceptions).
             SafeLog.warn(LOG, "ReEvaluationJob: failed to check NEEDS_REVIEW depth", e);
+            return;
         }
+        if (depth > needsReviewDepthThreshold) {
+            throttledAdminNotifier.notifyOnce(
+                ERROR_CLASS_NEEDS_REVIEW_DEPTH,
+                ERROR_CLASS_NEEDS_REVIEW_DEPTH,
+                "NEEDS_REVIEW queue depth " + depth
+                    + " exceeds threshold " + needsReviewDepthThreshold);
+        }
+    }
+
+    /**
+     * NEEDS_REVIEW depth bounded by the same fetched_at floor as
+     * {@link #enumerateCandidates} — without it this every-5-minutes
+     * COUNT scans every live partition of the RANGE(fetched_at) post
+     * table. The depth alert is an operator signal about the actionable
+     * review queue; a row older than the retention horizon + slack is
+     * about to age out via partition drop and stops counting toward the
+     * alert, the same window trade-off the candidate scan accepts.
+     */
+    long countNeedsReviewWithinScanWindow() throws SQLException {
+        final String sql = "SELECT COUNT(*) FROM post WHERE status = 'NEEDS_REVIEW' "
+            + "AND fetched_at >= now() - ?::INTERVAL";
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, partitionScanWindow());
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getLong(1);
+            }
+        }
+    }
+
+    /** The shared candidate/depth scan floor: retention horizon + slack, as a SQL INTERVAL string. */
+    private String partitionScanWindow() {
+        return (postRetentionDays + PARTITION_SCAN_SLACK.toDays()) + " days";
     }
 
     /**

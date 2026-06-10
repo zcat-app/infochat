@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 8 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 308 |
+| done | 309 |
 | deferred | 3 |
 | **total** | **319** |
 
@@ -26,7 +26,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-268 — Thread /lang through bundle lookups (D43) (complexity: high, risk: medium)
 - M1-274 — Capability flags: reconcile with design, prune speculative (complexity: medium, risk: low)
-- M1-276 — Collector mediums: re-eval splice, scan bounds, vocab, edges (complexity: medium, risk: medium)
 - M1-278 — Ops posture: health truth, endpoint gating, drop counters (complexity: medium, risk: medium)
 - M1-279 — §7/§7a sweep: defensive checks, broad catches, test seams (complexity: medium, risk: low)
 - M1-280 — Provider mediums: Gate 4, usage replies, price label, bucket (complexity: medium, risk: medium)
@@ -68,6 +67,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 |---|---|---|---|
 | M1-282 | Redactor suppressed-throwable coverage | 2026-06-10 | round 1 APPROVE |
 | M1-277 | SSRF: shared client, pin fast path, redirect scrub, ranges | 2026-06-10 | round 2 APPROVE |
+| M1-276 | Collector mediums: re-eval splice, scan bounds, vocab, edges | 2026-06-10 | round 1 APPROVE |
 | M1-275 | DB hygiene: SET LOCAL timeouts, per-dispatch conn reuse | 2026-06-10 | round 1 APPROVE |
 | M1-273 | Transport classification matrix + Signal start race | 2026-06-10 | round 1 APPROVE |
 | M1-272 | Redactor thrown-chain coverage + log hygiene sweep | 2026-06-10 | round 1 APPROVE |
@@ -75,7 +75,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-270 | Validate bootstrap admin ids before any write; SPI hoist | 2026-06-10 | round 1 APPROVE |
 | M1-269 | Pin the price_snapshot role-privilege matrix in DbRoleMatrixIT | 2026-06-10 | round 1 APPROVE |
 | M1-267 | Stage 2 judge off the emitter thread | 2026-06-10 | round 1 APPROVE |
-| M1-265 | LLM routing guard closure + provider hygiene | 2026-06-10 | round 1 APPROVE |
 
 ---
 
@@ -463,7 +462,7 @@ M1-273 (done)
 M1-274 (pending) ← runnable
   └── M1-283 (pending)
 M1-275 (done)
-M1-276 (pending) ← runnable
+M1-276 (done)
 M1-277 (done)
 M1-278 (pending) ← runnable
 M1-279 (pending) ← runnable

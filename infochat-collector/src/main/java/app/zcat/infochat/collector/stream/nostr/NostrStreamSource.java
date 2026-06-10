@@ -284,6 +284,14 @@ public final class NostrStreamSource implements StreamSource {
         @ConfigProperty(name = "infochat.stream.nostr.all-relays-bad-cycle-cap")
         int allRelaysBadCycleCap;
 
+        // The post partition retention horizon — the same property the
+        // PartitionPruner ages partitions out with — reused as the since-
+        // cursor scan window so the fetched_at floor never excludes a live
+        // post. Widened by the same slack convention ReEvaluationJob and
+        // PerSourceUnknownTracker document for their re-eval scans.
+        @ConfigProperty(name = "infochat.partitions.retention-days.post")
+        int postRetentionDays;
+
         // One shared client (and its executor) across every relay of every
         // nostr source; relay connections only subscribe and read. The
         // connect timeout bounds the handshake so a relay host that accepts
@@ -470,11 +478,43 @@ public final class NostrStreamSource implements StreamSource {
             return relays;
         }
 
-        private OptionalLong latestPublishedAtEpochSeconds(UUID sourceUuid) {
-            final String sql = "SELECT MAX(published_at) FROM post WHERE source_id = ?";
+        // Mirrors ReEvaluationJob/PerSourceUnknownTracker's documented
+        // PARTITION_SCAN_SLACK so the partition-pruned scans share one
+        // windowing convention rather than each inventing a knob.
+        private static final Duration PARTITION_SCAN_SLACK = Duration.ofDays(2);
+
+        /**
+         * Since-cursor for a relay reconnect. The fast path bounds
+         * fetched_at at {@code now() - (retention horizon + slack)} so
+         * the RANGE(fetched_at) partitioned post table prunes partitions
+         * instead of scanning every live one on every reconnect.
+         * Cursor-correctness argument: published_at is clamped to
+         * fetched_at at persist time, so a row outside the window can
+         * only carry a published_at older than the floor — missing it
+         * can only lower the cursor, and a lower {@code since} merely
+         * replays events the dedup filter drops. A stale source (no row
+         * inside the window) falls back to the unbounded scan, keeping
+         * the cursor semantics identical to the pre-bound form.
+         * Package-private for the NostrSinceCursorTest seam.
+         */
+        OptionalLong latestPublishedAtEpochSeconds(UUID sourceUuid) {
+            OptionalLong bounded = maxPublishedAtEpochSeconds(sourceUuid, true);
+            if (bounded.isPresent()) {
+                return bounded;
+            }
+            return maxPublishedAtEpochSeconds(sourceUuid, false);
+        }
+
+        private OptionalLong maxPublishedAtEpochSeconds(UUID sourceUuid, boolean boundedToScanWindow) {
+            final String sql = boundedToScanWindow
+                ? "SELECT MAX(published_at) FROM post WHERE source_id = ? AND fetched_at >= now() - ?::INTERVAL"
+                : "SELECT MAX(published_at) FROM post WHERE source_id = ?";
             try (Connection conn = dataSource.getConnection();
                  PreparedStatement ps = conn.prepareStatement(sql)) {
                 ps.setObject(1, sourceUuid);
+                if (boundedToScanWindow) {
+                    ps.setString(2, (postRetentionDays + PARTITION_SCAN_SLACK.toDays()) + " days");
+                }
                 try (ResultSet rs = ps.executeQuery()) {
                     if (rs.next()) {
                         Timestamp maxPublished = rs.getTimestamp(1);

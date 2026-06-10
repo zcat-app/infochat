@@ -92,6 +92,23 @@ public class PostPersister {
      * @throws IllegalStateException on JDBC failure.
      */
     public Optional<PersistedPostKey> persist(UUID sourceUuid, NormalizedPost normalized) {
+        try (Connection conn = dataSource.getConnection()) {
+            return persist(conn, sourceUuid, normalized);
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                "PostPersister: failed to acquire connection for sourceUuid=" + sourceUuid, e);
+        }
+    }
+
+    /**
+     * Caller-supplied-connection variant of {@link #persist(UUID, NormalizedPost)}:
+     * the INSERT joins whatever transaction the connection carries, so a
+     * caller can make the post write atomic with a dependent write that
+     * must never be committed without it (e.g. a kind-6 repost edge).
+     * Same contract as the self-connecting overload otherwise.
+     */
+    public Optional<PersistedPostKey> persist(Connection conn, UUID sourceUuid,
+                                              NormalizedPost normalized) {
         Objects.requireNonNull(sourceUuid, "sourceUuid");
         Objects.requireNonNull(normalized, "normalized");
         String upstreamIdentifier = normalized.upstreamIdentifier();
@@ -135,8 +152,8 @@ public class PostPersister {
                 + "ON CONFLICT (source_id, upstream_identifier, fetched_at) DO NOTHING "
                 + "RETURNING id, fetched_at";
 
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+        // The connection is the caller's — prepare on it, never close it.
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
 
             ps.setString(1, uid);
             ps.setObject(2, sourceUuid);
