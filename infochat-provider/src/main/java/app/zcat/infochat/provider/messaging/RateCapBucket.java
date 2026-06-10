@@ -148,85 +148,84 @@ public class RateCapBucket {
     }
 
     /**
-     * Test seam (contact bucket only). Plain-JUnit tests bypass CDI and
-     * instantiate the bean with a controllable {@link Clock} and
-     * explicit cap/window/eviction values. Group-bucket defaults match
-     * the application-properties laptop values so tests that don't care
-     * about group buckets still construct cleanly. Package-private —
-     * the rest of the provider tree consumes the bean via CDI.
+     * Test seam. Plain-JUnit tests bypass CDI and instantiate the bean
+     * with a controllable {@link Clock} and a {@link Settings} snapshot
+     * — start from {@link Settings#defaults()} and override only the
+     * bucket(s) under test via the per-bucket withers. Package-private
+     * — the rest of the provider tree consumes the bean via CDI, where
+     * {@code @ConfigProperty} populates the fields instead.
      */
-    RateCapBucket(Clock clock, int inboundPerMinute, Duration refillWindow, Duration evictionThreshold) {
-        this(clock, inboundPerMinute, refillWindow, evictionThreshold, 10, Duration.ofMinutes(15));
-    }
-
-    /**
-     * Test seam (contact + group-reply buckets). New for M1-112 so
-     * {@code GroupApprovalCheckTest} can drive the bucket-exhausted
-     * scenario with a small cap against a controllable clock.
-     * Group-LLM defaults match the application-properties laptop
-     * values, mirroring the 4-arg seam's group-reply defaulting.
-     */
-    RateCapBucket(Clock clock,
-                  int inboundPerMinute,
-                  Duration refillWindow,
-                  Duration evictionThreshold,
-                  int groupReplyCap,
-                  Duration groupReplyRefillWindow) {
-        this(clock, inboundPerMinute, refillWindow, evictionThreshold,
-                groupReplyCap, groupReplyRefillWindow, 5, Duration.ofMinutes(15));
-    }
-
-    /**
-     * Test seam (contact + group-reply + group-LLM buckets). New for
-     * M1-222 so {@code RateCapBucketTest} can drive the group-LLM
-     * exhaustion / refill / eviction scenarios with a small cap
-     * against a controllable clock. Group-command defaults match the
-     * application-properties laptop values, mirroring the narrower
-     * seams' defaulting.
-     */
-    RateCapBucket(Clock clock,
-                  int inboundPerMinute,
-                  Duration refillWindow,
-                  Duration evictionThreshold,
-                  int groupReplyCap,
-                  Duration groupReplyRefillWindow,
-                  int groupLlmCap,
-                  Duration groupLlmRefillWindow) {
-        this(clock, inboundPerMinute, refillWindow, evictionThreshold,
-                groupReplyCap, groupReplyRefillWindow, groupLlmCap, groupLlmRefillWindow,
-                20, Duration.ofMinutes(15));
-    }
-
-    /**
-     * Test seam (all four buckets). New for the M1-222 redteam
-     * follow-up so {@code RateCapBucketTest} can drive the
-     * group-command exhaustion / refill / eviction scenarios with a
-     * small cap against a controllable clock.
-     */
-    RateCapBucket(Clock clock,
-                  int inboundPerMinute,
-                  Duration refillWindow,
-                  Duration evictionThreshold,
-                  int groupReplyCap,
-                  Duration groupReplyRefillWindow,
-                  int groupLlmCap,
-                  Duration groupLlmRefillWindow,
-                  int groupCommandCap,
-                  Duration groupCommandRefillWindow) {
+    RateCapBucket(Clock clock, Settings settings) {
         this.clock = clock;
-        this.inboundPerMinute = inboundPerMinute;
-        this.refillWindow = refillWindow;
-        this.evictionThreshold = evictionThreshold;
-        this.groupReplyCap = groupReplyCap;
-        this.groupReplyRefillWindow = groupReplyRefillWindow;
-        this.groupLlmCap = groupLlmCap;
-        this.groupLlmRefillWindow = groupLlmRefillWindow;
-        this.groupCommandCap = groupCommandCap;
-        this.groupCommandRefillWindow = groupCommandRefillWindow;
-        // No test-ctor parameter for the key-space cap — mirror the
+        this.inboundPerMinute = settings.inboundPerMinute();
+        this.refillWindow = settings.refillWindow();
+        this.evictionThreshold = settings.evictionThreshold();
+        this.groupReplyCap = settings.groupReplyCap();
+        this.groupReplyRefillWindow = settings.groupReplyRefillWindow();
+        this.groupLlmCap = settings.groupLlmCap();
+        this.groupLlmRefillWindow = settings.groupLlmRefillWindow();
+        this.groupCommandCap = settings.groupCommandCap();
+        this.groupCommandRefillWindow = settings.groupCommandRefillWindow();
+        // No Settings component for the key-space cap — mirror the
         // @ConfigProperty default for the no-CDI test path (the flood test
         // overrides this field directly with a small value).
         this.maxContactBuckets = 100_000;
+    }
+
+    /**
+     * Immutable snapshot of the bucket caps and windows the CDI bean
+     * reads from {@code @ConfigProperty} fields — the test seam's
+     * replacement for the former telescoping constructors.
+     * {@link #defaults()} mirrors the {@code @ConfigProperty} declared
+     * defaults; each wither overrides one bucket's cap/window pair so a
+     * test names only the values it exercises.
+     */
+    record Settings(int inboundPerMinute,
+                    Duration refillWindow,
+                    Duration evictionThreshold,
+                    int groupReplyCap,
+                    Duration groupReplyRefillWindow,
+                    int groupLlmCap,
+                    Duration groupLlmRefillWindow,
+                    int groupCommandCap,
+                    Duration groupCommandRefillWindow) {
+
+        /** The {@code @ConfigProperty} declared defaults, as one snapshot. */
+        static Settings defaults() {
+            return new Settings(60, Duration.ofMinutes(1), Duration.ofMinutes(10),
+                    10, Duration.ofMinutes(15),
+                    5, Duration.ofMinutes(15),
+                    20, Duration.ofMinutes(15));
+        }
+
+        Settings withContactBucket(int inboundPerMinute, Duration refillWindow,
+                                   Duration evictionThreshold) {
+            return new Settings(inboundPerMinute, refillWindow, evictionThreshold,
+                    groupReplyCap, groupReplyRefillWindow,
+                    groupLlmCap, groupLlmRefillWindow,
+                    groupCommandCap, groupCommandRefillWindow);
+        }
+
+        Settings withGroupReplyBucket(int cap, Duration window) {
+            return new Settings(inboundPerMinute, refillWindow, evictionThreshold,
+                    cap, window,
+                    groupLlmCap, groupLlmRefillWindow,
+                    groupCommandCap, groupCommandRefillWindow);
+        }
+
+        Settings withGroupLlmBucket(int cap, Duration window) {
+            return new Settings(inboundPerMinute, refillWindow, evictionThreshold,
+                    groupReplyCap, groupReplyRefillWindow,
+                    cap, window,
+                    groupCommandCap, groupCommandRefillWindow);
+        }
+
+        Settings withGroupCommandBucket(int cap, Duration window) {
+            return new Settings(inboundPerMinute, refillWindow, evictionThreshold,
+                    groupReplyCap, groupReplyRefillWindow,
+                    groupLlmCap, groupLlmRefillWindow,
+                    cap, window);
+        }
     }
 
     /**

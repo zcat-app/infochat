@@ -78,11 +78,16 @@ class StartupGatesTest {
     }
 
     @Test
-    void gate4RejectsMentionByIdFalseWithGroupSpiWired() {
+    void gate4RejectsMentionByIdFalse() {
+        // Real mechanism: the group SPI is wired for every activated
+        // adapter in v1, so the bad-mention fake's capability
+        // declaration alone trips the gate — no hidden test property.
         IllegalStateException e = assertThrows(
                 IllegalStateException.class, () -> registry.start("bad-mention"));
         assertTrue(e.getMessage().contains("bad-mention"),
                 "gate 4 message must name the adapter, got: " + e.getMessage());
+        assertTrue(e.getMessage().contains("supportsMentionByContactId"),
+                "gate 4 message must mention the offending capability, got: " + e.getMessage());
     }
 
     @Test
@@ -129,10 +134,8 @@ class StartupGatesTest {
      * Single profile shared by every gate test. Excludes
      * {@link MessagingStartup} from ARC so its {@code @PostConstruct}
      * does not run {@code start()} at boot with whichever adapter list
-     * Quarkus picks up by default. Sets the gate-4-specific
-     * {@code test-group-spi-wired} flag on {@code bad-mention} so
-     * gate 4's @Test trips. The {@code inmemory.allow-low-trust} key
-     * is INTENTIONALLY omitted so gate 6's @Test trips on the
+     * Quarkus picks up by default. The {@code inmemory.allow-low-trust}
+     * key is INTENTIONALLY omitted so gate 6's @Test trips on the
      * production InMemoryAdapter.
      */
     public static class Profile implements QuarkusTestProfile {
@@ -147,7 +150,6 @@ class StartupGatesTest {
             return Map.of(
                     "quarkus.arc.exclude-types",
                     "app.zcat.infochat.provider.messaging.MessagingStartup",
-                    "infochat.adapters.bad-mention.test-group-spi-wired", "true",
                     "infochat.adapters.inmemory.allow-low-trust", "false"
             );
         }

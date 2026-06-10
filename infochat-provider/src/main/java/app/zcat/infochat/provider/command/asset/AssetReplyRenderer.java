@@ -11,6 +11,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.Locale;
 
 /**
  * Renders a plain-text reply body for an asset price snapshot
@@ -106,9 +107,14 @@ public class AssetReplyRenderer {
     }
 
     private static String formatPrice(BigDecimal price, String vsCurrency) {
+        String amount = price.stripTrailingZeros().toPlainString();
         return switch (vsCurrency) {
-            case "btc" -> price.stripTrailingZeros().toPlainString() + " BTC";
-            default -> "$" + price.stripTrailingZeros().toPlainString();
+            case "usd" -> "$" + amount;
+            case "btc" -> amount + " BTC";
+            // No per-currency symbol table: the uppercase ISO-code
+            // suffix ("123.45 CZK") is the plain-text-correct form for
+            // every other vs-currency in the small closed v1 set.
+            default -> amount + " " + vsCurrency.toUpperCase(Locale.ROOT);
         };
     }
 

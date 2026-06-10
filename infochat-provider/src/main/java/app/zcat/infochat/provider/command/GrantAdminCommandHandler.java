@@ -197,14 +197,13 @@ public class GrantAdminCommandHandler implements CommandHandler {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
         }
 
-        // Step 2 — parse positional <contact>. Missing → fall back
-        // to error.admin_only (the spec catalogue assigns no
-        // friendly error to "no positional arg"; the same fallback
-        // shape as BanCommandHandler). Fail fast before opening the
-        // transaction.
+        // Step 2 — parse positional <contact>. Fail fast before
+        // opening the transaction.
         String targetContactId = parseTargetContact(rawText);
         if (targetContactId == null) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+            return reply(scope, MessageFormat.format(
+                    bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT),
+                    "/grant-admin <contact>"));
         }
 
         // Step 3 — permission pre-check (spec §Authorization model

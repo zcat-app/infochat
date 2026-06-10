@@ -212,7 +212,9 @@ public class UnfollowTagCommandHandler implements CommandHandler {
 
         // Positional `/unfollow-tag <tag>` form.
         if (parsed.positionalTag == null) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL));
+            return reply(scope, MessageFormat.format(
+                    bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT),
+                    "/unfollow-tag <tag>|--all"));
         }
 
         Optional<UUID> tagId = lookupTagId(parsed.positionalTag);

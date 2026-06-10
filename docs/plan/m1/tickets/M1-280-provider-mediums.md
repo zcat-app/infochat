@@ -1,7 +1,7 @@
 ---
 id: M1-280
 title: "Provider mediums: Gate 4, usage replies, price label, bucket"
-status: pending
+status: done
 created: 2026-06-09
 last_updated: 2026-06-10
 blocked_by: []
@@ -43,7 +43,20 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-10
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 20
+      added: 347
+      removed: 155
 revisions:
   - date: 2026-06-10
     reason: clarity-fail refine — acceptance item 2 and §Notes delegated the 8-handler list to a gitignored deep-review report unreadable from worktrees; premise verification also found BundleKeys.java (required for the new bundle key) missing from files_scope with zero budget headroom
@@ -79,7 +92,12 @@ escalations:
       no way to enumerate the 8 handlers from this ticket alone. Fix: inline
       the complete list of 8 handler class names (and the wrong error each
       currently returns for no-args) directly in the ticket.
-clarity_check: {}
+clarity_check:
+  date: 2026-06-10
+  verdict: WARN
+  warnings:
+    - "SECURITY-FLAG-CONSISTENT: The diff will touch 7 admin/ban command handlers. The change is to usage-reply paths only (no-args path), not authorization gates, so security_relevant: false is acceptable. Reviewer should confirm authorization checks in those handlers are unchanged."
+  blockers: []
 ---
 
 # M1-280: Provider mediums: Gate 4, usage replies, price label, bucket

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 312 |
+| done | 313 |
 | deferred | 3 |
 | **total** | **319** |
 
@@ -26,7 +26,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-268 — Thread /lang through bundle lookups (D43) (complexity: high, risk: medium)
 - M1-279 — §7/§7a sweep: defensive checks, broad catches, test seams (complexity: medium, risk: low)
-- M1-280 — Provider mediums: Gate 4, usage replies, price label, bucket (complexity: medium, risk: medium)
 - M1-283 — Over-cap outbound digest dropped on SimpleX (complexity: medium, risk: medium)
 
 ---
@@ -65,6 +64,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 |---|---|---|---|
 | M1-282 | Redactor suppressed-throwable coverage | 2026-06-10 | round 1 APPROVE |
 | M1-281 | Core contracts: contact-id redaction parity, Fetcher rename | 2026-06-10 | round 1 APPROVE |
+| M1-280 | Provider mediums: Gate 4, usage replies, price label, bucket | 2026-06-10 | round 1 APPROVE |
 | M1-278 | Ops posture: health truth, endpoint gating, drop counters | 2026-06-10 | round 1 APPROVE |
 | M1-277 | SSRF: shared client, pin fast path, redirect scrub, ranges | 2026-06-10 | round 2 APPROVE |
 | M1-276 | Collector mediums: re-eval splice, scan bounds, vocab, edges | 2026-06-10 | round 1 APPROVE |
@@ -72,7 +72,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-274 | Capability flags: reconcile with design, prune speculative | 2026-06-10 | round 2 APPROVE |
 | M1-273 | Transport classification matrix + Signal start race | 2026-06-10 | round 1 APPROVE |
 | M1-272 | Redactor thrown-chain coverage + log hygiene sweep | 2026-06-10 | round 1 APPROVE |
-| M1-271 | Design/spec reconciliation + comment-truth sweep | 2026-06-10 | round 1 APPROVE |
 
 ---
 
@@ -464,7 +463,7 @@ M1-276 (done)
 M1-277 (done)
 M1-278 (done)
 M1-279 (pending) ← runnable
-M1-280 (pending) ← runnable
+M1-280 (done)
 M1-281 (done)
 M1-282 (done)
 ```

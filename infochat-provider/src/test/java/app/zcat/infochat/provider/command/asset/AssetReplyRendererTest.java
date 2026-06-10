@@ -138,6 +138,37 @@ class AssetReplyRendererTest {
     }
 
     @Test
+    void nonUsdVsCurrenciesRenderIsoCodeSuffix() {
+        AssetSnapshotReader.Snapshot eurSnap = new AssetSnapshotReader.Snapshot(
+                "zcash", "coingecko", "eur",
+                new BigDecimal("38.74"),
+                null, null, null, null, null, null,
+                Instant.now().minusSeconds(10),
+                "coingecko.com/en/coins/zcash"
+        );
+        AssetSnapshotReader.Snapshot czkSnap = new AssetSnapshotReader.Snapshot(
+                "zcash", "coingecko", "czk",
+                new BigDecimal("961.30"),
+                null, null, null, null, null, null,
+                Instant.now().minusSeconds(10),
+                "coingecko.com/en/coins/zcash"
+        );
+        Duration interval = Duration.ofSeconds(90);
+
+        String eurRendered = renderer.render(
+                new AssetSnapshotReader.SnapshotResult(eurSnap, false, interval),
+                "Zcash", "coingecko.com/en/coins/zcash");
+        String czkRendered = renderer.render(
+                new AssetSnapshotReader.SnapshotResult(czkSnap, false, interval),
+                "Zcash", "coingecko.com/en/coins/zcash");
+
+        assertTrue(eurRendered.contains("38.74 EUR"), "eur price gets ISO-code suffix");
+        assertFalse(eurRendered.contains("$38.74"), "eur price must not have $ prefix");
+        assertTrue(czkRendered.contains("961.3 CZK"), "czk price gets ISO-code suffix");
+        assertFalse(czkRendered.contains("$961.3"), "czk price must not have $ prefix");
+    }
+
+    @Test
     void btcQuoteCurrencyOmitsDollarSign() {
         AssetSnapshotReader.Snapshot snap = new AssetSnapshotReader.Snapshot(
                 "zcash", "coingecko", "btc",

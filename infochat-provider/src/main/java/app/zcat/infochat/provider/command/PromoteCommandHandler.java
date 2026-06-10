@@ -91,7 +91,9 @@ public class PromoteCommandHandler implements CommandHandler {
 
         String targetContactId = parseTarget(rawText);
         if (targetContactId == null) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+            return reply(scope, MessageFormat.format(
+                    bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT),
+                    "/promote <contact>"));
         }
 
         // Permission pre-check (spec §Authorization model step 7),

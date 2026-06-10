@@ -307,6 +307,9 @@ public final class BundleKeys {
     /** Non-admin invoked an admin-tier command. */
     public static final String ERROR_ADMIN_ONLY = "error.admin_only";
 
+    /** Required argument missing from a command invocation. {@code {0}} = the command's usage string (e.g. {@code /ban <contact> [--reason "..."]}). Shared across handlers; the usage string is supplied by the caller. */
+    public static final String ERROR_USAGE_MISSING_ARGUMENT = "error.usage.missing_argument";
+
     /** {@code /unban <contact>} against a contact with no {@code users} row at all (unknown-contact rule per {@code commands.md} §Admin). */
     public static final String ERROR_CONTACT_NOT_REGISTERED = "error.contact_not_registered";
 

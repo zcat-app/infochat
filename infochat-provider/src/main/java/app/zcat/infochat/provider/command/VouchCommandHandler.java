@@ -20,6 +20,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.text.MessageFormat;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
@@ -159,7 +160,9 @@ public class VouchCommandHandler implements CommandHandler {
         // Parse `<contact>`.
         VouchArgs args = VouchArgs.parse(rawText);
         if (args == null) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+            return reply(scope, MessageFormat.format(
+                    bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT),
+                    "/vouch <contact>"));
         }
         String targetContactId = args.contact;
 

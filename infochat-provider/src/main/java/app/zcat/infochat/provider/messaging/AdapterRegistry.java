@@ -2,7 +2,6 @@ package app.zcat.infochat.provider.messaging;
 
 import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.messaging.AdapterTrustLevel;
-import app.zcat.infochat.messaging.CapabilityFlags;
 import app.zcat.infochat.messaging.MembershipEvent;
 import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
@@ -23,7 +22,6 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -70,17 +68,6 @@ import java.util.Set;
 public class AdapterRegistry {
 
     private static final Logger log = LoggerFactory.getLogger(AdapterRegistry.class);
-
-    /**
-     * MVP has no group SPI wired; gate 4 (mention-by-id +
-     * group-SPI-wired) is vacuously satisfied at the constant level.
-     * Tests exercise gate 4 by setting a hidden per-adapter test
-     * property {@code infochat.adapters.<name>.test-group-spi-wired=true}
-     * which the registry consults at gate-4 evaluation. T2-F flips this
-     * constant (or migrates it to a real config property) when the
-     * group SPI lands.
-     */
-    private static final boolean GROUP_SPI_WIRED = false;
 
     /**
      * Production name reserved by {@link InMemoryAdapter}. Gate 5
@@ -190,9 +177,16 @@ public class AdapterRegistry {
         }
 
         // Gate 4: supportsMentionByContactId=false + group-SPI-wired per §6.7.
+        // The "group SPI wired in this deployment" condition is
+        // constant-true in v1: the activation loop below registers a
+        // membership-event handler on every adapter unconditionally and
+        // the InboundRouter routes group scopes for all adapters — there
+        // is no per-deployment groups-off toggle. The gate therefore
+        // enforces unconditionally; it fires only on an adapter that
+        // misdeclares (or genuinely lacks) the cryptographic mention
+        // anchor group access requires (§6.2.3).
         for (MessagingAdapter adapter : activating) {
-            CapabilityFlags caps = adapter.capabilities();
-            if (!caps.supportsMentionByContactId() && isGroupSpiWired(adapter)) {
+            if (!adapter.capabilities().supportsMentionByContactId()) {
                 throw new IllegalStateException(
                         "Adapter \"" + adapter.name()
                                 + "\" declares supportsMentionByContactId=false but the group SPI is wired (§6.7)");
@@ -354,19 +348,6 @@ public class AdapterRegistry {
         } catch (RuntimeException e) {
             SafeLog.error(log, "membership event dispatch failed adapter=" + adapterName, e);
         }
-    }
-
-    /**
-     * Per-adapter group-SPI-wired probe. Production MVP has no group
-     * SPI; T2-F flips {@link #GROUP_SPI_WIRED} or migrates this probe
-     * to a real config key. Tests exercise gate 4 by setting a hidden
-     * per-adapter property {@code infochat.adapters.<name>.test-group-spi-wired=true}.
-     */
-    private boolean isGroupSpiWired(MessagingAdapter adapter) {
-        Optional<Boolean> testFlag = ConfigProvider.getConfig().getOptionalValue(
-                "infochat.adapters." + adapter.name() + ".test-group-spi-wired",
-                Boolean.class);
-        return testFlag.orElse(GROUP_SPI_WIRED);
     }
 
     private static List<String> parseAdaptersList(String csv) {

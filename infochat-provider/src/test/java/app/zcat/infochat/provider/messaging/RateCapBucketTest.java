@@ -35,10 +35,17 @@ class RateCapBucketTest {
     private static final Duration REFILL_WINDOW = Duration.ofMinutes(1);
     private static final Duration EVICTION_THRESHOLD = Duration.ofMinutes(10);
 
+    // Base settings every test starts from: small contact-bucket values
+    // against the controllable TestClock, group buckets at their
+    // @ConfigProperty defaults until a test's wither overrides one.
+    private static final RateCapBucket.Settings CONTACT_SETTINGS =
+            RateCapBucket.Settings.defaults()
+                    .withContactBucket(CAP, REFILL_WINDOW, EVICTION_THRESHOLD);
+
     @Test
     void underCap() {
         TestClock clock = new TestClock(Instant.parse("2026-05-20T00:00:00Z"));
-        RateCapBucket bucket = new RateCapBucket(clock, CAP, REFILL_WINDOW, EVICTION_THRESHOLD);
+        RateCapBucket bucket = new RateCapBucket(clock, CONTACT_SETTINGS);
 
         for (int i = 0; i < CAP; i++) {
             assertTrue(bucket.tryAcquire("inmemory", "rate-1"),
@@ -49,7 +56,7 @@ class RateCapBucketTest {
     @Test
     void overCap() {
         TestClock clock = new TestClock(Instant.parse("2026-05-20T00:00:00Z"));
-        RateCapBucket bucket = new RateCapBucket(clock, CAP, REFILL_WINDOW, EVICTION_THRESHOLD);
+        RateCapBucket bucket = new RateCapBucket(clock, CONTACT_SETTINGS);
 
         for (int i = 0; i < CAP; i++) {
             assertTrue(bucket.tryAcquire("inmemory", "rate-1"));
@@ -61,7 +68,7 @@ class RateCapBucketTest {
     @Test
     void independent() {
         TestClock clock = new TestClock(Instant.parse("2026-05-20T00:00:00Z"));
-        RateCapBucket bucket = new RateCapBucket(clock, CAP, REFILL_WINDOW, EVICTION_THRESHOLD);
+        RateCapBucket bucket = new RateCapBucket(clock, CONTACT_SETTINGS);
 
         // Interleave two contact ids — each must respect its own cap.
         // Drain rate-A; rate-B must still admit CAP calls afterwards.
@@ -82,7 +89,7 @@ class RateCapBucketTest {
     @Test
     void refill() {
         TestClock clock = new TestClock(Instant.parse("2026-05-20T00:00:00Z"));
-        RateCapBucket bucket = new RateCapBucket(clock, CAP, REFILL_WINDOW, EVICTION_THRESHOLD);
+        RateCapBucket bucket = new RateCapBucket(clock, CONTACT_SETTINGS);
 
         // Drain the bucket.
         for (int i = 0; i < CAP; i++) {
@@ -120,7 +127,7 @@ class RateCapBucketTest {
     @Test
     void evictionDrainedIdle() {
         TestClock clock = new TestClock(Instant.parse("2026-05-20T00:00:00Z"));
-        RateCapBucket bucket = new RateCapBucket(clock, CAP, REFILL_WINDOW, EVICTION_THRESHOLD);
+        RateCapBucket bucket = new RateCapBucket(clock, CONTACT_SETTINGS);
 
         // Drain the bucket to 0 tokens via CAP tryAcquire calls. The
         // last call leaves lastRefillEpochMillis at the current clock
@@ -159,7 +166,7 @@ class RateCapBucketTest {
     @Test
     void contactBucketKeySpaceBoundedUnderDistinctContactFlood() {
         TestClock clock = new TestClock(Instant.parse("2026-05-20T00:00:00Z"));
-        RateCapBucket bucket = new RateCapBucket(clock, CAP, REFILL_WINDOW, EVICTION_THRESHOLD);
+        RateCapBucket bucket = new RateCapBucket(clock, CONTACT_SETTINGS);
         int cap = 5;
         bucket.maxContactBuckets = cap;
 
@@ -198,7 +205,7 @@ class RateCapBucketTest {
     @Test
     void strangerFloodDoesNotGrowPerIdBucketMap() {
         TestClock clock = new TestClock(Instant.parse("2026-06-08T00:00:00Z"));
-        RateCapBucket bucket = new RateCapBucket(clock, CAP, REFILL_WINDOW, EVICTION_THRESHOLD);
+        RateCapBucket bucket = new RateCapBucket(clock, CONTACT_SETTINGS);
 
         for (int i = 0; i < CAP * 100; i++) {
             // registered=false → shared stranger limiter, distinct ids.
@@ -220,7 +227,7 @@ class RateCapBucketTest {
     @Test
     void sustainedUnregisteredInboundBoundedBySharedLimiter() {
         TestClock clock = new TestClock(Instant.parse("2026-06-08T00:00:00Z"));
-        RateCapBucket bucket = new RateCapBucket(clock, CAP, REFILL_WINDOW, EVICTION_THRESHOLD);
+        RateCapBucket bucket = new RateCapBucket(clock, CONTACT_SETTINGS);
 
         for (int i = 0; i < CAP; i++) {
             assertTrue(bucket.tryAcquire("inmemory", "s-" + i, false),
@@ -239,7 +246,7 @@ class RateCapBucketTest {
     @Test
     void registeredContactRetainsIndependentPerUserCapUnaffectedByStrangerFlood() {
         TestClock clock = new TestClock(Instant.parse("2026-06-08T00:00:00Z"));
-        RateCapBucket bucket = new RateCapBucket(clock, CAP, REFILL_WINDOW, EVICTION_THRESHOLD);
+        RateCapBucket bucket = new RateCapBucket(clock, CONTACT_SETTINGS);
 
         // Drain the shared stranger budget completely with a flood.
         for (int i = 0; i < CAP * 10; i++) {
@@ -270,7 +277,7 @@ class RateCapBucketTest {
     @Test
     void strangerAdmittedWhenSharedBudgetHasCapacityAndAgainAfterRefill() {
         TestClock clock = new TestClock(Instant.parse("2026-06-08T00:00:00Z"));
-        RateCapBucket bucket = new RateCapBucket(clock, CAP, REFILL_WINDOW, EVICTION_THRESHOLD);
+        RateCapBucket bucket = new RateCapBucket(clock, CONTACT_SETTINGS);
 
         // An active flood drains the shared budget.
         for (int i = 0; i < CAP; i++) {
@@ -292,7 +299,7 @@ class RateCapBucketTest {
     // ----- D47 per-group LLM sub-bucket (M1-222) --------------------------
     // Per docs/spec/security.md §Rate limiting "Per-group LLM rate (D47)":
     // a separate sub-bucket per approved group bounding LLM-triggering
-    // operations across all group members. Driven through the 8-arg test
+    // operations across all group members. Driven through the settings
     // seam with a small cap against the controllable TestClock, mirroring
     // the contact-bucket tests above.
 
@@ -300,8 +307,8 @@ class RateCapBucketTest {
     private static final Duration GROUP_LLM_REFILL_WINDOW = Duration.ofMinutes(15);
 
     private static RateCapBucket bucketWithGroupLlmSeam(TestClock clock) {
-        return new RateCapBucket(clock, CAP, REFILL_WINDOW, EVICTION_THRESHOLD,
-                10, Duration.ofMinutes(15), GROUP_LLM_CAP, GROUP_LLM_REFILL_WINDOW);
+        return new RateCapBucket(clock, CONTACT_SETTINGS
+                .withGroupLlmBucket(GROUP_LLM_CAP, GROUP_LLM_REFILL_WINDOW));
     }
 
     @Test
@@ -390,8 +397,8 @@ class RateCapBucketTest {
     @Test
     void groupLlmEvictionDoesNotOutpaceRefillWindow() {
         TestClock clock = new TestClock(Instant.parse("2026-06-07T00:00:00Z"));
-        RateCapBucket bucket = new RateCapBucket(clock, CAP, REFILL_WINDOW, EVICTION_THRESHOLD,
-                10, Duration.ofMinutes(15), 1, GROUP_LLM_REFILL_WINDOW);
+        RateCapBucket bucket = new RateCapBucket(clock, CONTACT_SETTINGS
+                .withGroupLlmBucket(1, GROUP_LLM_REFILL_WINDOW));
         UUID groupId = UUID.randomUUID();
 
         assertTrue(bucket.tryAcquireGroupLlm(groupId), "the single token drains the cap-1 bucket");
@@ -411,7 +418,7 @@ class RateCapBucketTest {
     // ----- D47 per-group command sub-bucket (M1-222 redteam follow-up) ----
     // Per docs/spec/security.md §Rate limiting "Per-group command rate
     // (D47)": a sub-bucket per approved group bounding total command volume
-    // from all members. Driven through the 10-arg test seam with a small
+    // from all members. Driven through the settings seam with a small
     // cap against the controllable TestClock, mirroring the group-LLM
     // tests above.
 
@@ -419,9 +426,9 @@ class RateCapBucketTest {
     private static final Duration GROUP_COMMAND_REFILL_WINDOW = Duration.ofMinutes(15);
 
     private static RateCapBucket bucketWithGroupCommandSeam(TestClock clock, int groupCommandCap) {
-        return new RateCapBucket(clock, CAP, REFILL_WINDOW, EVICTION_THRESHOLD,
-                10, Duration.ofMinutes(15), GROUP_LLM_CAP, GROUP_LLM_REFILL_WINDOW,
-                groupCommandCap, GROUP_COMMAND_REFILL_WINDOW);
+        return new RateCapBucket(clock, CONTACT_SETTINGS
+                .withGroupLlmBucket(GROUP_LLM_CAP, GROUP_LLM_REFILL_WINDOW)
+                .withGroupCommandBucket(groupCommandCap, GROUP_COMMAND_REFILL_WINDOW));
     }
 
     @Test
@@ -518,7 +525,7 @@ class RateCapBucketTest {
     // ----- D47 step 3.5 per-group reply bucket (M1-112) -------------------
     // Per docs/spec/security.md §Rate limiting "per-group reply": one
     // sub-bucket per group bounding outbound reply volume across approval
-    // states. Driven through the 6-arg test seam with a small cap against
+    // states. Driven through the settings seam with a small cap against
     // the controllable TestClock, mirroring the group-LLM / group-command
     // tests above. (The reply bucket had no direct coverage before T11.)
 
@@ -526,8 +533,8 @@ class RateCapBucketTest {
     private static final Duration GROUP_REPLY_REFILL_WINDOW = Duration.ofMinutes(15);
 
     private static RateCapBucket bucketWithGroupReplySeam(TestClock clock) {
-        return new RateCapBucket(clock, CAP, REFILL_WINDOW, EVICTION_THRESHOLD,
-                GROUP_REPLY_CAP, GROUP_REPLY_REFILL_WINDOW);
+        return new RateCapBucket(clock, CONTACT_SETTINGS
+                .withGroupReplyBucket(GROUP_REPLY_CAP, GROUP_REPLY_REFILL_WINDOW));
     }
 
     @Test

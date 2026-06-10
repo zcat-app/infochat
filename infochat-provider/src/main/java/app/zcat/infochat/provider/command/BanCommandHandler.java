@@ -194,11 +194,9 @@ public class BanCommandHandler implements CommandHandler {
         // First-call path — parse `<contact>` + optional `--reason "..."`.
         BanArgs args = BanArgs.parse(rawText);
         if (args == null) {
-            // No positional contact arg. Fall back to error.admin_only;
-            // no spec-named friendly error covers this shape (callers
-            // who pass `/ban` with no args would only reach this branch
-            // post-admin-gate — non-admin would short-circuit above).
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+            return reply(scope, MessageFormat.format(
+                    bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT),
+                    "/ban <contact> [--reason \"...\"]"));
         }
         String targetContactId = args.contact;
 

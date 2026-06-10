@@ -164,7 +164,9 @@ public class UnbanCommandHandler implements CommandHandler {
         // Step 2 — parse `<contact>`.
         UnbanArgs args = UnbanArgs.parse(rawText);
         if (args == null) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+            return reply(scope, MessageFormat.format(
+                    bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT),
+                    "/unban <contact>"));
         }
         String targetContactId = args.contact;
 

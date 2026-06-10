@@ -203,7 +203,9 @@ public class RevokeAdminCommandHandler implements CommandHandler {
         // Step 2 — parse positional <contact>.
         String targetContactId = parseTargetContact(rawText);
         if (targetContactId == null) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+            return reply(scope, MessageFormat.format(
+                    bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT),
+                    "/revoke-admin <contact>"));
         }
 
         // Step 3 — permission pre-check (spec §Authorization model
