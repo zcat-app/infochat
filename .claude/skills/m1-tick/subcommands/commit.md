@@ -11,9 +11,16 @@ Preconditions:
 Steps:
 
 1. **Identify the files about to be committed.** Run `git diff --name-only HEAD` to list modified files in the working tree. Exclude the ticket file itself AND `docs/plan/m1/STATUS.md` (the ticket file's frontmatter mutation in step 4 and the STATUS.md regeneration in step 5 both happen *after* this check; we're checking the freshness of the test result against the source/test code that produced it. STATUS.md is a workflow-artifact regeneration, not a source edit, and so does not invalidate test freshness). Call this set the *commit candidates*.
-2. **Test-freshness safety check.**
-   - For tickets with `complexity: high` OR `risk: high`: re-run `mvn verify` from the repo root using the exact `.scratch/` → `target/` capture command in SKILL.md §M1 workflow rules "Capture `mvn verify` output to a fixed path" (that rule also explains why a direct `target/` redirect loses the log), with round token `rcommit` so the log lands at `target/m1-tick-test-{ID}-rcommit.log`. Refuse to commit if the exit code is non-zero.
-   - For all other tickets: locate the most recent `target/m1-tick-test-{ID}-r*.log`. Read its mtime. Compute the latest mtime among the *commit candidates* from step 1. If the test log is older than any commit candidate, refuse and tell the user to re-run `mvn verify` (the test result is stale relative to the code about to be committed).
+2. **Test-freshness safety check (user-gated, all tickets).**
+   - Gather verified evidence — each item checked against disk/git, never assumed:
+     1. *Prior log*: does a `target/m1-tick-test-{ID}-r*.log` exist? If yes, record its round token, mtime, and confirm it actually contains `BUILD SUCCESS` (grep the log — a log that exists but is red or truncated counts as "no green log").
+     2. *Changes since the log*: the explicit list of *commit candidates* from step 1 (code, test, or configuration files) with mtimes newer than the log. An empty list means skipping the re-run misses nothing; a non-empty list is printed file-by-file in the menu.
+     3. *History*: whether the branch was merged or rebased after the log's mtime (`git reflog` entries). A merge/rebase invalidates the log even with no file changes.
+   - ALWAYS present a blocking confirmation menu (`AskUserQuestion`) before proceeding — never silently re-run and never silently reuse. The menu question must state explicitly: whether a green log exists (path + round + age), the verified changed-files-since-log list (or "none — skipping misses nothing"), and the merge/rebase result. A green verify stays valid while the tree is unchanged (user rule, M1-272, 2026-06-10). Options:
+     - **"Skip re-run — reuse log r<N>"** (recommended when a green log exists, the changed-files list is empty, and no merge/rebase intervened; otherwise its description must spell out exactly what the suite has not seen)
+     - **"Re-run full suite now"** (recommended when there is no green log, the list is non-empty, or a merge/rebase intervened)
+   - On re-run: use the exact `.scratch/` → `target/` capture command in SKILL.md §M1 workflow rules "Capture `mvn verify` output to a fixed path" (that rule also explains why a direct `target/` redirect loses the log), with round token `rcommit` so the log lands at `target/m1-tick-test-{ID}-rcommit.log`. Refuse to commit if the exit code is non-zero.
+   - On approved skip: proceed with the reused log; the user's menu choice is the recorded authorization.
 3. Build the commit message. Read the ticket file's `title:` field; if the value is YAML-quoted (surrounded by `"..."` or `'...'`, which YAML requires when the title contains a colon, hash, leading dash, or other reserved character), strip the surrounding quotes — the bare string is the imperative summary used in the subject line.
    ```
    M1-NNN: <ticket title (quotes stripped)>
