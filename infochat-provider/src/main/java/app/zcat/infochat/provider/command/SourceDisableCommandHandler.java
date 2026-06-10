@@ -102,7 +102,7 @@ public class SourceDisableCommandHandler implements CommandHandler {
     public OutboundMessage handle(ScopeRef scope, String rawText) {
         if (scope instanceof ScopeRef.Group group) {
             if (!isGroupAdmin(group)) {
-                return reply(scope, bundleLoader.get(BundleKeys.ERROR_GROUP_ADMIN_NOT_IN_V1));
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_GROUP_ADMIN_NOT_IN_V1, inboundContext.effectiveLanguage()));
             }
         }
 
@@ -112,13 +112,13 @@ public class SourceDisableCommandHandler implements CommandHandler {
 
         Optional<UserRow> actorOpt = lookupUser(adapter, callerContactId);
         if (actorOpt.isEmpty() || !actorOpt.get().isAdmin) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
         }
         UserRow actor = actorOpt.get();
 
         UUID sourceId = parseSourceId(rawText);
         if (sourceId == null) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_SOURCE_DISABLE_UNKNOWN_ID));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_SOURCE_DISABLE_UNKNOWN_ID, inboundContext.effectiveLanguage()));
         }
 
         // Pre-flight read outside the transaction — surfaces unknown-id
@@ -128,11 +128,11 @@ public class SourceDisableCommandHandler implements CommandHandler {
         // audit + state write.
         Optional<SourceRow> preflightOpt = lookupSource(sourceId);
         if (preflightOpt.isEmpty()) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_SOURCE_DISABLE_UNKNOWN_ID));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_SOURCE_DISABLE_UNKNOWN_ID, inboundContext.effectiveLanguage()));
         }
         SourceRow preflight = preflightOpt.get();
         if (!"active".equals(preflight.status) || preflight.deletedAt != null) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_SOURCE_DISABLE_NOT_ACTIVE));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_SOURCE_DISABLE_NOT_ACTIVE, inboundContext.effectiveLanguage()));
         }
 
         try (Connection conn = dataSource.getConnection()) {
@@ -148,7 +148,7 @@ public class SourceDisableCommandHandler implements CommandHandler {
                         || !"active".equals(locked.status)
                         || locked.deletedAt != null) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_SOURCE_DISABLE_NOT_ACTIVE));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_SOURCE_DISABLE_NOT_ACTIVE, inboundContext.effectiveLanguage()));
                 }
 
                 // Invariant 7: audit-before-effect. The SOURCE_DISABLE
@@ -160,7 +160,7 @@ public class SourceDisableCommandHandler implements CommandHandler {
                 conn.commit();
 
                 String body = MessageFormat.format(
-                        bundleLoader.get(BundleKeys.REPLY_SOURCE_DISABLE_SUCCESS),
+                        bundleLoader.get(BundleKeys.REPLY_SOURCE_DISABLE_SUCCESS, inboundContext.effectiveLanguage()),
                         preflight.displayName);
                 return reply(scope, body);
             } catch (SQLException e) {

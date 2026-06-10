@@ -110,7 +110,7 @@ public class ApproveGroupCommandHandler implements CommandHandler {
         // identically to DM scope because senderContactId() carries the
         // sender id regardless of scope shape.
         if (adapter == null || callerContactId == null) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
         }
 
         // Step 3 — parse positional <group_id>. The "missing arg" and
@@ -119,7 +119,7 @@ public class ApproveGroupCommandHandler implements CommandHandler {
         UUID groupId = parseGroupId(rawText);
         if (groupId == null) {
             return reply(scope, MessageFormat.format(
-                    bundleLoader.get(BundleKeys.ERROR_GROUP_NOT_FOUND),
+                    bundleLoader.get(BundleKeys.ERROR_GROUP_NOT_FOUND, inboundContext.effectiveLanguage()),
                     parseGroupIdRaw(rawText)));
         }
 
@@ -143,7 +143,7 @@ public class ApproveGroupCommandHandler implements CommandHandler {
                         lookupActorForUpdate(conn, adapter, callerContactId);
                 if (actorOpt.isEmpty() || !actorOpt.get().isAdmin) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
                 }
                 UserRow actor = actorOpt.get();
                 try (PreparedStatement ps = conn.prepareStatement(
@@ -158,7 +158,7 @@ public class ApproveGroupCommandHandler implements CommandHandler {
                 if (targetOpt.isEmpty()) {
                     conn.rollback();
                     return reply(scope, MessageFormat.format(
-                            bundleLoader.get(BundleKeys.ERROR_GROUP_NOT_FOUND),
+                            bundleLoader.get(BundleKeys.ERROR_GROUP_NOT_FOUND, inboundContext.effectiveLanguage()),
                             groupId));
                 }
                 targetGroup = targetOpt.get();
@@ -169,7 +169,7 @@ public class ApproveGroupCommandHandler implements CommandHandler {
                 if ("approved".equals(targetGroup.approvalStatus())) {
                     conn.rollback();
                     return reply(scope, MessageFormat.format(
-                            bundleLoader.get(BundleKeys.REPLY_APPROVE_GROUP_NOOP),
+                            bundleLoader.get(BundleKeys.REPLY_APPROVE_GROUP_NOOP, inboundContext.effectiveLanguage()),
                             groupId));
                 }
 
@@ -203,10 +203,10 @@ public class ApproveGroupCommandHandler implements CommandHandler {
         // are logged but do not retract the approval; the admin's
         // success reply still goes out.
         sendGroupNotification(targetGroup,
-                bundleLoader.get(BundleKeys.GROUP_APPROVED_MESSAGE));
+                bundleLoader.get(BundleKeys.GROUP_APPROVED_MESSAGE, inboundContext.effectiveLanguage()));
 
         return reply(scope, MessageFormat.format(
-                bundleLoader.get(BundleKeys.REPLY_APPROVE_GROUP_SUCCESS),
+                bundleLoader.get(BundleKeys.REPLY_APPROVE_GROUP_SUCCESS, inboundContext.effectiveLanguage()),
                 groupId));
     }
 

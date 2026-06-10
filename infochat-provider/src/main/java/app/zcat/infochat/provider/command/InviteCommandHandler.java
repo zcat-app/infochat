@@ -173,7 +173,7 @@ public class InviteCommandHandler implements CommandHandler {
         // scope error before resolving the caller — matching the guard in
         // the other bot-global admin handlers (Audit, Quarantine, etc.).
         if (scope instanceof ScopeRef.Group) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY, inboundContext.effectiveLanguage()));
         }
         String inboundAdapter = inboundContext.adapterName();
         String callerContactId = contactIdOf(scope);
@@ -183,7 +183,7 @@ public class InviteCommandHandler implements CommandHandler {
         // per-inbound; the target adapter is a flag).
         Optional<UserRow> actorOpt = lookupUser(inboundAdapter, callerContactId);
         if (actorOpt.isEmpty() || !actorOpt.get().isAdmin) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
         }
         UserRow actor = actorOpt.get();
 
@@ -196,7 +196,7 @@ public class InviteCommandHandler implements CommandHandler {
             case "create" -> handleCreate(scope, actor, inboundAdapter, remainder);
             case "list" -> handleList(scope, remainder);
             case "revoke" -> handleRevoke(scope, actor, inboundAdapter, remainder);
-            default -> reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_UNKNOWN_SUBCOMMAND));
+            default -> reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_UNKNOWN_SUBCOMMAND, inboundContext.effectiveLanguage()));
         };
     }
 
@@ -224,7 +224,7 @@ public class InviteCommandHandler implements CommandHandler {
             Optional<ConfirmStateService.PendingConfirm> taken =
                     confirmStateService.takeMatching(actor.id, scope, "invite:create:open");
             if (taken.isEmpty()) {
-                return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONFIRM_NO_PENDING));
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONFIRM_NO_PENDING, inboundContext.effectiveLanguage()));
             }
             InviteCreateOpenConfirm pending = (InviteCreateOpenConfirm) taken.get();
             return createOpen(scope, actor, inboundAdapter, pending.targetAdapter());
@@ -236,10 +236,10 @@ public class InviteCommandHandler implements CommandHandler {
         // spec's friendly errors fire in this priority order (mutually
         // exclusive before missing, both before unknown adapter / cap).
         if (args.contact != null && args.open) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_MUTUALLY_EXCLUSIVE));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_MUTUALLY_EXCLUSIVE, inboundContext.effectiveLanguage()));
         }
         if (args.contact == null && !args.open) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_MISSING_FLAG));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_MISSING_FLAG, inboundContext.effectiveLanguage()));
         }
 
         // Adapter validation against the currently-enabled set.
@@ -247,7 +247,7 @@ public class InviteCommandHandler implements CommandHandler {
         String targetAdapter = args.adapter;
         if (targetAdapter == null || !enabled.contains(targetAdapter)) {
             String body = MessageFormat.format(
-                    bundleLoader.get(BundleKeys.ERROR_INVITE_UNKNOWN_ADAPTER),
+                    bundleLoader.get(BundleKeys.ERROR_INVITE_UNKNOWN_ADAPTER, inboundContext.effectiveLanguage()),
                     targetAdapter == null ? "" : targetAdapter);
             return reply(scope, body);
         }
@@ -278,7 +278,7 @@ public class InviteCommandHandler implements CommandHandler {
         confirmStateService.remember(actor.id, scope,
                 new InviteCreateOpenConfirm(targetAdapter));
         String prompt = MessageFormat.format(
-                bundleLoader.get(BundleKeys.REPLY_CONFIRM_PROMPT_INVITE_CREATE_OPEN),
+                bundleLoader.get(BundleKeys.REPLY_CONFIRM_PROMPT_INVITE_CREATE_OPEN, inboundContext.effectiveLanguage()),
                 Long.toString(confirmStateService.timeoutSeconds()),
                 targetAdapter);
         return reply(scope, prompt);
@@ -300,7 +300,7 @@ public class InviteCommandHandler implements CommandHandler {
         // contact (spec §Admin Unknown-contact rule exception).
         Optional<UserRow> targetOpt = lookupUser(targetAdapter, targetContactId);
         if (targetOpt.isPresent() && targetOpt.get().isBanned) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_BANNED_TARGET));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_BANNED_TARGET, inboundContext.effectiveLanguage()));
         }
 
         String requestId = UUID.randomUUID().toString();
@@ -312,7 +312,7 @@ public class InviteCommandHandler implements CommandHandler {
                 long current = countContactBoundPending(conn);
                 if (current >= contactCap) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_CONTACT_CAP_MET));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_CONTACT_CAP_MET, inboundContext.effectiveLanguage()));
                 }
 
                 // Audit-before-effect: mint the code (pure read), write
@@ -344,7 +344,7 @@ public class InviteCommandHandler implements CommandHandler {
         }
 
         String body = MessageFormat.format(
-                bundleLoader.get(BundleKeys.REPLY_INVITE_CREATED), code.toString());
+                bundleLoader.get(BundleKeys.REPLY_INVITE_CREATED, inboundContext.effectiveLanguage()), code.toString());
         return reply(scope, body);
     }
 
@@ -361,7 +361,7 @@ public class InviteCommandHandler implements CommandHandler {
                 long current = countOpenPendingForAdapter(conn, targetAdapter);
                 if (current >= openCap) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_OPEN_CAP_MET));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_OPEN_CAP_MET, inboundContext.effectiveLanguage()));
                 }
 
                 // Audit-before-effect: see {@link #createContactBound}
@@ -389,7 +389,7 @@ public class InviteCommandHandler implements CommandHandler {
         }
 
         String body = MessageFormat.format(
-                bundleLoader.get(BundleKeys.REPLY_INVITE_CREATED), code.toString());
+                bundleLoader.get(BundleKeys.REPLY_INVITE_CREATED, inboundContext.effectiveLanguage()), code.toString());
         return reply(scope, body);
     }
 
@@ -470,7 +470,7 @@ public class InviteCommandHandler implements CommandHandler {
                     "InviteCommandHandler.handleList failed", e);
         }
 
-        StringBuilder body = new StringBuilder(bundleLoader.get(BundleKeys.REPLY_INVITE_LIST_HEADER));
+        StringBuilder body = new StringBuilder(bundleLoader.get(BundleKeys.REPLY_INVITE_LIST_HEADER, inboundContext.effectiveLanguage()));
         for (PendingInviteRow row : rows) {
             body.append('\n');
             body.append(renderListEntry(row));
@@ -485,14 +485,14 @@ public class InviteCommandHandler implements CommandHandler {
         String expiresAtIso = row.expiresAt == null ? "(no expiry)" : row.expiresAt.toString();
         if ("OPEN_ADAPTER".equals(row.inviteType)) {
             return MessageFormat.format(
-                    bundleLoader.get(BundleKeys.REPLY_INVITE_LIST_ENTRY_OPEN),
+                    bundleLoader.get(BundleKeys.REPLY_INVITE_LIST_ENTRY_OPEN, inboundContext.effectiveLanguage()),
                     codeText, row.adapter, expiresAtIso);
         }
         String target = row.expectedContactId == null
                 ? ""
                 : ContactIds.redact(row.expectedContactId);
         return MessageFormat.format(
-                bundleLoader.get(BundleKeys.REPLY_INVITE_LIST_ENTRY),
+                bundleLoader.get(BundleKeys.REPLY_INVITE_LIST_ENTRY, inboundContext.effectiveLanguage()),
                 codeText, row.adapter, target, expiresAtIso);
     }
 
@@ -513,7 +513,7 @@ public class InviteCommandHandler implements CommandHandler {
             Optional<ConfirmStateService.PendingConfirm> taken =
                     confirmStateService.takeMatching(actor.id, scope, "invite:revoke");
             if (taken.isEmpty()) {
-                return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONFIRM_NO_PENDING));
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONFIRM_NO_PENDING, inboundContext.effectiveLanguage()));
             }
             InviteRevokeConfirm pending = (InviteRevokeConfirm) taken.get();
             return executeRevoke(scope, actor, inboundAdapter, pending.code());
@@ -524,7 +524,7 @@ public class InviteCommandHandler implements CommandHandler {
         try {
             code = UUID.fromString(codeText);
         } catch (IllegalArgumentException e) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_REVOKE_NOT_PENDING));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_REVOKE_NOT_PENDING, inboundContext.effectiveLanguage()));
         }
 
         // First-call path — validation passes only the UUID-parse here.
@@ -554,7 +554,7 @@ public class InviteCommandHandler implements CommandHandler {
         confirmStateService.remember(actor.id, scope,
                 new InviteRevokeConfirm(code));
         String prompt = MessageFormat.format(
-                bundleLoader.get(BundleKeys.REPLY_CONFIRM_PROMPT_INVITE_REVOKE),
+                bundleLoader.get(BundleKeys.REPLY_CONFIRM_PROMPT_INVITE_REVOKE, inboundContext.effectiveLanguage()),
                 Long.toString(confirmStateService.timeoutSeconds()),
                 code.toString().substring(0, 8));
         return reply(scope, prompt);
@@ -576,7 +576,7 @@ public class InviteCommandHandler implements CommandHandler {
                     // survives — audit-before-effect with no effect = no
                     // audit row.
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_REVOKE_NOT_PENDING));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_REVOKE_NOT_PENDING, inboundContext.effectiveLanguage()));
                 }
 
                 insertAudit(conn, AuditAction.INVITE_REVOKE, inviteId.toString(), null,
@@ -588,7 +588,7 @@ public class InviteCommandHandler implements CommandHandler {
                     // row, so this should be unreachable. Roll back to
                     // keep the invariant audit-row-iff-mutation.
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_REVOKE_NOT_PENDING));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_INVITE_REVOKE_NOT_PENDING, inboundContext.effectiveLanguage()));
                 }
 
                 conn.commit();
@@ -602,7 +602,7 @@ public class InviteCommandHandler implements CommandHandler {
                     "InviteCommandHandler.executeRevoke connection failed", e);
         }
 
-        return reply(scope, bundleLoader.get(BundleKeys.REPLY_INVITE_REVOKED));
+        return reply(scope, bundleLoader.get(BundleKeys.REPLY_INVITE_REVOKED, inboundContext.effectiveLanguage()));
     }
 
     private @Nullable UUID lockPendingInviteId(Connection conn, UUID code) throws SQLException {

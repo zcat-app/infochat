@@ -149,7 +149,7 @@ public class UnbanCommandHandler implements CommandHandler {
         // which an all-member-visible group reply must not surface.
         // Return the accurate scope error before resolving the caller.
         if (scope instanceof ScopeRef.Group) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY, inboundContext.effectiveLanguage()));
         }
         String adapter = inboundContext.adapterName();
         String callerContactId = contactIdOf(scope);
@@ -157,7 +157,7 @@ public class UnbanCommandHandler implements CommandHandler {
         // Step 1 — admin gate.
         Optional<UserRow> actorOpt = lookupUser(adapter, callerContactId);
         if (actorOpt.isEmpty() || !actorOpt.get().isAdmin) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
         }
         UserRow actor = actorOpt.get();
 
@@ -165,7 +165,7 @@ public class UnbanCommandHandler implements CommandHandler {
         UnbanArgs args = UnbanArgs.parse(rawText);
         if (args == null) {
             return reply(scope, MessageFormat.format(
-                    bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT),
+                    bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT, inboundContext.effectiveLanguage()),
                     "/unban <contact>"));
         }
         String targetContactId = args.contact;
@@ -186,21 +186,21 @@ public class UnbanCommandHandler implements CommandHandler {
         // DB write (Unknown-contact rule per spec §Admin).
         Optional<UserRow> targetOpt = lookupUser(adapter, targetContactId);
         if (targetOpt.isEmpty()) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONTACT_NOT_REGISTERED));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONTACT_NOT_REGISTERED, inboundContext.effectiveLanguage()));
         }
         UserRow target = targetOpt.get();
 
         // Step 4 — preban carve-out.
         if ("preban".equals(target.registrationState)) {
             executeDeletePrebanUser(adapter, targetContactId, target.id, actor.id, requestId);
-            return reply(scope, bundleLoader.get(BundleKeys.REPLY_UNBAN_PREBAN_DELETED));
+            return reply(scope, bundleLoader.get(BundleKeys.REPLY_UNBAN_PREBAN_DELETED, inboundContext.effectiveLanguage()));
         }
 
         // Step 4.5 — not-banned no-op. Nothing to unban: no UNBAN
         // audit row, no group-admin restoration claim, no UPDATE. The
         // step-2.5 intent row is the only trace of the probe.
         if (!target.isBanned) {
-            return reply(scope, bundleLoader.get(BundleKeys.REPLY_UNBAN_PLAIN));
+            return reply(scope, bundleLoader.get(BundleKeys.REPLY_UNBAN_PLAIN, inboundContext.effectiveLanguage()));
         }
 
         // Step 5 — non-preban path. One transaction: read group-admin
@@ -250,11 +250,11 @@ public class UnbanCommandHandler implements CommandHandler {
         // Step 6 / 7 — reply. Group-admin restoration disclosure when
         // any rows were restored, otherwise the plain reply.
         if (restored.isEmpty()) {
-            return reply(scope, bundleLoader.get(BundleKeys.REPLY_UNBAN_PLAIN));
+            return reply(scope, bundleLoader.get(BundleKeys.REPLY_UNBAN_PLAIN, inboundContext.effectiveLanguage()));
         }
         String groupList = renderGroupList(restored);
         String body = MessageFormat.format(
-                bundleLoader.get(BundleKeys.REPLY_UNBAN_GROUP_ADMINS_RESTORED),
+                bundleLoader.get(BundleKeys.REPLY_UNBAN_GROUP_ADMINS_RESTORED, inboundContext.effectiveLanguage()),
                 groupList);
         return reply(scope, body);
     }

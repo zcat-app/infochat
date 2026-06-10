@@ -109,7 +109,7 @@ public class CompressCommandHandler implements CommandHandler {
 
         Optional<UUID> actorIdOpt = lookupUserId(adapter, callerContactId);
         if (actorIdOpt.isEmpty()) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage()));
         }
         UUID actorId = actorIdOpt.get();
 
@@ -120,12 +120,12 @@ public class CompressCommandHandler implements CommandHandler {
         CompressResult result = compress(actorId, scopeKind, scopeId, scopeLanguage);
         return switch (result) {
             case CompressResult.Success s -> reply(scope,
-                    MessageFormat.format(bundleLoader.get(BundleKeys.REPLY_COMPRESS_SUCCESS),
+                    MessageFormat.format(bundleLoader.get(BundleKeys.REPLY_COMPRESS_SUCCESS, inboundContext.effectiveLanguage()),
                             Integer.toString(s.messageCount)));
             case CompressResult.NoMessages ignored ->
-                    reply(scope, bundleLoader.get(BundleKeys.REPLY_COMPRESS_NOOP));
+                    reply(scope, bundleLoader.get(BundleKeys.REPLY_COMPRESS_NOOP, inboundContext.effectiveLanguage()));
             case CompressResult.Failure ignored ->
-                    reply(scope, bundleLoader.get(BundleKeys.ERROR_COMPRESS_FAILED));
+                    reply(scope, bundleLoader.get(BundleKeys.ERROR_COMPRESS_FAILED, inboundContext.effectiveLanguage()));
         };
     }
 

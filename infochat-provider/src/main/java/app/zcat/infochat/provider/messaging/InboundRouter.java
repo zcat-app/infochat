@@ -160,7 +160,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * After the rate-cap check, {@link #onMessage} drops any inbound
  * whose UTF-8 byte length exceeds
  * {@code infochat.router.max-inbound-body-bytes} with the fixed
- * {@link #MESSAGE_TOO_LARGE_REPLY} literal. Ordering rationale
+ * {@code error.router.message_too_large} bundle reply. Ordering rationale
  * (M1-044e): rate-cap fires FIRST so a hostile flood cannot drive
  * outbound cost via the size-cap reply path (closes the DOS
  * amplification surface — over-cap inbound never produces a friendly
@@ -204,27 +204,6 @@ public class InboundRouter {
     static final String CHAT_MODE_REPLY =
             "Chat-mode replies are not in the MVP; try /help for the available commands.";
 
-    /** Deterministic English literal for an unknown slash command until M1-035c's bundle infrastructure lands. */
-    static final String UNKNOWN_COMMAND_REPLY =
-            "Unknown command. Try /help for the available commands.";
-
-    /**
-     * Deterministic English literal for any uncaught dispatch exception.
-     * The exception's own message is NEVER interpolated here — that
-     * is M1-020's sanitization concern. A fixed literal sidesteps it
-     * for MVP.
-     */
-    static final String INTERNAL_ERROR_REPLY =
-            "Something went wrong handling that message. Please try again.";
-
-    /**
-     * Deterministic English literal for an oversize inbound. Sent
-     * before the normalization pass runs (see body-size cap docs at
-     * the class level).
-     */
-    static final String MESSAGE_TOO_LARGE_REPLY =
-            "That message is too large for the bot to process. Please shorten it and resend.";
-
     /**
      * Test-only seam: incremented on entry to {@link #normalize}. The
      * size-cap test asserts this counter does not advance across an
@@ -248,6 +227,14 @@ public class InboundRouter {
     private static final String ENSURE_MEMBERSHIP_SQL =
             "INSERT INTO group_membership (group_id, user_id) VALUES (?, ?) "
                     + "ON CONFLICT DO NOTHING";
+
+    /**
+     * Effective scope language per D43 — same resolution semantics as
+     * {@code ChatAgent.readScopeLanguage} and the digest path's
+     * {@code GROUP_META_SQL} COALESCE: a missing row means {@code en}.
+     */
+    private static final String SELECT_SCOPE_LANGUAGE_SQL =
+            "SELECT language FROM scope_preferences WHERE scope_kind = ? AND scope_id = ?";
 
     @Inject
     Instance<CommandHandler> commandHandlers;
@@ -373,7 +360,7 @@ public class InboundRouter {
         // Step 1.5 — transport-level rate cap. Fires FIRST per spec
         // §Authorization model step 1.5: over-cap inbound is dropped
         // silently with NO outbound (no ban reply, no invite-required
-        // reply, no friendly error — including no MESSAGE_TOO_LARGE_REPLY).
+        // reply, no friendly error — including no size-cap reply).
         // A hostile flood that would otherwise drive the size-cap reply
         // path is short-circuited here, closing the DOS amplification
         // surface (M1-044e fix). Bucket arithmetic is O(1) and cares
@@ -402,7 +389,13 @@ public class InboundRouter {
         // normalize so NFKC amplification cannot drive cost on
         // adversarial inputs.
         if (raw != null && exceedsUtf8ByteLength(raw, maxInboundBodyBytes)) {
-            sendReply(msg.scope(), MESSAGE_TOO_LARGE_REPLY, adapterName);
+            // Fires before any DB step by design (the hostile-flood path
+            // must stay query-free), so the context language is still the
+            // pre-resolution "en" default — see InboundContext#effectiveLanguage.
+            sendReply(msg.scope(),
+                    bundleLoader.get(BundleKeys.ERROR_ROUTER_MESSAGE_TOO_LARGE,
+                            inboundContext.effectiveLanguage()),
+                    adapterName);
             return;
         }
 
@@ -439,13 +432,16 @@ public class InboundRouter {
             if (msg.scope() instanceof ScopeRef.Dm && snapshot.isEmpty()) {
                 InviteCodeConsumer.Outcome outcome =
                         inviteCodeConsumer.consume(adapterName, contactId, normalized);
+                // No users row → no scope_preferences row, so the context
+                // language is necessarily the "en" default here.
+                String lang = inboundContext.effectiveLanguage();
                 switch (outcome) {
                     case InviteCodeConsumer.Accepted a ->
-                            sendReply(msg.scope(), bundleLoader.get(BundleKeys.REPLY_WELCOME_DM_FRESH), adapterName);
+                            sendReply(msg.scope(), bundleLoader.get(BundleKeys.REPLY_WELCOME_DM_FRESH, lang), adapterName);
                     case InviteCodeConsumer.Rejected r ->
-                            sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_INVITE_REQUIRED), adapterName);
+                            sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_INVITE_REQUIRED, lang), adapterName);
                     case InviteCodeConsumer.BruteForceThresholdBreached b ->
-                            sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_INVITE_REQUIRED), adapterName);
+                            sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_INVITE_REQUIRED, lang), adapterName);
                 }
                 return;
             }
@@ -463,6 +459,24 @@ public class InboundRouter {
                     && (snapshot.isEmpty()
                             || REGISTRATION_STATE_PREBAN.equals(snapshot.get().registrationState()))) {
                 return;
+            }
+
+            // Effective scope language (D43), resolved as soon as the
+            // scope's id is known so every later reply on this dispatch
+            // renders in the language the scope chose. DM scope ids are
+            // the user's UUID — available right here from the snapshot
+            // (guaranteed present: DM-empty returned at step 2). Group
+            // scope ids resolve at step 4.1; group replies before that
+            // point (ban, approval gate, body caps) render the "en"
+            // context default — correct for pending/rejected groups,
+            // which can never have dispatched /lang, and a documented
+            // limitation for the banned-user-in-group reply. ONE
+            // scope_preferences SELECT per dispatch, on the dispatch
+            // connection — handlers read the context instead of
+            // querying per call site.
+            if (msg.scope() instanceof ScopeRef.Dm) {
+                inboundContext.setEffectiveLanguage(
+                        lookupScopeLanguage(db, "dm", snapshot.get().id()));
             }
 
             // Step 4 — ban check per spec §User ban + §Authorization model
@@ -486,7 +500,9 @@ public class InboundRouter {
             // takes effect on the next inbound. snapshot is guaranteed present
             // here — DM-empty returns at step 2, group-empty/preban at step 3.
             if (snapshot.get().isBanned()) {
-                sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_BAN_FIXED), adapterName);
+                sendReply(msg.scope(),
+                        bundleLoader.get(BundleKeys.ERROR_BAN_FIXED, inboundContext.effectiveLanguage()),
+                        adapterName);
                 return;
             }
 
@@ -512,7 +528,9 @@ public class InboundRouter {
                         // Fall through to step 4.1 (auto-promote).
                     }
                     case GroupApprovalCheck.Outcome.FixedReply f -> {
-                        sendReply(msg.scope(), bundleLoader.get(f.bundleKey()), adapterName);
+                        sendReply(msg.scope(),
+                                bundleLoader.get(f.bundleKey(), inboundContext.effectiveLanguage()),
+                                adapterName);
                         return;
                     }
                     case GroupApprovalCheck.Outcome.SilentDrop s -> {
@@ -531,7 +549,9 @@ public class InboundRouter {
             // reply, and the per-group reply rate bucket keep their spec'd
             // precedence over the cap reply.
             if (!normalized.startsWith("/") && normalized.length() > chatBodyCap) {
-                sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_CHAT_BODY_TOO_LARGE), adapterName);
+                sendReply(msg.scope(),
+                        bundleLoader.get(BundleKeys.ERROR_CHAT_BODY_TOO_LARGE, inboundContext.effectiveLanguage()),
+                        adapterName);
                 return;
             }
 
@@ -541,7 +561,9 @@ public class InboundRouter {
             // parser (handleSlash) — same ordering rationale as the chat cap
             // above (after the authorization gates, before any DB write).
             if (normalized.startsWith("/") && normalized.length() > commandBodyCap) {
-                sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_COMMAND_BODY_TOO_LARGE), adapterName);
+                sendReply(msg.scope(),
+                        bundleLoader.get(BundleKeys.ERROR_COMMAND_BODY_TOO_LARGE, inboundContext.effectiveLanguage()),
+                        adapterName);
                 return;
             }
 
@@ -568,6 +590,12 @@ public class InboundRouter {
                     return;
                 }
                 dispatchScopeId = groupId.get();
+                // Group counterpart of the DM resolution above: the
+                // group's scope id exists from this point on, so every
+                // later reply on this dispatch renders in the group's
+                // chosen language.
+                inboundContext.setEffectiveLanguage(
+                        lookupScopeLanguage(db, "group", dispatchScopeId));
                 if (groupAutoPromoteService != null) {
                     UUID senderId = snapshot.get().id();
                     groupAutoPromoteService.tryAutoPromote(dispatchScopeId, senderId, adapterName, contactId);
@@ -596,7 +624,7 @@ public class InboundRouter {
                 if (!commandPermissions.allowedDuringProbation(commandName)) {
                     Instant expiry = probationCheck.probationExpiry(probationActorId);
                     String body = MessageFormat.format(
-                            bundleLoader.get(BundleKeys.ERROR_PROBATION_BLOCKED),
+                            bundleLoader.get(BundleKeys.ERROR_PROBATION_BLOCKED, inboundContext.effectiveLanguage()),
                             formatTimeUntilUnlock(expiry));
                     sendReply(msg.scope(), body, adapterName);
                     return;
@@ -626,7 +654,7 @@ public class InboundRouter {
                 ConfirmStateService.PendingConfirm cancelled = pending.get();
                 confirmStateService.takeAny(confirmActorId, msg.scope());
                 String cancellation = MessageFormat.format(
-                        bundleLoader.get(BundleKeys.REPLY_CONFIRM_CANCELLED),
+                        bundleLoader.get(BundleKeys.REPLY_CONFIRM_CANCELLED, inboundContext.effectiveLanguage()),
                         cancelled.commandName());
                 sendReply(msg.scope(), cancellation, adapterName);
             }
@@ -673,7 +701,7 @@ public class InboundRouter {
                 // groups.id resolved once at step 4.1.
                 if (msg.scope() instanceof ScopeRef.Group
                         && !rateCapBucket.tryAcquireGroupCommand(dispatchScopeId)) {
-                    body = bundleLoader.get(BundleKeys.GROUP_COMMAND_RATE_LIMIT);
+                    body = bundleLoader.get(BundleKeys.GROUP_COMMAND_RATE_LIMIT, inboundContext.effectiveLanguage());
                 } else {
                     body = handleSlash(msg.scope(), normalized);
                 }
@@ -687,7 +715,7 @@ public class InboundRouter {
                 // schema §Invariants).
                 UUID actorId = snapshot.get().id();
                 if (!llmRateCap.tryAcquire(actorId)) {
-                    body = bundleLoader.get(BundleKeys.ERROR_CHAT_LLM_RATE_CAP);
+                    body = bundleLoader.get(BundleKeys.ERROR_CHAT_LLM_RATE_CAP, inboundContext.effectiveLanguage());
                 } else {
                     String scopeKind = chatModeScopeKindOf(msg.scope());
                     // Per-group LLM backstop (D47, M1-222) per spec
@@ -708,7 +736,7 @@ public class InboundRouter {
                         // acquired above — the backstop must not drain the
                         // sender's personal budget on fixed replies.
                         llmRateCap.refund(actorId);
-                        body = bundleLoader.get(BundleKeys.GROUP_LLM_RATE_LIMIT);
+                        body = bundleLoader.get(BundleKeys.GROUP_LLM_RATE_LIMIT, inboundContext.effectiveLanguage());
                     } else {
                         body = dispatchChat(actorId, scopeKind, dispatchScopeId, normalized);
                     }
@@ -719,7 +747,9 @@ public class InboundRouter {
                     "InboundRouter dispatch failed for scope="
                             + ContactIds.redact(scopeIdOf(msg.scope())),
                     e);
-            body = INTERNAL_ERROR_REPLY;
+            // The exception's own message is NEVER interpolated here —
+            // a fixed bundle reply sidesteps M1-020's sanitization concern.
+            body = bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage());
         }
 
         // A null body means a self-delivering handler already shipped
@@ -893,7 +923,7 @@ public class InboundRouter {
         if (assetCommandFamilyOracle != null && assetCommandFamilyOracle.isAssetCommand(commandName)) {
             return assetHandler.handle(commandName, scope, normalized).text();
         }
-        return UNKNOWN_COMMAND_REPLY;
+        return bundleLoader.get(BundleKeys.ERROR_UNKNOWN_COMMAND, inboundContext.effectiveLanguage());
     }
 
     /**
@@ -987,6 +1017,32 @@ public class InboundRouter {
         } catch (SQLException e) {
             throw new IllegalStateException(
                     "InboundRouter.lookupGroupId failed for adapter=" + adapter, e);
+        }
+    }
+
+    /**
+     * Resolve the effective scope language for {@code (scopeKind,
+     * scopeId)} per D43: a missing {@code scope_preferences} row means
+     * {@code en}. Called at most once per dispatch — DM right after the
+     * users-row snapshot gates, group at the step-4.1 resolution; the
+     * result is published to {@link InboundContext#effectiveLanguage()}
+     * for every downstream bundle lookup. Same test seam as
+     * {@link #lookupUser}: package-private + non-final, runs on the
+     * shared per-dispatch connection.
+     */
+    String lookupScopeLanguage(DispatchDb db, String scopeKind, UUID scopeId) {
+        try (PreparedStatement ps = db.connection().prepareStatement(SELECT_SCOPE_LANGUAGE_SQL)) {
+            ps.setString(1, scopeKind);
+            ps.setObject(2, scopeId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return "en";
+                }
+                return rs.getString("language");
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "InboundRouter.lookupScopeLanguage failed for scope_kind=" + scopeKind, e);
         }
     }
 

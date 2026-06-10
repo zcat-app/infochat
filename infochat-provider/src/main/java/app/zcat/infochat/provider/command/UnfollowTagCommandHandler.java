@@ -156,13 +156,13 @@ public class UnfollowTagCommandHandler implements CommandHandler {
         if (scope instanceof ScopeRef.Group group) {
             Optional<UUID> actorIdOpt = lookupActorId(inboundContext.senderContactId());
             if (actorIdOpt.isEmpty()) {
-                return reply(scope, bundleLoader.get(BundleKeys.ERROR_UNFOLLOW_TAG_GROUP_ADMIN_ONLY));
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_UNFOLLOW_TAG_GROUP_ADMIN_ONLY, inboundContext.effectiveLanguage()));
             }
             UUID groupDbId = lookupGroupId(group.adapterGroupId());
             if (groupDbId == null
                     || (!isBotAdmin(actorIdOpt.get())
                         && !groupMembershipRepository.isGroupAdmin(groupDbId, actorIdOpt.get()))) {
-                return reply(scope, bundleLoader.get(BundleKeys.ERROR_UNFOLLOW_TAG_GROUP_ADMIN_ONLY));
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_UNFOLLOW_TAG_GROUP_ADMIN_ONLY, inboundContext.effectiveLanguage()));
             }
             actorId = actorIdOpt.get();
             scopeKind = "group";
@@ -171,7 +171,7 @@ public class UnfollowTagCommandHandler implements CommandHandler {
             ScopeRef.Dm dm = (ScopeRef.Dm) scope;
             Optional<UUID> actorIdOpt = lookupActorId(dm.contactId());
             if (actorIdOpt.isEmpty()) {
-                return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL));
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage()));
             }
             actorId = actorIdOpt.get();
             scopeKind = "dm";
@@ -182,7 +182,7 @@ public class UnfollowTagCommandHandler implements CommandHandler {
 
         // Mutex check — positional tag AND --all are mutually exclusive.
         if (parsed.hasAllFlag && parsed.positionalTag != null) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_UNFOLLOW_TAG_MUTUALLY_EXCLUSIVE));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_UNFOLLOW_TAG_MUTUALLY_EXCLUSIVE, inboundContext.effectiveLanguage()));
         }
 
         // Confirm-leg fork: trailing ` confirm` token combined with the
@@ -193,7 +193,7 @@ public class UnfollowTagCommandHandler implements CommandHandler {
             Optional<ConfirmStateService.PendingConfirm> taken =
                     confirmStateService.takeMatching(actorId, scope, CONFIRM_COMMAND_NAME);
             if (taken.isEmpty()) {
-                return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONFIRM_NO_PENDING));
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONFIRM_NO_PENDING, inboundContext.effectiveLanguage()));
             }
             return executeUnfollowTagAllTransaction(scope, scopeKind, scopeId);
         }
@@ -204,7 +204,7 @@ public class UnfollowTagCommandHandler implements CommandHandler {
             long currentCount = countScopeTagRows(scopeKind, scopeId);
             confirmStateService.remember(actorId, scope, new UnfollowTagAllConfirm());
             String prompt = MessageFormat.format(
-                    bundleLoader.get(BundleKeys.REPLY_CONFIRM_PROMPT_UNFOLLOW_TAG_ALL),
+                    bundleLoader.get(BundleKeys.REPLY_CONFIRM_PROMPT_UNFOLLOW_TAG_ALL, inboundContext.effectiveLanguage()),
                     Long.toString(confirmStateService.timeoutSeconds()),
                     Long.toString(currentCount));
             return reply(scope, prompt);
@@ -213,7 +213,7 @@ public class UnfollowTagCommandHandler implements CommandHandler {
         // Positional `/unfollow-tag <tag>` form.
         if (parsed.positionalTag == null) {
             return reply(scope, MessageFormat.format(
-                    bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT),
+                    bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT, inboundContext.effectiveLanguage()),
                     "/unfollow-tag <tag>|--all"));
         }
 
@@ -222,7 +222,7 @@ public class UnfollowTagCommandHandler implements CommandHandler {
             List<String> vocab = readVocabulary();
             List<String> suggestions = fuzzySuggest(parsed.positionalTag, vocab, FUZZY_SUGGESTION_MAX);
             String body = MessageFormat.format(
-                    bundleLoader.get(BundleKeys.ERROR_UNFOLLOW_TAG_UNKNOWN_TAG),
+                    bundleLoader.get(BundleKeys.ERROR_UNFOLLOW_TAG_UNKNOWN_TAG, inboundContext.effectiveLanguage()),
                     parsed.positionalTag, String.join(", ", suggestions));
             return reply(scope, body);
         }
@@ -254,7 +254,7 @@ public class UnfollowTagCommandHandler implements CommandHandler {
                     updateFlipToExplicit(conn, scopeKind, scopeId);
                     insertSeedAllMinusOne(conn, scopeKind, scopeId, tagIdValue);
                     body = MessageFormat.format(
-                            bundleLoader.get(BundleKeys.REPLY_UNFOLLOW_TAG_SUCCESS_FROM_ALL),
+                            bundleLoader.get(BundleKeys.REPLY_UNFOLLOW_TAG_SUCCESS_FROM_ALL, inboundContext.effectiveLanguage()),
                             tagName);
                 } else {
                     // EXPLICIT mode: DELETE the row; if post-delete
@@ -267,12 +267,12 @@ public class UnfollowTagCommandHandler implements CommandHandler {
                     if (remaining == 0L) {
                         updateFlipToAll(conn, scopeKind, scopeId);
                         body = MessageFormat.format(
-                                bundleLoader.get(BundleKeys.REPLY_UNFOLLOW_TAG_FLIPS_BACK_TO_ALL),
+                                bundleLoader.get(BundleKeys.REPLY_UNFOLLOW_TAG_FLIPS_BACK_TO_ALL, inboundContext.effectiveLanguage()),
                                 tagName);
                     } else {
                         updateBumpTagVersion(conn, scopeKind, scopeId);
                         body = MessageFormat.format(
-                                bundleLoader.get(BundleKeys.REPLY_UNFOLLOW_TAG_SUCCESS_IN_PLACE),
+                                bundleLoader.get(BundleKeys.REPLY_UNFOLLOW_TAG_SUCCESS_IN_PLACE, inboundContext.effectiveLanguage()),
                                 tagName);
                     }
                 }
@@ -306,7 +306,7 @@ public class UnfollowTagCommandHandler implements CommandHandler {
                 updateFlipToAll(conn, scopeKind, scopeId);
                 conn.commit();
                 String body = MessageFormat.format(
-                        bundleLoader.get(BundleKeys.REPLY_UNFOLLOW_TAG_ALL_SUCCESS),
+                        bundleLoader.get(BundleKeys.REPLY_UNFOLLOW_TAG_ALL_SUCCESS, inboundContext.effectiveLanguage()),
                         Long.toString(deleted));
                 return reply(scope, body);
             } catch (SQLException e) {

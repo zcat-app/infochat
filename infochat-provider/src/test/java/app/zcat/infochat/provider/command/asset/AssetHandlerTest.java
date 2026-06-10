@@ -3,6 +3,7 @@ package app.zcat.infochat.provider.command.asset;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.messaging.InboundContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -64,7 +65,7 @@ class AssetHandlerTest {
         registry = new AssetRegistry(Map.of("zcash", zcash, "monero", monero));
         snapshotReader = new StubSnapshotReader();
         renderer = new AssetReplyRenderer(bundleLoader);
-        handler = new AssetHandler(registry, snapshotReader, renderer, bundleLoader);
+        handler = new AssetHandler(registry, snapshotReader, renderer, bundleLoader, new InboundContext());
     }
 
     @Test
@@ -84,7 +85,7 @@ class AssetHandlerTest {
         AssetRegistry noDefault = new AssetRegistry(Map.of(
                 "zcash", new AssetRegistry.AssetEntry("zcash", "Zcash",
                         List.of(sv), List.of("usd"))));
-        AssetHandler h = new AssetHandler(noDefault, snapshotReader, renderer, bundleLoader);
+        AssetHandler h = new AssetHandler(noDefault, snapshotReader, renderer, bundleLoader, new InboundContext());
 
         OutboundMessage reply = h.handle("zcash", SCOPE, "/zcash");
         assertTrue(reply.text().contains("No default sub-verb"),
@@ -101,7 +102,7 @@ class AssetHandlerTest {
         AssetRegistry withDisabledDefault = new AssetRegistry(Map.of(
                 "zcash", new AssetRegistry.AssetEntry("zcash", "Zcash",
                         List.of(defaultDisabled, krakenEnabled), List.of("usd"))));
-        AssetHandler h = new AssetHandler(withDisabledDefault, snapshotReader, renderer, bundleLoader);
+        AssetHandler h = new AssetHandler(withDisabledDefault, snapshotReader, renderer, bundleLoader, new InboundContext());
 
         OutboundMessage reply = h.handle("zcash", SCOPE, "/zcash");
         assertTrue(reply.text().contains("default sub-verb") && reply.text().contains("disabled"),
@@ -131,7 +132,7 @@ class AssetHandlerTest {
         AssetRegistry withBinance = new AssetRegistry(Map.of(
                 "monero", new AssetRegistry.AssetEntry("monero", "Monero",
                         List.of(moneroCg, moneroBinance), List.of("usd"))));
-        AssetHandler h = new AssetHandler(withBinance, snapshotReader, renderer, bundleLoader);
+        AssetHandler h = new AssetHandler(withBinance, snapshotReader, renderer, bundleLoader, new InboundContext());
 
         OutboundMessage reply = h.handle("monero", SCOPE, "/monero binance");
         assertTrue(reply.text().contains("not enabled"),

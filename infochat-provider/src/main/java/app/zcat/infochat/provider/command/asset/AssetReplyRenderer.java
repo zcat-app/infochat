@@ -44,41 +44,43 @@ public class AssetReplyRenderer {
      * @param result      the snapshot with staleness metadata
      * @param displayName the human-readable asset name (e.g. "Zcash")
      * @param sourceUrl   the attribution URL for this source
+     * @param language    the requester's effective scope language (D43)
      */
     public String render(AssetSnapshotReader.SnapshotResult result,
                          String displayName,
-                         String sourceUrl) {
+                         String sourceUrl,
+                         String language) {
         AssetSnapshotReader.Snapshot snap = result.snapshot();
         StringBuilder sb = new StringBuilder();
 
         // Header: <DisplayName> (<source>) + optional stale marker
         String header = MessageFormat.format(
-                bundleLoader.get(BundleKeys.REPLY_ASSET_HEADER),
+                bundleLoader.get(BundleKeys.REPLY_ASSET_HEADER, language),
                 displayName, snap.subVerb());
         sb.append(header);
         if (result.stale()) {
-            sb.append(bundleLoader.get(BundleKeys.REPLY_ASSET_STALE_MARKER));
+            sb.append(bundleLoader.get(BundleKeys.REPLY_ASSET_STALE_MARKER, language));
         }
         sb.append('\n');
 
         // Price line
         String priceFormatted = formatPrice(snap.price(), snap.vsCurrency());
         sb.append(MessageFormat.format(
-                bundleLoader.get(BundleKeys.REPLY_ASSET_PRICE_LINE),
+                bundleLoader.get(BundleKeys.REPLY_ASSET_PRICE_LINE, language),
                 priceFormatted));
         sb.append('\n');
 
         // Delta lines (coingecko only — exchanges omit)
         if (snap.change1hPct() != null) {
             sb.append(MessageFormat.format(
-                    bundleLoader.get(BundleKeys.REPLY_ASSET_DELTA_1H),
+                    bundleLoader.get(BundleKeys.REPLY_ASSET_DELTA_1H, language),
                     formatDelta(snap.change1hPct())));
             sb.append('\n');
         }
 
         if (snap.change24hPct() != null && snap.high24h() != null && snap.low24h() != null) {
             sb.append(MessageFormat.format(
-                    bundleLoader.get(BundleKeys.REPLY_ASSET_DELTA_24H),
+                    bundleLoader.get(BundleKeys.REPLY_ASSET_DELTA_24H, language),
                     formatDelta(snap.change24hPct()),
                     formatPrice(snap.high24h(), snap.vsCurrency()),
                     formatPrice(snap.low24h(), snap.vsCurrency())));
@@ -86,7 +88,7 @@ public class AssetReplyRenderer {
         } else if (snap.high24h() != null && snap.low24h() != null) {
             // Exchange path: spread without delta percentage
             sb.append(MessageFormat.format(
-                    bundleLoader.get(BundleKeys.REPLY_ASSET_SPREAD),
+                    bundleLoader.get(BundleKeys.REPLY_ASSET_SPREAD, language),
                     formatPrice(snap.high24h(), snap.vsCurrency()),
                     formatPrice(snap.low24h(), snap.vsCurrency())));
             sb.append('\n');
@@ -96,7 +98,7 @@ public class AssetReplyRenderer {
         String utcTime = UTC_TIME.format(snap.capturedAt());
         long cacheAgeSeconds = Duration.between(snap.capturedAt(), Instant.now()).toSeconds();
         sb.append(MessageFormat.format(
-                bundleLoader.get(BundleKeys.REPLY_ASSET_CAPTURE_LINE),
+                bundleLoader.get(BundleKeys.REPLY_ASSET_CAPTURE_LINE, language),
                 utcTime, String.valueOf(cacheAgeSeconds)));
         sb.append('\n');
 

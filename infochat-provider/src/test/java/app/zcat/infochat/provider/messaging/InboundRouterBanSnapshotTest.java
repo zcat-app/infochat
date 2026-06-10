@@ -44,6 +44,11 @@ class InboundRouterBanSnapshotTest {
                 lookups.incrementAndGet();
                 return Optional.of(new UserSnapshot(UUID.randomUUID(), "vouched", true));
             }
+
+            @Override
+            String lookupScopeLanguage(DispatchDb db, String scopeKind, UUID scopeId) {
+                return "en";
+            }
         };
         router.inboundContext = new InboundContext();
         router.rateCapBucket = new NoopRateCapBucket();

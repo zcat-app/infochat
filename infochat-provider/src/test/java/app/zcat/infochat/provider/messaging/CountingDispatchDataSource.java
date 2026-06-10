@@ -16,9 +16,10 @@ import java.util.logging.Logger;
 /**
  * Fully fake JDBC stack for {@link InboundRouterAcquisitionCountTest}:
  * counts pool acquisitions and tracks the open-connection balance while
- * serving canned rows for the three router-owned dispatch statements —
+ * serving canned rows for the router-owned dispatch statements —
  * the users-row snapshot (a vouched, non-banned actor), the groups-row
- * resolution, and the membership upsert.
+ * resolution, the scope-language read (no row → en), and the
+ * membership upsert.
  */
 final class CountingDispatchDataSource implements DataSource {
 
@@ -85,6 +86,11 @@ final class CountingDispatchDataSource implements DataSource {
         if (sql.contains("FROM groups")) {
             return groupIdRow();
         }
+        if (sql.contains("FROM scope_preferences")) {
+            // No preferences row — InboundRouter.lookupScopeLanguage
+            // maps the empty result to "en".
+            return emptyResultSet();
+        }
         throw new UnsupportedOperationException("query: " + sql);
     }
 
@@ -104,6 +110,18 @@ final class CountingDispatchDataSource implements DataSource {
             case "getObject" -> groupDbId;
             default -> throw new UnsupportedOperationException("ResultSet." + name);
         });
+    }
+
+    private static ResultSet emptyResultSet() {
+        return (ResultSet) Proxy.newProxyInstance(
+                ResultSet.class.getClassLoader(),
+                new Class<?>[] { ResultSet.class },
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "next" -> false;
+                    case "close" -> null;
+                    default -> throw new UnsupportedOperationException(
+                            "ResultSet." + method.getName());
+                });
     }
 
     private static ResultSet singleRowResultSet(ColumnReader reader) {

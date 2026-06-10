@@ -1,11 +1,11 @@
 ---
 id: M1-268
 title: "Thread /lang through bundle lookups (D43)"
-status: pending
+status: done
 created: 2026-06-09
-last_updated: 2026-06-09
+last_updated: 2026-06-10
 blocked_by: []
-files_budget: 60
+files_budget: 70
 complexity: high
 risk: medium
 round_cap: 3
@@ -32,12 +32,52 @@ test_plan:
 spec_refs: []
 decision_refs:
   - D43
-reviews: {}
+outline_file: target/m1-tick-outline-M1-268.md
+reviews:
+  - round: 1
+    date: 2026-06-10
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 69
+      added: 958
+      removed: 486
+escalations:
+  - date: 2026-06-10
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A (budget-breach: implementation diff touches 65 code files vs
+      files_budget 60 — 45 main + 2 bundle resources + 16 modified test
+      files + 2 new test files. The outline's Risk 1 anticipated the
+      test-sweep budget pressure and mandated stop-and-escalate at this
+      boundary; suggested resolutions there: refine to widen
+      files_budget, or decompose per handler group.)
+revisions:
+  - date: 2026-06-10
+    reason: budget-breach refine — the finished diff needs 65 code files
+      vs files_budget 60. Production landed on the outline's ~47 estimate
+      (45 main + 2 bundles); the overage is the test sweep the outline's
+      Risk 1 flagged as the budget pressure — 8 plain-JUnit router
+      subclass test files each need a lookupScopeLanguage seam override,
+      plus CountingDispatchDataSource, the two shared bundle-loader
+      fakes, the asset tests hit by signature changes, and the
+      demoted-literal assertion updates. Widen files_budget.
+    prior_values: |
+      files_budget: 60
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-10
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-268: Thread /lang through bundle lookups (D43)
@@ -82,9 +122,11 @@ behavior-reversal rule before finalizing.
   effective-language lookup likely belongs once in the dispatch layer
   (InboundRouter / command context), passed down, rather than 334 per-site
   DB lookups. That is the design question the outline must answer.
-- `files_budget: 60` is deliberately roomy for a 43-file sweep + bundles +
-  tests; the budget is numeric-only (no files_scope) because the sweep's
-  exact file set is its outcome, not its input.
+- `files_budget: 70` is deliberately roomy for a 43-file sweep + bundles +
+  tests (raised from 60 by the 2026-06-10 budget-breach refine — the test
+  sweep needed 18 files, not the ~13 the original budget left room for);
+  the budget is numeric-only (no files_scope) because the sweep's exact
+  file set is its outcome, not its input.
 
 ## Pre-flight self-check (author-side)
 

@@ -80,7 +80,7 @@ public class QuarantineCommandHandler implements CommandHandler {
     @Override
     public OutboundMessage handle(ScopeRef scope, String rawText) {
         if (scope instanceof ScopeRef.Group) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY, inboundContext.effectiveLanguage()));
         }
 
         String adapter = inboundContext.adapterName();
@@ -88,7 +88,7 @@ public class QuarantineCommandHandler implements CommandHandler {
 
         Optional<ActorRow> actorOpt = lookupActor(adapter, callerContactId);
         if (actorOpt.isEmpty() || !actorOpt.get().isAdmin) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
         }
         ActorRow actor = actorOpt.get();
 
@@ -100,7 +100,7 @@ public class QuarantineCommandHandler implements CommandHandler {
             case "list" -> handleList(scope, actor, adapter, remainder);
             case "approve" -> handleApprove(scope, actor, adapter, remainder);
             case "reject" -> handleReject(scope, actor, adapter, remainder);
-            default -> reply(scope, bundleLoader.get(BundleKeys.ERROR_QUARANTINE_UNKNOWN_SUBCOMMAND));
+            default -> reply(scope, bundleLoader.get(BundleKeys.ERROR_QUARANTINE_UNKNOWN_SUBCOMMAND, inboundContext.effectiveLanguage()));
         };
     }
 
@@ -136,7 +136,7 @@ public class QuarantineCommandHandler implements CommandHandler {
             }
         } catch (SQLException e) {
             LOG.errorf(e, "/quarantine list audit write failed");
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage()));
         }
 
         try (Connection conn = dataSource.getConnection()) {
@@ -148,7 +148,7 @@ public class QuarantineCommandHandler implements CommandHandler {
             }
 
             if (totalCount == 0) {
-                return reply(scope, bundleLoader.get(BundleKeys.REPLY_QUARANTINE_LIST_EMPTY));
+                return reply(scope, bundleLoader.get(BundleKeys.REPLY_QUARANTINE_LIST_EMPTY, inboundContext.effectiveLanguage()));
             }
 
             int pageSize = 20;
@@ -157,7 +157,7 @@ public class QuarantineCommandHandler implements CommandHandler {
 
             long rowsOnPage = Math.min(totalCount - (long) (page - 1) * pageSize, pageSize);
             StringBuilder sb = new StringBuilder();
-            sb.append(MessageFormat.format(bundleLoader.get(BundleKeys.REPLY_QUARANTINE_LIST_HEADER),
+            sb.append(MessageFormat.format(bundleLoader.get(BundleKeys.REPLY_QUARANTINE_LIST_HEADER, inboundContext.effectiveLanguage()),
                     String.valueOf(rowsOnPage),
                     String.valueOf(page),
                     String.valueOf(totalPages)));
@@ -169,7 +169,7 @@ public class QuarantineCommandHandler implements CommandHandler {
                     while (rs.next()) {
                         sb.append('\n');
                         sb.append(MessageFormat.format(
-                                bundleLoader.get(BundleKeys.REPLY_QUARANTINE_LIST_LINE),
+                                bundleLoader.get(BundleKeys.REPLY_QUARANTINE_LIST_LINE, inboundContext.effectiveLanguage()),
                                 rs.getObject("id", UUID.class).toString(),
                                 rs.getString("post_uid"),
                                 rs.getString("flagged_by"),
@@ -182,20 +182,20 @@ public class QuarantineCommandHandler implements CommandHandler {
             return reply(scope, sb.toString());
         } catch (SQLException e) {
             LOG.errorf(e, "/quarantine list failed");
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage()));
         }
     }
 
     private OutboundMessage handleApprove(ScopeRef scope, ActorRow actor,
                                           String adapter, String remainder) {
         if (!rateCapBucket.tryAcquire("quarantine", actor.id.toString())) {
-            return reply(scope, bundleLoader.get(RATE_LIMIT_KEY));
+            return reply(scope, bundleLoader.get(RATE_LIMIT_KEY, inboundContext.effectiveLanguage()));
         }
 
         String idStr = remainder.trim().split("\\s+")[0];
         if (idStr.isEmpty()) {
             return reply(scope, MessageFormat.format(
-                    bundleLoader.get(BundleKeys.ERROR_QUARANTINE_MISSING_ID), "approve"));
+                    bundleLoader.get(BundleKeys.ERROR_QUARANTINE_MISSING_ID, inboundContext.effectiveLanguage()), "approve"));
         }
 
         UUID quarantineId;
@@ -203,7 +203,7 @@ public class QuarantineCommandHandler implements CommandHandler {
             quarantineId = UUID.fromString(idStr);
         } catch (IllegalArgumentException e) {
             return reply(scope, MessageFormat.format(
-                    bundleLoader.get(BundleKeys.ERROR_QUARANTINE_INVALID_ID), idStr));
+                    bundleLoader.get(BundleKeys.ERROR_QUARANTINE_INVALID_ID, inboundContext.effectiveLanguage()), idStr));
         }
 
         try (Connection conn = dataSource.getConnection()) {
@@ -221,7 +221,7 @@ public class QuarantineCommandHandler implements CommandHandler {
             }
             conn.commit();
             return reply(scope, MessageFormat.format(
-                    bundleLoader.get(BundleKeys.REPLY_QUARANTINE_APPROVE_SUCCESS),
+                    bundleLoader.get(BundleKeys.REPLY_QUARANTINE_APPROVE_SUCCESS, inboundContext.effectiveLanguage()),
                     quarantineId.toString()));
         } catch (SQLException e) {
             return mapStoredProcError(scope, e, quarantineId);
@@ -231,13 +231,13 @@ public class QuarantineCommandHandler implements CommandHandler {
     private OutboundMessage handleReject(ScopeRef scope, ActorRow actor,
                                          String adapter, String remainder) {
         if (!rateCapBucket.tryAcquire("quarantine", actor.id.toString())) {
-            return reply(scope, bundleLoader.get(RATE_LIMIT_KEY));
+            return reply(scope, bundleLoader.get(RATE_LIMIT_KEY, inboundContext.effectiveLanguage()));
         }
 
         String idStr = remainder.trim().split("\\s+")[0];
         if (idStr.isEmpty()) {
             return reply(scope, MessageFormat.format(
-                    bundleLoader.get(BundleKeys.ERROR_QUARANTINE_MISSING_ID), "reject"));
+                    bundleLoader.get(BundleKeys.ERROR_QUARANTINE_MISSING_ID, inboundContext.effectiveLanguage()), "reject"));
         }
 
         UUID quarantineId;
@@ -245,7 +245,7 @@ public class QuarantineCommandHandler implements CommandHandler {
             quarantineId = UUID.fromString(idStr);
         } catch (IllegalArgumentException e) {
             return reply(scope, MessageFormat.format(
-                    bundleLoader.get(BundleKeys.ERROR_QUARANTINE_INVALID_ID), idStr));
+                    bundleLoader.get(BundleKeys.ERROR_QUARANTINE_INVALID_ID, inboundContext.effectiveLanguage()), idStr));
         }
 
         try (Connection conn = dataSource.getConnection()) {
@@ -263,7 +263,7 @@ public class QuarantineCommandHandler implements CommandHandler {
             }
             conn.commit();
             return reply(scope, MessageFormat.format(
-                    bundleLoader.get(BundleKeys.REPLY_QUARANTINE_REJECT_SUCCESS),
+                    bundleLoader.get(BundleKeys.REPLY_QUARANTINE_REJECT_SUCCESS, inboundContext.effectiveLanguage()),
                     quarantineId.toString()));
         } catch (SQLException e) {
             return mapStoredProcError(scope, e, quarantineId);
@@ -279,16 +279,16 @@ public class QuarantineCommandHandler implements CommandHandler {
         String msg = e.getMessage();
         if (msg != null && msg.contains("not found")) {
             return reply(scope, MessageFormat.format(
-                    bundleLoader.get(BundleKeys.ERROR_QUARANTINE_NOT_FOUND),
+                    bundleLoader.get(BundleKeys.ERROR_QUARANTINE_NOT_FOUND, inboundContext.effectiveLanguage()),
                     quarantineId.toString()));
         }
         if (msg != null && msg.contains("expected PENDING or BENIGN_CLOSED")) {
             return reply(scope, MessageFormat.format(
-                    bundleLoader.get(BundleKeys.ERROR_QUARANTINE_INVALID_STATE),
+                    bundleLoader.get(BundleKeys.ERROR_QUARANTINE_INVALID_STATE, inboundContext.effectiveLanguage()),
                     quarantineId.toString()));
         }
         LOG.errorf(e, "/quarantine stored procedure failed for id=%s", quarantineId);
-        return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL));
+        return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage()));
     }
 
     private Optional<ActorRow> lookupActor(String adapter, @Nullable String contactId) {

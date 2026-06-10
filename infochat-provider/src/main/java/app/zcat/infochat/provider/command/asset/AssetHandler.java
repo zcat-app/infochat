@@ -4,6 +4,7 @@ import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.messaging.InboundContext;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -41,6 +42,9 @@ public class AssetHandler {
     @Inject
     BundleLoader bundleLoader;
 
+    @Inject
+    InboundContext inboundContext;
+
     /** CDI-required no-arg constructor. */
     public AssetHandler() {}
 
@@ -48,11 +52,13 @@ public class AssetHandler {
     AssetHandler(AssetRegistry assetRegistry,
                  AssetSnapshotReader snapshotReader,
                  AssetReplyRenderer replyRenderer,
-                 BundleLoader bundleLoader) {
+                 BundleLoader bundleLoader,
+                 InboundContext inboundContext) {
         this.assetRegistry = assetRegistry;
         this.snapshotReader = snapshotReader;
         this.replyRenderer = replyRenderer;
         this.bundleLoader = bundleLoader;
+        this.inboundContext = inboundContext;
     }
 
     /**
@@ -65,10 +71,11 @@ public class AssetHandler {
     public OutboundMessage handle(String assetName,
                                            ScopeRef scope,
                                            String rawText) {
+        String language = inboundContext.effectiveLanguage();
         AssetRegistry.AssetEntry asset = assetRegistry.getAsset(assetName);
         if (asset == null) {
             return reply(scope, MessageFormat.format(
-                    bundleLoader.get(BundleKeys.ERROR_ASSET_NOT_CONFIGURED),
+                    bundleLoader.get(BundleKeys.ERROR_ASSET_NOT_CONFIGURED, language),
                     assetName, ""));
         }
 
@@ -82,12 +89,12 @@ public class AssetHandler {
             AssetRegistry.SubVerbEntry defaultSv = asset.defaultSubVerb();
             if (defaultSv == null) {
                 return reply(scope, MessageFormat.format(
-                        bundleLoader.get(BundleKeys.ERROR_ASSET_NOT_CONFIGURED),
+                        bundleLoader.get(BundleKeys.ERROR_ASSET_NOT_CONFIGURED, language),
                         assetName, String.join(", ", enabledSubVerbs)));
             }
             if (!defaultSv.enabled()) {
                 return reply(scope, MessageFormat.format(
-                        bundleLoader.get(BundleKeys.ERROR_ASSET_DEFAULT_DISABLED),
+                        bundleLoader.get(BundleKeys.ERROR_ASSET_DEFAULT_DISABLED, language),
                         assetName, String.join(", ", enabledSubVerbs)));
             }
             subVerb = defaultSv.subVerb();
@@ -102,12 +109,12 @@ public class AssetHandler {
                 List<String> suggestions = fuzzySuggest(args.subVerb, allSubVerbs, FUZZY_SUGGESTION_MAX);
                 String bestMatch = suggestions.isEmpty() ? "" : suggestions.getFirst();
                 return reply(scope, MessageFormat.format(
-                        bundleLoader.get(BundleKeys.ERROR_ASSET_UNKNOWN_SUB_VERB),
+                        bundleLoader.get(BundleKeys.ERROR_ASSET_UNKNOWN_SUB_VERB, language),
                         args.subVerb, bestMatch, assetName, String.join(", ", allSubVerbs)));
             }
             if (!svEntry.enabled()) {
                 return reply(scope, MessageFormat.format(
-                        bundleLoader.get(BundleKeys.ERROR_ASSET_SUB_VERB_NOT_ENABLED),
+                        bundleLoader.get(BundleKeys.ERROR_ASSET_SUB_VERB_NOT_ENABLED, language),
                         args.subVerb, assetName, String.join(", ", enabledSubVerbs)));
             }
             subVerb = svEntry.subVerb();
@@ -124,7 +131,7 @@ public class AssetHandler {
                 List<String> suggestions = fuzzySuggest(vsCurrency, supported, FUZZY_SUGGESTION_MAX);
                 String bestMatch = suggestions.isEmpty() ? "" : suggestions.getFirst();
                 return reply(scope, MessageFormat.format(
-                        bundleLoader.get(BundleKeys.ERROR_ASSET_UNSUPPORTED_QUOTE_CURRENCY),
+                        bundleLoader.get(BundleKeys.ERROR_ASSET_UNSUPPORTED_QUOTE_CURRENCY, language),
                         vsCurrency, bestMatch, assetName, String.join(", ", supported)));
             }
         }
@@ -133,7 +140,7 @@ public class AssetHandler {
         AssetSnapshotReader.SnapshotResult result = snapshotReader.readLatest(assetName, subVerb, vsCurrency);
         if (result == null) {
             return reply(scope, MessageFormat.format(
-                    bundleLoader.get(BundleKeys.ERROR_ASSET_NO_DATA),
+                    bundleLoader.get(BundleKeys.ERROR_ASSET_NO_DATA, language),
                     assetName, subVerb));
         }
 
@@ -141,7 +148,7 @@ public class AssetHandler {
         AssetRegistry.SubVerbEntry svEntry = asset.findSubVerb(subVerb);
         String attributionUrl = svEntry != null ? svEntry.attributionUrl() : "";
 
-        return reply(scope, replyRenderer.render(result, asset.displayName(), attributionUrl));
+        return reply(scope, replyRenderer.render(result, asset.displayName(), attributionUrl, language));
     }
 
     /** Parses {@code /<asset> [sub-verb] [--vs <currency>]} from the raw command text. */

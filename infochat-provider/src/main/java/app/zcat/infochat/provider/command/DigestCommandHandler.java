@@ -64,12 +64,12 @@ public class DigestCommandHandler implements CommandHandler {
     @Override
     public OutboundMessage handle(ScopeRef scope, String rawText) {
         if (!(scope instanceof ScopeRef.Group group)) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_DIGEST_DM_SCOPE));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_DIGEST_DM_SCOPE, inboundContext.effectiveLanguage()));
         }
 
         Boolean desiredEnabled = parseSubVerb(rawText);
         if (desiredEnabled == null) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_DIGEST_USAGE));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_DIGEST_USAGE, inboundContext.effectiveLanguage()));
         }
 
         String adapter = inboundContext.adapterName();
@@ -82,7 +82,7 @@ public class DigestCommandHandler implements CommandHandler {
                 ActorRow actor = resolveActor(conn, adapter, callerContactId);
                 if (actor == null) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_DIGEST_NOT_ADMIN));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_DIGEST_NOT_ADMIN, inboundContext.effectiveLanguage()));
                 }
 
                 GroupRow groupRow = resolveGroupInTx(conn, adapter, group.adapterGroupId());
@@ -90,7 +90,7 @@ public class DigestCommandHandler implements CommandHandler {
                 // Authorization: group-admin OR bot-admin
                 if (!actor.isAdmin && !isGroupAdmin(conn, groupRow.id, actor.id)) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_DIGEST_NOT_ADMIN));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_DIGEST_NOT_ADMIN, inboundContext.effectiveLanguage()));
                 }
 
                 // Idempotent no-op: already in the requested state — no UPDATE,
@@ -100,7 +100,7 @@ public class DigestCommandHandler implements CommandHandler {
                     String noopKey = desiredEnabled
                             ? BundleKeys.REPLY_DIGEST_ALREADY_ON
                             : BundleKeys.REPLY_DIGEST_ALREADY_OFF;
-                    return reply(scope, bundleLoader.get(noopKey));
+                    return reply(scope, bundleLoader.get(noopKey, inboundContext.effectiveLanguage()));
                 }
 
                 // Audit before effect, in the same transaction as the UPDATE, so
@@ -135,7 +135,7 @@ public class DigestCommandHandler implements CommandHandler {
         String successKey = desiredEnabled
                 ? BundleKeys.REPLY_DIGEST_ON
                 : BundleKeys.REPLY_DIGEST_OFF;
-        return reply(scope, bundleLoader.get(successKey));
+        return reply(scope, bundleLoader.get(successKey, inboundContext.effectiveLanguage()));
     }
 
     private @Nullable ActorRow resolveActor(Connection conn, String adapter,

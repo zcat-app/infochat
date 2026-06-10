@@ -207,6 +207,8 @@ class HelpCommandHandlerTest {
         };
         handler.bundleLoader = loader;
         handler.commandPermissions = commandPermissions;
+        // Fresh context → effectiveLanguage() returns the "en" default.
+        handler.inboundContext = new InboundContext();
         return handler;
     }
 
@@ -267,6 +269,11 @@ class HelpCommandHandlerTest {
                 throw new IllegalStateException("Missing bundle key: " + key);
             }
             return "value-for:" + key;
+        }
+
+        @Override
+        public String get(String key, String langCode) {
+            return get(key);
         }
     }
 }

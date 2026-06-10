@@ -56,13 +56,13 @@ class InboundRouterConfirmCancelTest {
         router.onMessage(dmInbound(DM_CONTACT, "/help"), ADAPTER);
 
         // Two outbounds in order: cancellation, then the /help dispatch
-        // (UNKNOWN_COMMAND_REPLY since the test wires no /help handler).
+        // (unknown-command reply since the test wires no /help handler).
         assertEquals(2, capture.captured.size(),
                 "expected one cancellation + one dispatch outbound; got: " + capture.captured);
         assertEquals("Pending `ban` cancelled.", capture.captured.get(0).text(),
                 "first outbound must be the cancellation acknowledgement BEFORE dispatch");
-        assertEquals(InboundRouter.UNKNOWN_COMMAND_REPLY, capture.captured.get(1).text(),
-                "second outbound must be the /help dispatch (UNKNOWN_COMMAND_REPLY)");
+        assertEquals("bundle:" + BundleKeys.ERROR_UNKNOWN_COMMAND, capture.captured.get(1).text(),
+                "second outbound must be the /help dispatch (unknown-command bundle reply)");
 
         // ConfirmStateService call sequence: peek → takeAny (sweep
         // drained the pending entry before dispatch).
@@ -115,10 +115,10 @@ class InboundRouterConfirmCancelTest {
 
         router.onMessage(dmInbound(DM_CONTACT, "/help"), ADAPTER);
 
-        // Single outbound — the /help dispatch only (UNKNOWN_COMMAND_REPLY).
+        // Single outbound — the /help dispatch only (unknown-command reply).
         assertEquals(1, capture.captured.size(),
                 "expected exactly one outbound (dispatch only); got: " + capture.captured);
-        assertEquals(InboundRouter.UNKNOWN_COMMAND_REPLY, capture.captured.get(0).text(),
+        assertEquals("bundle:" + BundleKeys.ERROR_UNKNOWN_COMMAND, capture.captured.get(0).text(),
                 "outbound must be the /help dispatch reply, not a cancellation");
 
         // ConfirmStateService call sequence: peek only.
@@ -142,6 +142,11 @@ class InboundRouterConfirmCancelTest {
             @Override
             Optional<UserSnapshot> lookupUser(DispatchDb db, String adapter, String contactId) {
                 return Optional.of(new UserSnapshot(ACTOR_ID, "vouched", false));
+            }
+
+            @Override
+            String lookupScopeLanguage(DispatchDb db, String scopeKind, UUID scopeId) {
+                return "en";
             }
         };
         router.commandHandlers = new SingletonInstance<>();
@@ -231,6 +236,11 @@ class InboundRouterConfirmCancelTest {
                 case BundleKeys.REPLY_CONFIRM_CANCELLED -> "Pending `{0}` cancelled.";
                 default -> "bundle:" + key;
             };
+        }
+
+        @Override
+        public String get(String key, String langCode) {
+            return get(key);
         }
     }
 

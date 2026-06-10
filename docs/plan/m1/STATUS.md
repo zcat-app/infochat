@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 314 |
+| done | 315 |
 | deferred | 3 |
 | **total** | **319** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-268 — Thread /lang through bundle lookups (D43) (complexity: high, risk: medium)
 - M1-279 — §7/§7a sweep: defensive checks, broad catches, test seams (complexity: medium, risk: low)
 
 ---
@@ -449,7 +448,7 @@ M1-264 (done)
 M1-265 (done)
 M1-266 (done)
 M1-267 (done)
-M1-268 (pending) ← runnable
+M1-268 (done)
 M1-269 (done)
 M1-270 (done)
 M1-271 (done)

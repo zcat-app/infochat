@@ -2,6 +2,8 @@ package app.zcat.infochat.provider.command;
 
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
+import app.zcat.infochat.provider.bundle.BundleKeys;
+import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.messaging.InboundContext;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
@@ -42,6 +44,7 @@ class ExportCommandHandlerTest {
     @Inject ExportCommandHandler handler;
     @Inject @SeedDataSource DataSource dataSource;
     @Inject InboundContext inboundContext;
+    @Inject BundleLoader bundleLoader;
 
     @BeforeEach
     void cleanup() throws Exception {
@@ -254,7 +257,7 @@ class ExportCommandHandlerTest {
     void groupScopeRejected() {
         OutboundMessage reply = handler.handle(
                 new ScopeRef.Group("some-group-id"), "/export");
-        assertEquals(ExportCommandHandler.GROUP_NOT_SUPPORTED_REPLY, reply.text());
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_EXPORT_GROUP_NOT_SUPPORTED), reply.text());
     }
 
     // -- helpers --

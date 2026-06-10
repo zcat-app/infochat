@@ -144,13 +144,13 @@ public class FollowTagCommandHandler implements CommandHandler {
         if (scope instanceof ScopeRef.Group group) {
             Optional<UUID> actorId = lookupActorId(inboundContext.senderContactId());
             if (actorId.isEmpty()) {
-                return reply(scope, bundleLoader.get(BundleKeys.ERROR_FOLLOW_TAG_GROUP_ADMIN_ONLY));
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_FOLLOW_TAG_GROUP_ADMIN_ONLY, inboundContext.effectiveLanguage()));
             }
             UUID groupDbId = lookupGroupId(group.adapterGroupId());
             if (groupDbId == null
                     || (!isBotAdmin(actorId.get())
                         && !groupMembershipRepository.isGroupAdmin(groupDbId, actorId.get()))) {
-                return reply(scope, bundleLoader.get(BundleKeys.ERROR_FOLLOW_TAG_GROUP_ADMIN_ONLY));
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_FOLLOW_TAG_GROUP_ADMIN_ONLY, inboundContext.effectiveLanguage()));
             }
             scopeKind = "group";
             scopeId = groupDbId;
@@ -158,7 +158,7 @@ public class FollowTagCommandHandler implements CommandHandler {
             ScopeRef.Dm dm = (ScopeRef.Dm) scope;
             Optional<UUID> actorId = lookupActorId(dm.contactId());
             if (actorId.isEmpty()) {
-                return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL));
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage()));
             }
             scopeKind = "dm";
             scopeId = actorId.get();
@@ -166,7 +166,7 @@ public class FollowTagCommandHandler implements CommandHandler {
 
         String suppliedTag = parsePositionalTag(rawText);
         if (suppliedTag == null) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage()));
         }
 
         Optional<UUID> tagId = lookupTagId(suppliedTag);
@@ -174,7 +174,7 @@ public class FollowTagCommandHandler implements CommandHandler {
             List<String> vocab = readVocabulary();
             List<String> suggestions = fuzzySuggest(suppliedTag, vocab, FUZZY_SUGGESTION_MAX);
             String body = MessageFormat.format(
-                    bundleLoader.get(BundleKeys.ERROR_FOLLOW_TAG_UNKNOWN_TAG),
+                    bundleLoader.get(BundleKeys.ERROR_FOLLOW_TAG_UNKNOWN_TAG, inboundContext.effectiveLanguage()),
                     suppliedTag, String.join(", ", suggestions));
             return reply(scope, body);
         }
@@ -210,7 +210,7 @@ public class FollowTagCommandHandler implements CommandHandler {
                     updateFlipToExplicit(conn, scopeKind, scopeId);
                     insertScopeTag(conn, scopeKind, scopeId, tagIdValue);
                     body = MessageFormat.format(
-                            bundleLoader.get(BundleKeys.REPLY_FOLLOW_TAG_SUCCESS_FROM_ALL),
+                            bundleLoader.get(BundleKeys.REPLY_FOLLOW_TAG_SUCCESS_FROM_ALL, inboundContext.effectiveLanguage()),
                             tagName);
                 } else {
                     // EXPLICIT → EXPLICIT: add in place. ON CONFLICT DO
@@ -219,7 +219,7 @@ public class FollowTagCommandHandler implements CommandHandler {
                     insertScopeTag(conn, scopeKind, scopeId, tagIdValue);
                     updateBumpTagVersion(conn, scopeKind, scopeId);
                     body = MessageFormat.format(
-                            bundleLoader.get(BundleKeys.REPLY_FOLLOW_TAG_SUCCESS_IN_PLACE),
+                            bundleLoader.get(BundleKeys.REPLY_FOLLOW_TAG_SUCCESS_IN_PLACE, inboundContext.effectiveLanguage()),
                             tagName);
                 }
                 conn.commit();

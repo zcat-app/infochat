@@ -143,7 +143,7 @@ public class RetryCommandHandler implements CommandHandler {
         }
         Optional<UUID> userId = resolveUserId(scope);
         if (userId.isEmpty()) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_NO_ANCHOR));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_NO_ANCHOR, inboundContext.effectiveLanguage()));
         }
 
         // v1 DM scope: scopeId = userId; resolveUserId already rejected
@@ -153,7 +153,7 @@ public class RetryCommandHandler implements CommandHandler {
         Optional<AnchorRow> anchorOpt =
                 summaryAnchorRepository.read(userId.get(), "dm", scopeId);
         if (anchorOpt.isEmpty()) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_NO_ANCHOR));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_NO_ANCHOR, inboundContext.effectiveLanguage()));
         }
         AnchorRow anchor = anchorOpt.get();
 
@@ -165,7 +165,7 @@ public class RetryCommandHandler implements CommandHandler {
         int excludedCount = originalCount - readyPosts.size();
 
         if (readyPosts.isEmpty()) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_NO_ELIGIBLE_POSTS));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_NO_ELIGIBLE_POSTS, inboundContext.effectiveLanguage()));
         }
 
         // Acquire the in-flight slot for the LLM re-roll BEFORE the
@@ -177,7 +177,7 @@ public class RetryCommandHandler implements CommandHandler {
         InFlightTracker.CancellationHandle slot =
                 inFlightTracker.tryAcquire(userId.get(), scopeKind, scopeId);
         if (slot == null) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_IN_FLIGHT));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_IN_FLIGHT, inboundContext.effectiveLanguage()));
         }
 
         try {
@@ -187,7 +187,7 @@ public class RetryCommandHandler implements CommandHandler {
             // rejection does not burn a retry slot (bucket tokens
             // self-heal after 60 s; the anchor's retry slots do not).
             if (!llmRateCap.tryAcquire(userId.get())) {
-                return reply(scope, bundleLoader.get(BundleKeys.ERROR_CHAT_LLM_RATE_CAP));
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_CHAT_LLM_RATE_CAP, inboundContext.effectiveLanguage()));
             }
 
             // Enforce profile-driven retry cap
@@ -195,7 +195,7 @@ public class RetryCommandHandler implements CommandHandler {
                     userId.get(), "dm", scopeId);
             if (retryCount > retryCap) {
                 return reply(scope, MessageFormat.format(
-                        bundleLoader.get(BundleKeys.ERROR_RETRY_CAP_EXHAUSTED),
+                        bundleLoader.get(BundleKeys.ERROR_RETRY_CAP_EXHAUSTED, inboundContext.effectiveLanguage()),
                         String.valueOf(retryCap)));
             }
 
@@ -203,7 +203,7 @@ public class RetryCommandHandler implements CommandHandler {
             // to only READY posts
             List<Cluster> clusters = reconstructClusters(anchor.clusterMapJson(), readyPosts);
             if (clusters.isEmpty()) {
-                return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_NO_ELIGIBLE_POSTS));
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_NO_ELIGIBLE_POSTS, inboundContext.effectiveLanguage()));
             }
 
             String scopeLanguage = readScopeLanguage(scopeKind, scopeId);
@@ -217,14 +217,14 @@ public class RetryCommandHandler implements CommandHandler {
             if (excludedCount > 0
                     && (double) excludedCount / originalCount >= statusDriftThreshold) {
                 out.append(MessageFormat.format(
-                        bundleLoader.get(BundleKeys.REPLY_RETRY_STATUS_DRIFT_NOTICE),
+                        bundleLoader.get(BundleKeys.REPLY_RETRY_STATUS_DRIFT_NOTICE, inboundContext.effectiveLanguage()),
                         String.valueOf(excludedCount),
                         String.valueOf(originalCount)));
             }
 
             boolean anyDegraded = prose.stream().anyMatch(ClusterProse::degraded);
             if (anyDegraded) {
-                out.append(bundleLoader.get(BundleKeys.REPLY_SUMMARY_DEGRADED_NOTICE));
+                out.append(bundleLoader.get(BundleKeys.REPLY_SUMMARY_DEGRADED_NOTICE, inboundContext.effectiveLanguage()));
                 out.append("\n\n");
             }
 
@@ -380,7 +380,7 @@ public class RetryCommandHandler implements CommandHandler {
 
     private OutboundMessage handleDigestRetry(ScopeRef scope) {
         if (scope instanceof ScopeRef.Dm) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_DIGEST_GROUP_ONLY));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_DIGEST_GROUP_ONLY, inboundContext.effectiveLanguage()));
         }
         ScopeRef.Group group = (ScopeRef.Group) scope;
 
@@ -388,14 +388,14 @@ public class RetryCommandHandler implements CommandHandler {
         String contactId = inboundContext.senderContactId();
         ActorRow actor = lookupActor(adapter, contactId);
         if (actor == null) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_DIGEST_GROUP_ADMIN_REQUIRED));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_DIGEST_GROUP_ADMIN_REQUIRED, inboundContext.effectiveLanguage()));
         }
 
         GroupRow groupRow = lookupGroup(group.adapterGroupId());
         if (groupRow == null
                 || (!actor.isAdmin
                     && !groupMembershipRepository.isGroupAdmin(groupRow.id(), actor.id))) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_DIGEST_GROUP_ADMIN_REQUIRED));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_DIGEST_GROUP_ADMIN_REQUIRED, inboundContext.effectiveLanguage()));
         }
         UUID groupDbId = groupRow.id();
 
@@ -406,7 +406,7 @@ public class RetryCommandHandler implements CommandHandler {
         // digest. Reject before the audit/cap gates so a paused retry costs
         // no audit row and no rate-limit token.
         if (!groupRow.digestEnabled()) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_DIGEST_PAUSED));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_RETRY_DIGEST_PAUSED, inboundContext.effectiveLanguage()));
         }
 
         writeDigestRetryAudit(actor, adapter, contactId, groupDbId);
@@ -422,22 +422,22 @@ public class RetryCommandHandler implements CommandHandler {
         // before retryDigest even though non-SUCCESS results skip the LLM
         // — over-counting is conservative for an anti-DOS cap.
         if (!llmRateCap.tryAcquire(actor.id)) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_CHAT_LLM_RATE_CAP));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_CHAT_LLM_RATE_CAP, inboundContext.effectiveLanguage()));
         }
         if (!rateCapBucket.tryAcquireGroupLlm(groupDbId)) {
             llmRateCap.refund(actor.id);
-            return reply(scope, bundleLoader.get(BundleKeys.GROUP_LLM_RATE_LIMIT));
+            return reply(scope, bundleLoader.get(BundleKeys.GROUP_LLM_RATE_LIMIT, inboundContext.effectiveLanguage()));
         }
         DigestRetryService.RetryResult result = digestRetryService.retryDigest(groupDbId);
         return switch (result) {
             case SUCCESS -> reply(scope,
-                    bundleLoader.get(BundleKeys.REPLY_RETRY_DIGEST_SUCCESS));
+                    bundleLoader.get(BundleKeys.REPLY_RETRY_DIGEST_SUCCESS, inboundContext.effectiveLanguage()));
             case ALREADY_IN_PROGRESS -> reply(scope,
-                    bundleLoader.get(BundleKeys.ERROR_RETRY_DIGEST_ALREADY_IN_PROGRESS));
+                    bundleLoader.get(BundleKeys.ERROR_RETRY_DIGEST_ALREADY_IN_PROGRESS, inboundContext.effectiveLanguage()));
             case NO_PRIOR_DIGEST -> reply(scope,
-                    bundleLoader.get(BundleKeys.ERROR_RETRY_DIGEST_NO_PRIOR));
+                    bundleLoader.get(BundleKeys.ERROR_RETRY_DIGEST_NO_PRIOR, inboundContext.effectiveLanguage()));
             case RATE_LIMITED -> reply(scope,
-                    bundleLoader.get(BundleKeys.ERROR_RETRY_DIGEST_RATE_LIMITED));
+                    bundleLoader.get(BundleKeys.ERROR_RETRY_DIGEST_RATE_LIMITED, inboundContext.effectiveLanguage()));
         };
     }
 

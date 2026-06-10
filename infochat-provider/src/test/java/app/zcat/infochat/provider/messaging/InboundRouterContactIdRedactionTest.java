@@ -153,6 +153,11 @@ class InboundRouterContactIdRedactionTest {
             Optional<UserSnapshot> lookupUser(DispatchDb db, String adapter, String contactId) {
                 return Optional.of(new UserSnapshot(UUID.randomUUID(), "vouched", false));
             }
+
+            @Override
+            String lookupScopeLanguage(DispatchDb db, String scopeKind, UUID scopeId) {
+                return "en";
+            }
         };
         router.commandHandlers = new SingletonInstance<>();
         // M1-040 wired a @RequestScoped InboundContext into onMessage.

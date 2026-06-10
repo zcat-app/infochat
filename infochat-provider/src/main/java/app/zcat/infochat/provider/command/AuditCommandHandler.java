@@ -70,7 +70,7 @@ public class AuditCommandHandler implements CommandHandler {
     @Override
     public OutboundMessage handle(ScopeRef scope, String rawText) {
         if (scope instanceof ScopeRef.Group) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY, inboundContext.effectiveLanguage()));
         }
 
         String adapter = inboundContext.adapterName();
@@ -78,7 +78,7 @@ public class AuditCommandHandler implements CommandHandler {
 
         Optional<ActorRow> actorOpt = lookupActor(adapter, callerContactId);
         if (actorOpt.isEmpty() || !actorOpt.get().isAdmin) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
         }
 
         AuditArgs args = AuditArgs.parse(rawText);
@@ -88,7 +88,7 @@ public class AuditCommandHandler implements CommandHandler {
                 AuditAction.valueOf(args.action.toUpperCase(Locale.ROOT));
             } catch (IllegalArgumentException e) {
                 return reply(scope, MessageFormat.format(
-                        bundleLoader.get(BundleKeys.ERROR_AUDIT_UNKNOWN_ACTION),
+                        bundleLoader.get(BundleKeys.ERROR_AUDIT_UNKNOWN_ACTION, inboundContext.effectiveLanguage()),
                         args.action, ACCEPTED_ACTIONS));
             }
         }
@@ -132,7 +132,7 @@ public class AuditCommandHandler implements CommandHandler {
             }
         } catch (SQLException e) {
             LOG.errorf(e, "/audit audit write failed");
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage()));
         }
 
         int page = args.page;
@@ -163,7 +163,7 @@ public class AuditCommandHandler implements CommandHandler {
             }
 
             if (totalCount == 0) {
-                return reply(scope, bundleLoader.get(BundleKeys.REPLY_AUDIT_EMPTY));
+                return reply(scope, bundleLoader.get(BundleKeys.REPLY_AUDIT_EMPTY, inboundContext.effectiveLanguage()));
             }
 
             int totalPages = (int) Math.ceil((double) totalCount / pageSize);
@@ -172,7 +172,7 @@ public class AuditCommandHandler implements CommandHandler {
             }
 
             StringBuilder sb = new StringBuilder();
-            sb.append(MessageFormat.format(bundleLoader.get(BundleKeys.REPLY_AUDIT_HEADER),
+            sb.append(MessageFormat.format(bundleLoader.get(BundleKeys.REPLY_AUDIT_HEADER, inboundContext.effectiveLanguage()),
                     String.valueOf(Math.min(totalCount - (long) (page - 1) * pageSize, pageSize)),
                     String.valueOf(page),
                     String.valueOf(totalPages)));
@@ -191,7 +191,7 @@ public class AuditCommandHandler implements CommandHandler {
                     while (rs.next()) {
                         sb.append('\n');
                         sb.append(MessageFormat.format(
-                                bundleLoader.get(BundleKeys.REPLY_AUDIT_LINE),
+                                bundleLoader.get(BundleKeys.REPLY_AUDIT_LINE, inboundContext.effectiveLanguage()),
                                 rs.getTimestamp("created_at").toInstant().toString(),
                                 rs.getString("action"),
                                 rs.getString("actor_contact_id") != null
@@ -206,7 +206,7 @@ public class AuditCommandHandler implements CommandHandler {
             return reply(scope, sb.toString());
         } catch (SQLException e) {
             LOG.errorf(e, "/audit query failed");
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage()));
         }
     }
 

@@ -117,7 +117,7 @@ public class RemoveSourceCommandHandler implements CommandHandler {
     public OutboundMessage handle(ScopeRef scope, String rawText) {
         if (scope instanceof ScopeRef.Group group) {
             if (!isGroupAdmin(group)) {
-                return reply(scope, bundleLoader.get(BundleKeys.ERROR_GROUP_ADMIN_NOT_IN_V1));
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_GROUP_ADMIN_NOT_IN_V1, inboundContext.effectiveLanguage()));
             }
         }
 
@@ -130,7 +130,7 @@ public class RemoveSourceCommandHandler implements CommandHandler {
         // admin gate has precedence over the confirm fork.
         Optional<UserRow> actorOpt = lookupUser(adapter, callerContactId);
         if (actorOpt.isEmpty() || !actorOpt.get().isAdmin) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
         }
         UserRow actor = actorOpt.get();
 
@@ -141,7 +141,7 @@ public class RemoveSourceCommandHandler implements CommandHandler {
             Optional<ConfirmStateService.PendingConfirm> taken =
                     confirmStateService.takeMatching(actor.id, scope, "remove-source");
             if (taken.isEmpty()) {
-                return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONFIRM_NO_PENDING));
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONFIRM_NO_PENDING, inboundContext.effectiveLanguage()));
             }
             RemoveSourceConfirm pending = (RemoveSourceConfirm) taken.get();
             return executeRemove(scope, actor, adapter, pending.sourceId());
@@ -150,16 +150,16 @@ public class RemoveSourceCommandHandler implements CommandHandler {
         // First-call: parse the positional <id>.
         UUID sourceId = parseSourceId(rawText);
         if (sourceId == null) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_REMOVE_SOURCE_UNKNOWN_ID));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_REMOVE_SOURCE_UNKNOWN_ID, inboundContext.effectiveLanguage()));
         }
 
         Optional<SourceRow> sourceOpt = lookupSource(sourceId);
         if (sourceOpt.isEmpty()) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_REMOVE_SOURCE_UNKNOWN_ID));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_REMOVE_SOURCE_UNKNOWN_ID, inboundContext.effectiveLanguage()));
         }
         SourceRow source = sourceOpt.get();
         if (source.deletedAt != null) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_REMOVE_SOURCE_ALREADY_DELETED));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_REMOVE_SOURCE_ALREADY_DELETED, inboundContext.effectiveLanguage()));
         }
 
         long subscriberCount = countSubscriptions(sourceId);
@@ -181,7 +181,7 @@ public class RemoveSourceCommandHandler implements CommandHandler {
         confirmStateService.remember(actor.id, scope, new RemoveSourceConfirm(sourceId));
 
         String prompt = MessageFormat.format(
-                bundleLoader.get(BundleKeys.REPLY_CONFIRM_PROMPT_REMOVE_SOURCE),
+                bundleLoader.get(BundleKeys.REPLY_CONFIRM_PROMPT_REMOVE_SOURCE, inboundContext.effectiveLanguage()),
                 source.displayName,
                 Long.toString(subscriberCount),
                 Long.toString(confirmStateService.timeoutSeconds()));
@@ -199,12 +199,12 @@ public class RemoveSourceCommandHandler implements CommandHandler {
                 LockedSourceRow locked = selectSourceForUpdate(conn, sourceId);
                 if (locked == null) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_REMOVE_SOURCE_UNKNOWN_ID));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_REMOVE_SOURCE_UNKNOWN_ID, inboundContext.effectiveLanguage()));
                 }
                 if (locked.deletedAt != null) {
                     conn.rollback();
                     return reply(scope,
-                            bundleLoader.get(BundleKeys.ERROR_REMOVE_SOURCE_ALREADY_DELETED));
+                            bundleLoader.get(BundleKeys.ERROR_REMOVE_SOURCE_ALREADY_DELETED, inboundContext.effectiveLanguage()));
                 }
 
                 String requestId = UUID.randomUUID().toString();
@@ -220,7 +220,7 @@ public class RemoveSourceCommandHandler implements CommandHandler {
                 conn.commit();
 
                 String body = MessageFormat.format(
-                        bundleLoader.get(BundleKeys.REPLY_REMOVE_SOURCE_SUCCESS),
+                        bundleLoader.get(BundleKeys.REPLY_REMOVE_SOURCE_SUCCESS, inboundContext.effectiveLanguage()),
                         locked.displayName, Long.toString(cascadeDeleted));
                 return reply(scope, body);
             } catch (SQLException e) {

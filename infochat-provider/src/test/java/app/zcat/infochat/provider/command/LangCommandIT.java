@@ -26,17 +26,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * IT for {@link LangCommandHandler} — walks the full inbound →
  * router → handler → adapter chain via {@link InMemoryAdapter}.
  *
- * <p>The two scenarios pin the T2-C.2 user-observable contract:
+ * <p>The two scenarios pin the user-observable contract:
  * <ul>
  *   <li>{@code /lang cs} produces a Czech confirmation reply via the
- *       NEW 2-arg {@link BundleLoader#get(String, String)} accessor;
- *       a subsequent {@code /help} from the same DM still resolves
- *       through the legacy 1-arg accessor and lands in English. The
- *       cross-cutting per-scope migration of every handler is T2-F's
- *       responsibility — T2-C.2 ships ONLY the {@code LangCommandHandler}-
- *       side per-scope resolution, so {@code /help} remaining in English
- *       is the load-bearing back-compat property of the additive
- *       BundleLoader refactor.</li>
+ *       2-arg {@link BundleLoader#get(String, String)} accessor; a
+ *       subsequent {@code /help} from the same DM resolves per the
+ *       scope's stored language and also lands in Czech — the D43
+ *       contract that every user-visible reply renders in the scope's
+ *       chosen language.</li>
  *   <li>{@code /lang xx} (unsupported) surfaces a reply that lists
  *       both {@code en} and {@code cs} as supported codes verbatim,
  *       per spec §Conversation control "lists the supported codes —
@@ -107,41 +104,37 @@ class LangCommandIT {
                 "step 1: outbound body must equal the cs.properties value of "
                         + "reply.lang.success interpolated with the just-set code");
 
-        // /help — the legacy 1-arg accessor MUST still return the en
-        // value. T2-C.2 ships ONLY LangCommandHandler-side per-scope
-        // resolution; the cross-cutting migration is T2-F's. A future
-        // regression that flipped HelpCommandHandler to the 2-arg
-        // accessor would break this assertion — and rightly so until
-        // T2-F lands.
+        // /help — must resolve per the scope's stored language and land
+        // in Czech (D43). A regression that dropped HelpCommandHandler
+        // back to the en-only accessor would break this assertion.
         adapter.deliverDm(actor, "/help");
         List<OutboundMessage> after2 = adapter.sentMessages();
         assertEquals(2, after2.size(),
                 "step 2: /help must produce one further outbound");
-        String enHelp = String.join("\n",
-                bundleLoader.get(BundleKeys.HELP_HEADER_DM_USER),
-                bundleLoader.get(BundleKeys.HELP_CMD_HELP_SHORT),
-                bundleLoader.get(BundleKeys.HELP_CMD_STATUS_SHORT),
-                bundleLoader.get(BundleKeys.HELP_CMD_GET_TAGS_SHORT),
-                bundleLoader.get(BundleKeys.HELP_CMD_GET_SOURCES_SHORT),
-                bundleLoader.get(BundleKeys.HELP_CMD_SUMMARY_SHORT),
-                bundleLoader.get(BundleKeys.HELP_CMD_LIST_SOURCES_SHORT),
-                bundleLoader.get(BundleKeys.HELP_CMD_SAVE_SHORT),
-                bundleLoader.get(BundleKeys.HELP_CMD_SAVED_SHORT),
-                bundleLoader.get(BundleKeys.HELP_CMD_UNSAVE_SHORT),
-                bundleLoader.get(BundleKeys.HELP_CMD_EXPORT_SHORT),
-                bundleLoader.get(BundleKeys.HELP_CMD_ADD_SOURCE_SHORT),
-                bundleLoader.get(BundleKeys.HELP_CMD_FOLLOW_TAG_SHORT),
-                bundleLoader.get(BundleKeys.HELP_CMD_UNFOLLOW_TAG_SHORT),
-                bundleLoader.get(BundleKeys.HELP_CMD_LANG_SHORT),
-                bundleLoader.get(BundleKeys.HELP_CMD_CLEAR_SHORT),
-                bundleLoader.get(BundleKeys.HELP_CMD_COMPRESS_SHORT),
-                bundleLoader.get(BundleKeys.HELP_CMD_FORGET_SHORT),
-                bundleLoader.get(BundleKeys.HELP_CMD_STOP_SHORT),
-                bundleLoader.get(BundleKeys.HELP_CMD_RETRY_SHORT));
-        assertEquals(enHelp, after2.get(1).text(),
-                "step 2: /help outbound must still resolve via the 1-arg accessor "
-                        + "(en values verbatim) — T2-F migrates handlers wholesale to the "
-                        + "2-arg per-scope accessor when chat-mode + digests land");
+        String csHelp = String.join("\n",
+                bundleLoader.get(BundleKeys.HELP_HEADER_DM_USER, "cs"),
+                bundleLoader.get(BundleKeys.HELP_CMD_HELP_SHORT, "cs"),
+                bundleLoader.get(BundleKeys.HELP_CMD_STATUS_SHORT, "cs"),
+                bundleLoader.get(BundleKeys.HELP_CMD_GET_TAGS_SHORT, "cs"),
+                bundleLoader.get(BundleKeys.HELP_CMD_GET_SOURCES_SHORT, "cs"),
+                bundleLoader.get(BundleKeys.HELP_CMD_SUMMARY_SHORT, "cs"),
+                bundleLoader.get(BundleKeys.HELP_CMD_LIST_SOURCES_SHORT, "cs"),
+                bundleLoader.get(BundleKeys.HELP_CMD_SAVE_SHORT, "cs"),
+                bundleLoader.get(BundleKeys.HELP_CMD_SAVED_SHORT, "cs"),
+                bundleLoader.get(BundleKeys.HELP_CMD_UNSAVE_SHORT, "cs"),
+                bundleLoader.get(BundleKeys.HELP_CMD_EXPORT_SHORT, "cs"),
+                bundleLoader.get(BundleKeys.HELP_CMD_ADD_SOURCE_SHORT, "cs"),
+                bundleLoader.get(BundleKeys.HELP_CMD_FOLLOW_TAG_SHORT, "cs"),
+                bundleLoader.get(BundleKeys.HELP_CMD_UNFOLLOW_TAG_SHORT, "cs"),
+                bundleLoader.get(BundleKeys.HELP_CMD_LANG_SHORT, "cs"),
+                bundleLoader.get(BundleKeys.HELP_CMD_CLEAR_SHORT, "cs"),
+                bundleLoader.get(BundleKeys.HELP_CMD_COMPRESS_SHORT, "cs"),
+                bundleLoader.get(BundleKeys.HELP_CMD_FORGET_SHORT, "cs"),
+                bundleLoader.get(BundleKeys.HELP_CMD_STOP_SHORT, "cs"),
+                bundleLoader.get(BundleKeys.HELP_CMD_RETRY_SHORT, "cs"));
+        assertEquals(csHelp, after2.get(1).text(),
+                "step 2: /help outbound must render in the scope's stored "
+                        + "language (cs values verbatim, per-scope resolution end-to-end)");
     }
 
     @Test

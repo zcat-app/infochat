@@ -146,7 +146,7 @@ public class VouchCommandHandler implements CommandHandler {
         // the caller or opening a transaction — matching the guard in the
         // other bot-global admin handlers.
         if (scope instanceof ScopeRef.Group) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY, inboundContext.effectiveLanguage()));
         }
         String adapter = inboundContext.adapterName();
         String callerContactId = contactIdOf(scope);
@@ -154,14 +154,14 @@ public class VouchCommandHandler implements CommandHandler {
         // contactIdOf is @Nullable; narrow it for the permission pre-check
         // and the in-tx FOR UPDATE gate below (both require non-null).
         if (callerContactId == null) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
         }
 
         // Parse `<contact>`.
         VouchArgs args = VouchArgs.parse(rawText);
         if (args == null) {
             return reply(scope, MessageFormat.format(
-                    bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT),
+                    bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT, inboundContext.effectiveLanguage()),
                     "/vouch <contact>"));
         }
         String targetContactId = args.contact;
@@ -176,7 +176,7 @@ public class VouchCommandHandler implements CommandHandler {
         // can never happen without the intent row.
         Optional<ActorRow> actorPre = lookupActor(adapter, callerContactId);
         if (actorPre.isEmpty() || !actorPre.get().isAdmin) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
         }
 
         String requestId = UUID.randomUUID().toString();
@@ -209,7 +209,7 @@ public class VouchCommandHandler implements CommandHandler {
                         lookupActorForUpdate(conn, adapter, callerContactId);
                 if (actorOpt.isEmpty() || !actorOpt.get().isAdmin) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
                 }
                 ActorRow actor = actorOpt.get();
                 try (PreparedStatement ps = conn.prepareStatement(
@@ -222,18 +222,18 @@ public class VouchCommandHandler implements CommandHandler {
                         lookupTargetInTx(conn, adapter, targetContactId);
                 if (targetOpt.isEmpty()) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONTACT_NOT_REGISTERED));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONTACT_NOT_REGISTERED, inboundContext.effectiveLanguage()));
                 }
                 TargetRow target = targetOpt.get();
 
                 if (target.isBanned) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_VOUCH_BANNED_TARGET));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_VOUCH_BANNED_TARGET, inboundContext.effectiveLanguage()));
                 }
 
                 if (isAlreadyPastProbation(target)) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.REPLY_VOUCH_NOOP));
+                    return reply(scope, bundleLoader.get(BundleKeys.REPLY_VOUCH_NOOP, inboundContext.effectiveLanguage()));
                 }
 
                 insertVouchAudit(conn, actor, adapter, target.id, targetContactId,
@@ -257,7 +257,7 @@ public class VouchCommandHandler implements CommandHandler {
                             + ContactIds.redact(targetContactId), e);
         }
 
-        return reply(scope, bundleLoader.get(outcomeBundleKey));
+        return reply(scope, bundleLoader.get(outcomeBundleKey, inboundContext.effectiveLanguage()));
     }
 
     /**

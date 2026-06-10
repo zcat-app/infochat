@@ -157,7 +157,7 @@ public class BanCommandHandler implements CommandHandler {
         // fork so `/ban confirm` in a group also returns the accurate
         // scope error — matching the other bot-global admin handlers.
         if (scope instanceof ScopeRef.Group) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY, inboundContext.effectiveLanguage()));
         }
         String adapter = inboundContext.adapterName();
         String callerContactId = contactIdOf(scope);
@@ -169,7 +169,7 @@ public class BanCommandHandler implements CommandHandler {
         // not error.confirm.no_pending — admin gate has precedence).
         Optional<UserRow> actorOpt = lookupUser(adapter, callerContactId);
         if (actorOpt.isEmpty() || !actorOpt.get().isAdmin) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
         }
         UserRow actor = actorOpt.get();
 
@@ -183,7 +183,7 @@ public class BanCommandHandler implements CommandHandler {
             Optional<ConfirmStateService.PendingConfirm> taken =
                     confirmStateService.takeMatching(actor.id, scope, "ban");
             if (taken.isEmpty()) {
-                return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONFIRM_NO_PENDING));
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONFIRM_NO_PENDING, inboundContext.effectiveLanguage()));
             }
             BanConfirm pendingBan = (BanConfirm) taken.get();
             return executeBan(scope, adapter, actor.contactId,
@@ -195,7 +195,7 @@ public class BanCommandHandler implements CommandHandler {
         BanArgs args = BanArgs.parse(rawText);
         if (args == null) {
             return reply(scope, MessageFormat.format(
-                    bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT),
+                    bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT, inboundContext.effectiveLanguage()),
                     "/ban <contact> [--reason \"...\"]"));
         }
         String targetContactId = args.contact;
@@ -237,7 +237,7 @@ public class BanCommandHandler implements CommandHandler {
         // target are scoped to the same inbound adapter, so a
         // contact_id match implies identity.
         if (callerContactId != null && callerContactId.equals(targetContactId)) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_BAN_CANNOT_BAN_SELF));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_BAN_CANNOT_BAN_SELF, inboundContext.effectiveLanguage()));
         }
 
         // Pre-flight validation passed — store pending args and prompt
@@ -250,7 +250,7 @@ public class BanCommandHandler implements CommandHandler {
         confirmStateService.remember(actor.id, scope,
                 new BanConfirm(targetContactId, args.reason, intentRequestId));
         String prompt = MessageFormat.format(
-                bundleLoader.get(BundleKeys.REPLY_CONFIRM_PROMPT_BAN),
+                bundleLoader.get(BundleKeys.REPLY_CONFIRM_PROMPT_BAN, inboundContext.effectiveLanguage()),
                 Long.toString(confirmStateService.timeoutSeconds()),
                 ContactIds.redact(targetContactId));
         return reply(scope, prompt);
@@ -289,7 +289,7 @@ public class BanCommandHandler implements CommandHandler {
                         lookupUserForUpdate(conn, adapter, callerContactId);
                 if (actorOpt.isEmpty() || !actorOpt.get().isAdmin) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
                 }
                 UserRow actor = actorOpt.get();
                 try (PreparedStatement ps = conn.prepareStatement(
@@ -355,7 +355,7 @@ public class BanCommandHandler implements CommandHandler {
                 // load-bearing match key — message text is free to
                 // reword.
                 if (LAST_ADMIN_SQLSTATE.equals(e.getSQLState())) {
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_BAN_LAST_ADMIN));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_BAN_LAST_ADMIN, inboundContext.effectiveLanguage()));
                 }
                 // Redact the contact id in the wrapping message: §Secrets
                 // handling commits "Contact IDs are logged in redacted
@@ -383,7 +383,7 @@ public class BanCommandHandler implements CommandHandler {
         registeredContactSet.invalidate(adapter, targetContactId);
 
         String body = MessageFormat.format(
-                bundleLoader.get(BundleKeys.REPLY_BAN_SUCCESS),
+                bundleLoader.get(BundleKeys.REPLY_BAN_SUCCESS, inboundContext.effectiveLanguage()),
                 ContactIds.redact(targetContactId));
         return reply(scope, body);
     }

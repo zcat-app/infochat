@@ -68,7 +68,7 @@ public class GroupTimezoneCommandHandler implements CommandHandler {
     @Override
     public OutboundMessage handle(ScopeRef scope, String rawText) {
         if (!(scope instanceof ScopeRef.Group group)) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_GROUP_TIMEZONE_DM_SCOPE));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_GROUP_TIMEZONE_DM_SCOPE, inboundContext.effectiveLanguage()));
         }
 
         String adapter = inboundContext.adapterName();
@@ -76,7 +76,7 @@ public class GroupTimezoneCommandHandler implements CommandHandler {
 
         String tzArg = parseTimezone(rawText);
         if (tzArg == null || tzArg.isBlank()) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_GROUP_TIMEZONE_NOT_ADMIN));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_GROUP_TIMEZONE_NOT_ADMIN, inboundContext.effectiveLanguage()));
         }
 
         // Validate IANA zone
@@ -86,7 +86,7 @@ public class GroupTimezoneCommandHandler implements CommandHandler {
         } catch (DateTimeException e) {
             String suggestions = fuzzySuggestions(tzArg);
             String replyText = MessageFormat.format(
-                    bundleLoader.get(BundleKeys.ERROR_GROUP_TIMEZONE_INVALID_ZONE),
+                    bundleLoader.get(BundleKeys.ERROR_GROUP_TIMEZONE_INVALID_ZONE, inboundContext.effectiveLanguage()),
                     tzArg, suggestions);
             return reply(scope, replyText);
         }
@@ -99,7 +99,7 @@ public class GroupTimezoneCommandHandler implements CommandHandler {
                 ActorRow actor = resolveActor(conn, adapter, callerContactId);
                 if (actor == null) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_GROUP_TIMEZONE_NOT_ADMIN));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_GROUP_TIMEZONE_NOT_ADMIN, inboundContext.effectiveLanguage()));
                 }
 
                 // Resolve group
@@ -108,7 +108,7 @@ public class GroupTimezoneCommandHandler implements CommandHandler {
                 // Authorization: group-admin OR bot-admin
                 if (!actor.isAdmin && !isGroupAdmin(conn, groupId, actor.id)) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_GROUP_TIMEZONE_NOT_ADMIN));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_GROUP_TIMEZONE_NOT_ADMIN, inboundContext.effectiveLanguage()));
                 }
 
                 // Audit before effect
@@ -141,7 +141,7 @@ public class GroupTimezoneCommandHandler implements CommandHandler {
         }
 
         String replyText = MessageFormat.format(
-                bundleLoader.get(BundleKeys.REPLY_GROUP_TIMEZONE_SUCCESS),
+                bundleLoader.get(BundleKeys.REPLY_GROUP_TIMEZONE_SUCCESS, inboundContext.effectiveLanguage()),
                 zoneId.getId());
         return reply(scope, replyText);
     }

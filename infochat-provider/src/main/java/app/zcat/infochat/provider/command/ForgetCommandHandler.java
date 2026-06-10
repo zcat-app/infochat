@@ -75,7 +75,7 @@ public class ForgetCommandHandler implements CommandHandler {
 
         Optional<UserRow> actorOpt = lookupUser(adapter, callerContactId);
         if (actorOpt.isEmpty()) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage()));
         }
         UserRow actor = actorOpt.get();
 
@@ -84,7 +84,7 @@ public class ForgetCommandHandler implements CommandHandler {
             Optional<ConfirmStateService.PendingConfirm> taken =
                     confirmStateService.takeMatching(actor.id, scope, "forget");
             if (taken.isEmpty()) {
-                return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONFIRM_NO_PENDING));
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONFIRM_NO_PENDING, inboundContext.effectiveLanguage()));
             }
             return executeForget(scope, actor, adapter);
         }
@@ -92,7 +92,7 @@ public class ForgetCommandHandler implements CommandHandler {
         // First-call path — store pending and return prompt.
         confirmStateService.remember(actor.id, scope, new ForgetConfirm());
         String prompt = MessageFormat.format(
-                bundleLoader.get(BundleKeys.REPLY_CONFIRM_PROMPT_FORGET),
+                bundleLoader.get(BundleKeys.REPLY_CONFIRM_PROMPT_FORGET, inboundContext.effectiveLanguage()),
                 Long.toString(confirmStateService.timeoutSeconds()));
         return reply(scope, prompt);
     }
@@ -112,7 +112,7 @@ public class ForgetCommandHandler implements CommandHandler {
                 if (counts.total() == 0) {
                     // Invariant 7 carve-out: verified no-op skips audit.
                     conn.commit();
-                    return reply(scope, bundleLoader.get(BundleKeys.REPLY_FORGET_NOOP));
+                    return reply(scope, bundleLoader.get(BundleKeys.REPLY_FORGET_NOOP, inboundContext.effectiveLanguage()));
                 }
 
                 String requestId = UUID.randomUUID().toString();
@@ -144,10 +144,10 @@ public class ForgetCommandHandler implements CommandHandler {
 
     private OutboundMessage buildReply(ScopeRef scope, int remainingScopes) {
         if (remainingScopes == 0) {
-            return reply(scope, bundleLoader.get(BundleKeys.REPLY_FORGET_CLEARED));
+            return reply(scope, bundleLoader.get(BundleKeys.REPLY_FORGET_CLEARED, inboundContext.effectiveLanguage()));
         }
         String body = MessageFormat.format(
-                bundleLoader.get(BundleKeys.REPLY_FORGET_CLEARED_WITH_REMAINING),
+                bundleLoader.get(BundleKeys.REPLY_FORGET_CLEARED_WITH_REMAINING, inboundContext.effectiveLanguage()),
                 Integer.toString(remainingScopes));
         return reply(scope, body);
     }

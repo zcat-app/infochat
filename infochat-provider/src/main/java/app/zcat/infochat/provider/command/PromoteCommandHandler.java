@@ -83,7 +83,7 @@ public class PromoteCommandHandler implements CommandHandler {
     @Override
     public OutboundMessage handle(ScopeRef scope, String rawText) {
         if (!(scope instanceof ScopeRef.Group group)) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_PROMOTE_GROUP_SCOPE_REQUIRED));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_PROMOTE_GROUP_SCOPE_REQUIRED, inboundContext.effectiveLanguage()));
         }
 
         String adapter = inboundContext.adapterName();
@@ -92,7 +92,7 @@ public class PromoteCommandHandler implements CommandHandler {
         String targetContactId = parseTarget(rawText);
         if (targetContactId == null) {
             return reply(scope, MessageFormat.format(
-                    bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT),
+                    bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT, inboundContext.effectiveLanguage()),
                     "/promote <contact>"));
         }
 
@@ -106,7 +106,7 @@ public class PromoteCommandHandler implements CommandHandler {
         Optional<UserRepository.UserRow> actorPre =
                 userRepository.findByAdapterAndContactId(adapter, callerContactId);
         if (actorPre.isEmpty() || !actorPre.get().isAdmin()) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
         }
 
         String requestId = UUID.randomUUID().toString();
@@ -127,24 +127,24 @@ public class PromoteCommandHandler implements CommandHandler {
                 UUID actorId = resolveAdmin(conn, adapter, callerContactId);
                 if (actorId == null) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
                 }
 
                 // Resolve target
                 TargetRow target = resolveTarget(conn, adapter, targetContactId);
                 if (target == null) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONTACT_NOT_REGISTERED));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONTACT_NOT_REGISTERED, inboundContext.effectiveLanguage()));
                 }
 
                 if (target.isBanned) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_PROMOTE_TARGET_BANNED));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_PROMOTE_TARGET_BANNED, inboundContext.effectiveLanguage()));
                 }
 
                 if (target.inProbation()) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_PROMOTE_TARGET_PROBATION));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_PROMOTE_TARGET_PROBATION, inboundContext.effectiveLanguage()));
                 }
 
                 // Resolve group
@@ -153,7 +153,7 @@ public class PromoteCommandHandler implements CommandHandler {
                 // Validate active membership
                 if (!hasActiveMembership(conn, groupId, target.id)) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_PROMOTE_TARGET_NOT_IN_GROUP));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_PROMOTE_TARGET_NOT_IN_GROUP, inboundContext.effectiveLanguage()));
                 }
 
                 // Audit before effect
@@ -187,7 +187,7 @@ public class PromoteCommandHandler implements CommandHandler {
         }
 
         String replyText = MessageFormat.format(
-                bundleLoader.get(BundleKeys.REPLY_PROMOTE_SUCCESS),
+                bundleLoader.get(BundleKeys.REPLY_PROMOTE_SUCCESS, inboundContext.effectiveLanguage()),
                 ContactIds.redact(targetContactId));
         return reply(scope, replyText);
     }

@@ -57,7 +57,7 @@ public class StopCommandHandler implements CommandHandler {
     public OutboundMessage handle(ScopeRef scope, String rawText) {
         Optional<UUID> userId = resolveUserId();
         if (userId.isEmpty()) {
-            return reply(scope, bundleLoader.get(BundleKeys.REPLY_STOP_NOOP));
+            return reply(scope, bundleLoader.get(BundleKeys.REPLY_STOP_NOOP, inboundContext.effectiveLanguage()));
         }
 
         // Per-(user, scope) cancellation key, mirroring
@@ -66,7 +66,7 @@ public class StopCommandHandler implements CommandHandler {
         // in-flight chat work) yields the idempotent no-op.
         Optional<ScopeResolution> resolved = resolveScope(scope, userId.get());
         if (resolved.isEmpty()) {
-            return reply(scope, bundleLoader.get(BundleKeys.REPLY_STOP_NOOP));
+            return reply(scope, bundleLoader.get(BundleKeys.REPLY_STOP_NOOP, inboundContext.effectiveLanguage()));
         }
         String scopeKind = resolved.get().scopeKind();
         UUID scopeId = resolved.get().scopeId();
@@ -80,21 +80,21 @@ public class StopCommandHandler implements CommandHandler {
 
         if (cancelledInFlight && cancelledConfirm.isPresent()) {
             String text = MessageFormat.format(
-                    bundleLoader.get(BundleKeys.REPLY_STOP_BOTH_CANCELLED),
+                    bundleLoader.get(BundleKeys.REPLY_STOP_BOTH_CANCELLED, inboundContext.effectiveLanguage()),
                     cancelledConfirm.get().commandName());
             return reply(scope, text);
         }
         if (cancelledInFlight) {
-            return reply(scope, bundleLoader.get(BundleKeys.REPLY_STOP_CANCELLED));
+            return reply(scope, bundleLoader.get(BundleKeys.REPLY_STOP_CANCELLED, inboundContext.effectiveLanguage()));
         }
         if (cancelledConfirm.isPresent()) {
             String text = MessageFormat.format(
-                    bundleLoader.get(BundleKeys.REPLY_STOP_CONFIRM_CANCELLED),
+                    bundleLoader.get(BundleKeys.REPLY_STOP_CONFIRM_CANCELLED, inboundContext.effectiveLanguage()),
                     cancelledConfirm.get().commandName());
             return reply(scope, text);
         }
 
-        return reply(scope, bundleLoader.get(BundleKeys.REPLY_STOP_NOOP));
+        return reply(scope, bundleLoader.get(BundleKeys.REPLY_STOP_NOOP, inboundContext.effectiveLanguage()));
     }
 
     /**

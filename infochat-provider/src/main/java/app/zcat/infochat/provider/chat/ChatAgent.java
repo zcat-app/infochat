@@ -119,34 +119,36 @@ public class ChatAgent {
      */
     public String handle(UUID userId, String scopeKind,
                                    UUID scopeId, String userMessage) {
+        // Resolved ahead of the in-flight gate so the contention notice
+        // and the catch-all unavailable reply localize too (D43).
+        String scopeLanguage = readScopeLanguage(scopeKind, scopeId);
         InFlightTracker.CancellationHandle slot =
                 inFlightTracker.tryAcquire(userId, scopeKind, scopeId);
         if (slot == null) {
-            return bundleLoader.get(BundleKeys.ERROR_CHAT_IN_FLIGHT);
+            return bundleLoader.get(BundleKeys.ERROR_CHAT_IN_FLIGHT, scopeLanguage);
         }
         try {
-            return doHandle(userId, scopeKind, scopeId, userMessage);
+            return doHandle(userId, scopeKind, scopeId, userMessage, scopeLanguage);
         } catch (Exception e) {
             // LLM unreachable or any other failure → friendly error.
             // No session advance, no memory write, no tool invocation
             // beyond what already ran before the failure.
             SafeLog.error(log, "ChatAgent.handle failed for userId=" + userId, e);
-            return bundleLoader.get(BundleKeys.ERROR_CHAT_UNAVAILABLE);
+            return bundleLoader.get(BundleKeys.ERROR_CHAT_UNAVAILABLE, scopeLanguage);
         } finally {
             inFlightTracker.release(userId, scopeKind, scopeId, slot);
         }
     }
 
-    private String doHandle(UUID userId, String scopeKind, UUID scopeId, String userMessage) {
+    private String doHandle(UUID userId, String scopeKind, UUID scopeId,
+                            String userMessage, String scopeLanguage) {
         // Ceiling gate: a failed auto-compress left this session at its
         // token ceiling — reject the turn outright (no LLM call, no
         // persist) instead of silently growing past the ceiling. Clears
         // when a compress succeeds or /clear empties the session.
         if (autoCompressTrigger.isCeilingGated(userId, scopeKind, scopeId)) {
-            return bundleLoader.get(BundleKeys.ERROR_COMPRESS_FAILED);
+            return bundleLoader.get(BundleKeys.ERROR_COMPRESS_FAILED, scopeLanguage);
         }
-
-        String scopeLanguage = readScopeLanguage(scopeKind, scopeId);
 
         // 1. Build prompt (pre-fetches memory internally)
         ChatPromptBuilder.BuiltPrompt prompt =

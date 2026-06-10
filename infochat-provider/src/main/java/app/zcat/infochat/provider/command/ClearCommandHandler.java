@@ -81,7 +81,7 @@ public class ClearCommandHandler implements CommandHandler {
 
         Optional<UUID> actorIdOpt = lookupUserId(adapter, callerContactId);
         if (actorIdOpt.isEmpty()) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage()));
         }
         UUID actorId = actorIdOpt.get();
 
@@ -89,14 +89,14 @@ public class ClearCommandHandler implements CommandHandler {
             Optional<ConfirmStateService.PendingConfirm> taken =
                     confirmStateService.takeMatching(actorId, scope, "clear");
             if (taken.isEmpty()) {
-                return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONFIRM_NO_PENDING));
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONFIRM_NO_PENDING, inboundContext.effectiveLanguage()));
             }
             return executeClear(scope, actorId, adapter);
         }
 
         confirmStateService.remember(actorId, scope, new ClearConfirm());
         String prompt = MessageFormat.format(
-                bundleLoader.get(BundleKeys.REPLY_CONFIRM_PROMPT_CLEAR),
+                bundleLoader.get(BundleKeys.REPLY_CONFIRM_PROMPT_CLEAR, inboundContext.effectiveLanguage()),
                 Long.toString(confirmStateService.timeoutSeconds()));
         return reply(scope, prompt);
     }
@@ -111,7 +111,7 @@ public class ClearCommandHandler implements CommandHandler {
                 // Idempotent: no session → no-op.
                 if (!sessionExists(conn, actorId, scopeKind, scopeId)) {
                     conn.commit();
-                    return reply(scope, bundleLoader.get(BundleKeys.REPLY_CLEAR_NOOP));
+                    return reply(scope, bundleLoader.get(BundleKeys.REPLY_CLEAR_NOOP, inboundContext.effectiveLanguage()));
                 }
 
                 try (PreparedStatement ps = conn.prepareStatement(DELETE_MESSAGES_SQL)) {
@@ -129,7 +129,7 @@ public class ClearCommandHandler implements CommandHandler {
                 }
 
                 conn.commit();
-                return reply(scope, bundleLoader.get(BundleKeys.REPLY_CLEAR_SUCCESS));
+                return reply(scope, bundleLoader.get(BundleKeys.REPLY_CLEAR_SUCCESS, inboundContext.effectiveLanguage()));
             } catch (SQLException e) {
                 conn.rollback();
                 throw e;

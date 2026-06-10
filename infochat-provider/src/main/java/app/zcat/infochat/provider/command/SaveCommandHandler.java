@@ -176,25 +176,25 @@ public class SaveCommandHandler implements CommandHandler {
         // before any DB work — so they are never stored.
         if (args.personalTags.size() > personalTagMaxCount) {
             return reply(scope, MessageFormat.format(
-                    bundleLoader.get(BundleKeys.ERROR_SAVE_TOO_MANY_TAGS),
+                    bundleLoader.get(BundleKeys.ERROR_SAVE_TOO_MANY_TAGS, inboundContext.effectiveLanguage()),
                     personalTagMaxCount));
         }
         for (String tag : args.personalTags) {
             if (tag.length() > personalTagMaxLength) {
                 return reply(scope, MessageFormat.format(
-                        bundleLoader.get(BundleKeys.ERROR_SAVE_TAG_TOO_LONG),
+                        bundleLoader.get(BundleKeys.ERROR_SAVE_TAG_TOO_LONG, inboundContext.effectiveLanguage()),
                         personalTagMaxLength));
             }
         }
 
         if (args.uid == null) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_SAVE_UNKNOWN_UID));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_SAVE_UNKNOWN_UID, inboundContext.effectiveLanguage()));
         }
 
         String adapter = inboundContext.adapterName();
         String callerContactId = resolveContactId(scope);
         if (callerContactId == null) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_SAVE_UNKNOWN_UID));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_SAVE_UNKNOWN_UID, inboundContext.effectiveLanguage()));
         }
 
         return executeSave(scope, adapter, callerContactId, args);
@@ -214,7 +214,7 @@ public class SaveCommandHandler implements CommandHandler {
                         lookupActorForUpdate(conn, adapter, callerContactId);
                 if (actorOpt.isEmpty()) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_SAVE_UNKNOWN_UID));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_SAVE_UNKNOWN_UID, inboundContext.effectiveLanguage()));
                 }
                 ActorRow actor = actorOpt.get();
 
@@ -225,7 +225,7 @@ public class SaveCommandHandler implements CommandHandler {
                 Optional<PostSnapshot> postOpt = lookupVisibleReadyPost(conn, uid, actor.id);
                 if (postOpt.isEmpty()) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_SAVE_UNKNOWN_UID));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_SAVE_UNKNOWN_UID, inboundContext.effectiveLanguage()));
                 }
                 PostSnapshot post = postOpt.get();
 
@@ -235,13 +235,13 @@ public class SaveCommandHandler implements CommandHandler {
                 // observes the post-serialization state).
                 if (isAlreadySaved(conn, actor.id, uid)) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_SAVE_ALREADY_SAVED));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_SAVE_ALREADY_SAVED, inboundContext.effectiveLanguage()));
                 }
 
                 // Step 3d — cap check.
                 if (actor.saveCount >= saveCap) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_SAVE_CAP_MET));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_SAVE_CAP_MET, inboundContext.effectiveLanguage()));
                 }
 
                 // Step 3e — snapshot INSERT. The V15 AFTER-INSERT
@@ -251,7 +251,7 @@ public class SaveCommandHandler implements CommandHandler {
                 conn.commit();
 
                 String body = MessageFormat.format(
-                        bundleLoader.get(BundleKeys.REPLY_SAVE_SUCCESS),
+                        bundleLoader.get(BundleKeys.REPLY_SAVE_SUCCESS, inboundContext.effectiveLanguage()),
                         args.uid);
                 return reply(scope, body);
             } catch (SQLException e) {

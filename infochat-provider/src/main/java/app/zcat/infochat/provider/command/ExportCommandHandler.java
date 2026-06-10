@@ -5,6 +5,8 @@ import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
+import app.zcat.infochat.provider.bundle.BundleKeys;
+import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
 import app.zcat.infochat.provider.user.UserRepository;
@@ -16,6 +18,7 @@ import org.jspecify.annotations.Nullable;
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.text.MessageFormat;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -45,17 +48,14 @@ import java.util.UUID;
 @ApplicationScoped
 public class ExportCommandHandler implements CommandHandler {
 
-    static final String GROUP_NOT_SUPPORTED_REPLY =
-            "Group /export is not available yet. Please use /export in a DM.";
-
-    static final String NO_USER_REPLY =
-            "Could not resolve your account. Please try again.";
-
     /** 32-char header budget per the spec (covers page=N/T + fences). */
     static final int HEADER_BUDGET = 32;
 
     @Inject
     DataSource dataSource;
+
+    @Inject
+    BundleLoader bundleLoader;
 
     @Inject
     AuditLogWriter auditLogWriter;
@@ -86,8 +86,10 @@ public class ExportCommandHandler implements CommandHandler {
 
     @Override
     public OutboundMessage handle(ScopeRef scope, String rawText) {
+        String language = inboundContext.effectiveLanguage();
         if (scope instanceof ScopeRef.Group) {
-            return reply(scope, GROUP_NOT_SUPPORTED_REPLY);
+            return reply(scope, bundleLoader.get(
+                    BundleKeys.ERROR_EXPORT_GROUP_NOT_SUPPORTED, language));
         }
 
         ScopeRef.Dm dm = (ScopeRef.Dm) scope;
@@ -96,7 +98,8 @@ public class ExportCommandHandler implements CommandHandler {
 
         UUID userId = lookupUserId(adapter, contactId);
         if (userId == null) {
-            return reply(scope, NO_USER_REPLY);
+            return reply(scope, bundleLoader.get(
+                    BundleKeys.ERROR_EXPORT_NO_USER, language));
         }
 
         // Audit-logged before effect (Invariant 7). Every invocation
@@ -117,9 +120,11 @@ public class ExportCommandHandler implements CommandHandler {
 
         int requestedPage = parseRequestedPage(rawText);
         if (requestedPage > pages.size()) {
-            return reply(scope, "Page " + requestedPage
-                    + " is out of range: this export has " + pages.size()
-                    + (pages.size() == 1 ? " page." : " pages."));
+            String key = pages.size() == 1
+                    ? BundleKeys.ERROR_EXPORT_PAGE_OUT_OF_RANGE_ONE
+                    : BundleKeys.ERROR_EXPORT_PAGE_OUT_OF_RANGE_MANY;
+            return reply(scope, MessageFormat.format(bundleLoader.get(key, language),
+                    String.valueOf(requestedPage), String.valueOf(pages.size())));
         }
         String body = formatPage(pages.get(requestedPage - 1),
                 requestedPage, pages.size());

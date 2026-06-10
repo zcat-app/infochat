@@ -3,6 +3,7 @@ package app.zcat.infochat.provider.messaging;
 import app.zcat.infochat.messaging.Identity;
 import app.zcat.infochat.messaging.InboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
+import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.util.TypeLiteral;
@@ -27,7 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * fence delimiters themselves) round-trip byte-for-byte. The size-cap
  * acceptance item (g) is exercised via the end-to-end
  * {@link InboundRouter#onMessage} path: an oversize body returns the
- * {@link InboundRouter#MESSAGE_TOO_LARGE_REPLY} literal AND the
+ * {@code error.router.message_too_large} bundle reply AND the
  * {@code NORMALIZE_INVOCATIONS} counter does not advance.
  *
  * <p>The test is plain JUnit (no Quarkus boot) — {@code normalize} is
@@ -155,8 +156,8 @@ class InboundRouterNormalizeTest {
     // ----- (g) size cap fires before normalize --------------------------
 
     /**
-     * An oversize inbound is dropped with
-     * {@link InboundRouter#MESSAGE_TOO_LARGE_REPLY} AND the
+     * An oversize inbound is dropped with the
+     * {@code error.router.message_too_large} bundle reply AND the
      * normalization pass is NEVER invoked. The
      * {@code NORMALIZE_INVOCATIONS} counter is the test seam — it is
      * incremented as the first line of {@code normalize}, so a
@@ -175,6 +176,9 @@ class InboundRouterNormalizeTest {
         // ordering; wire a no-op bucket so the size-cap reaches its
         // check without NPE'ing on the null field.
         router.rateCapBucket = new NoopRateCapBucket();
+        // The size-cap reply resolves through the bundle (D43); the
+        // Noop returns "noop:<key>".
+        router.bundleLoader = new NoopBundleLoader();
         // M1-045: oversize body short-circuits at step 1.6 (size cap)
         // BEFORE step 5 (probation), so the two new @Inject fields
         // are not strictly needed here. Wire them anyway for hygiene
@@ -203,8 +207,8 @@ class InboundRouterNormalizeTest {
 
         assertEquals(1, target.captured.size(),
                 "oversize body must produce exactly one too-large reply");
-        assertEquals(InboundRouter.MESSAGE_TOO_LARGE_REPLY, target.captured.get(0).text(),
-                "the oversize reply must be the fixed too-large literal");
+        assertEquals("noop:" + BundleKeys.ERROR_ROUTER_MESSAGE_TOO_LARGE, target.captured.get(0).text(),
+                "the oversize reply must be the fixed too-large bundle entry");
         assertEquals(invocationsBefore, InboundRouter.NORMALIZE_INVOCATIONS.get(),
                 "normalize() must NOT be invoked on an oversize body; counter must not advance");
     }
@@ -329,6 +333,11 @@ class InboundRouterNormalizeTest {
             @Override
             Optional<UserSnapshot> lookupUser(DispatchDb db, String adapter, String contactId) {
                 return Optional.of(new UserSnapshot(UUID.randomUUID(), "vouched", false));
+            }
+
+            @Override
+            String lookupScopeLanguage(DispatchDb db, String scopeKind, UUID scopeId) {
+                return "en";
             }
         };
         router.rateCapBucket = new NoopRateCapBucket();

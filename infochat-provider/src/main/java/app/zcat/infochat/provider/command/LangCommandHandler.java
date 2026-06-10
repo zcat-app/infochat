@@ -116,13 +116,13 @@ public class LangCommandHandler implements CommandHandler {
         if (scope instanceof ScopeRef.Group group) {
             UUID actorId = lookupActorId(inboundContext.senderContactId());
             if (actorId == null) {
-                return reply(scope, bundleLoader.get(BundleKeys.ERROR_LANG_GROUP_ADMIN_NOT_IN_V1));
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_LANG_GROUP_ADMIN_NOT_IN_V1, inboundContext.effectiveLanguage()));
             }
             UUID groupDbId = lookupGroupId(group.adapterGroupId());
             if (groupDbId == null
                     || (!isBotAdmin(actorId)
                         && !groupMembershipRepository.isGroupAdmin(groupDbId, actorId))) {
-                return reply(scope, bundleLoader.get(BundleKeys.ERROR_LANG_GROUP_ADMIN_NOT_IN_V1));
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_LANG_GROUP_ADMIN_NOT_IN_V1, inboundContext.effectiveLanguage()));
             }
             scopeKind = "group";
             scopeId = groupDbId;
@@ -130,7 +130,7 @@ public class LangCommandHandler implements CommandHandler {
             ScopeRef.Dm dm = (ScopeRef.Dm) scope;
             UUID actorId = lookupActorId(dm.contactId());
             if (actorId == null) {
-                return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL));
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage()));
             }
             scopeKind = "dm";
             scopeId = actorId;
@@ -140,7 +140,7 @@ public class LangCommandHandler implements CommandHandler {
         Set<String> supported = bundleLoader.supportedLanguages();
         if (suppliedCode == null || !supported.contains(suppliedCode)) {
             String body = MessageFormat.format(
-                    bundleLoader.get(BundleKeys.ERROR_LANG_UNSUPPORTED_CODE),
+                    bundleLoader.get(BundleKeys.ERROR_LANG_UNSUPPORTED_CODE, inboundContext.effectiveLanguage()),
                     sortedJoin(supported));
             return reply(scope, body);
         }

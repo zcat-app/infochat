@@ -56,7 +56,12 @@ public class ChatMemoryPreFetcher {
         String[] tokens = message.toLowerCase(Locale.ROOT).split("\\s+");
         List<String> keywords = new ArrayList<>();
         for (String token : tokens) {
-            String clean = token.replaceAll("[^a-z0-9]", "");
+            // Strip punctuation by keeping letters (any script) and
+            // digits — an ASCII-only [a-z0-9] class would delete the
+            // diacritic letters of non-en scopes (e.g. Czech č/š/ž),
+            // emptying their keywords and silently disabling memory
+            // pre-fetch for those scopes.
+            String clean = token.replaceAll("[^\\p{L}\\p{Nd}]", "");
             if (clean.length() >= 3) {
                 keywords.add(clean);
             }

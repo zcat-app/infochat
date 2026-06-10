@@ -28,7 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <ol>
  *   <li>(a) {@code overSizeCapDropsAfterRateCapPasses} — body exceeds
  *       the size cap and rate-cap passes; rateCapBucket fires FIRST,
- *       then the size-cap branch emits MESSAGE_TOO_LARGE_REPLY. No
+ *       then the size-cap branch emits the too-large bundle reply. No
  *       other collaborator consulted.</li>
  *   <li>(a2) {@code oversizedBodyDropsAfterOverRateCap} — body exceeds
  *       the size cap AND rate-cap rejects; the silent drop dominates,
@@ -101,13 +101,17 @@ class InboundRouterIntakeOrderingTest {
         router.onMessage(dmInbound(DM_CONTACT, oversize), ADAPTER);
 
         // M1-044e: rate-cap runs first; when it passes, the size-cap
-        // still fires and emits MESSAGE_TOO_LARGE_REPLY. Users-lookup,
-        // inviteCodeConsumer, and banCheck must NOT be consulted.
+        // still fires and emits the too-large bundle reply. Users-lookup,
+        // inviteCodeConsumer, and banCheck must NOT be consulted (the
+        // bundle lookup is part of emitting the reply, not a collaborator
+        // on the intake path).
         assertEquals(1, target.captured.size(),
                 "size-cap path must send exactly one too-large reply");
-        assertEquals(InboundRouter.MESSAGE_TOO_LARGE_REPLY, target.captured.get(0).text());
+        assertEquals(FakeBundleLoader.stubFor(BundleKeys.ERROR_ROUTER_MESSAGE_TOO_LARGE),
+                target.captured.get(0).text());
         assertEquals(
-                List.of("setAdapterName", "rateCapBucket.tryAcquire"),
+                List.of("setAdapterName", "rateCapBucket.tryAcquire",
+                        "bundleLoader.get(" + BundleKeys.ERROR_ROUTER_MESSAGE_TOO_LARGE + ")"),
                 log.calls,
                 "rate-cap first; no other collaborator consulted on the rate-cap-passes/size-cap-drops path; got: "
                         + log.calls);
@@ -126,7 +130,7 @@ class InboundRouterIntakeOrderingTest {
 
         // Oversize body AND rate-cap rejecting: per spec §Authorization
         // model step 1.5, the silent drop dominates — no
-        // MESSAGE_TOO_LARGE_REPLY is emitted (closes the DOS amplification
+        // too-large reply is emitted (closes the DOS amplification
         // surface flagged by /redteam M1-044b).
         String oversize = "0123456789ABCDEF01234567"; // 24 ASCII bytes, cap=16
         router.onMessage(dmInbound(DM_CONTACT, oversize), ADAPTER);
@@ -433,8 +437,9 @@ class InboundRouterIntakeOrderingTest {
         assertEquals(1, inboundAdapter.captured.size(),
                 "reply must route through the adapter that delivered the inbound; got: "
                         + inboundAdapter.captured);
-        assertEquals(InboundRouter.UNKNOWN_COMMAND_REPLY, inboundAdapter.captured.get(0).text(),
-                "the routed reply is the /help dispatch (UNKNOWN_COMMAND_REPLY)");
+        assertEquals(FakeBundleLoader.stubFor(BundleKeys.ERROR_UNKNOWN_COMMAND),
+                inboundAdapter.captured.get(0).text(),
+                "the routed reply is the /help dispatch (unknown-command bundle reply)");
         assertTrue(otherAdapter.captured.isEmpty(),
                 "reply must NEVER cross-route to a different activated adapter; got: "
                         + otherAdapter.captured);
@@ -529,6 +534,11 @@ class InboundRouterIntakeOrderingTest {
             Optional<UserSnapshot> lookupUser(DispatchDb db, String adapter, String contactId) {
                 log.calls.add("lookupUser");
                 return snapshot;
+            }
+
+            @Override
+            String lookupScopeLanguage(DispatchDb db, String scopeKind, UUID scopeId) {
+                return "en";
             }
 
             @Override

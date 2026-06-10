@@ -301,6 +301,11 @@ class InboundRouterProbationOrderingTest {
                         banned));
             }
 
+            @Override
+            String lookupScopeLanguage(DispatchDb db, String scopeKind, UUID scopeId) {
+                return "en";
+            }
+
             // Group-scope scenarios reach the step-4.1 groups-row
             // resolution (hoisted out of the auto-promote null-guard);
             // a fixed id keeps them off JDBC, mirroring lookupUser.
@@ -361,6 +366,11 @@ class InboundRouterProbationOrderingTest {
             Optional<UserSnapshot> lookupUser(DispatchDb db, String adapter, String contactId) {
                 log.calls.add("lookupUser");
                 return Optional.empty();
+            }
+
+            @Override
+            String lookupScopeLanguage(DispatchDb db, String scopeKind, UUID scopeId) {
+                return "en";
             }
         };
         router.commandHandlers = new SingletonInstance<>();

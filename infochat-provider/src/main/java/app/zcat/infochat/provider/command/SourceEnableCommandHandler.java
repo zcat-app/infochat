@@ -129,7 +129,7 @@ public class SourceEnableCommandHandler implements CommandHandler {
     public OutboundMessage handle(ScopeRef scope, String rawText) {
         if (scope instanceof ScopeRef.Group group) {
             if (!isGroupAdmin(group)) {
-                return reply(scope, bundleLoader.get(BundleKeys.ERROR_GROUP_ADMIN_NOT_IN_V1));
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_GROUP_ADMIN_NOT_IN_V1, inboundContext.effectiveLanguage()));
             }
         }
 
@@ -141,7 +141,7 @@ public class SourceEnableCommandHandler implements CommandHandler {
         // see error.admin_only (precedence over confirm fork).
         Optional<UserRow> actorOpt = lookupUser(adapter, callerContactId);
         if (actorOpt.isEmpty() || !actorOpt.get().isAdmin) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
         }
         UserRow actor = actorOpt.get();
 
@@ -150,7 +150,7 @@ public class SourceEnableCommandHandler implements CommandHandler {
             Optional<ConfirmStateService.PendingConfirm> taken =
                     confirmStateService.takeMatching(actor.id, scope, "source-enable");
             if (taken.isEmpty()) {
-                return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONFIRM_NO_PENDING));
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONFIRM_NO_PENDING, inboundContext.effectiveLanguage()));
             }
             SourceEnableConfirm pending = (SourceEnableConfirm) taken.get();
             return executeRevive(scope, actor, adapter, pending.sourceId());
@@ -159,12 +159,12 @@ public class SourceEnableCommandHandler implements CommandHandler {
         // First call: parse <id>.
         UUID sourceId = parseSourceId(rawText);
         if (sourceId == null) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_SOURCE_ENABLE_UNKNOWN_ID));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_SOURCE_ENABLE_UNKNOWN_ID, inboundContext.effectiveLanguage()));
         }
 
         Optional<SourceRow> sourceOpt = lookupSource(sourceId);
         if (sourceOpt.isEmpty()) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_SOURCE_ENABLE_UNKNOWN_ID));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_SOURCE_ENABLE_UNKNOWN_ID, inboundContext.effectiveLanguage()));
         }
         SourceRow source = sourceOpt.get();
 
@@ -174,7 +174,7 @@ public class SourceEnableCommandHandler implements CommandHandler {
         // activate a row no fetcher will read.
         if (!"rss".equals(source.kind)) {
             return reply(scope,
-                    bundleLoader.get(BundleKeys.ERROR_SOURCE_ENABLE_KIND_NOT_SUPPORTED_IN_V1));
+                    bundleLoader.get(BundleKeys.ERROR_SOURCE_ENABLE_KIND_NOT_SUPPORTED_IN_V1, inboundContext.effectiveLanguage()));
         }
 
         // State branch.
@@ -182,7 +182,7 @@ public class SourceEnableCommandHandler implements CommandHandler {
             return promptRevive(scope, actor, adapter, sourceId, source);
         }
         if ("active".equals(source.status)) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_SOURCE_ENABLE_ALREADY_ACTIVE));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_SOURCE_ENABLE_ALREADY_ACTIVE, inboundContext.effectiveLanguage()));
         }
         // failed or disabled — re-enable directly with a probe.
         return reactivateFailedOrDisabled(scope, actor, adapter, sourceId, source);
@@ -193,7 +193,7 @@ public class SourceEnableCommandHandler implements CommandHandler {
                                                        SourceRow source) {
         ProbeResult probe = probeSourceUrl(source.identifier);
         if (!probe.ok()) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_SOURCE_ENABLE_PROBE_FAILED));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_SOURCE_ENABLE_PROBE_FAILED, inboundContext.effectiveLanguage()));
         }
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
@@ -213,14 +213,14 @@ public class SourceEnableCommandHandler implements CommandHandler {
                     // by a concurrent dispatch). The user can retry to
                     // see the fresh state.
                     return reply(scope,
-                            bundleLoader.get(BundleKeys.ERROR_SOURCE_ENABLE_ALREADY_ACTIVE));
+                            bundleLoader.get(BundleKeys.ERROR_SOURCE_ENABLE_ALREADY_ACTIVE, inboundContext.effectiveLanguage()));
                 }
                 insertAudit(conn, AuditAction.SOURCE_ENABLE, sourceId, actor, adapter,
                         UUID.randomUUID().toString());
                 updateSourceReactivate(conn, sourceId);
                 conn.commit();
                 String body = MessageFormat.format(
-                        bundleLoader.get(BundleKeys.REPLY_SOURCE_ENABLE_SUCCESS),
+                        bundleLoader.get(BundleKeys.REPLY_SOURCE_ENABLE_SUCCESS, inboundContext.effectiveLanguage()),
                         source.displayName);
                 return reply(scope, body);
             } catch (SQLException e) {
@@ -248,7 +248,7 @@ public class SourceEnableCommandHandler implements CommandHandler {
         }
         confirmStateService.remember(actor.id, scope, new SourceEnableConfirm(sourceId));
         String prompt = MessageFormat.format(
-                bundleLoader.get(BundleKeys.REPLY_CONFIRM_PROMPT_SOURCE_ENABLE_SOFT_DELETED),
+                bundleLoader.get(BundleKeys.REPLY_CONFIRM_PROMPT_SOURCE_ENABLE_SOFT_DELETED, inboundContext.effectiveLanguage()),
                 source.displayName,
                 Long.toString(confirmStateService.timeoutSeconds()));
         return reply(scope, prompt);
@@ -262,17 +262,17 @@ public class SourceEnableCommandHandler implements CommandHandler {
         // an external call is unsafe).
         Optional<SourceRow> preflightOpt = lookupSource(sourceId);
         if (preflightOpt.isEmpty()) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_SOURCE_ENABLE_UNKNOWN_ID));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_SOURCE_ENABLE_UNKNOWN_ID, inboundContext.effectiveLanguage()));
         }
         SourceRow preflight = preflightOpt.get();
         if (preflight.deletedAt == null) {
             // The row was un-soft-deleted between the prompt and the
             // confirm; nothing to revive.
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_SOURCE_ENABLE_ALREADY_ACTIVE));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_SOURCE_ENABLE_ALREADY_ACTIVE, inboundContext.effectiveLanguage()));
         }
         if (!"rss".equals(preflight.kind)) {
             return reply(scope,
-                    bundleLoader.get(BundleKeys.ERROR_SOURCE_ENABLE_KIND_NOT_SUPPORTED_IN_V1));
+                    bundleLoader.get(BundleKeys.ERROR_SOURCE_ENABLE_KIND_NOT_SUPPORTED_IN_V1, inboundContext.effectiveLanguage()));
         }
 
         ProbeResult probe = probeSourceUrl(preflight.identifier);
@@ -283,7 +283,7 @@ public class SourceEnableCommandHandler implements CommandHandler {
             // failure"). The pending was already consumed by
             // takeMatching upstream — the admin needs to re-issue the
             // first call to restart the flow.
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_SOURCE_ENABLE_PROBE_FAILED));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_SOURCE_ENABLE_PROBE_FAILED, inboundContext.effectiveLanguage()));
         }
 
         try (Connection conn = dataSource.getConnection()) {
@@ -295,17 +295,17 @@ public class SourceEnableCommandHandler implements CommandHandler {
                         || locked.deletedAt == null) {
                     conn.rollback();
                     return reply(scope,
-                            bundleLoader.get(BundleKeys.ERROR_SOURCE_ENABLE_ALREADY_ACTIVE));
+                            bundleLoader.get(BundleKeys.ERROR_SOURCE_ENABLE_ALREADY_ACTIVE, inboundContext.effectiveLanguage()));
                 }
                 String requestId = UUID.randomUUID().toString();
                 insertAudit(conn, AuditAction.SOURCE_ENABLE, sourceId, actor, adapter, requestId);
                 updateSourceRevive(conn, sourceId);
                 conn.commit();
                 String successLine = MessageFormat.format(
-                        bundleLoader.get(BundleKeys.REPLY_SOURCE_ENABLE_SUCCESS_FROM_SOFT_DELETED),
+                        bundleLoader.get(BundleKeys.REPLY_SOURCE_ENABLE_SUCCESS_FROM_SOFT_DELETED, inboundContext.effectiveLanguage()),
                         locked.displayName);
                 String disclosure = bundleLoader.get(
-                        BundleKeys.REPLY_SOURCE_ENABLE_NO_SUBSCRIPTIONS_RESTORED);
+                        BundleKeys.REPLY_SOURCE_ENABLE_NO_SUBSCRIPTIONS_RESTORED, inboundContext.effectiveLanguage());
                 return reply(scope, successLine + "\n" + disclosure);
             } catch (SQLException e) {
                 conn.rollback();

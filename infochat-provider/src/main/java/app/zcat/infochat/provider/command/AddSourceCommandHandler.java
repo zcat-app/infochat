@@ -128,7 +128,7 @@ public class AddSourceCommandHandler implements CommandHandler {
                 ? dm.contactId() : inboundContext.senderContactId();
         Optional<UserRow> actor = lookupActor(contactId);
         if (actor.isPresent() && actor.get().isBanned) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADD_SOURCE_BANNED));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADD_SOURCE_BANNED, inboundContext.effectiveLanguage()));
         }
 
         // Group scope: group-admin permission gate via
@@ -138,19 +138,19 @@ public class AddSourceCommandHandler implements CommandHandler {
         final UUID scopeId;
         if (scope instanceof ScopeRef.Group group) {
             if (actor.isEmpty()) {
-                return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADD_SOURCE_GROUP_ADMIN_ONLY));
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADD_SOURCE_GROUP_ADMIN_ONLY, inboundContext.effectiveLanguage()));
             }
             UUID groupDbId = lookupGroupId(group.adapterGroupId());
             if (groupDbId == null
                     || (!actor.get().isAdmin
                         && !groupMembershipRepository.isGroupAdmin(groupDbId, actor.get().id))) {
-                return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADD_SOURCE_GROUP_ADMIN_ONLY));
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADD_SOURCE_GROUP_ADMIN_ONLY, inboundContext.effectiveLanguage()));
             }
             scopeKind = "group";
             scopeId = groupDbId;
         } else {
             if (actor.isEmpty()) {
-                return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL));
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage()));
             }
             scopeKind = "dm";
             scopeId = actor.get().id;
@@ -160,7 +160,7 @@ public class AddSourceCommandHandler implements CommandHandler {
         // Kind resolution.
         Resolution resolution = kindResolver.resolve(args.url(), args.typeOverride());
         if (resolution.isAmbiguous()) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADD_SOURCE_AMBIGUOUS_URL));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADD_SOURCE_AMBIGUOUS_URL, inboundContext.effectiveLanguage()));
         }
         KindResolver.SourceKind kind = resolution.kind().orElseThrow();
 
@@ -172,7 +172,7 @@ public class AddSourceCommandHandler implements CommandHandler {
                 ? urlProbe.probeRelay(args.url())
                 : urlProbe.probe(args.url());
         if (!probe.ok()) {
-            return reply(scope, bundleLoader.get(probe.failureBundleKey()));
+            return reply(scope, bundleLoader.get(probe.failureBundleKey(), inboundContext.effectiveLanguage()));
         }
 
         // Confirm-or-contradict: if no explicit --type was supplied
@@ -183,7 +183,7 @@ public class AddSourceCommandHandler implements CommandHandler {
                 && kind == KindResolver.SourceKind.RSS
                 && resolverHintedRssByPath(args.url())
                 && contradictsRss(probe.contentType())) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADD_SOURCE_AMBIGUOUS_URL));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADD_SOURCE_AMBIGUOUS_URL, inboundContext.effectiveLanguage()));
         }
 
         String displayName = SourceUpsertService.defaultDisplayName(
@@ -203,17 +203,17 @@ public class AddSourceCommandHandler implements CommandHandler {
                 String fresh = format(BundleKeys.REPLY_ADD_SOURCE_FRESH_INSERT,
                         result.displayName());
                 yield fresh + "\n"
-                        + bundleLoader.get(BundleKeys.REPLY_ADD_SOURCE_URL_VISIBILITY_DISCLOSURE);
+                        + bundleLoader.get(BundleKeys.REPLY_ADD_SOURCE_URL_VISIBILITY_DISCLOSURE, inboundContext.effectiveLanguage());
             }
             case SUBSCRIBED_EXISTING -> bundleLoader.get(
-                    BundleKeys.REPLY_ADD_SOURCE_SUBSCRIBED_EXISTING);
+                    BundleKeys.REPLY_ADD_SOURCE_SUBSCRIBED_EXISTING, inboundContext.effectiveLanguage());
             case ADMIN_TAGS_REPLACED -> bundleLoader.get(
-                    BundleKeys.REPLY_ADD_SOURCE_ADMIN_TAGS_REPLACED);
+                    BundleKeys.REPLY_ADD_SOURCE_ADMIN_TAGS_REPLACED, inboundContext.effectiveLanguage());
         };
     }
 
     private String format(String bundleKey, Object... args) {
-        String template = bundleLoader.get(bundleKey);
+        String template = bundleLoader.get(bundleKey, inboundContext.effectiveLanguage());
         if (args == null || args.length == 0) {
             return template;
         }

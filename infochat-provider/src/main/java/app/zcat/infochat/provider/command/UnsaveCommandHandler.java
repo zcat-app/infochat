@@ -69,26 +69,26 @@ public class UnsaveCommandHandler implements CommandHandler {
     public OutboundMessage handle(ScopeRef scope, String rawText) {
         String uid = parseUid(rawText);
         if (uid == null) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_UNSAVE_UNKNOWN_UID));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_UNSAVE_UNKNOWN_UID, inboundContext.effectiveLanguage()));
         }
 
         String adapter = inboundContext.adapterName();
         String callerContactId = resolveContactId(scope);
         if (callerContactId == null) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_UNSAVE_UNKNOWN_UID));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_UNSAVE_UNKNOWN_UID, inboundContext.effectiveLanguage()));
         }
 
         try (Connection conn = dataSource.getConnection()) {
             UUID userId = lookupActor(conn, adapter, callerContactId);
             if (userId == null) {
-                return reply(scope, bundleLoader.get(BundleKeys.ERROR_UNSAVE_UNKNOWN_UID));
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_UNSAVE_UNKNOWN_UID, inboundContext.effectiveLanguage()));
             }
             int deleted = deleteSavedPost(conn, userId, uid);
             if (deleted == 0) {
-                return reply(scope, bundleLoader.get(BundleKeys.ERROR_UNSAVE_UNKNOWN_UID));
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_UNSAVE_UNKNOWN_UID, inboundContext.effectiveLanguage()));
             }
             String body = MessageFormat.format(
-                    bundleLoader.get(BundleKeys.REPLY_UNSAVE_SUCCESS), uid);
+                    bundleLoader.get(BundleKeys.REPLY_UNSAVE_SUCCESS, inboundContext.effectiveLanguage()), uid);
             return reply(scope, body);
         } catch (SQLException e) {
             throw new IllegalStateException(

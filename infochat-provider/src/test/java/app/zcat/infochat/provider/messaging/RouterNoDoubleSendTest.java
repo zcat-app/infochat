@@ -79,6 +79,11 @@ class RouterNoDoubleSendTest {
             Optional<UserSnapshot> lookupUser(DispatchDb db, String adapter, String contactId) {
                 return Optional.of(new UserSnapshot(ACTOR_ID, "vouched", false));
             }
+
+            @Override
+            String lookupScopeLanguage(DispatchDb db, String scopeKind, UUID scopeId) {
+                return "en";
+            }
         };
         router.commandHandlers = new SingletonInstance<>();
         router.inboundContext = new InboundContext();

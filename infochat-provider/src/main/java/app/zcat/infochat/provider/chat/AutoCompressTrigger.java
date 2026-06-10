@@ -99,7 +99,7 @@ public class AutoCompressTrigger {
         return switch (result) {
             case CompressCommandHandler.CompressResult.Success ignored -> {
                 ceilingStuck.remove(key);
-                yield Optional.of(bundleLoader.get(BundleKeys.REPLY_AUTO_COMPRESS_NOTICE));
+                yield Optional.of(bundleLoader.get(BundleKeys.REPLY_AUTO_COMPRESS_NOTICE, scopeLanguage));
             }
             case CompressCommandHandler.CompressResult.NoMessages ignored -> {
                 ceilingStuck.remove(key);
@@ -107,7 +107,7 @@ public class AutoCompressTrigger {
             }
             case CompressCommandHandler.CompressResult.Failure ignored -> {
                 ceilingStuck.add(key);
-                yield Optional.of(bundleLoader.get(BundleKeys.ERROR_COMPRESS_FAILED));
+                yield Optional.of(bundleLoader.get(BundleKeys.ERROR_COMPRESS_FAILED, scopeLanguage));
             }
         };
     }

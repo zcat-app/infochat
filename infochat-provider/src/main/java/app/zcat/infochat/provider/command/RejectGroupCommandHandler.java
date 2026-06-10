@@ -115,7 +115,7 @@ public class RejectGroupCommandHandler implements CommandHandler {
         String callerContactId = inboundContext.senderContactId();
 
         if (adapter == null || callerContactId == null) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
         }
 
         // Admin gate has precedence — non-admin sending `confirm` must
@@ -124,7 +124,7 @@ public class RejectGroupCommandHandler implements CommandHandler {
         // executeReject for the M1-046-style TOCTOU closure.
         Optional<UserRow> actorOpt = lookupActor(adapter, callerContactId);
         if (actorOpt.isEmpty() || !actorOpt.get().isAdmin) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
         }
         UserRow actor = actorOpt.get();
 
@@ -133,7 +133,7 @@ public class RejectGroupCommandHandler implements CommandHandler {
             Optional<ConfirmStateService.PendingConfirm> taken =
                     confirmStateService.takeMatching(actor.id, scope, "reject-group");
             if (taken.isEmpty()) {
-                return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONFIRM_NO_PENDING));
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONFIRM_NO_PENDING, inboundContext.effectiveLanguage()));
             }
             RejectGroupConfirm pending = (RejectGroupConfirm) taken.get();
             return executeReject(scope, adapter, actor, pending.groupId());
@@ -144,14 +144,14 @@ public class RejectGroupCommandHandler implements CommandHandler {
         UUID groupId = parseGroupId(rawText);
         if (groupId == null) {
             return reply(scope, MessageFormat.format(
-                    bundleLoader.get(BundleKeys.ERROR_GROUP_NOT_FOUND),
+                    bundleLoader.get(BundleKeys.ERROR_GROUP_NOT_FOUND, inboundContext.effectiveLanguage()),
                     parseGroupIdRaw(rawText)));
         }
 
         Optional<GroupRepository.GroupRow> targetOpt = groupRepository.findById(groupId);
         if (targetOpt.isEmpty()) {
             return reply(scope, MessageFormat.format(
-                    bundleLoader.get(BundleKeys.ERROR_GROUP_NOT_FOUND), groupId));
+                    bundleLoader.get(BundleKeys.ERROR_GROUP_NOT_FOUND, inboundContext.effectiveLanguage()), groupId));
         }
         GroupRepository.GroupRow targetGroup = targetOpt.get();
 
@@ -165,7 +165,7 @@ public class RejectGroupCommandHandler implements CommandHandler {
         // between this first-call read and the confirmed UPDATE.
         if ("rejected".equals(targetGroup.approvalStatus())) {
             return reply(scope, MessageFormat.format(
-                    bundleLoader.get(BundleKeys.REPLY_REJECT_GROUP_NOOP), groupId));
+                    bundleLoader.get(BundleKeys.REPLY_REJECT_GROUP_NOOP, inboundContext.effectiveLanguage()), groupId));
         }
 
         // Audit-on-intent (security.md §Authorization model step 8):
@@ -184,7 +184,7 @@ public class RejectGroupCommandHandler implements CommandHandler {
 
         confirmStateService.remember(actor.id, scope, new RejectGroupConfirm(groupId));
         String prompt = MessageFormat.format(
-                bundleLoader.get(BundleKeys.REPLY_CONFIRM_PROMPT_REJECT_GROUP),
+                bundleLoader.get(BundleKeys.REPLY_CONFIRM_PROMPT_REJECT_GROUP, inboundContext.effectiveLanguage()),
                 Long.toString(confirmStateService.timeoutSeconds()),
                 groupId);
         return reply(scope, prompt);
@@ -206,7 +206,7 @@ public class RejectGroupCommandHandler implements CommandHandler {
                         lookupActorForUpdate(conn, adapter, actor.contactId);
                 if (reActorOpt.isEmpty() || !reActorOpt.get().isAdmin) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
                 }
                 UserRow reActor = reActorOpt.get();
                 try (PreparedStatement ps = conn.prepareStatement(
@@ -223,14 +223,14 @@ public class RejectGroupCommandHandler implements CommandHandler {
                 if (targetOpt.isEmpty()) {
                     conn.rollback();
                     return reply(scope, MessageFormat.format(
-                            bundleLoader.get(BundleKeys.ERROR_GROUP_NOT_FOUND), groupId));
+                            bundleLoader.get(BundleKeys.ERROR_GROUP_NOT_FOUND, inboundContext.effectiveLanguage()), groupId));
                 }
                 targetGroup = targetOpt.get();
 
                 if ("rejected".equals(targetGroup.approvalStatus())) {
                     conn.rollback();
                     return reply(scope, MessageFormat.format(
-                            bundleLoader.get(BundleKeys.REPLY_REJECT_GROUP_NOOP), groupId));
+                            bundleLoader.get(BundleKeys.REPLY_REJECT_GROUP_NOOP, inboundContext.effectiveLanguage()), groupId));
                 }
 
                 insertAudit(conn, AuditAction.REJECT_GROUP, reActor, adapter,
@@ -251,10 +251,10 @@ public class RejectGroupCommandHandler implements CommandHandler {
         }
 
         sendGroupNotification(targetGroup,
-                bundleLoader.get(BundleKeys.GROUP_REJECTED_MESSAGE));
+                bundleLoader.get(BundleKeys.GROUP_REJECTED_MESSAGE, inboundContext.effectiveLanguage()));
 
         return reply(scope, MessageFormat.format(
-                bundleLoader.get(BundleKeys.REPLY_REJECT_GROUP_SUCCESS), groupId));
+                bundleLoader.get(BundleKeys.REPLY_REJECT_GROUP_SUCCESS, inboundContext.effectiveLanguage()), groupId));
     }
 
     private Optional<UserRow> lookupActor(String adapter, String contactId) {

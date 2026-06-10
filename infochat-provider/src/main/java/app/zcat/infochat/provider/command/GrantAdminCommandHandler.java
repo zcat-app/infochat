@@ -185,7 +185,7 @@ public class GrantAdminCommandHandler implements CommandHandler {
     @Override
     public OutboundMessage handle(ScopeRef scope, String rawText) {
         if (scope instanceof ScopeRef.Group) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY, inboundContext.effectiveLanguage()));
         }
 
         String adapter = inboundContext.adapterName();
@@ -194,7 +194,7 @@ public class GrantAdminCommandHandler implements CommandHandler {
         // DM-only convention. Short-circuit with error.admin_only so
         // the step-3 pre-check never sees a null contact id.
         if (callerContactId == null) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
         }
 
         // Step 2 — parse positional <contact>. Fail fast before
@@ -202,7 +202,7 @@ public class GrantAdminCommandHandler implements CommandHandler {
         String targetContactId = parseTargetContact(rawText);
         if (targetContactId == null) {
             return reply(scope, MessageFormat.format(
-                    bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT),
+                    bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT, inboundContext.effectiveLanguage()),
                     "/grant-admin <contact>"));
         }
 
@@ -218,11 +218,11 @@ public class GrantAdminCommandHandler implements CommandHandler {
         // execution can never happen without the step-4 intent row.
         Optional<UserRow> actorPre = lookupUser(adapter, callerContactId);
         if (actorPre.isEmpty() || !actorPre.get().isAdmin) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
         }
         UserRow actor = actorPre.get();
         if (probationCheck.inProbation(actor.id)) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_PROBATION_BLOCKED));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_PROBATION_BLOCKED, inboundContext.effectiveLanguage()));
         }
 
         // Step 4 — audit-on-intent (spec step 8) on a separate
@@ -271,7 +271,7 @@ public class GrantAdminCommandHandler implements CommandHandler {
                         lookupActorForUpdate(conn, adapter, callerContactId);
                 if (actorOpt.isEmpty() || !actorOpt.get().isAdmin) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
                 }
                 UserRow actor = actorOpt.get();
                 try (PreparedStatement ps = conn.prepareStatement(
@@ -286,7 +286,7 @@ public class GrantAdminCommandHandler implements CommandHandler {
                 // might decouple probation from is_admin.
                 if (probationCheck.inProbation(actor.id)) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_PROBATION_BLOCKED));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_PROBATION_BLOCKED, inboundContext.effectiveLanguage()));
                 }
 
                 // Step 5c — target lookup, inbound-adapter-scoped,
@@ -296,20 +296,20 @@ public class GrantAdminCommandHandler implements CommandHandler {
                         lookupTargetInTx(conn, adapter, targetContactId);
                 if (targetOpt.isEmpty()) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONTACT_NOT_REGISTERED));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONTACT_NOT_REGISTERED, inboundContext.effectiveLanguage()));
                 }
                 UserRow target = targetOpt.get();
 
                 // Step 5d — banned-target reject.
                 if (target.isBanned) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_GRANT_ADMIN_BANNED_TARGET));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_GRANT_ADMIN_BANNED_TARGET, inboundContext.effectiveLanguage()));
                 }
 
                 // Step 5e — already-admin no-op.
                 if (target.isAdmin) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_GRANT_ADMIN_ALREADY_ADMIN));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_GRANT_ADMIN_ALREADY_ADMIN, inboundContext.effectiveLanguage()));
                 }
 
                 // Step 5f — pre-write GRANT_ADMIN audit row BEFORE
@@ -331,7 +331,7 @@ public class GrantAdminCommandHandler implements CommandHandler {
                 conn.commit();
 
                 String body = MessageFormat.format(
-                        bundleLoader.get(BundleKeys.REPLY_GRANT_ADMIN_SUCCESS),
+                        bundleLoader.get(BundleKeys.REPLY_GRANT_ADMIN_SUCCESS, inboundContext.effectiveLanguage()),
                         ContactIds.redact(target.contactId));
                 return reply(scope, body);
             } catch (SQLException e) {

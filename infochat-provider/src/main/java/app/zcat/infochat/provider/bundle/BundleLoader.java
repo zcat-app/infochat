@@ -22,15 +22,13 @@ import java.util.Set;
  * {@link #get(String, String)} accessor for per-scope language
  * resolution.
  *
- * <p>The 1-arg accessor is the load-bearing back-compat for the
- * 168 existing call sites in 19 handler/router files (see M1-060
- * out_of_scope item 14): every handler other than
- * {@code LangCommandHandler} continues to resolve through the
- * single-arg path until T2-D / T2-F migrate the chat-mode and digest
- * surfaces wholesale. The 2-arg accessor is consumed by
- * {@code LangCommandHandler}'s confirmation reply so a
- * {@code /lang cs} user sees the Czech version of the confirmation
- * immediately.</p>
+ * <p>The 1-arg accessor is en-only and demoted off every user-visible
+ * reply path (D43 threading): production reply lookups resolve through
+ * the 2-arg accessor with the requester's effective scope language
+ * (router/handlers read {@code InboundContext#effectiveLanguage()};
+ * the chat and digest surfaces pass their locally-resolved language).
+ * The 1-arg form remains for test fixtures and for deliberately
+ * language-independent internal/log-only strings.</p>
  *
  * <p>{@link #LOADED_LANGUAGES} is hardcoded rather than auto-discovered
  * from the classpath because (a) auto-discovery is fragile under
@@ -87,10 +85,11 @@ public class BundleLoader {
 
     /**
      * Resolve the value for {@code key} from the {@code en} bundle.
-     * Preserved verbatim from the pre-M1-060 signature so the 168
-     * existing 1-arg call sites in 19 handler/router files continue
-     * to compile and behave identically; the en value is the same
-     * one those call sites returned before the multi-bundle refactor.
+     * En-only by contract and demoted off every user-visible reply
+     * path (D43): production replies resolve via
+     * {@link #get(String, String)} with the requester's effective
+     * scope language; this form remains for test fixtures and for
+     * deliberately language-independent internal/log-only strings.
      *
      * <p>Throws {@link IllegalStateException} when {@code key} is not
      * present in {@code en.properties} — the load-bearing behavior the

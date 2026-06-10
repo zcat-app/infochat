@@ -99,7 +99,7 @@ public class SavedCommandHandler implements CommandHandler {
         String adapter = inboundContext.adapterName();
         String callerContactId = resolveContactId(scope);
         if (callerContactId == null) {
-            return reply(scope, bundleLoader.get(BundleKeys.REPLY_SAVED_EMPTY));
+            return reply(scope, bundleLoader.get(BundleKeys.REPLY_SAVED_EMPTY, inboundContext.effectiveLanguage()));
         }
 
         try {
@@ -117,12 +117,12 @@ public class SavedCommandHandler implements CommandHandler {
         try (Connection conn = dataSource.getConnection()) {
             UUID userId = lookupActor(conn, adapter, callerContactId);
             if (userId == null) {
-                return reply(scope, bundleLoader.get(BundleKeys.REPLY_SAVED_EMPTY));
+                return reply(scope, bundleLoader.get(BundleKeys.REPLY_SAVED_EMPTY, inboundContext.effectiveLanguage()));
             }
 
             long totalCount = countSaves(conn, userId, args);
             if (totalCount == 0) {
-                return reply(scope, bundleLoader.get(BundleKeys.REPLY_SAVED_EMPTY));
+                return reply(scope, bundleLoader.get(BundleKeys.REPLY_SAVED_EMPTY, inboundContext.effectiveLanguage()));
             }
 
             List<Row> rows = selectSaves(conn, userId, args);
@@ -130,7 +130,7 @@ public class SavedCommandHandler implements CommandHandler {
                 // Filter narrowed to zero rows (or page past the end) —
                 // treat the same as an empty library so the surface
                 // stays consistent.
-                return reply(scope, bundleLoader.get(BundleKeys.REPLY_SAVED_EMPTY));
+                return reply(scope, bundleLoader.get(BundleKeys.REPLY_SAVED_EMPTY, inboundContext.effectiveLanguage()));
             }
 
             return reply(scope, buildReply(rows, totalCount, args));
@@ -222,14 +222,14 @@ public class SavedCommandHandler implements CommandHandler {
         int totalPages = (int) Math.max(1L, (totalCount + PAGE_SIZE - 1) / PAGE_SIZE);
         String filterClause = args.tag == null ? "" : ", filter: " + args.tag;
         String header = MessageFormat.format(
-                bundleLoader.get(BundleKeys.REPLY_SAVED_HEADER_GLOBAL),
+                bundleLoader.get(BundleKeys.REPLY_SAVED_HEADER_GLOBAL, inboundContext.effectiveLanguage()),
                 rows.size(),
                 totalCount,
                 args.page,
                 totalPages,
                 filterClause);
 
-        String lineTemplate = bundleLoader.get(BundleKeys.REPLY_SAVED_LINE);
+        String lineTemplate = bundleLoader.get(BundleKeys.REPLY_SAVED_LINE, inboundContext.effectiveLanguage());
         StringBuilder body = new StringBuilder(header);
         for (Row row : rows) {
             String tagJoined = joinTags(row.personalTags, row.snapshotTags);

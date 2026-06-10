@@ -81,12 +81,12 @@ public class ListGroupsCommandHandler implements CommandHandler {
         String callerContactId = inboundContext.senderContactId();
 
         if (adapter == null || callerContactId == null) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
         }
 
         Optional<UserRow> actorOpt = lookupActor(adapter, callerContactId);
         if (actorOpt.isEmpty() || !actorOpt.get().isAdmin) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
         }
 
         int page = parsePage(rawText);
@@ -101,7 +101,7 @@ public class ListGroupsCommandHandler implements CommandHandler {
 
         long totalRows = groupRepository.countAllGroups();
         if (totalRows == 0) {
-            return reply(scope, bundleLoader.get(BundleKeys.REPLY_LIST_GROUPS_EMPTY));
+            return reply(scope, bundleLoader.get(BundleKeys.REPLY_LIST_GROUPS_EMPTY, inboundContext.effectiveLanguage()));
         }
         int totalPages = (int) Math.max(1L, (totalRows + PAGE_SIZE - 1) / PAGE_SIZE);
 
@@ -109,15 +109,15 @@ public class ListGroupsCommandHandler implements CommandHandler {
         if (rows.isEmpty()) {
             // Page out of range — show empty page rather than a bogus
             // header counting zero rows on page N of M.
-            return reply(scope, bundleLoader.get(BundleKeys.REPLY_LIST_GROUPS_EMPTY));
+            return reply(scope, bundleLoader.get(BundleKeys.REPLY_LIST_GROUPS_EMPTY, inboundContext.effectiveLanguage()));
         }
 
         StringBuilder body = new StringBuilder();
         body.append(MessageFormat.format(
-                bundleLoader.get(BundleKeys.REPLY_LIST_GROUPS_HEADER),
+                bundleLoader.get(BundleKeys.REPLY_LIST_GROUPS_HEADER, inboundContext.effectiveLanguage()),
                 rows.size(), page, totalPages));
         body.append('\n');
-        String lineTemplate = bundleLoader.get(BundleKeys.REPLY_LIST_GROUPS_LINE);
+        String lineTemplate = bundleLoader.get(BundleKeys.REPLY_LIST_GROUPS_LINE, inboundContext.effectiveLanguage());
         for (GroupRepository.GroupListRow row : rows) {
             String activatorDisplay = row.activatorContactId() == null
                     ? "-"

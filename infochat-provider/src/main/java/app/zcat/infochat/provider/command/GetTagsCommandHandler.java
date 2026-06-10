@@ -97,7 +97,7 @@ public class GetTagsCommandHandler implements CommandHandler {
     public OutboundMessage handle(ScopeRef scope, String rawText) {
         List<String> vocabulary = readVocabulary();
         if (vocabulary.isEmpty()) {
-            return reply(scope, bundleLoader.get(BundleKeys.REPLY_GET_TAGS_EMPTY));
+            return reply(scope, bundleLoader.get(BundleKeys.REPLY_GET_TAGS_EMPTY, inboundContext.effectiveLanguage()));
         }
         FollowedTags followed = resolveFollowedTags(scope);
         return reply(scope, render(vocabulary, followed));
@@ -131,7 +131,7 @@ public class GetTagsCommandHandler implements CommandHandler {
 
     private String render(List<String> vocabulary, FollowedTags followed) {
         StringBuilder sb = new StringBuilder();
-        sb.append(bundleLoader.get(BundleKeys.REPLY_GET_TAGS_HEADER));
+        sb.append(bundleLoader.get(BundleKeys.REPLY_GET_TAGS_HEADER, inboundContext.effectiveLanguage()));
         for (String name : vocabulary) {
             sb.append('\n');
             sb.append(followed.isFollowed(name) ? FOLLOWED_MARKER : UNFOLLOWED_MARKER);

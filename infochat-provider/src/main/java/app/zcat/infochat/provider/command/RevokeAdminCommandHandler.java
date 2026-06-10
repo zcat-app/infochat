@@ -188,7 +188,7 @@ public class RevokeAdminCommandHandler implements CommandHandler {
     @Override
     public OutboundMessage handle(ScopeRef scope, String rawText) {
         if (scope instanceof ScopeRef.Group) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY, inboundContext.effectiveLanguage()));
         }
 
         String adapter = inboundContext.adapterName();
@@ -197,14 +197,14 @@ public class RevokeAdminCommandHandler implements CommandHandler {
         // DM-only convention. Short-circuit with error.admin_only so
         // the step-3 pre-check never sees a null contact id.
         if (callerContactId == null) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
         }
 
         // Step 2 — parse positional <contact>.
         String targetContactId = parseTargetContact(rawText);
         if (targetContactId == null) {
             return reply(scope, MessageFormat.format(
-                    bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT),
+                    bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT, inboundContext.effectiveLanguage()),
                     "/revoke-admin <contact>"));
         }
 
@@ -221,11 +221,11 @@ public class RevokeAdminCommandHandler implements CommandHandler {
         // redteam finding 2).
         Optional<UserRow> actorPre = lookupUser(adapter, callerContactId);
         if (actorPre.isEmpty() || !actorPre.get().isAdmin) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
         }
         UserRow actor = actorPre.get();
         if (probationCheck.inProbation(actor.id)) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_PROBATION_BLOCKED));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_PROBATION_BLOCKED, inboundContext.effectiveLanguage()));
         }
 
         // Step 4 — audit-on-intent (spec step 8) on a separate
@@ -252,7 +252,7 @@ public class RevokeAdminCommandHandler implements CommandHandler {
         // transaction; the step-4 intent row already covers this
         // refused attempt.
         if (callerContactId.equals(targetContactId)) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_REVOKE_ADMIN_CANNOT_REVOKE_SELF));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_REVOKE_ADMIN_CANNOT_REVOKE_SELF, inboundContext.effectiveLanguage()));
         }
 
         // Step 6 — audit-before-effect transaction. All execution-
@@ -290,7 +290,7 @@ public class RevokeAdminCommandHandler implements CommandHandler {
                         lookupActorForUpdate(conn, adapter, callerContactId);
                 if (actorOpt.isEmpty() || !actorOpt.get().isAdmin) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
                 }
                 UserRow actor = actorOpt.get();
                 try (PreparedStatement ps = conn.prepareStatement(
@@ -302,7 +302,7 @@ public class RevokeAdminCommandHandler implements CommandHandler {
                 // Step 6b — probation guard (defense-in-depth).
                 if (probationCheck.inProbation(actor.id)) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_PROBATION_BLOCKED));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_PROBATION_BLOCKED, inboundContext.effectiveLanguage()));
                 }
 
                 // Step 6c — target lookup INSIDE the tx.
@@ -310,14 +310,14 @@ public class RevokeAdminCommandHandler implements CommandHandler {
                         lookupTargetInTx(conn, adapter, targetContactId);
                 if (targetOpt.isEmpty()) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONTACT_NOT_REGISTERED));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONTACT_NOT_REGISTERED, inboundContext.effectiveLanguage()));
                 }
                 UserRow target = targetOpt.get();
 
                 // Step 6d — not-admin no-op.
                 if (!target.isAdmin) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_REVOKE_ADMIN_NOT_ADMIN));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_REVOKE_ADMIN_NOT_ADMIN, inboundContext.effectiveLanguage()));
                 }
 
                 // Step 6e — pre-write REVOKE_ADMIN audit row BEFORE
@@ -338,7 +338,7 @@ public class RevokeAdminCommandHandler implements CommandHandler {
                 conn.commit();
 
                 String body = MessageFormat.format(
-                        bundleLoader.get(BundleKeys.REPLY_REVOKE_ADMIN_SUCCESS),
+                        bundleLoader.get(BundleKeys.REPLY_REVOKE_ADMIN_SUCCESS, inboundContext.effectiveLanguage()),
                         ContactIds.redact(target.contactId));
                 return reply(scope, body);
             } catch (SQLException e) {
@@ -348,7 +348,7 @@ public class RevokeAdminCommandHandler implements CommandHandler {
                 // load-bearing match key — message text is free to
                 // reword.
                 if (LAST_ADMIN_SQLSTATE.equals(e.getSQLState())) {
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_REVOKE_ADMIN_LAST_ADMIN));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_REVOKE_ADMIN_LAST_ADMIN, inboundContext.effectiveLanguage()));
                 }
                 throw new IllegalStateException(
                         "RevokeAdminCommandHandler.executeRevoke failed for adapter="

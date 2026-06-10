@@ -12,4 +12,9 @@ final class NoopBundleLoader extends BundleLoader {
     public String get(String key) {
         return "noop:" + key;
     }
+
+    @Override
+    public String get(String key, String langCode) {
+        return "noop:" + key;
+    }
 }

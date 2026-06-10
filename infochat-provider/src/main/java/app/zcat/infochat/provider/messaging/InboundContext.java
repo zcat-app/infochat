@@ -39,6 +39,10 @@ public class InboundContext {
     private String adapterName;
     @SuppressWarnings("NullAway.Init")
     private String senderContactId;
+    // Eagerly defaulted (not router-set) because some reply paths
+    // legitimately fire before any language is resolvable — see
+    // effectiveLanguage().
+    private String effectiveLanguage = "en";
 
     /**
      * The originating adapter's {@code name()} for the current
@@ -72,5 +76,28 @@ public class InboundContext {
 
     public void setSenderContactId(String senderContactId) {
         this.senderContactId = senderContactId;
+    }
+
+    /**
+     * The requester's effective scope language for the current inbound
+     * dispatch (decision D43), resolved from {@code scope_preferences}
+     * by {@link InboundRouter#onMessage} as soon as the scope's id is
+     * known — the user's UUID for DM right after the users-row
+     * snapshot gates, the group's UUID at the step-4.1 group
+     * resolution. Reply paths that fire BEFORE the respective
+     * resolution point (the pre-DB size cap, the invite flow for
+     * contacts with no users row, group replies ahead of step 4.1)
+     * read the {@code "en"} default, which is semantically correct
+     * for scopes that cannot have set {@code /lang}: an unregistered
+     * contact has no preferences row, and a pending or rejected group
+     * never dispatches the command. Handlers and notifiers pass this
+     * value to {@code BundleLoader.get(key, langCode)}.
+     */
+    public String effectiveLanguage() {
+        return effectiveLanguage;
+    }
+
+    public void setEffectiveLanguage(String effectiveLanguage) {
+        this.effectiveLanguage = effectiveLanguage;
     }
 }

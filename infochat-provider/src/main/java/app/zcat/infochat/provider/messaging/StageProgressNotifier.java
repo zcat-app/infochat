@@ -50,7 +50,8 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p><b>Security (no user input in stage strings).</b> Every stage
  * string is resolved by enum from the deterministic localization bundle
- * (decision D43) via {@link BundleLoader#get(String)} with no
+ * (decision D43) via {@link BundleLoader#get(String, String)} in the
+ * requester's effective scope language with no
  * interpolation of user-authored text. {@link #complete}'s
  * {@code finalText} is the caller-composed operation output (already
  * sanitized by the handler), not a stage label.</p>
@@ -95,7 +96,7 @@ public class StageProgressNotifier implements ProgressNotifier {
 
     @Override
     public void publish(ScopeRef scope, ProgressStage stage) {
-        String text = bundleLoader.get(bundleKeyFor(stage));
+        String text = bundleLoader.get(bundleKeyFor(stage), inboundContext.effectiveLanguage());
         MessagingAdapter adapter = resolveAdapter();
         ScopeState state = states.computeIfAbsent(scope, s -> new ScopeState());
         synchronized (state) {
@@ -139,7 +140,7 @@ public class StageProgressNotifier implements ProgressNotifier {
 
     @Override
     public void fail(ScopeRef scope) {
-        terminate(scope, bundleLoader.get(BundleKeys.PROGRESS_FAILED));
+        terminate(scope, bundleLoader.get(BundleKeys.PROGRESS_FAILED, inboundContext.effectiveLanguage()));
     }
 
     /**

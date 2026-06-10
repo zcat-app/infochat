@@ -77,6 +77,11 @@ class InboundRouterCommandCapTest {
             Optional<UserSnapshot> lookupUser(DispatchDb db, String adapter, String contactId) {
                 return Optional.of(new UserSnapshot(UUID.randomUUID(), "vouched", false));
             }
+
+            @Override
+            String lookupScopeLanguage(DispatchDb db, String scopeKind, UUID scopeId) {
+                return "en";
+            }
         };
         router.inboundContext = new InboundContext();
         router.rateCapBucket = new NoopRateCapBucket();

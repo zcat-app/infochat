@@ -20,6 +20,15 @@ final class FakeBundleLoader extends BundleLoader {
         return stubFor(key);
     }
 
+    // Same recorded shape and stub as the 1-arg accessor: existing
+    // call-log assertions stay language-agnostic, and the real (never
+    // loaded) bundle is never consulted.
+    @Override
+    public String get(String key, String langCode) {
+        log.calls.add("bundleLoader.get(" + key + ")");
+        return stubFor(key);
+    }
+
     static String stubFor(String key) {
         return "bundle:" + key;
     }

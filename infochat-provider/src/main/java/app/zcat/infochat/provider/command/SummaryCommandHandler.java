@@ -170,7 +170,7 @@ public class SummaryCommandHandler implements CommandHandler {
         // member-actor seam (T2-F) is not in MVP.
         Optional<UUID> scopeId = resolveScopeId(scope);
         if (scopeId.isEmpty()) {
-            return reply(scope, bundleLoader.get(BundleKeys.REPLY_SUMMARY_NO_POSTS_YET));
+            return reply(scope, bundleLoader.get(BundleKeys.REPLY_SUMMARY_NO_POSTS_YET, inboundContext.effectiveLanguage()));
         }
         String scopeKind = EligiblePostQuery.scopeKindOf(scope);
 
@@ -190,7 +190,7 @@ public class SummaryCommandHandler implements CommandHandler {
 
         Result result = eligiblePostQuery.fetch(scopeKind, scopeId.get(), args.tag(), args.window());
         if (result.posts().isEmpty()) {
-            return reply(scope, bundleLoader.get(BundleKeys.REPLY_SUMMARY_NO_POSTS_YET));
+            return reply(scope, bundleLoader.get(BundleKeys.REPLY_SUMMARY_NO_POSTS_YET, inboundContext.effectiveLanguage()));
         }
 
         // At most one in-flight interruptible request per (user, scope)
@@ -206,14 +206,14 @@ public class SummaryCommandHandler implements CommandHandler {
         InFlightTracker.CancellationHandle slot =
                 inFlightTracker.tryAcquire(actorId, scopeKind, actorId);
         if (slot == null) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_CHAT_IN_FLIGHT));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_CHAT_IN_FLIGHT, inboundContext.effectiveLanguage()));
         }
         try {
             // security.md §Rate limiting: on-demand /summary draws from
             // the same per-user LLM bucket as chat replies and /retry
             // re-rolls.
             if (!llmRateCap.tryAcquire(actorId)) {
-                return reply(scope, bundleLoader.get(BundleKeys.ERROR_CHAT_LLM_RATE_CAP));
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_CHAT_LLM_RATE_CAP, inboundContext.effectiveLanguage()));
             }
 
             // Committed to the terminal summary path. From here the
@@ -265,7 +265,7 @@ public class SummaryCommandHandler implements CommandHandler {
 
                 boolean anyDegraded = prose.stream().anyMatch(ClusterProse::degraded);
                 if (anyDegraded) {
-                    out.append(bundleLoader.get(BundleKeys.REPLY_SUMMARY_DEGRADED_NOTICE));
+                    out.append(bundleLoader.get(BundleKeys.REPLY_SUMMARY_DEGRADED_NOTICE, inboundContext.effectiveLanguage()));
                     out.append("\n\n");
                 }
 
@@ -411,7 +411,7 @@ public class SummaryCommandHandler implements CommandHandler {
     }
 
     private String format(String bundleKey, Object... args) {
-        String template = bundleLoader.get(bundleKey);
+        String template = bundleLoader.get(bundleKey, inboundContext.effectiveLanguage());
         if (args == null || args.length == 0) {
             return template;
         }

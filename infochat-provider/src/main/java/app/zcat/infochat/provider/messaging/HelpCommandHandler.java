@@ -169,17 +169,17 @@ public class HelpCommandHandler implements CommandHandler {
         CallerTier caller = resolveTier(scope);
 
         StringBuilder body = new StringBuilder();
-        body.append(bundleLoader.get(headerKey(caller)));
+        body.append(bundleLoader.get(headerKey(caller), inboundContext.effectiveLanguage()));
         for (CommandHelp entry : CATALOGUE) {
             if (visible(entry, caller)) {
                 body.append('\n');
-                body.append(bundleLoader.get(entry.bundleKey()));
+                body.append(bundleLoader.get(entry.bundleKey(), inboundContext.effectiveLanguage()));
             }
         }
         appendEnabledAssets(body);
         if (caller.probation()) {
             body.append('\n');
-            body.append(bundleLoader.get(BundleKeys.HELP_FOOTER_PROBATION));
+            body.append(bundleLoader.get(BundleKeys.HELP_FOOTER_PROBATION, inboundContext.effectiveLanguage()));
         }
 
         return new OutboundMessage(scope, body.toString(), Instant.now(), UUID.randomUUID().toString());

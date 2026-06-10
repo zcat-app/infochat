@@ -131,18 +131,18 @@ public class ListSourcesCommandHandler implements CommandHandler {
             // admin_only_flag error). The un-flagged /list-sources stays
             // available in group scope below.
             if (scope instanceof ScopeRef.Group) {
-                return reply(scope, bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY));
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_COMMAND_DM_ONLY, inboundContext.effectiveLanguage()));
             }
             Optional<UserRow> actor = lookupUser(adapter, callerContactId);
             if (actor.isEmpty() || !actor.get().isAdmin) {
-                return reply(scope, bundleLoader.get(BundleKeys.ERROR_LIST_SOURCES_ADMIN_ONLY_FLAG));
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_LIST_SOURCES_ADMIN_ONLY_FLAG, inboundContext.effectiveLanguage()));
             }
             // Admin verified. --include-deleted requires --all even
             // for an admin caller — a paired-flag constraint, not a
             // permission gate.
             if (args.includeDeleted && !args.all) {
                 return reply(scope,
-                        bundleLoader.get(BundleKeys.ERROR_LIST_SOURCES_INCLUDE_DELETED_REQUIRES_ALL));
+                        bundleLoader.get(BundleKeys.ERROR_LIST_SOURCES_INCLUDE_DELETED_REQUIRES_ALL, inboundContext.effectiveLanguage()));
             }
             // Spec §Authorization model step 8: admin gate passed, log
             // intent BEFORE step 9 (the deployment-wide SELECT). The
@@ -162,24 +162,24 @@ public class ListSourcesCommandHandler implements CommandHandler {
         if (scope instanceof ScopeRef.Dm dm) {
             Optional<UserRow> actor = lookupUser(adapter, dm.contactId());
             if (actor.isEmpty()) {
-                return reply(scope, bundleLoader.get(BundleKeys.REPLY_LIST_SOURCES_EMPTY));
+                return reply(scope, bundleLoader.get(BundleKeys.REPLY_LIST_SOURCES_EMPTY, inboundContext.effectiveLanguage()));
             }
             return scopedPath(scope, "dm", actor.get().id, args.page);
         }
         if (scope instanceof ScopeRef.Group group) {
             Optional<UUID> groupId = lookupGroupId(adapter, group.adapterGroupId());
             if (groupId.isEmpty()) {
-                return reply(scope, bundleLoader.get(BundleKeys.REPLY_LIST_SOURCES_EMPTY));
+                return reply(scope, bundleLoader.get(BundleKeys.REPLY_LIST_SOURCES_EMPTY, inboundContext.effectiveLanguage()));
             }
             return scopedPath(scope, "group", groupId.get(), args.page);
         }
-        return reply(scope, bundleLoader.get(BundleKeys.REPLY_LIST_SOURCES_EMPTY));
+        return reply(scope, bundleLoader.get(BundleKeys.REPLY_LIST_SOURCES_EMPTY, inboundContext.effectiveLanguage()));
     }
 
     private OutboundMessage scopedPath(ScopeRef scope, String scopeKind, UUID scopeId, int page) {
         List<SourceRow> rows = selectScopedSources(scopeKind, scopeId, page);
         if (rows.isEmpty()) {
-            return reply(scope, bundleLoader.get(BundleKeys.REPLY_LIST_SOURCES_EMPTY));
+            return reply(scope, bundleLoader.get(BundleKeys.REPLY_LIST_SOURCES_EMPTY, inboundContext.effectiveLanguage()));
         }
         return reply(scope, renderReply(rows, /* withVisibilityCaveat */ false));
     }
@@ -187,7 +187,7 @@ public class ListSourcesCommandHandler implements CommandHandler {
     private OutboundMessage adminAllPath(ScopeRef scope, boolean includeDeleted, int page) {
         List<SourceRow> rows = selectAllSources(includeDeleted, page);
         if (rows.isEmpty()) {
-            return reply(scope, bundleLoader.get(BundleKeys.REPLY_LIST_SOURCES_EMPTY));
+            return reply(scope, bundleLoader.get(BundleKeys.REPLY_LIST_SOURCES_EMPTY, inboundContext.effectiveLanguage()));
         }
         return reply(scope, renderReply(rows, /* withVisibilityCaveat */ true));
     }
@@ -236,15 +236,15 @@ public class ListSourcesCommandHandler implements CommandHandler {
 
     private String renderReply(List<SourceRow> rows, boolean withVisibilityCaveat) {
         StringBuilder sb = new StringBuilder();
-        sb.append(bundleLoader.get(BundleKeys.REPLY_LIST_SOURCES_HEADER));
+        sb.append(bundleLoader.get(BundleKeys.REPLY_LIST_SOURCES_HEADER, inboundContext.effectiveLanguage()));
         if (withVisibilityCaveat) {
             sb.append('\n');
-            sb.append(bundleLoader.get(BundleKeys.REPLY_LIST_SOURCES_URL_VISIBILITY_CAVEAT));
+            sb.append(bundleLoader.get(BundleKeys.REPLY_LIST_SOURCES_URL_VISIBILITY_CAVEAT, inboundContext.effectiveLanguage()));
         }
         for (SourceRow row : rows) {
             sb.append('\n');
             sb.append(MessageFormat.format(
-                    bundleLoader.get(BundleKeys.REPLY_LIST_SOURCES_LINE),
+                    bundleLoader.get(BundleKeys.REPLY_LIST_SOURCES_LINE, inboundContext.effectiveLanguage()),
                     row.displayName, row.identifier, row.kind, statusLabel(row)));
         }
         return sb.toString();

@@ -52,7 +52,7 @@ class AssetReplyRendererTest {
         AssetSnapshotReader.SnapshotResult result =
                 new AssetSnapshotReader.SnapshotResult(snap, false, interval);
 
-        String rendered = renderer.render(result, "Zcash", "coingecko.com/en/coins/zcash");
+        String rendered = renderer.render(result, "Zcash", "coingecko.com/en/coins/zcash", "en");
 
         assertTrue(rendered.contains("Zcash (coingecko)"), "header: display name + source");
         assertTrue(rendered.contains("$42.18"), "price line");
@@ -87,7 +87,7 @@ class AssetReplyRendererTest {
         AssetSnapshotReader.SnapshotResult result =
                 new AssetSnapshotReader.SnapshotResult(snap, false, interval);
 
-        String rendered = renderer.render(result, "Zcash", "kraken.com/prices/zec-usd-zcash-price-chart");
+        String rendered = renderer.render(result, "Zcash", "kraken.com/prices/zec-usd-zcash-price-chart", "en");
 
         assertTrue(rendered.contains("Zcash (kraken)"), "header");
         assertTrue(rendered.contains("$42.15"), "price line");
@@ -113,7 +113,7 @@ class AssetReplyRendererTest {
         AssetSnapshotReader.SnapshotResult result =
                 new AssetSnapshotReader.SnapshotResult(snap, true, interval);
 
-        String rendered = renderer.render(result, "Zcash", "coingecko.com/en/coins/zcash");
+        String rendered = renderer.render(result, "Zcash", "coingecko.com/en/coins/zcash", "en");
 
         assertTrue(rendered.contains("⚠ stale"),
                 "stale marker must appear when captured_at > 2 * refresh_interval");
@@ -132,7 +132,7 @@ class AssetReplyRendererTest {
         AssetSnapshotReader.SnapshotResult result =
                 new AssetSnapshotReader.SnapshotResult(snap, false, Duration.ofSeconds(90));
 
-        String rendered = renderer.render(result, "Zcash", "coingecko.com/en/coins/zcash");
+        String rendered = renderer.render(result, "Zcash", "coingecko.com/en/coins/zcash", "en");
 
         assertFalse(rendered.contains("⚠ stale"), "fresh snapshot should not show stale marker");
     }
@@ -157,10 +157,10 @@ class AssetReplyRendererTest {
 
         String eurRendered = renderer.render(
                 new AssetSnapshotReader.SnapshotResult(eurSnap, false, interval),
-                "Zcash", "coingecko.com/en/coins/zcash");
+                "Zcash", "coingecko.com/en/coins/zcash", "en");
         String czkRendered = renderer.render(
                 new AssetSnapshotReader.SnapshotResult(czkSnap, false, interval),
-                "Zcash", "coingecko.com/en/coins/zcash");
+                "Zcash", "coingecko.com/en/coins/zcash", "en");
 
         assertTrue(eurRendered.contains("38.74 EUR"), "eur price gets ISO-code suffix");
         assertFalse(eurRendered.contains("$38.74"), "eur price must not have $ prefix");
@@ -180,7 +180,7 @@ class AssetReplyRendererTest {
         AssetSnapshotReader.SnapshotResult result =
                 new AssetSnapshotReader.SnapshotResult(snap, false, Duration.ofSeconds(90));
 
-        String rendered = renderer.render(result, "Zcash", "coingecko.com/en/coins/zcash");
+        String rendered = renderer.render(result, "Zcash", "coingecko.com/en/coins/zcash", "en");
 
         assertTrue(rendered.contains("0.000651 BTC"), "BTC price format");
         assertFalse(rendered.contains("$0.000651"), "BTC price should not have $ prefix");

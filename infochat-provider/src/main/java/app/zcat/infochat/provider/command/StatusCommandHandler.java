@@ -74,11 +74,11 @@ public class StatusCommandHandler implements CommandHandler {
     public OutboundMessage handle(ScopeRef scope, String rawText) {
         StringBuilder body = new StringBuilder();
         body.append(MessageFormat.format(
-                bundleLoader.get(BundleKeys.REPLY_STATUS_PROFILE),
+                bundleLoader.get(BundleKeys.REPLY_STATUS_PROFILE, inboundContext.effectiveLanguage()),
                 profileLabel));
         body.append('\n');
         body.append(MessageFormat.format(
-                bundleLoader.get(BundleKeys.REPLY_STATUS_UPTIME),
+                bundleLoader.get(BundleKeys.REPLY_STATUS_UPTIME, inboundContext.effectiveLanguage()),
                 formatUptime(Duration.between(startedAt, Instant.now()))));
 
         String adapter = inboundContext.adapterName();
@@ -87,7 +87,7 @@ public class StatusCommandHandler implements CommandHandler {
                 && lookupIsAdmin(adapter, callerContactId)) {
             body.append('\n');
             body.append(MessageFormat.format(
-                    bundleLoader.get(BundleKeys.REPLY_STATUS_PENDING_GROUPS),
+                    bundleLoader.get(BundleKeys.REPLY_STATUS_PENDING_GROUPS, inboundContext.effectiveLanguage()),
                     groupRepository.countPendingGroups()));
         }
 

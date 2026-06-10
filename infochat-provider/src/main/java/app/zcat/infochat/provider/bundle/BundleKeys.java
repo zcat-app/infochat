@@ -147,10 +147,10 @@ public final class BundleKeys {
     /** Short-help line for {@code /list-groups} (bot-admin tier). */
     public static final String HELP_CMD_LIST_GROUPS_SHORT = "help.cmd.list-groups.short";
 
-    /** Deterministic reply for an unknown slash command. InboundRouter still uses its own literal at M1-035b's commit; replacing the literal with this lookup is a post-umbrella follow-up. */
+    /** Deterministic reply for an unknown slash command, looked up by InboundRouter's slash dispatch in the requester's effective scope language. */
     public static final String ERROR_UNKNOWN_COMMAND = "error.unknown_command";
 
-    /** Deterministic reply for any uncaught dispatch exception. Same M1-035b literal/bundle divergence note as {@link #ERROR_UNKNOWN_COMMAND}. */
+    /** Deterministic reply for any uncaught dispatch exception, looked up by InboundRouter's catch-all; the exception's own message is NEVER interpolated into it. */
     public static final String ERROR_INTERNAL = "error.internal";
 
     /** Deterministic reply for non-slash chat input until T2-D wires the chat dispatcher. Same M1-035b literal/bundle divergence note. */
@@ -1256,6 +1256,34 @@ public final class BundleKeys {
 
     /** {@code /retry --digest} rejected because the group's digest is paused ({@code digest_enabled = false}); regenerating a stale cached digest around the pause is blocked. */
     public static final String ERROR_RETRY_DIGEST_PAUSED = "error.retry.digest_paused";
+
+    // ----- Router size-cap + /export literal demotions (M1-268) -----------
+    // Per decision D43: every user-visible deterministic string flows
+    // through the bundle. These keys replace the last hardcoded English
+    // reply literals in InboundRouter and ExportCommandHandler. {0}/{1}
+    // interpolation tokens are filled by the caller via
+    // java.text.MessageFormat.
+
+    /**
+     * Defense-in-depth oversize-inbound reply. Looked up by
+     * InboundRouter BEFORE any DB step runs (the size cap fires ahead
+     * of the users-row snapshot by design), so it always renders in the
+     * pre-resolution context default {@code en} — the key exists so the
+     * literal lives in the bundle, not so the reply localizes.
+     */
+    public static final String ERROR_ROUTER_MESSAGE_TOO_LARGE = "error.router.message_too_large";
+
+    /** {@code /export} invoked in group scope — DM-only until the group actor seam lands. */
+    public static final String ERROR_EXPORT_GROUP_NOT_SUPPORTED = "error.export.group_not_supported";
+
+    /** {@code /export} caller's users row could not be resolved. */
+    public static final String ERROR_EXPORT_NO_USER = "error.export.no_user";
+
+    /** {@code /export --page N} beyond a single-page export. Token {0} = requested page. */
+    public static final String ERROR_EXPORT_PAGE_OUT_OF_RANGE_ONE = "error.export.page_out_of_range_one";
+
+    /** {@code /export --page N} beyond a multi-page export. Token {0} = requested page, {1} = total pages. */
+    public static final String ERROR_EXPORT_PAGE_OUT_OF_RANGE_MANY = "error.export.page_out_of_range_many";
 
     private BundleKeys() {
         throw new AssertionError("BundleKeys is a constant holder and must not be instantiated");

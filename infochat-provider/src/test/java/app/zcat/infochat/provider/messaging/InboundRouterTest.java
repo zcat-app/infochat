@@ -194,7 +194,7 @@ class InboundRouterTest {
 
         List<OutboundMessage> sent = inMemoryAdapter.sentMessages();
         assertEquals(1, sent.size());
-        assertEquals(InboundRouter.UNKNOWN_COMMAND_REPLY, sent.get(0).text());
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_UNKNOWN_COMMAND), sent.get(0).text());
     }
 
     @Test
@@ -205,7 +205,7 @@ class InboundRouterTest {
         assertEquals(1, sent.size(),
                 "exception path must still produce one user-visible reply");
         String body = sent.get(0).text();
-        assertEquals(InboundRouter.INTERNAL_ERROR_REPLY, body);
+        assertEquals(bundleLoader.get(BundleKeys.ERROR_INTERNAL), body);
         assertFalse(body.contains(BoomHandler.SECRET_LEAK_TEXT),
                 "exception's getMessage() must NOT be interpolated into the reply, got: " + body);
     }

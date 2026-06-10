@@ -75,7 +75,7 @@ public class DemoteCommandHandler implements CommandHandler {
     @Override
     public OutboundMessage handle(ScopeRef scope, String rawText) {
         if (!(scope instanceof ScopeRef.Group group)) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_DEMOTE_GROUP_SCOPE_REQUIRED));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_DEMOTE_GROUP_SCOPE_REQUIRED, inboundContext.effectiveLanguage()));
         }
 
         String adapter = inboundContext.adapterName();
@@ -84,7 +84,7 @@ public class DemoteCommandHandler implements CommandHandler {
         String targetContactId = parseTarget(rawText);
         if (targetContactId == null) {
             return reply(scope, MessageFormat.format(
-                    bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT),
+                    bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT, inboundContext.effectiveLanguage()),
                     "/demote <contact>"));
         }
 
@@ -98,7 +98,7 @@ public class DemoteCommandHandler implements CommandHandler {
         Optional<UserRepository.UserRow> actorPre =
                 userRepository.findByAdapterAndContactId(adapter, callerContactId);
         if (actorPre.isEmpty() || !actorPre.get().isAdmin()) {
-            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+            return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
         }
 
         String requestId = UUID.randomUUID().toString();
@@ -118,14 +118,14 @@ public class DemoteCommandHandler implements CommandHandler {
                 UUID actorId = resolveAdmin(conn, adapter, callerContactId);
                 if (actorId == null) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_ADMIN_ONLY, inboundContext.effectiveLanguage()));
                 }
 
                 // Resolve target
                 TargetRow target = resolveTarget(conn, adapter, targetContactId);
                 if (target == null) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONTACT_NOT_REGISTERED));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_CONTACT_NOT_REGISTERED, inboundContext.effectiveLanguage()));
                 }
 
                 // Resolve group
@@ -134,7 +134,7 @@ public class DemoteCommandHandler implements CommandHandler {
                 // Validate target is current group admin
                 if (!isGroupAdmin(conn, groupId, target.id)) {
                     conn.rollback();
-                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_DEMOTE_TARGET_NOT_ADMIN));
+                    return reply(scope, bundleLoader.get(BundleKeys.ERROR_DEMOTE_TARGET_NOT_ADMIN, inboundContext.effectiveLanguage()));
                 }
 
                 // Audit before effect
@@ -167,7 +167,7 @@ public class DemoteCommandHandler implements CommandHandler {
         }
 
         String replyText = MessageFormat.format(
-                bundleLoader.get(BundleKeys.REPLY_DEMOTE_SUCCESS),
+                bundleLoader.get(BundleKeys.REPLY_DEMOTE_SUCCESS, inboundContext.effectiveLanguage()),
                 ContactIds.redact(targetContactId));
         return reply(scope, replyText);
     }
