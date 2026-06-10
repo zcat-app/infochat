@@ -379,6 +379,28 @@ public final class SimpleXAdapter implements MessagingAdapter {
         close();
     }
 
+    /**
+     * True once the supervised simplex-chat subprocess has exhausted its
+     * crash cap and latched {@link SimpleXSubprocess.State#FAILED} — the
+     * readiness-truth signal Provider polls. A null subprocess (never
+     * started, or torn down) is not a terminal failure.
+     */
+    @Override
+    public boolean supervisorTerminallyFailed() {
+        SimpleXSubprocess sub = subprocess;
+        return sub != null && sub.state() == SimpleXSubprocess.State.FAILED;
+    }
+
+    /**
+     * Inbound deliveries dropped on dispatch-queue overflow, read through
+     * the live WebSocket client. Zero before the transport is wired.
+     */
+    @Override
+    public long droppedInboundCount() {
+        SimpleXWebSocketClient ws = webSocket;
+        return ws == null ? 0L : ws.droppedInboundCount();
+    }
+
     @Override
     public MessageHandle send(OutboundMessage msg) throws MessagingException {
         SimpleXWebSocketClient ws = requireConnected();

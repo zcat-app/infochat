@@ -16,7 +16,10 @@ services:
       POSTGRES_DB: infochat
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-infochat-dev}
     ports:
-      - "5432:5432"
+      # Bind to loopback only: a bare "5432:5432" publishes the dev DB on
+      # every host interface (0.0.0.0), reachable from the LAN with the
+      # default dev password above. Loopback keeps it to the dev machine.
+      - "127.0.0.1:5432:5432"
     volumes:
       - infochat-pgdata:/var/lib/postgresql/data
     healthcheck:

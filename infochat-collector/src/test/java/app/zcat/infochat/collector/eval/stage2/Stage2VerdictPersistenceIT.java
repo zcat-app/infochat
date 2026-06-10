@@ -29,6 +29,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * QUARANTINED verdict path. The fold is only safe because both writes target
  * the same row in the same transaction; that the verdict lands alongside the
  * status/flags is the observable proof.
+ *
+ * <p>Also pins the Stage-2 fail-open release path (INFRA_FAILURE under
+ * release-on-stage2-failure=true, the test profile's inherited base value):
+ * the post is released RAW with {@code stage2_failed=true}, and the
+ * operator-visible {@code releasedStage2FailedCount()} counter increments
+ * (the observability slice of M-K8 — the boot audit row says the posture is
+ * armed, this counter says how often it fired).</p>
  */
 @QuarkusTest
 class Stage2VerdictPersistenceIT {
@@ -79,6 +86,26 @@ class Stage2VerdictPersistenceIT {
         assertEquals("INJECTION", row.stage2Verdict(),
             "the folded UPDATE persisted the verdict alongside the status transition");
         assertNotNull(row.statusChangedAt(), "status_changed_at advanced by the quarantine UPDATE");
+    }
+
+    @Test
+    void infraFailureReleaseIncrementsReleasedCounter() throws Exception {
+        SeededPost post = seedRawPost("infra-failure");
+
+        // Delta, not absolute: the counter is a process-wide singleton other
+        // tests in the same container may have bumped.
+        long before = stage2VerdictHandler.releasedStage2FailedCount();
+        stage2VerdictHandler.apply(post.id(), post.fetchedAt(),
+            Stage2VerdictHandler.Verdict.INFRA_FAILURE);
+
+        PostRow row = readPost(post);
+        // RAW + stage2_failed proves the release branch ran — i.e. the test
+        // profile resolves release-on-stage2-failure=true (inherited base).
+        assertEquals("RAW", row.status(),
+            "fail-open release keeps status RAW (Tagger/Embedding still run)");
+        assertTrue(row.stage2Failed(), "stage2_failed marks the degraded-mode release");
+        assertEquals(before + 1, stage2VerdictHandler.releasedStage2FailedCount(),
+            "the fail-open release path must increment the released-post counter exactly once");
     }
 
     // ---------- helpers ----------

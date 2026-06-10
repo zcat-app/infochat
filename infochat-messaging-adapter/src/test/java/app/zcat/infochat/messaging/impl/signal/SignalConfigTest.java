@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -48,5 +49,29 @@ class SignalConfigTest {
         IllegalStateException ex = assertThrows(IllegalStateException.class, config::validate);
         assertTrue(ex.getMessage().contains(SignalConfig.DATA_DIR_KEY),
                 "message must name the offending property key: " + ex.getMessage());
+    }
+
+    @Test
+    void onStartup_isDormantWhenSignalNotEnabled() {
+        // A binary path validate() would reject — but the gated @Startup hook
+        // must not validate when "signal" is absent from infochat.adapters,
+        // so a future CDI-index of this jar cannot fail boot for an
+        // inmemory-/simplex-only deployment that never configured signal-cli.
+        Path binary = tempDir.resolve("nonexistent-signal-cli");
+        SignalConfig config = new SignalConfig(binary.toString(), tempDir.toString(), "+15551234567");
+        config.enabledAdapters = Optional.of("simplex,inmemory");
+
+        assertDoesNotThrow(config::onStartup);
+    }
+
+    @Test
+    void onStartup_validatesWhenSignalEnabled() {
+        Path binary = tempDir.resolve("nonexistent-signal-cli");
+        SignalConfig config = new SignalConfig(binary.toString(), tempDir.toString(), "+15551234567");
+        config.enabledAdapters = Optional.of("signal");
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class, config::onStartup);
+        assertTrue(ex.getMessage().contains(SignalConfig.BINARY_KEY),
+                "gated startup must run validate() when signal is enabled: " + ex.getMessage());
     }
 }

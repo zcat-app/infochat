@@ -1,7 +1,11 @@
 package app.zcat.infochat.provider.health;
 
+import app.zcat.infochat.messaging.MessagingAdapter;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Any;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
+import java.util.HashMap;
 import java.util.Map;
 import org.eclipse.microprofile.health.HealthCheck;
 import org.eclipse.microprofile.health.HealthCheckResponse;
@@ -14,30 +18,80 @@ import org.eclipse.microprofile.health.Readiness;
  * enabled adapter is connected (the Provider can serve traffic via
  * that adapter); not-ready when zero adapters are connected.
  *
- * <p>Deliberately deferred to the verification/observability backlog
- * (no ticket filed yet): the second half of the spec's readiness rule
- * — "Per-adapter connection state is exposed separately via metrics"
- * — is a separate micrometer lift, and the LLM probe ("a failing
- * provider surfaces as a degraded readiness signal but does not fail
- * readiness outright") is deferred with it. Until then, the
- * per-adapter data entries on this check's response are the only
- * signal distinguishing "fully healthy" from "degraded — one adapter
- * down".</p>
+ * <p>Two signals are folded per adapter. The startup outcome comes from
+ * {@link AdapterConnectionState} (did the adapter's transport
+ * {@code start()} return?). The <em>live</em> outcome comes from the
+ * adapter itself: {@link MessagingAdapter#supervisorTerminallyFailed()}
+ * reports a subprocess supervisor that exhausted its restart cap
+ * <em>after</em> a clean start. An adapter counts as connected only when
+ * it both started and has not since terminally failed — otherwise a
+ * deployment could read "ready" with a permanently dead adapter, since
+ * the startup snapshot alone never observes the later failure.</p>
+ *
+ * <p>The per-adapter {@code data} entries carry the operational detail:
+ * each adapter name maps to its effective up/down boolean, and an
+ * adapter that has dropped inbound messages on queue overflow contributes
+ * a {@code <name>.dropped-inbound} count
+ * ({@link MessagingAdapter#droppedInboundCount()}) so a silently
+ * overflowing queue is visible on the readiness payload without log
+ * scraping. The Micrometer per-adapter metrics lift named in the spec's
+ * readiness rule ("Per-adapter connection state is exposed separately via
+ * metrics") and the degraded-LLM-probe leg remain deferred to the
+ * observability backlog; until then these data entries are the status
+ * surface.</p>
  */
 @Readiness
 @ApplicationScoped
 public class AdapterReadinessCheck implements HealthCheck {
 
+    static final String DROPPED_INBOUND_SUFFIX = ".dropped-inbound";
+
     @Inject
     AdapterConnectionState connectionState;
 
+    @Inject
+    @Any
+    Instance<MessagingAdapter> discoveredAdapters;
+
     @Override
     public HealthCheckResponse call() {
-        Map<String, Boolean> snapshot = connectionState.snapshot();
-        HealthCheckResponseBuilder response = HealthCheckResponse
-                .named("messaging-adapters")
-                .status(snapshot.containsValue(true));
-        snapshot.forEach(response::withData);
-        return response.build();
+        return evaluate(connectionState.snapshot(), adaptersByName());
+    }
+
+    private Map<String, MessagingAdapter> adaptersByName() {
+        Map<String, MessagingAdapter> byName = new HashMap<>();
+        for (MessagingAdapter adapter : discoveredAdapters) {
+            byName.put(adapter.name(), adapter);
+        }
+        return byName;
+    }
+
+    /**
+     * Pure readiness evaluation, factored out so it is unit-testable
+     * without a CDI container: {@code started} is the per-adapter startup
+     * snapshot, {@code adaptersByName} the live adapter instances keyed by
+     * {@link MessagingAdapter#name()}. An adapter present in the snapshot
+     * but absent from {@code adaptersByName} keeps its snapshot value (it
+     * has no live supervisor to consult).
+     */
+    static HealthCheckResponse evaluate(Map<String, Boolean> started,
+                                        Map<String, MessagingAdapter> adaptersByName) {
+        HealthCheckResponseBuilder response = HealthCheckResponse.named("messaging-adapters");
+        boolean anyUp = false;
+        for (Map.Entry<String, Boolean> entry : started.entrySet()) {
+            String name = entry.getKey();
+            MessagingAdapter adapter = adaptersByName.get(name);
+            boolean terminallyFailed = adapter != null && adapter.supervisorTerminallyFailed();
+            boolean up = entry.getValue() && !terminallyFailed;
+            anyUp = anyUp || up;
+            response.withData(name, up);
+            if (adapter != null) {
+                long dropped = adapter.droppedInboundCount();
+                if (dropped > 0) {
+                    response.withData(name + DROPPED_INBOUND_SUFFIX, dropped);
+                }
+            }
+        }
+        return response.status(anyUp).build();
     }
 }

@@ -785,6 +785,8 @@ Both services expose:
 
 **Provider readiness rule.** Ready when the Provider's DB pool is up **and at least one** activated messaging adapter is connected (`adapter.connection.status{adapter}=1` for any one of them). Per-adapter status is exposed separately so an operator can distinguish "fully healthy — every adapter up" from "degraded — one adapter down" without parsing readiness alone.
 
+"Connected" folds two signals: the adapter's transport `start()` returned at boot, **and** its subprocess supervisor has not since reached its terminal FAILED state (crash-restart cap exhausted). A supervisor that gives up after a clean start flips that adapter's readiness datum to down — without this, a deployment would read "ready" with a permanently dead adapter, because the boot-time start snapshot never observes the later failure. Mid-session reconnect blips that the supervisor is still retrying do **not** flip readiness (only the terminal give-up does).
+
 Recommended monitoring:
 
 - **Liveness:** kill if `/live` fails 3× in 30 s (systemd `WatchdogSec`). Probe `/live` only.
@@ -831,6 +833,19 @@ Recommended monitoring:
   - `llm.calls.total{outcome="fail"}` rate-of-change.
   - `eval.queue.size` near `infochat.eval.queue-size` for too long → fetcher back-pressure.
   - `embedding.calls.total{outcome="fallback"}` non-zero → model down.
+
+### 7.12.1 Ops-posture surfaces (v1, pre-metrics)
+
+The Micrometer panel names above (`adapter.connection.status{adapter}`, …) are the target observability surface. v1 ships **no metrics backend wired** (no `quarkus-micrometer` dependency yet — adding one is an explicit dependency decision, not assumed). Until that lift lands, the readiness payload `data` map and a few in-process counters are the status surfaces an operator reads:
+
+- **Health-endpoint exposure — bind to loopback.** `GET /q/health/ready` is **unauthenticated**, and its per-adapter `data` entries **enumerate the activated adapter names** (`simplex`, `signal`, …). That is a mild information leak to any caller that can reach the port. Quarkus serves health under the management interface (`quarkus.management.enabled=true`, §7.4); bind it to loopback and reach it via the orchestrator/monitoring sidecar, not a public interface:
+  ```
+  quarkus.management.host=127.0.0.1        # health/metrics reachable on loopback only
+  ```
+  On a split-host deployment where the prober is on another host, restrict the management port to the prober's address with a host firewall rather than publishing it on `0.0.0.0`. The same posture applies to the local `docker-compose` Postgres, which binds `127.0.0.1:5432` for the identical reason (§7.7).
+- **Inbound drop-newest counters.** Each transport adapter's inbound dispatch queue is bounded and drops the newest message on overflow (06-messaging.md §6.5). The drop is no longer log-only: the readiness payload carries a `<adapter>.dropped-inbound` datum (cumulative since process start) whenever an adapter has dropped at least one inbound message, so a silently saturating queue is visible on `/q/health/ready` without log scraping.
+- **Stage-2 fail-open posture (Collector).** On the `base`/`laptop`/`pi` profiles `infochat.security.release-on-stage2-failure=true` (04-security.md §4.7): when the Stage-2 LLM judge cannot run, posts are released with Stage-1 redactions only rather than quarantined. This is a deliberate availability-over-strictness trade for resource-constrained profiles; `vps`/`remote-llm` leave it false. Two surfaces make the posture auditable: a boot-time WARN + `audit_log` row (`STARTUP_RELEASE_ON_STAGE2_FAILURE_TRUE`) records that it is **armed**, and `Stage2VerdictHandler.releasedStage2FailedCount()` counts how often it actually **fired** (posts released with `stage2_failed=true`) so an operator can size the exposure. Flipping the default is a product decision, out of scope here — only the visibility is.
+- **Adapter config bean activation.** `SignalConfig`/`SimpleXConfig` are eager `@Startup` validation beans living in the `infochat-messaging-adapter` library jar. The provider does **not** CDI-index that jar today, so they stay dormant; their `@PostConstruct` is gated on the adapter appearing in `infochat.adapters` so that a future `quarkus.index-dependency` on the jar cannot make the eager filesystem validation fire — and fail boot — for a deployment that never enabled that adapter (e.g. an `inmemory`-only or single-real-adapter deployment).
 
 ---
 

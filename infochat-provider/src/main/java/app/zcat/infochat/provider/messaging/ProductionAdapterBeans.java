@@ -10,6 +10,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
 import java.time.Duration;
@@ -129,6 +130,20 @@ public class ProductionAdapterBeans {
     @ConfigProperty(name = "infochat.adapters.signal.endpoint", defaultValue = "127.0.0.1:7654")
     String signalEndpoint;
 
+    /**
+     * Opt-in for a non-loopback signal-cli daemon endpoint. signal-cli's
+     * TCP JSON-RPC daemon has no authentication — any process that can
+     * reach the endpoint can drive the bot's Signal account. The loopback
+     * default ({@code 127.0.0.1}) keeps it reachable only from the same
+     * host. An operator who deliberately binds it to a non-loopback
+     * address (e.g. behind a host firewall on a multi-NIC box) must set
+     * this {@code true} to acknowledge the widened trust surface;
+     * otherwise {@link #parseEndpoint} fails boot closed.
+     */
+    @ConfigProperty(name = "infochat.adapters.signal.allow-non-loopback-endpoint",
+            defaultValue = "false")
+    boolean signalAllowNonLoopbackEndpoint;
+
     @Produces
     @ApplicationScoped
     SimpleXAdapter simpleXAdapter() {
@@ -151,7 +166,7 @@ public class ProductionAdapterBeans {
     @Produces
     @ApplicationScoped
     SignalAdapter signalAdapter() {
-        InetSocketAddress endpoint = parseEndpoint(signalEndpoint);
+        InetSocketAddress endpoint = parseEndpoint(signalEndpoint, signalAllowNonLoopbackEndpoint);
         return new SignalAdapter(
                 signalBinary.orElse(""),
                 signalDataDir.orElse(""),
@@ -167,8 +182,20 @@ public class ProductionAdapterBeans {
      * Producer @PostConstruct time, before any traffic, satisfying the
      * "validation at system boundaries" carve-out from the
      * No-defensive-code rule (config parsing is a system boundary).
+     *
+     * <p>Besides shape and port-range, the host is held to the loopback
+     * trust model: signal-cli's TCP JSON-RPC daemon is unauthenticated, so
+     * a non-loopback bind exposes the bot's Signal account to anything that
+     * can route to the host. A non-loopback host is rejected unless
+     * {@code allowNonLoopback} (the operator's explicit
+     * {@code infochat.adapters.signal.allow-non-loopback-endpoint} opt-in)
+     * is set. The check fails closed: a host that does not resolve to a
+     * confirmed loopback address is treated as non-loopback.</p>
+     *
+     * <p>Package-private (not {@code private}) so the loopback policy is
+     * unit-testable without booting the Producer.</p>
      */
-    private static InetSocketAddress parseEndpoint(String hostPort) {
+    static InetSocketAddress parseEndpoint(String hostPort, boolean allowNonLoopback) {
         int idx = hostPort.lastIndexOf(':');
         if (idx <= 0 || idx == hostPort.length() - 1) {
             throw new IllegalStateException(
@@ -186,6 +213,17 @@ public class ProductionAdapterBeans {
             throw new IllegalStateException(
                     "infochat.adapters.signal.endpoint port out of 1..65535 range: " + port);
         }
-        return new InetSocketAddress(host, port);
+        InetSocketAddress endpoint = new InetSocketAddress(host, port);
+        InetAddress resolved = endpoint.getAddress();
+        boolean loopback = resolved != null && resolved.isLoopbackAddress();
+        if (!loopback && !allowNonLoopback) {
+            throw new IllegalStateException(
+                    "infochat.adapters.signal.endpoint host \"" + host + "\" is not a loopback"
+                            + " address; signal-cli's unauthenticated TCP JSON-RPC daemon is"
+                            + " trusted only on loopback. Set"
+                            + " infochat.adapters.signal.allow-non-loopback-endpoint=true to opt"
+                            + " into a non-loopback endpoint (e.g. a firewalled multi-NIC host).");
+        }
+        return endpoint;
     }
 }

@@ -225,6 +225,38 @@ public interface MessagingAdapter {
     }
 
     /**
+     * Whether this adapter's transport supervisor has reached a terminal
+     * failed state — the subprocess crash-restart loop exhausted its cap
+     * and gave up. Polled by Provider's readiness probe: a started-then-
+     * terminally-failed adapter must report not-ready, otherwise a
+     * deployment stays "ready" with a permanently dead adapter (the
+     * startup-only {@code AdapterConnectionState} snapshot never sees the
+     * later failure). Default false so transportless adapters (the
+     * in-memory test double) and adapters whose supervisor is still
+     * running are reported live.
+     *
+     * @return true iff the transport supervisor has terminally failed.
+     */
+    default boolean supervisorTerminallyFailed() {
+        return false;
+    }
+
+    /**
+     * Cumulative count of inbound messages dropped because the adapter's
+     * bounded inbound dispatch queue was full (the drop-newest overflow
+     * policy). Exposed for operational observability — Provider surfaces
+     * it on the readiness payload so a silently-overflowing queue is
+     * visible without log scraping. Monotonic within a process; resets
+     * only on restart. Default 0 for adapters without a bounded inbound
+     * queue.
+     *
+     * @return the number of inbound messages dropped on queue overflow.
+     */
+    default long droppedInboundCount() {
+        return 0L;
+    }
+
+    /**
      * Functional callback Provider registers with each
      * {@link MessagingAdapter}. Pure SPI; concrete dispatching to
      * command handlers / chat mode lives in Provider.

@@ -16,6 +16,7 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Stage 2's per-verdict dispatch + SQL writer. Owns the
@@ -109,6 +110,15 @@ public class Stage2VerdictHandler {
 
     private static final Logger LOG = Logger.getLogger(Stage2VerdictHandler.class);
 
+    // Cumulative count of posts released through the Stage-2 fail-open
+    // path (release-on-stage2-failure=true + INFRA_FAILURE), i.e. posts
+    // that reached the pipeline with Stage 1 redactions only because the
+    // judge could not run. The startup audit row records that the posture
+    // is active; this counter records how often it actually fired, so an
+    // operator can size the exposure. No metrics backend is wired in v1,
+    // so the accessor is the status surface (see docs/design/07-deployment.md).
+    private final AtomicLong releasedStage2FailedCount = new AtomicLong();
+
     @Inject
     DataSource dataSource;
 
@@ -152,6 +162,10 @@ public class Stage2VerdictHandler {
         if (releaseOnStage2Failure) {
             TransactionHelper.inTransaction(dataSource, "Stage2VerdictHandler", conn ->
                 updatePostStage2DoneRaw(conn, postId, postFetchedAt, /* stage2Failed */ true, /* stage2Verdict */ null));
+            // Count only after the release commits — the counter measures
+            // posts that actually entered the pipeline fail-open, not
+            // attempts that rolled back.
+            releasedStage2FailedCount.incrementAndGet();
             LOG.warnf("Stage 2 infrastructure failure (error_class=%s) post_id=%s — released with Stage 1 redactions "
                     + "(stage2_done=true, stage2_failed=true, status=RAW); release-on-stage2-failure=true",
                 ERROR_CLASS_STAGE2_INFRA_FAILURE, postId);
@@ -162,6 +176,17 @@ public class Stage2VerdictHandler {
                     + "(stage2_done=true, stage2_failed=true, status=QUARANTINED); release-on-stage2-failure=false",
                 ERROR_CLASS_STAGE2_INFRA_FAILURE, postId);
         }
+    }
+
+    /**
+     * Number of posts released through the Stage-2 fail-open path
+     * (release-on-stage2-failure=true + INFRA_FAILURE) since process
+     * start. The operator-visible counter complementing the boot-time
+     * {@code STARTUP_RELEASE_ON_STAGE2_FAILURE_TRUE} audit row: the row
+     * says the posture is armed, this says how often it fired.
+     */
+    public long releasedStage2FailedCount() {
+        return releasedStage2FailedCount.get();
     }
 
     /**

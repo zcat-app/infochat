@@ -311,6 +311,31 @@ public final class SignalAdapter implements MessagingAdapter {
         close();
     }
 
+    /**
+     * True once the supervised signal-cli subprocess has exhausted its
+     * restart cap and latched {@link SignalSubprocess.State#FAILED} — the
+     * readiness-truth signal Provider polls. A null subprocess (never
+     * started, or torn down) is not a terminal failure: readiness treats
+     * "not running" via the startup snapshot, this method reports only the
+     * give-up state.
+     */
+    @Override
+    public boolean supervisorTerminallyFailed() {
+        SignalSubprocess sp = subprocess;
+        return sp != null && sp.state() == SignalSubprocess.State.FAILED;
+    }
+
+    /**
+     * Inbound notifications dropped on dispatch-queue overflow, read
+     * through the live JSON-RPC client. Zero before the client is wired
+     * (no transport, nothing to drop).
+     */
+    @Override
+    public long droppedInboundCount() {
+        SignalJsonRpcClient c = client;
+        return c == null ? 0L : c.droppedInboundCount();
+    }
+
     @Override
     public MessageHandle send(OutboundMessage msg) throws MessagingException {
         SignalJsonRpcClient c = requireConnected("send");

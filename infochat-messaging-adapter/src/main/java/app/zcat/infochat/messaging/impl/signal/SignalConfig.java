@@ -8,6 +8,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Optional;
 
 /**
  * Operator configuration for the Signal adapter. Carries the three
@@ -37,9 +38,22 @@ public class SignalConfig {
     /** Registered signal-cli account (phone number or account identifier). */
     public static final String ACCOUNT_KEY = "infochat.adapters.signal.account";
 
+    /** The provider's activated-adapter CSV — read only to gate eager validation. */
+    static final String ADAPTERS_KEY = "infochat.adapters";
+
+    /** Adapter-selection name whose enablement gates this config's eager validation. */
+    static final String ADAPTER_NAME = "signal";
+
     private final String binary;
     private final String dataDir;
     private final String account;
+
+    // Field-injected (not a constructor param) so the @Startup gate can read
+    // it without widening the constructor the adapter-construction path uses.
+    // Seeded non-null so plain-construction unit tests that call validate()
+    // directly never touch a null here.
+    @ConfigProperty(name = ADAPTERS_KEY)
+    Optional<String> enabledAdapters = Optional.empty();
 
     @Inject
     SignalConfig(@ConfigProperty(name = BINARY_KEY) String binary,
@@ -51,12 +65,42 @@ public class SignalConfig {
     }
 
     /**
+     * Eager-startup entry point, gated on adapter enablement. The
+     * dormant-activation guard for the footgun in
+     * {@code docs/design/07-deployment.md} §Adapter config bean
+     * activation: this library jar is not CDI-indexed today, so this
+     * {@code @Startup} hook does not run in the current build — but were a
+     * future {@code quarkus.index-dependency} to add it, an ungated
+     * {@code @PostConstruct} would run {@link #validate()}'s filesystem
+     * checks (and fail boot) even for an inmemory- or simplex-only
+     * deployment that never configured signal-cli. Only delegates to
+     * {@link #validate()} when {@code "signal"} appears in
+     * {@code infochat.adapters}.
+     */
+    @PostConstruct
+    void onStartup() {
+        if (!adapterEnabled()) {
+            return;
+        }
+        validate();
+    }
+
+    private boolean adapterEnabled() {
+        for (String name : enabledAdapters.orElse("").split(",")) {
+            if (name.trim().equals(ADAPTER_NAME)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Enforce that the operator-supplied signal-cli inputs are usable:
      * the binary exists and is executable, the data directory exists and
      * is writable, and the account is non-empty. Throws naming the
      * offending property key so an operator can fix the exact value.
-     * Runs eagerly at Provider boot via {@code @Startup}; a failure here
-     * fails startup.
+     * Invoked by the enablement-gated {@link #onStartup()} (and directly
+     * by callers that resolve the config); a failure fails startup.
      *
      * <p>This is a boot-time snapshot, not a standing guarantee: it proves
      * the binary and data directory were present and writable at the instant
@@ -67,7 +111,6 @@ public class SignalConfig {
      *
      * @throws IllegalStateException if any check fails.
      */
-    @PostConstruct
     public void validate() {
         Path binaryPath = Path.of(binary);
         if (!Files.exists(binaryPath) || !Files.isExecutable(binaryPath)) {

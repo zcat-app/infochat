@@ -1,14 +1,16 @@
 ---
 id: M1-278
 title: "Ops posture: health truth, endpoint gating, drop counters"
-status: pending
+status: done
 created: 2026-06-09
 last_updated: 2026-06-10
 blocked_by: []
-files_budget: 16
+files_budget: 18
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/health
   - infochat-provider/src/test/java/app/zcat/infochat/provider/health
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging
   - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging
   - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/stage2
@@ -27,7 +29,7 @@ out_of_scope:
 acceptance:
   - "A messaging subprocess supervisor reaching its terminal FAILED state feeds readiness: an adapter whose supervisor is FAILED reports DOWN on the readiness endpoint; named test."
   - "Operator documentation (deployment design note) gains explicit loopback-bind guidance for the health endpoints, addressing the adapter-name enumeration concern for unauthenticated callers."
-  - "Signal endpoint configuration rejects non-loopback hosts unless an explicit opt-in property is set (parseEndpoint today validates shape/port only under a loopback trust model); named test for reject and for opt-in."
+  - "Signal endpoint configuration rejects non-loopback hosts unless an explicit opt-in property is set: the check lands in ProductionAdapterBeans.parseEndpoint (the live boot-time endpoint parser that builds the InetSocketAddress and reads the endpoint + opt-in property — it today validates shape/port only under a loopback trust model). NOT SignalConfig.validate(), whose @Startup @PostConstruct is dormant because the provider does not CDI-index the messaging-adapter jar. Named test for reject and for opt-in."
   - "Inbound queue drop-newest events are observable: a counter (metrics or status surface) increments on drop; named test."
   - "The Stage-2 fail-open posture (release-on-stage2-failure=true in base/laptop/pi) is visible to operators: documented in the deployment design note, and a metric counts posts released with stage2_failed=true (the startup audit row already exists); named test that the counter increments when release-on-stage2-failure=true and the infra-failure release path runs."
   - "docker-compose binds Postgres to 127.0.0.1 (no bare 5432:5432 publish)."
@@ -42,7 +44,20 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-10
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 18
+      added: 664
+      removed: 52
 revisions:
   - date: 2026-06-10
     reason: clarity-fail refine (files_scope omitted the collector module that item 5's stage2_failed counter requires; item 5 lacked a named-test requirement)
@@ -61,16 +76,73 @@ revisions:
          design note, and a metric counts posts released with stage2_failed=true
          (the startup audit row already exists)."
       All other frontmatter fields unchanged by the refine.
+  - date: 2026-06-10
+    reason: budget-breach refine (item 3's parseEndpoint lives in provider/messaging/ProductionAdapterBeans, outside files_scope; the in-scope SignalConfig.validate() alternative is dormant because the provider does not CDI-index the messaging-adapter jar, verified against provider application.properties)
+    snapshot: |
+      Pre-refine files_budget: 16.
+      Pre-refine files_scope lacked the two provider/messaging paths added
+      by this refine:
+        infochat-provider/src/main/java/app/zcat/infochat/provider/messaging
+        infochat-provider/src/test/java/app/zcat/infochat/provider/messaging
+      Pre-refine acceptance item 3 verbatim (did not name the file home):
+        "Signal endpoint configuration rejects non-loopback hosts unless an
+         explicit opt-in property is set (parseEndpoint today validates
+         shape/port only under a loopback trust model); named test for reject
+         and for opt-in."
+      All other frontmatter fields unchanged by the refine.
 escalations:
   - date: 2026-06-10
     reason: clarity-fail
     reviewer_verdict_excerpt: |
       N/A
+  - date: 2026-06-10
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      files_scope gap (about to touch a path outside files_scope). Acceptance
+      item 3 (Signal endpoint rejects non-loopback hosts) references
+      parseEndpoint, which lives ONLY in
+      infochat-provider/.../provider/messaging/ProductionAdapterBeans.java —
+      the boot-time path that constructs the InetSocketAddress and is the
+      single place the endpoint + opt-in property are actually read. That file
+      is in provider/messaging, which is OUTSIDE files_scope (scope has
+      provider/health, not provider/messaging).
+
+      The in-scope alternative the clarity reviewer assumed (loopback check in
+      SignalConfig.validate()) is DORMANT: verified that the provider does NOT
+      CDI-index the infochat-messaging-adapter jar (provider
+      application.properties indexes only infochat-llm-adapter and
+      infochat-core; the messaging-adapter jar carries no beans.xml / jandex).
+      So SignalConfig's @Startup @PostConstruct never runs in the current
+      build — a loopback check there would reject nothing, failing a
+      security_relevant acceptance item in substance.
+
+      Remaining 6 of 7 acceptance items are implementable in-scope. Only item 3
+      needs provider/messaging. Mirrors this ticket's prior clarity-fail refine
+      (which added the omitted collector module).
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-10
+    verdict: CLEAN
+    base: c370a3b
+    head: working-tree (uncommitted, branch m1/M1-278-ops-posture)
+    verdict_file: docs/plan/m1/redteam/M1-278-2026-06-10.md
+    out_of_model_count: 2
+    note: |
+      --in-progress audit between review APPROVE (round 1) and commit. Diffed
+      from the fork point c370a3b to the working tree (the implementation is
+      uncommitted). CLEAN — no findings across the auth/authz/input/ban/audit
+      surfaces. Two out-of-model observations were recorded in the verdict
+      file; advisory only, no remediation required to proceed to commit.
+clarity_check:
+  date: 2026-06-10
+  verdict: WARN
+  warnings:
+    - "Acceptance item 2: documentation-only change (loopback-bind guidance in docs/design/07-deployment.md) is verifiable only by reading the doc diff. No test is possible for a markdown change; reviewer should check the file explicitly during review."
+    - "Acceptance item 6: compose-only change (Postgres port binding to 127.0.0.1) is verifiable only by inspecting docker-compose.yml. No test is possible for a compose port-binding entry; reviewer should check the file explicitly."
+  blockers: []
 ---
 
 # M1-278: Ops posture: health truth, endpoint gating, drop counters
