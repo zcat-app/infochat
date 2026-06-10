@@ -104,27 +104,27 @@ public class StreamSourceSupervisor {
      * is slow or unreachable at boot never blocks the caller.
      *
      * <p>Carries {@code filterSpec} and {@code deliver} beyond the
-     * {@code (sourceId, source)} identity because the {@link StreamSource}
+     * {@code (dispatchKey, source)} identity because the {@link StreamSource}
      * SPI's {@code start} needs both: the caller owns the outbox-writing
      * delivery callback, the supervisor owns only the worker lifecycle.</p>
      */
-    public void register(long sourceId, String filterSpec,
+    public void register(long dispatchKey, String filterSpec,
                          StreamSource source, Consumer<NormalizedPost> deliver) {
         StreamSourceRegistration registration =
-                new StreamSourceRegistration(sourceId, filterSpec, source, deliver);
-        registrations.put(sourceId, registration);
+                new StreamSourceRegistration(dispatchKey, filterSpec, source, deliver);
+        registrations.put(dispatchKey, registration);
         registration.startOn(workerExecutor);
     }
 
     /**
      * Stop a single source — used when its {@code source.status}
-     * transitions to {@code 'failed'}. A {@code sourceId} that was never
+     * transitions to {@code 'failed'}. A {@code dispatchKey} that was never
      * registered as a stream (e.g. a polled Fetcher source crossing the
      * D42 failure threshold) is a no-op: status transitions span all
      * source kinds, only some of which are StreamSources.
      */
-    public void stop(long sourceId) {
-        StreamSourceRegistration registration = registrations.remove(sourceId);
+    public void stop(long dispatchKey) {
+        StreamSourceRegistration registration = registrations.remove(dispatchKey);
         if (registration == null) {
             return;
         }
@@ -148,10 +148,10 @@ public class StreamSourceSupervisor {
         Map<Long, Boolean> outcomes = new HashMap<>();
         for (StreamSourceDrainHandle handle : handles) {
             boolean drained = handle.awaitUntil(deadline);
-            outcomes.put(handle.sourceId(), drained);
+            outcomes.put(handle.dispatchKey(), drained);
             if (!drained) {
                 LOG.warnf("StreamSource %d did not flush within drain timeout %s; in-flight events dropped",
-                        handle.sourceId(), timeout);
+                        handle.dispatchKey(), timeout);
             }
         }
         return outcomes;
@@ -163,8 +163,8 @@ public class StreamSourceSupervisor {
     }
 
     /** Per-source "events lost on shutdown" counter for operator monitoring. */
-    public long eventsLostOnShutdown(long sourceId) {
-        StreamSourceRegistration registration = registrations.get(sourceId);
+    public long eventsLostOnShutdown(long dispatchKey) {
+        StreamSourceRegistration registration = registrations.get(dispatchKey);
         return registration == null ? 0L : registration.eventsLostOnShutdown();
     }
 

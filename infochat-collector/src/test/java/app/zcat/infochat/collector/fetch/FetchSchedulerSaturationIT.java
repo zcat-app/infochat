@@ -212,7 +212,7 @@ class FetchSchedulerSaturationIT {
         final AtomicBoolean hitCapNext = new AtomicBoolean(false);
 
         @Override
-        public List<NormalizedPost> fetch(long sourceId, String identifier) {
+        public List<NormalizedPost> fetch(long dispatchKey, String identifier) {
             if (hitCapNext.get()) {
                 PaginationSaturationTracker.signalCapHit();
             }

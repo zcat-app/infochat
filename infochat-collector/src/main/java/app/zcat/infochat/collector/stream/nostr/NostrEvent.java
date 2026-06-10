@@ -61,12 +61,12 @@ public record NostrEvent(
      *     the {@code post_reference} edge.</li>
      * </ul>
      *
-     * @param sourceId  the dispatch token the supervisor registered this
-     *                  stream under; stamped onto the post (opaque to the
-     *                  persister, which writes the resolved UUID instead).
+     * @param dispatchKey the dispatch token the supervisor registered this
+     *                    stream under; stamped onto the post (opaque to the
+     *                    persister, which writes the resolved UUID instead).
      * @param fetchedAt wall-clock receipt time, supplied by the caller.
      */
-    public NormalizedPost toNormalizedPost(long sourceId, Instant fetchedAt) {
+    public NormalizedPost toNormalizedPost(long dispatchKey, Instant fetchedAt) {
         Map<String, String> rawMetadata;
         if (kind == 6) {
             String repostTarget = extractFirstETag();
@@ -85,7 +85,7 @@ public record NostrEvent(
         Instant createdAtInstant = Instant.ofEpochSecond(createdAt);
         Instant publishedAt = createdAtInstant.isAfter(fetchedAt) ? fetchedAt : createdAtInstant;
         return new NormalizedPost(
-                sourceId,
+                dispatchKey,
                 id,
                 null,
                 content,

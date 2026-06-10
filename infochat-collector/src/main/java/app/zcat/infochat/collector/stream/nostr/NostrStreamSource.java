@@ -103,7 +103,7 @@ public final class NostrStreamSource implements StreamSource {
     // every delivery-loop deref — hence NullAway.Init, not @Nullable.
     @SuppressWarnings("NullAway.Init")
     private volatile Thread deliveryThread;
-    private long sourceId;
+    private long dispatchKey;
     @SuppressWarnings("NullAway.Init")
     private Consumer<NormalizedPost> deliver;
 
@@ -124,12 +124,12 @@ public final class NostrStreamSource implements StreamSource {
     }
 
     @Override
-    public void start(long sourceId, String filterSpec, Consumer<NormalizedPost> deliver) {
-        this.sourceId = sourceId;
+    public void start(long dispatchKey, String filterSpec, Consumer<NormalizedPost> deliver) {
+        this.dispatchKey = dispatchKey;
         this.deliver = deliver;
         this.delivering = true;
         this.deliveryThread = Thread.ofVirtual()
-                .name("nostr-deliver-" + sourceId)
+                .name("nostr-deliver-" + dispatchKey)
                 .start(this::deliveryLoop);
         for (URI relayUri : relayUris) {
             NostrRelayConnection connection = new NostrRelayConnection(
@@ -150,7 +150,7 @@ public final class NostrStreamSource implements StreamSource {
             long total = failedSig.incrementAndGet();
             if (total == 1 || total % 100 == 0) {
                 LOG.warn("Nostr signature verification failed; dropped {} event(s) cumulative for source {}",
-                        total, sourceId);
+                        total, dispatchKey);
             }
             return false;
         }
@@ -174,7 +174,7 @@ public final class NostrStreamSource implements StreamSource {
             // drown operator logs. No SafeLog: msg is operator-authored.
             if (total == 1 || total % 100 == 0) {
                 LOG.warn("Nostr inbound queue full (cap={}); dropped {} event(s) cumulative for source {}",
-                        INBOUND_CAPACITY, total, sourceId);
+                        INBOUND_CAPACITY, total, dispatchKey);
             }
         }
         return accepted;
@@ -218,7 +218,7 @@ public final class NostrStreamSource implements StreamSource {
 
     private void deliverOne(NostrEvent event) {
         try {
-            deliver.accept(event.toNormalizedPost(sourceId, Instant.now()));
+            deliver.accept(event.toNormalizedPost(dispatchKey, Instant.now()));
         } catch (RuntimeException e) {
             // A failed outbox write (e.g. JDBC down) must not kill the stream;
             // the post reappears on reconnect via the since cursor. Mirrors

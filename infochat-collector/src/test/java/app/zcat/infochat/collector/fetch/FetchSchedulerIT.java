@@ -288,7 +288,7 @@ class FetchSchedulerIT {
         private final HttpClient httpClient = HttpClient.newHttpClient();
 
         @Override
-        public List<NormalizedPost> fetch(long sourceId, String identifier) {
+        public List<NormalizedPost> fetch(long dispatchKey, String identifier) {
             Instant fetchedAt = Instant.now();
             try {
                 HttpResponse<byte[]> response = httpClient.send(
@@ -298,7 +298,7 @@ class FetchSchedulerIT {
                     throw new RuntimeException(
                         "TestRssFetcher: HTTP " + response.statusCode() + " from " + identifier);
                 }
-                return RssFeedParser.parse(sourceId, response.body(), fetchedAt);
+                return RssFeedParser.parse(dispatchKey, response.body(), fetchedAt);
             } catch (IOException | InterruptedException e) {
                 if (e instanceof InterruptedException) {
                     Thread.currentThread().interrupt();

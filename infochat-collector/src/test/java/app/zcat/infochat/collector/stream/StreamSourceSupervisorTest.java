@@ -151,7 +151,7 @@ final class FakeStreamSource implements StreamSource {
     }
 
     @Override
-    public void start(long sourceId, String filterSpec, Consumer<NormalizedPost> deliver) {
+    public void start(long dispatchKey, String filterSpec, Consumer<NormalizedPost> deliver) {
         this.deliver = deliver;
         startEntered.countDown();
         try {

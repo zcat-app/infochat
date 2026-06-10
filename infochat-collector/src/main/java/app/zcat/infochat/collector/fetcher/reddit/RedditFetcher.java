@@ -62,7 +62,7 @@ public class RedditFetcher implements Fetcher {
     }
 
     @Override
-    public List<NormalizedPost> fetch(long sourceId, String identifier) {
+    public List<NormalizedPost> fetch(long dispatchKey, String identifier) {
         Instant fetchedAt = Instant.now();
         List<NormalizedPost> allPosts = new ArrayList<>();
         String afterCursor = null;
@@ -92,7 +92,7 @@ public class RedditFetcher implements Fetcher {
 
             RedditResponseParser.ListingPage listing;
             try {
-                listing = RedditResponseParser.parse(sourceId, response.body(), fetchedAt);
+                listing = RedditResponseParser.parse(dispatchKey, response.body(), fetchedAt);
             } catch (IOException e) {
                 throw new RedditFetchException(
                     "Reddit JSON parse failure for " + UrlRedactor.redact(identifier)

@@ -23,19 +23,19 @@ public interface StreamSource {
      * call itself returns once the subscription is established; it
      * does NOT block while events flow.
      *
-     * @param sourceId   the per-tick opaque dispatch token for this
-     *                   stream, stamped onto every delivered post. It is
-     *                   NOT the {@code source.id} UUID and is not stable
-     *                   across ticks (see {@link NormalizedPost}).
-     * @param filterSpec the source-side filter / topic / relay set
-     *                   describing what to subscribe to. Format is
-     *                   per-source (Nostr filter JSON, Bluesky DID
-     *                   list, etc.).
-     * @param deliver    callback invoked once per new post. The impl
-     *                   must NOT call {@code deliver} after {@link
-     *                   #stop} returns.
+     * @param dispatchKey the per-tick opaque dispatch token for this
+     *                    stream, stamped onto every delivered post. It is
+     *                    NOT the {@code source.id} UUID and is not stable
+     *                    across ticks (see {@link NormalizedPost}).
+     * @param filterSpec  the source-side filter / topic / relay set
+     *                    describing what to subscribe to. Format is
+     *                    per-source (Nostr filter JSON, Bluesky DID
+     *                    list, etc.).
+     * @param deliver     callback invoked once per new post. The impl
+     *                    must NOT call {@code deliver} after {@link
+     *                    #stop} returns.
      */
-    void start(long sourceId, String filterSpec, Consumer<NormalizedPost> deliver);
+    void start(long dispatchKey, String filterSpec, Consumer<NormalizedPost> deliver);
 
     /**
      * Close the subscription. Implementations must release any

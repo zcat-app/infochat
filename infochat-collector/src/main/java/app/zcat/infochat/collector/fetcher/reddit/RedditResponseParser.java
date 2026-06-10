@@ -43,7 +43,7 @@ final class RedditResponseParser {
      * @throws IOException if the body is not valid JSON or does not
      *         contain the expected listing structure
      */
-    static ListingPage parse(long sourceId, byte [] body, Instant fetchedAt)
+    static ListingPage parse(long dispatchKey, byte [] body, Instant fetchedAt)
             throws IOException {
         JsonNode root = MAPPER.readTree(body);
         JsonNode data = root.path("data");
@@ -53,19 +53,19 @@ final class RedditResponseParser {
 
         List<NormalizedPost> posts = new ArrayList<>(children.size());
         for (JsonNode child : children) {
-            posts.add(mapPost(sourceId, child.path("data"), fetchedAt));
+            posts.add(mapPost(dispatchKey, child.path("data"), fetchedAt));
         }
         return new ListingPage(List.copyOf(posts), after);
     }
 
-    private static NormalizedPost mapPost(long sourceId, JsonNode data, Instant fetchedAt) {
+    private static NormalizedPost mapPost(long dispatchKey, JsonNode data, Instant fetchedAt) {
         // Missing/non-numeric created_utc: substitute the fetch time
         // instead of silently storing epoch 0 (a missing node's
         // asDouble() is 0.0 → every malformed item dated 1970-01-01,
         // sorting to the bottom of every published_at window forever).
         // Substitution is pinned over skipping: a skip would drop the
         // item's content permanently, since a re-fetch sees the same
-        // malformed item again. Only sourceId in the log — the item's
+        // malformed item again. Only dispatchKey in the log — the item's
         // fields are upstream-controlled text.
         JsonNode createdUtc = data.path("created_utc");
         final Instant publishedAt;
@@ -73,11 +73,11 @@ final class RedditResponseParser {
             publishedAt = Instant.ofEpochSecond(createdUtc.asLong());
         } else {
             LOG.warn("Reddit item missing created_utc for source_id={}; substituting fetch time",
-                sourceId);
+                dispatchKey);
             publishedAt = fetchedAt;
         }
         return new NormalizedPost(
-            sourceId,
+            dispatchKey,
             data.path("name").asText(),
             data.path("title").asText(),
             data.path("selftext").asText(""),

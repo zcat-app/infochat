@@ -22,7 +22,7 @@ import java.util.function.Consumer;
  */
 final class StreamSourceRegistration {
 
-    private final long sourceId;
+    private final long dispatchKey;
     private final String filterSpec;
     private final StreamSource source;
     private final Consumer<NormalizedPost> deliver;
@@ -34,16 +34,16 @@ final class StreamSourceRegistration {
     @SuppressWarnings("NullAway.Init")
     private volatile Future<?> startFuture;
 
-    StreamSourceRegistration(long sourceId, String filterSpec,
+    StreamSourceRegistration(long dispatchKey, String filterSpec,
                              StreamSource source, Consumer<NormalizedPost> deliver) {
-        this.sourceId = sourceId;
+        this.dispatchKey = dispatchKey;
         this.filterSpec = filterSpec;
         this.source = source;
         this.deliver = deliver;
     }
 
-    long sourceId() {
-        return sourceId;
+    long dispatchKey() {
+        return dispatchKey;
     }
 
     long eventsLostOnShutdown() {
@@ -58,7 +58,7 @@ final class StreamSourceRegistration {
      * means a relay unreachable at boot never blocks the caller.
      */
     void startOn(ExecutorService executor) {
-        startFuture = executor.submit(() -> source.start(sourceId, filterSpec, deliver));
+        startFuture = executor.submit(() -> source.start(dispatchKey, filterSpec, deliver));
     }
 
     /**

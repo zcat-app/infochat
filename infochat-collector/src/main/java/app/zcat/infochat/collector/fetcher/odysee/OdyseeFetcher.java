@@ -50,7 +50,7 @@ public class OdyseeFetcher implements Fetcher {
     }
 
     @Override
-    public List<NormalizedPost> fetch(long sourceId, String identifier) {
+    public List<NormalizedPost> fetch(long dispatchKey, String identifier) {
         Instant fetchedAt = Instant.now();
 
         HttpResponse<byte[]> response;
@@ -72,7 +72,7 @@ public class OdyseeFetcher implements Fetcher {
                 "Odysee fetch got HTTP " + status + " for " + UrlRedactor.redact(identifier));
         }
 
-        return RssFeedParser.parse(sourceId, response.body(), fetchedAt);
+        return RssFeedParser.parse(dispatchKey, response.body(), fetchedAt);
     }
 
     /**

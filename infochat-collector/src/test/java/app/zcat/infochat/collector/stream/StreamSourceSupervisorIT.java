@@ -30,23 +30,23 @@ class StreamSourceSupervisorIT {
     void supervisorIntegratesWithCollectorLifecycle() throws InterruptedException {
         assertTrue(supervisor.isReady(), "CDI-managed supervisor is ready after Collector startup");
 
-        long sourceId = 4242L;
+        long dispatchKey = 4242L;
         List<NormalizedPost> buffered = List.of(FakeStreamSource.samplePost("it-event"));
         FakeStreamSource source = FakeStreamSource.flushingOnStop(buffered);
         List<NormalizedPost> delivered = new CopyOnWriteArrayList<>();
 
-        supervisor.register(sourceId, "spec", source, delivered::add);
+        supervisor.register(dispatchKey, "spec", source, delivered::add);
         try {
             assertTrue(source.startEntered.await(2, TimeUnit.SECONDS), "worker started in-container");
 
             Map<Long, Boolean> outcomes = supervisor.drainAll(Duration.ofSeconds(5));
 
-            assertEquals(Boolean.TRUE, outcomes.get(sourceId), "source flushed during drain");
+            assertEquals(Boolean.TRUE, outcomes.get(dispatchKey), "source flushed during drain");
             assertEquals(buffered.size(), delivered.size(), "buffered event flushed to the deliver callback");
         } finally {
             // Remove the test registration so the @PreDestroy shutdown drain
             // does not re-run against it.
-            supervisor.stop(sourceId);
+            supervisor.stop(dispatchKey);
         }
     }
 }

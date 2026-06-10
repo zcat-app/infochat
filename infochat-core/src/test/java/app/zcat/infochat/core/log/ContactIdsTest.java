@@ -8,10 +8,15 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Per acceptance items (a)–(e) of M1-038. The redaction shape is
- * pinned to docs/spec/security.md §Secrets handling: prefix +
- * ellipsis + suffix, with fixed sentinels for null / short inputs
- * so a grep audit can distinguish redacted output from raw output.
+ * Per acceptance items (a)–(e) of M1-038, re-pinned by M1-281 to the
+ * design shape. The redaction shape is pinned to
+ * docs/spec/security.md §Secrets handling and
+ * docs/design/04-security.md §4.11: 6-char prefix + ellipsis + 4-char
+ * suffix, inputs of 10 characters or fewer fully masked — identical
+ * to the SQL mirror {@code redact_contact_id} (V31); cross-engine
+ * parity lives in {@link ContactIdsSqlParityIT}. Null keeps a fixed
+ * sentinel so a grep audit can distinguish a null input from a
+ * redacted id.
  */
 class ContactIdsTest {
 
@@ -24,44 +29,44 @@ class ContactIdsTest {
         assertEquals(ContactIds.NULL_SENTINEL, ContactIds.redact(null));
     }
 
-    /** Acceptance (b): empty input returns a fixed sentinel. */
+    /** Acceptance (b): empty input collapses to the bare ellipsis. */
     @Test
-    void emptyReturnsShortSentinel() {
-        assertEquals(ContactIds.SHORT_SENTINEL, ContactIds.redact(""));
+    void emptyReturnsFullMask() {
+        assertEquals(ContactIds.ELLIPSIS, ContactIds.redact(""));
     }
 
     /**
      * Acceptance (c): inputs at-or-below {@code prefix + suffix} length
-     * collapse to the short sentinel without exposing the original. The
-     * spec rule is "expose strictly less than the whole id" — for
-     * 12-character input, prefix(8) + suffix(4) = 12 would expose the
-     * entire id, so {@link ContactIds#MIN_REDACTABLE_LENGTH} is set
-     * above that boundary.
+     * collapse to the bare ellipsis without exposing the original. The
+     * rule is "expose strictly less than the whole id" — at 10
+     * characters, prefix(6) + suffix(4) would tile the entire id, so
+     * {@link ContactIds#MIN_REDACTABLE_LENGTH} sits just above that
+     * boundary.
      */
     @Test
-    void shortInputReturnsShortSentinelWithoutExposingOriginal() {
-        String shortId = "alice-q1234";
+    void shortInputFullyMaskedWithoutExposingOriginal() {
+        String shortId = "alice-q123"; // 10 chars
         String redacted = ContactIds.redact(shortId);
-        assertEquals(ContactIds.SHORT_SENTINEL, redacted);
+        assertEquals(ContactIds.ELLIPSIS, redacted);
         assertFalse(redacted.contains(shortId),
                 "short-input redaction must not contain the original; got " + redacted);
     }
 
     /**
      * Acceptance (c) edge case: input length equal to {@code prefix +
-     * suffix} (12 characters for the v1 cutoffs) is still short — the
-     * spec's "expose less than the whole id" rule forbids exposing 12
-     * out of 12 characters.
+     * suffix} (10 characters for the design cutoffs) is still short —
+     * the "expose less than the whole id" rule forbids exposing 10
+     * out of 10 characters.
      */
     @Test
-    void exactlyPrefixPlusSuffixLengthReturnsShortSentinel() {
-        String shortId = "abcdefghijkl"; // 12 chars
-        assertEquals(12, ContactIds.PREFIX_LENGTH + ContactIds.SUFFIX_LENGTH);
-        assertEquals(ContactIds.SHORT_SENTINEL, ContactIds.redact(shortId));
+    void exactlyPrefixPlusSuffixLengthFullyMasked() {
+        String shortId = "abcdefghij"; // 10 chars
+        assertEquals(10, ContactIds.PREFIX_LENGTH + ContactIds.SUFFIX_LENGTH);
+        assertEquals(ContactIds.ELLIPSIS, ContactIds.redact(shortId));
     }
 
     /**
-     * Acceptance (d): a 16+-character input returns the prefix +
+     * Acceptance (d): a redactable-length input returns the prefix +
      * ellipsis + suffix form, and neither half exposes the full id.
      */
     @Test
@@ -95,14 +100,15 @@ class ContactIdsTest {
      * Boundary at exactly {@link ContactIds#MIN_REDACTABLE_LENGTH}:
      * the input is the minimum redactable length, so the prefix +
      * ellipsis + suffix form applies. The hidden middle has
-     * {@code 16 - 8 - 4 = 4} characters — strictly less than the
-     * whole id.
+     * {@code 11 - 6 - 4 = 1} character — strictly less than the
+     * whole id, per the design's threshold choice (V31 comment:
+     * length 10 would tile the whole value).
      */
     @Test
     void minimumRedactableLengthYieldsRedactedForm() {
-        String input = "0123456789ABCDEF"; // 16 chars exactly
+        String input = "0123456789A"; // 11 chars exactly
         assertEquals(ContactIds.MIN_REDACTABLE_LENGTH, input.length());
         String redacted = ContactIds.redact(input);
-        assertEquals("01234567" + ContactIds.ELLIPSIS + "CDEF", redacted);
+        assertEquals("012345" + ContactIds.ELLIPSIS + "789A", redacted);
     }
 }

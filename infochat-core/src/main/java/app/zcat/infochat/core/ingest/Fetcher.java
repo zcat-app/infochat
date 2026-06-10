@@ -22,16 +22,16 @@ public interface Fetcher {
     /**
      * Fetch the current batch of posts for one source.
      *
-     * @param sourceId   the per-tick opaque dispatch token for this
-     *                   fetch, stamped onto every returned post. It is
-     *                   NOT the {@code source.id} UUID and is not stable
-     *                   across ticks (see {@link NormalizedPost}); the
-     *                   FetchScheduler passes {@code row.dispatchKey()}.
-     * @param identifier the source-side identifier: URL for HTTP-shaped
-     *                   sources, filter spec for stream-but-polled
-     *                   sources.
+     * @param dispatchKey the per-tick opaque dispatch token for this
+     *                    fetch, stamped onto every returned post. It is
+     *                    NOT the {@code source.id} UUID and is not stable
+     *                    across ticks (see {@link NormalizedPost}); the
+     *                    FetchScheduler passes {@code row.dispatchKey()}.
+     * @param identifier  the source-side identifier: URL for HTTP-shaped
+     *                    sources, filter spec for stream-but-polled
+     *                    sources.
      * @return zero or more normalized posts, in source-supplied order.
      *         Never null; an empty list means "no new items right now".
      */
-    List<NormalizedPost> fetch(long sourceId, String identifier);
+    List<NormalizedPost> fetch(long dispatchKey, String identifier);
 }

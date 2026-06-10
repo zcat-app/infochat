@@ -34,13 +34,14 @@ public final class BlueskyResponseParser {
      * Parse a single page of an {@code app.bsky.feed.getAuthorFeed}
      * response into {@link NormalizedPost} records.
      *
-     * @param sourceId  the {@code source.id} stamped onto every post
+     * @param dispatchKey the per-tick dispatch token stamped onto every post
+     *                    (NOT the {@code source.id} UUID)
      * @param body      raw JSON response bytes
      * @param fetchedAt shared timestamp for the entire fetch batch
      * @return a {@link Page} containing the parsed posts and the cursor
      *         for the next page (null when this is the last page)
      */
-    public static Page parse(long sourceId, byte [] body, Instant fetchedAt) {
+    public static Page parse(long dispatchKey, byte [] body, Instant fetchedAt) {
         JsonNode root;
         try {
             root = MAPPER.readTree(body);
@@ -55,7 +56,7 @@ public final class BlueskyResponseParser {
 
         List<NormalizedPost> posts = new ArrayList<>(feedNode.size());
         for (JsonNode entry : feedNode) {
-            posts.add(parseEntry(sourceId, entry, fetchedAt));
+            posts.add(parseEntry(dispatchKey, entry, fetchedAt));
         }
 
         String cursor = root.has("cursor") && !root.get("cursor").isNull()
@@ -65,7 +66,7 @@ public final class BlueskyResponseParser {
         return new Page(Collections.unmodifiableList(posts), cursor);
     }
 
-    private static NormalizedPost parseEntry(long sourceId, JsonNode entry, Instant fetchedAt) {
+    private static NormalizedPost parseEntry(long dispatchKey, JsonNode entry, Instant fetchedAt) {
         JsonNode postNode = entry.path("post");
         if (postNode.isMissingNode()) {
             throw new BlueskyParseException("Feed entry missing 'post' field");
@@ -96,7 +97,7 @@ public final class BlueskyResponseParser {
         rawMetadata.put("repostCount", String.valueOf(postNode.path("repostCount").asInt(0)));
 
         return new NormalizedPost(
-            sourceId,
+            dispatchKey,
             uri,
             null,
             text != null ? text : "",

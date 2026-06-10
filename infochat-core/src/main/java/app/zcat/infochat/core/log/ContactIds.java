@@ -10,11 +10,13 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>The helper is intentionally tiny and one-shape: a single static
  * {@link #redact(String)} method that callers wrap around any
- * contact-id-shaped value before handing it to SLF4J. The shape
- * matches the spec's prefix + ellipsis + suffix wording; the exact
- * cutoffs (8 leading + literal {@code "..."} + 4 trailing for
- * inputs ≥ 16 characters) are an implementer choice that the spec
- * leaves open.</p>
+ * contact-id-shaped value before handing it to SLF4J. The exact
+ * cutoffs (6 leading + {@code "…"} + 4 trailing; inputs of 10
+ * characters or fewer fully masked) are fixed by
+ * {@code docs/design/04-security.md} §4.11 and MUST stay identical
+ * to the SQL mirror {@code redact_contact_id} (V31) so the same
+ * contact id redacts to the same string regardless of which layer
+ * logged it — {@code ContactIdsSqlParityIT} pins the parity.</p>
  *
  * <h2>Why not one generic redactor</h2>
  *
@@ -44,38 +46,44 @@ import org.jspecify.annotations.Nullable;
  * <ul>
  *   <li>{@code null} → {@link #NULL_SENTINEL} so an SLF4J pattern
  *       does not emit the literal string {@code "null"} (which a
- *       grep audit would not distinguish from a redacted id).</li>
+ *       grep audit would not distinguish from a redacted id). The
+ *       SQL mirror instead passes NULL through (audit rows without
+ *       an actor/target contact id store NULL); the divergence is
+ *       deliberate — NULL never renders into a log line on the SQL
+ *       side, so parity applies to the string domain only.</li>
  *   <li>An input strictly shorter than {@link #MIN_REDACTABLE_LENGTH}
- *       → {@link #SHORT_SENTINEL}. The minimum length is set so the
- *       prefix and suffix together expose strictly less than the
- *       whole id; for shorter inputs the safe choice is to expose
- *       nothing at all rather than nearly the whole id.</li>
+ *       → the bare {@link #ELLIPSIS}, fully masked, exactly as the
+ *       SQL mirror does. At length 10 a 6-char prefix and 4-char
+ *       suffix tile the whole value leaving no character hidden, and
+ *       shorter ids make the halves overlap — the safe choice is to
+ *       expose nothing at all.</li>
  * </ul>
  */
 public final class ContactIds {
 
-    /** Leading characters of the redacted form for ≥ 16-character inputs. */
-    static final int PREFIX_LENGTH = 8;
+    /** Leading characters of the redacted form for redactable inputs. */
+    static final int PREFIX_LENGTH = 6;
 
-    /** Trailing characters of the redacted form for ≥ 16-character inputs. */
+    /** Trailing characters of the redacted form for redactable inputs. */
     static final int SUFFIX_LENGTH = 4;
 
     /**
-     * Inputs shorter than this length are not redactable: exposing
-     * 12 of 13 characters would defeat the redaction. The threshold
-     * is set high enough that {@code length - (prefix + suffix)} is
-     * at least 4 hidden characters for every redactable input.
+     * Inputs shorter than this length are not redactable — the prefix
+     * and suffix would tile (length 10) or overlap (shorter) the whole
+     * id — and collapse to the bare {@link #ELLIPSIS}. Mirrors the
+     * {@code char_length(input) <= 10} arm of {@code redact_contact_id}.
      */
-    static final int MIN_REDACTABLE_LENGTH = 16;
+    static final int MIN_REDACTABLE_LENGTH = 11;
 
     /** Sentinel returned for {@code null} input. */
     public static final String NULL_SENTINEL = "<null>";
 
-    /** Sentinel returned for empty or strictly-too-short input. */
-    public static final String SHORT_SENTINEL = "<short>";
-
-    /** Literal ellipsis the redacted form interpolates between prefix and suffix. */
-    public static final String ELLIPSIS = "...";
+    /**
+     * Literal ellipsis (U+2026, matching the SQL mirror — not three
+     * ASCII dots) interpolated between prefix and suffix, and returned
+     * bare for inputs too short to redact.
+     */
+    public static final String ELLIPSIS = "…";
 
     private ContactIds() {}
 
@@ -84,7 +92,7 @@ public final class ContactIds {
      *
      * @param id the contact id; may be null or empty.
      * @return the redacted form: {@link #NULL_SENTINEL} for null,
-     *         {@link #SHORT_SENTINEL} for inputs shorter than
+     *         the bare {@link #ELLIPSIS} for inputs shorter than
      *         {@link #MIN_REDACTABLE_LENGTH}, otherwise
      *         {@code id.substring(0, PREFIX_LENGTH) + ELLIPSIS +
      *         id.substring(id.length() - SUFFIX_LENGTH)}.
@@ -94,7 +102,7 @@ public final class ContactIds {
             return NULL_SENTINEL;
         }
         if (id.length() < MIN_REDACTABLE_LENGTH) {
-            return SHORT_SENTINEL;
+            return ELLIPSIS;
         }
         return id.substring(0, PREFIX_LENGTH)
                 + ELLIPSIS

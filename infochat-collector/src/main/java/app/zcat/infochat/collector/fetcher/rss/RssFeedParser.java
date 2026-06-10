@@ -63,7 +63,7 @@ public final class RssFeedParser {
         // static-only
     }
 
-    public static List<NormalizedPost> parse(long sourceId, byte[] body, Instant fetchedAt) {
+    public static List<NormalizedPost> parse(long dispatchKey, byte[] body, Instant fetchedAt) {
         // External entity / DTD loading is disabled: feed payloads are
         // arbitrary remote XML; following a DTD reference would be an
         // XXE + outbound-network vector that the Stage-0 SSRF gate (still
@@ -87,9 +87,9 @@ public final class RssFeedParser {
                     String localName = reader.getLocalName();
                     String ns = reader.getNamespaceURI();
                     if ("rss".equals(localName)) {
-                        return parseRss(reader, sourceId, fetchedAt);
+                        return parseRss(reader, dispatchKey, fetchedAt);
                     } else if ("feed".equals(localName) && ATOM_NS.equals(ns)) {
-                        return parseAtom(reader, sourceId, fetchedAt);
+                        return parseAtom(reader, dispatchKey, fetchedAt);
                     } else {
                         throw new RssFeedParseException(
                             "Unrecognized root element: <" + localName + "> (ns=" + ns + ")");
@@ -109,12 +109,12 @@ public final class RssFeedParser {
     }
 
     private static List<NormalizedPost> parseRss(
-            XMLStreamReader reader, long sourceId, Instant fetchedAt) throws XMLStreamException {
+            XMLStreamReader reader, long dispatchKey, Instant fetchedAt) throws XMLStreamException {
         List<NormalizedPost> posts = new ArrayList<>();
         while (reader.hasNext()) {
             int event = reader.next();
             if (event == XMLStreamConstants.START_ELEMENT && "item".equals(reader.getLocalName())) {
-                posts.add(parseRssItem(reader, sourceId, fetchedAt));
+                posts.add(parseRssItem(reader, dispatchKey, fetchedAt));
                 if (posts.size() > MAX_ITEMS) {
                     throw new RssFeedParseException(
                         "feed item count exceeded " + MAX_ITEMS);
@@ -125,7 +125,7 @@ public final class RssFeedParser {
     }
 
     private static NormalizedPost parseRssItem(
-            XMLStreamReader reader, long sourceId, Instant fetchedAt) throws XMLStreamException {
+            XMLStreamReader reader, long dispatchKey, Instant fetchedAt) throws XMLStreamException {
         String guid = null;
         String link = null;
         String title = null;
@@ -165,7 +165,7 @@ public final class RssFeedParser {
         Instant publishedAt = parseRfc1123(pubDate);
 
         return new NormalizedPost(
-            sourceId,
+            dispatchKey,
             upstreamIdentifier,
             title,
             description == null ? "" : description,
@@ -177,12 +177,12 @@ public final class RssFeedParser {
     }
 
     private static List<NormalizedPost> parseAtom(
-            XMLStreamReader reader, long sourceId, Instant fetchedAt) throws XMLStreamException {
+            XMLStreamReader reader, long dispatchKey, Instant fetchedAt) throws XMLStreamException {
         List<NormalizedPost> posts = new ArrayList<>();
         while (reader.hasNext()) {
             int event = reader.next();
             if (event == XMLStreamConstants.START_ELEMENT && "entry".equals(reader.getLocalName())) {
-                posts.add(parseAtomEntry(reader, sourceId, fetchedAt));
+                posts.add(parseAtomEntry(reader, dispatchKey, fetchedAt));
                 if (posts.size() > MAX_ITEMS) {
                     throw new RssFeedParseException(
                         "feed item count exceeded " + MAX_ITEMS);
@@ -193,7 +193,7 @@ public final class RssFeedParser {
     }
 
     private static NormalizedPost parseAtomEntry(
-            XMLStreamReader reader, long sourceId, Instant fetchedAt) throws XMLStreamException {
+            XMLStreamReader reader, long dispatchKey, Instant fetchedAt) throws XMLStreamException {
         String id = null;
         String title = null;
         String content = null;
@@ -248,7 +248,7 @@ public final class RssFeedParser {
         String url = alternateHref != null ? alternateHref : firstUnrelHref;
 
         return new NormalizedPost(
-            sourceId,
+            dispatchKey,
             id,
             title,
             content == null ? "" : content,

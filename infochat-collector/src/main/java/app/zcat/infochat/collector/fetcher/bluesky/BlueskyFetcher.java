@@ -64,7 +64,7 @@ public class BlueskyFetcher implements Fetcher {
     }
 
     @Override
-    public List<NormalizedPost> fetch(long sourceId, String identifier) {
+    public List<NormalizedPost> fetch(long dispatchKey, String identifier) {
         Instant fetchedAt = Instant.now();
         List<NormalizedPost> allPosts = new ArrayList<>();
         String cursor = null;
@@ -92,7 +92,7 @@ public class BlueskyFetcher implements Fetcher {
             }
 
             BlueskyResponseParser.Page parsed =
-                BlueskyResponseParser.parse(sourceId, response.body(), fetchedAt);
+                BlueskyResponseParser.parse(dispatchKey, response.body(), fetchedAt);
             allPosts.addAll(parsed.posts());
 
             cursor = parsed.cursor();

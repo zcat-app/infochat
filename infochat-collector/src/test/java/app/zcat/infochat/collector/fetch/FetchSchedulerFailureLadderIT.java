@@ -308,11 +308,11 @@ class FetchSchedulerFailureLadderIT {
         final AtomicInteger callCount = new AtomicInteger();
 
         @Override
-        public List<NormalizedPost> fetch(long sourceId, String identifier) {
+        public List<NormalizedPost> fetch(long dispatchKey, String identifier) {
             callCount.incrementAndGet();
             if (failNext.get()) {
                 throw new RuntimeException(
-                    "test-controlled fetch failure for source " + sourceId);
+                    "test-controlled fetch failure for source " + dispatchKey);
             }
             return List.of();
         }
