@@ -442,6 +442,8 @@ test corpus in `infochat-core` keeps the enforcement honest):
 | `SET_TIMEZONE`             | `/group-timezone`                                      | `group`         |
 | `LLM_OUTPUT_SANITIZED`     | LLM output sanitizer hit (per occurrence, V13)         | `system`        |
 | `RE_EVAL_RELEASED`         | Stage-2 re-eval releases a previously-held post        | `post`          |
+| `DIGEST_ENABLE`            | `/digest on` (group-admin toggle, on actual state flip) | `group`        |
+| `DIGEST_DISABLE`           | `/digest off` (group-admin toggle, on actual state flip) | `group`       |
 | `DIGEST_RETRY`             | `/retry` (group digest re-run)                         | `group`         |
 | `DIGEST_SLOT_MISSED`       | Digest scheduler: missed slot detected                 | `group`         |
 | `QUARANTINE_TTL_REJECT`    | Quarantine TTL sweep auto-reject                       | `quarantine`    |
@@ -1443,10 +1445,10 @@ partition drop on a 7-day retention horizon (long enough that "the latest
 snapshot for an enabled `(asset, sub_verb)`" is always present, short
 enough that the table does not unbounded-grow).
 
-NOTIFY `new_price_snapshot` is the latency optimization; the table read is
-the correctness guarantee. Provider's in-process cache is **flushed
-entirely on every Postgres reconnect** so a missed NOTIFY during a
-connection blip cannot serve a stale row past the reconnect.
+The latest snapshot for an enabled `(asset, sub_verb)` is read directly
+from this table by a single SQL query on each asset-command invocation —
+the table read is the sole correctness path. There is no NOTIFY channel
+and no in-process cache for asset snapshots.
 
 ---
 
@@ -1478,7 +1480,6 @@ spec amendment):
 | Channel              | Sent by                                          | Listened by                                | Payload (cursor only)                                          |
 | -------------------- | ------------------------------------------------ | ------------------------------------------ | -------------------------------------------------------------- |
 | `new_post`           | Collector (after `post.status → READY`)          | Provider (cache invalidation, digest)      | `{ready_at, post_id}`                                          |
-| `new_price_snapshot` | Collector Fetcher (after `price_snapshot` write) | Provider (asset-command cache, best-effort) | `{asset, sub_verb}`                                            |
 | `quarantine_review`  | Collector / proc (state-machine transitions)     | Provider (admin notifier + cursor advance) | `{target_kind, target_id, new_status}` where target_kind ∈ `{quarantine, post}` |
 
 **Payload size bound.** NOTIFY payloads are bounded to the cursor key.
@@ -1513,7 +1514,6 @@ cursor interpretation is per-channel (spec §Operational — Provider state):
 | -------------------- | ------------------------------------ | ------------------------- | --------------- |
 | `new_post`           | `post.ready_at`                      | `'post'`                  | `post.id`       |
 | `quarantine_review`  | `quarantine.updated_at` *or* `post.status_changed_at` (whichever transition fired) | `'quarantine'` *or* `'post'` | quarantine id *or* post id |
-| `new_price_snapshot` | (no row — best-effort only)          | —                         | —               |
 
 **First-boot insert** races safely:
 
@@ -1735,8 +1735,8 @@ is implemented either as a constraint, a trigger, or a documented test").
   `PENDING` row whose `expires_at` has passed as expired without writing
   a transition (spec §Invite code).
 - **No `eval_failure` / `source_failed` NOTIFY channels.** Removed in
-  this revision; the spec's closed list is `new_post`,
-  `new_price_snapshot`, `quarantine_review`. Adding a channel is a spec
+  this revision; the spec's closed list is `new_post` and
+  `quarantine_review`. Adding a channel is a spec
   amendment.
 
 ---

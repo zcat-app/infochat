@@ -59,17 +59,17 @@ import java.util.UUID;
  * {@code /follow-tag} but do NOT change the source row's
  * {@code bootstrap_tags}, which is what Branch B requires.</p>
  *
- * <p><b>GRANT note.</b> V6 grants Provider {@code SELECT} only on
- * {@code source} and {@code tag}; production writes are intended to
- * route through a future SECURITY DEFINER handoff. The current
- * Provider runtime connects as the {@code infochat} superuser (see
- * the comment on {@code quarkus.datasource.username} in
- * {@code application.properties}), so the writes here succeed at
- * runtime. When the role-hardening ticket lands and Provider switches
- * to {@code infochat_provider}, this service will fail with
- * permission-denied until either the GRANT matrix is widened or the
- * writes are wrapped in a SECURITY DEFINER procedure. The deferred
- * follow-up is noted in the M1-036 plan outline §Risks.</p>
+ * <p><b>GRANT note.</b> The Provider runtime connects as the weak
+ * {@code infochat_provider} role. V6 starts it read-only on
+ * {@code source} and {@code tag}; V31 widens the matrix to exactly the
+ * privileges these writes need — {@code INSERT} on {@code source} and
+ * {@code tag} plus column-scoped {@code UPDATE} on {@code source}
+ * ({@code bootstrap_tags} among the listed columns — the only column
+ * this upsert's {@code ON CONFLICT DO UPDATE} touches) — while
+ * {@code DELETE} stays revoked (Invariant 4: soft-delete only). V7
+ * grants the Provider full {@code source_subscription} DML. So every
+ * write here succeeds under the weak role, with no superuser and no
+ * SECURITY DEFINER handoff.</p>
  */
 @ApplicationScoped
 public class SourceUpsertService {

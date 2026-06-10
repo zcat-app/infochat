@@ -311,10 +311,12 @@ Invariants (also enforced in `schema.md`):
 - **Last-admin protection (bot admin only).** Cannot revoke the only
   bot admin's `is_admin`, cannot ban the only bot admin, cannot ban
   self. **The "only bot admin" check is global across adapters** —
-  the count is `SELECT COUNT(*) FROM users WHERE is_admin = true`,
-  not per-adapter — so a deployment with admins on multiple adapters
-  may demote any single admin row as long as at least one
-  `is_admin = true` row remains anywhere. This pairs with
+  the count is `SELECT COUNT(*) FROM users WHERE is_admin = true AND
+  is_banned = false`, not per-adapter — a banned admin does not count
+  as a live admin, so the trigger excludes banned rows. A deployment
+  with admins on multiple adapters may demote any single admin row as
+  long as at least one non-banned `is_admin = true` row remains
+  anywhere. This pairs with
   `/grant-admin` / `/revoke-admin` being inbound-adapter-scoped
   (`commands.md` §Admin): the per-adapter scoping bounds the
   blast radius of a single-adapter compromise, and the global

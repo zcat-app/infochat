@@ -157,13 +157,14 @@ from.
   and are a single request per tick.
 
 - **Output type.** A Fetcher is shaped around what it produces. The
-  default output is normalized posts that flow into the post outbox.
-  Asset Fetchers (decision D39) produce `price_snapshot` rows
-  instead and write **directly** to the `price_snapshot` table —
-  they never hit the post outbox, never go through Stage 1/2,
-  tagger, or embedding. The Fetcher SPI carries an output-type
-  discriminator so the Collector's per-tick dispatch routes the
-  result to the right sink. There are no `source` rows for asset
+  post Fetcher produces normalized posts that flow into the post
+  outbox. Asset price fetching (decision D39) is a **separate ingest
+  path**, not a discriminated variant of the post Fetcher: a dedicated
+  asset-fetch SPI produces `price_snapshot` rows and writes
+  **directly** to the `price_snapshot` table — never the post outbox,
+  never Stage 1/2, tagger, or embedding. (An output-type discriminator
+  on a single shared Fetcher SPI was considered and deferred; the two
+  paths stay separate.) There are no `source` rows for asset
   feeds: scheduling, status, and per-`(asset, sub_verb)` enable
   state live in **`asset_config`** (`schema.md` §Operational, the
   asset-side parallel to `source`). The Collector's asset

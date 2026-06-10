@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 9 |
+| pending | 8 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 307 |
+| done | 308 |
 | deferred | 3 |
 | **total** | **319** |
 
@@ -25,7 +25,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-268 — Thread /lang through bundle lookups (D43) (complexity: high, risk: medium)
-- M1-271 — Design/spec reconciliation + comment-truth sweep (complexity: low, risk: low)
 - M1-274 — Capability flags: reconcile with design, prune speculative (complexity: medium, risk: low)
 - M1-276 — Collector mediums: re-eval splice, scan bounds, vocab, edges (complexity: medium, risk: medium)
 - M1-278 — Ops posture: health truth, endpoint gating, drop counters (complexity: medium, risk: medium)
@@ -72,11 +71,11 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-275 | DB hygiene: SET LOCAL timeouts, per-dispatch conn reuse | 2026-06-10 | round 1 APPROVE |
 | M1-273 | Transport classification matrix + Signal start race | 2026-06-10 | round 1 APPROVE |
 | M1-272 | Redactor thrown-chain coverage + log hygiene sweep | 2026-06-10 | round 1 APPROVE |
+| M1-271 | Design/spec reconciliation + comment-truth sweep | 2026-06-10 | round 1 APPROVE |
 | M1-270 | Validate bootstrap admin ids before any write; SPI hoist | 2026-06-10 | round 1 APPROVE |
 | M1-269 | Pin the price_snapshot role-privilege matrix in DbRoleMatrixIT | 2026-06-10 | round 1 APPROVE |
 | M1-267 | Stage 2 judge off the emitter thread | 2026-06-10 | round 1 APPROVE |
 | M1-265 | LLM routing guard closure + provider hygiene | 2026-06-10 | round 1 APPROVE |
-| M1-264 | Compress: no JDBC tx across LLM call; ceiling gate | 2026-06-10 | round 1 APPROVE |
 
 ---
 
@@ -458,7 +457,7 @@ M1-267 (done)
 M1-268 (pending) ← runnable
 M1-269 (done)
 M1-270 (done)
-M1-271 (pending) ← runnable
+M1-271 (done)
 M1-272 (done)
 M1-273 (done)
 M1-274 (pending) ← runnable

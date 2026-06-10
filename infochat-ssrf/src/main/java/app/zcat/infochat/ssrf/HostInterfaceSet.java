@@ -45,8 +45,9 @@ public final class HostInterfaceSet {
         } catch (SocketException e) {
             // System-boundary I/O failure. The spec's host-non-loopback
             // clause is unsatisfiable without OS interface enumeration,
-            // so we surface the failure at module init rather than
-            // silently degrading the defense surface to an empty set.
+            // so we surface the failure to the caller's validation pass
+            // rather than silently degrading the defense surface to an
+            // empty set.
             throw new IllegalStateException(
                 "could not enumerate host network interfaces", e);
         }

@@ -24,11 +24,10 @@ import java.util.List;
  *
  * <p>RSS has no pagination per {@code docs/design/01-architecture.md}
  * §1.6 — per-tick pagination cap is 1, so this Fetcher is a one-request-
- * per-call shape. Retry / backoff / Retry-After honoring lives on the
- * FetchScheduler at the per-tick boundary (microprofile-faulttolerance),
- * not here; a non-2xx response propagates as an unchecked exception that
- * the scheduler's per-tick error handler catches and feeds into D42's
- * per-source failure-counter model.
+ * per-call shape. There is no retry or backoff here: a non-2xx response
+ * propagates as an unchecked exception that the scheduler's per-tick
+ * error handler catches and feeds into D42's per-source failure-counter
+ * model.
  *
  * <p>{@code fetchedAt} is captured once, before the HTTP call. Every
  * {@link NormalizedPost} produced by one {@code fetch()} invocation

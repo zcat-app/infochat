@@ -127,7 +127,7 @@ public final class SsrfGuardedHttpClient {
 
     private static final Set<String> WEBSOCKET_SCHEMES = Set.of("ws", "wss");
 
-    private static final String USER_AGENT = "infochat/0.0.1-SNAPSHOT";
+    private static final String USER_AGENT = "infochat/1.0.0-SNAPSHOT";
 
     private static final String ACCEPT_HEADER = "*/*";
 

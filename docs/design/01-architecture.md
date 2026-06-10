@@ -80,7 +80,7 @@ omitted from the diagram above because the diagram is the v1 production shape.
 
 The closed list of LISTEN/NOTIFY channels is committed in
 [`spec/architecture.md`](../spec/architecture.md) §Inter-service communication
-(`new_post`, `new_price_snapshot`, `quarantine_review`). Adding a channel
+(`new_post`, `quarantine_review`). Adding a channel
 requires a spec amendment. The `quarantine_review` channel carries a tagged
 payload `(target_kind, target_id, new_status)` with `target_kind ∈
 {'quarantine', 'post'}`; payloads are bounded to the cursor key and the
@@ -194,19 +194,17 @@ Asset Fetcher issues HTTP GET via infochat-ssrf
   │
   ▼
 Parse → INSERT price_snapshot(asset, sub_verb, captured_at, payload, source_url)
-  │  NEVER through Stage 1/2, tagger, entity extractor, or embedding.
-  │  Failure increments asset_config.consecutive_failures; D42-style
-  │  threshold-based active → failed transition.
-  ▼
-NOTIFY new_price_snapshot payload (asset, sub_verb)
+     NEVER through Stage 1/2, tagger, entity extractor, or embedding.
+     Failure increments asset_config.consecutive_failures; D42-style
+     threshold-based active → failed transition.
+     The write is the terminal step — no NOTIFY, no outbox.
 ```
 
-Provider serves `/zcash`, `/monero`, etc. from an in-process cache keyed by
-`(asset, sub_verb)`. The cache is **flushed entirely on every Postgres
-reconnect** (no high-water mark on this channel; flush-on-reconnect is the
-correctness mechanism, [`spec/architecture.md`](../spec/architecture.md)
-§Inter-service communication and [`spec/commands.md`](../spec/commands.md)
-§Asset commands).
+Provider serves `/zcash`, `/monero`, etc. by reading the latest
+`price_snapshot` row for the `(asset, sub_verb)` triple with a single SQL
+query on each command invocation. The table read is the sole correctness
+path ([`spec/commands.md`](../spec/commands.md) §Asset commands); there is
+no NOTIFY channel and no in-process cache for asset snapshots.
 
 ### 1.3.4 Eval pipeline workers
 
@@ -562,10 +560,6 @@ The `quarantine_review` channel uses the same cursor mechanism on its own
 payload. M1 only ships the `new_post` reconciler;
 the `quarantine_review` reconciler lands in M2 alongside the admin
 quarantine-review commands.
-
-The `new_price_snapshot` channel does **not** maintain a `provider_state`
-row — flush-on-Postgres-reconnect is the correctness mechanism, not a
-high-water mark.
 
 ## 1.6 Concurrency and rate limiting
 

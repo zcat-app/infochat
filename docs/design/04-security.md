@@ -699,7 +699,7 @@ Three Postgres roles, least-privilege per [../spec/security.md](../spec/security
 - `EXECUTE` on the `delete_preban_user(user_id, actor_id)` stored procedure ([02-schema.md §2.1.6](02-schema.md)). Provider has **no direct `DELETE`** on `users`; the `'preban'` row deletion path runs only through the procedure (Invariant 2 carve-out).
 - `SELECT` on `audit_log_view` ([02-schema.md §2.1.9](02-schema.md)) — the redacted view that masks contact ids and secret-shaped values in `details_json`. **Provider has no direct `SELECT` on `audit_log` itself**; granting that would expose unredacted columns. The `/audit` command reads through the view.
 - `INSERT`-only on `audit_log` (same `UPDATE`/`DELETE` revoke + trigger guard as Collector).
-- `LISTEN/NOTIFY`. The Provider listens on `new_post`, `new_price_snapshot`, and `quarantine_review` per [../spec/architecture.md](../spec/architecture.md) §Inter-service communication and [02-schema.md §2.9.1](02-schema.md). Notifies are emitted only through the stored procedures above; the Provider does not call `pg_notify` directly.
+- `LISTEN/NOTIFY`. The Provider listens on `new_post` and `quarantine_review` per [../spec/architecture.md](../spec/architecture.md) §Inter-service communication and [02-schema.md §2.9.1](02-schema.md). Notifies are emitted only through the stored procedures above; the Provider does not call `pg_notify` directly.
 
 ### `infochat_admin` (Operator psql sessions only)
 

@@ -89,8 +89,8 @@ public class LlmRouter {
     private final ConfigReader config;
 
     /**
-     * One-shot guard for the priority-3 unknown-default-provider WARN
-     * (M1-042). Set true on the first {@link #forTask} call that
+     * One-shot guard for the priority-3 unknown-default-provider WARN.
+     * Set true on the first {@link #forTask} call that
      * observes an operator-configured {@link #CONFIG_KEY_DEFAULT_PROVIDER}
      * naming a provider that resolves to no registered entry. The
      * audit-loud-fallback posture is documented in {@link #forTask}'s
@@ -175,21 +175,19 @@ public class LlmRouter {
         String defaultName = configuredDefault.orElse(OpenAiCompatibleProvider.PROVIDER_NAME);
         Entry defaultEntry = entriesByName.get(defaultName.toLowerCase(Locale.ROOT));
         if (defaultEntry == null) {
-            // M1-042 audit-loud-fallback posture: when the operator
+            // Audit-loud-fallback posture: when the operator
             // EXPLICITLY configured infochat.llm.default.provider but
             // the named provider resolves to no registered LlmProvider,
             // emit a one-shot WARN (per JVM) naming the configured
             // value AND the registered provider set AND the fallback,
-            // then proceed with entries.get(0). Replaces M1-033's
-            // silent fall-back which would route SECURITY_JUDGE (and
-            // every other task with no per-task override) to whatever
-            // bean CDI discovery happened to list first — a typo would
-            // silently re-route every Stage 2 call.
+            // then proceed with entries.get(0). The earlier silent
+            // fall-back would route SECURITY_JUDGE (and every other
+            // task with no per-task override) to whatever bean CDI
+            // discovery happened to list first — a typo would silently
+            // re-route every Stage 2 call.
             //
             // Fail-loud-fallback (not fail-startup) is the chosen
-            // posture because (1) M1-042 §out_of_scope forbids touching
-            // LlmRouterStartupGuard, where a startup-time guard would
-            // most naturally live, and (2) existing test fixtures (e.g.
+            // posture because existing test fixtures (e.g.
             // Stage2WorkerIT.TestStubLlmProvider, registered under its
             // class simple-name) rely on the legacy silent-fallback
             // behavior when CONFIG_KEY_DEFAULT_PROVIDER defaults to
@@ -286,9 +284,9 @@ public class LlmRouter {
      * {@link OpenAiCompatibleProvider} is registered; future ticket
      * authors add their providers here with capability sets that
      * reflect what their backend can produce. Capability assignment
-     * is router-internal because the SPI surface is frozen
-     * (M1-007b) and adding a {@code capabilities()} method would
-     * violate this ticket's out-of-scope list.
+     * is router-internal because the LlmProvider SPI surface is
+     * deliberately kept minimal — a {@code capabilities()} method on
+     * the SPI is intentionally avoided.
      *
      * <p>A test {@code @Alternative} provider (e.g.
      * {@code Stage2WorkerIT.TestStubLlmProvider}) is registered

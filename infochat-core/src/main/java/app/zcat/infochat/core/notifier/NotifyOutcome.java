@@ -7,9 +7,8 @@ package app.zcat.infochat.core.notifier;
  * boolean) because self-documenting at call sites:
  * {@code if (notifier.notifyOnce(...) == NotifyOutcome.EMITTED)}
  * reads better than {@code if (notifier.notifyOnce(...))} and lets
- * future additions (e.g. {@code DELIVERED} once the
- * AdminNotificationDelivery SPI lands) extend the contract without
- * breaking callers.
+ * future additions (e.g. a {@code DELIVERED} state) extend the
+ * contract without breaking callers.
  */
 public enum NotifyOutcome {
     /** The call refreshed the row and emitted a WARN log line. */

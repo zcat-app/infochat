@@ -57,9 +57,9 @@ import java.time.Duration;
  * <p>{@link HttpClient} from {@code java.net.http} — built into JDK
  * 25, no third-party dependency. The client is constructed eagerly
  * in the bean's no-arg constructor (HttpClient is thread-safe;
- * connection pooling is automatic). The rejected
- * {@code quarkus-rest-client-reactive} alternative is documented in
- * the M1-033 ticket's Implementation notes.
+ * connection pooling is automatic). A
+ * {@code quarkus-rest-client-reactive} alternative was rejected to keep
+ * this provider free of a third-party HTTP dependency.
  *
  * <h2>API key handling</h2>
  * <p>When {@code api-key} is non-empty, the value is sent as

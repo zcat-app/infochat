@@ -17,10 +17,10 @@ package app.zcat.infochat.core.audit;
  * <ul>
  *   <li>V12 added {@link #INVITE_BRUTE_FORCE_BREACH} for the
  *       per-(adapter, contact_id) brute-force breach audit row.</li>
- *   <li>V13 (this ticket) adds {@link #LLM_OUTPUT_SANITIZED} for
+ *   <li>V13 adds {@link #LLM_OUTPUT_SANITIZED} for
  *       the per-occurrence sanitizer hit audit row.</li>
  *   <li>M1-068 adds {@link #CHAT_MODE} for the per-request audit
- *       row written by {@link app.zcat.infochat.provider.chat.ChatAgent}
+ *       row written by {@code app.zcat.infochat.provider.chat.ChatAgent}
  *       before the LLM call in chat-mode dispatch. The row records
  *       actor + scope but never user-authored prose.</li>
  *   <li>M1-051 adds {@link #BAN_INTENT},
@@ -182,9 +182,9 @@ public enum AuditAction {
     // /digest on|off toggle of groups.digest_enabled (mirroring
     // SOURCE_ENABLE / SOURCE_DISABLE). Written only on an actual
     // state flip — an idempotent no-op writes no row — with
-    // target_kind='group' and target_id = the group's id. M1-228
-    // reads the DIGEST_ENABLE rows to derive the missed-slot pause
-    // carve-out, so the target_kind/target_id convention is
+    // target_kind='group' and target_id = the group's id. The digest
+    // missed-slot pause carve-out reads the DIGEST_ENABLE rows to
+    // derive its window, so the target_kind/target_id convention is
     // load-bearing.
     DIGEST_ENABLE,
     DIGEST_DISABLE,

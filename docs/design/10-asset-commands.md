@@ -139,38 +139,21 @@ Rationale:
 - Writer behaviour on conflict: the store INSERTs with
   `ON CONFLICT (asset, sub_verb, captured_at) DO NOTHING` — the table
   is INSERT-only by spec ("no updates"), so a duplicate write is
-  dropped, never updated. The `NOTIFY new_price_snapshot` emit is
-  skipped when the INSERT was a no-op: the NOTIFY is a row-landed
-  signal (it already commits or rolls back with the INSERT —
-  symmetrically, no new row means nothing to invalidate).
+  dropped, never updated.
 
-### `new_price_snapshot` channel — verdict: keep-as-seam
+### `new_price_snapshot` channel — removed
 
-The Collector emits `NOTIFY new_price_snapshot` inside the INSERT
-transaction, but no Provider code LISTENs on the channel — the
-Provider reads the latest row by SQL on each command invocation.
-Resolution: the producer stays as the spec-committed best-effort emit;
-no consumer lands until the cache layer it serves exists.
+No NOTIFY channel exists for price snapshots. The Collector's
+`price_snapshot` writer emits no NOTIFY; the Provider reads the latest
+row for an `(asset, sub_verb)` triple with a single SQL query on each
+command invocation, and the table read is the sole correctness path.
 
-Rationale:
-
-- The emit is spec-committed: `commands.md` §Asset commands
-  (Provider/Collector contract) requires the Collector to emit
-  `NOTIFY new_price_snapshot` with `(asset, source)` as the payload.
-  Removing the channel would amend two spec files only to delete a
-  seam the spec already designed a consumer for.
-- The consumer this seam will serve is the Provider's in-process
-  `price_snapshot` cache keyed by `(asset, sub-verb)` (`commands.md`:
-  the Provider may "warm/invalidate it from the `NOTIFY` payload"),
-  with cache-flush-on-reconnect as the correctness mechanism and no
-  `provider_state` high-water row (`schema.md` §Operational —
-  provider_state channel list). That cache layer does not exist yet;
-  the channel is best-effort by design ("the table read is the
-  correctness guarantee"), so an unconsumed emit is harmless and
-  cheap.
-- A minimal LISTEN consumer landed now, without the cache, would be
-  dead machinery — it would have nothing to invalidate. The seam's
-  two halves (consumer + cache) belong in one change.
+An earlier revision kept the producer as a best-effort seam for a
+future in-process cache. That seam was dropped: the emit had no
+consumer (the cache layer it was meant to serve was never built), so a
+producerless channel was dead machinery. The closed NOTIFY list is now
+`new_post` and `quarantine_review` (`spec/architecture.md`
+§Inter-service communication).
 
 ## 10.4 Refresh & cache strategy
 
