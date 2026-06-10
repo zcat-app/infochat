@@ -317,8 +317,7 @@ public class TaggerWorker {
             return AttemptResult.unreachable();
         }
 
-        String text = response == null ? null : response.text();
-        List<String> parsed = parseTags(text);
+        List<String> parsed = parseTags(response.text());
         if (parsed == null) {
             return AttemptResult.schemaViolating();
         }
@@ -521,8 +520,9 @@ public class TaggerWorker {
         }
     }
 
-    /** One pending post + the join-cached source.bootstrap_tags. */
-    public record PostRow(UUID id, Instant fetchedAt, String title, String body,
+    /** One pending post + the join-cached source.bootstrap_tags.
+     *  title/body reflect the V7 schema: both post columns are nullable. */
+    public record PostRow(UUID id, Instant fetchedAt, @Nullable String title, @Nullable String body,
                           List<String> bootstrapTags) {
     }
 

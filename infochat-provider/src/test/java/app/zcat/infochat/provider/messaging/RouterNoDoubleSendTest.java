@@ -88,6 +88,7 @@ class RouterNoDoubleSendTest {
         router.commandHandlers = new SingletonInstance<>();
         router.inboundContext = new InboundContext();
         router.rateCapBucket = new NoopRateCapBucket();
+        router.registeredContactSet = new NoopRegisteredContactSet();
         router.inviteCodeConsumer = new NoopInviteCodeConsumer();
         router.bundleLoader = new NoopBundleLoader();
         router.confirmStateService = new NoopConfirmStateService();

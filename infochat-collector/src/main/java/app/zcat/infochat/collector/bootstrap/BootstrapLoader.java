@@ -28,6 +28,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Reads {@code bootstrap-sources.json} at Collector startup and idempotently
@@ -168,9 +169,12 @@ public class BootstrapLoader {
 
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             for (BootstrapSourcesEntry entry : entries) {
-                String[] normalizedTags = new String[entry.tags().size()];
-                for (int i = 0; i < entry.tags().size(); i++) {
-                    normalizedTags[i] = normalizeTag(entry.tags().get(i));
+                // Parser-validated entries: tags is non-empty (§7.6.1);
+                // requireNonNull re-states that for the type system.
+                List<String> tags = Objects.requireNonNull(entry.tags());
+                String[] normalizedTags = new String[tags.size()];
+                for (int i = 0; i < tags.size(); i++) {
+                    normalizedTags[i] = normalizeTag(tags.get(i));
                 }
                 Array tagArray = conn.createArrayOf("TEXT", normalizedTags);
 
@@ -191,7 +195,7 @@ public class BootstrapLoader {
         // shows the operator's original spelling.
         Map<String, String> uniqueTags = new LinkedHashMap<>();
         for (BootstrapSourcesEntry entry : entries) {
-            for (String raw : entry.tags()) {
+            for (String raw : Objects.requireNonNull(entry.tags())) {
                 String name = normalizeTag(raw);
                 uniqueTags.putIfAbsent(name, raw);
             }

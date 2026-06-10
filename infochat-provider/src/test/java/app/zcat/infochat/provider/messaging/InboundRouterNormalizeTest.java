@@ -176,6 +176,9 @@ class InboundRouterNormalizeTest {
         // ordering; wire a no-op bucket so the size-cap reaches its
         // check without NPE'ing on the null field.
         router.rateCapBucket = new NoopRateCapBucket();
+        // §7a wiring: the registered/stranger split is consulted right
+        // before the rate cap on every dispatch.
+        router.registeredContactSet = new NoopRegisteredContactSet();
         // The size-cap reply resolves through the bundle (D43); the
         // Noop returns "noop:<key>".
         router.bundleLoader = new NoopBundleLoader();
@@ -341,6 +344,9 @@ class InboundRouterNormalizeTest {
             }
         };
         router.rateCapBucket = new NoopRateCapBucket();
+        // §7a wiring: the registered/stranger split is consulted right
+        // before the rate cap on every dispatch.
+        router.registeredContactSet = new NoopRegisteredContactSet();
         router.inviteCodeConsumer = new NoopInviteCodeConsumer();
         router.bundleLoader = new NoopBundleLoader();
         // M1-051: step 4.5 confirm-cancel sweep peek call would NPE on

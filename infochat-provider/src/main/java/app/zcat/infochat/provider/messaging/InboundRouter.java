@@ -374,12 +374,8 @@ public class InboundRouter {
         // maxContactBuckets (the M1-205 capacity-wall DOS). The route is
         // a pure in-memory RegisteredContactSet lookup — NO DB read here
         // (the users-row SELECT stays at lookupUser below, deliberately
-        // downstream). The null guard mirrors the groupApprovalCheck /
-        // groupAutoPromoteService pattern: plain-JUnit test subclasses
-        // that bypass CDI leave the field null and route conservatively
-        // (treated as stranger, never falsely registered).
-        boolean registered = registeredContactSet != null
-                && registeredContactSet.isRegistered(adapterName, contactId);
+        // downstream).
+        boolean registered = registeredContactSet.isRegistered(adapterName, contactId);
         if (!rateCapBucket.tryAcquire(adapterName, contactId, registered)) {
             return;
         }
@@ -513,11 +509,8 @@ public class InboundRouter {
             // Pending / rejected short-circuit with a fixed reply BEFORE
             // step 4.1 (auto-promote); approved falls through. Banned
             // users are already filtered at step 4 above and never reach
-            // this block. The null check mirrors the step-4.1 pattern:
-            // plain-JUnit test subclasses that bypass CDI may leave the
-            // field null.
-            if (msg.scope() instanceof ScopeRef.Group group && snapshot.isPresent()
-                    && groupApprovalCheck != null) {
+            // this block.
+            if (msg.scope() instanceof ScopeRef.Group group && snapshot.isPresent()) {
                 GroupApprovalCheck.Outcome outcome = groupApprovalCheck.check(
                         adapterName,
                         group.adapterGroupId(),
@@ -579,9 +572,6 @@ public class InboundRouter {
             // every non-banned group-scope sender, attempt auto-promote
             // first (INSERT with is_group_admin=true ON CONFLICT DO
             // NOTHING), then ensure a non-admin membership row exists.
-            // The null check on the service mirrors the replyTarget
-            // pattern: plain-JUnit test subclasses do not wire CDI
-            // fields.
             if (msg.scope() instanceof ScopeRef.Group group) {
                 Optional<UUID> groupId = lookupGroupId(db, adapterName, group.adapterGroupId());
                 if (groupId.isEmpty()) {
@@ -596,11 +586,9 @@ public class InboundRouter {
                 // chosen language.
                 inboundContext.setEffectiveLanguage(
                         lookupScopeLanguage(db, "group", dispatchScopeId));
-                if (groupAutoPromoteService != null) {
-                    UUID senderId = snapshot.get().id();
-                    groupAutoPromoteService.tryAutoPromote(dispatchScopeId, senderId, adapterName, contactId);
-                    ensureGroupMembership(db, dispatchScopeId, senderId);
-                }
+                UUID senderId = snapshot.get().id();
+                groupAutoPromoteService.tryAutoPromote(dispatchScopeId, senderId, adapterName, contactId);
+                ensureGroupMembership(db, dispatchScopeId, senderId);
             } else {
                 dispatchScopeId = snapshot.get().id();
             }
@@ -916,11 +904,8 @@ public class InboundRouter {
         // dispatcher agree by construction — an asset the gate admits during
         // probation is the same asset this branch routes, closing the
         // "pass the gate then Unknown command" path. A bootstrap-added asset
-        // becomes dispatchable with no new code. The null guard is the
-        // plain-JUnit subclass path, which wires no CDI fields and must still
-        // fall through to the unknown reply (mirrors the replyTarget /
-        // groupAutoPromoteService convention elsewhere in this class).
-        if (assetCommandFamilyOracle != null && assetCommandFamilyOracle.isAssetCommand(commandName)) {
+        // becomes dispatchable with no new code.
+        if (assetCommandFamilyOracle.isAssetCommand(commandName)) {
             return assetHandler.handle(commandName, scope, normalized).text();
         }
         return bundleLoader.get(BundleKeys.ERROR_UNKNOWN_COMMAND, inboundContext.effectiveLanguage());

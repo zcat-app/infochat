@@ -262,8 +262,7 @@ public class EntityExtractorWorker {
             return AttemptResult.unreachable();
         }
 
-        String text = response == null ? null : response.text();
-        EntityExtractionResult parsed = parseEntities(text);
+        EntityExtractionResult parsed = parseEntities(response.text());
         if (parsed == null) {
             LOG.warn(
                 "EntityExtractorWorker: schema-violating response on attempt {} for post_id={}",

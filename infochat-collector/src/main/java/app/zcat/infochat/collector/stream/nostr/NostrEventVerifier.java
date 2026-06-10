@@ -10,6 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * BIP-340 Schnorr signature verifier for Nostr events. Stateless and
@@ -180,17 +181,23 @@ public final class NostrEventVerifier {
      * / form-feed, and a four-hex unicode escape for other 0x00..0x1F controls).
      */
     static byte[] nip01Canonical(NostrEvent event) {
+        // Only reached after verify()'s null gate; the requireNonNulls
+        // re-state that invariant for the type system (an NPE here is
+        // absorbed by verify()'s RuntimeException → false arm).
+        String pubkey = Objects.requireNonNull(event.pubkey());
+        List<List<String>> tags = Objects.requireNonNull(event.tags());
+        String content = Objects.requireNonNull(event.content());
         StringBuilder sb = new StringBuilder(256);
         sb.append("[0,\"");
-        sb.append(event.pubkey());
+        sb.append(pubkey);
         sb.append("\",");
         sb.append(event.createdAt());
         sb.append(',');
         sb.append(event.kind());
         sb.append(',');
-        appendTags(sb, event.tags());
+        appendTags(sb, tags);
         sb.append(',');
-        appendJsonString(sb, event.content());
+        appendJsonString(sb, content);
         sb.append(']');
         return sb.toString().getBytes(StandardCharsets.UTF_8);
     }

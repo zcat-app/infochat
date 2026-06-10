@@ -254,7 +254,7 @@ public class Stage1Pipeline {
      *         and post-redact bodies plus the flagged / watchdog
      *         flags for downstream consumers (Stage 2 / Tagger).
      */
-    public Stage1Result process(UUID postId, String postUid, Instant postFetchedAt, String rawBody) {
+    public Stage1Result process(UUID postId, String postUid, Instant postFetchedAt, @Nullable String rawBody) {
         String safeBody = rawBody == null ? "" : rawBody;
         // Step 1: HTML entity pre-decode. Closes the
         // entity-bypass vector documented in

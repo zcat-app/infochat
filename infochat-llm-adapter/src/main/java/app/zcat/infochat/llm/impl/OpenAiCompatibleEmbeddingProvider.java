@@ -132,7 +132,7 @@ public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
                 input.add(text);
             }
             body = JSON.writeValueAsString(root);
-        } catch (RuntimeException | com.fasterxml.jackson.core.JsonProcessingException e) {
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
             throw new EmbeddingCallFailedException(
                 "OpenAiCompatibleEmbeddingProvider: failed to assemble request body", e);
         }

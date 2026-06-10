@@ -141,7 +141,7 @@ public class TagVocabulary {
      * the same rule (see {@link TaggerWorker#normalizeTag(String)}).
      */
     public boolean contains(String normalized) {
-        return normalized != null && names.contains(normalized);
+        return names.contains(normalized);
     }
 
 }

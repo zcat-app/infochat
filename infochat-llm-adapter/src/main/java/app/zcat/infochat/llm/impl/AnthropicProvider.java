@@ -155,7 +155,7 @@ public class AnthropicProvider implements LlmProvider {
             user.put("content", userPrompt);
 
             body = JSON.writeValueAsString(root);
-        } catch (RuntimeException | com.fasterxml.jackson.core.JsonProcessingException e) {
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
             throw new LlmCallFailedException(
                 "AnthropicProvider: failed to assemble request body", e);
         }

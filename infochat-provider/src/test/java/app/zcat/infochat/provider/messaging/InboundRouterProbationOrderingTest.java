@@ -331,6 +331,18 @@ class InboundRouterProbationOrderingTest {
         router.summaryAnchorRepository = new SummaryAnchorRepository() {
             @Override public void clear(UUID userId, String scopeKind, UUID scopeId) {}
         };
+        // §7a wiring: the production fields are non-null by contract, so
+        // the plain-JUnit setup supplies log-silent doubles instead of
+        // relying on removed null branches. The fake JDBC stack only
+        // serves the step-4.1 membership upsert (the lookups are
+        // overridden seams above); the no-arg oracle answers false for
+        // every asset probe.
+        router.registeredContactSet = new NoopRegisteredContactSet();
+        router.assetCommandFamilyOracle = new AssetCommandFamilyOracle();
+        CountingDispatchDataSource dispatchDataSource =
+                new CountingDispatchDataSource(snapshot.id(), GROUP_ROW_ID);
+        router.dataSource = dispatchDataSource;
+        router.groupAutoPromoteService = new NoopGroupAutoPromoteService(dispatchDataSource);
         router.maxInboundBodyBytes = 65536;
         router.commandBodyCap = 65536;
         return router;
@@ -390,6 +402,9 @@ class InboundRouterProbationOrderingTest {
         router.summaryAnchorRepository = new SummaryAnchorRepository() {
             @Override public void clear(UUID userId, String scopeKind, UUID scopeId) {}
         };
+        // §7a wiring: the intake always consults the registered-contact
+        // set (step 1.5) before this scenario's step-3 drop.
+        router.registeredContactSet = new NoopRegisteredContactSet();
         router.maxInboundBodyBytes = 65536;
         router.commandBodyCap = 65536;
         return router;

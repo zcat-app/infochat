@@ -483,7 +483,15 @@ public class ReEvaluationJob {
             ps.setTimestamp(2, Timestamp.from(candidate.fetchedAt()));
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
-                    return rs.getString(1);
+                    // post.body is a nullable column; a re-eval candidate
+                    // with no body cannot be spliced — validate at the
+                    // SQL boundary so the non-null return contract holds.
+                    String body = rs.getString(1);
+                    if (body == null) {
+                        throw new IllegalStateException(
+                            "ReEvaluationJob: post body is NULL: " + candidate.postId());
+                    }
+                    return body;
                 }
                 throw new IllegalStateException(
                     "ReEvaluationJob: post not found: " + candidate.postId());

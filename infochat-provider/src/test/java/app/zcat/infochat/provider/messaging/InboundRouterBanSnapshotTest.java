@@ -52,6 +52,7 @@ class InboundRouterBanSnapshotTest {
         };
         router.inboundContext = new InboundContext();
         router.rateCapBucket = new NoopRateCapBucket();
+        router.registeredContactSet = new NoopRegisteredContactSet();
         router.inviteCodeConsumer = new NoopInviteCodeConsumer();
         router.bundleLoader = bundleLoader;
         // Wired but unreachable: the ban short-circuit at step 4 must

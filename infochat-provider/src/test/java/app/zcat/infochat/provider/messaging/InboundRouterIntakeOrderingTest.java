@@ -6,6 +6,7 @@ import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.chat.LlmRateCap;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
+import app.zcat.infochat.provider.command.AssetCommandFamilyOracle;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -579,6 +580,18 @@ class InboundRouterIntakeOrderingTest {
         router.summaryAnchorRepository = new SummaryAnchorRepository() {
             @Override public void clear(UUID userId, String scopeKind, UUID scopeId) {}
         };
+        // §7a wiring: the production fields are non-null by contract, so
+        // the plain-JUnit setup supplies the log-silent doubles instead
+        // of relying on removed null branches. The fake JDBC stack only
+        // serves the step-4.1 membership upsert (the lookups are
+        // overridden seams above); the no-arg oracle answers false for
+        // every asset probe.
+        router.registeredContactSet = new NoopRegisteredContactSet();
+        router.assetCommandFamilyOracle = new AssetCommandFamilyOracle();
+        CountingDispatchDataSource dispatchDataSource =
+                new CountingDispatchDataSource(UUID.randomUUID(), UUID.randomUUID());
+        router.dataSource = dispatchDataSource;
+        router.groupAutoPromoteService = new NoopGroupAutoPromoteService(dispatchDataSource);
         router.maxInboundBodyBytes = 65536;
         router.commandBodyCap = 65536;
         return router;

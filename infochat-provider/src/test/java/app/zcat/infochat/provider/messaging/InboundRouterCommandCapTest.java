@@ -85,6 +85,7 @@ class InboundRouterCommandCapTest {
         };
         router.inboundContext = new InboundContext();
         router.rateCapBucket = new NoopRateCapBucket();
+        router.registeredContactSet = new NoopRegisteredContactSet();
         router.inviteCodeConsumer = new NoopInviteCodeConsumer();
         router.bundleLoader = bundleLoader;
         router.commandHandlers = new SingletonInstance<>();

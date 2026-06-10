@@ -6,6 +6,7 @@ import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.command.AssetCommandFamilyOracle;
 import app.zcat.infochat.provider.command.CommandPermissions;
+import app.zcat.infochat.provider.command.asset.AssetRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -209,6 +210,8 @@ class HelpCommandHandlerTest {
         handler.commandPermissions = commandPermissions;
         // Fresh context → effectiveLanguage() returns the "en" default.
         handler.inboundContext = new InboundContext();
+        // No-arg registry carries no assets → no asset lines in the reply.
+        handler.assetRegistry = new AssetRegistry();
         return handler;
     }
 

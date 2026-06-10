@@ -8,6 +8,7 @@ import org.jspecify.annotations.Nullable;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * One parsed NIP-01 event (the object inside an {@code ["EVENT", subId,
@@ -23,13 +24,17 @@ import java.util.Map;
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record NostrEvent(
-        @JsonProperty("id") String id,
-        @JsonProperty("pubkey") String pubkey,
+        // Every reference field is @Nullable: the record is Jackson-built
+        // from hostile relay JSON where any field can be absent.
+        // NostrEventVerifier.verify is the gate that rejects null fields;
+        // post-verify consumers re-state that invariant via requireNonNull.
+        @JsonProperty("id") @Nullable String id,
+        @JsonProperty("pubkey") @Nullable String pubkey,
         @JsonProperty("created_at") long createdAt,
         @JsonProperty("kind") int kind,
-        @JsonProperty("tags") List<List<String>> tags,
-        @JsonProperty("content") String content,
-        @JsonProperty("sig") String sig
+        @JsonProperty("tags") @Nullable List<List<String>> tags,
+        @JsonProperty("content") @Nullable String content,
+        @JsonProperty("sig") @Nullable String sig
 ) {
 
     /** rawMetadata key carrying the literal Nostr kind ("1", "6") for downstream dispatch. */
@@ -67,6 +72,11 @@ public record NostrEvent(
      * @param fetchedAt wall-clock receipt time, supplied by the caller.
      */
     public NormalizedPost toNormalizedPost(long dispatchKey, Instant fetchedAt) {
+        // Callers deliver only events NostrEventVerifier.verify accepted
+        // (the relay trust-boundary gate that rejects null fields); the
+        // requireNonNulls re-state that invariant for the type system.
+        String id = Objects.requireNonNull(this.id);
+        String content = Objects.requireNonNull(this.content);
         Map<String, String> rawMetadata;
         if (kind == 6) {
             String repostTarget = extractFirstETag();

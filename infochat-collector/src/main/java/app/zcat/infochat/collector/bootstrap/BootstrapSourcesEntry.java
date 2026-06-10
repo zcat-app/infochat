@@ -1,5 +1,7 @@
 package app.zcat.infochat.collector.bootstrap;
 
+import org.jspecify.annotations.Nullable;
+
 import java.util.List;
 import java.util.Map;
 
@@ -20,14 +22,17 @@ import java.util.Map;
  * <p>{@code config} is {@code null} for HTTP-shaped sources
  * ({@code rss}, {@code bluesky}, {@code nitter}, {@code reddit},
  * {@code youtube}, {@code odysee}) and a {@code Map} carrying the
- * relay list for {@code nostr}.
+ * relay list for {@code nostr}. {@code tags} is {@code @Nullable}
+ * because Jackson leaves an omitted field null at the parse boundary;
+ * the parser's validation rejects a null/empty array, so loader-side
+ * consumers re-state non-nullness via {@code requireNonNull}.
  */
 public record BootstrapSourcesEntry(
     String kind,
     String identifier,
     String name,
     String category,
-    List<String> tags,
-    Map<String, Object> config
+    @Nullable List<String> tags,
+    @Nullable Map<String, Object> config
 ) {
 }

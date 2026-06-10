@@ -258,22 +258,6 @@ class SsrfGuardedHttpClientTest {
     }
 
     @Test
-    void constructorRejectsNullTimeout() {
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-            () -> new SsrfGuardedHttpClient(
-                new IpBlocklist(),
-                null,
-                Duration.ofSeconds(1),
-                Duration.ofSeconds(1),
-                Duration.ofMinutes(2),
-                1024L,
-                3));
-        assertTrue(ex.getMessage().contains("timeout must be configured"),
-            "null connect-timeout must be rejected with the literal "
-            + "\"timeout must be configured\" prefix");
-    }
-
-    @Test
     void constructorRejectsZeroTimeout() {
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
             () -> new SsrfGuardedHttpClient(

@@ -211,12 +211,7 @@ public class HelpCommandHandler implements CommandHandler {
     }
 
     private void appendEnabledAssets(StringBuilder body) {
-        // assetRegistry is null when the handler is constructed outside
-        // CDI (the plain-JUnit HelpCommandHandlerTest sets fields directly
-        // and omits the registry — asset listing is not its concern).
-        List<AssetRegistry.AssetEntry> enabledAssets = assetRegistry != null
-                ? assetRegistry.getEnabledAssets() : List.of();
-        for (AssetRegistry.AssetEntry asset : enabledAssets) {
+        for (AssetRegistry.AssetEntry asset : assetRegistry.getEnabledAssets()) {
             List<String> subVerbs = asset.enabledSubVerbNames();
             body.append('\n');
             body.append('/').append(asset.name());

@@ -32,6 +32,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.OptionalLong;
 import java.util.Set;
 import java.util.UUID;
@@ -160,7 +161,9 @@ public final class NostrStreamSource implements StreamSource {
             // counter — kind drops are noise, not a signal that needs auditing.
             return false;
         }
-        if (!dedupFilter.accept(event.id())) {
+        // verify() above rejected null fields; requireNonNull re-states
+        // that invariant for the type system.
+        if (!dedupFilter.accept(Objects.requireNonNull(event.id()))) {
             // Same event id already delivered (most likely from another
             // relay of this same source). Silent drop: the in-memory filter
             // is the authoritative cross-relay dedup per architecture.md

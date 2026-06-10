@@ -215,16 +215,16 @@ public final class SsrfGuardedHttpClient {
                                  long bodyCap,
                                  int redirectCap,
                                  Function<String, List<InetAddress>> resolverSeam) {
-        if (connectTimeout == null || connectTimeout.isZero() || connectTimeout.isNegative()) {
+        if (connectTimeout.isZero() || connectTimeout.isNegative()) {
             throw new IllegalArgumentException("connect timeout must be configured");
         }
-        if (requestTimeout == null || requestTimeout.isZero() || requestTimeout.isNegative()) {
+        if (requestTimeout.isZero() || requestTimeout.isNegative()) {
             throw new IllegalArgumentException("request timeout must be configured");
         }
-        if (readTimeout == null || readTimeout.isZero() || readTimeout.isNegative()) {
+        if (readTimeout.isZero() || readTimeout.isNegative()) {
             throw new IllegalArgumentException("read timeout must be configured");
         }
-        if (bodyReadDeadline == null || bodyReadDeadline.isZero() || bodyReadDeadline.isNegative()) {
+        if (bodyReadDeadline.isZero() || bodyReadDeadline.isNegative()) {
             throw new IllegalArgumentException("body read deadline must be configured");
         }
         if (bodyCap <= 0) {

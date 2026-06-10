@@ -53,6 +53,10 @@ class InboundRouterAcquisitionCountTest {
         router.dataSource = counting;
         router.inboundContext = new InboundContext();
         router.rateCapBucket = new AdmitAllRateCapBucket();
+        // §7a wiring: both doubles are JDBC-free, so the router-owned
+        // acquisition count under test is unchanged.
+        router.registeredContactSet = new NoopRegisteredContactSet();
+        router.groupApprovalCheck = new NoopGroupApprovalCheck();
         router.inviteCodeConsumer = new NoopInviteCodeConsumer();
         router.bundleLoader = new NoopBundleLoader();
         router.commandHandlers = new SingletonInstance<>();

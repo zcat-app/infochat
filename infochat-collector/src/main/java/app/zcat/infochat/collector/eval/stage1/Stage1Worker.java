@@ -101,9 +101,6 @@ public class Stage1Worker {
     @Incoming("eval-queue")
     @RunOnVirtualThread
     public void onPostKey(PostPersister.PersistedPostKey key) {
-        if (key == null) {
-            return;
-        }
         PostRow row;
         try {
             row = loadPost(key);
@@ -156,6 +153,7 @@ public class Stage1Worker {
         }
     }
 
-    private record PostRow(String uid, String body, boolean stage1Done) {
+    // body reflects the V7 schema: post.body is a nullable column.
+    private record PostRow(String uid, @Nullable String body, boolean stage1Done) {
     }
 }

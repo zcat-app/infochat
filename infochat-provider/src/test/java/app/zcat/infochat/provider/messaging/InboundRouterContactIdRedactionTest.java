@@ -10,6 +10,7 @@ import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
+import app.zcat.infochat.provider.command.AssetCommandFamilyOracle;
 import org.jboss.logmanager.LogContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -187,6 +188,11 @@ class InboundRouterContactIdRedactionTest {
         router.summaryAnchorRepository = new SummaryAnchorRepository() {
             @Override public void clear(UUID userId, String scopeKind, UUID scopeId) {}
         };
+        // §7a wiring: the intake consults the registered-contact set on
+        // every dispatch, and the handleSlash unknown-command fallback
+        // (/xyz scenarios) probes the asset oracle (no-arg → false).
+        router.registeredContactSet = new NoopRegisteredContactSet();
+        router.assetCommandFamilyOracle = new AssetCommandFamilyOracle();
         return router;
     }
 

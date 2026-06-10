@@ -179,7 +179,7 @@ public class OpenAiCompatibleProvider implements LlmProvider {
             user.put("role", "user");
             user.put("content", userPrompt);
             body = JSON.writeValueAsString(root);
-        } catch (RuntimeException | com.fasterxml.jackson.core.JsonProcessingException e) {
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
             throw new LlmCallFailedException(
                 "OpenAiCompatibleProvider: failed to assemble request body", e);
         }

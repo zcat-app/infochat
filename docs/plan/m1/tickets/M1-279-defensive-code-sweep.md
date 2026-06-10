@@ -1,11 +1,36 @@
 ---
 id: M1-279
 title: "§7/§7a sweep: defensive checks, broad catches, test seams"
-status: pending
+status: done
 created: 2026-06-09
-last_updated: 2026-06-09
+last_updated: 2026-06-11
+revisions:
+  - date: 2026-06-11
+    reason: budget-breach rework
+    snapshot:
+      status: escalated
+      files_budget: 20
+      escalation_reason: budget-breach
+      note: |
+        Budget widened 20 -> 36 after per-site verification found all
+        F4/F6 sites real: ~16 production files + ~13 test files counted,
+        plus headroom for the F4 @Nullable cascade (NullAway-forced
+        handling at read sites, e.g. BootstrapLoader / Nostr stream
+        consumers) and collector-test fallout. No acceptance change.
+escalations:
+  - date: 2026-06-11
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A (escalation from budget-breach during implementation, before any
+      review round). Per-site verification found ALL F4/F6 sites real (none
+      already-clean); the full acceptance set spans ~16 production files
+      (4 SSRF/LLM done + InboundRouter + HelpCommandHandler + 10 collector
+      files) plus ~13 test files (~9 InboundRouter* plain-JUnit tests
+      needing collaborator wiring, HelpCommandHandlerTest,
+      SsrfGuardedHttpClientTest, 1-2 new top-level Noop doubles) ≈ 29
+      files vs files_budget: 20.
 blocked_by: []
-files_budget: 20
+files_budget: 36
 complexity: medium
 risk: low
 round_cap: 2
@@ -28,12 +53,30 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-11
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 35
+      added: 222
+      removed: 99
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-10
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE item 4: 'sites found already-clean are listed in the commit message' is the only artifact for verifying sweep completeness at F4/F6; name each already-clean site in the commit message with the falsification evidence so the expectation is checkable at review time."
+    - "SECURITY-FLAG-CONSISTENT: SsrfGuardedHttpClient is touched while security_relevant: false — may be missed in security sweeps; changes are boundary-preserving by construction (isZero/isNegative legs explicitly out of scope), labeling concern only."
 ---
 
 # M1-279: §7/§7a sweep: defensive checks, broad catches, test seams

@@ -453,8 +453,11 @@ public class EmbeddingWorker {
         return pg;
     }
 
-    /** One pending post, populated by {@link #enumeratePending}. */
-    public record PostRow(UUID id, Instant fetchedAt, String title, String body, String bodySummary) {
+    /** One pending post, populated by {@link #enumeratePending}.
+     *  title/body/bodySummary reflect the V7 schema: all three post
+     *  columns are nullable. */
+    public record PostRow(UUID id, Instant fetchedAt, @Nullable String title, @Nullable String body,
+                          @Nullable String bodySummary) {
     }
 
     /**

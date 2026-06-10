@@ -7,6 +7,7 @@ import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.command.AssetCommandFamilyOracle;
 import app.zcat.infochat.provider.command.BanConfirm;
 import app.zcat.infochat.provider.command.ConfirmStateService;
 import org.junit.jupiter.api.Test;
@@ -167,6 +168,11 @@ class InboundRouterConfirmCancelTest {
         router.summaryAnchorRepository = new SummaryAnchorRepository() {
             @Override public void clear(UUID userId, String scopeKind, UUID scopeId) {}
         };
+        // §7a wiring: the intake consults the registered-contact set on
+        // every dispatch, and the handleSlash unknown-command fallback
+        // probes the asset oracle (the no-arg oracle answers false).
+        router.registeredContactSet = new NoopRegisteredContactSet();
+        router.assetCommandFamilyOracle = new AssetCommandFamilyOracle();
         router.maxInboundBodyBytes = 65536;
         router.commandBodyCap = 65536;
         router.setReplyTarget(target);

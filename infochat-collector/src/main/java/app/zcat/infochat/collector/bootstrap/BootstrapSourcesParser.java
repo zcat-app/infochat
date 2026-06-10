@@ -140,7 +140,7 @@ public final class BootstrapSourcesParser {
      * {@code docs/design/07-deployment.md} §7.6.1 Per-kind config shape.
      */
     @SuppressWarnings("unchecked")
-    private void validateNostrConfig(Map<String, Object> config, int index) {
+    private void validateNostrConfig(@Nullable Map<String, Object> config, int index) {
         if (config == null) {
             throw new BootstrapSourcesParseException(
                 "entry[" + index + "] kind=nostr requires a config object with a non-empty 'relays' array");
@@ -215,7 +215,7 @@ public final class BootstrapSourcesParser {
      * for the {@code source.config JSONB} column. Returns {@code "{}"}
      * for {@code null} config (the column is NOT NULL DEFAULT '{}').
      */
-    public String configToJsonString(Map<String, Object> config) {
+    public String configToJsonString(@Nullable Map<String, Object> config) {
         if (config == null) {
             return "{}";
         }

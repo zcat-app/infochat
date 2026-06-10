@@ -216,12 +216,12 @@ public class Stage2Worker {
         String delimiterId = UUID.randomUUID().toString();
         String userPrompt = promptTemplate
             .replace("{{id}}", delimiterId)
-            .replace("{{content}}", originalBody == null ? "" : originalBody);
+            .replace("{{content}}", originalBody);
 
         try {
             LlmProvider provider = llmRouter.forTask(ModelTask.SECURITY_JUDGE, "en");
             LlmResponse response = provider.generate(ModelTask.SECURITY_JUDGE, "", userPrompt);
-            return new Attempt(parseVerdict(response == null ? null : response.text()), false);
+            return new Attempt(parseVerdict(response.text()), false);
         } catch (RuntimeException e) {
             // SafeLog, never the raw Throwable: the provider exception
             // can echo its request context, which embeds the
