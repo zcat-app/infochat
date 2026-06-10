@@ -291,7 +291,7 @@ class StartupGatesTest {
     /**
      * Shared {@link CapabilityFlags} factory for the test fakes. Keeps
      * the gate-specific tweaks one named-argument away so the per-fake
-     * intent reads at a glance — the alternative is 14 verbose record
+     * intent reads at a glance — the alternative is 10 verbose record
      * components duplicated four times across the file.
      */
     static final class TestCapabilities {
@@ -301,10 +301,6 @@ class StartupGatesTest {
                     /* supportsMembershipEvents   */ true,
                     /* supportsCodeFormatting     */ false,
                     /* supportsMarkdownLinks      */ markdownLinks,
-                    /* supportsMultilineCode      */ false,
-                    /* supportsAttachments        */ false,
-                    /* supportsThreading          */ false,
-                    /* maxMessageBytes            */ 100_000,
                     /* maxInboundMessageBytes     */ 100_000,
                     /* maxSendsPerSecond          */ 10_000,
                     /* supportsMessageEdit        */ true,

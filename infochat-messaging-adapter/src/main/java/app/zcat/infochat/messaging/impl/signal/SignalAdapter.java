@@ -67,17 +67,13 @@ public final class SignalAdapter implements MessagingAdapter {
     private static final Logger LOG = Logger.getLogger(SignalAdapter.class);
 
     // 16 KiB laptop default per docs/design/06-messaging.md §6.2.2;
-    // maxMessageBytes / maxSendsPerSecond / minEditInterval are best-guess
+    // maxSendsPerSecond / minEditInterval are best-guess
     // defaults expected to be tuned against a live signal-cli.
     private static final CapabilityFlags CAPABILITIES = new CapabilityFlags(
             /* supportsMentionByContactId */ true,
             /* supportsMembershipEvents   */ true,
             /* supportsCodeFormatting     */ true,
             /* supportsMarkdownLinks      */ false,
-            /* supportsMultilineCode      */ false,
-            /* supportsAttachments        */ false,
-            /* supportsThreading          */ false,
-            /* maxMessageBytes            */ 2_000,
             /* maxInboundMessageBytes     */ 16_384,
             /* maxSendsPerSecond          */ 8,
             /* supportsMessageEdit        */ true,

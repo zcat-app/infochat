@@ -30,10 +30,6 @@ class SimpleXAdapterSkeletonTest {
                 "skeleton declares false; M1-104 flips this when group support lands");
         assertFalse(caps.supportsCodeFormatting());
         assertFalse(caps.supportsMarkdownLinks(), "v1 adapters MUST declare supportsMarkdownLinks=false");
-        assertFalse(caps.supportsMultilineCode());
-        assertFalse(caps.supportsAttachments());
-        assertFalse(caps.supportsThreading());
-        assertEquals(2_000, caps.maxMessageBytes());
         assertEquals(16_384, caps.maxInboundMessageBytes());
         assertEquals(5, caps.maxSendsPerSecond(), "design §6.4.2: at most 5/s averaged");
         assertTrue(caps.supportsMessageEdit(), "SimpleX supports message edits");

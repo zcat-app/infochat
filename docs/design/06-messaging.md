@@ -160,11 +160,7 @@
       boolean supportsMarkdownLinks,       // MUST be false for every v1 adapter; Provider
                                            //   validates at adapter-registration startup
                                            //   and fails fast on a true value (§6.2.1).
-      boolean supportsMultilineCode,       // triple-backtick blocks render
-      boolean supportsAttachments,         // future use
-      boolean supportsThreading,           // future use
       // --- Sizing ---
-      int     maxMessageBytes,             // outbound chunking threshold
       int     maxInboundMessageBytes,      // transport-layer first-defense cap on inbound
                                            //   message size (§6.2.2 + spec/messaging.md
                                            //   §Required SPI surface — Inbound message
@@ -332,8 +328,7 @@
   - Adapter receives OutboundMessage.text already formatted with the project's plain-text-plus-backticks convention (see 03-commands.md §3.1).                                                                                                          
   - If capabilities.supportsCodeFormatting = true, the adapter MAY translate single backticks to its protocol's monospace formatting. Otherwise it MUST send the text verbatim — the recipient sees raw backticks (still readable).
   - URLs are always rendered bare. Adapters MUST NOT wrap URLs in protocol-specific link syntax even if the protocol supports it; `supportsMarkdownLinks` is asserted false at adapter-registration startup (§6.2.1) and the field is therefore not consulted on the per-message path.
-  - The adapter MUST NOT inject extra formatting (no auto-markdown link conversion, no auto-emoji, no auto-mention).                                                                                                                                    
-  - The adapter MUST chunk messages exceeding maxMessageBytes at line boundaries when possible, otherwise at maxMessageBytes - 1. Chunked messages MUST preserve code-block fences (close before chunk, reopen after).                                  
+  - The adapter MUST NOT inject extra formatting (no auto-markdown link conversion, no auto-emoji, no auto-mention).                                                                                                                                                                      
                                                                                                                                                                                                                                                         
   ### 6.3.5 Idempotency                                                                                                                                                                                                                                     
                                                                                                                                                                                                                                                         
@@ -483,10 +478,6 @@
                                       //   See "Open questions" at end of file.
   supportsCodeFormatting     = false  // SimpleX renders backticks as literal characters
   supportsMarkdownLinks      = false  // hard-asserted at startup (§6.2.1); SimpleX renders bare URLs
-  supportsMultilineCode      = false
-  supportsAttachments        = false  // v1 doesn't use them
-  supportsThreading          = false
-  maxMessageBytes            = 4000   // SimpleX hard limit; adapter chunks above this
   maxInboundMessageBytes     = profile-driven (see §6.2.2)  // SimpleX bot-API inbound text frames
                                                             //   are bounded by the WS frame cap; the
                                                             //   adapter clamps tighter to give the
@@ -565,8 +556,6 @@
   - DM: /_send @<contact> text=<base64-encoded text>                                                                                                                                                                                                    
   - Group: /_send #<group> text=<base64-encoded text>                              
                                                                                                                                                                                                                                                         
-  Chunking: messages over 4000 bytes are split at the nearest line break before the limit; if a single line is longer, it's split at the limit. Code-block fences are preserved across chunks.
-
   #### Update encoding
 
   `update(handle, text)` and `finalize(handle, text)` both serialize to the SimpleX
@@ -616,8 +605,6 @@
   ├──────────────────────────────────────────┼────────────────────────────────────┼───────────────────────────────────────────────────────────┤
   │ Identity assertion fails                 │ Drop the inbound message; log WARN │ None (silent skip)                                        │
   ├──────────────────────────────────────────┼────────────────────────────────────┼───────────────────────────────────────────────────────────┤                                                                                                         
-  │ Outbound chunking exceeds protocol limit │ Throw MessagingException           │ Provider retries 3x, then logs                            │
-  ├──────────────────────────────────────────┼────────────────────────────────────┼───────────────────────────────────────────────────────────┤
   │ Update rejected (CEInvalidChatItemUpdate │ Fall back to new send() with orig. │ User sees a new message rather than an in-place update    │
   │   — item too old, deleted, not owner)    │ correlationId; metric incremented  │                                                           │
   └──────────────────────────────────────────┴────────────────────────────────────┴───────────────────────────────────────────────────────────┘                                                                                                         
@@ -682,11 +669,6 @@
                                       //   on Signal even though the protocol could carry link
                                       //   formatting — widening the rendering surface is a spec
                                       //   amendment, not a per-adapter footgun.
-  supportsMultilineCode      = true   // Signal preserves newlines in code spans
-  supportsAttachments        = false  // v1 doesn't use them
-  supportsThreading          = false
-  maxMessageBytes            = 8000   // Signal's effective text-content cap is well above SimpleX;
-                                      //   conservative chunking floor, refine after observation.
   maxInboundMessageBytes     = profile-driven (see §6.2.2)
   maxSendsPerSecond          = 5      // conservative; Signal's per-account ceiling is higher but
                                       //   the v1 LLM concurrency cap (D46 §Topology) is the
@@ -760,8 +742,6 @@
   - Group: `{"method":"send","params":{"groupId":"<adapterGroupId>","message":<text>}}`
   - Edit (`update`/`finalize` on a `supportsMessageEdit=true` send): `{"method":"sendEdit","params":{"recipient"|"groupId":..., "targetTimestamp":<original send timestamp>,"message":<text>}}`
 
-  Chunking: messages over 8000 bytes are split at the nearest line break before the limit; if a single line is longer, it's split at the limit. Code-block fences are preserved across chunks (close before chunk, reopen after) — same discipline as SimpleX §6.4.5.
-
   Edit failure handling: a `signal-cli` JSON-RPC error indicating the original message is no longer editable (deleted by user, edit window expired) is non-recoverable for that handle. The adapter falls back to a fresh `send` with the original `correlationId` and increments `adapter.outbound.update.fail{reason='edit_window_expired' | 'item_deleted' | …}`, paralleling the SimpleX `CEInvalidChatItemUpdate` handling in §6.4.5.
 
   ### 6.5.8 Reconnection
@@ -828,10 +808,6 @@
               true,            // supportsMembershipEvents — tests drive group join/leave directly
               true,            // supportsCodeFormatting — exercises the markdown-code render path
               false,           // supportsMarkdownLinks — MUST be false (§6.2.1 startup gate)
-              true,            // supportsMultilineCode
-              false,           // supportsAttachments
-              false,           // supportsThreading
-              100_000,         // maxMessageBytes — generous for tests
               100_000,         // maxInboundMessageBytes — generous for tests
               10_000,          // maxSendsPerSecond — effectively unlimited rate
               true,            // supportsMessageEdit
@@ -1002,8 +978,8 @@
   ## 6.13 What's intentionally NOT in v1
 
   - Telegram, Matrix, IRC, XMPP adapters — the SPI is designed to accept them but the v1 production set is closed at SimpleX + Signal (D32, D46). Adding a new adapter requires it to declare its trust level and identity-assertion shape per §6.2.3 and [04-security.md §4.8](04-security.md) before it can be enabled in production.
-  - Voice / file attachments — `supportsAttachments` capability exists but is unused.
-  - Threaded replies in groups — `supportsThreading` exists but unused.
+  - Voice / file attachments — out of scope for v1.
+  - Threaded replies in groups — out of scope for v1.
   - Per-message read receipts back to the bot — adapters don't surface "delivered/read" to Provider.
   - End-to-end encryption configuration in the adapter layer — handled by the messaging app itself; nothing to configure.
   - Auto-translate of inbound user messages to English — chat agent receives original language, replies per `/lang`.
@@ -1022,7 +998,6 @@
   - Group filtering by **mention payload**: a group message whose mention payload does NOT reference the bot's per-adapter contact id is NOT delivered, even if the body textually contains a string that matches the bot's display name (asserts §6.10).
   - Mention stripping: delivered text does NOT contain the bot's mention span.
   - Mention-by-id rejection of display-name spoof: a group message whose body contains `@<bot-display-name>` *without* the matching mention payload is dropped (regression-test for the forever-out-of-v1 rule).
-  - Chunking: a 10K outbound message arrives as multiple inbound chunks at the recipient (when fixture supports it; for SimpleX it's a recorded-WS-fixture test, for Signal a recorded JSON-RPC fixture).
   - Reconnection: simulated transport disconnect → adapter reconnects, queued outbounds eventually deliver (per-adapter; the simulation differs by adapter — WS for SimpleX, JSON-RPC pipe for Signal).
   - Per-adapter resilience: with two adapters configured, a forced startup failure on one of them must NOT prevent the other from coming up; readiness probe reports ready while the failing adapter retries (asserts §6.7).
   - Readiness rule: with the only enabled adapter disconnected, readiness reports not-ready; reconnect flips it to ready (asserts §6.7).

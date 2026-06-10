@@ -59,9 +59,8 @@ public final class SimpleXAdapter implements MessagingAdapter {
     private static final Logger LOG = LoggerFactory.getLogger(SimpleXAdapter.class);
 
     // maxInboundMessageBytes is the 16 KiB laptop default per
-    // docs/design/06-messaging.md §6.2.2 (profile-tunable). maxMessageBytes
-    // is a best-guess default not fixed by spec, to be tuned against a live
-    // simplex-chat. maxSendsPerSecond and minEditInterval take design
+    // docs/design/06-messaging.md §6.2.2 (profile-tunable).
+    // maxSendsPerSecond and minEditInterval take design
     // §6.4.2's conservative values (5/s, 600 ms floor), to be raised only
     // after observation.
     private static final CapabilityFlags CAPABILITIES = new CapabilityFlags(
@@ -69,10 +68,6 @@ public final class SimpleXAdapter implements MessagingAdapter {
             /* supportsMembershipEvents   */ false,
             /* supportsCodeFormatting     */ false,
             /* supportsMarkdownLinks      */ false,
-            /* supportsMultilineCode      */ false,
-            /* supportsAttachments        */ false,
-            /* supportsThreading          */ false,
-            /* maxMessageBytes            */ 2_000,
             /* maxInboundMessageBytes     */ 16_384,
             /* maxSendsPerSecond          */ 5,
             /* supportsMessageEdit        */ true,

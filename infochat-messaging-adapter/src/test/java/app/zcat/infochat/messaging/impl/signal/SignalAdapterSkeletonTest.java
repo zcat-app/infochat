@@ -25,10 +25,6 @@ class SignalAdapterSkeletonTest {
         assertTrue(caps.supportsMembershipEvents(), "Signal exposes native membership events");
         assertTrue(caps.supportsCodeFormatting(), "design §6.5.2: Signal renders monospace");
         assertFalse(caps.supportsMarkdownLinks(), "v1 adapters MUST declare supportsMarkdownLinks=false");
-        assertFalse(caps.supportsMultilineCode());
-        assertFalse(caps.supportsAttachments());
-        assertFalse(caps.supportsThreading());
-        assertEquals(2_000, caps.maxMessageBytes());
         assertEquals(16_384, caps.maxInboundMessageBytes());
         assertEquals(8, caps.maxSendsPerSecond());
         assertTrue(caps.supportsMessageEdit());

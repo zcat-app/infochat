@@ -50,17 +50,6 @@ import java.time.Duration;
  *                                   Provider validates this at adapter
  *                                   registration (startup) and fails
  *                                   fast on a true declaration.
- * @param supportsMultilineCode      true when triple-backtick blocks
- *                                   render as a code block; false
- *                                   renders the raw backticks.
- * @param supportsAttachments        true when the protocol supports
- *                                   attachments at the API layer
- *                                   (future use).
- * @param supportsThreading          true when the protocol supports
- *                                   threaded replies (future use).
- * @param maxMessageBytes            outbound chunking threshold —
- *                                   Provider splits longer messages
- *                                   into ≤ this many bytes per send().
  * @param maxInboundMessageBytes     transport-layer first-defense cap
  *                                   on inbound message size per design
  *                                   §6.2.2. Tighter than the
@@ -96,10 +85,6 @@ public record CapabilityFlags(
         boolean supportsMembershipEvents,
         boolean supportsCodeFormatting,
         boolean supportsMarkdownLinks,
-        boolean supportsMultilineCode,
-        boolean supportsAttachments,
-        boolean supportsThreading,
-        int maxMessageBytes,
         int maxInboundMessageBytes,
         int maxSendsPerSecond,
         boolean supportsMessageEdit,
