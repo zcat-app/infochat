@@ -101,7 +101,7 @@ class DigestPostCollectorIT {
         collector.collectForGroup(groupId, Instant.now());
 
         assertTrue(recordingDataSource.executedSql().stream()
-                        .anyMatch(sql -> sql.contains("SET statement_timeout")),
+                        .anyMatch(sql -> sql.contains("SET LOCAL statement_timeout")),
                 "DigestPostCollector's connection must run under statement_timeout. "
                         + "Got: " + recordingDataSource.executedSql());
     }
@@ -170,7 +170,7 @@ class DigestPostCollectorIT {
     /**
      * Wraps the real {@link DataSource} and records the SQL run via
      * {@code createStatement().execute(...)} on each connection (where the
-     * {@code SET statement_timeout} lands), delegating every other call to
+     * {@code SET LOCAL statement_timeout} lands), delegating every other call to
      * the real connection — same shape as the recorder in
      * {@code EligiblePostQueryStatementTimeoutTest}.
      */

@@ -526,13 +526,13 @@ class InboundRouterIntakeOrderingTest {
                                            Optional<UUID> groupRowId) {
         InboundRouter router = new InboundRouter() {
             @Override
-            Optional<UserSnapshot> lookupUser(String adapter, String contactId) {
+            Optional<UserSnapshot> lookupUser(DispatchDb db, String adapter, String contactId) {
                 log.calls.add("lookupUser");
                 return snapshot;
             }
 
             @Override
-            Optional<UUID> lookupGroupId(String adapter, String upstreamGroupId) {
+            Optional<UUID> lookupGroupId(DispatchDb db, String adapter, String upstreamGroupId) {
                 return groupRowId;
             }
         };

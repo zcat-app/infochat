@@ -327,7 +327,7 @@ class InboundRouterNormalizeTest {
     private InboundRouter newRouterWithKnownVouchedUser() {
         InboundRouter router = new InboundRouter() {
             @Override
-            Optional<UserSnapshot> lookupUser(String adapter, String contactId) {
+            Optional<UserSnapshot> lookupUser(DispatchDb db, String adapter, String contactId) {
                 return Optional.of(new UserSnapshot(UUID.randomUUID(), "vouched", false));
             }
         };

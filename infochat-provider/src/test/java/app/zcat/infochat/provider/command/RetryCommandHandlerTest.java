@@ -400,6 +400,7 @@ class RetryCommandHandlerTest {
                             }
                             case "createStatement" -> newStatementProxy();
                             case "createArrayOf" -> newArrayProxy();
+                            case "setAutoCommit" -> null;
                             case "close" -> null;
                             default -> throw new UnsupportedOperationException(
                                     "Conn." + method.getName());

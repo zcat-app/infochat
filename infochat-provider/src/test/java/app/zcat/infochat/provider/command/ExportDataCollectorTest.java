@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.command;
 
+import app.zcat.infochat.provider.chat.CancellationService;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
@@ -7,15 +8,24 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
+import java.io.PrintWriter;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.SQLFeatureNotSupportedException;
+import java.sql.Statement;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -34,6 +44,7 @@ class ExportDataCollectorTest {
 
     @Inject ExportDataCollector collector;
     @Inject @SeedDataSource DataSource dataSource;
+    @Inject CancellationService cancellationService;
 
     @BeforeEach
     void cleanup() throws Exception {
@@ -257,6 +268,7 @@ class ExportDataCollectorTest {
         // 10000-row cap, which cannot be overridden mid-test.
         ExportDataCollector smallCapCollector = new ExportDataCollector();
         smallCapCollector.dataSource = dataSource;
+        smallCapCollector.cancellationService = cancellationService;
         smallCapCollector.maxRowsPerTable = 5;
 
         ExportDataCollector.ExportResult result =
@@ -281,6 +293,7 @@ class ExportDataCollectorTest {
 
         ExportDataCollector smallCapCollector = new ExportDataCollector();
         smallCapCollector.dataSource = dataSource;
+        smallCapCollector.cancellationService = cancellationService;
         smallCapCollector.maxRowsPerTable = 5;
 
         ExportDataCollector.ExportResult result =
@@ -292,7 +305,110 @@ class ExportDataCollectorTest {
                 "the probe row must not reach the export output");
     }
 
+    /**
+     * Acceptance pin: the export connection applies the standard
+     * statement timeout before the first collection query, so a
+     * pathological table cannot hold the connection unbounded.
+     */
+    @Test
+    void appliesStatementTimeoutBeforeFirstCollectionQuery() throws Exception {
+        String contactId = PREFIX + "timeout-actor";
+        UUID userId = seedUser(contactId);
+
+        SqlOrderRecordingDataSource recording = new SqlOrderRecordingDataSource(dataSource);
+        ExportDataCollector timedCollector = new ExportDataCollector();
+        timedCollector.dataSource = recording;
+        timedCollector.cancellationService = cancellationService;
+        timedCollector.maxRowsPerTable = 10_000;
+
+        timedCollector.collect(userId, "dm", userId);
+
+        List<String> sqlOrder = recording.sqlOrder();
+        assertFalse(sqlOrder.isEmpty(), "the export must execute SQL");
+        assertTrue(sqlOrder.get(0).contains("SET LOCAL statement_timeout"),
+                "the statement timeout must be applied before any collection"
+                        + " query runs. Got order: " + sqlOrder);
+        assertEquals(1, sqlOrder.stream()
+                        .filter(s -> s.contains("statement_timeout")).count(),
+                "the timeout must be applied exactly once, on the shared"
+                        + " export connection");
+    }
+
     // -- helpers --
+
+    /**
+     * Wraps the real {@link DataSource} and records, in execution
+     * order, every statement reaching the export connection — prepared
+     * queries at prepare time, plain statements (where the
+     * {@code SET LOCAL statement_timeout} lands) at execute time —
+     * delegating every other call to the real Postgres connection.
+     * Same shape as the recording wrappers in
+     * {@code EligiblePostQueryStatementTimeoutTest} and
+     * {@code DigestPostCollectorIT}.
+     */
+    static final class SqlOrderRecordingDataSource implements DataSource {
+        private final DataSource delegate;
+        private final List<String> sqlOrder = new ArrayList<>();
+
+        SqlOrderRecordingDataSource(DataSource delegate) {
+            this.delegate = delegate;
+        }
+
+        List<String> sqlOrder() {
+            return sqlOrder;
+        }
+
+        @Override
+        public Connection getConnection() throws SQLException {
+            Connection real = delegate.getConnection();
+            return (Connection) Proxy.newProxyInstance(
+                    Connection.class.getClassLoader(),
+                    new Class<?>[] { Connection.class },
+                    (proxy, method, args) -> switch (method.getName()) {
+                        case "prepareStatement" -> {
+                            sqlOrder.add((String) args[0]);
+                            yield invoke(real, method, args);
+                        }
+                        case "createStatement" ->
+                                wrapStatement((Statement) invoke(real, method, args));
+                        default -> invoke(real, method, args);
+                    });
+        }
+
+        private Statement wrapStatement(Statement real) {
+            return (Statement) Proxy.newProxyInstance(
+                    Statement.class.getClassLoader(),
+                    new Class<?>[] { Statement.class },
+                    (proxy, method, args) -> switch (method.getName()) {
+                        case "execute", "executeQuery" -> {
+                            sqlOrder.add((String) args[0]);
+                            yield invoke(real, method, args);
+                        }
+                        default -> invoke(real, method, args);
+                    });
+        }
+
+        // Rethrows the real cause (e.g. SQLException) instead of
+        // InvocationTargetException so the code under test sees the
+        // same exceptions a real connection would throw.
+        private static Object invoke(Object target, Method method, Object[] args)
+                throws Throwable {
+            try {
+                return method.invoke(target, args);
+            } catch (InvocationTargetException e) {
+                throw e.getCause();
+            }
+        }
+
+        @Override public Connection getConnection(String u, String p) throws SQLException { return getConnection(); }
+        @Override public PrintWriter getLogWriter() { throw new UnsupportedOperationException(); }
+        @Override public void setLogWriter(PrintWriter out) { throw new UnsupportedOperationException(); }
+        @Override public void setLoginTimeout(int seconds) { throw new UnsupportedOperationException(); }
+        @Override public int getLoginTimeout() { throw new UnsupportedOperationException(); }
+        @Override public Logger getParentLogger() throws SQLFeatureNotSupportedException { throw new SQLFeatureNotSupportedException(); }
+        @Override public <T> T unwrap(Class<T> iface) { throw new UnsupportedOperationException(); }
+        @Override public boolean isWrapperFor(Class<?> iface) { return false; }
+    }
 
     private UUID seedUser(String contactId) throws Exception {
         try (Connection conn = dataSource.getConnection();

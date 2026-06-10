@@ -34,7 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * /summary) runs under a profile-driven statement_timeout"). The timeout is
  * applied inside {@code EligiblePostQuery}, where the connection lives
  * (mirroring {@code RetryCommandHandler}); this test wraps the seed
- * {@link DataSource} to observe the {@code SET statement_timeout} on the
+ * {@link DataSource} to observe the {@code SET LOCAL statement_timeout} on the
  * connections {@code fetch()} opens.
  */
 @QuarkusTest
@@ -66,7 +66,7 @@ class EligiblePostQueryStatementTimeoutTest {
         assertTrue(result.posts().isEmpty(),
                 "empty scope must yield no eligible posts");
         assertTrue(recordingDataSource.executedSql().stream()
-                        .anyMatch(s -> s.contains("SET statement_timeout")),
+                        .anyMatch(s -> s.contains("SET LOCAL statement_timeout")),
                 "EligiblePostQuery's /summary connections must run under "
                         + "statement_timeout. Got: " + recordingDataSource.executedSql());
     }
@@ -74,7 +74,7 @@ class EligiblePostQueryStatementTimeoutTest {
     /**
      * Wraps a real {@link DataSource} and records the SQL run via
      * {@code createStatement().execute(...)} on each connection (where the
-     * {@code SET statement_timeout} lands), delegating every other call to the
+     * {@code SET LOCAL statement_timeout} lands), delegating every other call to the
      * real connection so {@code fetch()}'s queries run against the seed DB.
      */
     static final class RecordingDataSource implements DataSource {

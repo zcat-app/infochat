@@ -114,7 +114,7 @@ class RecallMemoryToolTest {
         // InFlightTracker is the injected singleton). Non-empty keywords are
         // required so execute() reaches the connection (empty short-circuits
         // before opening one); no chat_memory row need exist. The wrapper
-        // observes the SET statement_timeout and pg_backend_pid the arming
+        // observes the SET LOCAL statement_timeout and pg_backend_pid the arming
         // step issues.
         UUID userId = UUID.randomUUID();
         CountingRecordingDataSource countingDs = new CountingRecordingDataSource(dataSource);
@@ -129,7 +129,7 @@ class RecallMemoryToolTest {
                     Map.of("keywords", List.of(PREFIX + "kw")));
 
             assertTrue(countingDs.executedSql().stream()
-                            .anyMatch(s -> s.contains("SET statement_timeout")),
+                            .anyMatch(s -> s.contains("SET LOCAL statement_timeout")),
                     "recallMemory's connection must have statement_timeout applied. Got: "
                             + countingDs.executedSql());
             assertTrue(slot.hasPgBackendPid(),

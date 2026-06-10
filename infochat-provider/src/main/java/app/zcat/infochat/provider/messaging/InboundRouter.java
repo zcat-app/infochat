@@ -143,6 +143,19 @@ import java.util.concurrent.atomic.AtomicLong;
  * second query; the step-1→step-4 TOCTOU is microseconds and the ban
  * takes effect on the next inbound regardless.</p>
  *
+ * <p><b>Dispatch connection (pre-LLM phase).</b> Every router-owned DB
+ * step of one inbound — the users-row snapshot, the groups-row
+ * resolution, the membership upsert — runs on a single lazily-borrowed
+ * pool connection ({@link DispatchDb}) that is closed before step 6
+ * hands off to a command handler or the chat agent, so no router
+ * connection is ever held across an LLM call. The {@code groups.id} is
+ * resolved at most once per dispatch (step 4.1) and carried forward to
+ * the group rate caps, the anchor clear, and chat scope resolution.
+ * Collaborators invoked during the pre-LLM phase (invite consumer,
+ * approval check, auto-promote, probation, anchor repository) manage
+ * their own connections, so a dispatch may briefly hold two pool
+ * connections; the pool must size for that worst case.</p>
+ *
  * <p><b>Body-size cap (defense in depth, preserved from M1-038).</b>
  * After the rate-cap check, {@link #onMessage} drops any inbound
  * whose UTF-8 byte length exceeds
@@ -401,221 +414,242 @@ public class InboundRouter {
 
         // Single users-row SELECT feeds steps 2 (DM emptiness), 3
         // (group unregistered/preban drop), 4 (ban check), and 5
-        // (probation gate) — see class-level Javadoc.
-        Optional<UserSnapshot> snapshot = lookupUser(adapterName, contactId);
+        // (probation gate) — see class-level Javadoc. Every router-owned
+        // DB step of the pre-LLM intake phase shares the one lazily-
+        // borrowed dispatch connection below; the try closes it before
+        // step 6 hands off to a command handler or the chat agent.
+        Optional<UserSnapshot> snapshot;
+        // DM → the actor's users.id; group → the groups.id resolved at
+        // most once at step 4.1 and carried forward (group rate caps,
+        // anchor clear, chat scope resolution — per-scope isolation,
+        // schema §Invariants).
+        UUID dispatchScopeId;
+        try (DispatchDb db = new DispatchDb(dataSource)) {
+            snapshot = lookupUser(db, adapterName, contactId);
 
-        // Step 2 — DM unknown contact + invite-code consume.
-        // Per spec §Authorization model step 2: pass the normalized
-        // body to InviteCodeConsumer.consume; the consumer owns the
-        // UUID-parse + brute-force counter (M1-044e fix — closes
-        // AUDIT-EVASION by ensuring non-UUID probes also increment
-        // the counter). Accepted → welcome reply; Rejected and
-        // BruteForceThresholdBreached → fixed error.invite.required
-        // reply (the spec gives the same user-visible reply for
-        // both — the rate-limit state does not change it).
-        if (msg.scope() instanceof ScopeRef.Dm && snapshot.isEmpty()) {
-            InviteCodeConsumer.Outcome outcome =
-                    inviteCodeConsumer.consume(adapterName, contactId, normalized);
-            switch (outcome) {
-                case InviteCodeConsumer.Accepted a ->
-                        sendReply(msg.scope(), bundleLoader.get(BundleKeys.REPLY_WELCOME_DM_FRESH), adapterName);
-                case InviteCodeConsumer.Rejected r ->
-                        sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_INVITE_REQUIRED), adapterName);
-                case InviteCodeConsumer.BruteForceThresholdBreached b ->
-                        sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_INVITE_REQUIRED), adapterName);
-            }
-            return;
-        }
-
-        // Step 3 — Group message from an unregistered or pre-banned
-        // contact → silent drop (D47 gate #1). Per spec §Authorization
-        // model: a group @mention from a contact with no users row, or
-        // whose registration_state is 'preban', produces NO reply, NO
-        // DB write, NO registration. D47 removed the group
-        // auto-registration path entirely; group interaction now
-        // requires prior DM registration. The drop returns BEFORE any
-        // snapshot.get() downstream, so a registered (invited/vouched)
-        // group sender — guaranteed present here — falls through safely.
-        if (msg.scope() instanceof ScopeRef.Group
-                && (snapshot.isEmpty()
-                        || REGISTRATION_STATE_PREBAN.equals(snapshot.get().registrationState()))) {
-            return;
-        }
-
-        // Step 4 — ban check per spec §User ban + §Authorization model
-        // step 4. The fixed error.ban.fixed reply is sent and dispatch
-        // stops. Fires AFTER step 3 (registered/preban filter) and
-        // BEFORE step 3.5 (group approval) so a banned user in group
-        // scope short-circuits here without triggering any group-
-        // related DB write (groups row INSERT, admin notification, or
-        // per-group rate-cap consumption). Step numbers are stable
-        // cross-reference labels per spec §Authorization model
-        // "Step labels are stable cross-reference identifiers, not
-        // execution-order indices"; execution order is the source-
-        // code order in this method.
-        //
-        // is_banned is served from the step-1 snapshot (one users-row
-        // SELECT per dispatch) instead of a second live query. Spec-
-        // legal: §Authorization model requires the ban check at step-4
-        // ordering, not a separate query. The step-1→step-4 TOCTOU is
-        // microseconds inside this synchronous handler; a ban landing in
-        // that window lets at most this one in-flight message through and
-        // takes effect on the next inbound. snapshot is guaranteed present
-        // here — DM-empty returns at step 2, group-empty/preban at step 3.
-        if (snapshot.get().isBanned()) {
-            sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_BAN_FIXED), adapterName);
-            return;
-        }
-
-        // Step 3.5 — D47 approval gate (M1-112). Group-scope inbound
-        // from a registered (not preban), non-banned user routes
-        // through GroupApprovalCheck.check, which consults the per-
-        // group reply rate bucket then dispatches on approval_status.
-        // Pending / rejected short-circuit with a fixed reply BEFORE
-        // step 4.1 (auto-promote); approved falls through. Banned
-        // users are already filtered at step 4 above and never reach
-        // this block. The null check mirrors the step-4.1 pattern:
-        // plain-JUnit test subclasses that bypass CDI may leave the
-        // field null.
-        if (msg.scope() instanceof ScopeRef.Group group && snapshot.isPresent()
-                && groupApprovalCheck != null) {
-            GroupApprovalCheck.Outcome outcome = groupApprovalCheck.check(
-                    adapterName,
-                    group.adapterGroupId(),
-                    snapshot.get().id(),
-                    ContactIds.redact(contactId));
-            switch (outcome) {
-                case GroupApprovalCheck.Outcome.Approved a -> {
-                    // Fall through to step 4.1 (auto-promote).
+            // Step 2 — DM unknown contact + invite-code consume.
+            // Per spec §Authorization model step 2: pass the normalized
+            // body to InviteCodeConsumer.consume; the consumer owns the
+            // UUID-parse + brute-force counter (M1-044e fix — closes
+            // AUDIT-EVASION by ensuring non-UUID probes also increment
+            // the counter). Accepted → welcome reply; Rejected and
+            // BruteForceThresholdBreached → fixed error.invite.required
+            // reply (the spec gives the same user-visible reply for
+            // both — the rate-limit state does not change it).
+            if (msg.scope() instanceof ScopeRef.Dm && snapshot.isEmpty()) {
+                InviteCodeConsumer.Outcome outcome =
+                        inviteCodeConsumer.consume(adapterName, contactId, normalized);
+                switch (outcome) {
+                    case InviteCodeConsumer.Accepted a ->
+                            sendReply(msg.scope(), bundleLoader.get(BundleKeys.REPLY_WELCOME_DM_FRESH), adapterName);
+                    case InviteCodeConsumer.Rejected r ->
+                            sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_INVITE_REQUIRED), adapterName);
+                    case InviteCodeConsumer.BruteForceThresholdBreached b ->
+                            sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_INVITE_REQUIRED), adapterName);
                 }
-                case GroupApprovalCheck.Outcome.FixedReply f -> {
-                    sendReply(msg.scope(), bundleLoader.get(f.bundleKey()), adapterName);
-                    return;
-                }
-                case GroupApprovalCheck.Outcome.SilentDrop s -> {
-                    return;
-                }
-            }
-        }
-
-        // Chat-mode body cap (commands.md §Input length caps): beyond
-        // the cap → friendly error, no chat-agent invocation, no LLM
-        // call, and no DB write. The check fires BEFORE the membership
-        // write (4.1), the probation lazy-clear (5), the confirm drain
-        // (4.5), and the anchor clear (4.6) — all forbidden for an
-        // oversized message — and AFTER the authorization gates
-        // (2/3/4/3.5) so the invite flow, D47 invisibility, the ban
-        // reply, and the per-group reply rate bucket keep their spec'd
-        // precedence over the cap reply.
-        if (!normalized.startsWith("/") && normalized.length() > chatBodyCap) {
-            sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_CHAT_BODY_TOO_LARGE), adapterName);
-            return;
-        }
-
-        // Slash-command body cap (commands.md §Input length caps): a
-        // slash body longer than infochat.command.body-cap gets the
-        // fixed error.command.body_too_large reply and stops BEFORE the
-        // parser (handleSlash) — same ordering rationale as the chat cap
-        // above (after the authorization gates, before any DB write).
-        if (normalized.startsWith("/") && normalized.length() > commandBodyCap) {
-            sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_COMMAND_BODY_TOO_LARGE), adapterName);
-            return;
-        }
-
-        // Step 4.1 — Group membership + auto-promote (M1-079c).
-        // Placed AFTER the ban check (step 4) so banned users never
-        // get a membership row written. For every non-banned group-
-        // scope sender, attempt auto-promote first (INSERT with
-        // is_group_admin=true ON CONFLICT DO NOTHING), then ensure a
-        // non-admin membership row exists. The null check mirrors the
-        // replyTarget pattern: plain-JUnit test subclasses do not wire
-        // CDI fields.
-        if (msg.scope() instanceof ScopeRef.Group group && snapshot.isPresent()
-                && groupAutoPromoteService != null) {
-            Optional<UUID> groupId = lookupGroupId(adapterName, group.adapterGroupId());
-            if (groupId.isEmpty()) {
-                // Group row vanished between the step-3.5 approval read
-                // and here (concurrent removal). Silent drop with a
-                // specific debug log — throwing here was a timing
-                // oracle distinguishing removed-group state.
-                log.debug("InboundRouter: no active groups row for adapter={} group={}; dropping",
-                        adapterName, ContactIds.redact(group.adapterGroupId()));
                 return;
             }
-            UUID senderId = snapshot.get().id();
-            groupAutoPromoteService.tryAutoPromote(groupId.get(), senderId, adapterName, contactId);
-            ensureGroupMembership(groupId.get(), senderId);
-        }
 
-        // Step 5 — slow-start probation gate (M1-045) per spec
-        // §Slow-start tier + §Authorization model step 5. A probation
-        // user invoking a non-allowed command receives the
-        // error.probation.blocked reply (with the {0} time-until-
-        // unlock interpolated from probation_until); a probation
-        // user invoking an allowed command falls through to the
-        // rest of the pipeline; a non-probation user gets the
-        // opportunistic clearIfPromoted (the lazy clear) on the way.
-        //
-        // Invariant: snapshot is always present here — DM-empty
-        // short-circuited at step 2's invite-consume; group senders
-        // with no row (or 'preban') were silently dropped at step 3.
-        // The defensive isPresent guard removed by M1-045 redteam-fix.
-        UUID probationActorId = snapshot.get().id();
-        String commandName = commandNameOf(normalized);
-        if (probationCheck.inProbation(probationActorId)) {
-            if (!commandPermissions.allowedDuringProbation(commandName)) {
-                Instant expiry = probationCheck.probationExpiry(probationActorId);
-                String body = MessageFormat.format(
-                        bundleLoader.get(BundleKeys.ERROR_PROBATION_BLOCKED),
-                        formatTimeUntilUnlock(expiry));
-                sendReply(msg.scope(), body, adapterName);
+            // Step 3 — Group message from an unregistered or pre-banned
+            // contact → silent drop (D47 gate #1). Per spec §Authorization
+            // model: a group @mention from a contact with no users row, or
+            // whose registration_state is 'preban', produces NO reply, NO
+            // DB write, NO registration. D47 removed the group
+            // auto-registration path entirely; group interaction now
+            // requires prior DM registration. The drop returns BEFORE any
+            // snapshot.get() downstream, so a registered (invited/vouched)
+            // group sender — guaranteed present here — falls through safely.
+            if (msg.scope() instanceof ScopeRef.Group
+                    && (snapshot.isEmpty()
+                            || REGISTRATION_STATE_PREBAN.equals(snapshot.get().registrationState()))) {
                 return;
             }
-        } else {
-            // Lazy clear: nulls probation_until on the next
-            // request after graduation. Idempotent after first
-            // success (WHERE clause matches zero rows).
-            probationCheck.clearIfPromoted(probationActorId);
+
+            // Step 4 — ban check per spec §User ban + §Authorization model
+            // step 4. The fixed error.ban.fixed reply is sent and dispatch
+            // stops. Fires AFTER step 3 (registered/preban filter) and
+            // BEFORE step 3.5 (group approval) so a banned user in group
+            // scope short-circuits here without triggering any group-
+            // related DB write (groups row INSERT, admin notification, or
+            // per-group rate-cap consumption). Step numbers are stable
+            // cross-reference labels per spec §Authorization model
+            // "Step labels are stable cross-reference identifiers, not
+            // execution-order indices"; execution order is the source-
+            // code order in this method.
+            //
+            // is_banned is served from the step-1 snapshot (one users-row
+            // SELECT per dispatch) instead of a second live query. Spec-
+            // legal: §Authorization model requires the ban check at step-4
+            // ordering, not a separate query. The step-1→step-4 TOCTOU is
+            // microseconds inside this synchronous handler; a ban landing in
+            // that window lets at most this one in-flight message through and
+            // takes effect on the next inbound. snapshot is guaranteed present
+            // here — DM-empty returns at step 2, group-empty/preban at step 3.
+            if (snapshot.get().isBanned()) {
+                sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_BAN_FIXED), adapterName);
+                return;
+            }
+
+            // Step 3.5 — D47 approval gate (M1-112). Group-scope inbound
+            // from a registered (not preban), non-banned user routes
+            // through GroupApprovalCheck.check, which consults the per-
+            // group reply rate bucket then dispatches on approval_status.
+            // Pending / rejected short-circuit with a fixed reply BEFORE
+            // step 4.1 (auto-promote); approved falls through. Banned
+            // users are already filtered at step 4 above and never reach
+            // this block. The null check mirrors the step-4.1 pattern:
+            // plain-JUnit test subclasses that bypass CDI may leave the
+            // field null.
+            if (msg.scope() instanceof ScopeRef.Group group && snapshot.isPresent()
+                    && groupApprovalCheck != null) {
+                GroupApprovalCheck.Outcome outcome = groupApprovalCheck.check(
+                        adapterName,
+                        group.adapterGroupId(),
+                        snapshot.get().id(),
+                        ContactIds.redact(contactId));
+                switch (outcome) {
+                    case GroupApprovalCheck.Outcome.Approved a -> {
+                        // Fall through to step 4.1 (auto-promote).
+                    }
+                    case GroupApprovalCheck.Outcome.FixedReply f -> {
+                        sendReply(msg.scope(), bundleLoader.get(f.bundleKey()), adapterName);
+                        return;
+                    }
+                    case GroupApprovalCheck.Outcome.SilentDrop s -> {
+                        return;
+                    }
+                }
+            }
+
+            // Chat-mode body cap (commands.md §Input length caps): beyond
+            // the cap → friendly error, no chat-agent invocation, no LLM
+            // call, and no DB write. The check fires BEFORE the membership
+            // write (4.1), the probation lazy-clear (5), the confirm drain
+            // (4.5), and the anchor clear (4.6) — all forbidden for an
+            // oversized message — and AFTER the authorization gates
+            // (2/3/4/3.5) so the invite flow, D47 invisibility, the ban
+            // reply, and the per-group reply rate bucket keep their spec'd
+            // precedence over the cap reply.
+            if (!normalized.startsWith("/") && normalized.length() > chatBodyCap) {
+                sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_CHAT_BODY_TOO_LARGE), adapterName);
+                return;
+            }
+
+            // Slash-command body cap (commands.md §Input length caps): a
+            // slash body longer than infochat.command.body-cap gets the
+            // fixed error.command.body_too_large reply and stops BEFORE the
+            // parser (handleSlash) — same ordering rationale as the chat cap
+            // above (after the authorization gates, before any DB write).
+            if (normalized.startsWith("/") && normalized.length() > commandBodyCap) {
+                sendReply(msg.scope(), bundleLoader.get(BundleKeys.ERROR_COMMAND_BODY_TOO_LARGE), adapterName);
+                return;
+            }
+
+            // Step 4.1 — Group resolution, auto-promote, membership
+            // (M1-079c). Placed AFTER the ban check (step 4) so banned
+            // users never get a membership row written. The groups-row
+            // id is resolved exactly once per dispatch, here, on the
+            // dispatch connection, and carried forward as
+            // dispatchScopeId. A missing row is the vanished-group race
+            // (concurrent removal after the step-3.5 approval read):
+            // silent drop with a specific debug log — throwing here was
+            // a timing oracle distinguishing removed-group state. For
+            // every non-banned group-scope sender, attempt auto-promote
+            // first (INSERT with is_group_admin=true ON CONFLICT DO
+            // NOTHING), then ensure a non-admin membership row exists.
+            // The null check on the service mirrors the replyTarget
+            // pattern: plain-JUnit test subclasses do not wire CDI
+            // fields.
+            if (msg.scope() instanceof ScopeRef.Group group) {
+                Optional<UUID> groupId = lookupGroupId(db, adapterName, group.adapterGroupId());
+                if (groupId.isEmpty()) {
+                    log.debug("InboundRouter: no active groups row for adapter={} group={}; dropping",
+                            adapterName, ContactIds.redact(group.adapterGroupId()));
+                    return;
+                }
+                dispatchScopeId = groupId.get();
+                if (groupAutoPromoteService != null) {
+                    UUID senderId = snapshot.get().id();
+                    groupAutoPromoteService.tryAutoPromote(dispatchScopeId, senderId, adapterName, contactId);
+                    ensureGroupMembership(db, dispatchScopeId, senderId);
+                }
+            } else {
+                dispatchScopeId = snapshot.get().id();
+            }
+
+            // Step 5 — slow-start probation gate (M1-045) per spec
+            // §Slow-start tier + §Authorization model step 5. A probation
+            // user invoking a non-allowed command receives the
+            // error.probation.blocked reply (with the {0} time-until-
+            // unlock interpolated from probation_until); a probation
+            // user invoking an allowed command falls through to the
+            // rest of the pipeline; a non-probation user gets the
+            // opportunistic clearIfPromoted (the lazy clear) on the way.
+            //
+            // Invariant: snapshot is always present here — DM-empty
+            // short-circuited at step 2's invite-consume; group senders
+            // with no row (or 'preban') were silently dropped at step 3.
+            // The defensive isPresent guard removed by M1-045 redteam-fix.
+            UUID probationActorId = snapshot.get().id();
+            String commandName = commandNameOf(normalized);
+            if (probationCheck.inProbation(probationActorId)) {
+                if (!commandPermissions.allowedDuringProbation(commandName)) {
+                    Instant expiry = probationCheck.probationExpiry(probationActorId);
+                    String body = MessageFormat.format(
+                            bundleLoader.get(BundleKeys.ERROR_PROBATION_BLOCKED),
+                            formatTimeUntilUnlock(expiry));
+                    sendReply(msg.scope(), body, adapterName);
+                    return;
+                }
+            } else {
+                // Lazy clear: nulls probation_until on the next
+                // request after graduation. Idempotent after first
+                // success (WHERE clause matches zero rows).
+                probationCheck.clearIfPromoted(probationActorId);
+            }
+
+            // Step 4.5 — confirm-cancel sweep (M1-051). Per spec
+            // §Surface conventions ("any other input cancels"): a pending
+            // confirm under (actor.id, scope) that does NOT match the
+            // current inbound's confirm-shape is drained AND the user
+            // receives a cancellation acknowledgement BEFORE the
+            // intended-next-command dispatches. Snapshot is guaranteed
+            // present here by the step-3 invariant.
+            UUID confirmActorId = snapshot.get().id();
+            Optional<ConfirmStateService.PendingConfirm> pending =
+                    confirmStateService.peek(confirmActorId, msg.scope());
+            if (pending.isPresent() && !isConfirmShape(normalized, pending.get())) {
+                // Drain pending and send cancellation BEFORE dispatch.
+                // The takeAny call removes the entry; the subsequent
+                // dispatch proceeds with no pending state, so the
+                // user's intended-next-command is processed normally.
+                ConfirmStateService.PendingConfirm cancelled = pending.get();
+                confirmStateService.takeAny(confirmActorId, msg.scope());
+                String cancellation = MessageFormat.format(
+                        bundleLoader.get(BundleKeys.REPLY_CONFIRM_CANCELLED),
+                        cancelled.commandName());
+                sendReply(msg.scope(), cancellation, adapterName);
+            }
+            // Matching confirm-shape: leave pending in place; the
+            // handler's takeMatching pops it on the dispatch path.
+
+            // Step 4.6 — anchor-clear on non-/retry input (M1-065).
+            // Spec §/retry: "any non-/retry input from the same (user,
+            // scope) clears the anchor." Fires for all commands (except
+            // /retry itself) and all chat-mode messages. The scope id is
+            // the carried dispatchScopeId — no group re-lookup; a
+            // vanished group row already silent-dropped at step 4.1.
+            if (!"retry".equals(commandName)) {
+                UUID anchorActorId = snapshot.get().id();
+                summaryAnchorRepository.clear(
+                        anchorActorId, chatModeScopeKindOf(msg.scope()), dispatchScopeId);
+            }
         }
 
-        // Step 4.5 — confirm-cancel sweep (M1-051). Per spec
-        // §Surface conventions ("any other input cancels"): a pending
-        // confirm under (actor.id, scope) that does NOT match the
-        // current inbound's confirm-shape is drained AND the user
-        // receives a cancellation acknowledgement BEFORE the
-        // intended-next-command dispatches. Snapshot is guaranteed
-        // present here by the step-3 invariant.
-        UUID confirmActorId = snapshot.get().id();
-        Optional<ConfirmStateService.PendingConfirm> pending =
-                confirmStateService.peek(confirmActorId, msg.scope());
-        if (pending.isPresent() && !isConfirmShape(normalized, pending.get())) {
-            // Drain pending and send cancellation BEFORE dispatch.
-            // The takeAny call removes the entry; the subsequent
-            // dispatch proceeds with no pending state, so the
-            // user's intended-next-command is processed normally.
-            ConfirmStateService.PendingConfirm cancelled = pending.get();
-            confirmStateService.takeAny(confirmActorId, msg.scope());
-            String cancellation = MessageFormat.format(
-                    bundleLoader.get(BundleKeys.REPLY_CONFIRM_CANCELLED),
-                    cancelled.commandName());
-            sendReply(msg.scope(), cancellation, adapterName);
-        }
-        // Matching confirm-shape: leave pending in place; the
-        // handler's takeMatching pops it on the dispatch path.
-
-        // Step 4.6 — anchor-clear on non-/retry input (M1-065).
-        // Spec §/retry: "any non-/retry input from the same (user,
-        // scope) clears the anchor." Fires for all commands (except
-        // /retry itself) and all chat-mode messages.
-        if (!"retry".equals(commandName)) {
-            UUID anchorActorId = snapshot.get().id();
-            // Empty scope (group row vanished mid-dispatch) → nothing
-            // to clear; the chat dispatch below silent-drops the same
-            // case.
-            resolveChatScopeId(msg.scope(), anchorActorId, adapterName)
-                    .ifPresent(anchorScopeId -> summaryAnchorRepository.clear(
-                            anchorActorId, chatModeScopeKindOf(msg.scope()), anchorScopeId));
-        }
+        // ---- LLM boundary. The dispatch connection is closed above;
+        // step 6 runs with no router-held pool connection — command
+        // handlers and the chat agent borrow (and release) their own,
+        // and nothing may pin a connection under an LLM call.
 
         // Step 6 — Parse + dispatch (slash-command resolver or
         // chat-mode fallback). The body is @Nullable: a slash handler
@@ -635,46 +669,27 @@ public class InboundRouter {
                 // dispatch never consults the group bucket. Overflow
                 // sends the fixed group.command_rate_limit reply per
                 // design §4.9 — unlike the reply bucket's silent drop.
-                // An empty group lookup is the same vanished-mid-
-                // dispatch race as the step-4.1 and chat branches and
-                // silent-drops identically.
-                if (msg.scope() instanceof ScopeRef.Group group) {
-                    Optional<UUID> groupDbId =
-                            lookupGroupId(adapterName, group.adapterGroupId());
-                    if (groupDbId.isEmpty()) {
-                        log.debug("InboundRouter: no active groups row for command scope adapter={} scope={}; dropping",
-                                adapterName, ContactIds.redact(group.adapterGroupId()));
-                        return;
-                    }
-                    if (!rateCapBucket.tryAcquireGroupCommand(groupDbId.get())) {
-                        body = bundleLoader.get(BundleKeys.GROUP_COMMAND_RATE_LIMIT);
-                    } else {
-                        body = handleSlash(msg.scope(), normalized);
-                    }
+                // The bucket keys on the carried dispatchScopeId — the
+                // groups.id resolved once at step 4.1.
+                if (msg.scope() instanceof ScopeRef.Group
+                        && !rateCapBucket.tryAcquireGroupCommand(dispatchScopeId)) {
+                    body = bundleLoader.get(BundleKeys.GROUP_COMMAND_RATE_LIMIT);
                 } else {
                     body = handleSlash(msg.scope(), normalized);
                 }
             } else {
                 // Chat-mode dispatch: enforce LLM rate cap, then delegate
-                // to ChatAgent (the chat-mode body cap already fired
+                // to the chat agent (the chat-mode body cap already fired
                 // before step 4.1 — see the intake-step order above).
-                // scope_kind is "dm" or "group"; scope_id is the user's
-                // UUID for DM, the group's UUID for group scope
-                // (per-scope isolation, schema §Invariants).
+                // scope_kind is "dm" or "group"; the scope id is the
+                // carried dispatchScopeId — the user's UUID for DM, the
+                // group's UUID for group scope (per-scope isolation,
+                // schema §Invariants).
                 UUID actorId = snapshot.get().id();
                 if (!llmRateCap.tryAcquire(actorId)) {
                     body = bundleLoader.get(BundleKeys.ERROR_CHAT_LLM_RATE_CAP);
                 } else {
                     String scopeKind = chatModeScopeKindOf(msg.scope());
-                    Optional<UUID> scopeId = resolveChatScopeId(
-                            msg.scope(), actorId, adapterName);
-                    if (scopeId.isEmpty()) {
-                        // Group row vanished mid-dispatch — silent drop,
-                        // mirroring the step-4.1 empty branch.
-                        log.debug("InboundRouter: no active groups row for chat scope adapter={} scope={}; dropping",
-                                adapterName, ContactIds.redact(scopeIdOf(msg.scope())));
-                        return;
-                    }
                     // Per-group LLM backstop (D47, M1-222) per spec
                     // §Rate limiting: the per-user cap above fires
                     // first; this aggregate sub-bucket keyed on
@@ -688,14 +703,14 @@ public class InboundRouter {
                     // digests are system-initiated and never reach
                     // this path.
                     if (msg.scope() instanceof ScopeRef.Group
-                            && !rateCapBucket.tryAcquireGroupLlm(scopeId.get())) {
+                            && !rateCapBucket.tryAcquireGroupLlm(dispatchScopeId)) {
                         // Group-cap rejection refunds the per-user token
                         // acquired above — the backstop must not drain the
                         // sender's personal budget on fixed replies.
                         llmRateCap.refund(actorId);
                         body = bundleLoader.get(BundleKeys.GROUP_LLM_RATE_LIMIT);
                     } else {
-                        body = chatAgent.handle(actorId, scopeKind, scopeId.get(), normalized);
+                        body = dispatchChat(actorId, scopeKind, dispatchScopeId, normalized);
                     }
                 }
             }
@@ -727,12 +742,13 @@ public class InboundRouter {
      * and override this method with a fixed-value response — the
      * helpers do not wire a {@link DataSource} fake, and the
      * size-cap / normalize / redaction code paths the tests exercise
-     * do not depend on a real users row. Production callers consume
-     * via the {@code @Inject} {@link DataSource} seam.</p>
+     * do not depend on a real users row. Production resolution runs on
+     * the shared per-dispatch connection ({@link DispatchDb}, lazily
+     * borrowed at this first use); overrides ignore the context and
+     * never touch JDBC.</p>
      */
-    Optional<UserSnapshot> lookupUser(String adapter, String contactId) {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(USER_SNAPSHOT_SQL)) {
+    Optional<UserSnapshot> lookupUser(DispatchDb db, String adapter, String contactId) {
+        try (PreparedStatement ps = db.connection().prepareStatement(USER_SNAPSHOT_SQL)) {
             ps.setString(1, adapter);
             ps.setString(2, contactId);
             try (ResultSet rs = ps.executeQuery()) {
@@ -760,6 +776,48 @@ public class InboundRouter {
      * construct instances when overriding {@link #lookupUser}.
      */
     record UserSnapshot(UUID id, String registrationState, boolean isBanned) {}
+
+    /**
+     * Per-dispatch database context: one lazily-borrowed pool
+     * connection shared by every router-owned DB step of the pre-LLM
+     * intake phase (users-row snapshot, groups-row resolution,
+     * membership upsert). Lazy so dispatches that stop before any DB
+     * step — and test subclasses that override the lookup seams —
+     * never borrow at all. Closed before step 6 hands off to a
+     * command handler or the chat agent: no router connection may be
+     * held across an LLM call, and dispatch-phase collaborators
+     * borrow their own.
+     */
+    static final class DispatchDb implements AutoCloseable {
+
+        private final DataSource dataSource;
+        private @Nullable Connection connection;
+
+        DispatchDb(DataSource dataSource) {
+            this.dataSource = dataSource;
+        }
+
+        /** The shared dispatch connection, borrowed from the pool on first use. */
+        Connection connection() throws SQLException {
+            if (connection == null) {
+                connection = dataSource.getConnection();
+            }
+            return connection;
+        }
+
+        @Override
+        public void close() {
+            if (connection == null) {
+                return;
+            }
+            try {
+                connection.close();
+            } catch (SQLException e) {
+                throw new IllegalStateException(
+                        "InboundRouter dispatch connection release failed", e);
+            }
+        }
+    }
 
     private void sendReply(ScopeRef scope, String body, String adapterName) {
         MessagingAdapter target = replyTargets.get(adapterName);
@@ -904,32 +962,20 @@ public class InboundRouter {
         };
     }
 
-    // DM scope → actorId; group scope → group UUID from the groups
-    // table, empty when the group row is absent (removed mid-dispatch).
-    // Callers skip the anchor clear / silent-drop the chat dispatch on
-    // empty rather than throwing.
-    private Optional<UUID> resolveChatScopeId(ScopeRef scope,
-                                              UUID actorId,
-                                              String adapterName) {
-        return switch (scope) {
-            case ScopeRef.Dm ignored -> Optional.of(actorId);
-            case ScopeRef.Group group -> lookupGroupId(adapterName, group.adapterGroupId());
-        };
-    }
-
     /**
      * Resolve the {@code groups.id} for an active (not removed) group
      * row, or empty when no such row exists. A missing row is a normal
      * race outcome (group removed between the step-3.5 approval read
-     * and a later lookup), NOT an error: callers silent-drop or skip
-     * instead of throwing, so an attacker cannot use the
+     * and the step-4.1 resolution), NOT an error: the caller
+     * silent-drops instead of throwing, so an attacker cannot use the
      * exception-vs-reply difference as a timing oracle on group
      * existence. The {@link SQLException} branch (infrastructure
-     * failure) still throws.
+     * failure) still throws. Same test seam as {@link #lookupUser}:
+     * package-private + non-final, runs on the shared per-dispatch
+     * connection.
      */
-    Optional<UUID> lookupGroupId(String adapter, String upstreamGroupId) {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(SELECT_GROUP_SQL)) {
+    Optional<UUID> lookupGroupId(DispatchDb db, String adapter, String upstreamGroupId) {
+        try (PreparedStatement ps = db.connection().prepareStatement(SELECT_GROUP_SQL)) {
             ps.setString(1, adapter);
             ps.setString(2, upstreamGroupId);
             try (ResultSet rs = ps.executeQuery()) {
@@ -944,9 +990,8 @@ public class InboundRouter {
         }
     }
 
-    private void ensureGroupMembership(UUID groupId, UUID userId) {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(ENSURE_MEMBERSHIP_SQL)) {
+    private void ensureGroupMembership(DispatchDb db, UUID groupId, UUID userId) {
+        try (PreparedStatement ps = db.connection().prepareStatement(ENSURE_MEMBERSHIP_SQL)) {
             ps.setObject(1, groupId);
             ps.setObject(2, userId);
             ps.executeUpdate();
@@ -954,6 +999,17 @@ public class InboundRouter {
             throw new IllegalStateException(
                     "InboundRouter.ensureGroupMembership failed", e);
         }
+    }
+
+    /**
+     * Chat-mode dispatch hand-off. Package-private + non-final for the
+     * same reason as {@link #lookupUser}: plain-JUnit tests assert the
+     * LLM-boundary invariant (the dispatch connection is released
+     * before this point) without wiring a real
+     * {@link app.zcat.infochat.provider.chat.ChatAgent}.
+     */
+    String dispatchChat(UUID actorId, String scopeKind, UUID scopeId, String normalized) {
+        return chatAgent.handle(actorId, scopeKind, scopeId, normalized);
     }
 
     /**

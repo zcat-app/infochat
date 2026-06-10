@@ -76,11 +76,40 @@ public class CancellationService {
      * Called by interruptible query code before executing long-running
      * read-only queries — bounds the worst case even when pg_cancel_backend
      * fails or the cancellation handle is never registered.
+     *
+     * <p>The timeout is transaction-local: autocommit is switched off so
+     * {@code SET LOCAL} binds to the transaction pgJDBC opens at the next
+     * statement, and the setting dies with that transaction — a plain
+     * session-level {@code SET} on a pooled connection leaks the timeout
+     * to subsequent borrowers. Callers run read-only queries on the armed
+     * connection and never commit, so the pool's release-time rollback
+     * discards nothing.</p>
      */
     public void applyStatementTimeout(Connection conn) throws SQLException {
+        long timeoutMillis = validatedTimeoutMillis();
+        conn.setAutoCommit(false);
         try (var stmt = conn.createStatement()) {
-            stmt.execute("SET statement_timeout = " + statementTimeout.toMillis());
+            stmt.execute("SET LOCAL statement_timeout = " + timeoutMillis);
         }
+    }
+
+    /**
+     * The configured timeout as a validated positive integer of
+     * milliseconds. PostgreSQL rejects bind parameters in SET, so the
+     * value is formatted into the statement text; the range check
+     * guarantees the formatted text is a plain positive integer within
+     * PostgreSQL's int4 statement_timeout domain, never raw
+     * operator-supplied text.
+     */
+    private long validatedTimeoutMillis() {
+        long millis = statementTimeout.toMillis();
+        if (millis <= 0 || millis > Integer.MAX_VALUE) {
+            throw new IllegalStateException(
+                    "infochat.stop.statement-timeout must be a positive duration"
+                            + " of at most " + Integer.MAX_VALUE + " ms, got: "
+                            + statementTimeout);
+        }
+        return millis;
     }
 
     /**
@@ -120,8 +149,19 @@ public class CancellationService {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(PG_CANCEL_BACKEND)) {
             ps.setInt(1, pid);
-            ps.execute();
-            log.info("pg_cancel_backend({}) issued", pid);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                if (rs.getBoolean(1)) {
+                    log.info("pg_cancel_backend({}) issued", pid);
+                } else {
+                    // false: no backend with that pid (query already
+                    // finished) or not cancellable by this role. The
+                    // worker discards the in-flight result regardless;
+                    // the WARN is for operator visibility only.
+                    log.warn("pg_cancel_backend({}) returned false"
+                            + " (backend gone or not cancellable)", pid);
+                }
+            }
         } catch (SQLException e) {
             // Best-effort: the worker discards the result regardless.
             log.warn("pg_cancel_backend({}) failed (best-effort)", pid, e);

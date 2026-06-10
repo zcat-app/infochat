@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.command;
 
 import app.zcat.infochat.core.util.JsonEscaper;
+import app.zcat.infochat.provider.chat.CancellationService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -132,6 +133,9 @@ public class ExportDataCollector {
     @Inject
     DataSource dataSource;
 
+    @Inject
+    CancellationService cancellationService;
+
     /**
      * Per-table row cap. Bounds memory for power users with large
      * audit histories. When a table has more rows than the cap, the
@@ -156,6 +160,11 @@ public class ExportDataCollector {
             UUID scopeId) {
 
         try (Connection conn = dataSource.getConnection()) {
+            // Export reads run under the standard (profile-driven)
+            // statement timeout, applied transaction-locally before the
+            // first collection query so a pathological table cannot hold
+            // the connection unbounded.
+            cancellationService.applyStatementTimeout(conn);
             LinkedHashMap<String, List<String>> tables = new LinkedHashMap<>();
             List<String> truncated = new ArrayList<>();
 

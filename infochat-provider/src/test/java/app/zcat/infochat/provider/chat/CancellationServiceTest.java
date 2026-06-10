@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.chat;
 
+import org.jboss.logmanager.LogContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -16,10 +17,16 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
 import java.util.logging.Logger;
+import java.util.logging.SimpleFormatter;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CancellationServiceTest {
@@ -94,10 +101,106 @@ class CancellationServiceTest {
         assertEquals(1, stmt.executedSql.size(),
                 "applyStatementTimeout must execute exactly one SQL statement");
         String sql = stmt.executedSql.get(0);
-        assertTrue(sql.contains("SET statement_timeout"),
-                "must issue SET statement_timeout. Got: " + sql);
+        assertTrue(sql.contains("SET LOCAL statement_timeout"),
+                "must issue SET LOCAL statement_timeout. Got: " + sql);
         assertTrue(sql.contains("30000"),
                 "must use the configured timeout in millis (30s = 30000ms). Got: " + sql);
+    }
+
+    /**
+     * Acceptance pin: the timeout is transaction-local. A pooled
+     * session armed by a timeout-bearing call must serve the pool's
+     * default statement_timeout to the next borrower — the leak fixed
+     * here was a session-level SET surviving the connection's return
+     * to the pool. {@link PgSessionFake} models the PostgreSQL
+     * semantics the assertion needs: SET LOCAL binds to the open
+     * transaction only, and the pool's release-time rollback + reset
+     * discards it; a plain session-level SET would survive both.
+     */
+    @Test
+    void connectionBorrowedAfterTimeoutBearingCallObservesPoolDefault() throws SQLException {
+        PgSessionFake session = new PgSessionFake();
+
+        Connection first = session.borrow();
+        service.applyStatementTimeout(first);
+        assertEquals("30000", session.effectiveStatementTimeout(),
+                "the timeout must be in force while the armed transaction is open");
+        first.close();
+
+        session.borrow();
+        assertEquals(PgSessionFake.DEFAULT_TIMEOUT, session.effectiveStatementTimeout(),
+                "a connection borrowed after a timeout-bearing call must observe"
+                        + " the pool's default statement_timeout");
+    }
+
+    /**
+     * Acceptance pin: the value reaching the SET statement is a
+     * validated positive integer within PostgreSQL's int4 domain —
+     * never raw text. Rejection must happen before any SQL reaches
+     * the connection.
+     */
+    @Test
+    void applyStatementTimeoutRejectsNonPositiveAndOverflowDurations() {
+        RecordingStatement recorder = new RecordingStatement();
+        Connection conn = proxyConnection(recorder);
+
+        service.statementTimeout = Duration.ZERO;
+        assertThrows(IllegalStateException.class,
+                () -> service.applyStatementTimeout(conn),
+                "zero timeout must be rejected");
+
+        service.statementTimeout = Duration.ofMillis(-5);
+        assertThrows(IllegalStateException.class,
+                () -> service.applyStatementTimeout(conn),
+                "negative timeout must be rejected");
+
+        service.statementTimeout = Duration.ofMillis((long) Integer.MAX_VALUE + 1);
+        assertThrows(IllegalStateException.class,
+                () -> service.applyStatementTimeout(conn),
+                "timeout beyond PostgreSQL's int4 millisecond domain must be rejected");
+
+        assertTrue(recorder.executedSql.isEmpty(),
+                "validation must reject the value before any SQL reaches the connection");
+    }
+
+    /**
+     * Acceptance pin: a false pg_cancel_backend result (backend gone
+     * or not cancellable) logs WARN naming the pid instead of the
+     * success INFO.
+     */
+    @Test
+    void pgCancelBackendFalseResultLogsWarnNamingPid() {
+        recordingDataSource.pgCancelResult = false;
+        tracker.tryAcquire(USER_A, "dm", SCOPE_A);
+        InFlightTracker.CancellationHandle handle =
+                tracker.getCancellationHandle(USER_A, "dm", SCOPE_A).orElseThrow();
+        handle.registerPgBackendPid(77);
+
+        CapturingHandler logCapture = new CapturingHandler();
+        org.jboss.logmanager.Logger jbossLogger =
+                LogContext.getLogContext().getLogger(CancellationService.class.getName());
+        Logger julLogger = Logger.getLogger(CancellationService.class.getName());
+        jbossLogger.addHandler(logCapture);
+        julLogger.addHandler(logCapture);
+        try {
+            service.cancel(USER_A, "dm", SCOPE_A);
+        } finally {
+            jbossLogger.removeHandler(logCapture);
+            julLogger.removeHandler(logCapture);
+        }
+
+        assertTrue(logCapture.records.stream().anyMatch(r ->
+                        r.getLevel().intValue() == Level.WARNING.intValue()
+                                && logCapture.format(r).contains("pg_cancel_backend")
+                                && logCapture.format(r).contains("77")),
+                "a false pg_cancel_backend result must WARN naming the pid. Got: "
+                        + logCapture.formatted());
+        assertFalse(logCapture.records.stream().anyMatch(r ->
+                        r.getLevel().intValue() == Level.INFO.intValue()
+                                && logCapture.format(r).contains("pg_cancel_backend")),
+                "the false path must not emit the success INFO");
+
+        Thread.interrupted();
     }
 
     @Test
@@ -115,7 +218,7 @@ class CancellationServiceTest {
 
         service.armToolConnection(conn, USER_A, "dm", SCOPE_A);
 
-        assertTrue(recorder.executedSql.stream().anyMatch(s -> s.contains("SET statement_timeout")),
+        assertTrue(recorder.executedSql.stream().anyMatch(s -> s.contains("SET LOCAL statement_timeout")),
                 "armToolConnection must apply statement_timeout. Got: " + recorder.executedSql);
         InFlightTracker.CancellationHandle handle =
                 tracker.getCancellationHandle(USER_A, "dm", SCOPE_A).orElseThrow();
@@ -135,7 +238,7 @@ class CancellationServiceTest {
         // is a no-op rather than throwing.
         service.armToolConnection(conn, USER_A, "dm", SCOPE_A);
 
-        assertTrue(recorder.executedSql.stream().anyMatch(s -> s.contains("SET statement_timeout")),
+        assertTrue(recorder.executedSql.stream().anyMatch(s -> s.contains("SET LOCAL statement_timeout")),
                 "statement_timeout must still apply with no in-flight slot");
         assertTrue(tracker.getCancellationHandle(USER_A, "dm", SCOPE_A).isEmpty(),
                 "no slot should exist, so pid registration is a no-op");
@@ -145,6 +248,8 @@ class CancellationServiceTest {
 
     private static class RecordingDataSource implements DataSource {
         final List<String> executedSql = new ArrayList<>();
+        // What the fake pg_cancel_backend(pid) reports back.
+        boolean pgCancelResult = true;
 
         @Override
         public Connection getConnection() {
@@ -162,6 +267,10 @@ class CancellationServiceTest {
                                         case "execute" -> {
                                             executedSql.add(sql);
                                             yield false;
+                                        }
+                                        case "executeQuery" -> {
+                                            executedSql.add(sql);
+                                            yield singleBooleanResultSet(pgCancelResult);
                                         }
                                         case "close" -> null;
                                         default -> throw new UnsupportedOperationException(
@@ -205,6 +314,7 @@ class CancellationServiceTest {
                                 default -> throw new UnsupportedOperationException(
                                         "Statement." + sMethod.getName());
                             });
+                    case "setAutoCommit" -> null;
                     case "close" -> null;
                     default -> throw new UnsupportedOperationException(
                             "Connection." + method.getName());
@@ -234,6 +344,7 @@ class CancellationServiceTest {
                                 default -> throw new UnsupportedOperationException(
                                         "Statement." + sMethod.getName());
                             });
+                    case "setAutoCommit" -> null;
                     case "close" -> null;
                     default -> throw new UnsupportedOperationException(
                             "Connection." + method.getName());
@@ -257,5 +368,145 @@ class CancellationServiceTest {
                     default -> throw new UnsupportedOperationException(
                             "ResultSet." + method.getName());
                 });
+    }
+
+    // ResultSet proxy with exactly one row whose single boolean column is value.
+    private static ResultSet singleBooleanResultSet(boolean value) {
+        boolean[] advanced = { false };
+        return (ResultSet) Proxy.newProxyInstance(
+                ResultSet.class.getClassLoader(),
+                new Class<?>[] { ResultSet.class },
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "next" -> {
+                        if (advanced[0]) yield false;
+                        advanced[0] = true;
+                        yield true;
+                    }
+                    case "getBoolean" -> value;
+                    case "close" -> null;
+                    default -> throw new UnsupportedOperationException(
+                            "ResultSet." + method.getName());
+                });
+    }
+
+    /**
+     * Minimal model of one pooled PostgreSQL session, covering exactly
+     * the semantics the transaction-local pin needs:
+     * <ul>
+     *   <li>{@code SET statement_timeout} (session-level) survives the
+     *       connection's return to the pool — the leak under test;</li>
+     *   <li>{@code SET LOCAL statement_timeout} binds to the open
+     *       transaction only (a no-op under autocommit, as in
+     *       PostgreSQL), and the pool's release-time rollback + reset
+     *       discards it;</li>
+     *   <li>{@code borrow()} hands out the SAME underlying session
+     *       again, as a pool reusing the physical connection does.</li>
+     * </ul>
+     */
+    private static final class PgSessionFake {
+        static final String DEFAULT_TIMEOUT = "default";
+
+        private String sessionTimeout = DEFAULT_TIMEOUT;
+        private String txLocalTimeout;
+        private boolean autoCommit = true;
+
+        Connection borrow() {
+            return (Connection) Proxy.newProxyInstance(
+                    Connection.class.getClassLoader(),
+                    new Class<?>[] { Connection.class },
+                    (proxy, method, args) -> switch (method.getName()) {
+                        case "setAutoCommit" -> {
+                            autoCommit = (Boolean) args[0];
+                            yield null;
+                        }
+                        case "createStatement" -> statement();
+                        case "close" -> {
+                            release();
+                            yield null;
+                        }
+                        default -> throw new UnsupportedOperationException(
+                                "Connection." + method.getName());
+                    });
+        }
+
+        private Statement statement() {
+            return (Statement) Proxy.newProxyInstance(
+                    Statement.class.getClassLoader(),
+                    new Class<?>[] { Statement.class },
+                    (proxy, method, args) -> switch (method.getName()) {
+                        case "execute" -> {
+                            applySql((String) args[0]);
+                            yield false;
+                        }
+                        case "close" -> null;
+                        default -> throw new UnsupportedOperationException(
+                                "Statement." + method.getName());
+                    });
+        }
+
+        // Pool release: roll back any open transaction (discarding
+        // SET LOCAL) and reset autocommit.
+        private void release() {
+            txLocalTimeout = null;
+            autoCommit = true;
+        }
+
+        private void applySql(String sql) {
+            if (sql.startsWith("SET LOCAL statement_timeout")) {
+                // Transaction-scoped; PostgreSQL discards it under
+                // autocommit (each statement is its own transaction).
+                if (!autoCommit) {
+                    txLocalTimeout = valueOf(sql);
+                }
+            } else if (sql.startsWith("SET statement_timeout")) {
+                sessionTimeout = valueOf(sql);
+            } else {
+                throw new UnsupportedOperationException("SQL: " + sql);
+            }
+        }
+
+        private static String valueOf(String sql) {
+            return sql.substring(sql.indexOf('=') + 1).trim();
+        }
+
+        String effectiveStatementTimeout() {
+            return txLocalTimeout != null ? txLocalTimeout : sessionTimeout;
+        }
+    }
+
+    // Mirrors the plain-JUnit log-capture pattern of
+    // InboundRouterContactIdRedactionTest: a JUL Handler attached to both
+    // the jboss-logmanager and JUL loggers so the capture works under
+    // either active backend.
+    private static final class CapturingHandler extends Handler {
+        final List<LogRecord> records = new CopyOnWriteArrayList<>();
+        private final SimpleFormatter formatter = new SimpleFormatter();
+
+        CapturingHandler() {
+            setLevel(Level.ALL);
+        }
+
+        @Override
+        public void publish(LogRecord record) {
+            records.add(record);
+        }
+
+        @Override
+        public void flush() {}
+
+        @Override
+        public void close() {}
+
+        String format(LogRecord record) {
+            return formatter.format(record);
+        }
+
+        String formatted() {
+            StringBuilder sb = new StringBuilder();
+            for (LogRecord r : records) {
+                sb.append(formatter.format(r));
+            }
+            return sb.toString();
+        }
     }
 }

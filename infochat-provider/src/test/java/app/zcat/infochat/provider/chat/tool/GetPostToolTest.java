@@ -124,7 +124,7 @@ class GetPostToolTest {
         // Construct the tool against a counting/recording DataSource that
         // delegates to the seed DB, plus the CDI CancellationService (whose
         // InFlightTracker is the injected singleton). The query runs for real
-        // (no row need exist); the wrapper observes the SET statement_timeout
+        // (no row need exist); the wrapper observes the SET LOCAL statement_timeout
         // and pg_backend_pid the arming step issues.
         UUID userId = UUID.randomUUID();
         CountingRecordingDataSource countingDs = new CountingRecordingDataSource(dataSource);
@@ -138,7 +138,7 @@ class GetPostToolTest {
             directTool.execute(userId, "dm", userId, Map.of("uid", PREFIX + "absent"));
 
             assertTrue(countingDs.executedSql().stream()
-                            .anyMatch(s -> s.contains("SET statement_timeout")),
+                            .anyMatch(s -> s.contains("SET LOCAL statement_timeout")),
                     "getPost's connection must have statement_timeout applied. Got: "
                             + countingDs.executedSql());
             assertTrue(slot.hasPgBackendPid(),

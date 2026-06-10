@@ -40,7 +40,7 @@ class InboundRouterBanSnapshotTest {
         NoopBundleLoader bundleLoader = new NoopBundleLoader();
         InboundRouter router = new InboundRouter() {
             @Override
-            Optional<UserSnapshot> lookupUser(String adapter, String contactId) {
+            Optional<UserSnapshot> lookupUser(DispatchDb db, String adapter, String contactId) {
                 lookups.incrementAndGet();
                 return Optional.of(new UserSnapshot(UUID.randomUUID(), "vouched", true));
             }

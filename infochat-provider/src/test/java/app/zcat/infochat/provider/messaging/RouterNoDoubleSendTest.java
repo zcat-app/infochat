@@ -76,7 +76,7 @@ class RouterNoDoubleSendTest {
     private InboundRouter newRouter(CapturingAdapter target) {
         InboundRouter router = new InboundRouter() {
             @Override
-            Optional<UserSnapshot> lookupUser(String adapter, String contactId) {
+            Optional<UserSnapshot> lookupUser(DispatchDb db, String adapter, String contactId) {
                 return Optional.of(new UserSnapshot(ACTOR_ID, "vouched", false));
             }
         };

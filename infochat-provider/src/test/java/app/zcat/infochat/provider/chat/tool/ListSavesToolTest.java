@@ -54,7 +54,7 @@ class ListSavesToolTest {
             directTool.execute(userId, "dm", userId, Map.of());
 
             assertTrue(countingDs.executedSql().stream()
-                            .anyMatch(s -> s.contains("SET statement_timeout")),
+                            .anyMatch(s -> s.contains("SET LOCAL statement_timeout")),
                     "listSaves's connection must have statement_timeout applied. Got: "
                             + countingDs.executedSql());
             assertTrue(slot.hasPgBackendPid(),

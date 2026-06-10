@@ -60,6 +60,7 @@ class InboundRouterProbationOrderingTest {
 
     private static final String ADAPTER = "inmemory";
     private static final String DM_CONTACT = "probation-ordering-test-contact";
+    private static final UUID GROUP_ROW_ID = UUID.randomUUID();
 
     // ----- (a) in-probation user + blocked command → gate fires --------------
 
@@ -292,12 +293,20 @@ class InboundRouterProbationOrderingTest {
             boolean allowedDuringProbation) {
         InboundRouter router = new InboundRouter() {
             @Override
-            Optional<UserSnapshot> lookupUser(String adapter, String contactId) {
+            Optional<UserSnapshot> lookupUser(DispatchDb db, String adapter, String contactId) {
                 log.calls.add("lookupUser");
                 return Optional.of(new UserSnapshot(
                         snapshot.id(),
                         snapshot.registrationState(),
                         banned));
+            }
+
+            // Group-scope scenarios reach the step-4.1 groups-row
+            // resolution (hoisted out of the auto-promote null-guard);
+            // a fixed id keeps them off JDBC, mirroring lookupUser.
+            @Override
+            Optional<UUID> lookupGroupId(DispatchDb db, String adapter, String upstreamGroupId) {
+                return Optional.of(GROUP_ROW_ID);
             }
         };
         router.commandHandlers = new SingletonInstance<>();
@@ -349,7 +358,7 @@ class InboundRouterProbationOrderingTest {
     private InboundRouter newRouterEmptySnapshot(CallLog log) {
         InboundRouter router = new InboundRouter() {
             @Override
-            Optional<UserSnapshot> lookupUser(String adapter, String contactId) {
+            Optional<UserSnapshot> lookupUser(DispatchDb db, String adapter, String contactId) {
                 log.calls.add("lookupUser");
                 return Optional.empty();
             }

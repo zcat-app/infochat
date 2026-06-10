@@ -146,7 +146,7 @@ class SearchPostsToolTest {
             assertEquals(1, countingDs.connectionCount(),
                     "SearchPostsTool must acquire exactly one pooled connection per call");
             assertTrue(countingDs.executedSql().stream()
-                            .anyMatch(s -> s.contains("SET statement_timeout")),
+                            .anyMatch(s -> s.contains("SET LOCAL statement_timeout")),
                     "the single connection must have statement_timeout applied. Got: "
                             + countingDs.executedSql());
             assertTrue(slot.hasPgBackendPid(),
@@ -451,7 +451,7 @@ class SearchPostsToolTest {
      * Wraps a real {@link DataSource}, counting {@code getConnection()} calls
      * and recording the SQL executed on each connection (both
      * {@code createStatement().execute/executeQuery} — e.g. the
-     * {@code SET statement_timeout} and {@code SELECT pg_backend_pid()} the
+     * {@code SET LOCAL statement_timeout} and {@code SELECT pg_backend_pid()} the
      * arming step issues — and {@code prepareStatement}). Every other call is
      * delegated to the real connection, so the tool's queries run for real.
      */
