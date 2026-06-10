@@ -23,6 +23,7 @@ import java.net.http.HttpClient;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -399,10 +400,23 @@ public final class SimpleXAdapter implements MessagingAdapter {
     @Override
     public MessageHandle send(OutboundMessage msg) throws MessagingException {
         SimpleXWebSocketClient ws = requireConnected();
-        String corrId = nextCorrId();
-        String envelope = SimpleXMessageCodec.encodeSendCommand(corrId, msg.scope(), msg.text());
-        outboundRate.acquire();
-        String chatItemId = ws.sendCommand(corrId, envelope, ACK_TIMEOUT);
+        // Over-cap texts are split into ordered chunks (design §6.3.4) —
+        // before chunking, a digest past the 4 000-byte SimpleX text cap
+        // failed PERMANENT and the recipient received nothing. sendCommand
+        // blocks on each chunk's ack, so chunk N+1 transmits only after
+        // chunk N is accepted: transport-order delivery with no extra
+        // sequencing. Each chunk draws its own rate-limiter token. A
+        // chunked send is not atomic — a mid-sequence failure can deliver
+        // a prefix; the Provider retry then re-sends from the first chunk,
+        // which the §6.3.5 duplicate tolerance accepts.
+        List<String> chunks = SimpleXOutboundChunker.chunk(msg.text());
+        String chatItemId = transmitChunk(ws, msg.scope(), chunks.getFirst());
+        for (int i = 1; i < chunks.size(); i++) {
+            chatItemId = transmitChunk(ws, msg.scope(), chunks.get(i));
+        }
+        // The handle tracks the LAST chunk, so a later update() /
+        // finalizeMessage() edits the message closest to the reader's
+        // view; the single-chunk case is unchanged.
         String opaque = "simplex-" + handleCounter.incrementAndGet();
         TrackedHandle tracked = new TrackedHandle(
                 new SimpleXMessageHandle(chatItemId, msg.scope(), msg.correlationId()));
@@ -410,6 +424,15 @@ public final class SimpleXAdapter implements MessagingAdapter {
             handles.put(opaque, tracked);
         }
         return new MessageHandle(opaque);
+    }
+
+    /** Encode, pace, and transmit one chunk; returns the ack's chat-item id. */
+    private String transmitChunk(SimpleXWebSocketClient ws, ScopeRef scope, String text)
+            throws MessagingException {
+        String corrId = nextCorrId();
+        String envelope = SimpleXMessageCodec.encodeSendCommand(corrId, scope, text);
+        outboundRate.acquire();
+        return ws.sendCommand(corrId, envelope, ACK_TIMEOUT);
     }
 
     @Override

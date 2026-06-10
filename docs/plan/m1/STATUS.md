@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 313 |
+| done | 314 |
 | deferred | 3 |
 | **total** | **319** |
 
@@ -26,7 +26,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-268 — Thread /lang through bundle lookups (D43) (complexity: high, risk: medium)
 - M1-279 — §7/§7a sweep: defensive checks, broad catches, test seams (complexity: medium, risk: low)
-- M1-283 — Over-cap outbound digest dropped on SimpleX (complexity: medium, risk: medium)
 
 ---
 
@@ -62,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-283 | Over-cap outbound digest dropped on SimpleX | 2026-06-10 | round 1 APPROVE |
 | M1-282 | Redactor suppressed-throwable coverage | 2026-06-10 | round 1 APPROVE |
 | M1-281 | Core contracts: contact-id redaction parity, Fetcher rename | 2026-06-10 | round 1 APPROVE |
 | M1-280 | Provider mediums: Gate 4, usage replies, price label, bucket | 2026-06-10 | round 1 APPROVE |
@@ -71,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-275 | DB hygiene: SET LOCAL timeouts, per-dispatch conn reuse | 2026-06-10 | round 1 APPROVE |
 | M1-274 | Capability flags: reconcile with design, prune speculative | 2026-06-10 | round 2 APPROVE |
 | M1-273 | Transport classification matrix + Signal start race | 2026-06-10 | round 1 APPROVE |
-| M1-272 | Redactor thrown-chain coverage + log hygiene sweep | 2026-06-10 | round 1 APPROVE |
 
 ---
 
@@ -457,7 +456,7 @@ M1-271 (done)
 M1-272 (done)
 M1-273 (done)
 M1-274 (done)
-  └── M1-283 (pending) ← runnable
+  └── M1-283 (done)
 M1-275 (done)
 M1-276 (done)
 M1-277 (done)

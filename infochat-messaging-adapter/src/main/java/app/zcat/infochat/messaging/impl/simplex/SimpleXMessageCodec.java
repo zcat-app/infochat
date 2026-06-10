@@ -50,11 +50,12 @@ import java.util.regex.Pattern;
 final class SimpleXMessageCodec {
 
     /**
-     * Adapter-local clock cap on the outbound text we paste into the command
-     * envelope. The Provider-side capability flag enforces the protocol cap
-     * (4 KB per design §6.4.2); this constant exists only as a defensive
-     * second wall against a Provider that forgot to chunk — the codec is the
-     * narrowest internal boundary that still sees the raw text.
+     * Adapter-local cap on the outbound text we paste into the command
+     * envelope (4 KB per design §6.4.2). {@link SimpleXAdapter#send} splits
+     * over-cap texts into chunks that each fit this ceiling (design §6.3.4
+     * outbound chunking); the check here is a defensive second wall at the
+     * codec — the narrowest internal boundary that still sees the raw text
+     * — and is what keeps the never-chunked edit path capped.
      */
     static final int MAX_OUTBOUND_TEXT_BYTES = 4_000;
 
@@ -104,7 +105,7 @@ final class SimpleXMessageCodec {
      *
      * @throws MessagingException ({@link FailureCategory#PERMANENT}) if
      *         {@code text} exceeds {@link #MAX_OUTBOUND_TEXT_BYTES} — the
-     *         Provider's capability-flag chunking should have prevented
+     *         {@link SimpleXAdapter#send} chunking should have prevented
      *         this; the check is a system-boundary defense.
      */
     static String encodeSendCommand(String corrId,
