@@ -14,8 +14,8 @@ This skill is the procedure. The prompt templates are at:
 
 If any of those is absent, the skill refuses with an explicit error.
 
-The reviewer subagent is `senior-developer` (see [`.claude/agents/senior-developer.md`](../../agents/senior-developer.md)) — model: opus, tools: Read/Grep/Glob/Write.
-The synthesizer subagent is `review-synthesizer` (see [`.claude/agents/review-synthesizer.md`](../../agents/review-synthesizer.md)) — model: opus, tools: Read/Write.
+The reviewer subagent is `senior-developer` (see [`.claude/agents/senior-developer.md`](../../agents/senior-developer.md)) — model: inherited from the main conversation, tools: Read/Grep/Glob/Write.
+The synthesizer subagent is `review-synthesizer` (see [`.claude/agents/review-synthesizer.md`](../../agents/review-synthesizer.md)) — model: inherited from the main conversation, tools: Read/Write.
 
 This skill is intentionally decoupled from `/m1-tick` and `/redteam`. It does not gate commits, does not write to ticket frontmatter, does not invoke the workflow's escalation menu. The user reads the reports and decides what to act on.
 

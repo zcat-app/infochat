@@ -1,6 +1,6 @@
 # Reviewer subagent prompt template
 
-This is the user prompt the m1-tick skill substitutes and passes to `Agent(subagent_type: "code-reviewer", ...)` for `/m1-tick review <id>`. The agent's identity, tool allowlist (Read/Grep/Glob/Write), and model pinning (opus) are declared in [`.claude/agents/code-reviewer.md`](../../.claude/agents/code-reviewer.md) — those are harness-level enforcement. This template carries only the *task metadata*, the *prompt-supplied paths* the agent reads, the diff stats, and the negative-space list; the ticket body, diff, test log, and the canonical engineering rules are loaded by the agent via Read in its fresh context. The full structured verdict is written to disk before the short chat reply.
+This is the user prompt the m1-tick skill substitutes and passes to `Agent(subagent_type: "code-reviewer", ...)` for `/m1-tick review <id>`. The agent's identity and tool allowlist (Read/Grep/Glob/Write) are declared in [`.claude/agents/code-reviewer.md`](../../.claude/agents/code-reviewer.md) — those are harness-level enforcement; the model is inherited from the main conversation. This template carries only the *task metadata*, the *prompt-supplied paths* the agent reads, the diff stats, and the negative-space list; the ticket body, diff, test log, and the canonical engineering rules are loaded by the agent via Read in its fresh context. The full structured verdict is written to disk before the short chat reply.
 
 ---
 

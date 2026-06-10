@@ -2,7 +2,7 @@
 name: plan-writer
 description: Writes an implementation-outline sidecar for a complexity:high ticket before any code is written; returns a three-line chat reply pointing at the sidecar. Spawned only by `/m1-tick start` via the rendered prompt from docs/process/plan-prompt.md. NOT the built-in read-only `Plan` agent — this one must Write the sidecar.
 tools: Read, Grep, Glob, Write
-model: opus
+model: inherit
 color: green
 ---
 

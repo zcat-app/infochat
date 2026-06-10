@@ -2,7 +2,7 @@
 name: code-reviewer
 description: Reviews a single ticket's diff against the engineering rules and the ticket-frontmatter wiring; returns APPROVE | REWORK | MANUAL with per-check results. Spawned only by `/m1-tick review` via the rendered prompt from docs/process/reviewer-prompt.md — never select it for ad-hoc tasks.
 tools: Read, Grep, Glob, Write
-model: opus
+model: inherit
 color: blue
 ---
 

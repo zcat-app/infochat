@@ -1,6 +1,6 @@
 # Senior-developer subagent prompt template — module lens
 
-Used when `/deep-code-review module <name>` or `/deep-code-review path <path>` spawns the senior-developer subagent. The `deep-code-review` skill renders the fenced template below via `scripts/m1-render-prompt.py` (substituting only metadata, paths, and the file inventory) and spawns `Agent(subagent_type: "senior-developer", ...)` with a short stub pointing at the rendered file. The agent's identity, tool allowlist, and model pinning are declared in [`.claude/agents/senior-developer.md`](../../.claude/agents/senior-developer.md).
+Used when `/deep-code-review module <name>` or `/deep-code-review path <path>` spawns the senior-developer subagent. The `deep-code-review` skill renders the fenced template below via `scripts/m1-render-prompt.py` (substituting only metadata, paths, and the file inventory) and spawns `Agent(subagent_type: "senior-developer", ...)` with a short stub pointing at the rendered file. The agent's identity and tool allowlist are declared in [`.claude/agents/senior-developer.md`](../../.claude/agents/senior-developer.md); the model is inherited from the main conversation.
 
 This lens differs from the diff lens: there is no `BASE..HEAD` diff. The reviewer reads the entire module/directory top-to-bottom and evaluates every file as it stands today. The expected output is line-precise findings across the module.
 

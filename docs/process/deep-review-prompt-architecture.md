@@ -1,6 +1,6 @@
 # Senior-developer subagent prompt template — architecture lens
 
-Used when `/deep-code-review architecture` spawns the senior-developer subagent (also used for the architecture pass within `/deep-code-review full`). The `deep-code-review` skill renders the fenced template below via `scripts/m1-render-prompt.py` (substituting only metadata, paths, and the seed inventories) and spawns `Agent(subagent_type: "senior-developer", ...)` with a short stub pointing at the rendered file. The agent's identity, tool allowlist, and model pinning are declared in [`.claude/agents/senior-developer.md`](../../.claude/agents/senior-developer.md).
+Used when `/deep-code-review architecture` spawns the senior-developer subagent (also used for the architecture pass within `/deep-code-review full`). The `deep-code-review` skill renders the fenced template below via `scripts/m1-render-prompt.py` (substituting only metadata, paths, and the seed inventories) and spawns `Agent(subagent_type: "senior-developer", ...)` with a short stub pointing at the rendered file. The agent's identity and tool allowlist are declared in [`.claude/agents/senior-developer.md`](../../.claude/agents/senior-developer.md); the model is inherited from the main conversation.
 
 This lens differs from module and diff lenses: the reviewer focuses on the cross-module contract surface — SPI interfaces, schema, NOTIFY channel payloads, capability flags, property-key shape, the 6-module DAG, layering. Module-internal smells belong to the module lens, not this one.
 

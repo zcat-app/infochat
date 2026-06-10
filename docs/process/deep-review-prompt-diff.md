@@ -1,6 +1,6 @@
 # Senior-developer subagent prompt template — diff lens
 
-Used when `/deep-code-review uncommitted | ticket <id> | range <a>..<b>` spawns the senior-developer subagent. The `deep-code-review` skill renders the fenced template below via `scripts/m1-render-prompt.py` (substituting only metadata and paths) and spawns `Agent(subagent_type: "senior-developer", ...)` with a short stub pointing at the rendered file. The agent's identity, tool allowlist, and model pinning are declared in [`.claude/agents/senior-developer.md`](../../.claude/agents/senior-developer.md).
+Used when `/deep-code-review uncommitted | ticket <id> | range <a>..<b>` spawns the senior-developer subagent. The `deep-code-review` skill renders the fenced template below via `scripts/m1-render-prompt.py` (substituting only metadata and paths) and spawns `Agent(subagent_type: "senior-developer", ...)` with a short stub pointing at the rendered file. The agent's identity and tool allowlist are declared in [`.claude/agents/senior-developer.md`](../../.claude/agents/senior-developer.md); the model is inherited from the main conversation.
 
 The reviewer starts with **zero conversation context**. It receives the paths to the diff and the engineering rules (Reading both in its own context — their bytes never enter the main-session transcript), the path it must write to, and is told it may read the rest of the codebase / spec / design notes via Read/Grep/Glob to verify claims and gather context.
 

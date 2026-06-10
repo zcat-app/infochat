@@ -1,6 +1,6 @@
 # Review-synthesizer subagent prompt template
 
-Used when `/deep-code-review full` completes the parallel per-target reviews and spawns the synthesizer to produce the consolidated summary. The `deep-code-review` skill renders the fenced template below via `scripts/m1-render-prompt.py` and spawns `Agent(subagent_type: "review-synthesizer", ...)` with a short stub pointing at the rendered file. The agent's identity, tool allowlist (Read/Write only — no Grep, no Glob, no shell), and model pinning are declared in [`.claude/agents/review-synthesizer.md`](../../.claude/agents/review-synthesizer.md).
+Used when `/deep-code-review full` completes the parallel per-target reviews and spawns the synthesizer to produce the consolidated summary. The `deep-code-review` skill renders the fenced template below via `scripts/m1-render-prompt.py` and spawns `Agent(subagent_type: "review-synthesizer", ...)` with a short stub pointing at the rendered file. The agent's identity and tool allowlist (Read/Write only — no Grep, no Glob, no shell) are declared in [`.claude/agents/review-synthesizer.md`](../../.claude/agents/review-synthesizer.md); the model is inherited from the main conversation.
 
 The synthesizer starts with **zero conversation context, zero source code access, zero spec access**. It sees only the per-target review reports and this prompt. The framing — "you organize, you do not review" — is what makes this different from the senior-developer subagent.
 
