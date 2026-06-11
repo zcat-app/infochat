@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 29 |
+| pending | 28 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 317 |
+| done | 318 |
 | deferred | 3 |
 | **total** | **349** |
 
@@ -29,7 +29,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-286 — UNKNOWN-rate auto-disable stops the running stream-source worker (complexity: medium, risk: high)
 - M1-287 — Nostr dedup records event id only after a successful queue offer (complexity: low, risk: medium)
 - M1-288 — Group-scope /summary resolves its scope instead of returning no_posts_yet (complexity: medium, risk: medium)
-- M1-289 — Unreadable bootstrap-assets file fails startup instead of silently disabling (complexity: low, risk: low)
 - M1-290 — SECURITY DEFINER procedures reject banned admins as actors (complexity: low, risk: medium)
 - M1-291 — SSRF module: proxy posture, pinned-path policy, bounded discard, contract fixes (complexity: medium, risk: medium)
 - M1-292 — Log hygiene: redactor timeout arms, URL paths, upstream bytes, LLM previews (complexity: medium, risk: medium)
@@ -88,6 +87,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-304 | Declare jakarta.json (+ Parsson) in the messaging-adapter pom | 2026-06-11 | round 1 APPROVE |
+| M1-289 | Unreadable bootstrap-assets file fails startup instead of silently disabling | 2026-06-11 | round 1 APPROVE |
 | M1-279 | §7/§7a sweep: defensive checks, broad catches, test seams | 2026-06-11 | round 1 APPROVE |
 | M1-283 | Over-cap outbound digest dropped on SimpleX | 2026-06-10 | round 1 APPROVE |
 | M1-282 | Redactor suppressed-throwable coverage | 2026-06-10 | round 1 APPROVE |
@@ -96,7 +96,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-278 | Ops posture: health truth, endpoint gating, drop counters | 2026-06-10 | round 1 APPROVE |
 | M1-277 | SSRF: shared client, pin fast path, redirect scrub, ranges | 2026-06-10 | round 2 APPROVE |
 | M1-276 | Collector mediums: re-eval splice, scan bounds, vocab, edges | 2026-06-10 | round 1 APPROVE |
-| M1-275 | DB hygiene: SET LOCAL timeouts, per-dispatch conn reuse | 2026-06-10 | round 1 APPROVE |
 
 ---
 
@@ -497,7 +496,7 @@ M1-285 (pending) ← runnable
 M1-286 (pending) ← runnable
 M1-287 (pending) ← runnable
 M1-288 (pending) ← runnable
-M1-289 (pending) ← runnable
+M1-289 (done)
 M1-290 (pending) ← runnable
 M1-291 (pending) ← runnable
 M1-292 (pending) ← runnable

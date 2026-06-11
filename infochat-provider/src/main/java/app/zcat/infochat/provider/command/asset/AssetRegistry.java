@@ -181,13 +181,18 @@ public class AssetRegistry {
         return result;
     }
 
-    private Map<String, BootstrapMeta> loadBootstrapMeta() {
+    /** Package-private so a unit test can drive the path branches directly. */
+    Map<String, BootstrapMeta> loadBootstrapMeta() {
         if (assetsFilePath.isEmpty()) {
             return Map.of();
         }
         Path path = Path.of(assetsFilePath.get());
+        // Configured-but-unreadable is broken intent, not opt-out: fail fast so
+        // the operator sees the misconfiguration instead of silently losing the
+        // asset commands they opted into (docs/spec/deployment.md §Path set, file absent).
         if (!Files.isReadable(path)) {
-            return Map.of();
+            throw new IllegalStateException(
+                    "Configured bootstrap-assets file is not readable: " + path);
         }
         try (InputStream in = Files.newInputStream(path)) {
             ObjectMapper mapper = new ObjectMapper();
