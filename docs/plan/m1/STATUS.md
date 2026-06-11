@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 29 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 316 |
 | deferred | 3 |
-| **total** | **319** |
+| **total** | **348** |
 
 ---
 
@@ -24,7 +24,35 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-284 — Outbound delivery failure layer: retry, cap escalation, cleanup (complexity: high, risk: high)
+- M1-285 — Edit-failure fallback to fresh send in both production adapters (complexity: medium, risk: medium)
+- M1-286 — UNKNOWN-rate auto-disable stops the running stream-source worker (complexity: medium, risk: medium)
+- M1-287 — Nostr dedup records event id only after a successful queue offer (complexity: low, risk: medium)
+- M1-288 — Group-scope /summary resolves its scope instead of returning no_posts_yet (complexity: medium, risk: medium)
+- M1-289 — Unreadable bootstrap-assets file fails startup instead of silently disabling (complexity: low, risk: low)
+- M1-290 — SECURITY DEFINER procedures reject banned admins as actors (complexity: low, risk: medium)
+- M1-291 — SSRF module: proxy posture, pinned-path policy, bounded discard, contract fixes (complexity: medium, risk: medium)
+- M1-292 — Log hygiene: redactor timeout arms, URL paths, upstream bytes, LLM previews (complexity: medium, risk: medium)
+- M1-293 — Signal adapter: mention overflow, sourceName, capability values, launch classification (complexity: medium, risk: medium)
+- M1-294 — SimpleX adapter: error classification, close race, bot-id validation, inbound cap (complexity: medium, risk: medium)
+- M1-295 — Ingest resilience: eval-queue boundary, fetch-ladder scope, parser boundary, re-eval predicate (complexity: medium, risk: medium)
+- M1-296 — LLM config/routing: deterministic order, typo fail-fast, base-url validation, structure (complexity: medium, risk: medium)
+- M1-297 — /stop cancellation is honored: cancelled flag, stopped terminal, single reply (complexity: medium, risk: medium)
+- M1-298 — Core contracts: dispatchKey rename, TargetKind enum, nullable-UUID bind helper (complexity: medium, risk: medium)
+- M1-299 — Core hardening smalls: notifier fallback throttle, probe outside lock, escaper allocation (complexity: low, risk: low)
+- M1-300 — Asset-refresh config: one grammar (Duration) across both services (complexity: low, risk: medium)
+- M1-301 — Adapter trust-anchor reconciliation: Gate 4 scope, bot-id provenance (decisions) (complexity: medium, risk: medium)
+- M1-302 — Ops posture: Stage-2 fail-open default, readiness topology exposure (decisions) (complexity: low, risk: medium)
+- M1-303 — D43 localization gaps: cluster labels, /help asset lines, source label + shared renderer (complexity: medium, risk: medium)
+- M1-304 — Declare jakarta.json (+ Parsson) in the messaging-adapter pom (complexity: low, risk: low)
+- M1-305 — Observability commitments: schedule implementation or amend as deferred (decision) (complexity: low, risk: low)
+- M1-306 — Provider mediums: edit-interval floor, /retry counter order, chat-tool caps, group row reuse (complexity: medium, risk: medium)
+- M1-307 — Provider code lows: JSON conventions, sanitizer seam, dead keys, misc one-liners (complexity: medium, risk: low)
+- M1-308 — Messaging/collector code lows: dead surfaces, helper drift, small perf/correctness (complexity: medium, risk: low)
+- M1-309 — Provider structural dedup: PG listener base class, shared command tokenizer (complexity: medium, risk: medium)
+- M1-310 — Collector dedup: one fetchAndParse helper for the four single-GET fetchers (complexity: medium, risk: medium)
+- M1-311 — Strip ticket/finding provenance from permanent comments (policy + sweep) (complexity: medium, risk: low)
+- M1-312 — Doc-truth v5: false comments and spec/design drift reconciliation (complexity: medium, risk: low)
 
 ---
 
@@ -464,4 +492,33 @@ M1-279 (done)
 M1-280 (done)
 M1-281 (done)
 M1-282 (done)
+M1-284 (pending) ← runnable
+M1-285 (pending) ← runnable
+M1-286 (pending) ← runnable
+M1-287 (pending) ← runnable
+M1-288 (pending) ← runnable
+M1-289 (pending) ← runnable
+M1-290 (pending) ← runnable
+M1-291 (pending) ← runnable
+M1-292 (pending) ← runnable
+M1-293 (pending) ← runnable
+M1-294 (pending) ← runnable
+M1-295 (pending) ← runnable
+M1-296 (pending) ← runnable
+M1-297 (pending) ← runnable
+M1-298 (pending) ← runnable
+M1-299 (pending) ← runnable
+M1-300 (pending) ← runnable
+M1-301 (pending) ← runnable
+M1-302 (pending) ← runnable
+M1-303 (pending) ← runnable
+M1-304 (pending) ← runnable
+M1-305 (pending) ← runnable
+M1-306 (pending) ← runnable
+M1-307 (pending) ← runnable
+M1-308 (pending) ← runnable
+M1-309 (pending) ← runnable
+M1-310 (pending) ← runnable
+M1-311 (pending) ← runnable
+M1-312 (pending) ← runnable
 ```
