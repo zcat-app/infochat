@@ -26,7 +26,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-284 — Outbound delivery failure layer: retry, cap escalation, cleanup (complexity: high, risk: high)
 - M1-285 — Edit-failure fallback to fresh send in both production adapters (complexity: medium, risk: medium)
-- M1-286 — UNKNOWN-rate auto-disable stops the running stream-source worker (complexity: medium, risk: medium)
+- M1-286 — UNKNOWN-rate auto-disable stops the running stream-source worker (complexity: medium, risk: high)
 - M1-287 — Nostr dedup records event id only after a successful queue offer (complexity: low, risk: medium)
 - M1-288 — Group-scope /summary resolves its scope instead of returning no_posts_yet (complexity: medium, risk: medium)
 - M1-289 — Unreadable bootstrap-assets file fails startup instead of silently disabling (complexity: low, risk: low)

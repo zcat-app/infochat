@@ -13,8 +13,8 @@ files_scope:
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/reeval
   - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr
 complexity: medium
-risk: medium
-round_cap: 2
+risk: high
+round_cap: 3
 security_relevant: true
 migration_touch: false
 out_of_scope:
@@ -24,17 +24,19 @@ out_of_scope:
   - The UNKNOWN-rate threshold/window mechanics themselves.
 acceptance:
   - "Spec sentence implemented (docs/spec/security.md ~:953, verbatim: 'Auto-disable only blocks new ingest — it stops the fetcher or stream-source worker from enqueueing new posts from the source.'): a named test auto-disables a running Nostr stream source via PerSourceUnknownTracker and asserts the worker for that source stops enqueueing (supervisor stop reached for the right dispatch key)."
-  - "Spec sentence preserved (verbatim: 'Posts already in the outbox or re-evaluation queue continue through their current evaluation stage unaffected'): a named test asserts already-enqueued posts from the disabled source still complete their current stage."
-  - "The disable signal travels tracker → NostrStreamSource.Registrar (owner of the sourceId → dispatchKey map) → supervisor.stop(dispatchKey); the tracker gains no direct supervisor dependency; a stop for an unknown/already-stopped source id is a logged no-op (boundary, not internal defensive code)."
-  - "U-58 fixed first: StreamSourceSupervisor.stop's javadoc no longer blesses cross-keyspace calls (fetch and stream dispatch keys are both monotonic from 1, so a cross-keyspace stop(key) would stop an unrelated stream) and no longer claims a false no-op behaviour; the corrected javadoc states the single-keyspace contract this ticket's new caller relies on."
-  - "The existing admin notification on auto-disable now tells the truth: it fires only after (or together with) the worker stop, so 'source disabled' is accurate; existing notification tests stay green or are updated to the new ordering."
+  - "Spec sentence preserved (verbatim: 'Posts already in the outbox or re-evaluation queue continue through their current evaluation stage unaffected'): the already-green test PerSourceUnknownTrackerTest.autoDisable_inflightPostsContinueUnaffected covers this — it asserts already-enqueued posts from the disabled source still complete their current stage — and must remain green and unmodified."
+  - "The disable signal travels tracker → NostrStreamSource.Registrar (owner of the sourceId → dispatchKey map) → supervisor.stop(dispatchKey); the tracker gains no direct supervisor dependency; a stop for an unknown/already-stopped source id is a logged no-op."
+  - "U-58 fixed first: StreamSourceSupervisor.stop's javadoc no longer blesses cross-keyspace calls (fetch and stream dispatch keys are both monotonic from 1, so a cross-keyspace stop(key) would stop an unrelated stream) and no longer claims a false no-op behaviour; the corrected javadoc states the single-keyspace contract this ticket's new caller relies on and contains a greppable phrase asserting stop accepts only a dispatch key minted by this same supervisor instance (e.g. the phrase 'only a dispatch key returned by this supervisor')."
+  - "The existing admin notification on auto-disable now tells the truth: within disableSource() the worker-stop signal is dispatched before the admin notify, so 'source disabled' is accurate. A new named test (in the stream/nostr suite) asserts the stop signal reaches the supervisor before the admin notify fires (ordering). No pre-existing test is modified: the existing presence-based notification tests (PerSourceUnknownTrackerTest.unknownRateExceedsThreshold_disablesSource and twoSourcesDisabledInWindow_eachNotifies) assert only that a notification was emitted — a property the reordering preserves — so they stay green unchanged; no existing test pins the old notify-without-stop ordering. Firing the new disable signal must not break these tests when no stream source is registered for the disabled id (the Registrar observer is then a logged no-op per the item above)."
   - "mvn -B clean verify from the repo root exits 0."
 test_plan:
   adds:
     - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr
-  modifies:
-    - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/reeval
+  modifies: []
   preserves:
+    - "PerSourceUnknownTrackerTest.autoDisable_inflightPostsContinueUnaffected (acceptance item 2 — already green; unmodified)"
+    - "PerSourceUnknownTrackerTest.unknownRateExceedsThreshold_disablesSource (notification presence — stays green; unmodified)"
+    - "PerSourceUnknownTrackerTest.twoSourcesDisabledInWindow_eachNotifies (per-source notify — stays green; unmodified)"
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
@@ -42,6 +44,30 @@ reviews: {}
 overrides: []
 aborted_attempts: []
 reopens: []
+revisions:
+  - date: 2026-06-11
+    reason: "clarity-fail refine — TEST-CHANGES-AUTHORIZED blocker + 4 warnings"
+    summary: |
+      Pre-refine state (git history carries the full prior frontmatter):
+      - test_plan.modifies listed the eval/reeval test directory; acceptance
+        item 5 used a 'stay green or are updated' disjunction naming no test.
+        Resolved option (a): no pre-existing test is modified (modifies: []);
+        the existing notification tests assert presence only and stay green.
+      - acceptance item 3 embedded the '(boundary, not internal defensive code)'
+        design directive — moved to Notes.
+      - acceptance item 4 verified javadoc 'by inspection' — now requires a
+        greppable contract phrase.
+      - acceptance item 2 now names the existing green test that satisfies it.
+      - risk: medium → high; round_cap: 2 → 3 (confirmed SECURITY/HIGH U-03 fix).
+escalations:
+  - date: 2026-06-11
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      TEST-CHANGES-AUTHORIZED: FAIL — test_plan.modifies lists the eval/reeval
+      test directory, but acceptance item 5 ("existing notification tests stay
+      green or are updated to the new ordering") names no specific test file/
+      method and no new expected assertion for the "are updated" case. Pre-existing
+      test modifications must be explicitly listed with the new expected behavior.
 redteam_findings: []
 clarity_check: {}
 ---
@@ -88,6 +114,11 @@ See frontmatter.
 - Fix U-58's javadoc BEFORE wiring the new caller (the report is explicit
   about the order) — the corrected contract is what the new call site is
   written against.
+- Acceptance item 3's no-op for an unknown/already-stopped source id is
+  system-boundary handling at the Registrar's event-observer entry (the
+  sourceId → dispatchKey map is the boundary), NOT internal defensive code
+  between two trusted internal classes — so it does not violate the
+  No-defensive-code rule.
 - If the optional scheduled reconciliation for operator-side disables is
   wanted, file it as a follow-up ticket; do not fold it in here.
 
