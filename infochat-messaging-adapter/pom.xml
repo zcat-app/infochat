@@ -48,6 +48,28 @@
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
         </dependency>
+        <!--
+             jakarta.json:jakarta.json-api (compile) + org.eclipse.parsson:parsson
+             (runtime) — the Signal codec path (SignalMessageCodec,
+             SignalGroupHandler, SignalMentionParser, SignalJsonRpcClient) imports
+             jakarta.json types directly. Declared explicitly for the same reason
+             as jackson-databind above: without it the API arrives only
+             transitively via the Quarkus BOM, so an unrelated dependency-tree
+             change could break this module's compile with no local edit. The API
+             is compile-scope (main sources reference its types); Parsson is the
+             JSON-P provider those types need at runtime, hence runtime-scope.
+             Versions BOM-managed via the parent's quarkus-bom import (no
+             <version/> here, per the M1-001 invariant).
+        -->
+        <dependency>
+            <groupId>jakarta.json</groupId>
+            <artifactId>jakarta.json-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.eclipse.parsson</groupId>
+            <artifactId>parsson</artifactId>
+            <scope>runtime</scope>
+        </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>

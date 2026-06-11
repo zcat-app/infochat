@@ -1,7 +1,7 @@
 ---
 id: M1-304
 title: "Declare jakarta.json (+ Parsson) in the messaging-adapter pom"
-status: pending
+status: done
 created: 2026-06-11
 last_updated: 2026-06-11
 blocked_by: []
@@ -24,12 +24,29 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-11
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 3
+      added: 32
+      removed: 8
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-11
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-304: Declare jakarta.json (+ Parsson) in the messaging-adapter pom

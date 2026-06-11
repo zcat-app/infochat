@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 29 |
+| pending | 28 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 316 |
+| done | 317 |
 | deferred | 3 |
 | **total** | **348** |
 
@@ -44,7 +44,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-301 — Adapter trust-anchor reconciliation: Gate 4 scope, bot-id provenance (decisions) (complexity: medium, risk: medium)
 - M1-302 — Ops posture: Stage-2 fail-open default, readiness topology exposure (decisions) (complexity: low, risk: medium)
 - M1-303 — D43 localization gaps: cluster labels, /help asset lines, source label + shared renderer (complexity: medium, risk: medium)
-- M1-304 — Declare jakarta.json (+ Parsson) in the messaging-adapter pom (complexity: low, risk: low)
 - M1-305 — Observability commitments: schedule implementation or amend as deferred (decision) (complexity: low, risk: low)
 - M1-306 — Provider mediums: edit-interval floor, /retry counter order, chat-tool caps, group row reuse (complexity: medium, risk: medium)
 - M1-307 — Provider code lows: JSON conventions, sanitizer seam, dead keys, misc one-liners (complexity: medium, risk: low)
@@ -88,6 +87,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-304 | Declare jakarta.json (+ Parsson) in the messaging-adapter pom | 2026-06-11 | round 1 APPROVE |
 | M1-279 | §7/§7a sweep: defensive checks, broad catches, test seams | 2026-06-11 | round 1 APPROVE |
 | M1-283 | Over-cap outbound digest dropped on SimpleX | 2026-06-10 | round 1 APPROVE |
 | M1-282 | Redactor suppressed-throwable coverage | 2026-06-10 | round 1 APPROVE |
@@ -97,7 +97,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-277 | SSRF: shared client, pin fast path, redirect scrub, ranges | 2026-06-10 | round 2 APPROVE |
 | M1-276 | Collector mediums: re-eval splice, scan bounds, vocab, edges | 2026-06-10 | round 1 APPROVE |
 | M1-275 | DB hygiene: SET LOCAL timeouts, per-dispatch conn reuse | 2026-06-10 | round 1 APPROVE |
-| M1-274 | Capability flags: reconcile with design, prune speculative | 2026-06-10 | round 2 APPROVE |
 
 ---
 
@@ -512,7 +511,7 @@ M1-300 (pending) ← runnable
 M1-301 (pending) ← runnable
 M1-302 (pending) ← runnable
 M1-303 (pending) ← runnable
-M1-304 (pending) ← runnable
+M1-304 (done)
 M1-305 (pending) ← runnable
 M1-306 (pending) ← runnable
 M1-307 (pending) ← runnable
