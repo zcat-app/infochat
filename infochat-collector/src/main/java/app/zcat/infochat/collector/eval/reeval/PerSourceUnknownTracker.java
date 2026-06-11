@@ -4,6 +4,7 @@ import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Event;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.slf4j.Logger;
@@ -24,8 +25,10 @@ import java.util.UUID;
  * throttled admin notification fires.
  *
  * <p>In-flight posts from a disabled source continue through their
- * current evaluation stage unaffected — the disable only prevents
- * new fetches from the source.
+ * current evaluation stage unaffected — the disable blocks only new
+ * ingest: it fires a {@link SourceDisabled} signal that stops the
+ * source's running stream-source worker, while polled fetchers skip
+ * the now-disabled source on their next tick.
  */
 @ApplicationScoped
 public class PerSourceUnknownTracker {
@@ -53,6 +56,14 @@ public class PerSourceUnknownTracker {
 
     @Inject
     ThrottledAdminNotifier throttledAdminNotifier;
+
+    // Worker-stop signal for an auto-disabled source. Fired (synchronously)
+    // from disableSource so the observer reaches the supervisor before the
+    // admin notify. An Event — not a direct StreamSourceSupervisor reference —
+    // keeps this re-eval bean free of any stream-module dependency: the
+    // NostrStreamSource.Registrar observer owns the sourceId→dispatchKey map.
+    @Inject
+    Event<SourceDisabled> sourceDisabledEvent;
 
     @ConfigProperty(name = "infochat.reeval.unknown-rate-threshold")
     double unknownRateThreshold;
@@ -126,6 +137,14 @@ public class PerSourceUnknownTracker {
             ps.setObject(1, sourceId);
             int updated = ps.executeUpdate();
             if (updated > 0) {
+                // Stop the source's running stream-source worker BEFORE the
+                // admin notify, so "source disabled" is true the moment it
+                // fires (U-03). fire() is synchronous: the
+                // NostrStreamSource.Registrar observer has reached
+                // supervisor.stop by the time fire() returns. A source with no
+                // live stream worker (the common case — polled sources) is a
+                // logged no-op in that observer.
+                sourceDisabledEvent.fire(new SourceDisabled(sourceId));
                 // Per-source coalescing key so two different sources auto-disabled
                 // inside one throttle window each emit their own notification — a
                 // constant key (the error class) would suppress the second source's
@@ -146,5 +165,15 @@ public class PerSourceUnknownTracker {
             // §Secrets handling — User content in exceptions).
             SafeLog.error(LOG, "PerSourceUnknownTracker: failed to disable source " + sourceId, e);
         }
+    }
+
+    /**
+     * Signal that a source was auto-disabled, carrying the source id so an
+     * observer can stop that source's running stream-source worker. Owned by
+     * the producer (this tracker) so the re-eval bean needs no stream-module
+     * type; the {@link app.zcat.infochat.collector.stream.nostr.NostrStreamSource}
+     * Registrar observes it.
+     */
+    public record SourceDisabled(UUID sourceId) {
     }
 }

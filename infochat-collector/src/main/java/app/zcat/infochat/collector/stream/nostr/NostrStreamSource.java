@@ -1,5 +1,6 @@
 package app.zcat.infochat.collector.stream.nostr;
 
+import app.zcat.infochat.collector.eval.reeval.PerSourceUnknownTracker;
 import app.zcat.infochat.collector.outbox.EvalQueueProducer;
 import app.zcat.infochat.collector.outbox.PostPersister;
 import app.zcat.infochat.collector.stream.StreamSourceSupervisor;
@@ -14,6 +15,7 @@ import io.quarkus.runtime.Startup;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Priority;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.slf4j.Logger;
@@ -32,11 +34,13 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.OptionalLong;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
@@ -319,6 +323,14 @@ public final class NostrStreamSource implements StreamSource {
         // Stateless and thread-safe — one verifier shared across every source.
         private final NostrEventVerifier verifier = new NostrEventVerifier();
 
+        // sourceId → dispatchKey for every registered nostr worker. The
+        // Registrar is the only bean that can translate the source id the
+        // re-eval tracker knows into the dispatch key the supervisor keys
+        // workers by, so it owns this map and the SourceDisabled observer.
+        // Package-private (not private) so the wiring IT can populate it on a
+        // directly-constructed Registrar without a CDI proxy.
+        final Map<UUID, Long> dispatchKeyBySource = new ConcurrentHashMap<>();
+
         @PostConstruct
         void registerNostrSources() {
             List<NostrSourceRow> rows;
@@ -370,9 +382,37 @@ public final class NostrStreamSource implements StreamSource {
                     }
                 };
                 supervisor.register(dispatchKey, row.identifier(), worker, deliver);
+                dispatchKeyBySource.put(sourceUuid, dispatchKey);
                 LOG.info("Registered NostrStreamSource for source {} across {} relay(s)",
                         sourceUuid, relays.size());
             }
+        }
+
+        /**
+         * Stop the stream worker for an auto-disabled source (U-03). Observes
+         * the {@link PerSourceUnknownTracker.SourceDisabled} signal the re-eval
+         * tracker fires when a source crosses the UNKNOWN-rate threshold: the
+         * worker must stop enqueueing new posts the moment the source is
+         * disabled, not only at the next restart. Synchronous observer (default
+         * {@code @Observes}) so the tracker's "source disabled" notification is
+         * true the moment it fires.
+         *
+         * <p>The signal arrives for EVERY auto-disabled source — most are
+         * polled (non-stream) sources with no entry in the map, so a map miss is
+         * a logged no-op. {@code remove} (not {@code get}) makes a repeated
+         * signal for an already-stopped source a no-op too. The lookup is the
+         * system boundary between the tracker's source-id keyspace and the
+         * supervisor's dispatch-key keyspace; this guard is boundary handling,
+         * not internal defensive code between two trusted internal classes.
+         */
+        void onSourceDisabled(@Observes PerSourceUnknownTracker.SourceDisabled event) {
+            Long dispatchKey = dispatchKeyBySource.remove(event.sourceId());
+            if (dispatchKey == null) {
+                LOG.debug("SourceDisabled for {} has no registered stream worker; no-op",
+                        event.sourceId());
+                return;
+            }
+            supervisor.stop(dispatchKey);
         }
 
         /**

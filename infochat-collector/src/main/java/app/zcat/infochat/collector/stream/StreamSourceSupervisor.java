@@ -117,11 +117,17 @@ public class StreamSourceSupervisor {
     }
 
     /**
-     * Stop a single source — used when its {@code source.status}
-     * transitions to {@code 'failed'}. A {@code dispatchKey} that was never
-     * registered as a stream (e.g. a polled Fetcher source crossing the
-     * D42 failure threshold) is a no-op: status transitions span all
-     * source kinds, only some of which are StreamSources.
+     * Stop a single stream source — used when its {@code source.status}
+     * transitions to {@code 'failed'} (operator {@code /source-disable} or
+     * the UNKNOWN-rate auto-disable). Accepts
+     * <strong>only a dispatch key registered with this same supervisor instance</strong>
+     * via {@link #register}. Stream dispatch keys and the polled
+     * FetchScheduler's source keys are both monotonic from 1, so a key minted
+     * in another keyspace must never be passed here: it would not be a harmless
+     * no-op — it would collide with, and stop, an unrelated stream this
+     * supervisor happens to hold under the same numeric key. For a key this
+     * supervisor did register, an absent one (never registered, or already
+     * stopped) is a genuine no-op.
      */
     public void stop(long dispatchKey) {
         StreamSourceRegistration registration = registrations.remove(dispatchKey);

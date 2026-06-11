@@ -1,9 +1,9 @@
 ---
 id: M1-286
 title: "UNKNOWN-rate auto-disable stops the running stream-source worker"
-status: pending
+status: done
 created: 2026-06-11
-last_updated: 2026-06-11
+last_updated: 2026-06-12
 blocked_by: []
 files_budget: 8
 files_scope:
@@ -40,7 +40,20 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-12
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 366
+      removed: 15
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -69,7 +82,25 @@ escalations:
       method and no new expected assertion for the "are updated" case. Pre-existing
       test modifications must be explicitly listed with the new expected behavior.
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-12
+    verdict: CLEAN
+    base: 05da0987e58a80cfdfebd233de5a7bb641f69a48
+    head: working-tree (m1/M1-286-auto-disable-stops-stream-worker)
+    verdict_file: docs/plan/m1/redteam/M1-286-2026-06-12.md
+    out_of_model_count: 1
+    note: |
+      Adversarial audit on the in-progress branch before commit. CLEAN — the
+      SourceDisabled event → Registrar → supervisor.stop path and the U-58
+      javadoc contract introduce no threat-model gap; auto-disable now actually
+      bounds the admin-review-capacity-exhaustion attack U-03 named. One
+      advisory out-of-model observation recorded in the verdict file; no
+      remediation ticket needed.
+clarity_check:
+  date: 2026-06-11
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-286: UNKNOWN-rate auto-disable stops the running stream-source worker
