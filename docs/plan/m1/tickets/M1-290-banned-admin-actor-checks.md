@@ -1,9 +1,9 @@
 ---
 id: M1-290
 title: "SECURITY DEFINER procedures reject banned admins as actors"
-status: pending
+status: done
 created: 2026-06-11
-last_updated: 2026-06-11
+last_updated: 2026-06-12
 blocked_by: []
 files_budget: 6
 files_scope:
@@ -32,12 +32,45 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-11
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 282
+      removed: 8
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-11
+    verdict: CLEAN
+    base: a2514ca93f0d7ba8b69133e8e89c315398a7ef45
+    head: working-tree
+    verdict_file: docs/plan/m1/redteam/M1-290-2026-06-11.md
+    out_of_model_count: 1
+    note: |
+      Adversarial audit of the in-progress working-tree diff (post-APPROVE,
+      pre-commit). CLEAN — zero findings. The three SECURITY DEFINER routines'
+      actor predicate is correctly hardened to is_admin = TRUE AND is_banned =
+      FALSE, matching the spec's live-admin definition; is_banned is NOT NULL
+      so no three-valued-logic bypass. One out-of-model advisory: the U-56
+      column drop bundled into this migration is a scope/engineering concern,
+      not a security finding — and the bundling is mandated by acceptance item
+      3 and user-approved at start; the zero-readers/writers premise is verified.
+clarity_check:
+  date: 2026-06-11
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-290: SECURITY DEFINER procedures reject banned admins as actors

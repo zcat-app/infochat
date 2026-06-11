@@ -59,6 +59,34 @@ class QuarantineActorCheckTest extends PostgresSchemaTestBase {
     }
 
     @Test
+    void approveWithBannedAdminActorRaises() throws SQLException {
+        try (Connection c = newConnection()) {
+            String bannedAdminId = insertBannedAdmin(c, "banned-admin@example");
+            UUID quarantineId = seedQuarantineRow(c, bannedAdminId);
+
+            SQLException ex = assertThrows(SQLException.class,
+                    () -> callApprove(c, quarantineId, UUID.fromString(bannedAdminId)));
+            assertTrue(ex.getMessage().contains("actor is not a bot admin"),
+                    "banned admin must be rejected with the same error a non-admin gets: "
+                            + ex.getMessage());
+        }
+    }
+
+    @Test
+    void rejectWithBannedAdminActorRaises() throws SQLException {
+        try (Connection c = newConnection()) {
+            String bannedAdminId = insertBannedAdmin(c, "banned-admin@example");
+            UUID quarantineId = seedQuarantineRow(c, bannedAdminId);
+
+            SQLException ex = assertThrows(SQLException.class,
+                    () -> callReject(c, quarantineId, UUID.fromString(bannedAdminId)));
+            assertTrue(ex.getMessage().contains("actor is not a bot admin"),
+                    "banned admin must be rejected with the same error a non-admin gets: "
+                            + ex.getMessage());
+        }
+    }
+
+    @Test
     void approveWithAdminActorSucceeds() throws SQLException {
         try (Connection c = newConnection()) {
             String adminId = insertUser(c, "admin@example", true);
@@ -126,6 +154,20 @@ class QuarantineActorCheckTest extends PostgresSchemaTestBase {
             insert.setString(1, "inmemory");
             insert.setString(2, contactId);
             insert.setBoolean(3, isAdmin);
+            try (ResultSet rs = insert.executeQuery()) {
+                rs.next();
+                return rs.getString(1);
+            }
+        }
+    }
+
+    private static String insertBannedAdmin(Connection c,
+                                             String contactId) throws SQLException {
+        try (PreparedStatement insert = c.prepareStatement(
+                "INSERT INTO users (adapter, contact_id, is_admin, is_banned, registration_state) "
+                        + "VALUES (?, ?, TRUE, TRUE, 'vouched') RETURNING id")) {
+            insert.setString(1, "inmemory");
+            insert.setString(2, contactId);
             try (ResultSet rs = insert.executeQuery()) {
                 rs.next();
                 return rs.getString(1);

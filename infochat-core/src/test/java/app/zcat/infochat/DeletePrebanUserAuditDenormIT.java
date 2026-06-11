@@ -9,6 +9,7 @@ import java.sql.SQLException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -54,6 +55,40 @@ class DeletePrebanUserAuditDenormIT extends PostgresSchemaTestBase {
                             "actor_adapter must be denormalized from the acting admin");
                     assertFalse(rs.next(), "expected exactly one audit row");
                 }
+            }
+        }
+    }
+
+    @Test
+    void bannedAdminActorRejectedWithNonAdminErrorShape() throws SQLException {
+        try (Connection c = newConnection()) {
+            String bannedAdminId = insertBannedAdmin(c, "signal", "banned-admin-aci");
+            String prebanId = insertUser(c, "simplex", "preban-queue-9", false, "preban");
+
+            SQLException ex = assertThrows(SQLException.class, () -> {
+                try (PreparedStatement call = c.prepareStatement(
+                        "CALL delete_preban_user(?::uuid, ?::uuid)")) {
+                    call.setString(1, prebanId);
+                    call.setString(2, bannedAdminId);
+                    call.execute();
+                }
+            });
+            assertTrue(ex.getMessage().contains("actor is not a bot admin"),
+                    "banned admin must be rejected with the same error a non-admin gets: "
+                            + ex.getMessage());
+        }
+    }
+
+    private static String insertBannedAdmin(Connection c, String adapter,
+                                            String contactId) throws SQLException {
+        try (PreparedStatement insert = c.prepareStatement(
+                "INSERT INTO users (adapter, contact_id, is_admin, is_banned, registration_state) "
+                        + "VALUES (?, ?, TRUE, TRUE, 'vouched') RETURNING id")) {
+            insert.setString(1, adapter);
+            insert.setString(2, contactId);
+            try (var rs = insert.executeQuery()) {
+                rs.next();
+                return rs.getString(1);
             }
         }
     }
