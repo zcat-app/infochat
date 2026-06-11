@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 26 |
+| pending | 25 |
 | in-progress | 1 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 320 |
+| done | 321 |
 | deferred | 3 |
 | **total** | **350** |
 
@@ -32,7 +32,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-293 — Signal adapter: mention overflow, sourceName, capability values, launch classification (complexity: medium, risk: medium)
 - M1-294 — SimpleX adapter: error classification, close race, bot-id validation, inbound cap (complexity: medium, risk: medium)
 - M1-295 — Ingest resilience: eval-queue boundary, fetch-ladder scope, parser boundary, re-eval predicate (complexity: medium, risk: medium)
-- M1-296 — LLM config/routing: deterministic order, typo fail-fast, base-url validation, structure (complexity: medium, risk: medium)
 - M1-297 — /stop cancellation is honored: cancelled flag, stopped terminal, single reply (complexity: medium, risk: medium)
 - M1-298 — Core contracts: dispatchKey rename, TargetKind enum, nullable-UUID bind helper (complexity: medium, risk: medium)
 - M1-299 — Core hardening smalls: notifier fallback throttle, probe outside lock, escaper allocation (complexity: low, risk: low)
@@ -86,13 +85,13 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-290 | SECURITY DEFINER procedures reject banned admins as actors | 2026-06-12 | round 1 APPROVE |
 | M1-286 | UNKNOWN-rate auto-disable stops the running stream-source worker | 2026-06-12 | round 1 APPROVE |
 | M1-304 | Declare jakarta.json (+ Parsson) in the messaging-adapter pom | 2026-06-11 | round 1 APPROVE |
+| M1-296 | LLM config/routing: deterministic order, typo fail-fast, base-url validation, structure | 2026-06-11 | round 1 APPROVE |
 | M1-289 | Unreadable bootstrap-assets file fails startup instead of silently disabling | 2026-06-11 | round 1 APPROVE |
 | M1-279 | §7/§7a sweep: defensive checks, broad catches, test seams | 2026-06-11 | round 1 APPROVE |
 | M1-283 | Over-cap outbound digest dropped on SimpleX | 2026-06-10 | round 1 APPROVE |
 | M1-282 | Redactor suppressed-throwable coverage | 2026-06-10 | round 1 APPROVE |
 | M1-281 | Core contracts: contact-id redaction parity, Fetcher rename | 2026-06-10 | round 1 APPROVE |
 | M1-280 | Provider mediums: Gate 4, usage replies, price label, bucket | 2026-06-10 | round 1 APPROVE |
-| M1-278 | Ops posture: health truth, endpoint gating, drop counters | 2026-06-10 | round 1 APPROVE |
 
 ---
 
@@ -502,7 +501,7 @@ M1-293 (pending) ← runnable
 M1-294 (pending) ← runnable
   └── M1-314 (pending) [see above]
 M1-295 (pending) ← runnable
-M1-296 (pending) ← runnable
+M1-296 (done)
 M1-297 (pending) ← runnable
 M1-298 (pending) ← runnable
 M1-299 (pending) ← runnable

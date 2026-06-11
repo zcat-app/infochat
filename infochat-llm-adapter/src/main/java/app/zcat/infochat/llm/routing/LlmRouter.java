@@ -12,6 +12,7 @@ import org.eclipse.microprofile.config.Config;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -237,6 +238,23 @@ public class LlmRouter {
      * entry declares would validate providers no route can reach.
      */
     public void assertAllTasksResolve() {
+        // An explicitly configured default provider naming no registered
+        // entry is an operator typo that forTask's priority-3 absorbs as an
+        // audit-loud fallback to entries.get(0) for the JVM lifetime —
+        // silently rerouting every task with no per-task override. Fail boot
+        // here instead. The implicit default (key absent) is intentionally
+        // NOT failed: test fixtures register a single stub under a name that
+        // need not match the v1 default, and rely on the silent fallback.
+        config.get(CONFIG_KEY_DEFAULT_PROVIDER)
+            .filter(name -> !name.isEmpty())
+            .ifPresent(name -> {
+                if (!entriesByName.containsKey(name.toLowerCase(Locale.ROOT))) {
+                    throw new IllegalStateException(
+                        "LlmRouter: " + CONFIG_KEY_DEFAULT_PROVIDER + "='" + name
+                            + "' names no registered provider (registered: "
+                            + entriesByName.keySet() + ")");
+                }
+            });
         Set<String> configuredLanguages = new LinkedHashSet<>();
         for (Entry e : entries) {
             configuredLanguages.addAll(e.supportedLanguages());
@@ -307,6 +325,12 @@ public class LlmRouter {
                 "LlmRouter: no LlmProvider beans discovered via CDI; "
                     + "at least OpenAiCompatibleProvider must be on the classpath");
         }
+        // Deterministic order: CDI bean-discovery order is not stable across
+        // services or restarts, yet both the priority-2 language-tie
+        // first-match and the priority-3 entries.get(0) fallback read
+        // positional order. Sorting by provider name makes the same config
+        // route identically everywhere — a project determinism pillar.
+        out.sort(Comparator.comparing(Entry::name, String.CASE_INSENSITIVE_ORDER));
         return out;
     }
 
@@ -345,29 +369,27 @@ public class LlmRouter {
      * @param name                stable, operator-visible provider id.
      * @param provider            the live {@link LlmProvider} instance.
      * @param supportedLanguages  ISO 639-1 codes the provider can
-     *                            emit. Never null once constructed;
-     *                            empty means "no declared language",
-     *                            which the language-aware branch skips
-     *                            so a generic provider doesn't
-     *                            front-run a capability-declaring one.
+     *                            emit. Must be non-null; empty means
+     *                            "no declared language", which the
+     *                            language-aware branch skips so a
+     *                            generic provider doesn't front-run a
+     *                            capability-declaring one.
      */
     public record Entry(String name, LlmProvider provider, Set<String> supportedLanguages) {
         /**
-         * Canonical constructor, written out (not compact) so the
-         * supportedLanguages PARAMETER can be {@code @Nullable} while
-         * the component stays non-null: a caller may pass null for
-         * "no declared languages" — normalized to the empty set here —
-         * and the accessor still never returns null.
+         * Compact canonical constructor enforcing the real contract:
+         * {@code name} non-empty and {@code supportedLanguages} non-null
+         * (an empty set is the legitimate "no declared languages" value).
+         * The defensive copy keeps the component immutable, and
+         * {@link Set#copyOf} rejects a null argument — so a null
+         * {@code supportedLanguages} is a programming error, not a
+         * tolerated input.
          */
-        public Entry(String name, LlmProvider provider, @Nullable Set<String> supportedLanguages) {
+        public Entry {
             if (name.isEmpty()) {
                 throw new IllegalArgumentException("Entry.name must be non-empty");
             }
-            this.name = name;
-            this.provider = provider;
-            this.supportedLanguages = supportedLanguages == null
-                ? Set.of()
-                : Set.copyOf(supportedLanguages);
+            supportedLanguages = Set.copyOf(supportedLanguages);
         }
     }
 

@@ -10,20 +10,28 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * Pins {@link LlmRouter.Entry}'s construction contract: the canonical
- * constructor accepts a null {@code supportedLanguages} ("no declared
- * languages") and normalizes it to the empty set, so the accessor —
- * and therefore the router's language-capability read — never sees
- * null.
+ * Pins {@link LlmRouter.Entry}'s honest construction contract:
+ * {@code supportedLanguages} is non-null (the empty set is the
+ * legitimate "no declared languages" value) and is defensively
+ * copied, so the accessor exposes exactly the codes the caller
+ * supplied and the component stays immutable.
  */
 class LlmRouterEntryTest {
 
     @Test
-    void entryConstructedWithNullSupportedLanguagesYieldsEmptySet() {
-        LlmRouter.Entry entry = new LlmRouter.Entry("stub", new StubProvider(), null);
+    void entryExposesSuppliedSupportedLanguages() {
+        LlmRouter.Entry entry = new LlmRouter.Entry("stub", new StubProvider(), Set.of("en", "cs"));
+
+        assertEquals(Set.of("en", "cs"), entry.supportedLanguages(),
+            "the accessor must expose exactly the supplied language codes");
+    }
+
+    @Test
+    void entryAcceptsEmptySupportedLanguagesAsNoDeclaredLanguages() {
+        LlmRouter.Entry entry = new LlmRouter.Entry("stub", new StubProvider(), Set.of());
 
         assertEquals(Set.of(), entry.supportedLanguages(),
-            "null supportedLanguages must normalize to the empty set");
+            "an empty set is the legitimate 'no declared languages' value");
     }
 
     private static final class StubProvider implements LlmProvider {

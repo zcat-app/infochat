@@ -2,11 +2,11 @@ package app.zcat.infochat.llm.impl;
 
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import app.zcat.infochat.llm.EmbeddingProvider;
 import app.zcat.infochat.llm.EmbeddingResult;
+import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
@@ -74,8 +74,6 @@ import java.util.Optional;
 @ApplicationScoped
 public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
 
-    private static final ObjectMapper JSON = new ObjectMapper();
-
     private final HttpClient http;
 
     @ConfigProperty(name = "infochat.embeddings.base-url")
@@ -112,6 +110,20 @@ public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
             .build();
     }
 
+    /**
+     * Config-boundary validation that {@code infochat.embeddings.base-url} is
+     * well-formed, run at bean creation. In the Collector this fires at
+     * startup — the @Startup {@code EmbeddingMetadataStartupGuard} drives
+     * this bean — so a malformed base-url fails boot naming the property,
+     * rather than surfacing the per-call {@code URI.create} throw inside the
+     * EmbeddingWorker's batch-failure catch, where it would read as a
+     * transient outage. Package-private so the unit test can invoke it.
+     */
+    @PostConstruct
+    void validateBaseUrl() {
+        LlmHttpSupport.requireHttpBaseUrl(baseUrl, "infochat.embeddings.base-url");
+    }
+
     /** Test seam: exposes the shared client so tests can pin its construction. */
     HttpClient httpClient() {
         return http;
@@ -125,13 +137,13 @@ public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
 
         String body;
         try {
-            ObjectNode root = JSON.createObjectNode();
+            ObjectNode root = LlmHttpSupport.JSON.createObjectNode();
             root.put("model", model);
             ArrayNode input = root.putArray("input");
             for (String text : texts) {
                 input.add(text);
             }
-            body = JSON.writeValueAsString(root);
+            body = LlmHttpSupport.JSON.writeValueAsString(root);
         } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
             throw new EmbeddingCallFailedException(
                 "OpenAiCompatibleEmbeddingProvider: failed to assemble request body", e);
@@ -161,7 +173,7 @@ public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
     private static List<EmbeddingResult> parseEmbeddings(String responseBody, URI uri, int expectedCount) {
         JsonNode root;
         try {
-            root = JSON.readTree(responseBody);
+            root = LlmHttpSupport.JSON.readTree(responseBody);
         } catch (IOException e) {
             throw new EmbeddingCallFailedException(
                 "OpenAiCompatibleEmbeddingProvider: failed to parse JSON response from " + uri, e);

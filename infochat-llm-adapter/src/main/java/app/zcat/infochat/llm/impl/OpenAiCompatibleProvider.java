@@ -2,7 +2,6 @@ package app.zcat.infochat.llm.impl;
 
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import app.zcat.infochat.llm.LlmProvider;
@@ -94,8 +93,6 @@ public class OpenAiCompatibleProvider implements LlmProvider {
      */
     public static final String PROVIDER_NAME = "openai-compatible";
 
-    private static final ObjectMapper JSON = new ObjectMapper();
-
     /**
      * java.net.http.HttpClient is thread-safe and the connection
      * pool is bounded internally — one shared instance per bean is
@@ -156,6 +153,7 @@ public class OpenAiCompatibleProvider implements LlmProvider {
     private TaskConfig configFor(ModelTask task) {
         String prefix = "infochat.llm." + task.keySegment() + ".";
         String baseUrl = config.getValue(prefix + "base-url", String.class);
+        LlmHttpSupport.requireHttpBaseUrl(baseUrl, prefix + "base-url");
         String apiKey = config.getOptionalValue(prefix + "api-key", String.class).orElse("");
         String model = config.getValue(prefix + "model", String.class);
         long timeoutMs = config.getOptionalValue(prefix + "timeout-ms", Long.class).orElse(30000L);
@@ -169,7 +167,7 @@ public class OpenAiCompatibleProvider implements LlmProvider {
         // mis-handle a prompt containing a literal quote.
         String body;
         try {
-            ObjectNode root = JSON.createObjectNode();
+            ObjectNode root = LlmHttpSupport.JSON.createObjectNode();
             root.put("model", cfg.model());
             ArrayNode messages = root.putArray("messages");
             ObjectNode system = messages.addObject();
@@ -178,7 +176,7 @@ public class OpenAiCompatibleProvider implements LlmProvider {
             ObjectNode user = messages.addObject();
             user.put("role", "user");
             user.put("content", userPrompt);
-            body = JSON.writeValueAsString(root);
+            body = LlmHttpSupport.JSON.writeValueAsString(root);
         } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
             throw new LlmCallFailedException(
                 "OpenAiCompatibleProvider: failed to assemble request body", e);
@@ -203,7 +201,7 @@ public class OpenAiCompatibleProvider implements LlmProvider {
     private static LlmResponse parseChoiceText(String responseBody, URI uri) {
         JsonNode root;
         try {
-            root = JSON.readTree(responseBody);
+            root = LlmHttpSupport.JSON.readTree(responseBody);
         } catch (IOException e) {
             throw new LlmCallFailedException(
                 "OpenAiCompatibleProvider: failed to parse JSON response from " + uri, e);
@@ -225,24 +223,5 @@ public class OpenAiCompatibleProvider implements LlmProvider {
 
     /** Per-task config snapshot extracted by {@link #configFor}. */
     private record TaskConfig(String baseUrl, String apiKey, String model, long timeoutMs) {
-    }
-
-    /**
-     * Unchecked exception covering every failure mode the provider's
-     * caller (Stage 2 worker) treats as infrastructure failure:
-     * network I/O, non-2xx HTTP, malformed JSON, missing required
-     * response fields, and assembly errors on the request side. The
-     * caller's retry-once-then-fallback harness catches this type
-     * uniformly per {@code docs/spec/security.md} §Failure handling.
-     */
-    public static final class LlmCallFailedException extends RuntimeException {
-
-        public LlmCallFailedException(String message) {
-            super(message);
-        }
-
-        public LlmCallFailedException(String message, Throwable cause) {
-            super(message, cause);
-        }
     }
 }

@@ -2,7 +2,6 @@ package app.zcat.infochat.llm.impl;
 
 import app.zcat.infochat.llm.LlmProvider;
 import app.zcat.infochat.llm.ModelTask;
-import app.zcat.infochat.llm.impl.OpenAiCompatibleProvider.LlmCallFailedException;
 import com.sun.net.httpserver.HttpServer;
 import org.eclipse.microprofile.config.Config;
 import org.junit.jupiter.api.AfterEach;
@@ -111,6 +110,38 @@ class HttpProviderSharedPipelineTest {
                 name + " must wrap the cap-overflow IOException as the cause");
             assertTrue(ex.getCause().getMessage().contains("cap"),
                 name + " wrapped cause must name the byte cap; got: " + ex.getCause().getMessage());
+        }
+    }
+
+    @Test
+    void bothProvidersFailStartupScanOnMalformedBaseUrlNamingTheProperty() {
+        // U-28: a malformed per-task base-url must fail the startup config
+        // scan (assertTaskConfigResolvable, driven by
+        // LlmRouter.assertAllTasksResolve) for BOTH chat providers, naming
+        // the offending property — rather than throwing from the per-call
+        // URI.create where the worker's catch absorbs it as a transient
+        // outage. A bad scheme stands in for the general malformed case.
+        String seg = ModelTask.SUMMARIZER.keySegment();
+        String property = "infochat.llm." + seg + ".base-url";
+        Map<String, String> values = new LinkedHashMap<>();
+        values.put(property, "ftp://example.com");
+        values.put("infochat.llm." + seg + ".model", MODEL);
+        // Required by AnthropicProvider.configFor; ignored by the OpenAI sibling.
+        values.put("infochat.llm." + seg + ".max-tokens", "1024");
+        Config config = new StubConfig(values);
+
+        Map<String, LlmProvider> malformed = new LinkedHashMap<>();
+        malformed.put("AnthropicProvider", new AnthropicProvider(config));
+        malformed.put("OpenAiCompatibleProvider", new OpenAiCompatibleProvider(config));
+
+        for (Map.Entry<String, LlmProvider> entry : malformed.entrySet()) {
+            String name = entry.getKey();
+            LlmProvider provider = entry.getValue();
+            IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> provider.assertTaskConfigResolvable(ModelTask.SUMMARIZER),
+                name + " must fail the startup scan on a malformed base-url");
+            assertTrue(ex.getMessage().contains(property),
+                name + " failure must name the offending property; got: " + ex.getMessage());
         }
     }
 

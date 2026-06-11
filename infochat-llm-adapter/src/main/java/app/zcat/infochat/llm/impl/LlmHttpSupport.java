@@ -1,5 +1,6 @@
 package app.zcat.infochat.llm.impl;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import app.zcat.infochat.llm.LlmResponse;
 import org.eclipse.microprofile.config.Config;
 import org.jboss.logging.Logger;
@@ -7,6 +8,7 @@ import org.jspecify.annotations.Nullable;
 
 import java.io.IOException;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -27,8 +29,9 @@ import java.util.concurrent.Flow;
  * the JVM. The LLM endpoint is operator-configured (semi-trusted),
  * so this is hygiene, not an SSRF-grade target — these calls do not
  * pass through the {@code infochat-ssrf} guard's {@code readBounded}.
- * Also home to the small request/log helpers every provider needs:
- * {@link #joinPath} and {@link #preview}.
+ * Also home to the small shared state and helpers every provider needs:
+ * the {@link #JSON} mapper, the {@link #requireHttpBaseUrl} config-boundary
+ * validator, {@link #joinPath}, and {@link #preview}.
  *
  * <p>Package-private: the three providers ({@link OpenAiCompatibleProvider},
  * {@link AnthropicProvider}, {@link OpenAiCompatibleEmbeddingProvider})
@@ -37,6 +40,15 @@ import java.util.concurrent.Flow;
 final class LlmHttpSupport {
 
     private static final Logger LOG = Logger.getLogger(LlmHttpSupport.class);
+
+    /**
+     * Shared Jackson mapper for the impl-package providers. An
+     * {@link ObjectMapper} is thread-safe once configured, so one default
+     * instance serves all three providers' request-assembly and
+     * response-parsing — collapsing what were three byte-identical
+     * per-class fields.
+     */
+    static final ObjectMapper JSON = new ObjectMapper();
 
     /** Lower bound of the operator-configurable response-body cap (1 MiB). */
     static final long MIN_BODY_CAP_BYTES = 1L * 1024 * 1024;
@@ -80,7 +92,7 @@ final class LlmHttpSupport {
     /**
      * Provider-specific response-text extraction: turns a 2xx response
      * body into an {@link LlmResponse}, or throws
-     * {@link OpenAiCompatibleProvider.LlmCallFailedException} when the
+     * {@link LlmCallFailedException} when the
      * body is malformed or the wrong shape. {@code uri} is for
      * diagnostic messages only.
      */
@@ -94,7 +106,7 @@ final class LlmHttpSupport {
      * {@code null} on the non-2xx path (a status check, no transport
      * exception to chain) and non-null on the transport / interrupt paths.
      * Each provider supplies its own exception type — chat providers throw
-     * {@link OpenAiCompatibleProvider.LlmCallFailedException}, the embedding
+     * {@link LlmCallFailedException}, the embedding
      * provider its own {@code EmbeddingCallFailedException} — so the shared
      * {@link #sendForBody} pipeline can surface the failure under the type
      * the caller's downstream (LLM router vs. EmbeddingWorker) expects.
@@ -151,7 +163,7 @@ final class LlmHttpSupport {
      * providers ({@link AnthropicProvider} and
      * {@link OpenAiCompatibleProvider}): read and clamp the
      * operator-configurable body cap, run the send / non-2xx surface through
-     * {@link #sendForBody} under {@link OpenAiCompatibleProvider.LlmCallFailedException},
+     * {@link #sendForBody} under {@link LlmCallFailedException},
      * and hand the 2xx body to {@code parser}. Each provider supplies only
      * its fully-built {@code request} and its response-text {@code parser}.
      *
@@ -166,8 +178,8 @@ final class LlmHttpSupport {
                 .orElse(DEFAULT_BODY_CAP_BYTES));
         String body = sendForBody(http, request, cap, providerLabel, (message, cause) ->
             cause == null
-                ? new OpenAiCompatibleProvider.LlmCallFailedException(message)
-                : new OpenAiCompatibleProvider.LlmCallFailedException(message, cause));
+                ? new LlmCallFailedException(message)
+                : new LlmCallFailedException(message, cause));
         return parser.parse(body, request.uri());
     }
 
@@ -178,6 +190,40 @@ final class LlmHttpSupport {
      * this many characters of a response body can ever be logged.
      */
     static final int PREVIEW_MAX_CHARS = 200;
+
+    /**
+     * Config-boundary validation of an operator-supplied LLM/embedding
+     * base-url: the value must parse as a URI, carry an {@code http} or
+     * {@code https} scheme, and name a host. A malformed value dies here —
+     * at startup, where every provider's config is asserted — naming
+     * {@code propertyKey}, rather than throwing {@link IllegalArgumentException}
+     * from a per-call {@code URI.create} deep inside a live call, where the
+     * caller's retry-then-fallback catch would absorb a permanent
+     * misconfiguration as a transient outage.
+     *
+     * @throws IllegalArgumentException when {@code baseUrl} does not parse,
+     *     uses a non-http(s) scheme, or names no host; the message names
+     *     {@code propertyKey} so the operator can find the offending property.
+     */
+    static void requireHttpBaseUrl(String baseUrl, String propertyKey) {
+        URI uri;
+        try {
+            uri = new URI(baseUrl);
+        } catch (URISyntaxException e) {
+            throw new IllegalArgumentException(
+                propertyKey + "='" + baseUrl + "' is not a valid URI: " + e.getMessage(), e);
+        }
+        String scheme = uri.getScheme();
+        if (scheme == null || !(scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"))) {
+            throw new IllegalArgumentException(
+                propertyKey + "='" + baseUrl + "' must use an http or https scheme");
+        }
+        String host = uri.getHost();
+        if (host == null || host.isEmpty()) {
+            throw new IllegalArgumentException(
+                propertyKey + "='" + baseUrl + "' must name a host");
+        }
+    }
 
     /**
      * Concatenate {@code base} + {@code path} with exactly one slash

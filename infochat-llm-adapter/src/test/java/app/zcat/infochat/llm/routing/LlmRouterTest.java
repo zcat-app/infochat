@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Plain JUnit5 unit tests for {@link LlmRouter}. Bypasses Quarkus
@@ -288,6 +289,47 @@ class LlmRouterTest {
 
         assertDoesNotThrow(router::assertAllTasksResolve,
             "every task resolves to the default provider when no override is set");
+    }
+
+    /**
+     * U-27: an explicitly configured {@code infochat.llm.default.provider}
+     * that names no registered entry fails the startup scan — a typo that
+     * forTask's priority-3 would otherwise absorb as a silent reroute of
+     * every override-less task for the JVM lifetime. The message names the
+     * property and the bad value so the operator can find the typo.
+     */
+    @Test
+    void assertAllTasksResolveFailsWhenExplicitDefaultProviderUnknown() {
+        LlmRouter router = new LlmRouter(
+            List.of(new LlmRouter.Entry(NAME_DEFAULT, new StubProvider(), Set.of("en"))),
+            LlmRouter.ConfigReader.fromMap(Map.of(
+                LlmRouter.CONFIG_KEY_DEFAULT_PROVIDER, "no-such-provider")));
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+            router::assertAllTasksResolve,
+            "an explicit unknown default provider must fail the startup scan");
+        assertTrue(ex.getMessage().contains(LlmRouter.CONFIG_KEY_DEFAULT_PROVIDER),
+            "the failure must name the default-provider property; got: " + ex.getMessage());
+        assertTrue(ex.getMessage().contains("no-such-provider"),
+            "the failure must name the unknown configured value; got: " + ex.getMessage());
+    }
+
+    /**
+     * U-27 complement: when {@code infochat.llm.default.provider} is UNSET,
+     * the implicit default ({@code OpenAiCompatibleProvider.PROVIDER_NAME})
+     * may name no registered entry in a stub-only fixture — that must NOT
+     * fail the startup scan. forTask's priority-3 silently falls back to the
+     * first entry, the path test fixtures rely on.
+     */
+    @Test
+    void assertAllTasksResolveToleratesUnknownImplicitDefault() {
+        LlmRouter router = new LlmRouter(
+            List.of(new LlmRouter.Entry(NAME_ALTERNATE, new StubProvider(), Set.of("en"))),
+            LlmRouter.ConfigReader.fromMap(Map.of()));
+
+        assertDoesNotThrow(router::assertAllTasksResolve,
+            "an unknown IMPLICIT default must not fail boot — the silent "
+                + "fallback is the test-fixture path");
     }
 
     /**

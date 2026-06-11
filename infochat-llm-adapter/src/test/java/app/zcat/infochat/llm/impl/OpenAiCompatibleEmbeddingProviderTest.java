@@ -183,6 +183,23 @@ class OpenAiCompatibleEmbeddingProviderTest {
             "a well-formed numeric reply parses to the same float[] as before");
     }
 
+    @Test
+    void validateBaseUrlFailsOnMalformedBaseUrlNamingTheProperty() {
+        // U-28: the @PostConstruct base-url check (run at Collector startup,
+        // where the @Startup EmbeddingMetadataStartupGuard drives this bean)
+        // must reject a malformed infochat.embeddings.base-url naming the
+        // property, rather than deferring the failure to the per-call
+        // URI.create inside the EmbeddingWorker's batch-failure catch.
+        OpenAiCompatibleEmbeddingProvider provider = new OpenAiCompatibleEmbeddingProvider();
+        provider.baseUrl = "ftp://example.com";
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+            provider::validateBaseUrl,
+            "a malformed embeddings base-url must fail the startup check");
+        assertTrue(ex.getMessage().contains("infochat.embeddings.base-url"),
+            "the failure must name the embeddings base-url property; got: " + ex.getMessage());
+    }
+
     private void respondWith(String json) {
         mockServer.createContext("/embeddings", exchange -> {
             byte[] resp = json.getBytes(StandardCharsets.UTF_8);

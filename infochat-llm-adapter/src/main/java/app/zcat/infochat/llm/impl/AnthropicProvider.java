@@ -2,13 +2,11 @@ package app.zcat.infochat.llm.impl;
 
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import app.zcat.infochat.llm.LlmProvider;
 import app.zcat.infochat.llm.LlmResponse;
 import app.zcat.infochat.llm.ModelTask;
-import app.zcat.infochat.llm.impl.OpenAiCompatibleProvider.LlmCallFailedException;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.Config;
@@ -72,7 +70,6 @@ public class AnthropicProvider implements LlmProvider {
     public static final String PROVIDER_NAME = "anthropic";
 
     private static final String API_VERSION = "2023-06-01";
-    private static final ObjectMapper JSON = new ObjectMapper();
 
     private final Config config;
     private final HttpClient http;
@@ -123,6 +120,7 @@ public class AnthropicProvider implements LlmProvider {
     private TaskConfig configFor(ModelTask task) {
         String prefix = "infochat.llm." + task.keySegment() + ".";
         String baseUrl = config.getValue(prefix + "base-url", String.class);
+        LlmHttpSupport.requireHttpBaseUrl(baseUrl, prefix + "base-url");
         String apiKey = config.getOptionalValue(prefix + "api-key", String.class).orElse("");
         String model = config.getValue(prefix + "model", String.class);
         long timeoutMs = config.getOptionalValue(prefix + "timeout-ms", Long.class).orElse(30000L);
@@ -133,7 +131,7 @@ public class AnthropicProvider implements LlmProvider {
     private LlmResponse doCall(TaskConfig cfg, String systemPrompt, String userPrompt) {
         String body;
         try {
-            ObjectNode root = JSON.createObjectNode();
+            ObjectNode root = LlmHttpSupport.JSON.createObjectNode();
             root.put("model", cfg.model());
             root.put("max_tokens", cfg.maxTokens());
 
@@ -154,7 +152,7 @@ public class AnthropicProvider implements LlmProvider {
             user.put("role", "user");
             user.put("content", userPrompt);
 
-            body = JSON.writeValueAsString(root);
+            body = LlmHttpSupport.JSON.writeValueAsString(root);
         } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
             throw new LlmCallFailedException(
                 "AnthropicProvider: failed to assemble request body", e);
@@ -178,7 +176,7 @@ public class AnthropicProvider implements LlmProvider {
     private static LlmResponse parseContentText(String responseBody, URI uri) {
         JsonNode root;
         try {
-            root = JSON.readTree(responseBody);
+            root = LlmHttpSupport.JSON.readTree(responseBody);
         } catch (IOException e) {
             throw new LlmCallFailedException(
                 "AnthropicProvider: failed to parse JSON response from " + uri, e);

@@ -3,7 +3,6 @@ package app.zcat.infochat.llm.impl;
 import app.zcat.infochat.llm.LlmProvider;
 import app.zcat.infochat.llm.LlmResponse;
 import app.zcat.infochat.llm.ModelTask;
-import app.zcat.infochat.llm.impl.OpenAiCompatibleProvider.LlmCallFailedException;
 import app.zcat.infochat.llm.routing.LlmRouter;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;

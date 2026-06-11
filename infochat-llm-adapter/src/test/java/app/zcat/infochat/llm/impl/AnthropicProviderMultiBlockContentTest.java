@@ -2,7 +2,6 @@ package app.zcat.infochat.llm.impl;
 
 import app.zcat.infochat.llm.LlmResponse;
 import app.zcat.infochat.llm.ModelTask;
-import app.zcat.infochat.llm.impl.OpenAiCompatibleProvider.LlmCallFailedException;
 import com.sun.net.httpserver.HttpServer;
 import org.eclipse.microprofile.config.Config;
 import org.junit.jupiter.api.AfterEach;
