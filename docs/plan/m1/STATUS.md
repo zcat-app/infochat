@@ -11,12 +11,12 @@
 | Status | Count |
 |---|---|
 | pending | 28 |
-| in-progress | 0 |
+| in-progress | 1 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 318 |
 | deferred | 3 |
-| **total** | **349** |
+| **total** | **350** |
 
 ---
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-284 — Outbound delivery failure layer: retry, cap escalation, cleanup (complexity: high, risk: high)
 - M1-285 — Edit-failure fallback to fresh send in both production adapters (complexity: medium, risk: medium)
 - M1-286 — UNKNOWN-rate auto-disable stops the running stream-source worker (complexity: medium, risk: high)
 - M1-287 — Nostr dedup records event id only after a successful queue offer (complexity: low, risk: medium)
@@ -58,8 +57,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 | ID | Title | Status | Last review |
 |---|---|---|---|
-
-_(none)_
+| M1-284 | Outbound delivery failure layer: retry, cap escalation, cleanup | in-progress | (none) |
 
 ---
 
@@ -67,7 +65,8 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-313 — blocked_by: M1-284 (pending)
+- M1-313 — blocked_by: M1-284 (in-progress)
+- M1-314 — blocked_by: M1-284 (in-progress), M1-294 (pending)
 
 ---
 
@@ -490,8 +489,9 @@ M1-279 (done)
 M1-280 (done)
 M1-281 (done)
 M1-282 (done)
-M1-284 (pending) ← runnable
-  └── M1-313 (pending)
+M1-284 (in-progress)
+  ├── M1-313 (pending)
+  └── M1-314 (pending)
 M1-285 (pending) ← runnable
 M1-286 (pending) ← runnable
 M1-287 (pending) ← runnable
@@ -502,6 +502,7 @@ M1-291 (pending) ← runnable
 M1-292 (pending) ← runnable
 M1-293 (pending) ← runnable
 M1-294 (pending) ← runnable
+  └── M1-314 (pending) [see above]
 M1-295 (pending) ← runnable
 M1-296 (pending) ← runnable
 M1-297 (pending) ← runnable

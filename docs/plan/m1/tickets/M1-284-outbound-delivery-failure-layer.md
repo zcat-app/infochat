@@ -1,7 +1,7 @@
 ---
 id: M1-284
 title: "Outbound delivery failure layer: retry, cap escalation, cleanup"
-status: pending
+status: in-progress
 created: 2026-06-11
 last_updated: 2026-06-11
 blocked_by: []
@@ -22,8 +22,9 @@ files_scope:
 complexity: high
 risk: high
 round_cap: 2
-security_relevant: false
+security_relevant: true
 migration_touch: false
+outline_file: target/m1-tick-outline-M1-284.md
 out_of_scope:
   - Adapter-side classification fixes (SimpleX classifyError substring matching is M1-294; adapters MUST NOT grow their own retry wrapper — the spec's "No silent extension" rule).
   - The edit/finalize fallback-to-fresh-send path (M1-285) — this ticket owns fresh-send failure handling; M1-285 owns the in-place-edit failure fork.
@@ -112,7 +113,13 @@ revisions:
         the "chat_memory is not written" clause to out_of_scope, owned by the
         new M1-313 (reorder chat-turn persistence + auto-compress to after
         send-success in provider/chat). Items 2/3/5/6/7/8 unchanged.
-clarity_check: {}
+clarity_check:
+  date: 2026-06-11
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE item 7: MessagingException javadoc check is by-inspection, weaker than the grep/named-test bar of the other items (not a blocker)."
+    - "SECURITY-FLAG-CONSISTENT: security_relevant: false should be true — acceptance item 6 clears is_group_admin in a transaction (admin-tier gate). Flagged in two consecutive clarity passes."
+    - "SELF-CONTAINED-CHECK: body 're-read §Failure handling in full' treats messaging.md as load-bearing; the 'Group deleted upstream' path (group-not-found permanent failure → removed_at + scheduler cancel) has no acceptance item or named test. Flagged in two consecutive passes."
 ---
 
 # M1-284: Outbound delivery failure layer: retry, cap escalation, cleanup
@@ -140,8 +147,17 @@ mechanism for the flagship adapter — departed users and admins keep live
 ## Acceptance
 
 See frontmatter. The spec sentences quoted there are transcribed from
-`docs/spec/messaging.md` §Failure handling (verified verbatim 2026-06-11);
-re-read that section in full before implementing — it is the contract.
+`docs/spec/messaging.md` §Failure handling (verified verbatim 2026-06-11) —
+every load-bearing clause is inlined in the acceptance items above; treat
+those items as the contract. The one spec case NOT inlined here is "Group
+deleted upstream" (group-not-found permanent failure → `removed_at` +
+scheduler cancel): it is consciously deferred to M1-314, because
+distinguishing the group-not-found signal from a generic PERMANENT failure
+requires the adapter-side error classification owned by M1-294 (out of
+scope). Treated as a generic permanent failure today, it already rides the
+item-5 threshold path. The §Failure handling section remains the background
+reference, but no clause beyond the deferred one is load-bearing outside the
+inlined items.
 
 ## Out-of-scope
 
