@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 28 |
+| pending | 29 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 317 |
 | deferred | 3 |
-| **total** | **348** |
+| **total** | **349** |
 
 ---
 
@@ -68,7 +68,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-313 — blocked_by: M1-284 (pending)
 
 ---
 
@@ -492,6 +492,7 @@ M1-280 (done)
 M1-281 (done)
 M1-282 (done)
 M1-284 (pending) ← runnable
+  └── M1-313 (pending)
 M1-285 (pending) ← runnable
 M1-286 (pending) ← runnable
 M1-287 (pending) ← runnable
