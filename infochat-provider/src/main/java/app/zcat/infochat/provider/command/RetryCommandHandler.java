@@ -45,11 +45,9 @@ import java.text.MessageFormat;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -228,46 +226,16 @@ public class RetryCommandHandler implements CommandHandler {
                 out.append("\n\n");
             }
 
+            ClusterBlockRenderer clusterBlockRenderer =
+                    new ClusterBlockRenderer(llmOutputSanitizer, translationPipeline, bundleLoader);
             for (ClusterProse cp : prose) {
-                appendClusterBlock(out, cp, scopeLanguage);
+                clusterBlockRenderer.appendClusterBlock(out, cp, scopeLanguage);
             }
 
             return reply(scope, out.toString().stripTrailing());
         } finally {
             inFlightTracker.release(userId.get(), scopeKind, scopeId, slot);
         }
-    }
-
-    private void appendClusterBlock(StringBuilder out, ClusterProse cp, String scopeLanguage) {
-        Cluster cluster = cp.cluster();
-        List<Post> posts = cluster.posts();
-        Post first = posts.get(0);
-
-        out.append("[topic_id=").append(cluster.topicId()).append("]\n");
-        out.append(first.title()).append("\n");
-        out.append("covered by: ");
-        for (int i = 0; i < posts.size(); i++) {
-            Post p = posts.get(i);
-            if (i > 0) out.append(", ");
-            out.append(p.sourceDisplayName()).append(" (uid ").append(p.uid()).append(")");
-        }
-        out.append("\n");
-        Set<String> sourceSet = new LinkedHashSet<>();
-        for (Post p : posts) {
-            sourceSet.add(p.sourceDisplayName());
-        }
-        out.append("score: ").append(sourceSet.size())
-           .append(sourceSet.size() == 1 ? " source" : " sources")
-           .append("\n");
-        // /retry output passes through LlmOutputSanitizer (spec §LLM output sanitizer)
-        String summaryText = cp.degraded()
-                ? cp.prose()
-                : translationPipeline.run(
-                        llmOutputSanitizer.sanitize(cp.prose()), scopeLanguage);
-        out.append("summary: ").append(summaryText).append("\n");
-        out.append("classification: ").append(joinedTags(posts)).append("\n");
-        out.append("tags: ").append(joinedTags(posts)).append("\n");
-        out.append("\n");
     }
 
     /**
@@ -368,14 +336,6 @@ public class RetryCommandHandler implements CommandHandler {
         } catch (SQLException e) {
             throw new IllegalStateException("RetryCommandHandler.readScopeLanguage failed", e);
         }
-    }
-
-    private static String joinedTags(List<Post> posts) {
-        Set<String> union = new LinkedHashSet<>();
-        for (Post p : posts) {
-            union.addAll(p.tags());
-        }
-        return String.join(", ", union);
     }
 
     private OutboundMessage handleDigestRetry(ScopeRef scope) {

@@ -102,8 +102,12 @@ public class AssetReplyRenderer {
                 utcTime, String.valueOf(cacheAgeSeconds)));
         sb.append('\n');
 
-        // Attribution URL on its own line, bare per D30
-        sb.append("  source: ").append(sourceUrl);
+        // Attribution URL on its own line, bare per D30. The 2-space indent
+        // and the separator space are layout (owned here); only the label word
+        // is bundle-resolved (D43).
+        sb.append("  ")
+          .append(bundleLoader.get(BundleKeys.REPLY_ASSET_SOURCE_LABEL, language))
+          .append(' ').append(sourceUrl);
 
         return sb.toString();
     }

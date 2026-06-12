@@ -190,6 +190,40 @@ class HelpCommandHandlerTest {
                 "reply must not contain HTML anchor tags: " + body);
     }
 
+    @Test
+    void enabledAssetLineResolvesThroughBundleInScopeLanguage() {
+        // One enabled asset + a cs scope language: the asset /help line must
+        // resolve through the bundle (no inline English) like every other line.
+        HelpCommandHandler handler = new HelpCommandHandler() {
+            @Override
+            HelpCommandHandler.CallerTier resolveTier(ScopeRef scope) {
+                return dm(false, false, false);
+            }
+        };
+        handler.bundleLoader = productionBundleLoader;
+        handler.commandPermissions = commandPermissions;
+        InboundContext context = new InboundContext();
+        context.setEffectiveLanguage("cs");
+        handler.inboundContext = context;
+        handler.assetRegistry = new AssetRegistry() {
+            @Override
+            public List<AssetRegistry.AssetEntry> getEnabledAssets() {
+                return List.of(new AssetRegistry.AssetEntry(
+                        "zcash", "Zcash",
+                        List.of(new AssetRegistry.SubVerbEntry(
+                                "price", true, true, "https://example.com", "usd")),
+                        List.of("usd")));
+            }
+        };
+
+        String body = handler.handle(new ScopeRef.Dm("alice"), "/help").text();
+
+        assertTrue(body.contains("/zcash [sub-verb] [--vs <currency>] — tržní data Zcash (price)"),
+                "asset line must render in cs through the bundle; got: " + body);
+        assertFalse(body.contains("market data"),
+                "cs asset line must not concatenate inline English 'market data'; got: " + body);
+    }
+
     // ----- helpers ----------------------------------------------------------
 
     /**

@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.command.asset;
 
+import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -19,10 +20,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class AssetReplyRendererTest {
 
     private AssetReplyRenderer renderer;
+    private BundleLoader bundleLoader;
 
     @BeforeEach
     void setUp() {
-        BundleLoader bundleLoader = new BundleLoader();
+        bundleLoader = new BundleLoader();
         // Trigger PostConstruct manually to load bundles
         try {
             var method = BundleLoader.class.getDeclaredMethod("load");
@@ -166,6 +168,29 @@ class AssetReplyRendererTest {
         assertFalse(eurRendered.contains("$38.74"), "eur price must not have $ prefix");
         assertTrue(czkRendered.contains("961.3 CZK"), "czk price gets ISO-code suffix");
         assertFalse(czkRendered.contains("$961.3"), "czk price must not have $ prefix");
+    }
+
+    @Test
+    void sourceLabelIsResolvedFromBundle() {
+        AssetSnapshotReader.Snapshot snap = new AssetSnapshotReader.Snapshot(
+                "zcash", "coingecko", "usd",
+                new BigDecimal("42.18"),
+                null, null, null, null, null, null,
+                Instant.now().minusSeconds(10),
+                "coingecko.com/en/coins/zcash"
+        );
+        String rendered = renderer.render(
+                new AssetSnapshotReader.SnapshotResult(snap, false, Duration.ofSeconds(90)),
+                "Zcash", "coingecko.com/en/coins/zcash", "en");
+
+        // The attribution line is composed from the bundle label (no longer a
+        // hardcoded literal); the layout indent + separator frame it.
+        String label = bundleLoader.get(BundleKeys.REPLY_ASSET_SOURCE_LABEL, "en");
+        assertTrue(rendered.contains("  " + label + " coingecko.com/en/coins/zcash"),
+                "source line must be composed from the bundle label; got: " + rendered);
+        // ... and the en rendering stays byte-identical to the prior literal.
+        assertTrue(rendered.contains("  source: coingecko.com/en/coins/zcash"),
+                "en source line stays byte-identical; got: " + rendered);
     }
 
     @Test

@@ -16,6 +16,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.text.MessageFormat;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -211,12 +212,15 @@ public class HelpCommandHandler implements CommandHandler {
     }
 
     private void appendEnabledAssets(StringBuilder body) {
+        String language = inboundContext.effectiveLanguage();
         for (AssetRegistry.AssetEntry asset : assetRegistry.getEnabledAssets()) {
             List<String> subVerbs = asset.enabledSubVerbNames();
             body.append('\n');
-            body.append('/').append(asset.name());
-            body.append(" [sub-verb] [--vs <currency>] — ");
-            body.append(asset.displayName()).append(" market data");
+            body.append(MessageFormat.format(
+                    bundleLoader.get(BundleKeys.HELP_CMD_ASSET_LINE, language),
+                    asset.name(), asset.displayName()));
+            // The enabled sub-verb names are literal command tokens, not
+            // translatable prose; the parenthetical wrapper stays in code.
             if (!subVerbs.isEmpty()) {
                 body.append(" (").append(String.join(", ", subVerbs)).append(')');
             }

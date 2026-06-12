@@ -147,6 +147,19 @@ public final class BundleKeys {
     /** Short-help line for {@code /list-groups} (bot-admin tier). */
     public static final String HELP_CMD_LIST_GROUPS_SHORT = "help.cmd.list-groups.short";
 
+    /**
+     * Per-asset {@code /help} line template (M1-303). One key for the whole
+     * dynamic asset list (unlike the per-command {@code help.cmd.*.short}
+     * keys) since the enabled-asset set is operator-driven, not a fixed
+     * catalogue. Tokens: {@code {0}} = asset command name (e.g. {@code zcash}),
+     * {@code {1}} = display name (e.g. {@code Zcash}). The command syntax
+     * placeholders ({@code [sub-verb]}, {@code [--vs <currency>]}) stay
+     * verbatim per the help-line convention; only the prose is translated.
+     * The trailing enabled-sub-verb parenthetical is appended by the handler
+     * (the names are literal command tokens, not translatable prose).
+     */
+    public static final String HELP_CMD_ASSET_LINE = "help.cmd.asset.line";
+
     /** Deterministic reply for an unknown slash command, looked up by InboundRouter's slash dispatch in the requester's effective scope language. */
     public static final String ERROR_UNKNOWN_COMMAND = "error.unknown_command";
 
@@ -252,6 +265,30 @@ public final class BundleKeys {
     /** {@code >5 followed tags} top-3 restriction prefix. {@code {0}} = N = followed-tag count. */
     public static final String REPLY_SUMMARY_TOP_3_OF_N_PREFIX =
             "reply.summary.top_3_of_n_prefix";
+
+    // ----- /summary + /retry cluster block labels (M1-303) ----------------
+    // Per docs/design/05-llm.md §418 ("Cluster headers, classification
+    // labels in summaries" — listed as Translated) + decision D43. The
+    // shared ClusterBlockRenderer resolves these in the scope's reply
+    // language for both /summary (terminal compose) and /retry (anchored
+    // replay). The score line carries a MessageFormat {0,choice,...} plural
+    // shape so Czech's three-form plural (1 zdroj / 2 zdroje / 5 zdrojů)
+    // renders correctly; binary languages collapse it to two arms.
+
+    /** Cluster-block {@code covered by: } label prefix; the comma-joined source list is appended after it. */
+    public static final String REPLY_SUMMARY_CLUSTER_COVERED_BY = "reply.summary.cluster.covered_by";
+
+    /** Cluster-block score line. Token {@code {0}} = distinct-source count; a {@code {0,choice,...}} plural shape renders the count-and-noun. */
+    public static final String REPLY_SUMMARY_CLUSTER_SCORE = "reply.summary.cluster.score";
+
+    /** Cluster-block {@code summary: } label prefix; the (possibly translated) LLM prose is appended after it. */
+    public static final String REPLY_SUMMARY_CLUSTER_SUMMARY_LABEL = "reply.summary.cluster.summary_label";
+
+    /** Cluster-block {@code classification: } label prefix; the comma-joined tag union is appended after it. */
+    public static final String REPLY_SUMMARY_CLUSTER_CLASSIFICATION_LABEL = "reply.summary.cluster.classification_label";
+
+    /** Cluster-block {@code tags: } label prefix; the comma-joined tag union is appended after it. */
+    public static final String REPLY_SUMMARY_CLUSTER_TAGS_LABEL = "reply.summary.cluster.tags_label";
 
     // ----- Intake-step splice fixed replies (M1-044b) ---------------------
     // Per docs/spec/security.md §Authorization model + §User ban +
@@ -809,6 +846,14 @@ public final class BundleKeys {
 
     /** Stale-data warning marker appended to the header when {@code now - captured_at > 2 * refresh_interval}. */
     public static final String REPLY_ASSET_STALE_MARKER = "reply.asset.stale_marker";
+
+    /**
+     * Attribution {@code source:} label preceding the bare source URL (M1-303).
+     * The bundle holds only the translatable word; the renderer owns the line
+     * indent and the separator space, so the value carries no fragile leading
+     * or trailing whitespace.
+     */
+    public static final String REPLY_ASSET_SOURCE_LABEL = "reply.asset.source_label";
 
     // ----- Asset command friendly errors (M1-055c) ---------------------------
     // Per docs/spec/commands.md §Asset commands + docs/design/10-asset-commands.md

@@ -41,10 +41,8 @@ import java.sql.SQLException;
 import java.text.MessageFormat;
 import java.time.Instant;
 import java.util.HexFormat;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -298,8 +296,10 @@ public class SummaryCommandHandler implements CommandHandler {
                     out.append("\n\n");
                 }
 
+                ClusterBlockRenderer clusterBlockRenderer =
+                        new ClusterBlockRenderer(llmOutputSanitizer, translationPipeline, bundleLoader);
                 for (ClusterProse cp : prose) {
-                    appendClusterBlock(out, cp, scopeLanguage);
+                    clusterBlockRenderer.appendClusterBlock(out, cp, scopeLanguage);
                 }
 
                 // Degraded prose is still a successful terminal delivery
@@ -346,61 +346,6 @@ public class SummaryCommandHandler implements CommandHandler {
         } finally {
             inFlightTracker.release(actorId, scopeKind, scopeId.get(), slot);
         }
-    }
-
-    /**
-     * Compose one cluster block. Six fields are deterministic; only
-     * {@code summary:} is LLM-authored (degraded entries write the
-     * degraded prose into the same slot).
-     */
-    private void appendClusterBlock(StringBuilder out, ClusterProse cp,
-                                     String scopeLanguage) {
-        Cluster cluster = cp.cluster();
-        List<Post> posts = cluster.posts();
-        Post first = posts.get(0);
-
-        // [topic_id=...] — deterministic; ClusterTraversal computed it.
-        out.append("[topic_id=").append(cluster.topicId()).append("]\n");
-        // headline — first post's title.
-        out.append(first.title()).append("\n");
-        // covered by: source display name (uid p-...), ...
-        out.append("covered by: ");
-        for (int i = 0; i < posts.size(); i++) {
-            Post p = posts.get(i);
-            if (i > 0) out.append(", ");
-            out.append(p.sourceDisplayName()).append(" (uid ").append(p.uid()).append(")");
-        }
-        out.append("\n");
-        // score: <count> sources (placeholder shape for MVP)
-        Set<String> sourceSet = new LinkedHashSet<>();
-        for (Post p : posts) {
-            sourceSet.add(p.sourceDisplayName());
-        }
-        out.append("score: ").append(sourceSet.size())
-           .append(sourceSet.size() == 1 ? " source" : " sources")
-           .append("\n");
-        // summary: degraded prose bypasses the pipeline per D43
-        // (bundle-not-translator invariant); non-degraded prose runs
-        // through sanitizer-1 then the translation pipeline (which
-        // internally runs sanitizer-2 + cache).
-        String summaryText = cp.degraded()
-                ? cp.prose()
-                : translationPipeline.run(
-                        llmOutputSanitizer.sanitize(cp.prose()), scopeLanguage);
-        out.append("summary: ").append(summaryText).append("\n");
-        // classification: comma-joined union of cluster.posts.tags.
-        out.append("classification: ").append(joinedTags(posts)).append("\n");
-        // tags: deduplicated union of cluster.posts.tags.
-        out.append("tags: ").append(joinedTags(posts)).append("\n");
-        out.append("\n");
-    }
-
-    private static String joinedTags(List<Post> posts) {
-        Set<String> union = new LinkedHashSet<>();
-        for (Post p : posts) {
-            union.addAll(p.tags());
-        }
-        return String.join(", ", union);
     }
 
     /**
