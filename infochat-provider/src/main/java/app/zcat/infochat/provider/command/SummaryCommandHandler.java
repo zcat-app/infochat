@@ -57,9 +57,12 @@ import java.util.UUID;
  * <ol>
  *   <li>Parse args via {@link SummaryArgs#parse(String)}; a typed
  *       {@link Failure} short-circuits to the friendly error.</li>
- *   <li>Resolve the caller's {@code users.id} from
- *       {@link ScopeRef.Dm#contactId()} (DM scope only in v1; group
- *       scope is T2-F territory).</li>
+ *   <li>Resolve the caller's {@code users.id} from the inbound
+ *       {@code (adapter, contact_id)} — carried by {@link InboundContext}
+ *       for both DM and group scope — then the scope id: the caller's own
+ *       {@code users.id} for DM, the {@code groups.id} for group scope
+ *       (the router resolved + validated the group at its step 4.1 before
+ *       dispatch).</li>
  *   <li>If a positional tag was supplied, verify it appears in the
  *       controlled vocabulary; otherwise emit the
  *       {@code error.summary.unknown_tag} bundle with a fuzzy
@@ -100,6 +103,18 @@ public class SummaryCommandHandler implements CommandHandler {
 
     private static final String SELECT_SCOPE_LANGUAGE =
             "SELECT language FROM scope_preferences WHERE scope_kind = ? AND scope_id = ?";
+
+    /**
+     * Group-scope id resolution: the active (not soft-removed)
+     * {@code groups} row for the inbound {@code (adapter,
+     * upstream_group_id)}. Same query the {@code InboundRouter} runs at
+     * step 4.1 and the sibling {@code ClearCommandHandler} uses, so the
+     * scope id the anchor keys on is the same {@code groups.id} the
+     * router carried through the dispatch.
+     */
+    private static final String SELECT_GROUP_ID_BY_ADAPTER_AND_UPSTREAM_ID =
+            "SELECT id FROM groups WHERE adapter = ? AND upstream_group_id = ? "
+                    + "AND removed_at IS NULL";
 
     /** Max fuzzy-suggestion entries surfaced in the unknown-tag error. */
     private static final int FUZZY_SUGGESTION_MAX = 5;
@@ -150,7 +165,7 @@ public class SummaryCommandHandler implements CommandHandler {
      *
      * <p>Returns a non-null {@link OutboundMessage} for every guard /
      * error branch (parse failure, no-posts, unknown tag, in-flight,
-     * rate-cap, group scope) — the router sends those. For the terminal
+     * rate-cap) — the router sends those. For the terminal
      * summary path the handler owns its own message lifecycle through
      * {@link ProgressNotifier} (placeholder &rarr; coalesced
      * {@code update} &rarr; {@code complete}/{@code fail}) and returns
@@ -165,14 +180,29 @@ public class SummaryCommandHandler implements CommandHandler {
         }
         SummaryArgs args = ((Success) parsed).args();
 
-        // Resolve scope -> (scope_kind, scope_id). v1 supports DM only;
-        // group scope falls through to no_posts_yet because the group
-        // member-actor seam (T2-F) is not in MVP.
-        Optional<UUID> scopeId = resolveScopeId(scope);
+        // Resolve the caller's users.id from the inbound (adapter,
+        // contact_id). InboundContext carries the sender's contact id for
+        // both DM and group scope (ScopeRef carries it only for DM), so a
+        // group member resolves to their own users.id here. An unknown
+        // contact (no users row) yields no_posts_yet.
+        String adapterName = inboundContext.adapterName();
+        Optional<UUID> actorIdOpt = lookupUserId(adapterName, inboundContext.senderContactId());
+        if (actorIdOpt.isEmpty()) {
+            return reply(scope, bundleLoader.get(BundleKeys.REPLY_SUMMARY_NO_POSTS_YET, inboundContext.effectiveLanguage()));
+        }
+        UUID actorId = actorIdOpt.get();
+
+        // Resolve the scope id the post query and the anchor key on: the
+        // caller's own users.id for DM, the groups.id for group scope
+        // (per-member personal anchors, commands.md ~:779). Per-(user,
+        // scope) isolation: the anchor row and the in-flight slot key on
+        // (actorId, scope_kind, scopeId), so a user's DM summary and their
+        // group summary never read or overwrite each other.
+        String scopeKind = EligiblePostQuery.scopeKindOf(scope);
+        Optional<UUID> scopeId = resolveScopeId(scope, actorId, adapterName);
         if (scopeId.isEmpty()) {
             return reply(scope, bundleLoader.get(BundleKeys.REPLY_SUMMARY_NO_POSTS_YET, inboundContext.effectiveLanguage()));
         }
-        String scopeKind = EligiblePostQuery.scopeKindOf(scope);
 
         // Unknown-tag check via the controlled vocabulary. The parser
         // accepts any syntactically-valid tag; the handler tells the
@@ -199,12 +229,11 @@ public class SummaryCommandHandler implements CommandHandler {
         // checked BEFORE the LLM bucket so neither check consumes
         // anything on a rejection — an already-in-flight rejection
         // takes no bucket token, and a rate-cap rejection records no
-        // timestamp, so the next permitted request still succeeds.
-        // v1 DM-only: scopeId IS the caller's users.id here (group
-        // scope returned no_posts_yet above).
-        UUID actorId = scopeId.get();
+        // timestamp, so the next permitted request still succeeds. The
+        // slot keys on (actorId, scope_kind, scopeId) so /stop targets the
+        // caller's request in this exact scope.
         InFlightTracker.CancellationHandle slot =
-                inFlightTracker.tryAcquire(actorId, scopeKind, actorId);
+                inFlightTracker.tryAcquire(actorId, scopeKind, scopeId.get());
         if (slot == null) {
             return reply(scope, bundleLoader.get(BundleKeys.ERROR_CHAT_IN_FLIGHT, inboundContext.effectiveLanguage()));
         }
@@ -243,7 +272,7 @@ public class SummaryCommandHandler implements CommandHandler {
                 String argHash = computeArgHash(rawText);
                 String clusterMapJson = serializeClusterMap(clusters);
                 summaryAnchorRepository.write(
-                        scopeId.get(), scopeKind, scopeId.get(), "summary",
+                        actorId, scopeKind, scopeId.get(), "summary",
                         argHash, postUids, clusterMapJson);
 
                 progressNotifier.publish(scope, ProgressStage.TRANSLATING);
@@ -299,7 +328,7 @@ public class SummaryCommandHandler implements CommandHandler {
             // Self-delivered via the notifier — no router send.
             return null;
         } finally {
-            inFlightTracker.release(actorId, scopeKind, actorId, slot);
+            inFlightTracker.release(actorId, scopeKind, scopeId.get(), slot);
         }
     }
 
@@ -358,21 +387,34 @@ public class SummaryCommandHandler implements CommandHandler {
         return String.join(", ", union);
     }
 
-    private Optional<UUID> resolveScopeId(ScopeRef scope) {
-        if (!(scope instanceof ScopeRef.Dm dm)) {
-            // Group scope is T2-F territory; v1 has no actor seam, so
-            // the group-scope-id we'd want here (a group_membership
-            // row's users.id for the caller) is not available. Return
-            // empty so the handler emits no_posts_yet rather than
-            // querying with the adapter-side group id.
-            return Optional.empty();
-        }
-        String adapterName = inboundContext.adapterName();
+    /**
+     * Resolve the scope id the post query and the anchor key on: the
+     * caller's own {@code users.id} for DM, the {@code groups.id} for
+     * group scope. The router resolved + validated the group at its step
+     * 4.1 before this handler runs; an empty result here is the
+     * vanished-group race (concurrent removal) and falls through to
+     * no_posts_yet, matching the unknown-contact path.
+     */
+    private Optional<UUID> resolveScopeId(ScopeRef scope, UUID actorId, String adapter) {
+        return switch (scope) {
+            case ScopeRef.Dm ignored -> Optional.of(actorId);
+            case ScopeRef.Group group -> lookupGroupId(adapter, group.adapterGroupId());
+        };
+    }
+
+    /**
+     * Resolve the caller's {@code users.id} from the inbound
+     * {@code (adapter, contact_id)}. The lookup MUST qualify on both
+     * columns per the V5 {@code UNIQUE (adapter, contact_id)} constraint
+     * (decision D46: SimpleX + Signal side-by-side). An absent row means
+     * the contact has no users row; the caller maps empty to no_posts_yet.
+     */
+    private Optional<UUID> lookupUserId(String adapter, String contactId) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                      SELECT_USER_ID_BY_ADAPTER_AND_CONTACT_ID)) {
-            ps.setString(1, adapterName);
-            ps.setString(2, dm.contactId());
+            ps.setString(1, adapter);
+            ps.setString(2, contactId);
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) {
                     return Optional.empty();
@@ -384,7 +426,30 @@ public class SummaryCommandHandler implements CommandHandler {
             // message; the SQLException stack already carries the SQL
             // diagnostic. The cause preserves the exception chain.
             throw new IllegalStateException(
-                    "SummaryCommandHandler.resolveScopeId failed", e);
+                    "SummaryCommandHandler.lookupUserId failed", e);
+        }
+    }
+
+    /**
+     * Resolve the active (not soft-removed) {@code groups.id} for the
+     * inbound {@code (adapter, upstream_group_id)}, or empty when no such
+     * row exists (the vanished-group race).
+     */
+    private Optional<UUID> lookupGroupId(String adapter, String upstreamGroupId) {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     SELECT_GROUP_ID_BY_ADAPTER_AND_UPSTREAM_ID)) {
+            ps.setString(1, adapter);
+            ps.setString(2, upstreamGroupId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return Optional.empty();
+                }
+                return Optional.of((UUID) rs.getObject("id"));
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "SummaryCommandHandler.lookupGroupId failed", e);
         }
     }
 

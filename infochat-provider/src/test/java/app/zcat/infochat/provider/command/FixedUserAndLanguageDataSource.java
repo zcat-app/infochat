@@ -8,15 +8,25 @@ import java.util.UUID;
 
 /**
  * Hand-rolled JDBC stub: answers the handler's users-id lookup with
- * the fixed constructor-supplied id (any contact id matches) and a
- * {@code scope_preferences} language lookup with {@code "en"}.
- * Mockito is intentionally absent from the Provider classpath.
+ * the fixed constructor-supplied id (any contact id matches), the
+ * group-id lookup ({@code SELECT id FROM groups ...}) with the
+ * constructor-supplied group id, and a {@code scope_preferences}
+ * language lookup with {@code "en"}. Mockito is intentionally absent
+ * from the Provider classpath.
  */
 final class FixedUserAndLanguageDataSource extends UnsupportedDataSource {
     private final UUID userId;
+    private final UUID groupId;
 
     FixedUserAndLanguageDataSource(UUID userId) {
+        // DM-only callers never issue the groups lookup; supply a
+        // throwaway group id so the single-arg form stays compatible.
+        this(userId, UUID.randomUUID());
+    }
+
+    FixedUserAndLanguageDataSource(UUID userId, UUID groupId) {
         this.userId = userId;
+        this.groupId = groupId;
     }
 
     @Override
@@ -40,13 +50,16 @@ final class FixedUserAndLanguageDataSource extends UnsupportedDataSource {
 
     private PreparedStatement newPreparedStatement(String sql) {
         boolean isScopePrefsQuery = sql.contains("scope_preferences");
+        boolean isGroupQuery = sql.contains("FROM groups");
         return (PreparedStatement) Proxy.newProxyInstance(
                 PreparedStatement.class.getClassLoader(),
                 new Class<?>[] { PreparedStatement.class },
                 (proxy, method, methodArgs) -> switch (method.getName()) {
                     case "setString", "setObject" -> null;
                     case "executeQuery" ->
-                            isScopePrefsQuery ? newLanguageResultSet() : newUserIdResultSet();
+                            isScopePrefsQuery ? newLanguageResultSet()
+                                    : isGroupQuery ? newIdResultSet(groupId)
+                                    : newIdResultSet(userId);
                     case "close" -> null;
                     case "toString" -> "StubPreparedStatement";
                     case "hashCode" -> System.identityHashCode(proxy);
@@ -56,7 +69,7 @@ final class FixedUserAndLanguageDataSource extends UnsupportedDataSource {
                 });
     }
 
-    private ResultSet newUserIdResultSet() {
+    private ResultSet newIdResultSet(UUID id) {
         boolean[] consumed = { false };
         return (ResultSet) Proxy.newProxyInstance(
                 ResultSet.class.getClassLoader(),
@@ -67,9 +80,9 @@ final class FixedUserAndLanguageDataSource extends UnsupportedDataSource {
                         consumed[0] = true;
                         yield true;
                     }
-                    case "getObject" -> userId;
+                    case "getObject" -> id;
                     case "close" -> null;
-                    case "toString" -> "StubResultSet(userId)";
+                    case "toString" -> "StubResultSet(id)";
                     case "hashCode" -> System.identityHashCode(proxy);
                     case "equals" -> proxy == methodArgs[0];
                     default -> throw new UnsupportedOperationException(

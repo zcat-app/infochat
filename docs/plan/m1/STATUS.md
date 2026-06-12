@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 22 |
+| pending | 21 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 327 |
+| done | 328 |
 | deferred | 3 |
 | **total** | **352** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-288 — Group-scope /summary resolves its scope instead of returning no_posts_yet (complexity: medium, risk: medium)
 - M1-291 — SSRF module: proxy posture, pinned-path policy, bounded discard, contract fixes (complexity: medium, risk: medium)
 - M1-292 — Log hygiene: redactor timeout arms, URL paths, upstream bytes, LLM previews (complexity: medium, risk: medium)
 - M1-293 — Signal adapter: mention overflow, sourceName, capability values, launch classification (complexity: medium, risk: medium)
@@ -84,12 +83,12 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-299 | Core hardening smalls: notifier fallback throttle, probe outside lock, escaper allocation | 2026-06-12 | round 1 APPROVE |
 | M1-295 | Ingest resilience: eval-queue boundary, fetch-ladder scope, parser boundary, re-eval predicate | 2026-06-12 | round 1 APPROVE |
 | M1-290 | SECURITY DEFINER procedures reject banned admins as actors | 2026-06-12 | round 1 APPROVE |
+| M1-288 | Group-scope /summary resolves its scope instead of returning no_posts_yet | 2026-06-12 | round 1 APPROVE |
 | M1-287 | Nostr dedup records event id only after a successful queue offer | 2026-06-12 | round 1 APPROVE |
 | M1-286 | UNKNOWN-rate auto-disable stops the running stream-source worker | 2026-06-12 | round 1 APPROVE |
 | M1-285 | Edit-failure fallback to fresh send in both production adapters | 2026-06-12 | round 1 APPROVE |
 | M1-284 | Outbound delivery failure layer: retry, cap escalation, cleanup | 2026-06-12 | round 2 APPROVE |
 | M1-304 | Declare jakarta.json (+ Parsson) in the messaging-adapter pom | 2026-06-11 | round 1 APPROVE |
-| M1-296 | LLM config/routing: deterministic order, typo fail-fast, base-url validation, structure | 2026-06-11 | round 1 APPROVE |
 
 ---
 
@@ -490,7 +489,7 @@ M1-284 (done)
 M1-285 (done)
 M1-286 (done)
 M1-287 (done)
-M1-288 (pending) ← runnable
+M1-288 (done)
 M1-289 (done)
 M1-290 (done)
 M1-291 (pending) ← runnable

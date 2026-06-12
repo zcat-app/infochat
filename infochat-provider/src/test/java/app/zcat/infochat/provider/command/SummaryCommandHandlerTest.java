@@ -37,6 +37,7 @@ import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -53,7 +54,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@link RecordingSummaryProseGenerator}, {@link LlmOutputSanitizer}
  * (real), real {@link ClusterTraversal}, {@link InboundContext}
  * (constructed), {@link FixedUserAndLanguageDataSource} for the
- * DM-scope users-id lookup, plus a real {@link InFlightTracker} and a
+ * users-id (and, in group scope, group-id) lookup, plus a real {@link InFlightTracker} and a
  * real {@link LlmRateCap} (M1-183 admission control).
  *
  * <p>Asserted invariants (one {@code @Test} per behavioral branch):
@@ -73,8 +74,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   <li>LLM-unreachable branch: degraded prose → reply carries the
  *       degraded_notice prefix.</li>
  *   <li>Cap-excess branch: cap_excess_notice prefix interpolated.</li>
- *   <li>Group scope: handler returns no_posts_yet without calling
- *       the prose generator.</li>
+ *   <li>Group scope: resolves the caller's users.id and the group's
+ *       scope id, then runs the prose generator and writes a
+ *       group-scoped personal anchor (scope_kind="group",
+ *       scope_id=group id, distinct from the DM anchor key) — the
+ *       end-to-end group flow is pinned by {@code SummaryGroupScopeIT}.</li>
  *   <li>Sanitizer: LLM-authored prose containing {@code /grant-admin}
  *       lands as {@code [redacted command]} in the outbound.</li>
  * </ul>
@@ -115,6 +119,11 @@ class SummaryCommandHandlerTest {
         handler.progressNotifier = progressNotifier;
         InboundContext context = new InboundContext();
         context.setAdapterName("inmemory");
+        // The handler resolves the caller's users.id from the inbound
+        // (adapter, contact_id) carried by InboundContext (not from the
+        // ScopeRef), so the sender contact id must be set; the stub
+        // DataSource returns the fixed userId for any contact id.
+        context.setSenderContactId(PREFIX + "caller");
         handler.inboundContext = context;
     }
 
@@ -300,19 +309,38 @@ class SummaryCommandHandlerTest {
     }
 
     @Test
-    void groupScopeReturnsNoPostsYet() {
-        // Group scope: handler.resolveScopeId returns Optional.empty()
-        // before touching DataSource. Wire a NEVER stub so an
-        // accidental SQL call would surface loudly.
-        handler.dataSource = StubUserDataSource.neverCalled();
+    void groupScopeResolvesGroupIdAndWritesGroupScopedAnchor() {
+        // Group scope is functional (M1-288): the handler resolves the
+        // caller's users.id AND the group's scope id, runs the prose
+        // generator, and writes a personal anchor keyed on the GROUP's
+        // scope id — not the caller's user id (the DM key). The stub
+        // answers the users-id lookup with `userId` and the group-id
+        // lookup with a distinct `groupId`.
+        UUID groupId = UUID.randomUUID();
+        handler.dataSource = new FixedUserAndLanguageDataSource(userId, groupId);
+        eligiblePostQuery.seedPosts(
+                List.of(post(PREFIX + "g1", "Group headline", Instant.now())), 0);
+        proseGenerator.setResponseText("Group summary prose.");
 
         OutboundMessage reply = handler.handle(new ScopeRef.Group("g-some-id"), "/summary");
+        assertNull(reply, "terminal group /summary self-delivers via the notifier and returns null");
 
-        assertTrue(reply.text().contains("No posts to summarize"),
-                "group scope (no actor seam in v1) falls through to no_posts_yet. Got: "
-                        + reply.text());
-        assertEquals(0, proseGenerator.callCount(),
-                "group scope must NOT invoke the LLM");
+        assertEquals(1, proseGenerator.callCount(),
+                "group scope MUST run the prose generator (no longer short-circuits to no_posts_yet)");
+        assertEquals(1, anchorRepository.writeCount(),
+                "group /summary must write a personal anchor");
+        // Per-(user, scope) isolation: the anchor is keyed on the caller's
+        // user id as user_id but the GROUP's id as scope_id + scope_kind
+        // 'group' — distinct from a DM anchor (scope_kind 'dm', scope_id =
+        // user id), so the two never alias.
+        assertEquals(userId, anchorRepository.lastUserId(),
+                "anchor user_id must be the caller's users.id");
+        assertEquals("group", anchorRepository.lastScopeKind(),
+                "anchor scope_kind must be 'group' for a group invocation");
+        assertEquals(groupId, anchorRepository.lastScopeId(),
+                "anchor scope_id must be the group's id, not the caller's user id");
+        assertNotEquals(userId, anchorRepository.lastScopeId(),
+                "the group scope id must differ from the caller's user id (DM/group anchor isolation)");
     }
 
     @Test
@@ -615,6 +643,9 @@ class SummaryCommandHandlerTest {
     private static final class RecordingSummaryAnchorRepository extends SummaryAnchorRepository {
         private final AtomicInteger writes = new AtomicInteger();
         private volatile List<String> lastPostUids = List.of();
+        private volatile @Nullable UUID lastUserId;
+        private volatile @Nullable String lastScopeKind;
+        private volatile @Nullable UUID lastScopeId;
 
         @Override
         public void write(UUID userId, String scopeKind, UUID scopeId,
@@ -622,6 +653,9 @@ class SummaryCommandHandlerTest {
                           List<String> postUids, String clusterMapJson) {
             writes.incrementAndGet();
             lastPostUids = List.copyOf(postUids);
+            lastUserId = userId;
+            lastScopeKind = scopeKind;
+            lastScopeId = scopeId;
         }
 
         @Override
@@ -636,5 +670,8 @@ class SummaryCommandHandlerTest {
 
         int writeCount() { return writes.get(); }
         List<String> lastPostUids() { return lastPostUids; }
+        @Nullable UUID lastUserId() { return lastUserId; }
+        @Nullable String lastScopeKind() { return lastScopeKind; }
+        @Nullable UUID lastScopeId() { return lastScopeId; }
     }
 }
