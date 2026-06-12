@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.messaging;
 
+import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.core.notifier.AdminNotificationRecord;
 import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import app.zcat.infochat.messaging.FailureCategory;
@@ -9,6 +10,7 @@ import app.zcat.infochat.provider.group.GroupMembershipRepository;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -64,6 +66,7 @@ class OutboundDeliveryCleanupIT {
     static final UUID ITEM6_SOURCE = UUID.fromString("0b540005-0005-4000-8000-000000000005");
 
     static final String EXHAUST_CHANNEL = "ob-it-exhaust-chan";
+    static final String FAIL_CHANNEL = "ob-it-chan";
 
     @Inject @SeedDataSource DataSource dataSource;
     @Inject OutboundDelivery outboundDelivery;
@@ -78,6 +81,8 @@ class OutboundDeliveryCleanupIT {
             exec(conn, "DELETE FROM chat_session WHERE scope_id = ?", ITEM6_GROUP);
             exec(conn, "DELETE FROM summary_anchor WHERE scope_id = ?", ITEM6_GROUP);
             exec(conn, "DELETE FROM source WHERE id = ?", ITEM6_SOURCE);
+            exec(conn, "DELETE FROM audit_log WHERE scope_id IN (?, ?, ?)",
+                    ITEM5_GROUP, ITEM5_CONTROL, ITEM6_GROUP);
             exec(conn, "DELETE FROM group_membership WHERE group_id IN (?, ?, ?)",
                     ITEM5_GROUP, ITEM5_CONTROL, ITEM6_GROUP);
             exec(conn, "DELETE FROM groups WHERE id IN (?, ?, ?)",
@@ -114,6 +119,24 @@ class OutboundDeliveryCleanupIT {
         assertTrue(passesActiveGroupPredicate(ITEM5_CONTROL),
                 "an unrelated group must stay schedulable");
         assertNull(readRemovedAt(ITEM5_CONTROL));
+
+        // Effect 3: a BOT_REMOVED system-actor audit row is written in the same
+        // transaction as removed_at, with the column shape the native
+        // MembershipEventHandler.handleBotRemoved path writes — so /audit and
+        // audit_log_view render system-initiated and native-event removals
+        // identically.
+        BotRemovedRow audit = readBotRemovedRow(ITEM5_GROUP);
+        assertNotNull(audit, "threshold crossing must write a BOT_REMOVED audit row");
+        assertNull(audit.actorUserId(), "system actor: actor_user_id is NULL");
+        assertNull(audit.actorContactId(), "system actor: actor_contact_id is NULL");
+        assertEquals(FAIL_CHANNEL, audit.actorAdapter(),
+                "actor_adapter records the failing channel");
+        assertEquals("group", audit.targetKind());
+        assertEquals(ITEM5_GROUP.toString(), audit.targetId());
+        assertEquals(ITEM5_GROUP, audit.scopeId(), "scope is the group");
+        // The unaffected control group has no BOT_REMOVED row.
+        assertNull(readBotRemovedRow(ITEM5_CONTROL),
+                "an unrelated group must not get a BOT_REMOVED row");
     }
 
     @Test
@@ -255,6 +278,33 @@ class OutboundDeliveryCleanupIT {
 
     private java.sql.Timestamp readRemovedAt(UUID groupId) throws SQLException {
         return readTimestamp("SELECT removed_at FROM groups WHERE id = ?", groupId);
+    }
+
+    private record BotRemovedRow(@Nullable UUID actorUserId, @Nullable String actorContactId,
+                                 @Nullable String actorAdapter, String targetKind,
+                                 String targetId, @Nullable UUID scopeId) {}
+
+    private @Nullable BotRemovedRow readBotRemovedRow(UUID scopeId) throws SQLException {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT actor_user_id, actor_contact_id, actor_adapter, target_kind,"
+                             + " target_id, scope_id FROM audit_log"
+                             + " WHERE scope_id = ? AND action = ?")) {
+            ps.setObject(1, scopeId);
+            ps.setString(2, AuditAction.BOT_REMOVED.name());
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return null;
+                }
+                return new BotRemovedRow(
+                        rs.getObject("actor_user_id", UUID.class),
+                        rs.getString("actor_contact_id"),
+                        rs.getString("actor_adapter"),
+                        rs.getString("target_kind"),
+                        rs.getString("target_id"),
+                        rs.getObject("scope_id", UUID.class));
+            }
+        }
     }
 
     private java.sql.Timestamp readMembershipRemovedAt(UUID groupId, UUID userId) throws SQLException {

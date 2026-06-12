@@ -1,8 +1,14 @@
 package app.zcat.infochat.provider.group;
 
+import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.AuditLogWriter;
+import app.zcat.infochat.core.audit.RedactionHook;
+import app.zcat.infochat.core.log.SafeLog;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jspecify.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -119,7 +125,19 @@ public class GroupRepository {
           + "WHERE approval_status = 'pending' "
           + "  AND removed_at IS NULL";
 
+    private static final Logger log = LoggerFactory.getLogger(GroupRepository.class);
+
     private final DataSource dataSource;
+
+    // Field-injected rather than constructor-injected so the existing 1-arg
+    // constructor — and every `super(dataSource)` test double / `new
+    // GroupRepository(dataSource)` call site — stays unchanged. Package-private
+    // so the same-package GroupRepositoryAuditedRemovalIT can substitute a
+    // failing writer for the audit-rollback test. Non-null in the container;
+    // the hand-constructed test doubles that leave it null never reach
+    // markRemovedAudited.
+    @Inject
+    AuditLogWriter auditLogWriter;
 
     @Inject
     public GroupRepository(DataSource dataSource) {
@@ -180,6 +198,62 @@ public class GroupRepository {
             ps.setObject(1, groupId);
             ps.executeUpdate();
         }
+    }
+
+    /**
+     * Soft-remove a group AND write its {@code BOT_REMOVED} system-actor audit
+     * row in one transaction, audit-before-effect per Invariant 7. The
+     * permanent-delivery-failure cleanup path ({@code OutboundDelivery}) is the
+     * only bot-removed signal on adapters without native membership events
+     * ({@code supportsMembershipEvents=false}); an audit-write failure rolls the
+     * {@code removed_at} mutation back, so a group is never left removed without
+     * the matching audit row.
+     *
+     * <p>The row mirrors the columns
+     * {@code MembershipEventHandler.handleBotRemoved} writes for the native
+     * event — system actor (no user caused this), scope = the group — so
+     * {@code /audit} renders the system-initiated and native-event removals
+     * identically. The audit INSERT routes through {@link AuditLogWriter}; this
+     * method owns the {@code groups} connection, so coordinating the
+     * two-statement transaction here keeps the soft-remove and its audit row
+     * atomic.</p>
+     *
+     * @param adapter the failing channel name, recorded as {@code actor_adapter}.
+     */
+    public void markRemovedAudited(UUID groupId, String adapter) {
+        try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                // System-actor row (actor_user_id / actor_contact_id default to
+                // NULL): the platform-side failure removed the bot, not any user.
+                // INSERTed BEFORE the mutation per Invariant 7.
+                auditLogWriter.write(conn, RedactionHook.AuditRow.builder()
+                        .actorAdapter(adapter)
+                        .action(AuditAction.BOT_REMOVED)
+                        .targetKind("group")
+                        .targetId(groupId.toString())
+                        .scopeId(groupId)
+                        .requestId(UUID.randomUUID().toString())
+                        .build());
+                markRemoved(conn, groupId);
+                conn.commit();
+            } catch (SQLException e) {
+                conn.rollback();
+                // An SQLException message can echo bound audit-row values (a
+                // Postgres constraint-violation DETAIL line); per security.md
+                // §User content in exceptions the failure propagates with the
+                // exception class name only — no cause, no message body.
+                SafeLog.error(log, "markRemovedAudited transaction failed group=" + groupId, e);
+                throw sanitizedFailure("markRemovedAudited transaction failed group=" + groupId, e);
+            }
+        } catch (SQLException e) {
+            SafeLog.error(log, "markRemovedAudited connection failed group=" + groupId, e);
+            throw sanitizedFailure("markRemovedAudited connection failed group=" + groupId, e);
+        }
+    }
+
+    private static IllegalStateException sanitizedFailure(String context, SQLException e) {
+        return new IllegalStateException(context + " | exception=" + e.getClass().getName());
     }
 
     public void clearRemoved(UUID groupId) {

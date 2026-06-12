@@ -53,10 +53,11 @@ import java.util.concurrent.ThreadLocalRandom;
  * failures per group. When the count reaches the profile-driven
  * {@link #permanentFailureThreshold} (always &gt; 1, so a single
  * misclassified failure cannot trigger it) the group is soft-removed via
- * {@link GroupRepository#markRemoved(UUID)} — which is the entire
- * scheduler-cancel effect, since {@code DigestScheduler.queryActiveGroups}
- * filters {@code removed_at IS NULL}. A successful group delivery resets
- * the group's counter.</p>
+ * {@link GroupRepository#markRemovedAudited(UUID, String)} — which writes a
+ * {@code BOT_REMOVED} system-actor audit row in the same transaction and is
+ * the entire scheduler-cancel effect, since
+ * {@code DigestScheduler.queryActiveGroups} filters {@code removed_at IS NULL}.
+ * A successful group delivery resets the group's counter.</p>
  */
 @ApplicationScoped
 public class OutboundDelivery {
@@ -173,7 +174,7 @@ public class OutboundDelivery {
                     case PERMANENT -> {
                         log.warn("Outbound delivery to channel={} failed permanently, aborting reply",
                                 channel);
-                        onPermanentGroupFailure(groupId);
+                        onPermanentGroupFailure(channel, groupId);
                         return Outcome.ABORTED;
                     }
                     case TRANSIENT -> {
@@ -181,7 +182,7 @@ public class OutboundDelivery {
                             // Budget exhausted — escalate to permanent for the
                             // rest of this reply's lifecycle and alert admins.
                             onCapExhausted(channel, e);
-                            onPermanentGroupFailure(groupId);
+                            onPermanentGroupFailure(channel, groupId);
                             return Outcome.ABORTED;
                         }
                         if (!backOff(currentBound)) {
@@ -216,16 +217,18 @@ public class OutboundDelivery {
                         + " exhausted retry budget; escalated to permanent", last);
     }
 
-    private void onPermanentGroupFailure(@Nullable UUID groupId) {
+    private void onPermanentGroupFailure(String channel, @Nullable UUID groupId) {
         if (groupId == null) {
             return;
         }
         int count = consecutivePermanentByGroup.merge(groupId, 1, Integer::sum);
         if (count >= permanentFailureThreshold) {
-            // The bot looks removed from the group: soft-remove it (which also
-            // stops the digest scheduler, since it filters removed_at IS NULL)
-            // and reset the counter so a later re-add starts clean.
-            groupRepository.markRemoved(groupId);
+            // The bot looks removed from the group: soft-remove it AND write the
+            // BOT_REMOVED system-actor audit row atomically (which also stops the
+            // digest scheduler, since it filters removed_at IS NULL), then reset
+            // the counter so a later re-add starts clean. channel is recorded as
+            // the audit actor_adapter.
+            groupRepository.markRemovedAudited(groupId, channel);
             consecutivePermanentByGroup.remove(groupId);
             log.warn("Group {} soft-removed after {} consecutive permanent send failures",
                     groupId, count);

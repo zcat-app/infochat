@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 21 |
+| pending | 20 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 328 |
+| done | 329 |
 | deferred | 3 |
 | **total** | **352** |
 
@@ -43,7 +43,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-311 — Strip ticket/finding provenance from permanent comments (policy + sweep) (complexity: medium, risk: low)
 - M1-312 — Doc-truth v5: false comments and spec/design drift reconciliation (complexity: medium, risk: low)
 - M1-313 — Chat-memory write ordering on permanent delivery failure (complexity: high, risk: high)
-- M1-316 — Permanent-failure-driven group/membership cleanup writes BOT_REMOVED / MEMBER_LEFT audit rows (complexity: medium, risk: medium)
 
 ---
 
@@ -79,6 +78,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-316 | Permanent-failure-driven group soft-removal writes a BOT_REMOVED audit row | 2026-06-12 | round 2 APPROVE |
 | M1-315 | NostrDedupIT.multiRelayDedup over-asserts deliveryCount==1 (flake) | 2026-06-12 | — |
 | M1-299 | Core hardening smalls: notifier fallback throttle, probe outside lock, escaper allocation | 2026-06-12 | round 1 APPROVE |
 | M1-295 | Ingest resilience: eval-queue boundary, fetch-ladder scope, parser boundary, re-eval predicate | 2026-06-12 | round 1 APPROVE |
@@ -88,7 +88,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-286 | UNKNOWN-rate auto-disable stops the running stream-source worker | 2026-06-12 | round 1 APPROVE |
 | M1-285 | Edit-failure fallback to fresh send in both production adapters | 2026-06-12 | round 1 APPROVE |
 | M1-284 | Outbound delivery failure layer: retry, cap escalation, cleanup | 2026-06-12 | round 2 APPROVE |
-| M1-304 | Declare jakarta.json (+ Parsson) in the messaging-adapter pom | 2026-06-11 | round 1 APPROVE |
 
 ---
 
@@ -516,5 +515,5 @@ M1-310 (pending) ← runnable
 M1-311 (pending) ← runnable
 M1-312 (pending) ← runnable
 M1-315 (done)
-M1-316 (pending) ← runnable
+M1-316 (done)
 ```
