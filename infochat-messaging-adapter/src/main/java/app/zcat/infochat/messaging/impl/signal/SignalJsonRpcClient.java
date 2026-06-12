@@ -11,6 +11,7 @@ import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
+import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -99,6 +100,9 @@ final class SignalJsonRpcClient {
     private static final Logger LOG = Logger.getLogger(SignalJsonRpcClient.class);
 
     private static final String OPAQUE_PREFIX = "signal-";
+
+    /** §6.12 {@code adapter} label value — mirrors {@code SignalAdapter.name()}. */
+    private static final String ADAPTER_NAME = "signal";
 
     /**
      * Coarse hard cap on the per-line UTF-16 character count read from
@@ -194,6 +198,12 @@ final class SignalJsonRpcClient {
     private final AtomicLong rpcIdGen = new AtomicLong();
     private final AtomicLong handleIdGen = new AtomicLong();
 
+    // Late-bound by SignalAdapter (bindMetrics/attachClient) from
+    // AdapterMetrics.bindAdapter at registration. The noop() initializer
+    // keeps unbound instances — plain-constructed tests, a client built
+    // before registration — emitting into a throwaway registry instead
+    // of null-checking at every emission site.
+    private volatile AdapterMetrics metrics = AdapterMetrics.noop();
     private volatile MessagingAdapter.@Nullable InboundHandler inboundHandler;
     private volatile @Nullable Consumer<JsonObject> groupNotificationHandler;
     @Nullable private volatile Socket socket;
@@ -369,6 +379,7 @@ final class SignalJsonRpcClient {
             // A prior edit on this handle was unrecoverable; never edit again
             // (design §6.3.8: subsequent updates continue to fall back).
             fallbackSend(handle, internal, body);
+            recordFallbackSend(internal);
             return;
         }
         try {
@@ -381,7 +392,9 @@ final class SignalJsonRpcClient {
             if (e.category() != FailureCategory.PERMANENT) {
                 throw e;
             }
+            recordUpdateFail();
             fallbackSend(handle, internal, body);
+            recordFallbackSend(internal);
         }
     }
 
@@ -389,6 +402,7 @@ final class SignalJsonRpcClient {
         SignalMessageHandle internal = lookupOpen(handle);
         if (internal.fellBack()) {
             fallbackSend(handle, internal, body);
+            recordFallbackSend(internal);
         } else {
             try {
                 editMessage(internal, body);
@@ -396,7 +410,9 @@ final class SignalJsonRpcClient {
                 if (e.category() != FailureCategory.PERMANENT) {
                     throw e;
                 }
+                recordUpdateFail();
                 fallbackSend(handle, internal, body);
+                recordFallbackSend(internal);
             }
         }
         // Eviction-on-finalize bounds the open-handle map. Subsequent
@@ -448,6 +464,11 @@ final class SignalJsonRpcClient {
         String request = codec.encodeSendTyping(rpcId, account, dm.contactId(), typing);
         try {
             call(rpcId, request);
+            // §6.12 typing counter, emitted at the wire so only pulses
+            // that actually reached signal-cli count — absorbed failures
+            // and the group-scope drop above stay invisible, and
+            // capability-declared no-op adapters (SimpleX) stay at zero.
+            metrics.typingToggle(ADAPTER_NAME, scope, typing);
         } catch (MessagingException e) {
             // setTyping is declared without `throws MessagingException` — typing
             // pulses are best-effort UI hints per the SPI; absorb here.
@@ -788,6 +809,43 @@ final class SignalJsonRpcClient {
     int dispatchQueueDepth() {
         BlockingQueue<Runnable> queue = dispatchQueue;
         return queue == null ? 0 : queue.size();
+    }
+
+    /**
+     * Live connection state for {@link SignalAdapter#connected()}: the
+     * dispatch queue exists exactly between {@code connect()} and
+     * {@code disconnect()} — the same lifecycle as the reader/dispatcher
+     * pair that makes the transport usable.
+     */
+    boolean isConnected() {
+        return dispatchQueue != null;
+    }
+
+    /** Late-binding from {@link SignalAdapter}; see the {@code metrics} field. */
+    void bindMetrics(AdapterMetrics metrics) {
+        this.metrics = metrics;
+    }
+
+    /**
+     * §6.12 counter for every update/finalize call that resolved as a
+     * fresh-send fallback — both the failing edit itself and the
+     * subsequent calls a fallen-back handle short-circuits.
+     */
+    private void recordFallbackSend(SignalMessageHandle internal) {
+        metrics.updateOutcome(ADAPTER_NAME, internal.original().scope(),
+                AdapterMetrics.UpdateOutcome.FALLBACK_SEND);
+    }
+
+    /**
+     * §6.12 per-reason counter, incremented once at the failing edit
+     * (not on the short-circuited repeats). Reason is {@code unknown}:
+     * the response translation in {@link #call} classifies only the
+     * retry category, so the edit-window-expired / item-deleted
+     * distinction design §6.5.7 envisions is not observable here — a
+     * more specific label would be fabricated.
+     */
+    private void recordUpdateFail() {
+        metrics.updateFail(ADAPTER_NAME, AdapterMetrics.UpdateFailReason.UNKNOWN);
     }
 
     /**

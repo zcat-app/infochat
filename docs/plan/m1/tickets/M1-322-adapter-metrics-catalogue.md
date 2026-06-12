@@ -1,9 +1,9 @@
 ---
 id: M1-322
 title: "Adapter observability: AdapterMetrics catalogue"
-status: pending
+status: done
 created: 2026-06-12
-last_updated: 2026-06-12
+last_updated: 2026-06-13
 blocked_by: [M1-321]
 files_budget: 14
 complexity: medium
@@ -22,17 +22,39 @@ acceptance:
   - "The invite_drop_total counter (docs/design/04-security.md; deferred by M1-044a with a TODO in InviteCodeConsumer) is registered and increments on the documented drop path; the TODO comment is resolved by the implementation; a named test asserts the increment."
   - "mvn -B clean verify from the repo root exits 0."
 test_plan:
-  adds: []
+  adds:
+    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/metrics/AdapterMetricsTest.java
+    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXEditFallbackMetricsTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/AdapterMetricsWiringTest.java
   preserves:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-13
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 16
+      added: 1292
+      removed: 26
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-13
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE item 2: reason=… in adapter.outbound.update.fail{reason=…} does not specify which reason value the named test should assert; the §6.12 domain has five values — name the expected one for the CEInvalidChatItemUpdate simulation."
+    - "FILES-BUDGET-PLAUSIBLE: test_plan.adds is empty despite acceptance items 1–3 each requiring new named tests; adds should enumerate the expected test files."
+    - "SECURITY-FLAG-CONSISTENT: acceptance item 3 touches InviteCodeConsumer (invite-code drop path, docs/design/04-security.md); change is additive, security_relevant: false defensible but noted."
 ---
 
 # M1-322: Adapter observability: AdapterMetrics catalogue

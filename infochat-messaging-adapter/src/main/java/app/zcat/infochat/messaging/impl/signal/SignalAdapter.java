@@ -12,6 +12,7 @@ import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.OutboundRateLimiter;
 import app.zcat.infochat.messaging.ScopeRef;
+import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 
 import java.util.Locale;
 
@@ -102,6 +103,12 @@ public final class SignalAdapter implements MessagingAdapter {
     // groupHandler() on the JSON-RPC reader/dispatch threads.
     @Nullable private volatile String botAci;
 
+    // Late-bound by AdapterMetrics.bindAdapter at registration (the same
+    // shape as setInboundHandler). The noop() initializer keeps unbound
+    // instances — plain-constructed tests, a never-registered adapter —
+    // emitting into a throwaway registry instead of null-checking at
+    // every emission site.
+    private volatile AdapterMetrics metrics = AdapterMetrics.noop();
     @Nullable private volatile SignalSubprocess subprocess;
     @Nullable private volatile SignalJsonRpcClient client;
     @Nullable private volatile InboundHandler handler;
@@ -366,6 +373,45 @@ public final class SignalAdapter implements MessagingAdapter {
         return c == null ? 0L : c.droppedInboundCount();
     }
 
+    /**
+     * Live transport state for the {@code adapter.connection.status}
+     * gauge: the supervised daemon is RUNNING and the JSON-RPC client
+     * holds a live connection. The subprocess fold matters because the
+     * client's connection flag only flips on an explicit
+     * disconnect/reconnect — a crashed daemon (RESTARTING/FAILED) must
+     * read disconnected before the reconnect path runs.
+     */
+    @Override
+    public boolean connected() {
+        SignalSubprocess sp = subprocess;
+        SignalJsonRpcClient c = client;
+        return sp != null && sp.state() == SignalSubprocess.State.RUNNING
+                && c != null && c.isConnected();
+    }
+
+    /** Dispatch-queue depth, read through the live JSON-RPC client. */
+    @Override
+    public int inboundQueueDepth() {
+        SignalJsonRpcClient c = client;
+        return c == null ? 0 : c.dispatchQueueDepth();
+    }
+
+    /**
+     * Stored and forwarded to the JSON-RPC client by
+     * {@link #attachClient} — the client owns the §6.3.8/§6.5.7
+     * edit-failure fallback sites this emission point counts. Binding
+     * happens at registration, before {@link #start()} builds the
+     * client, so the forward runs in attachClient rather than here.
+     */
+    @Override
+    public void bindMetrics(AdapterMetrics metrics) {
+        this.metrics = metrics;
+        SignalJsonRpcClient c = client;
+        if (c != null) {
+            c.bindMetrics(metrics);
+        }
+    }
+
     @Override
     public MessageHandle send(OutboundMessage msg) throws MessagingException {
         SignalJsonRpcClient c = requireConnected("send");
@@ -437,6 +483,7 @@ public final class SignalAdapter implements MessagingAdapter {
      */
     void attachClient(SignalJsonRpcClient c) {
         this.client = c;
+        c.bindMetrics(metrics);
         InboundHandler current = handler;
         if (current != null) {
             c.setInboundHandler(current);

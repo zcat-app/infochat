@@ -5,6 +5,8 @@ import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.core.log.ContactIds;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -67,13 +69,14 @@ import java.util.concurrent.ConcurrentHashMap;
  * tolerates a second breach audit if the attacker is patient
  * enough to wait through a Provider restart.</p>
  *
- * <p><b>Drop counter.</b> The spec also names a
- * {@code invite_drop_total} Micrometer counter that increments
- * on every Rejected outcome. That wiring is DEFERRED to a
- * follow-up ticket (Provider-level Micrometer config + metrics
- * endpoint + per-counter registration is out of scope for the
- * intake-step services). A {@code TODO followup} comment marks
- * the deferred site.</p>
+ * <p><b>Drop counter.</b> The {@code invite_drop_total} Micrometer
+ * counter (docs/design/04-security.md §Invite-code registration)
+ * increments on every invalid attempt "regardless of rate-limit
+ * state": both the {@link Rejected} branch and the over-threshold
+ * {@link BruteForceThresholdBreached} branch — the latter drops the
+ * attempt unvalidated, so a sustained attack keeps moving the
+ * counter after the brute-force limit kicks in. Successful consumes
+ * never increment it.</p>
  */
 @ApplicationScoped
 public class InviteCodeConsumer {
@@ -130,6 +133,15 @@ public class InviteCodeConsumer {
 
     @Inject
     RegisteredContactSet registeredContactSet;
+
+    /**
+     * Backs {@code invite_drop_total} (see the class javadoc's Drop
+     * counter paragraph). The throwaway-registry initializer keeps the
+     * plain-constructed eviction tests working unmodified; CDI replaces
+     * it with quarkus-micrometer's deployment-wide registry.
+     */
+    @Inject
+    MeterRegistry meterRegistry = new SimpleMeterRegistry();
 
     // Sentinel map of (adapter, contact_id) tuples that have ALREADY
     // had an INVITE_BRUTE_FORCE_BREACH audit row written within the
@@ -200,6 +212,7 @@ public class InviteCodeConsumer {
                     }
                     conn.commit();
                     breachAudited.put(key, Instant.now());
+                    recordInviteDrop();
                     return new BruteForceThresholdBreached();
                 }
                 // Counter under threshold — clear any stale sentinel for
@@ -212,14 +225,13 @@ public class InviteCodeConsumer {
                 // null). Both increment the brute-force counter so a
                 // sustained attack of either shape accumulates toward the
                 // threshold within the window.
-                // TODO followup: register `invite_drop_total` Micrometer
-                // counter (deferred from M1-044a).
                 UUID inviteId = candidateCode == null
                         ? null
                         : tryConsume(conn, contactId, candidateCode, adapter);
                 if (inviteId == null) {
                     insertAttempt(conn, adapter, contactId);
                     conn.commit();
+                    recordInviteDrop();
                     return new Rejected();
                 }
 
@@ -273,6 +285,12 @@ public class InviteCodeConsumer {
         lastSweep = now;
         Instant cutoff = now.minus(bruteForceWindow);
         breachAudited.entrySet().removeIf(entry -> entry.getValue().isBefore(cutoff));
+    }
+
+    // See the class javadoc's Drop counter paragraph for the increment
+    // semantics (docs/design/04-security.md §Invite-code registration).
+    private void recordInviteDrop() {
+        meterRegistry.counter("invite_drop_total").increment();
     }
 
     private static @Nullable UUID parseUuid(String body) {

@@ -7,6 +7,7 @@ import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.OutboundMessage;
+import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 import app.zcat.infochat.provider.group.GroupRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -63,6 +64,20 @@ import java.util.concurrent.ThreadLocalRandom;
 public class OutboundDelivery {
 
     private static final Logger log = LoggerFactory.getLogger(OutboundDelivery.class);
+
+    /**
+     * §6.12 adapter-metrics emission point for the outbound chokepoint
+     * ({@code adapter.outbound.total} with its ok/retry/fail
+     * classification — only this retry loop sees all three — plus
+     * outbound {@code adapter.message.bytes}). Field-injected, unlike
+     * the rest of this class, so the two constructors and their
+     * plain-JUnit construction sites stay unchanged; the
+     * throwaway-registry initializer covers unwired plain
+     * constructions, and CDI replaces it with the produced
+     * deployment-wide bean.
+     */
+    @Inject
+    AdapterMetrics adapterMetrics = AdapterMetrics.noop();
 
     private final ThrottledAdminNotifier adminNotifier;
     private final GroupRepository groupRepository;
@@ -122,7 +137,7 @@ public class OutboundDelivery {
      * replies and progress placeholders/finalizes.
      */
     public @Nullable MessageHandle deliver(MessagingAdapter adapter, OutboundMessage msg) {
-        return execute(adapter.name(), null, () -> adapter.send(msg)).handle();
+        return execute(adapter.name(), null, msg, () -> adapter.send(msg)).handle();
     }
 
     /**
@@ -132,7 +147,7 @@ public class OutboundDelivery {
      */
     public @Nullable MessageHandle deliverToGroup(
             MessagingAdapter adapter, OutboundMessage msg, UUID groupId) {
-        return execute(adapter.name(), groupId, () -> adapter.send(msg)).handle();
+        return execute(adapter.name(), groupId, msg, () -> adapter.send(msg)).handle();
     }
 
     /**
@@ -142,7 +157,7 @@ public class OutboundDelivery {
      * to this class alone.
      */
     public boolean updateInPlace(MessagingAdapter adapter, MessageHandle handle, String body) {
-        return execute(adapter.name(), null, () -> {
+        return execute(adapter.name(), null, null, () -> {
             adapter.update(handle, body);
             return null;
         }).delivered();
@@ -154,19 +169,34 @@ public class OutboundDelivery {
      * chokepoint grep (acceptance item 1) resolves to this class alone.
      */
     public boolean finalizeInPlace(MessagingAdapter adapter, MessageHandle handle, String body) {
-        return execute(adapter.name(), null, () -> {
+        return execute(adapter.name(), null, null, () -> {
             adapter.finalizeMessage(handle, body);
             return null;
         }).delivered();
     }
 
-    private Outcome execute(String channel, @Nullable UUID groupId, DeliveryOp op) {
+    /**
+     * {@code sendMsg} carries the §6.12 {@code adapter.outbound.total}
+     * emission for send ops — its scope supplies the {@code scope_kind}
+     * label, its text the outbound byte count. Null for update/finalize
+     * ops: those are counted by the progress notifier under
+     * {@code adapter.outbound.update.total}, whose outcome domain has no
+     * retry value, so this loop emits nothing for them.
+     */
+    private Outcome execute(String channel, @Nullable UUID groupId,
+            @Nullable OutboundMessage sendMsg, DeliveryOp op) {
         long currentBound = baseDelayMillis;
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
                 MessageHandle handle = op.perform();
                 if (groupId != null) {
                     consecutivePermanentByGroup.remove(groupId);
+                }
+                if (sendMsg != null) {
+                    adapterMetrics.outbound(channel, sendMsg.scope(),
+                            AdapterMetrics.SendOutcome.OK);
+                    adapterMetrics.messageBytes(channel,
+                            AdapterMetrics.Direction.OUTBOUND, sendMsg.text());
                 }
                 return new Outcome(true, handle);
             } catch (MessagingException e) {
@@ -175,6 +205,10 @@ public class OutboundDelivery {
                         log.warn("Outbound delivery to channel={} failed permanently, aborting reply",
                                 channel);
                         onPermanentGroupFailure(channel, groupId);
+                        if (sendMsg != null) {
+                            adapterMetrics.outbound(channel, sendMsg.scope(),
+                                    AdapterMetrics.SendOutcome.FAIL);
+                        }
                         return Outcome.ABORTED;
                     }
                     case TRANSIENT -> {
@@ -183,10 +217,18 @@ public class OutboundDelivery {
                             // rest of this reply's lifecycle and alert admins.
                             onCapExhausted(channel, e);
                             onPermanentGroupFailure(channel, groupId);
+                            if (sendMsg != null) {
+                                adapterMetrics.outbound(channel, sendMsg.scope(),
+                                        AdapterMetrics.SendOutcome.FAIL);
+                            }
                             return Outcome.ABORTED;
                         }
                         if (!backOff(currentBound)) {
                             return Outcome.ABORTED;
+                        }
+                        if (sendMsg != null) {
+                            adapterMetrics.outbound(channel, sendMsg.scope(),
+                                    AdapterMetrics.SendOutcome.RETRY);
                         }
                         currentBound = (long) (currentBound * growthFactor);
                     }

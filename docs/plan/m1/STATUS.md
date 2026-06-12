@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 10 |
+| pending | 9 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 344 |
+| done | 345 |
 | deferred | 4 |
 | **total** | **358** |
 
@@ -33,7 +33,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-313 — Chat-memory write ordering on permanent delivery failure (complexity: high, risk: high)
 - M1-314 — Group-deleted-upstream immediate cleanup, distinct from threshold-counted bot-removed (complexity: medium, risk: medium)
 - M1-320 — Derive SimpleX bot queue address via APIShowMyAddress (complexity: high, risk: high)
-- M1-322 — Adapter observability: AdapterMetrics catalogue (complexity: medium, risk: low)
 
 ---
 
@@ -69,6 +68,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-322 | Adapter observability: AdapterMetrics catalogue | 2026-06-13 | round 1 APPROVE |
 | M1-302 | Ops posture: Stage-2 fail-open default, readiness topology exposure (decisions) | 2026-06-13 | round 2 APPROVE |
 | M1-321 | LLM observability: call context and Micrometer metrics | 2026-06-12 | round 1 APPROVE |
 | M1-319 | Derive Signal bot ACI from signal-cli identity store | 2026-06-12 | round 1 APPROVE |
@@ -78,7 +78,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-310 | Collector dedup: one fetchAndParse helper for the four single-GET fetchers | 2026-06-12 | round 1 APPROVE |
 | M1-305 | Observability commitments: schedule implementation or amend as deferred (decision) | 2026-06-12 | round 1 OVERRIDE-APPROVE |
 | M1-303 | D43 localization gaps: cluster labels, /help asset lines, source label + shared renderer | 2026-06-12 | round 1 APPROVE |
-| M1-301 | Adapter trust-anchor reconciliation: Gate 4 scope, bot-id provenance (decisions) | 2026-06-12 | round 1 APPROVE |
 
 ---
 
@@ -513,5 +512,5 @@ M1-318 (deferred)
 M1-319 (done)
   └── M1-320 (pending) ← runnable
 M1-321 (done)
-  └── M1-322 (pending) ← runnable
+  └── M1-322 (done)
 ```

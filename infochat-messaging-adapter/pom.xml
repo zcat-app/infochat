@@ -70,6 +70,20 @@
             <artifactId>parsson</artifactId>
             <scope>runtime</scope>
         </dependency>
+        <!--
+             io.micrometer:micrometer-core — required by AdapterMetrics, the
+             §6.12 adapter observability catalogue (M1-322). Provided scope,
+             mirroring infochat-llm-adapter/pom.xml's declaration for
+             LlmMetrics (M1-321): Provider's quarkus-micrometer supplies the
+             classes at runtime, so the library jar never ships its own copy.
+             Version BOM-managed via the parent's quarkus-bom import (no
+             <version/> here, per the M1-001 invariant).
+        -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-core</artifactId>
+            <scope>provided</scope>
+        </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>

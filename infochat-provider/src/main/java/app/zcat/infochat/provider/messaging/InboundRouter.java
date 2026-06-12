@@ -7,6 +7,7 @@ import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
+import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.chat.LlmRateCap;
@@ -290,6 +291,16 @@ public class InboundRouter {
     @Inject
     OutboundDelivery outboundDelivery;
 
+    /**
+     * §6.12 adapter-metrics emission point for the inbound chokepoint
+     * ({@code adapter.inbound.total} + inbound {@code adapter.message.bytes}).
+     * The throwaway-registry initializer keeps the many plain-constructed
+     * router tests working unmodified; CDI replaces it with the produced
+     * deployment-wide bean.
+     */
+    @Inject
+    AdapterMetrics adapterMetrics = AdapterMetrics.noop();
+
     @ConfigProperty(name = "infochat.chat.body-cap", defaultValue = "2048")
     int chatBodyCap;
 
@@ -359,6 +370,16 @@ public class InboundRouter {
         String raw = msg.text();
         String contactId = msg.sender().contactId();
         inboundContext.setSenderContactId(contactId);
+
+        // §6.12 observability, ahead of every intake gate: the inbound
+        // counter is a transport-level traffic count, so rate-capped,
+        // oversize, and banned messages are all counted. The byte count
+        // mirrors exceedsUtf8ByteLength's allocation-free walk — a
+        // hostile flood must not buy a getBytes() copy per message.
+        adapterMetrics.inbound(adapterName, msg.scope());
+        if (raw != null) {
+            adapterMetrics.messageBytes(adapterName, AdapterMetrics.Direction.INBOUND, raw);
+        }
 
         // Step 1.5 — transport-level rate cap. Fires FIRST per spec
         // §Authorization model step 1.5: over-cap inbound is dropped

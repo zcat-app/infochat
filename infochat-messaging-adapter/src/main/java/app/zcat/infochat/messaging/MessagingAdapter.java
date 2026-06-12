@@ -1,5 +1,6 @@
 package app.zcat.infochat.messaging;
 
+import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 
 /**
  * Transport contract between Provider and a messaging backend
@@ -254,6 +255,51 @@ public interface MessagingAdapter {
      */
     default long droppedInboundCount() {
         return 0L;
+    }
+
+    /**
+     * Whether the adapter's transport is currently connected — the live
+     * value behind the {@code adapter.connection.status} gauge
+     * ({@code docs/design/06-messaging.md} §6.12; 1 connected, 0
+     * disconnected). Unlike {@link #supervisorTerminallyFailed()} (the
+     * gave-up latch), this reflects transient outages too: an adapter
+     * mid-reconnect reports false. Default true so transportless
+     * adapters (the in-memory test double) — which have no wire to lose
+     * — always read connected.
+     *
+     * @return true iff the transport is up and able to carry messages.
+     */
+    default boolean connected() {
+        return true;
+    }
+
+    /**
+     * Current depth of the adapter's bounded inbound dispatch queue —
+     * the live value behind the {@code adapter.inbound.queue.size}
+     * gauge ({@code docs/design/06-messaging.md} §6.12). Companion to
+     * {@link #droppedInboundCount()}: that counter reports overflow
+     * after the fact, this gauge shows the pressure building toward it.
+     * Default 0 for adapters without a bounded inbound queue.
+     *
+     * @return the number of inbound deliveries queued awaiting dispatch.
+     */
+    default int inboundQueueDepth() {
+        return 0;
+    }
+
+    /**
+     * Hand the adapter the deployment's {@link AdapterMetrics} emission
+     * point for its transport-internal signals — the ones only the
+     * adapter can classify, like the §6.3.8/§6.4.5 edit-failure
+     * fallback counters. Called once per activated adapter by
+     * {@link AdapterMetrics#bindAdapter} during registration, the same
+     * late-binding shape as {@link #setInboundHandler}. Default no-op
+     * so adapters without transport-internal emissions are unaffected.
+     *
+     * @param metrics the deployment-wide emission point; never null.
+     */
+    default void bindMetrics(AdapterMetrics metrics) {
+        // No-op — overridden by adapters with transport-internal emissions.
     }
 
     /**

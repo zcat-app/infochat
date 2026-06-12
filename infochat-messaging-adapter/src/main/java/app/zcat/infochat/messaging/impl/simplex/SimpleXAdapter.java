@@ -14,6 +14,7 @@ import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.OutboundRateLimiter;
 import app.zcat.infochat.messaging.ScopeRef;
+import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -110,6 +111,12 @@ public final class SimpleXAdapter implements MessagingAdapter {
                 }
             };
 
+    // Late-bound by AdapterMetrics.bindAdapter at registration (the same
+    // shape as setInboundHandler). The noop() initializer keeps unbound
+    // instances — plain-constructed tests, a never-registered adapter —
+    // emitting into a throwaway registry instead of null-checking at
+    // every emission site.
+    private volatile AdapterMetrics metrics = AdapterMetrics.noop();
     private volatile @Nullable InboundHandler inboundHandler;
     private volatile @Nullable SimpleXSubprocess subprocess;
     private volatile @Nullable SimpleXWebSocketClient webSocket;
@@ -416,6 +423,29 @@ public final class SimpleXAdapter implements MessagingAdapter {
         return ws == null ? 0L : ws.droppedInboundCount();
     }
 
+    /**
+     * Live transport state for the {@code adapter.connection.status}
+     * gauge: a wired WebSocket client that is neither mid-reconnect nor
+     * terminally closed. Mirrors {@link #requireConnected()}'s guard
+     * order without its exception classification.
+     */
+    @Override
+    public boolean connected() {
+        return !closedForGood && !reconnecting && webSocket != null;
+    }
+
+    /** Dispatch-queue depth, read through the live WebSocket client. */
+    @Override
+    public int inboundQueueDepth() {
+        SimpleXWebSocketClient ws = webSocket;
+        return ws == null ? 0 : ws.dispatchQueueDepth();
+    }
+
+    @Override
+    public void bindMetrics(AdapterMetrics metrics) {
+        this.metrics = metrics;
+    }
+
     @Override
     public MessageHandle send(OutboundMessage msg) throws MessagingException {
         SimpleXWebSocketClient ws = requireConnected();
@@ -463,6 +493,7 @@ public final class SimpleXAdapter implements MessagingAdapter {
             // again (design §6.4.5: "subsequent update calls continue to
             // fall back") — go straight to a fresh send.
             fallbackSend(ws, tracked.handle, body);
+            recordFallbackSend(tracked);
             return;
         }
         try {
@@ -482,7 +513,9 @@ public final class SimpleXAdapter implements MessagingAdapter {
                 throw e;
             }
             markFellBack(handle.opaqueValue());
+            recordUpdateFail();
             fallbackSend(ws, tracked.handle, body);
+            recordFallbackSend(tracked);
         }
     }
 
@@ -492,6 +525,7 @@ public final class SimpleXAdapter implements MessagingAdapter {
         SimpleXWebSocketClient ws = requireConnected();
         if (hasFallenBack(tracked)) {
             fallbackSend(ws, tracked.handle, body);
+            recordFallbackSend(tracked);
             markFinalized(handle.opaqueValue());
             return;
         }
@@ -510,7 +544,9 @@ public final class SimpleXAdapter implements MessagingAdapter {
             // final body still reaches the reader instead of freezing the
             // placeholder. finalize clears the fallback path (design §6.4.5)
             // by finalizing the handle below.
+            recordUpdateFail();
             fallbackSend(ws, tracked.handle, body);
+            recordFallbackSend(tracked);
         }
         // SPI contract: after finalizeMessage, any update() on the same
         // handle MUST throw PERMANENT. The flag is checked above in
@@ -535,6 +571,28 @@ public final class SimpleXAdapter implements MessagingAdapter {
         for (String chunk : SimpleXOutboundChunker.chunk(body)) {
             transmitChunk(ws, internal.scope(), chunk);
         }
+    }
+
+    /**
+     * §6.12 counter for every update/finalize call that resolved as a
+     * fresh-send fallback — both the failing edit itself and the
+     * subsequent calls a fallen-back handle short-circuits.
+     */
+    private void recordFallbackSend(TrackedHandle tracked) {
+        metrics.updateOutcome(name(), tracked.handle.scope(),
+                AdapterMetrics.UpdateOutcome.FALLBACK_SEND);
+    }
+
+    /**
+     * §6.12 per-reason counter, incremented once at the failing edit
+     * (not on the short-circuited repeats). Reason is {@code unknown}:
+     * SimpleX's single {@code CEInvalidChatItemUpdate} rejection tag
+     * covers "item too old, deleted, or not the bot's own message"
+     * (§6.4.5) without discriminating, so any more specific label would
+     * be fabricated.
+     */
+    private void recordUpdateFail() {
+        metrics.updateFail(name(), AdapterMetrics.UpdateFailReason.UNKNOWN);
     }
 
     @Override

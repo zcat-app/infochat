@@ -5,7 +5,9 @@ import app.zcat.infochat.messaging.AdapterTrustLevel;
 import app.zcat.infochat.messaging.MembershipEvent;
 import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
+import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 import app.zcat.infochat.provider.group.MembershipEventHandler;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Any;
 import jakarta.enterprise.inject.Instance;
@@ -89,6 +91,16 @@ public class AdapterRegistry {
     @Inject
     MembershipEventHandler membershipEventHandler;
 
+    /**
+     * The §6.12 adapter-metrics emission point, bound to each activated
+     * adapter in the activation loop. Field-injected with a
+     * throwaway-registry initializer so the plain-constructed gate
+     * tests ({@code StartupGatesTest}) need no metrics wiring; CDI
+     * replaces it with the produced deployment-wide bean.
+     */
+    @Inject
+    AdapterMetrics adapterMetrics = AdapterMetrics.noop();
+
     private final List<MessagingAdapter> activatedAdapters = new ArrayList<>();
 
     /**
@@ -101,6 +113,20 @@ public class AdapterRegistry {
     @ApplicationScoped
     InMemoryAdapter inMemoryAdapter() {
         return new InMemoryAdapter();
+    }
+
+    /**
+     * Producer that exposes {@link AdapterMetrics} as an
+     * {@code @ApplicationScoped} CDI bean, for the same reason as the
+     * {@link InMemoryAdapter} producer above: the messaging-adapter
+     * library jar carries no CDI annotations, so the class is not
+     * discoverable on its own. {@code MeterRegistry} is supplied by
+     * quarkus-micrometer.
+     */
+    @Produces
+    @ApplicationScoped
+    AdapterMetrics adapterMetrics(MeterRegistry meterRegistry) {
+        return new AdapterMetrics(meterRegistry);
     }
 
     /**
@@ -317,6 +343,9 @@ public class AdapterRegistry {
             String adapterName = adapter.name();
             adapter.setInboundHandler(msg -> inboundRouter.onMessage(msg, adapterName));
             adapter.setMembershipEventHandler(event -> dispatchMembershipEvent(event, adapterName));
+            // §6.12 observability: per-adapter gauges + the adapter's
+            // transport-internal emission binding (AdapterMetrics javadoc).
+            adapterMetrics.bindAdapter(adapter);
             log.info("activating adapter: {} (trust={}{})",
                     adapterName,
                     adapter.trustLevel(),

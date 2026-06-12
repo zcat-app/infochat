@@ -7,6 +7,7 @@ import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ProgressNotifier;
 import app.zcat.infochat.messaging.ProgressStage;
 import app.zcat.infochat.messaging.ScopeRef;
+import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -80,6 +81,18 @@ public class StageProgressNotifier implements ProgressNotifier {
     OutboundDelivery outboundDelivery;
 
     /**
+     * §6.12 adapter-metrics emission point for the edit lifecycle
+     * ({@code adapter.outbound.update.total} ok/coalesced/fail and
+     * {@code adapter.outbound.update.lag}) — this class owns the
+     * coalescing window, so only it can classify these. The
+     * throwaway-registry initializer keeps the plain-constructed
+     * notifier tests working unmodified; CDI replaces it with the
+     * produced deployment-wide bean.
+     */
+    @Inject
+    AdapterMetrics adapterMetrics = AdapterMetrics.noop();
+
+    /**
      * Single system-wide edit-coalescing floor in milliseconds (design
      * {@code 06-messaging.md} §6.3.8 records 600ms). The notifier emits
      * at most one {@link MessagingAdapter#update} per this interval per
@@ -124,10 +137,24 @@ public class StageProgressNotifier implements ProgressNotifier {
             // silently (the terminal finalize carries the real output).
             Instant now = Instant.now();
             if (Duration.between(state.lastEditAt, now).toMillis() < minEditIntervalMs) {
+                adapterMetrics.updateOutcome(adapter.name(), scope,
+                        AdapterMetrics.UpdateOutcome.COALESCED);
                 return;
             }
             if (outboundDelivery.updateInPlace(adapter, state.handle, text)) {
                 state.lastEditAt = now;
+                adapterMetrics.updateOutcome(adapter.name(), scope,
+                        AdapterMetrics.UpdateOutcome.OK);
+                // §6.12 update lag: this publish's entry to the edit on
+                // the wire. Coalescing here discards rather than defers,
+                // so the lag of a transmitted edit is its own delivery
+                // time (including the chokepoint's transient retries).
+                adapterMetrics.updateLag(adapter.name(), Duration.between(now, Instant.now()));
+                adapterMetrics.messageBytes(adapter.name(),
+                        AdapterMetrics.Direction.OUTBOUND, text);
+            } else {
+                adapterMetrics.updateOutcome(adapter.name(), scope,
+                        AdapterMetrics.UpdateOutcome.FAIL);
             }
         }
     }
@@ -156,7 +183,18 @@ public class StageProgressNotifier implements ProgressNotifier {
         ScopeState state = states.remove(scope);
         MessageHandle handle = state == null ? null : state.handle;
         if (handle != null) {
-            outboundDelivery.finalizeInPlace(adapter, handle, text);
+            // The terminal finalize is an in-place edit, so it counts
+            // under the §6.12 update outcomes (the fresh-send branch
+            // below is counted by the chokepoint as a send).
+            if (outboundDelivery.finalizeInPlace(adapter, handle, text)) {
+                adapterMetrics.updateOutcome(adapter.name(), scope,
+                        AdapterMetrics.UpdateOutcome.OK);
+                adapterMetrics.messageBytes(adapter.name(),
+                        AdapterMetrics.Direction.OUTBOUND, text);
+            } else {
+                adapterMetrics.updateOutcome(adapter.name(), scope,
+                        AdapterMetrics.UpdateOutcome.FAIL);
+            }
             // Typing was only turned on if a placeholder was acquired.
             adapter.setTyping(scope, false);
         } else {
