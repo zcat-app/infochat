@@ -3,6 +3,7 @@ package app.zcat.infochat.collector.eval.reeval;
 import app.zcat.infochat.collector.eval.TransactionHelper;
 import app.zcat.infochat.collector.notify.QuarantineNotifyEmitter;
 import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.core.log.SafeLog;
@@ -138,7 +139,7 @@ public class AdminReviewTtlJob {
             RedactionHook.AuditRow auditRow = RedactionHook.AuditRow.builder()
                 .actorContactId("admin_review_ttl_job")
                 .action(AuditAction.QUARANTINE_TTL_REJECT)
-                .targetKind("quarantine")
+                .targetKind(TargetKind.QUARANTINE)
                 .targetId(candidate.quarantineId().toString())
                 .detailsJson("{\"post_id\":\"" + candidate.postId() + "\"}")
                 .build();

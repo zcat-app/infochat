@@ -6,6 +6,7 @@ import app.zcat.infochat.collector.eval.stage2.Stage2Worker;
 import app.zcat.infochat.collector.notify.QuarantineNotifyEmitter;
 import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.core.log.SafeLog;
@@ -399,7 +400,7 @@ public class ReEvaluationJob {
         RedactionHook.AuditRow row = RedactionHook.AuditRow.builder()
             .actorContactId("re_eval_job")
             .action(AuditAction.RE_EVAL_RELEASED)
-            .targetKind("post")
+            .targetKind(TargetKind.POST)
             .targetId(candidate.postId().toString())
             .detailsJson(detailsJson)
             .build();

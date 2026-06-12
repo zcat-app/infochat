@@ -143,7 +143,7 @@ class RssFeedParserTest {
         assertEquals(3, posts.size(),
             "the rss20-sample fixture has three <item> elements");
         for (NormalizedPost post : posts) {
-            assertEquals(SOURCE_ID, post.sourceId());
+            assertEquals(SOURCE_ID, post.dispatchKey());
             assertEquals(FETCHED_AT, post.fetchedAt());
             assertNotNull(post.body(),
                 "NormalizedPost.body must never be null per the SPI contract");

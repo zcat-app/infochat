@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.chat;
 
 import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.llm.LlmProvider;
@@ -418,7 +419,7 @@ public class ChatAgent {
             RedactionHook.AuditRow row = RedactionHook.AuditRow.builder()
                     .actorUserId(userId)
                     .action(AuditAction.CHAT_MODE)
-                    .targetKind("user")
+                    .targetKind(TargetKind.USER)
                     .targetId(userId.toString())
                     .detailsJson("{\"scope_kind\":\"" + scopeKind
                             + "\",\"scope_id\":\"" + scopeId + "\"}")

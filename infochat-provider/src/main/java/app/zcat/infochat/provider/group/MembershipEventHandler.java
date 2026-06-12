@@ -3,6 +3,7 @@ package app.zcat.infochat.provider.group;
 import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
+import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.log.ContactIds;
 import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.messaging.MembershipEvent;
@@ -109,7 +110,7 @@ public class MembershipEventHandler {
                     return;
                 }
                 writeAudit(conn, AuditAction.MEMBER_LEFT, userId, event.contactId(), adapter,
-                        "user", userId.toString(), groupId,
+                        TargetKind.USER, userId.toString(), groupId,
                         "{\"was_group_admin\":" + state.groupAdmin() + "}");
                 membershipRepository.markMemberRemoved(conn, groupId, userId);
                 conn.commit();
@@ -147,7 +148,7 @@ public class MembershipEventHandler {
             try {
                 // System-actor row: no user caused this — the platform removed the bot.
                 writeAudit(conn, AuditAction.BOT_REMOVED, null, null, adapter,
-                        "group", groupId.toString(), groupId, null);
+                        TargetKind.GROUP, groupId.toString(), groupId, null);
                 groupRepository.markRemoved(conn, groupId);
                 conn.commit();
             } catch (SQLException e) {
@@ -166,7 +167,7 @@ public class MembershipEventHandler {
 
     private void writeAudit(Connection conn, AuditAction action, @Nullable UUID actorUserId,
                             @Nullable String actorContactId, String actorAdapter,
-                            String targetKind, String targetId,
+                            TargetKind targetKind, String targetId,
                             UUID scopeId, @Nullable String detailsJson) throws SQLException {
         RedactionHook.AuditRow row = RedactionHook.AuditRow.builder()
                 .actorUserId(actorUserId)

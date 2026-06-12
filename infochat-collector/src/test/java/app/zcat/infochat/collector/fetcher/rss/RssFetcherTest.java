@@ -88,7 +88,7 @@ class RssFetcherTest {
             "the fixture has three <item> elements; fetch returns one NormalizedPost per item");
 
         for (NormalizedPost post : posts) {
-            assertEquals(1L, post.sourceId(),
+            assertEquals(1L, post.dispatchKey(),
                 "every returned post must carry the caller-supplied sourceId");
             assertNotNull(post.upstreamIdentifier(),
                 "upstreamIdentifier must be non-null per SPI contract");

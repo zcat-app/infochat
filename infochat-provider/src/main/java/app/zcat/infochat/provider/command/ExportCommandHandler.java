@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.command;
 
 import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.messaging.OutboundMessage;
@@ -144,7 +145,7 @@ public class ExportCommandHandler implements CommandHandler {
                         .actorContactId(contactId)
                         .actorAdapter(adapter)
                         .action(AuditAction.EXPORT)
-                        .targetKind("user")
+                        .targetKind(TargetKind.USER)
                         .targetId(userId.toString())
                         .requestId(UUID.randomUUID().toString())
                         .build();

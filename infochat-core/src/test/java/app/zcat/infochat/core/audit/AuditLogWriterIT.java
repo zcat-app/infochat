@@ -34,7 +34,7 @@ class AuditLogWriterIT extends PostgresSchemaTestBase {
     void happyPathRoundTripsRowThroughRedactionHook() throws SQLException {
         RedactionHook.AuditRow row = RedactionHook.AuditRow.builder()
                 .action(AuditAction.BOOTSTRAP_SOURCE_LOAD)
-                .targetKind("system")
+                .targetKind(TargetKind.SYSTEM)
                 .targetId("round-trip-target")
                 .requestId("req-happy-1")
                 .detailsJson("{\"path\":\"/tmp/bootstrap.json\"}")
@@ -66,7 +66,7 @@ class AuditLogWriterIT extends PostgresSchemaTestBase {
 
         RedactionHook.AuditRow row = RedactionHook.AuditRow.builder()
                 .action(AuditAction.LLM_OUTPUT_SANITIZED)
-                .targetKind("system")
+                .targetKind(TargetKind.SYSTEM)
                 .targetId("redaction-target")
                 .requestId("req-redact-1")
                 .detailsJson(detailsJson)
@@ -100,7 +100,7 @@ class AuditLogWriterIT extends PostgresSchemaTestBase {
                 .actorContactId("actor-contact-id-1234567890")
                 .actorAdapter("test-adapter")
                 .action(AuditAction.BAN)
-                .targetKind("user")
+                .targetKind(TargetKind.USER)
                 .targetId(targetId)
                 .targetContactId("target-contact-id-1234567890")
                 .requestId("req-tx-1")
@@ -135,7 +135,7 @@ class AuditLogWriterIT extends PostgresSchemaTestBase {
                 .actorContactId("actor-contact-id-1234567890")
                 .actorAdapter("test-adapter")
                 .action(AuditAction.BAN)
-                .targetKind("user")
+                .targetKind(TargetKind.USER)
                 .targetId(targetId)
                 .targetContactId("target-contact-id-1234567890")
                 .requestId("req-tx-commit-1")
@@ -168,7 +168,7 @@ class AuditLogWriterIT extends PostgresSchemaTestBase {
         String targetId = "watchdog-jsonb-target-" + UUID.randomUUID();
         RedactionHook.AuditRow row = RedactionHook.AuditRow.builder()
                 .action(AuditAction.LLM_OUTPUT_SANITIZED)
-                .targetKind("system")
+                .targetKind(TargetKind.SYSTEM)
                 .targetId(targetId)
                 .requestId("req-watchdog-1")
                 .detailsJson(DefaultRedactionHook.REDACTED_FIELD_JSONB)
@@ -202,7 +202,7 @@ class AuditLogWriterIT extends PostgresSchemaTestBase {
 
         RedactionHook.AuditRow row = RedactionHook.AuditRow.builder()
                 .action(AuditAction.LLM_OUTPUT_SANITIZED)
-                .targetKind("system")
+                .targetKind(TargetKind.SYSTEM)
                 .targetId(targetId)
                 .requestId("req-generic-redact-1")
                 .detailsJson(detailsJson)

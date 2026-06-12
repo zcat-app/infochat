@@ -117,7 +117,7 @@ class OdyseeFetcherTest {
             "the Odysee fixture has two <item> elements; RssFeedParser returns one NormalizedPost per item");
 
         NormalizedPost first = posts.get(0);
-        assertEquals(1L, first.sourceId(),
+        assertEquals(1L, first.dispatchKey(),
             "every returned post must carry the caller-supplied sourceId");
         assertNotNull(first.upstreamIdentifier(),
             "upstreamIdentifier must be non-null — RssFeedParser extracts guid or link");

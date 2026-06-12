@@ -3,6 +3,7 @@ package app.zcat.infochat.provider.digest;
 import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
+import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.annotation.PreDestroy;
@@ -262,7 +263,7 @@ public class DigestScheduler {
                 auditLogWriter.write(conn, new RedactionHook.AuditRow(
                         null, null, null,
                         AuditAction.DIGEST_SLOT_MISSED,
-                        "group", groupId.toString(),
+                        TargetKind.GROUP, groupId.toString(),
                         null, groupId, null,
                         "{\"slot_kind\":\"" + slotKind
                                 + "\",\"window_start\":\"" + windowStart + "\"}"));

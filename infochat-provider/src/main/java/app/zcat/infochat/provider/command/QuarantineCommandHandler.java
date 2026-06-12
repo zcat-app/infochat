@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.command;
 
 import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.messaging.OutboundMessage;
@@ -123,7 +124,7 @@ public class QuarantineCommandHandler implements CommandHandler {
                         .actorContactId(actor.contactId)
                         .actorAdapter(adapter)
                         .action(AuditAction.QUARANTINE_LIST)
-                        .targetKind("quarantine")
+                        .targetKind(TargetKind.QUARANTINE)
                         .targetId("list")
                         .requestId(UUID.randomUUID().toString())
                         .detailsJson("{\"show_all\":" + args.showAll + "}")

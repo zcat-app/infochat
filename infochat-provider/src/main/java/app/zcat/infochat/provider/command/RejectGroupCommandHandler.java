@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.command;
 
 import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.core.util.JsonEscaper;
@@ -280,7 +281,7 @@ public class RejectGroupCommandHandler implements CommandHandler {
                 .actorContactId(actor.contactId)
                 .actorAdapter(adapter)
                 .action(action)
-                .targetKind("group")
+                .targetKind(TargetKind.GROUP)
                 .targetId(targetGroup.id().toString())
                 .targetContactId(null)
                 .requestId(requestId)

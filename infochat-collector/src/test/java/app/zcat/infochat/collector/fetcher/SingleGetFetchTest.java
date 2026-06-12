@@ -61,7 +61,7 @@ class SingleGetFetchTest {
             "the RSS 2.0 fixture has three <item> elements; the helper returns one post each");
         Instant shared = posts.get(0).fetchedAt();
         for (NormalizedPost post : posts) {
-            assertEquals(5L, post.sourceId(),
+            assertEquals(5L, post.dispatchKey(),
                 "every post carries the caller-supplied dispatch/source id");
             assertEquals(shared, post.fetchedAt(),
                 "every post from one fetchAndParse invocation shares one fetchedAt");

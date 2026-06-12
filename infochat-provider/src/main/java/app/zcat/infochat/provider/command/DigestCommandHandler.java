@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.command;
 
 import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.core.log.ContactIds;
@@ -110,7 +111,7 @@ public class DigestCommandHandler implements CommandHandler {
                         .actorContactId(callerContactId)
                         .actorAdapter(adapter)
                         .action(desiredEnabled ? AuditAction.DIGEST_ENABLE : AuditAction.DIGEST_DISABLE)
-                        .targetKind("group")
+                        .targetKind(TargetKind.GROUP)
                         .targetId(groupRow.id.toString())
                         .scopeId(groupRow.id)
                         .requestId(requestId)

@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.group;
 
 import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.core.log.SafeLog;
@@ -230,7 +231,7 @@ public class GroupRepository {
                 auditLogWriter.write(conn, RedactionHook.AuditRow.builder()
                         .actorAdapter(adapter)
                         .action(AuditAction.BOT_REMOVED)
-                        .targetKind("group")
+                        .targetKind(TargetKind.GROUP)
                         .targetId(groupId.toString())
                         .scopeId(groupId)
                         .requestId(UUID.randomUUID().toString())

@@ -62,9 +62,10 @@ public interface RedactionHook {
      *   <li>{@code actorAdapter} — nullable for system-actor rows;
      *       carries the inbound adapter name for user-actor rows.</li>
      *   <li>{@code action} — non-null; the closed-set verb.</li>
-     *   <li>{@code targetKind} — non-null; one of the V5 §2.1.7
-     *       CHECK values ({@code user|group|source|post|invite|
-     *       quarantine|asset|memory|system}).</li>
+     *   <li>{@code targetKind} — non-null; the closed V5 §2.1.7
+     *       CHECK set ({@code user|group|source|post|invite|
+     *       quarantine|asset|memory|system}) mirrored by
+     *       {@link TargetKind}.</li>
      *   <li>{@code targetId} — non-null; UUID-as-text for entity
      *       rows, file-content SHA for bootstrap rows,
      *       {@code <host>-<pid>} for startup-bean rows.</li>
@@ -88,7 +89,7 @@ public interface RedactionHook {
             @Nullable String actorContactId,
             @Nullable String actorAdapter,
             AuditAction action,
-            String targetKind,
+            TargetKind targetKind,
             String targetId,
             @Nullable String targetContactId,
             @Nullable UUID scopeId,
@@ -111,7 +112,7 @@ public interface RedactionHook {
         /**
          * Mutable builder for {@link AuditRow}. Unset reference
          * fields default to {@code null}; {@link #action(AuditAction)},
-         * {@link #targetKind(String)}, and {@link #targetId(String)}
+         * {@link #targetKind(TargetKind)}, and {@link #targetId(String)}
          * are the three required fields and the {@link #build()}
          * call rejects an attempt to construct a row without them.
          */
@@ -120,7 +121,7 @@ public interface RedactionHook {
             private @Nullable String actorContactId;
             private @Nullable String actorAdapter;
             private @Nullable AuditAction action;
-            private @Nullable String targetKind;
+            private @Nullable TargetKind targetKind;
             private @Nullable String targetId;
             private @Nullable String targetContactId;
             private @Nullable UUID scopeId;
@@ -150,7 +151,7 @@ public interface RedactionHook {
                 return this;
             }
 
-            public Builder targetKind(String v) {
+            public Builder targetKind(TargetKind v) {
                 this.targetKind = v;
                 return this;
             }

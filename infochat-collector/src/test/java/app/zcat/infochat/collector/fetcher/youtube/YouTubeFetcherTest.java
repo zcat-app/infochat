@@ -75,7 +75,7 @@ class YouTubeFetcherTest {
             "the fixture has three <entry> elements; fetch returns one NormalizedPost per entry");
 
         for (NormalizedPost post : posts) {
-            assertEquals(42L, post.sourceId(),
+            assertEquals(42L, post.dispatchKey(),
                 "every returned post must carry the caller-supplied sourceId");
             assertNotNull(post.upstreamIdentifier(),
                 "upstreamIdentifier must be non-null per SPI contract");

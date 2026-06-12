@@ -13,7 +13,7 @@ import java.util.Map;
  *
  * <h2>Field contract</h2>
  * <ul>
- *   <li>{@code sourceId} — the per-tick opaque dispatch token the
+ *   <li>{@code dispatchKey} — the per-tick opaque dispatch token the
  *       scheduler handed the Fetcher SPI for this fetch; it is NOT
  *       the {@code source.id} UUID, is not stable across ticks, and
  *       must not be used to key any persistent or cross-tick
@@ -41,7 +41,7 @@ import java.util.Map;
  * belongs at system boundaries, not inside the SPI record.</p>
  */
 public record NormalizedPost(
-        long sourceId,
+        long dispatchKey,
         String upstreamIdentifier,
         @Nullable String title,
         String body,

@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.command;
 
 import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.core.log.ContactIds;
@@ -215,7 +216,7 @@ public class ListSourcesCommandHandler implements CommandHandler {
                         .actorContactId(callerContactId)
                         .actorAdapter(adapter)
                         .action(AuditAction.LIST_SOURCES_ALL)
-                        .targetKind("source")
+                        .targetKind(TargetKind.SOURCE)
                         .targetId("all")
                         .requestId(UUID.randomUUID().toString())
                         .detailsJson("{\"include_deleted\":" + includeDeleted + "}")

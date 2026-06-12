@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.command;
 
 import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.core.log.ContactIds;
@@ -337,7 +338,7 @@ public class UnbanCommandHandler implements CommandHandler {
                     .actorContactId(actor.contactId)
                     .actorAdapter(adapter)
                     .action(AuditAction.UNBAN_INTENT)
-                    .targetKind("user")
+                    .targetKind(TargetKind.USER)
                     .targetId(targetUserIdForIntent.toString())
                     .targetContactId(targetContactId)
                     .requestId(requestId)
@@ -380,7 +381,7 @@ public class UnbanCommandHandler implements CommandHandler {
                 .actorContactId(actor.contactId)
                 .actorAdapter(adapter)
                 .action(AuditAction.UNBAN)
-                .targetKind("user")
+                .targetKind(TargetKind.USER)
                 .targetId(targetId.toString())
                 .targetContactId(targetContactId)
                 .requestId(requestId)

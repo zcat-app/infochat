@@ -1,6 +1,7 @@
 package app.zcat.infochat.collector.bootstrap;
 
 import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.core.util.JsonEscaper;
@@ -328,7 +329,7 @@ public class BootstrapAssetsLoader {
                 + ",\"soft_disabled_count\":" + softDisabledCount + "}";
         RedactionHook.AuditRow row = RedactionHook.AuditRow.builder()
             .action(AuditAction.BOOTSTRAP_ASSET_LOAD)
-            .targetKind("asset")
+            .targetKind(TargetKind.ASSET)
             .targetId(sha256)
             .detailsJson(detailsJson)
             .build();

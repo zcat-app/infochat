@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.startup;
 
 import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.messaging.MessagingAdapter;
@@ -214,7 +215,7 @@ public class AdminBootstrap {
                 // startup-bean writers.
                 auditLogWriter.write(conn, RedactionHook.AuditRow.builder()
                         .action(AuditAction.BOOTSTRAP_ADMIN)
-                        .targetKind("user")
+                        .targetKind(TargetKind.USER)
                         .targetId(userId.toString())
                         .targetContactId(contactId)
                         .detailsJson("{\"cause\":\"bootstrap\"}")

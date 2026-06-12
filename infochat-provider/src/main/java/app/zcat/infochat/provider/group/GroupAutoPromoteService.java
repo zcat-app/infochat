@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.group;
 
 import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -108,7 +109,7 @@ public class GroupAutoPromoteService {
                         .actorContactId(contactId)
                         .actorAdapter(adapter)
                         .action(AuditAction.PROMOTE_GROUP_ADMIN)
-                        .targetKind("user")
+                        .targetKind(TargetKind.USER)
                         .targetId(userId.toString())
                         .scopeId(groupId)
                         .requestId(UUID.randomUUID().toString())

@@ -164,7 +164,7 @@ class RedditFetcherTest {
         Instant afterFetch = Instant.now();
 
         NormalizedPost first = posts.get(0);
-        assertEquals(99L, first.sourceId());
+        assertEquals(99L, first.dispatchKey());
         assertEquals("t3_abc001", first.upstreamIdentifier());
         assertEquals("First Post Title", first.title());
         assertEquals("Body of the first post", first.body());

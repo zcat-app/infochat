@@ -1,6 +1,7 @@
 package app.zcat.infochat.collector.eval.stage2;
 
 import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.core.util.JsonEscaper;
@@ -117,7 +118,7 @@ public class StartupReleaseOnStage2FailureWarn {
 
         RedactionHook.AuditRow row = RedactionHook.AuditRow.builder()
                 .action(AuditAction.STARTUP_RELEASE_ON_STAGE2_FAILURE_TRUE)
-                .targetKind("system")
+                .targetKind(TargetKind.SYSTEM)
                 .targetId(targetId)
                 .detailsJson(detailsJson)
                 .build();

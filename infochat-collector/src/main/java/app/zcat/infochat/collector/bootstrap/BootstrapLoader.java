@@ -1,6 +1,7 @@
 package app.zcat.infochat.collector.bootstrap;
 
 import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.core.util.JsonEscaper;
@@ -225,7 +226,7 @@ public class BootstrapLoader {
                 + "\",\"entry_count\":" + entryCount + "}";
         RedactionHook.AuditRow row = RedactionHook.AuditRow.builder()
                 .action(AuditAction.BOOTSTRAP_SOURCE_LOAD)
-                .targetKind("system")
+                .targetKind(TargetKind.SYSTEM)
                 .targetId(sha256)
                 .detailsJson(detailsJson)
                 .build();

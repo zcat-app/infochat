@@ -133,7 +133,7 @@ class BlueskyFetcherTest {
         assertEquals(4, posts.size());
 
         for (NormalizedPost post : posts) {
-            assertEquals(1L, post.sourceId());
+            assertEquals(1L, post.dispatchKey());
             assertNotNull(post.upstreamIdentifier());
             assertNotNull(post.fetchedAt());
         }
@@ -157,7 +157,7 @@ class BlueskyFetcherTest {
             5L, feedIdentifier());
 
         NormalizedPost first = posts.get(0);
-        assertEquals(5L, first.sourceId());
+        assertEquals(5L, first.dispatchKey());
         assertEquals("at://did:plc:abc111/app.bsky.feed.post/post001",
             first.upstreamIdentifier());
         assertNull(first.title(), "Bluesky posts have no title");

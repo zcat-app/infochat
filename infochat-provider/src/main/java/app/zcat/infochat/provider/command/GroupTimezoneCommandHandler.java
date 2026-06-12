@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.command;
 
 import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.core.log.ContactIds;
@@ -117,7 +118,7 @@ public class GroupTimezoneCommandHandler implements CommandHandler {
                         .actorContactId(callerContactId)
                         .actorAdapter(adapter)
                         .action(AuditAction.SET_TIMEZONE)
-                        .targetKind("group")
+                        .targetKind(TargetKind.GROUP)
                         .targetId(groupId.toString())
                         .scopeId(groupId)
                         .requestId(requestId)

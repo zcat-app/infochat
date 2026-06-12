@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 14 |
+| pending | 13 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 340 |
+| done | 341 |
 | deferred | 4 |
 | **total** | **358** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-298 — Core contracts: dispatchKey rename, TargetKind enum, nullable-UUID bind helper (complexity: medium, risk: medium)
 - M1-302 — Ops posture: Stage-2 fail-open default, readiness topology exposure (decisions) (complexity: low, risk: medium)
 - M1-306 — Provider mediums: edit-interval floor, /retry counter order, chat-tool caps, group row reuse (complexity: medium, risk: medium)
 - M1-307 — Provider code lows: JSON conventions, sanitizer seam, dead keys, misc one-liners (complexity: medium, risk: low)
@@ -81,7 +80,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-301 | Adapter trust-anchor reconciliation: Gate 4 scope, bot-id provenance (decisions) | 2026-06-12 | round 1 APPROVE |
 | M1-300 | Asset-refresh config: one grammar (Duration) across both services | 2026-06-12 | round 1 APPROVE |
 | M1-299 | Core hardening smalls: notifier fallback throttle, probe outside lock, escaper allocation | 2026-06-12 | round 1 APPROVE |
-| M1-297 | /stop cancellation is honored: cancelled flag, stopped terminal, single reply | 2026-06-12 | round 1 APPROVE |
+| M1-298 | Core contracts: dispatchKey rename, TargetKind enum, nullable-UUID bind helper | 2026-06-12 | round 1 APPROVE |
 
 ---
 
@@ -494,7 +493,7 @@ M1-294 (done)
 M1-295 (done)
 M1-296 (done)
 M1-297 (done)
-M1-298 (pending) ← runnable
+M1-298 (done)
 M1-299 (done)
 M1-300 (done)
 M1-301 (done)

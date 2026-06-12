@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.command;
 
 import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.core.log.ContactIds;
@@ -143,7 +144,7 @@ public class DemoteCommandHandler implements CommandHandler {
                         .actorContactId(callerContactId)
                         .actorAdapter(adapter)
                         .action(AuditAction.DEMOTE_GROUP_ADMIN)
-                        .targetKind("user")
+                        .targetKind(TargetKind.USER)
                         .targetId(target.id.toString())
                         .targetContactId(targetContactId)
                         .scopeId(groupId)
@@ -259,7 +260,7 @@ public class DemoteCommandHandler implements CommandHandler {
                     .actorContactId(actor.contactId())
                     .actorAdapter(adapter)
                     .action(AuditAction.DEMOTE_GROUP_ADMIN_INTENT)
-                    .targetKind("user")
+                    .targetKind(TargetKind.USER)
                     .targetId(targetUserIdForIntent.toString())
                     .targetContactId(targetContactId)
                     .requestId(requestId)

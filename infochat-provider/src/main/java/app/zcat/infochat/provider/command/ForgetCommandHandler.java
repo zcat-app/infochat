@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.command;
 
 import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.core.log.ContactIds;
@@ -210,7 +211,7 @@ public class ForgetCommandHandler implements CommandHandler {
                 .actorContactId(actor.contactId)
                 .actorAdapter(adapter)
                 .action(AuditAction.FORGET)
-                .targetKind("user")
+                .targetKind(TargetKind.USER)
                 .targetId(actor.id.toString())
                 .targetContactId(actor.contactId)
                 .scopeId(scopeId)

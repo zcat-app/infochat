@@ -3,6 +3,7 @@ package app.zcat.infochat.provider.command;
 import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
+import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.log.ContactIds;
 import app.zcat.infochat.core.util.JsonEscaper;
 import app.zcat.infochat.messaging.OutboundMessage;
@@ -223,7 +224,7 @@ public class BanCommandHandler implements CommandHandler {
         UUID targetUserIdForIntent = targetOpt.map(u -> u.id).orElse(UUID.randomUUID());
         String intentRequestId = UUID.randomUUID().toString();
         try (Connection conn = dataSource.getConnection()) {
-            insertAudit(conn, AuditAction.BAN_INTENT, "user",
+            insertAudit(conn, AuditAction.BAN_INTENT, TargetKind.USER,
                     targetUserIdForIntent.toString(), targetContactId, actor,
                     adapter, intentRequestId,
                     banDetailsJson(args.reason, targetOpt.isPresent()));
@@ -320,7 +321,7 @@ public class BanCommandHandler implements CommandHandler {
                 // effect row can carry a synthetic target_id too (the
                 // pre-ban path mints the users row only at step 5), so
                 // it records target_registered like the intent row.
-                insertAudit(conn, AuditAction.BAN, "user", targetUserId.toString(),
+                insertAudit(conn, AuditAction.BAN, TargetKind.USER, targetUserId.toString(),
                         targetContactId, actor, adapter, requestId,
                         banDetailsJson(reason, targetOpt.isPresent()));
 
@@ -328,7 +329,7 @@ public class BanCommandHandler implements CommandHandler {
                 // pending CONTACT_BOUND invite, sharing the same
                 // request_id (acceptance item 7).
                 for (UUID inviteId : pendingInviteIds) {
-                    insertAudit(conn, AuditAction.INVITE_REVOKE, "invite",
+                    insertAudit(conn, AuditAction.INVITE_REVOKE, TargetKind.INVITE,
                             inviteId.toString(), targetContactId, actor,
                             adapter, requestId, inviteRevokeOnBanDetailsJson());
                 }
@@ -429,7 +430,7 @@ public class BanCommandHandler implements CommandHandler {
 
     private void insertAudit(Connection conn,
                              AuditAction action,
-                             String targetKind,
+                             TargetKind targetKind,
                              String targetId,
                              String targetContactId,
                              UserRow actor,

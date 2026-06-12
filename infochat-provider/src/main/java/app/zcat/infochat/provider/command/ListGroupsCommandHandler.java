@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.command;
 
 import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.core.log.ContactIds;
@@ -150,7 +151,7 @@ public class ListGroupsCommandHandler implements CommandHandler {
                         .actorContactId(callerContactId)
                         .actorAdapter(adapter)
                         .action(AuditAction.LIST_GROUPS)
-                        .targetKind("group")
+                        .targetKind(TargetKind.GROUP)
                         .targetId("all")
                         .requestId(UUID.randomUUID().toString())
                         .detailsJson("{\"page\":" + page + "}")

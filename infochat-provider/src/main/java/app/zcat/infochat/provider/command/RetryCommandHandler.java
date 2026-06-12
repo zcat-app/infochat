@@ -3,6 +3,7 @@ package app.zcat.infochat.provider.command;
 import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
+import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
@@ -409,7 +410,7 @@ public class RetryCommandHandler implements CommandHandler {
                 auditLogWriter.write(conn, new RedactionHook.AuditRow(
                         actor.id, contactId, adapter,
                         AuditAction.DIGEST_RETRY,
-                        "group", groupDbId.toString(),
+                        TargetKind.GROUP, groupDbId.toString(),
                         null, groupDbId, null, null));
                 conn.commit();
             } catch (SQLException e) {

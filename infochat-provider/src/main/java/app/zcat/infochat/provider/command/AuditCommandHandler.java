@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.command;
 
 import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.core.util.JsonEscaper;
@@ -119,7 +120,7 @@ public class AuditCommandHandler implements CommandHandler {
                         .actorContactId(actor.contactId)
                         .actorAdapter(adapter)
                         .action(AuditAction.AUDIT_READ)
-                        .targetKind("system")
+                        .targetKind(TargetKind.SYSTEM)
                         .targetId("audit_log")
                         .requestId(UUID.randomUUID().toString())
                         .detailsJson(detailsJson.toString())

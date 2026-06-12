@@ -3,6 +3,7 @@ package app.zcat.infochat.provider.command;
 import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
+import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.log.ContactIds;
 import app.zcat.infochat.core.util.JsonEscaper;
 import app.zcat.infochat.messaging.OutboundMessage;
@@ -318,7 +319,7 @@ public class GrantAdminCommandHandler implements CommandHandler {
                 // back too; the separately-committed
                 // GRANT_ADMIN_INTENT row from step 4 is what
                 // survives.
-                insertAudit(conn, AuditAction.GRANT_ADMIN, "user",
+                insertAudit(conn, AuditAction.GRANT_ADMIN, TargetKind.USER,
                         target.id.toString(), target.contactId, actor,
                         adapter, requestId, grantAdminDetailsJson(adapter));
 
@@ -407,7 +408,7 @@ public class GrantAdminCommandHandler implements CommandHandler {
         Optional<UserRow> targetPre = lookupUser(adapter, targetContactId);
         UUID targetUserIdForIntent = targetPre.map(u -> u.id).orElse(UUID.randomUUID());
         try (Connection conn = dataSource.getConnection()) {
-            insertAudit(conn, AuditAction.GRANT_ADMIN_INTENT, "user",
+            insertAudit(conn, AuditAction.GRANT_ADMIN_INTENT, TargetKind.USER,
                     targetUserIdForIntent.toString(), targetContactId, actor,
                     adapter, requestId,
                     grantAdminIntentDetailsJson(adapter, targetPre.isPresent()));
@@ -421,7 +422,7 @@ public class GrantAdminCommandHandler implements CommandHandler {
 
     private void insertAudit(Connection conn,
                              AuditAction action,
-                             String targetKind,
+                             TargetKind targetKind,
                              String targetId,
                              String targetContactId,
                              UserRow actor,

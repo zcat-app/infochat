@@ -8,6 +8,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Types;
+import java.util.UUID;
 
 /**
  * Sole application-layer INSERT path into {@code audit_log}. Every
@@ -96,22 +97,14 @@ public class AuditLogWriter {
     public void write(Connection conn, RedactionHook.AuditRow row) throws SQLException {
         RedactionHook.AuditRow redacted = redactionHook.redact(row);
         try (PreparedStatement ps = conn.prepareStatement(INSERT_SQL)) {
-            if (redacted.actorUserId() == null) {
-                ps.setNull(1, Types.OTHER);
-            } else {
-                ps.setObject(1, redacted.actorUserId());
-            }
+            setNullableUuid(ps, 1, redacted.actorUserId());
             setNullableString(ps, 2, redacted.actorContactId());
             setNullableString(ps, 3, redacted.actorAdapter());
             ps.setString(4, redacted.action().name());
-            ps.setString(5, redacted.targetKind());
+            ps.setString(5, redacted.targetKind().dbValue());
             ps.setString(6, redacted.targetId());
             setNullableString(ps, 7, redacted.targetContactId());
-            if (redacted.scopeId() == null) {
-                ps.setNull(8, Types.OTHER);
-            } else {
-                ps.setObject(8, redacted.scopeId());
-            }
+            setNullableUuid(ps, 8, redacted.scopeId());
             setNullableString(ps, 9, redacted.requestId());
             // The {@code ::jsonb} cast in the SQL handles a null
             // details_json correctly (PostgreSQL casts a SQL NULL
@@ -129,6 +122,16 @@ public class AuditLogWriter {
             ps.setNull(index, Types.VARCHAR);
         } else {
             ps.setString(index, value);
+        }
+    }
+
+    // Types.OTHER (not a UUID-specific type) is how the PostgreSQL
+    // driver expects a SQL NULL bound against a uuid column.
+    private static void setNullableUuid(PreparedStatement ps, int index, @Nullable UUID value) throws SQLException {
+        if (value == null) {
+            ps.setNull(index, Types.OTHER);
+        } else {
+            ps.setObject(index, value);
         }
     }
 }

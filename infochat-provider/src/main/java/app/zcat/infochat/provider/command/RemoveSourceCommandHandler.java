@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.command;
 
 import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.core.log.ContactIds;
@@ -317,7 +318,7 @@ public class RemoveSourceCommandHandler implements CommandHandler {
                 .actorContactId(actor.contactId)
                 .actorAdapter(adapter)
                 .action(action)
-                .targetKind("source")
+                .targetKind(TargetKind.SOURCE)
                 .targetId(sourceId.toString())
                 .requestId(requestId)
                 .build();

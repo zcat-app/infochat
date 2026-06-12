@@ -104,7 +104,7 @@ class NostrStreamSourceTest {
         assertEquals(NostrSignedEventFixtures.KIND_1_ID, post.upstreamIdentifier(),
                 "upstream id is the Nostr event id");
         assertEquals(NostrSignedEventFixtures.KIND_1_CONTENT, post.body());
-        assertEquals(7L, post.sourceId());
+        assertEquals(7L, post.dispatchKey());
         assertEquals(Instant.ofEpochSecond(NostrSignedEventFixtures.FIXED_CREATED_AT), post.publishedAt(),
                 "published_at is created_at");
         assertNull(post.title());

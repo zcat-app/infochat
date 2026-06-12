@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.llm;
 
 import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.core.util.JsonEscaper;
@@ -264,7 +265,7 @@ public class LlmOutputSanitizer {
                         + JsonEscaper.escape(token) + "\"}";
                 RedactionHook.AuditRow row = RedactionHook.AuditRow.builder()
                         .action(AuditAction.LLM_OUTPUT_SANITIZED)
-                        .targetKind("system")
+                        .targetKind(TargetKind.SYSTEM)
                         .targetId(AUDIT_TARGET_ID)
                         .detailsJson(detailsJson)
                         .build();
