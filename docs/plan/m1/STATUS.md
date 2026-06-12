@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 19 |
+| pending | 18 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 330 |
+| done | 331 |
 | deferred | 3 |
 | **total** | **352** |
 
@@ -38,7 +38,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-307 — Provider code lows: JSON conventions, sanitizer seam, dead keys, misc one-liners (complexity: medium, risk: low)
 - M1-308 — Messaging/collector code lows: dead surfaces, helper drift, small perf/correctness (complexity: medium, risk: low)
 - M1-309 — Provider structural dedup: PG listener base class, shared command tokenizer (complexity: medium, risk: medium)
-- M1-310 — Collector dedup: one fetchAndParse helper for the four single-GET fetchers (complexity: medium, risk: medium)
 - M1-311 — Strip ticket/finding provenance from permanent comments (policy + sweep) (complexity: medium, risk: low)
 - M1-312 — Doc-truth v5: false comments and spec/design drift reconciliation (complexity: medium, risk: low)
 - M1-313 — Chat-memory write ordering on permanent delivery failure (complexity: high, risk: high)
@@ -79,6 +78,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 |---|---|---|---|
 | M1-316 | Permanent-failure-driven group soft-removal writes a BOT_REMOVED audit row | 2026-06-12 | round 2 APPROVE |
 | M1-315 | NostrDedupIT.multiRelayDedup over-asserts deliveryCount==1 (flake) | 2026-06-12 | — |
+| M1-310 | Collector dedup: one fetchAndParse helper for the four single-GET fetchers | 2026-06-12 | round 1 APPROVE |
 | M1-300 | Asset-refresh config: one grammar (Duration) across both services | 2026-06-12 | round 1 APPROVE |
 | M1-299 | Core hardening smalls: notifier fallback throttle, probe outside lock, escaper allocation | 2026-06-12 | round 1 APPROVE |
 | M1-295 | Ingest resilience: eval-queue boundary, fetch-ladder scope, parser boundary, re-eval predicate | 2026-06-12 | round 1 APPROVE |
@@ -86,7 +86,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-288 | Group-scope /summary resolves its scope instead of returning no_posts_yet | 2026-06-12 | round 1 APPROVE |
 | M1-287 | Nostr dedup records event id only after a successful queue offer | 2026-06-12 | round 1 APPROVE |
 | M1-286 | UNKNOWN-rate auto-disable stops the running stream-source worker | 2026-06-12 | round 1 APPROVE |
-| M1-285 | Edit-failure fallback to fresh send in both production adapters | 2026-06-12 | round 1 APPROVE |
 
 ---
 
@@ -510,7 +509,7 @@ M1-306 (pending) ← runnable
 M1-307 (pending) ← runnable
 M1-308 (pending) ← runnable
 M1-309 (pending) ← runnable
-M1-310 (pending) ← runnable
+M1-310 (done)
 M1-311 (pending) ← runnable
 M1-312 (pending) ← runnable
 M1-315 (done)

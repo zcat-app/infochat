@@ -1,17 +1,12 @@
 package app.zcat.infochat.collector.fetcher.youtube;
 
 import app.zcat.infochat.collector.fetch.FetcherKind;
-import app.zcat.infochat.collector.fetcher.rss.RssFeedParser;
+import app.zcat.infochat.collector.fetcher.SingleGetFetch;
 import app.zcat.infochat.core.ingest.Fetcher;
 import app.zcat.infochat.core.ingest.NormalizedPost;
 import app.zcat.infochat.ssrf.SsrfGuardedHttpClient;
-import app.zcat.infochat.ssrf.UrlRedactor;
 import jakarta.enterprise.context.ApplicationScoped;
 
-import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpResponse;
-import java.time.Instant;
 import java.util.List;
 
 /**
@@ -45,28 +40,11 @@ public class YouTubeFetcher implements Fetcher {
 
     @Override
     public List<NormalizedPost> fetch(long dispatchKey, String identifier) {
-        Instant fetchedAt = Instant.now();
-
-        HttpResponse<byte[]> response;
-        try {
-            response = client.get(URI.create(identifier));
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new YouTubeFetchException(
-                "YouTube fetch interrupted for " + UrlRedactor.redact(identifier), e);
-        } catch (IOException e) {
-            throw new YouTubeFetchException(
-                "YouTube fetch I/O failure for " + UrlRedactor.redact(identifier)
-                + ": " + e.getMessage(), e);
-        }
-
-        int status = response.statusCode();
-        if (status < 200 || status >= 300) {
-            throw new YouTubeFetchException(
-                "YouTube fetch got HTTP " + status + " for " + UrlRedactor.redact(identifier));
-        }
-
-        return RssFeedParser.parse(dispatchKey, response.body(), fetchedAt);
+        return SingleGetFetch.fetchAndParse(
+            client::get, "YouTube", dispatchKey, identifier,
+            (message, cause) -> cause == null
+                ? new YouTubeFetchException(message)
+                : new YouTubeFetchException(message, cause));
     }
 
     /**

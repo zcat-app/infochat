@@ -1,9 +1,9 @@
 ---
 id: M1-310
 title: "Collector dedup: one fetchAndParse helper for the four single-GET fetchers"
-status: pending
+status: done
 created: 2026-06-11
-last_updated: 2026-06-11
+last_updated: 2026-06-12
 blocked_by: []
 files_budget: 12
 files_scope:
@@ -16,7 +16,7 @@ files_scope:
 complexity: medium
 risk: medium
 round_cap: 2
-security_relevant: false
+security_relevant: true
 migration_touch: false
 out_of_scope:
   - BlueskyFetcher and RedditFetcher — different request shapes; not part of the byte-identical quartet.
@@ -33,12 +33,44 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-12
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 331
+      removed: 123
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-12
+    verdict: CLEAN
+    base: 591c3b2a28192e606cf0d35c5362ffc33ec319af
+    head: working-tree (uncommitted M1-310 branch tip)
+    verdict_file: docs/plan/m1/redteam/M1-310-2026-06-12.md
+    out_of_model_count: 0
+    note: |
+      Behavior-preserving dedup of the four single-GET fetchers into one
+      SingleGetFetch.fetchAndParse helper. SSRF guard, URL-credential
+      redaction, per-kind failure exceptions, and the fetchedAt partition-key
+      capture all preserved through the GuardedGet/FetchExceptionFactory seams.
+      No threat-model commitment undelivered; nothing feeds a remediation ticket.
+clarity_check:
+  date: 2026-06-12
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE item 2: 'A named test exercises the helper's redaction/interrupt/status behaviour once, directly' does not name the test class or method; reviewer has no specific target to verify."
+    - "SECURITY-FLAG-CONSISTENT: security_relevant: false is inconsistent with the ticket's own description of the refactored code as 'security-relevant redaction and interrupt logic'; consider security_relevant: true."
+  blockers: []
 ---
 
 # M1-310: Collector dedup: one fetchAndParse helper for the four single-GET fetchers
