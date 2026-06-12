@@ -1,9 +1,9 @@
 ---
 id: M1-301
 title: "Adapter trust-anchor reconciliation: Gate 4 scope, bot-id provenance (decisions)"
-status: pending
+status: done
 created: 2026-06-11
-last_updated: 2026-06-11
+last_updated: 2026-06-12
 blocked_by: []
 files_budget: 8
 files_scope:
@@ -32,12 +32,46 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-12
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 42
+      removed: 18
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-12
+    verdict: CLEAN
+    base: 34ac3a83^
+    head: 34ac3a83
+    verdict_file: docs/plan/m1/redteam/M1-301-2026-06-12.md
+    out_of_model_count: 1
+    note: |
+      CLEAN — docs-only spec amendment, no promised security property
+      weakened. One out-of-model advisory observation: the residual
+      mention-misdirection risk from the operator-typed bot-id anchor,
+      which this ticket explicitly accepts and documents in security.md
+      §Per-adapter admin threat profile. Advisory only; no remediation
+      ticket. The real elimination is the deferred U-34 derivation
+      follow-up. Audited pre-merge against branch-tip 34ac3a83.
+clarity_check:
+  date: 2026-06-12
+  verdict: WARN
+  warnings:
+    - "U-33/U-34: 'recorded explicitly' does not name the recording artifact (commit message, decisions.md entry, code comment, or spec note); a reviewer cannot tell from the text alone whether the recording obligation is met."
+    - "U-33 code-change path names the required test behaviorally but gives no test class/method name."
+  blockers: []
 ---
 
 # M1-301: Adapter trust-anchor reconciliation: Gate 4 scope, bot-id provenance (decisions)

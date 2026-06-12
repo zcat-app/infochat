@@ -61,9 +61,12 @@ Every adapter implements:
   For adapters whose underlying protocol exposes no mention
   primitive at all (no @-mention payload, no mention metadata),
   the adapter MUST surface this in its capability flags
-  (`supportsMentionByContactId = false`), and Provider's intake
-  refuses to enable group mode for that adapter — group access
-  requires a cryptographic mention anchor in v1. Falling back to
+  (`supportsMentionByContactId = false`). v1 has no per-deployment
+  groups-off toggle — group routing is wired unconditionally for
+  every activated adapter — so there is no isolated "group mode"
+  to leave disabled: Provider rejects such an adapter at startup
+  rather than running it DM-only. Group access requires a
+  cryptographic mention anchor in v1. Falling back to
   string matching on the bot's display name in the message body
   is explicitly out of v1 (see `security.md` §"What's intentionally
   NOT in v1").

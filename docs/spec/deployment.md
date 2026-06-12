@@ -135,12 +135,16 @@ An operator must provide:
    in §Bootstrap behavior on startup applies — one adapter's
    identity-store failure does not abort Provider). The
    per-adapter bot contact id (the value mention recognition
-   compares against, `messaging.md` §Required SPI surface) is
-   derived from this identity material at adapter startup; it is
-   not an operator-typed property. The list is closed at startup
-   — adding or removing an adapter is a restart. The exact
-   property keys (and the multi-adapter list shape) live in
-   design notes.
+   compares against, `messaging.md` §Required SPI surface) is an
+   operator-configured per-adapter property, distinct from the
+   bootstrap-admin contact id; Provider validates it as non-blank
+   at adapter startup. Deriving it from the adapter's identity
+   material instead — so it cannot be mistyped — is planned
+   hardening, not v1; the operator-typed-anchor risk is recorded
+   in `security.md` §Per-adapter admin threat profile. The list is
+   closed at startup — adding or removing an adapter is a restart.
+   The exact property keys (and the multi-adapter list shape) live
+   in design notes.
 
 Everything else has a profile default.
 

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 15 |
+| pending | 14 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 335 |
+| done | 336 |
 | deferred | 3 |
 | **total** | **353** |
 
@@ -27,7 +27,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-292 — Log hygiene: redactor timeout arms, URL paths, upstream bytes, LLM previews (complexity: medium, risk: medium)
 - M1-294 — SimpleX adapter: error classification, close race, bot-id validation, inbound cap (complexity: medium, risk: medium)
 - M1-298 — Core contracts: dispatchKey rename, TargetKind enum, nullable-UUID bind helper (complexity: medium, risk: medium)
-- M1-301 — Adapter trust-anchor reconciliation: Gate 4 scope, bot-id provenance (decisions) (complexity: medium, risk: medium)
 - M1-302 — Ops posture: Stage-2 fail-open default, readiness topology exposure (decisions) (complexity: low, risk: medium)
 - M1-303 — D43 localization gaps: cluster labels, /help asset lines, source label + shared renderer (complexity: medium, risk: medium)
 - M1-305 — Observability commitments: schedule implementation or amend as deferred (decision) (complexity: low, risk: low)
@@ -77,12 +76,12 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-316 | Permanent-failure-driven group soft-removal writes a BOT_REMOVED audit row | 2026-06-12 | round 2 APPROVE |
 | M1-315 | NostrDedupIT.multiRelayDedup over-asserts deliveryCount==1 (flake) | 2026-06-12 | — |
 | M1-310 | Collector dedup: one fetchAndParse helper for the four single-GET fetchers | 2026-06-12 | round 1 APPROVE |
+| M1-301 | Adapter trust-anchor reconciliation: Gate 4 scope, bot-id provenance (decisions) | 2026-06-12 | round 1 APPROVE |
 | M1-300 | Asset-refresh config: one grammar (Duration) across both services | 2026-06-12 | round 1 APPROVE |
 | M1-299 | Core hardening smalls: notifier fallback throttle, probe outside lock, escaper allocation | 2026-06-12 | round 1 APPROVE |
 | M1-297 | /stop cancellation is honored: cancelled flag, stopped terminal, single reply | 2026-06-12 | round 1 APPROVE |
 | M1-295 | Ingest resilience: eval-queue boundary, fetch-ladder scope, parser boundary, re-eval predicate | 2026-06-12 | round 1 APPROVE |
 | M1-293 | Signal adapter: mention overflow, sourceName, capability values, launch classification | 2026-06-12 | round 1 APPROVE |
-| M1-291 | SSRF module: proxy posture, pinned-path policy, bounded discard, contract fixes | 2026-06-12 | round 4 APPROVE |
 
 ---
 
@@ -497,7 +496,7 @@ M1-297 (done)
 M1-298 (pending) ← runnable
 M1-299 (done)
 M1-300 (done)
-M1-301 (pending) ← runnable
+M1-301 (done)
 M1-302 (pending) ← runnable
 M1-303 (pending) ← runnable
 M1-304 (done)
