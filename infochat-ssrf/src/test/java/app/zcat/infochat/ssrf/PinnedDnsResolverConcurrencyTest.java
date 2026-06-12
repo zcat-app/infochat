@@ -7,7 +7,6 @@ import org.junit.jupiter.api.Test;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.UnknownHostException;
-import java.net.spi.InetAddressResolver;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -15,7 +14,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -25,10 +23,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Concurrency contract of the {@link Provider} per-host pin map: pin
  * isolation across hosts, refcounted lifetime for overlapping
- * same-host holders, and release-on-throw. Lookups are asserted by
- * composing a {@link PinnedDnsResolver} over
- * {@link Provider#activePinsSnapshot()} — the same composition the
- * JVM-wide forwarding resolver uses — rather than through
+ * same-host holders, and release-on-throw. Pin state is asserted
+ * directly through {@link Provider#activePinsSnapshot()} — the live
+ * map's inspection seam — rather than through
  * {@code InetAddress.getAllByName}, whose positive cache sits ABOVE
  * the resolver SPI and can mask pin/release transitions. Hostnames
  * are unique RFC 6761 {@code .invalid} names per test so no state
@@ -36,33 +33,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class PinnedDnsResolverConcurrencyTest {
 
-    private static final InetAddressResolver.LookupPolicy ANY_POLICY =
-        InetAddressResolver.LookupPolicy.of(
-            InetAddressResolver.LookupPolicy.IPV4 | InetAddressResolver.LookupPolicy.IPV6);
-
-    /**
-     * Delegate that fails the test if consulted: a pinned host must
-     * NEVER fall through to the builtin resolver.
-     */
-    private static final InetAddressResolver REJECTING_DELEGATE = new InetAddressResolver() {
-
-        @Override
-        public Stream<InetAddress> lookupByName(String host, LookupPolicy lookupPolicy)
-                throws UnknownHostException {
-            throw new UnknownHostException(
-                "delegate must not be consulted for a pinned host: " + host);
-        }
-
-        @Override
-        public String lookupByAddress(byte[] addr) throws UnknownHostException {
-            throw new UnknownHostException("reverse lookup not expected in these tests");
-        }
-    };
-
-    private static List<InetAddress> lookupThroughActivePins(String host) throws Exception {
-        return new PinnedDnsResolver(Provider.activePinsSnapshot(), REJECTING_DELEGATE)
-            .lookupByName(host, ANY_POLICY)
-            .toList();
+    private static List<InetAddress> lookupThroughActivePins(String host) {
+        // Read the live pin map directly through its inspection seam.
+        // The production lens is Provider's forwarding resolver; these
+        // tests assert pin-map SEMANTICS (isolation, refcount lifetime,
+        // latest-wins), for which the snapshot's own readout is the
+        // direct evidence — a pinned host's entry is exactly its
+        // validated set, keyed by the canonical host these tests use.
+        return Provider.activePinsSnapshot().getOrDefault(host, List.of());
     }
 
     @Test

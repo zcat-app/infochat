@@ -65,6 +65,23 @@ public final class NostrStreamSource implements StreamSource {
 
     private static final Logger LOG = LoggerFactory.getLogger(NostrStreamSource.class);
 
+    /**
+     * Build the shared relay-dial {@link HttpClient}. NO_PROXY disables
+     * proxying: a WebSocket dial inherits its proxy selector from this
+     * client, and an ambient JVM proxy (http/https/socksProxyHost) would
+     * re-resolve the relay host itself, voiding the validated peer IP and
+     * the DNS pin {@code SsrfGuardedHttpClient.checkAndPinForWebSocket}
+     * installs. The builder is the only lever — there is no per-dial
+     * proxy override. Package-private static so the posture is assertable
+     * without standing up the CDI {@code Registrar} bean.
+     */
+    static HttpClient newRelayDialClient() {
+        return HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(10))
+                .proxy(HttpClient.Builder.NO_PROXY)
+                .build();
+    }
+
     // Delivery-loop wake cadence: how often it re-checks the stop flag while
     // the inbound queue is idle. Short enough that stop()/drain is prompt.
     private static final Duration DELIVERY_POLL = Duration.ofMillis(100);
@@ -346,9 +363,7 @@ public final class NostrStreamSource implements StreamSource {
         // the TCP SYN but never completes the connection cannot pin this
         // shared client open indefinitely (mirrors the 10s handshake bound
         // in NostrRelayConnection.CONNECT_TIMEOUT).
-        private final HttpClient httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(10))
-                .build();
+        private final HttpClient httpClient = newRelayDialClient();
 
         // CDI-managed default-strict SSRF guard, supplied by
         // CollectorSsrfClientProducer (one shared @Singleton instance) rather

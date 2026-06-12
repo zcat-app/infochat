@@ -243,7 +243,25 @@ public final class SsrfGuardedHttpClient {
         this.httpClient = HttpClient.newBuilder()
             .connectTimeout(connectTimeout)
             .followRedirects(HttpClient.Redirect.NEVER)
+            // NO_PROXY pins egress to a direct dial. A default-built
+            // client falls through to the JDK's non-exposed default
+            // proxy selector, which honors http.proxyHost /
+            // https.proxyHost / socksProxyHost. An ambient proxy would
+            // re-resolve the target host itself, bypassing both the
+            // validated peer IP and the DNS pin (the rebind defense),
+            // so guarded egress must never inherit one.
+            .proxy(HttpClient.Builder.NO_PROXY)
             .build();
+    }
+
+    /**
+     * The wrapper's shared {@link HttpClient}. Package-private test
+     * seam (matching {@code canonicalizeHost}'s same-package access
+     * idiom) so the proxy posture can be asserted directly:
+     * {@code httpClient().proxy()} is {@link HttpClient.Builder#NO_PROXY}.
+     */
+    HttpClient httpClient() {
+        return httpClient;
     }
 
     private static List<InetAddress> defaultResolve(String host) {
@@ -264,9 +282,9 @@ public final class SsrfGuardedHttpClient {
      * {@code pins.get(host)} to miss and the resolver to fall
      * through to the unpinned builtin — defeating the rebind
      * defense. Both the install side ({@link #get(URI)}) and the
-     * lookup side ({@link PinnedDnsResolver#lookupByName}) MUST call
-     * this helper so the pin keys match regardless of JDK
-     * transformation choices.
+     * lookup side (the forwarding resolver inside
+     * {@link PinnedDnsResolver.Provider}) MUST call this helper so the
+     * pin keys match regardless of JDK transformation choices.
      *
      * <p>Transformations applied, in order:
      * <ol>
@@ -392,10 +410,7 @@ public final class SsrfGuardedHttpClient {
 
                 int status = response.statusCode();
                 if (isFollowableRedirect(status)) {
-                    try (InputStream discard = response.body()) {
-                        // Drain via close(); redirect bodies carry
-                        // no payload we need.
-                    }
+                    discardBounded(response.body(), bodyCap);
                     redirectCount++;
                     if (redirectCount > redirectCap) {
                         throw new SsrfPolicyException(
@@ -539,8 +554,9 @@ public final class SsrfGuardedHttpClient {
         }
         // M1-026 Finding 2: canonicalize before BOTH the seam call
         // AND the pin install. The same helper is invoked on the
-        // lookup side by PinnedDnsResolver.lookupByName, so the pin
-        // matches regardless of JDK normalization choices.
+        // lookup side by the forwarding resolver inside
+        // PinnedDnsResolver.Provider, so the pin matches regardless of
+        // JDK normalization choices.
         // IDN.toASCII throws IllegalArgumentException on invalid
         // input; wrap as SsrfPolicyException so the wrapper boundary
         // surfaces a clean policy exception (no JDK internals leak).
@@ -562,7 +578,23 @@ public final class SsrfGuardedHttpClient {
         // not k. The block/allow decision is identical to a per-address
         // scan, and per-request freshness is preserved (each pass takes
         // its own fresh snapshot).
-        InetAddress blocked = blocklist.firstBlocked(addresses);
+        //
+        // HostInterfaceSet.enumerate() raises IllegalStateException when
+        // the OS interface enumeration itself fails (SocketException) —
+        // a system-boundary I/O failure, not a policy decision. Surface
+        // it as a typed SsrfPolicyException so it stays inside get()'s
+        // documented SsrfPolicyException / IOException contract rather
+        // than escaping as an undocumented RuntimeException; fail closed
+        // (a request whose host-interface clause cannot be evaluated is
+        // rejected, not admitted).
+        InetAddress blocked;
+        try {
+            blocked = blocklist.firstBlocked(addresses);
+        } catch (IllegalStateException e) {
+            throw new SsrfPolicyException(
+                SsrfPolicyException.Reason.HOST_INTERFACE_UNAVAILABLE,
+                "host interface enumeration failed", e);
+        }
         if (blocked != null) {
             throw new SsrfPolicyException(
                 SsrfPolicyException.Reason.BLOCKED_IP, "blocked IP: " + blocked.getHostAddress());
@@ -570,85 +602,19 @@ public final class SsrfGuardedHttpClient {
         return new ResolvedHost(canonicalHost, addresses);
     }
 
-    private byte[] readBounded(HttpResponse<InputStream> response) throws IOException {
-        // Per-read wall-clock watchdog (M1-025, Finding 4): the JDK's
-        // HttpRequest.timeout() bounds only the receipt of response
-        // HEADERS; without this watchdog a malicious upstream can
-        // dribble body bytes one per minute and hold a fetcher thread
-        // for hours. We run each in.read(buf) call on a virtual thread
-        // (B-READBOUNDED-EXECUTOR: one per read, JDK 25 — cheap enough
-        // to spin per read and needs no pool / shutdownNow bookkeeping)
-        // and supervise from the caller thread; on timeout we cancel
-        // the task and raise SsrfPolicyException.
-        //
-        // M1-026 Finding 1: in addition to the per-read watchdog,
-        // the TOTAL wall-clock time from the start of body-read is
-        // bounded by bodyReadDeadline. A drip attacker that returns
-        // 1 byte per (readTimeout - epsilon) defeats the per-read
-        // watchdog (each individual read completes well under the
-        // window) but cannot defeat a total-elapsed deadline.
+    private byte[] readBounded(HttpResponse<InputStream> response)
+            throws IOException, InterruptedException {
         long bodyReadStartNanos = System.nanoTime();
         try (InputStream in = response.body();
              ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             // 64 KiB buffer: each in.read() runs on its own virtual thread
-            // (see the watchdog note above), so a larger buffer means ~8x
-            // fewer reads — and ~8x fewer thread spins / FutureTask
-            // allocations — to drain the same body. The per-read
-            // min(readTimeout, remaining) clamp and the total bodyReadDeadline
-            // are unchanged; only the read granularity changes.
+            // (see supervisedReadChunk), so a larger buffer means ~8x fewer
+            // reads — and ~8x fewer thread spins / FutureTask allocations —
+            // to drain the same body.
             byte[] buf = new byte[64 * 1024];
             long total = 0;
             while (true) {
-                long elapsedNanos = System.nanoTime() - bodyReadStartNanos;
-                long remainingNanos = bodyReadDeadline.toNanos() - elapsedNanos;
-                if (remainingNanos <= 0) {
-                    throw new SsrfPolicyException(
-                        SsrfPolicyException.Reason.BODY_READ_DEADLINE_EXCEEDED,
-                        "body read deadline exceeded after "
-                        + TimeUnit.NANOSECONDS.toMillis(elapsedNanos) + "ms");
-                }
-                // B-DEADLINE-TOCTOU: clamp each read to
-                // min(readTimeout, remaining-until-deadline) so one read
-                // cannot overshoot the total deadline by up to a full
-                // readTimeout. remaining is rounded UP to whole ms so the
-                // clamped wait never expires BEFORE the deadline — that
-                // keeps the classification below correct (a clamp expiry
-                // at or past the deadline is a deadline breach, not a
-                // per-read stall).
-                long remainingMillisCeil = (remainingNanos + 999_999L) / 1_000_000L;
-                long readBudgetMillis = Math.min(readTimeout.toMillis(), remainingMillisCeil);
-
-                FutureTask<Integer> readTask = new FutureTask<>(() -> in.read(buf));
-                BODY_READER_THREAD_FACTORY.newThread(readTask).start();
-                int n;
-                try {
-                    n = readTask.get(readBudgetMillis, TimeUnit.MILLISECONDS);
-                } catch (TimeoutException e) {
-                    readTask.cancel(true);
-                    long elapsedAtTimeoutNanos = System.nanoTime() - bodyReadStartNanos;
-                    if (elapsedAtTimeoutNanos >= bodyReadDeadline.toNanos()) {
-                        throw new SsrfPolicyException(
-                            SsrfPolicyException.Reason.BODY_READ_DEADLINE_EXCEEDED,
-                            "body read deadline exceeded after "
-                            + TimeUnit.NANOSECONDS.toMillis(elapsedAtTimeoutNanos) + "ms");
-                    }
-                    throw new SsrfPolicyException(
-                        SsrfPolicyException.Reason.BODY_READ_TIMEOUT,
-                        "body read timeout after " + readTimeout.toMillis() + "ms");
-                } catch (ExecutionException e) {
-                    Throwable cause = e.getCause();
-                    if (cause instanceof IOException io) {
-                        throw io;
-                    }
-                    if (cause instanceof RuntimeException re) {
-                        throw re;
-                    }
-                    throw new IOException("body read failed", cause);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    readTask.cancel(true);
-                    throw new IOException("interrupted during body read", e);
-                }
+                int n = supervisedReadChunk(in, buf, bodyReadStartNanos);
                 if (n == -1) {
                     break;
                 }
@@ -661,6 +627,128 @@ public final class SsrfGuardedHttpClient {
                 out.write(buf, 0, n);
             }
             return out.toByteArray();
+        }
+    }
+
+    /**
+     * Read one buffer's worth of {@code in} under the body-read time
+     * bounds, returning the byte count (or -1 at EOF). Both the
+     * terminal-hop {@link #readBounded} and the redirect-hop
+     * {@link #discardBounded} drains supervise every read through here, so
+     * the wall-clock bound is identical on both paths — a redirect body is
+     * thrown away, but it is not read un-timed.
+     *
+     * <p>Per-read wall-clock watchdog (M1-025, Finding 4): the JDK's
+     * {@code HttpRequest.timeout()} bounds only the receipt of response
+     * HEADERS; without this watchdog a malicious upstream can dribble body
+     * bytes one per minute and hold a fetcher thread for hours. Each
+     * {@code in.read(buf)} runs on its own virtual thread
+     * (B-READBOUNDED-EXECUTOR: one per read, JDK 25 — cheap enough to spin
+     * per read and needs no pool / shutdownNow bookkeeping), supervised
+     * from the caller thread; on timeout the task is cancelled and a typed
+     * {@link SsrfPolicyException} raised.
+     *
+     * <p>M1-026 Finding 1: beyond the per-read watchdog, the TOTAL
+     * wall-clock time from {@code bodyReadStartNanos} is bounded by
+     * {@code bodyReadDeadline}. A drip attacker that returns 1 byte per
+     * (readTimeout - epsilon) defeats the per-read watchdog (each read
+     * completes well under the window) but cannot defeat a total-elapsed
+     * deadline.
+     */
+    private int supervisedReadChunk(InputStream in, byte[] buf, long bodyReadStartNanos)
+            throws IOException, InterruptedException {
+        long elapsedNanos = System.nanoTime() - bodyReadStartNanos;
+        long remainingNanos = bodyReadDeadline.toNanos() - elapsedNanos;
+        if (remainingNanos <= 0) {
+            throw new SsrfPolicyException(
+                SsrfPolicyException.Reason.BODY_READ_DEADLINE_EXCEEDED,
+                "body read deadline exceeded after "
+                + TimeUnit.NANOSECONDS.toMillis(elapsedNanos) + "ms");
+        }
+        // B-DEADLINE-TOCTOU: clamp each read to
+        // min(readTimeout, remaining-until-deadline) so one read cannot
+        // overshoot the total deadline by up to a full readTimeout.
+        // remaining is rounded UP to whole ms so the clamped wait never
+        // expires BEFORE the deadline — that keeps the classification below
+        // correct (a clamp expiry at or past the deadline is a deadline
+        // breach, not a per-read stall).
+        long remainingMillisCeil = (remainingNanos + 999_999L) / 1_000_000L;
+        long readBudgetMillis = Math.min(readTimeout.toMillis(), remainingMillisCeil);
+
+        FutureTask<Integer> readTask = new FutureTask<>(() -> in.read(buf));
+        BODY_READER_THREAD_FACTORY.newThread(readTask).start();
+        try {
+            return readTask.get(readBudgetMillis, TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            readTask.cancel(true);
+            long elapsedAtTimeoutNanos = System.nanoTime() - bodyReadStartNanos;
+            if (elapsedAtTimeoutNanos >= bodyReadDeadline.toNanos()) {
+                throw new SsrfPolicyException(
+                    SsrfPolicyException.Reason.BODY_READ_DEADLINE_EXCEEDED,
+                    "body read deadline exceeded after "
+                    + TimeUnit.NANOSECONDS.toMillis(elapsedAtTimeoutNanos) + "ms");
+            }
+            throw new SsrfPolicyException(
+                SsrfPolicyException.Reason.BODY_READ_TIMEOUT,
+                "body read timeout after " + readTimeout.toMillis() + "ms");
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof IOException io) {
+                throw io;
+            }
+            if (cause instanceof RuntimeException re) {
+                throw re;
+            }
+            throw new IOException("body read failed", cause);
+        } catch (InterruptedException e) {
+            // Propagate the interrupt as InterruptedException (get() already
+            // declares it) rather than masking it as IOException, so a caller
+            // that cancels a fetch by interrupting its thread sees the
+            // interrupt, not a spurious I/O error. Cancel the in-flight read
+            // first. Do NOT also restore the interrupt flag: re-throwing the
+            // InterruptedException IS the propagation, and re-interrupting on
+            // top would double-signal it.
+            readTask.cancel(true);
+            throw e;
+        }
+    }
+
+    /**
+     * Drain a redirect hop's response body through a SIZE- and
+     * TIME-bounded discard and return the number of bytes read. A redirect
+     * carries no payload the wrapper retains, but the body still has to be
+     * consumed (or the connection abandoned) before the next hop; the prior
+     * implementation closed the stream, and {@code close()} on an
+     * {@code ofInputStream()} body can read-and-discard the WHOLE
+     * (attacker-controlled) body to ready the connection for reuse — an
+     * unbounded read on a hostile redirect.
+     *
+     * <p>This reads at most {@code cap} bytes (plus the final buffer) and
+     * then stops, so a redirect body cannot impose more than the body cap's
+     * worth of read work. Crucially it ALSO supervises every read through
+     * {@link #supervisedReadChunk}, so the same per-read watchdog and total
+     * {@code bodyReadDeadline} that bound {@link #readBounded} bound this
+     * drain too: a slow-dribble redirect body that stays under the size cap
+     * still cannot hold the fetcher thread past the deadline — it aborts
+     * with the typed {@code BODY_READ_TIMEOUT} / {@code
+     * BODY_READ_DEADLINE_EXCEEDED}. A size-only cap would reopen the M1-025
+     * slow-dribble DoS on the redirect path; the redirect body is thrown
+     * away, but it is not read un-timed.
+     */
+    long discardBounded(InputStream body, long cap)
+            throws IOException, InterruptedException {
+        long bodyReadStartNanos = System.nanoTime();
+        try (InputStream in = body) {
+            byte[] buf = new byte[64 * 1024];
+            long total = 0;
+            while (total <= cap) {
+                int n = supervisedReadChunk(in, buf, bodyReadStartNanos);
+                if (n == -1) {
+                    break;
+                }
+                total += n;
+            }
+            return total;
         }
     }
 
@@ -771,10 +859,10 @@ public final class SsrfGuardedHttpClient {
 
     /**
      * Raised on any policy violation in the wrapper pipeline:
-     * disallowed scheme, userinfo in URI, blocked IP, oversize
-     * body, exceeded redirect cap, missing or unresolvable redirect
-     * {@code Location}, body-read timeout, body-read
-     * deadline exceeded. {@link #reason()} carries the typed
+     * disallowed scheme, userinfo in URI, blocked IP, host-interface
+     * enumeration failure, oversize body, exceeded redirect cap,
+     * missing or unresolvable redirect {@code Location}, body-read
+     * timeout, body-read deadline exceeded. {@link #reason()} carries the typed
      * failure mode — callers branch on it, never on message text
      * (the message is human-facing and free to reword).
      */
@@ -788,6 +876,7 @@ public final class SsrfGuardedHttpClient {
             INVALID_HOST,
             UNKNOWN_HOST,
             BLOCKED_IP,
+            HOST_INTERFACE_UNAVAILABLE,
             REDIRECT_CAP_EXCEEDED,
             REDIRECT_LOCATION_MISSING,
             REDIRECT_LOCATION_INVALID,

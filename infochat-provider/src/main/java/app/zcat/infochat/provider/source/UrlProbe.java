@@ -68,8 +68,16 @@ public class UrlProbe {
      * connects to the addresses {@link SsrfGuardedHttpClient}
      * validated — same pattern as the collector's
      * {@code NostrRelayConnection}.
+     *
+     * <p>{@code NO_PROXY} disables proxying: a WebSocket dial inherits
+     * its proxy selector from the {@link HttpClient}, and an ambient
+     * JVM proxy (http/https/socksProxyHost) would re-resolve the relay
+     * host itself, voiding the validated peer IP and the DNS pin. The
+     * builder is the only lever — there is no per-dial proxy override.
      */
-    private final HttpClient relayDialClient = HttpClient.newHttpClient();
+    private final HttpClient relayDialClient = HttpClient.newBuilder()
+            .proxy(HttpClient.Builder.NO_PROXY)
+            .build();
 
     /**
      * CDI no-arg constructor. {@link SsrfGuardedHttpClient} is not
@@ -94,6 +102,15 @@ public class UrlProbe {
      */
     public UrlProbe(SsrfGuardedHttpClient httpClient) {
         this.httpClient = httpClient;
+    }
+
+    /**
+     * The relay-probe dial client. Package-private test seam so the
+     * proxy posture can be asserted directly: {@code relayDialClient()
+     * .proxy()} is {@link HttpClient.Builder#NO_PROXY}.
+     */
+    HttpClient relayDialClient() {
+        return relayDialClient;
     }
 
     /**

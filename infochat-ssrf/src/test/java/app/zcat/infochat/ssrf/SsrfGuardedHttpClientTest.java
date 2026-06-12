@@ -7,16 +7,19 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.UnknownHostException;
+import java.net.http.HttpClient;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
@@ -821,6 +824,232 @@ class SsrfGuardedHttpClientTest {
                 URI.create("https://evil.example.org/b")),
             "a genuinely different host must still be treated as cross-origin "
             + "so the credential scrub fires where it should");
+    }
+
+    // -----------------------------------------------------------------
+    // U-09 proxy posture. A default-built HttpClient falls through to
+    // the JDK's non-exposed default proxy selector, which honors
+    // http.proxyHost / https.proxyHost / socksProxyHost. An ambient
+    // proxy would re-resolve the target host itself, bypassing the
+    // validated peer IP and the DNS pin (the rebind defense). The
+    // guarded client must pin NO_PROXY so guarded egress is always a
+    // direct dial.
+    // -----------------------------------------------------------------
+
+    @Test
+    void guardedClientDisablesAmbientProxy() {
+        SsrfGuardedHttpClient client = new SsrfGuardedHttpClient();
+        assertEquals(Optional.of(HttpClient.Builder.NO_PROXY), client.httpClient().proxy(),
+            "the guarded client must be built with NO_PROXY so ambient JVM "
+            + "proxy settings cannot route guarded egress through a proxy that "
+            + "re-resolves the target and voids the DNS pin");
+    }
+
+    // -----------------------------------------------------------------
+    // U-37 host-interface enumeration failure. HostInterfaceSet
+    // .enumerate() raises IllegalStateException when the OS interface
+    // enumeration itself fails (SocketException). That must surface
+    // through get()'s documented SsrfPolicyException / IOException
+    // contract, not escape as a raw RuntimeException. A blocklist whose
+    // per-call host-interface supplier throws simulates the failure
+    // deterministically (a real SocketException is not reproducible).
+    // -----------------------------------------------------------------
+
+    @Test
+    void hostInterfaceEnumerationFailureSurfacesAsPolicyException() {
+        IpBlocklist enumerationFails = new IpBlocklist(() -> {
+            throw new IllegalStateException("could not enumerate host network interfaces");
+        });
+        SsrfGuardedHttpClient client = new SsrfGuardedHttpClient(
+            enumerationFails,
+            Duration.ofSeconds(2),
+            Duration.ofSeconds(5),
+            Duration.ofSeconds(5),
+            Duration.ofMinutes(2),
+            10L * 1024,
+            3,
+            host -> {
+                try {
+                    return List.of(InetAddress.getByName("192.0.2.1"));
+                } catch (UnknownHostException e) {
+                    throw new IllegalStateException(e);
+                }
+            });
+
+        SsrfPolicyException ex = assertThrows(SsrfPolicyException.class,
+            () -> client.get(URI.create("http://feed.example.test/")));
+        assertEquals(SsrfPolicyException.Reason.HOST_INTERFACE_UNAVAILABLE, ex.reason(),
+            "a host-interface enumeration failure must surface as "
+            + "HOST_INTERFACE_UNAVAILABLE, not escape as IllegalStateException");
+    }
+
+    // -----------------------------------------------------------------
+    // U-38 interrupt propagation. get() declares throws
+    // InterruptedException; an interrupt while the wrapper is blocked
+    // reading the body must surface as InterruptedException, not be
+    // masked as IOException, so a caller that cancels a fetch by
+    // interrupting its thread sees the cancellation.
+    // -----------------------------------------------------------------
+
+    @Test
+    void interruptDuringBodyReadPropagatesInterruptedException() throws Exception {
+        server.createContext("/stall", exchange -> {
+            exchange.getResponseHeaders().add("Content-Type", "application/octet-stream");
+            exchange.sendResponseHeaders(200, 5_000_000);
+            OutputStream out = exchange.getResponseBody();
+            try {
+                // Send headers + a few bytes so the wrapper enters the
+                // body-read phase, then stall well past the interrupt.
+                out.write(new byte[16]);
+                out.flush();
+                Thread.sleep(10_000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } catch (IOException e) {
+                // Expected once the wrapper tears the connection down.
+            } finally {
+                try {
+                    out.close();
+                } catch (IOException ignored) {
+                    // Connection already gone.
+                }
+            }
+        });
+
+        // Long read timeout + deadline so neither the per-read watchdog
+        // nor the total deadline can fire before the interrupt does.
+        SsrfGuardedHttpClient client = new SsrfGuardedHttpClient(
+            new LoopbackPermittingBlocklist(),
+            Duration.ofSeconds(2),
+            Duration.ofSeconds(30),
+            Duration.ofSeconds(30),
+            Duration.ofSeconds(30),
+            10L * 1024 * 1024,
+            3);
+
+        AtomicReference<Throwable> caught = new AtomicReference<>();
+        Thread worker = new Thread(() -> {
+            try {
+                client.get(URI.create("http://127.0.0.1:" + port + "/stall"));
+            } catch (Throwable t) {
+                caught.set(t);
+            }
+        });
+        worker.start();
+        // Let the worker send, receive headers, and block in the body
+        // read before interrupting it.
+        Thread.sleep(1_000);
+        worker.interrupt();
+        worker.join(10_000);
+
+        assertFalse(worker.isAlive(),
+            "the worker must finish promptly after the interrupt");
+        assertNotNull(caught.get(), "the interrupted get() must have thrown");
+        assertTrue(caught.get() instanceof InterruptedException,
+            "an interrupt during the body read must propagate as "
+            + "InterruptedException, not be masked as IOException; got: "
+            + caught.get());
+    }
+
+    // -----------------------------------------------------------------
+    // U-40 bounded redirect-body discard. A redirect hop's body is
+    // drained through discardBounded (a SIZE- and TIME-bounded sibling of
+    // readBounded) rather than close(): close() on an ofInputStream()
+    // body can read-and-discard the whole attacker-controlled body to
+    // ready the connection for reuse. discardBounded reads at most the
+    // cap (plus one buffer) and then stops, AND supervises every read
+    // through the same per-read watchdog + total bodyReadDeadline as
+    // readBounded — so a slow-dribble redirect body that stays under the
+    // size cap still cannot hold the fetcher thread past the deadline.
+    // -----------------------------------------------------------------
+
+    @Test
+    void discardBoundedStopsReadingAtCap() throws IOException, InterruptedException {
+        long cap = 1024;
+        int streamSize = 1024 * 1024;
+        AtomicInteger bytesRead = new AtomicInteger();
+        InputStream oversizedBody = new InputStream() {
+            private int pos;
+
+            @Override
+            public int read() {
+                if (pos >= streamSize) {
+                    return -1;
+                }
+                pos++;
+                bytesRead.incrementAndGet();
+                return 'A';
+            }
+
+            @Override
+            public int read(byte[] b, int off, int len) {
+                if (pos >= streamSize) {
+                    return -1;
+                }
+                int n = Math.min(len, streamSize - pos);
+                pos += n;
+                bytesRead.addAndGet(n);
+                return n;
+            }
+        };
+
+        // testModeClient has a generous readTimeout (5s) and deadline (2min),
+        // so the in-memory fast reads never trip the time watchdog — only the
+        // size cap stops the drain.
+        long discarded = testModeClient().discardBounded(oversizedBody, cap);
+
+        assertTrue(discarded <= cap + 64 * 1024,
+            "the discard must stop within one buffer of the cap; discarded="
+            + discarded);
+        assertTrue(bytesRead.get() < streamSize,
+            "the discard must NOT read the whole oversized body — it stops at "
+            + "the cap; bytesRead=" + bytesRead.get() + " of " + streamSize);
+    }
+
+    @Test
+    void discardBoundedAbortsWhenRedirectBodyStallsPastReadTimeout() {
+        // A hostile redirect whose body stalls indefinitely (under the size
+        // cap, so a size-only drain would block forever). The per-read
+        // watchdog must fire and abort with the typed timeout/deadline
+        // reason instead of holding the fetcher thread — the slow-dribble
+        // DoS the size cap alone does NOT close.
+        SsrfGuardedHttpClient client = new SsrfGuardedHttpClient(
+            new LoopbackPermittingBlocklist(),
+            Duration.ofSeconds(2),
+            Duration.ofSeconds(5),
+            Duration.ofMillis(200),
+            Duration.ofSeconds(1),
+            10L * 1024,
+            3);
+        InputStream stallingBody = new InputStream() {
+            @Override
+            public int read() throws IOException {
+                return blockUntilCancelled();
+            }
+
+            @Override
+            public int read(byte[] b, int off, int len) throws IOException {
+                return blockUntilCancelled();
+            }
+
+            private int blockUntilCancelled() throws IOException {
+                try {
+                    Thread.sleep(30_000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException("read interrupted", e);
+                }
+                return -1;
+            }
+        };
+
+        SsrfPolicyException ex = assertThrows(SsrfPolicyException.class,
+            () -> client.discardBounded(stallingBody, 10L * 1024));
+        assertTrue(
+            ex.reason() == SsrfPolicyException.Reason.BODY_READ_TIMEOUT
+                || ex.reason() == SsrfPolicyException.Reason.BODY_READ_DEADLINE_EXCEEDED,
+            "a stalled redirect-body drain must abort with the typed read "
+            + "timeout/deadline reason, not block unbounded; got: " + ex.reason());
     }
 
     private SsrfGuardedHttpClient testModeClient() {

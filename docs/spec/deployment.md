@@ -276,7 +276,11 @@ property keys live in design notes:
   asset commands disabled).
 - **Admin bootstrap.** Bot-admin contact id.
 - **Security.** Release-on-Stage-2-failure default; SSRF allowlist (not
-  user-tunable; see `security.md`); fetch caps (size, timeouts);
+  user-tunable; see `security.md`). Guarded outbound egress ignores
+  ambient JVM proxy settings (`http.proxyHost` / `https.proxyHost` /
+  `socksProxyHost`): the guard pins DNS to the validated peer IPs, so a
+  proxy that re-resolved the target would void that pin — guarded
+  clients are built with proxying disabled. Fetch caps (size, timeouts);
   re-evaluation cadence and per-post attempt cap (separate caps for
   Stage-2-infra-failure class and UNKNOWN-verdict class — both
   profile-driven, both overridable per-property); admin-review TTL

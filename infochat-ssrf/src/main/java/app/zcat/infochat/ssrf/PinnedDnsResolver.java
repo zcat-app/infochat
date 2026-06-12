@@ -1,9 +1,11 @@
 package app.zcat.infochat.ssrf;
 
+import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.net.spi.InetAddressResolver;
 import java.net.spi.InetAddressResolverProvider;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -12,13 +14,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
 
 /**
- * Implements {@link InetAddressResolver} (Java 18+ SPI; this project
- * runs on JDK 25). Given a pin map of hostname → preferred IPs and a
- * delegate {@link InetAddressResolver} (typically the JDK builtin),
- * returns the pinned IPs for hosts in the map and DELEGATES to the
- * supplied delegate for any unmapped host.
- *
- * <p>The pinning serves the spec's "DNS-rebind defense" promise
+ * Holder for the JVM-wide DNS-pinning resolver {@link Provider}. The
+ * pinning serves the spec's "DNS-rebind defense" promise
  * ({@code docs/spec/security.md} §SSRF and outbound connections):
  * after the wrapper has resolved and IP-validated a hostname, the
  * subsequent {@code HttpClient.send} must connect to those SAME IPs
@@ -41,60 +38,55 @@ import java.util.stream.Stream;
  * proceed independently; there is no global mutual exclusion, so a
  * slow or adversarial host cannot stall the JVM's outbound plane.
  *
- * <p>Production callers never instantiate this class directly; the
- * forwarding resolver inside {@link Provider} probes the live pin map
- * with the same canonicalize-then-get-then-delegate policy this class
- * implements (M1-277 removed the per-lookup ephemeral composition).
- * The public constructor exists so the class is independently
- * testable (pin-or-delegate behavior in isolation).
+ * <p>The forwarding resolver inside {@link Provider} is the single
+ * production lookup lens: it probes the live pin map with a
+ * canonicalize-then-get-then-delegate policy (M1-277 removed the
+ * per-lookup ephemeral composition). This class itself is a
+ * non-instantiable holder — there is no standalone resolver instance.
  */
-public final class PinnedDnsResolver implements InetAddressResolver {
+public final class PinnedDnsResolver {
 
-    private final Map<String, List<InetAddress>> pins;
-
-    private final InetAddressResolver delegate;
-
-    public PinnedDnsResolver(Map<String, List<InetAddress>> pins,
-                             InetAddressResolver delegate) {
-        this.pins = Map.copyOf(pins);
-        this.delegate = delegate;
+    private PinnedDnsResolver() {
+        // Holder for Provider + the shared LookupPolicy filter; not
+        // instantiable — the JVM-wide resolver is Provider's nested
+        // ForwardingResolver, registered via META-INF/services.
     }
 
-    @Override
-    public Stream<InetAddress> lookupByName(String host, LookupPolicy lookupPolicy)
-            throws UnknownHostException {
-        // M1-026 Finding 2: canonicalize the host BEFORE pins.get().
-        // The pin map is keyed by SsrfGuardedHttpClient.canonicalizeHost
-        // on the install side; the JDK may pass a different form of
-        // the host argument here (case-fold, trailing-dot strip,
-        // IDN <-> punycode). The shared helper normalizes both sides
-        // to the same key, so the pin matches regardless of JDK
-        // transformation choices.
-        //
-        // If canonicalization throws (invalid host per IDN.toASCII),
-        // the host cannot be in our pin map (always keyed by the
-        // canonical form). Delegate to the builtin resolver — it
-        // may reject with UnknownHostException or accept on its own
-        // terms; either is correct policy.
-        String canonicalHost;
-        try {
-            canonicalHost = SsrfGuardedHttpClient.canonicalizeHost(host);
-        } catch (IllegalArgumentException e) {
-            return delegate.lookupByName(host, lookupPolicy);
+    /**
+     * Filter a pinned address set down to the families the JDK asked
+     * for via {@code lookupPolicy} (U-39). The builtin resolver already
+     * receives the {@link InetAddressResolver.LookupPolicy} and honors
+     * it; before this, the PINNED path returned every validated address
+     * regardless of the requested family, so an IPv4-only caller could
+     * be handed an IPv6 pinned address it cannot use. The policy's
+     * {@code characteristics()} bitmask carries the family request:
+     * {@code IPV4} and/or {@code IPV6}. When exactly one family bit is
+     * set the set is filtered to that family; when both (or neither)
+     * are set there is no family restriction and the set passes through
+     * unchanged. Every returned address is still one a still-active
+     * holder blocklist-validated — filtering narrows, never widens.
+     *
+     * <p>Package-private static so both the production lens
+     * ({@link Provider.ForwardingResolver}) and the U-39 tests invoke
+     * the identical filter.
+     */
+    static List<InetAddress> filterByFamily(List<InetAddress> addresses,
+                                            InetAddressResolver.LookupPolicy lookupPolicy) {
+        int characteristics = lookupPolicy.characteristics();
+        boolean wantIpv4 = (characteristics & InetAddressResolver.LookupPolicy.IPV4) != 0;
+        boolean wantIpv6 = (characteristics & InetAddressResolver.LookupPolicy.IPV6) != 0;
+        if (wantIpv4 == wantIpv6) {
+            // Both families requested (or, defensively, neither bit set):
+            // no family restriction to apply.
+            return addresses;
         }
-        List<InetAddress> pinned = pins.get(canonicalHost);
-        if (pinned != null) {
-            return pinned.stream();
+        List<InetAddress> filtered = new ArrayList<>(addresses.size());
+        for (InetAddress address : addresses) {
+            if ((address instanceof Inet4Address) == wantIpv4) {
+                filtered.add(address);
+            }
         }
-        return delegate.lookupByName(host, lookupPolicy);
-    }
-
-    @Override
-    public String lookupByAddress(byte[] addr) throws UnknownHostException {
-        // Reverse lookups always go to the delegate. The wrapper never
-        // pins reverse-lookup answers; only forward (name -> address)
-        // lookups carry SSRF rebind exposure.
-        return delegate.lookupByAddress(addr);
+        return filtered;
     }
 
     /**
@@ -172,29 +164,21 @@ public final class PinnedDnsResolver implements InetAddressResolver {
 
         /**
          * Snapshot of the hosts currently pinned → their validated
-         * addresses, in the {@code Map} shape
-         * {@link PinnedDnsResolver} consumes. Test seam: lets tests
-         * compose a {@link PinnedDnsResolver} over the live pin state
-         * (the forwarding resolver itself probes the live map directly
-         * since M1-277 — no per-lookup snapshot). Weakly consistent
-         * like the underlying map — but a caller's own pin is always
-         * visible to its own dial's lookup, because the pin is
-         * installed happens-before the send that needs it.
+         * addresses. Package-private test-inspection seam: the only
+         * window onto the otherwise-private {@link #PINS} map, so tests
+         * can assert pin/release transitions ({@code containsKey},
+         * {@code get}) without reaching through {@code InetAddress
+         * .getAllByName}, whose positive cache sits ABOVE the resolver
+         * SPI. Weakly consistent like the underlying map — but a
+         * caller's own pin is always visible to its own dial's lookup,
+         * because the pin is installed happens-before the send that
+         * needs it. Has no production caller; the live
+         * {@link ForwardingResolver} probes {@link #PINS} directly.
          */
         static Map<String, List<InetAddress>> activePinsSnapshot() {
             Map<String, List<InetAddress>> snapshot = new HashMap<>();
             PINS.forEach((host, entry) -> snapshot.put(host, entry.addresses()));
             return snapshot;
-        }
-
-        /**
-         * The JDK-default resolver captured at JVM startup. Exposed
-         * package-privately for tests that want to compose a
-         * {@link PinnedDnsResolver} on top of the real builtin
-         * without installing into the JVM-wide pin map.
-         */
-        static InetAddressResolver builtin() {
-            return BUILTIN;
         }
 
         /** Validated addresses plus the number of active holders. */
@@ -223,11 +207,19 @@ public final class PinnedDnsResolver implements InetAddressResolver {
                     return;
                 }
                 PINS.compute(canonicalHost, (host, entry) -> {
-                    // entry == null cannot happen while the refcount
-                    // invariant holds (this handle's acquisition is
-                    // still counted); the arm exists because compute's
-                    // contract supplies null for an absent key.
-                    if (entry == null || entry.holders() == 1) {
+                    if (entry == null) {
+                        // Unreachable while the refcount invariant holds:
+                        // this handle's acquisition is still counted, so
+                        // the entry must exist. compute's remapping
+                        // function takes a @Nullable value, so the branch
+                        // cannot be deleted (NullAway) — make it LOUD
+                        // rather than a silent no-op so a refcount bug
+                        // surfaces here instead of corrupting pin state.
+                        throw new IllegalStateException(
+                            "pin entry missing on release for host "
+                            + canonicalHost + " (refcount invariant violated)");
+                    }
+                    if (entry.holders() == 1) {
                         return null;
                     }
                     return new PinEntry(entry.addresses(), entry.holders() - 1);
@@ -241,16 +233,16 @@ public final class PinnedDnsResolver implements InetAddressResolver {
             public Stream<InetAddress> lookupByName(String host, LookupPolicy lookupPolicy)
                     throws UnknownHostException {
                 // Every lookup in the JVM (DB pool, LLM endpoints, ...)
-                // routes through this provider. No-pin fast path first;
-                // then (M1-277, M-S2) an exact probe of the live map —
-                // previously any active pin made EVERY JVM-wide lookup
-                // pay a HashMap snapshot + ephemeral PinnedDnsResolver +
-                // Map.copyOf. Canonicalize BEFORE the get (M1-026
-                // Finding 2): the pin map is keyed by canonical form,
-                // and the JDK may pass a case / trailing-dot / IDN
-                // variant here. The same canonicalize-then-get-then-
-                // delegate policy as PinnedDnsResolver.lookupByName,
-                // applied to the live map instead of a snapshot.
+                // routes through this provider — the single production
+                // lookup lens. No-pin fast path first; then (M1-277,
+                // M-S2) an exact probe of the live map. Canonicalize
+                // BEFORE the get (M1-026 Finding 2): the pin map is keyed
+                // by canonical form, and the JDK may pass a case /
+                // trailing-dot / IDN variant here. A pinned hit is
+                // filtered to the requested address family (U-39) so an
+                // IPv4-only or IPv6-only policy is honored on the pinned
+                // path exactly as the builtin already honors it on the
+                // delegate path.
                 if (PINS.isEmpty()) {
                     return BUILTIN.lookupByName(host, lookupPolicy);
                 }
@@ -265,7 +257,7 @@ public final class PinnedDnsResolver implements InetAddressResolver {
                 }
                 PinEntry entry = PINS.get(canonicalHost);
                 if (entry != null) {
-                    return entry.addresses().stream();
+                    return filterByFamily(entry.addresses(), lookupPolicy).stream();
                 }
                 return BUILTIN.lookupByName(host, lookupPolicy);
             }
