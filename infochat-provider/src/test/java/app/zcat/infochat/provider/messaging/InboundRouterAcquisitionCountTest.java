@@ -50,6 +50,7 @@ class InboundRouterAcquisitionCountTest {
                 return "chat-reply";
             }
         };
+        router.outboundDelivery = TestOutboundDelivery.passThrough();
         router.dataSource = counting;
         router.inboundContext = new InboundContext();
         router.rateCapBucket = new AdmitAllRateCapBucket();

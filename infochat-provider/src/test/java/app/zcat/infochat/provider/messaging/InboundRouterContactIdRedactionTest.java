@@ -193,6 +193,7 @@ class InboundRouterContactIdRedactionTest {
         // (/xyz scenarios) probes the asset oracle (no-arg → false).
         router.registeredContactSet = new NoopRegisteredContactSet();
         router.assetCommandFamilyOracle = new AssetCommandFamilyOracle();
+        router.outboundDelivery = TestOutboundDelivery.passThrough();
         return router;
     }
 

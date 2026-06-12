@@ -167,6 +167,7 @@ class InboundRouterNormalizeTest {
     @Test
     void oversizeBodyIsDroppedAndNormalizeIsNeverInvoked() {
         InboundRouter router = new InboundRouter();
+        router.outboundDelivery = TestOutboundDelivery.passThrough();
         router.maxInboundBodyBytes = 16; // tiny cap so a short ASCII body overflows
         router.commandHandlers = new EmptyHandlerInstance();
         // M1-040: InboundContext is set at the top of onMessage and
@@ -369,6 +370,7 @@ class InboundRouterNormalizeTest {
         };
         // dataSource intentionally left null — lookupUser is overridden
         // above so the DataSource field is never accessed.
+        router.outboundDelivery = TestOutboundDelivery.passThrough();
         return router;
     }
 }

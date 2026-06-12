@@ -1,7 +1,7 @@
 ---
 id: M1-284
 title: "Outbound delivery failure layer: retry, cap escalation, cleanup"
-status: in-review
+status: done
 created: 2026-06-11
 last_updated: 2026-06-12
 blocked_by: []
@@ -40,6 +40,7 @@ acceptance:
   - "Bot-removed cleanup per spec: repeated permanent group-send failures past a profile-driven threshold (spec: 'The permanent-failure threshold is always greater than 1') set groups.removed_at = NOW() and cancel the periodic-digest scheduler entries for that group; a named test crosses the threshold and asserts both effects; a second named test asserts a single permanent failure does NOT trigger cleanup."
   - "User-left cleanup per spec §Failure handling 'User left group': a permanent send failure attributed to a specific group member soft-clears the group_membership row (removed_at = NOW()), preserves chat_memory/chat_session/summary_anchor/subscription rows, and clears is_group_admin in the same transaction when the departing user was group admin; a named test covers the admin case."
   - "MessagingException's javadoc (currently naming a nonexistent 'outbound retry layer') names the real layer landed by this ticket."
+  - "The cap-exhaustion admin notification must not leak the raw transport exception body: OutboundDelivery.onCapExhausted passes only channel, error_class, and attempt count to ThrottledAdminNotifier.notifyOnce — never last.getMessage() (security.md §'User content in exceptions'/D37: exception message bodies never reach non-audit logs; SafeLog is the mandated path, and onCapExhausted's own second log call already uses SafeLog.warn). A named test asserts the captured ADMIN-NOTIFY message for an exhausted (channel, error_class) omits the exception message body."
   - "mvn -B clean verify from the repo root exits 0."
 test_plan:
   adds:
@@ -63,6 +64,19 @@ reviews:
       files: 26
       added: 1043
       removed: 71
+  - round: 2
+    date: 2026-06-12
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 29
+      added: 1366
+      removed: 88
 escalations:
   - date: 2026-06-11
     reason: outline-fail
@@ -95,10 +109,104 @@ escalations:
       forces wiring `outboundDelivery` into every plain-JUnit test that
       constructs those beans directly (9 InboundRouter*Test + DigestWorkerTest
       + StageProgressNotifierTest). User chose refine → bump files_budget to 26.
+  - date: 2026-06-12
+    reason: redteam-finding
+    reviewer_verdict_excerpt: |
+      /redteam M1-284 --in-progress returned FINDINGS: 1 medium INFO-LEAK
+      (critical=0 high=0 medium=1 low=0; out-of-model=2). OutboundDelivery
+      .onCapExhausted interpolates last.getMessage() (raw adapter
+      MessagingException message) into ThrottledAdminNotifier.notifyOnce,
+      which emits it on the application logger; the notifier strips control
+      chars + truncates but does NOT drop the body or apply the Redactor,
+      bypassing the SafeLog body-drop that security.md §"User content in
+      exceptions"/D37 mandates. The method's own second log call already uses
+      SafeLog.warn. Full finding: redteam_findings[0] +
+      docs/plan/m1/redteam/M1-284-2026-06-12.md. User chose refine.
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
+redteam_findings:
+  - date: 2026-06-12
+    category: INFO-LEAK
+    severity: medium
+    promise: |
+      security.md §Secrets handling — "User content in exceptions":
+      "Exception messages and stack traces emitted via the application
+      logger MUST NOT contain user-authored prose (chat-mode message
+      bodies, post bodies, saved-post annotations, command arguments).
+      The application provides a `SafeLog` utility that drops the
+      exception message body, retains only the exception class name...
+      The original `Throwable` is never passed to the underlying SLF4J
+      logger." (and §Secrets handling: chat-mode message bodies / saved
+      bodies / annotations "never appear in non-audit logs, at any log
+      level (decision D37)").
+    gap: |
+      OutboundDelivery.onCapExhausted (infochat-provider/.../messaging/
+      OutboundDelivery.java, diff lines 463-475 — the new file's
+      onCapExhausted method) builds the admin-notification message by
+      interpolating the raw adapter exception message:
+          adminNotifier.notifyOnce(key, errorClass,
+              "Outbound delivery to channel " + channel
+              + " exhausted the retry budget (" + maxAttempts
+              + " attempts) and was escalated to permanent: "
+              + last.getMessage());
+      `last` is the MessagingException raised by the transport adapter at
+      its throw site. The spec's whole reason for SafeLog is that callers
+      MUST NOT trust an exception message to be free of user-authored prose
+      — SafeLog.formatSafe (infochat-core/.../log/SafeLog.java:68-84)
+      deliberately appends only `t.getClass().getName()` and the cause-chain
+      class names, never `t.getMessage()`. The SECOND log call in
+      onCapExhausted correctly uses SafeLog.warn(log, "...", last) (drops the
+      body), but the FIRST call routes `last.getMessage()` verbatim into
+      ThrottledAdminNotifier.notifyOnce, which emits it as an
+      `ADMIN-NOTIFY key=... error=... message=%s` WARN line on the
+      application logger (ThrottledAdminNotifier.runNotify:305-309). The
+      notifier's sanitize() (ThrottledAdminNotifier.java:120-127) only strips
+      control chars and truncates to 2048 chars; it does NOT drop the
+      exception body the way SafeLog mandates, and does not apply the API-key
+      Redactor either. The admin-notify WARN line is a non-audit application
+      log line, so D37's "never in non-audit logs at any level" applies.
+    repro: |
+      An adversary repeatedly drives a reply-producing inbound (e.g. a
+      chat-mode message or a DM reply) to a scope whose transport is
+      returning TRANSIENT failures for every send (a transport rate-limit /
+      "try again later" condition the adversary can induce by flooding at
+      the per-user cap, or that occurs naturally under transport
+      back-pressure). After the 3-attempt budget exhausts, onCapExhausted
+      fires. If the adapter's MessagingException message echoes any portion
+      of the rejected outbound payload or a transport "policy violation"
+      string that quotes the message body (a documented PERMANENT/TRANSIENT
+      example in design 06-messaging.md §6.3.6 is "message rejected as
+      policy violation by the transport" / "transport-side oversize
+      rejection"), that prose — derived from the user-facing reply content,
+      which can in turn contain user-supplied chat text echoed back — lands
+      verbatim in the ADMIN-NOTIFY WARN line. The spec forbids exactly this
+      and supplies SafeLog so no caller has to reason about whether a given
+      adapter's exception message is clean. The chokepoint bypasses that
+      guarantee on the one branch where it interpolates getMessage().
+    suggested_fix_class: trust-boundary-tightening
+redteam_audits:
+  - date: 2026-06-12
+    verdict: FINDINGS
+    base: f2c24950
+    head: "working-tree (branch m1/M1-284-outbound-delivery-failure-layer, uncommitted)"
+    verdict_file: docs/plan/m1/redteam/M1-284-2026-06-12.md
+    findings_count: 1
+    out_of_model_count: 2
+    note: |
+      In-progress audit (--in-progress; working-tree vs fork point f2c24950).
+      One medium INFO-LEAK: OutboundDelivery.onCapExhausted routes
+      last.getMessage() (raw adapter MessagingException message) into
+      ThrottledAdminNotifier.notifyOnce, which emits it on the application
+      logger; the notifier strips control chars + truncates but does NOT drop
+      the body or apply the Redactor, bypassing the SafeLog guarantee that
+      security.md §"User content in exceptions" / D37 mandates for exception
+      messages on non-audit logs. Verified real against source. Two
+      out-of-model notes (advisory): synchronous retry back-off occupies the
+      single per-adapter dispatch thread under sustained TRANSIENT failure;
+      system-initiated group soft-removal writes no audit row. Recorded on the
+      branch (squashes into M1-284); fix decision held for in-worktree
+      discussion.
 revisions:
   - date: 2026-06-11
     reason: outline-fail rework
@@ -155,6 +263,21 @@ revisions:
       over-budget breadth; acceptance item 1 (all sends route through the
       chokepoint) is unsatisfiable without the InboundRouter/DigestWorker
       injection that forces it.
+  - date: 2026-06-12
+    reason: redteam-finding rework
+    snapshot:
+      status: escalated
+      escalation_reason: redteam-finding
+      files_budget: 26
+    resolution: |
+      Refine — added one acceptance item (the cap-exhaustion admin
+      notification must omit the raw transport exception body) closing the
+      medium INFO-LEAK in redteam_findings[0]. Acceptance items 1-8,
+      files_scope, out_of_scope, and files_budget are otherwise UNCHANGED:
+      the fix is a one-expression edit in OutboundDelivery.onCapExhausted
+      (drop "+ last.getMessage()") plus a test assertion in an existing
+      messaging test — no new files, no budget change. security_relevant is
+      already true. Re-implement on the existing branch, then round-2 review.
 clarity_check:
   date: 2026-06-11
   verdict: WARN

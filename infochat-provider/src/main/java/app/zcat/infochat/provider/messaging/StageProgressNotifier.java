@@ -1,6 +1,5 @@
 package app.zcat.infochat.provider.messaging;
 
-import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.MessagingException;
@@ -56,8 +55,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * {@code finalText} is the caller-composed operation output (already
  * sanitized by the handler), not a stage label.</p>
  *
- * <p><b>Checked-exception absorption.</b> {@link MessagingException}
- * (checked) is caught and logged internally — the {@code ProgressNotifier}
+ * <p><b>Checked-exception absorption.</b> Every send/update/finalize goes
+ * through {@link OutboundDelivery}, which absorbs {@link MessagingException}
+ * (retry on transient, abort on permanent) — the {@code ProgressNotifier}
  * SPI does not declare it, and the spec mandates that an intermediate
  * transport failure never leaves a dangling placeholder or leaks out of
  * the calling handler.</p>
@@ -75,6 +75,9 @@ public class StageProgressNotifier implements ProgressNotifier {
 
     @Inject
     BundleLoader bundleLoader;
+
+    @Inject
+    OutboundDelivery outboundDelivery;
 
     /**
      * Single system-wide edit-coalescing floor in milliseconds (design
@@ -101,17 +104,17 @@ public class StageProgressNotifier implements ProgressNotifier {
         ScopeState state = states.computeIfAbsent(scope, s -> new ScopeState());
         synchronized (state) {
             if (state.handle == null) {
-                // Step 1+2: acquire the placeholder, capture the handle,
-                // turn typing on. A failed placeholder send leaves
-                // handle null so a later publish retries and complete()
-                // falls back to a fresh send (placeholder never dangles).
-                try {
-                    state.handle = adapter.send(outbound(scope, text));
-                } catch (MessagingException e) {
-                    SafeLog.error(log,
-                            "ProgressNotifier placeholder send failed for adapter=" + adapter.name(), e);
+                // Step 1+2: acquire the placeholder via the outbound
+                // chokepoint, capture the handle, turn typing on. A null
+                // handle means the chokepoint aborted the send (after its
+                // TRANSIENT retries); leave handle null so a later publish
+                // retries and complete() falls back to a fresh send
+                // (placeholder never dangles).
+                MessageHandle handle = outboundDelivery.deliver(adapter, outbound(scope, text));
+                if (handle == null) {
                     return;
                 }
+                state.handle = handle;
                 state.lastEditAt = Instant.now();
                 adapter.setTyping(scope, true);
                 return;
@@ -123,12 +126,8 @@ public class StageProgressNotifier implements ProgressNotifier {
             if (Duration.between(state.lastEditAt, now).toMillis() < minEditIntervalMs) {
                 return;
             }
-            try {
-                adapter.update(state.handle, text);
+            if (outboundDelivery.updateInPlace(adapter, state.handle, text)) {
                 state.lastEditAt = now;
-            } catch (MessagingException e) {
-                SafeLog.error(log,
-                        "ProgressNotifier update failed for adapter=" + adapter.name(), e);
             }
         }
     }
@@ -144,30 +143,24 @@ public class StageProgressNotifier implements ProgressNotifier {
     }
 
     /**
-     * Step 4: finalize the placeholder with {@code text} and turn
-     * typing off, both guaranteed via try/finally. When no placeholder
-     * exists (publish never ran, or its send failed) the terminal text
-     * is delivered as a fresh send so the user still receives the
-     * outcome.
+     * Step 4: finalize the placeholder with {@code text} and turn typing
+     * off. When no placeholder exists (publish never ran, or its send was
+     * aborted) the terminal text is delivered as a fresh send so the user
+     * still receives the outcome. Both the finalize and the fresh send go
+     * through the outbound chokepoint, which absorbs transport failures
+     * (retry/abort) internally — so typing is turned off unconditionally
+     * after a finalize, with no exception able to skip it.
      */
     private void terminate(ScopeRef scope, String text) {
         MessagingAdapter adapter = resolveAdapter();
         ScopeState state = states.remove(scope);
         MessageHandle handle = state == null ? null : state.handle;
-        try {
-            if (handle != null) {
-                adapter.finalizeMessage(handle, text);
-            } else {
-                adapter.send(outbound(scope, text));
-            }
-        } catch (MessagingException e) {
-            SafeLog.error(log,
-                    "ProgressNotifier terminal delivery failed for adapter=" + adapter.name(), e);
-        } finally {
+        if (handle != null) {
+            outboundDelivery.finalizeInPlace(adapter, handle, text);
             // Typing was only turned on if a placeholder was acquired.
-            if (handle != null) {
-                adapter.setTyping(scope, false);
-            }
+            adapter.setTyping(scope, false);
+        } else {
+            outboundDelivery.deliver(adapter, outbound(scope, text));
         }
     }
 

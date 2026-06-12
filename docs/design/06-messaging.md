@@ -202,8 +202,9 @@
 
   `MessagingException` carries a `FailureCategory category()` accessor.
   Adapters set the field at throw site; callers (most importantly
-  `ProgressNotifier` and the outbound retry layer) branch on it without
-  any heuristic re-classification.
+  `ProgressNotifier` and the outbound-delivery chokepoint
+  `OutboundDelivery`, §6.3.6) branch on it without any heuristic
+  re-classification.
 
   ### 6.2.1 Startup validation — `supportsMarkdownLinks` fail-fast
 
@@ -352,6 +353,8 @@
   #### Failure categorisation and retry policy
 
   Per [../spec/messaging.md](../spec/messaging.md) §Failure handling, every send/update/finalize failure raised by an adapter is categorised as `TRANSIENT` or `PERMANENT` (the `FailureCategory category()` accessor on `MessagingException`). The adapter MUST set the category at throw site; an adapter that cannot tell the two apart MUST default to `PERMANENT`.
+
+  The single Provider-side implementation is the `OutboundDelivery` bean (`infochat-provider`, package `…provider.messaging`): every reply, progress placeholder/finalize, periodic digest, and group command announcement routes its send/update/finalize through it — no caller touches `MessagingAdapter.send`/`update`/`finalizeMessage` directly. It owns the retry loop, cap-exhaustion escalation, and the bot-removed permanent-failure counter. The profile-driven values below are read from `application.properties` keys `infochat.messaging.retry.{max-attempts,base-delay-ms,growth-factor}` and `infochat.messaging.permanent-failure-threshold` (base defaults declared so the `%test` profile, which inherits no `%<profile>` namespace, still resolves them).
 
   | Category | Examples (adapter-specific shapes in §6.4.7 / §6.5.7) | Retried? |
   |---|---|---|

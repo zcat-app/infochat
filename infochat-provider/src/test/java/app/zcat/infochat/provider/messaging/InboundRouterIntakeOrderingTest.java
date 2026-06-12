@@ -594,6 +594,7 @@ class InboundRouterIntakeOrderingTest {
         router.groupAutoPromoteService = new NoopGroupAutoPromoteService(dispatchDataSource);
         router.maxInboundBodyBytes = 65536;
         router.commandBodyCap = 65536;
+        router.outboundDelivery = TestOutboundDelivery.passThrough();
         return router;
     }
 

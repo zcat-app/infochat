@@ -3,8 +3,8 @@ package app.zcat.infochat.provider.messaging;
 import app.zcat.infochat.core.log.ContactIds;
 import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.messaging.InboundMessage;
+import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.MessagingAdapter;
-import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
@@ -286,6 +286,9 @@ public class InboundRouter {
 
     @Inject
     LlmRateCap llmRateCap;
+
+    @Inject
+    OutboundDelivery outboundDelivery;
 
     @ConfigProperty(name = "infochat.chat.body-cap", defaultValue = "2048")
     int chatBodyCap;
@@ -851,19 +854,18 @@ public class InboundRouter {
                     adapterName, ContactIds.redact(scopeIdOf(scope)));
             return;
         }
-        try {
-            target.send(new OutboundMessage(
-                    scope,
-                    body,
-                    Instant.now(),
-                    UUID.randomUUID().toString()));
-        } catch (MessagingException e) {
-            // Outbound failure on the reply itself is not recoverable
-            // on this code path — surface it in the log and move on.
-            SafeLog.error(log,
-                    "InboundRouter reply send failed for adapter=" + target.name()
-                            + " scope=" + ContactIds.redact(scopeIdOf(scope)),
-                    e);
+        // The chokepoint owns retry (TRANSIENT) and abort (PERMANENT /
+        // exhausted). A null handle means the reply was aborted; log it
+        // here with the scope id REDACTED (never the full contact id) and
+        // drop it — there is no recovery on the reply path.
+        MessageHandle handle = outboundDelivery.deliver(target, new OutboundMessage(
+                scope,
+                body,
+                Instant.now(),
+                UUID.randomUUID().toString()));
+        if (handle == null) {
+            log.error("InboundRouter reply aborted for adapter={} scope={}",
+                    target.name(), ContactIds.redact(scopeIdOf(scope)));
         }
     }
 

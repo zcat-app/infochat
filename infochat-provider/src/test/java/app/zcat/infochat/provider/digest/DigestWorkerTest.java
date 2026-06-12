@@ -5,9 +5,12 @@ import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
+import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.group.GroupRepository;
 import app.zcat.infochat.provider.messaging.AdapterRegistry;
+import app.zcat.infochat.provider.messaging.OutboundDelivery;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -67,6 +70,12 @@ class DigestWorkerTest {
         worker.adapterRegistry = new StubAdapterRegistry(recordingAdapter);
         worker.dataSource = new StubGroupDataSource(ADAPTER_NAME, UPSTREAM_GROUP_ID, "en");
         worker.retryHorizon = RETRY_HORIZON;
+        // Pass-through chokepoint via the public constructor: the recording
+        // adapter never throws, so the retry/cleanup collaborators (notifier,
+        // group repo) are never exercised on these success/programming-error
+        // paths. base-delay 0 keeps any (unused) back-off instant.
+        worker.outboundDelivery = new OutboundDelivery(
+                new ThrottledAdminNotifier(), new GroupRepository(null), 3, 0L, 2.0, 3);
     }
 
     @Test

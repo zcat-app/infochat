@@ -50,6 +50,7 @@ class InboundRouterBanSnapshotTest {
                 return "en";
             }
         };
+        router.outboundDelivery = TestOutboundDelivery.passThrough();
         router.inboundContext = new InboundContext();
         router.rateCapBucket = new NoopRateCapBucket();
         router.registeredContactSet = new NoopRegisteredContactSet();

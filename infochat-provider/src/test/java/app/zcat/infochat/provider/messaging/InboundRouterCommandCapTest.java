@@ -96,6 +96,7 @@ class InboundRouterCommandCapTest {
             @Override public void clear(UUID userId, String scopeKind, UUID scopeId) {}
         };
         router.maxInboundBodyBytes = 65536;
+        router.outboundDelivery = TestOutboundDelivery.passThrough();
         return router;
     }
 

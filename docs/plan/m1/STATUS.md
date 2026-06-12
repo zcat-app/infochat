@@ -12,9 +12,9 @@
 |---|---|
 | pending | 24 |
 | in-progress | 0 |
-| in-review | 1 |
+| in-review | 0 |
 | escalated | 0 |
-| done | 323 |
+| done | 324 |
 | deferred | 3 |
 | **total** | **351** |
 
@@ -46,6 +46,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-310 — Collector dedup: one fetchAndParse helper for the four single-GET fetchers (complexity: medium, risk: medium)
 - M1-311 — Strip ticket/finding provenance from permanent comments (policy + sweep) (complexity: medium, risk: low)
 - M1-312 — Doc-truth v5: false comments and spec/design drift reconciliation (complexity: medium, risk: low)
+- M1-313 — Chat-memory write ordering on permanent delivery failure (complexity: high, risk: high)
 
 ---
 
@@ -53,7 +54,8 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 | ID | Title | Status | Last review |
 |---|---|---|---|
-| M1-284 | Outbound delivery failure layer: retry, cap escalation, cleanup | in-review | round 1 APPROVE on 2026-06-12 |
+
+_(none)_
 
 ---
 
@@ -61,8 +63,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-313 — blocked_by: M1-284 (in-review)
-- M1-314 — blocked_by: M1-284 (in-review), M1-294 (pending)
+- M1-314 — blocked_by: M1-284 (done), M1-294 (pending)
 
 ---
 
@@ -85,12 +86,12 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-290 | SECURITY DEFINER procedures reject banned admins as actors | 2026-06-12 | round 1 APPROVE |
 | M1-287 | Nostr dedup records event id only after a successful queue offer | 2026-06-12 | round 1 APPROVE |
 | M1-286 | UNKNOWN-rate auto-disable stops the running stream-source worker | 2026-06-12 | round 1 APPROVE |
+| M1-284 | Outbound delivery failure layer: retry, cap escalation, cleanup | 2026-06-12 | round 2 APPROVE |
 | M1-304 | Declare jakarta.json (+ Parsson) in the messaging-adapter pom | 2026-06-11 | round 1 APPROVE |
 | M1-296 | LLM config/routing: deterministic order, typo fail-fast, base-url validation, structure | 2026-06-11 | round 1 APPROVE |
 | M1-289 | Unreadable bootstrap-assets file fails startup instead of silently disabling | 2026-06-11 | round 1 APPROVE |
 | M1-279 | §7/§7a sweep: defensive checks, broad catches, test seams | 2026-06-11 | round 1 APPROVE |
 | M1-283 | Over-cap outbound digest dropped on SimpleX | 2026-06-10 | round 1 APPROVE |
-| M1-282 | Redactor suppressed-throwable coverage | 2026-06-10 | round 1 APPROVE |
 
 ---
 
@@ -485,8 +486,8 @@ M1-279 (done)
 M1-280 (done)
 M1-281 (done)
 M1-282 (done)
-M1-284 (in-review)
-  ├── M1-313 (pending)
+M1-284 (done)
+  ├── M1-313 (pending) ← runnable
   └── M1-314 (pending)
 M1-285 (pending) ← runnable
 M1-286 (done)

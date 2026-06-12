@@ -5,7 +5,6 @@ import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.core.util.JsonEscaper;
 import app.zcat.infochat.messaging.MessagingAdapter;
-import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
@@ -14,6 +13,7 @@ import app.zcat.infochat.provider.group.GroupRepository;
 import app.zcat.infochat.provider.messaging.AdapterRegistry;
 import app.zcat.infochat.provider.messaging.CommandHandler;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.messaging.OutboundDelivery;
 import app.zcat.infochat.provider.user.UserRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -100,6 +100,9 @@ public class RejectGroupCommandHandler implements CommandHandler {
 
     @Inject
     AdapterRegistry adapterRegistry;
+
+    @Inject
+    OutboundDelivery outboundDelivery;
 
     @Inject
     UserRepository userRepository;
@@ -298,12 +301,11 @@ public class RejectGroupCommandHandler implements CommandHandler {
                 body,
                 Instant.now(),
                 "reject-group-" + targetGroup.id());
-        try {
-            targetAdapter.send(msg);
-        } catch (MessagingException e) {
-            log.warn("Group notification send failed for group {} on adapter '{}'",
-                    targetGroup.id(), targetGroup.adapter(), e);
-        }
+        // Route through the chokepoint: retry on TRANSIENT, abort on
+        // PERMANENT, and count permanent group-send failures toward
+        // bot-removed cleanup. The rejection already committed, so an
+        // aborted announcement is logged by the chokepoint and dropped.
+        outboundDelivery.deliverToGroup(targetAdapter, msg, targetGroup.id());
     }
 
     private @Nullable MessagingAdapter findAdapter(String adapterName) {

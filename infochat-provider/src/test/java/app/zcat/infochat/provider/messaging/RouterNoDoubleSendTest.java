@@ -100,6 +100,7 @@ class RouterNoDoubleSendTest {
         router.maxInboundBodyBytes = 65536;
         router.commandBodyCap = 65536;
         router.setReplyTarget(target);
+        router.outboundDelivery = TestOutboundDelivery.passThrough();
         return router;
     }
 

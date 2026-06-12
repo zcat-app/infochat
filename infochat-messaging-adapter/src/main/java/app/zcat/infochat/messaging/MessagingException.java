@@ -14,7 +14,8 @@ import org.jspecify.annotations.Nullable;
  * encodes the spec's "an adapter that cannot tell the two apart MUST
  * default to PERMANENT" as a forcing function rather than a downstream
  * re-derivation: the throwing code makes the choice. Callers
- * ({@link ProgressNotifier}, the outbound retry layer) branch on
+ * ({@link ProgressNotifier} and the Provider's outbound delivery
+ * chokepoint {@code OutboundDelivery}) branch on
  * {@link #category()} without heuristic re-classification.</p>
  */
 public class MessagingException extends Exception {

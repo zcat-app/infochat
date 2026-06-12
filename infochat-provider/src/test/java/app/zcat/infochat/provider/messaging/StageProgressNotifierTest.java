@@ -178,6 +178,12 @@ class StageProgressNotifierTest {
         notifier.inboundContext = context;
         notifier.bundleLoader = bundleLoader;
         notifier.minEditIntervalMs = floorMs;
+        // The notifier now routes every primitive through the outbound
+        // chokepoint. A pass-through OutboundDelivery calls the adapter's
+        // send/update/finalize once each with no transport failure, so the
+        // recorded step 1–4 sequence is identical to the pre-chokepoint
+        // behavior these tests pin.
+        notifier.outboundDelivery = TestOutboundDelivery.passThrough();
         return notifier;
     }
 

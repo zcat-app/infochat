@@ -23,13 +23,13 @@ import org.jboss.logging.Logger;
 import org.jspecify.annotations.Nullable;
 
 import app.zcat.infochat.messaging.MessagingAdapter;
-import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.digest.DigestPostCollector.CollectionResult;
 import app.zcat.infochat.provider.messaging.AdapterRegistry;
+import app.zcat.infochat.provider.messaging.OutboundDelivery;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
@@ -69,6 +69,9 @@ public class DigestWorker {
 
     @Inject
     AdapterRegistry adapterRegistry;
+
+    @Inject
+    OutboundDelivery outboundDelivery;
 
     @Inject
     DataSource dataSource;
@@ -120,8 +123,10 @@ public class DigestWorker {
         }
         try {
             executeSlot(slot);
-        } catch (SQLException | MessagingException e) {
-            // Expected operational failures only — programming errors propagate
+        } catch (SQLException e) {
+            // Expected operational failures only — programming errors propagate.
+            // Outbound delivery failures no longer surface here: the chokepoint
+            // absorbs them (retry/abort) inside executeSlot.
             LOG.errorf(e, "Digest failed for group %s slot %s", slot.groupId(), slot.slotKind());
         } finally {
             inFlightSlots.remove(inFlightKey);
@@ -129,7 +134,7 @@ public class DigestWorker {
         return SlotOutcome.RAN;
     }
 
-    private void executeSlot(DigestSlot slot) throws SQLException, MessagingException {
+    private void executeSlot(DigestSlot slot) throws SQLException {
         // Collect the full inter-digest period, not just the slot window: the
         // lower bound is the previous digest boundary (latest summary_cache
         // row before this slot), so posts published between two slots appear
@@ -196,7 +201,14 @@ public class DigestWorker {
                 content,
                 Instant.now(),
                 correlationId);
-        adapter.send(msg);
+        // Route through the chokepoint: retry on TRANSIENT, abort on
+        // PERMANENT, and feed the per-group permanent-failure counter that
+        // drives bot-removed cleanup. A null return means the delivery was
+        // aborted — logged here; the next slot retries (spec §Failure handling).
+        if (outboundDelivery.deliverToGroup(adapter, msg, slot.groupId()) == null) {
+            LOG.warnf("Digest delivery aborted for group %s slot %s",
+                    slot.groupId(), slot.slotKind());
+        }
     }
 
     record GroupMetadata(String adapterName,
