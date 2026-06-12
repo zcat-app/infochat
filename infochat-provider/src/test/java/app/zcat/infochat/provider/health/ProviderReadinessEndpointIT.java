@@ -28,9 +28,13 @@ class ProviderReadinessEndpointIT {
 
     @Test
     void readinessEndpointReportsUpOnceBootstrapCompletes() throws Exception {
+        // quarkus.http.test-port=0 (test application.properties) binds an
+        // ephemeral port; Quarkus writes the resolved port back into this
+        // config key after binding, so this read returns the actual port —
+        // never 0, and never a hardcoded fallback that could mask a
+        // cross-worktree collision.
         int port = ConfigProvider.getConfig()
-                .getOptionalValue("quarkus.http.test-port", Integer.class)
-                .orElse(8081);
+                .getValue("quarkus.http.test-port", Integer.class);
         try (HttpClient client = HttpClient.newHttpClient()) {
             HttpResponse<String> response = client.send(
                     HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/q/health/ready"))
