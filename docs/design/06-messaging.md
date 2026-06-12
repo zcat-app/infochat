@@ -986,6 +986,8 @@
   ---                                                                                                                                                                                                                                                   
   ## 6.12 Observability                                                               
                     
+  Status: scheduled, not yet built — no `AdapterMetrics` exists in any `infochat-*` main source as of 2026-06-12. Ticket M1-322 (blocked on M1-321's Micrometer dependency) implements the catalogue below, including the §6.3.8 `adapter.outbound.update.total{outcome=fallback_send}` counter M1-285 explicitly deferred; the /status reporting line at the end of this section is a named follow-up to be filed when M1-322 lands.
+
   AdapterMetrics (Micrometer):
                                                                                                                                                                                                                                                         
   - adapter.inbound.total{adapter, scope_kind} — counter                                                                                                                                                                                                

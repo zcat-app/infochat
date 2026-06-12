@@ -522,6 +522,8 @@ All retries use exponential backoff (250ms → 500ms → 1s) with jitter, capped
 ---                                                                                                                                                                                                                                                   
 ## 5.9 Observability                                                                
                  
+Status: scheduled, not yet built — nothing in this catalogue is emitted as of 2026-06-12 (no Micrometer dependency in the build). Ticket M1-321 implements the catalogue below plus the spec's per-call context (trace/scope id); the /status aggregate line at the end of this section is a named follow-up to be filed when M1-321 lands.
+
 LlmMetrics emits via Micrometer:
                                                                                                                                                                                                                                                       
 - llm.calls.total{task, provider, model, outcome} — counter                                                                                                                                                                                           

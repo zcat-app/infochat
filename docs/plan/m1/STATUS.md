@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 13 |
+| pending | 14 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 339 |
+| done | 340 |
 | deferred | 4 |
-| **total** | **356** |
+| **total** | **358** |
 
 ---
 
@@ -26,7 +26,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-298 — Core contracts: dispatchKey rename, TargetKind enum, nullable-UUID bind helper (complexity: medium, risk: medium)
 - M1-302 — Ops posture: Stage-2 fail-open default, readiness topology exposure (decisions) (complexity: low, risk: medium)
-- M1-305 — Observability commitments: schedule implementation or amend as deferred (decision) (complexity: low, risk: low)
 - M1-306 — Provider mediums: edit-interval floor, /retry counter order, chat-tool caps, group row reuse (complexity: medium, risk: medium)
 - M1-307 — Provider code lows: JSON conventions, sanitizer seam, dead keys, misc one-liners (complexity: medium, risk: low)
 - M1-308 — Messaging/collector code lows: dead surfaces, helper drift, small perf/correctness (complexity: medium, risk: low)
@@ -36,6 +35,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-313 — Chat-memory write ordering on permanent delivery failure (complexity: high, risk: high)
 - M1-314 — Group-deleted-upstream immediate cleanup, distinct from threshold-counted bot-removed (complexity: medium, risk: medium)
 - M1-319 — Derive Signal bot ACI from signal-cli identity store (complexity: high, risk: high)
+- M1-321 — LLM observability: call context and Micrometer metrics (complexity: medium, risk: low)
 
 ---
 
@@ -53,6 +53,7 @@ _(none)_
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
 - M1-320 — blocked_by: M1-319 (pending)
+- M1-322 — blocked_by: M1-321 (pending)
 
 ---
 
@@ -75,12 +76,12 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-316 | Permanent-failure-driven group soft-removal writes a BOT_REMOVED audit row | 2026-06-12 | round 2 APPROVE |
 | M1-315 | NostrDedupIT.multiRelayDedup over-asserts deliveryCount==1 (flake) | 2026-06-12 | — |
 | M1-310 | Collector dedup: one fetchAndParse helper for the four single-GET fetchers | 2026-06-12 | round 1 APPROVE |
+| M1-305 | Observability commitments: schedule implementation or amend as deferred (decision) | 2026-06-12 | round 1 OVERRIDE-APPROVE |
 | M1-303 | D43 localization gaps: cluster labels, /help asset lines, source label + shared renderer | 2026-06-12 | round 1 APPROVE |
 | M1-301 | Adapter trust-anchor reconciliation: Gate 4 scope, bot-id provenance (decisions) | 2026-06-12 | round 1 APPROVE |
 | M1-300 | Asset-refresh config: one grammar (Duration) across both services | 2026-06-12 | round 1 APPROVE |
 | M1-299 | Core hardening smalls: notifier fallback throttle, probe outside lock, escaper allocation | 2026-06-12 | round 1 APPROVE |
 | M1-297 | /stop cancellation is honored: cancelled flag, stopped terminal, single reply | 2026-06-12 | round 1 APPROVE |
-| M1-295 | Ingest resilience: eval-queue boundary, fetch-ladder scope, parser boundary, re-eval predicate | 2026-06-12 | round 1 APPROVE |
 
 ---
 
@@ -500,7 +501,7 @@ M1-301 (done)
 M1-302 (pending) ← runnable
 M1-303 (done)
 M1-304 (done)
-M1-305 (pending) ← runnable
+M1-305 (done)
 M1-306 (pending) ← runnable
 M1-307 (pending) ← runnable
 M1-308 (pending) ← runnable
@@ -514,4 +515,6 @@ M1-317 (done)
 M1-318 (deferred)
 M1-319 (pending) ← runnable
   └── M1-320 (pending)
+M1-321 (pending) ← runnable
+  └── M1-322 (pending)
 ```
