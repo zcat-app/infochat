@@ -94,7 +94,8 @@ public final class NostrStreamSource implements StreamSource {
     private final NostrDedupFilter dedupFilter;
 
     private final List<NostrRelayConnection> connections = new ArrayList<>();
-    private final BlockingQueue<NostrEvent> inbound = new LinkedBlockingQueue<>(INBOUND_CAPACITY);
+    private final int inboundCapacity;
+    private final BlockingQueue<NostrEvent> inbound;
     private final AtomicLong droppedEvents = new AtomicLong();
     // Per-source counter of events that failed BIP-340 verification. A hostile
     // relay can produce many; no admin notification per failure — the counter
@@ -117,6 +118,20 @@ public final class NostrStreamSource implements StreamSource {
                       HttpClient httpClient, SsrfGuardedHttpClient ssrfClient,
                       NostrEventVerifier verifier,
                       RelayHealthTracker healthTracker, NostrDedupFilter dedupFilter) {
+        this(relayUris, sinceCursor, backoffBase, backoffMax, httpClient, ssrfClient,
+                verifier, healthTracker, dedupFilter, INBOUND_CAPACITY);
+    }
+
+    // Capacity-override constructor: the record-after-offer test drives a
+    // 1-slot inbound queue so a single filler event makes offer() return false
+    // deterministically, instead of flooding INBOUND_CAPACITY (10K) events
+    // through a relay. Production always uses the INBOUND_CAPACITY default.
+    NostrStreamSource(List<URI> relayUris, Supplier<OptionalLong> sinceCursor,
+                      Duration backoffBase, Duration backoffMax,
+                      HttpClient httpClient, SsrfGuardedHttpClient ssrfClient,
+                      NostrEventVerifier verifier,
+                      RelayHealthTracker healthTracker, NostrDedupFilter dedupFilter,
+                      int inboundCapacity) {
         this.relayUris = List.copyOf(relayUris);
         this.sinceCursor = sinceCursor;
         this.backoffBase = backoffBase;
@@ -126,6 +141,8 @@ public final class NostrStreamSource implements StreamSource {
         this.verifier = verifier;
         this.healthTracker = healthTracker;
         this.dedupFilter = dedupFilter;
+        this.inboundCapacity = inboundCapacity;
+        this.inbound = new LinkedBlockingQueue<>(inboundCapacity);
     }
 
     @Override
@@ -146,7 +163,10 @@ public final class NostrStreamSource implements StreamSource {
         }
     }
 
-    private boolean enqueueInbound(NostrEvent event) {
+    // Package-private (not private) so NostrDedupRecordAfterOfferTest can drive
+    // the dedup-record-after-offer ordering synchronously through a 1-slot
+    // queue, without a live relay flooding INBOUND_CAPACITY events.
+    boolean enqueueInbound(NostrEvent event) {
         // Trust-boundary gate per security.md §Per-source trust boundaries:
         // signature verification → kind allowlist → outbox write. The order
         // is load-bearing — kind alone gates nothing if the sig is forged, and
@@ -167,7 +187,8 @@ public final class NostrStreamSource implements StreamSource {
         }
         // verify() above rejected null fields; requireNonNull re-states
         // that invariant for the type system.
-        if (!dedupFilter.accept(Objects.requireNonNull(event.id()))) {
+        String eventId = Objects.requireNonNull(event.id());
+        if (dedupFilter.seen(eventId)) {
             // Same event id already delivered (most likely from another
             // relay of this same source). Silent drop: the in-memory filter
             // is the authoritative cross-relay dedup per architecture.md
@@ -181,10 +202,30 @@ public final class NostrStreamSource implements StreamSource {
             // drown operator logs. No SafeLog: msg is operator-authored.
             if (total == 1 || total % 100 == 0) {
                 LOG.warn("Nostr inbound queue full (cap={}); dropped {} event(s) cumulative for source {}",
-                        INBOUND_CAPACITY, total, dispatchKey);
+                        inboundCapacity, total, dispatchKey);
             }
+            // Do NOT record the id on a dropped event: the outbox write is
+            // at-least-once (architecture.md §"an event is written to the
+            // outbox before the implementation considers it processed"), so a
+            // queue-full drop must stay replayable on the relay's reconnect
+            // (since cursor). Recording here would poison the dedup set and
+            // turn a transient burst into a permanent coverage gap.
+            return false;
         }
-        return accepted;
+        // Record only after a successful enqueue. Window: two relays of this
+        // source can both pass seen() and both enqueue the same id before
+        // either records — a double-enqueue the DB collapses to one posts row
+        // (PostPersister's WHERE NOT EXISTS uid pre-filter + ON CONFLICT
+        // (source_id, upstream_identifier, fetched_at) DO NOTHING).
+        dedupFilter.record(eventId);
+        return true;
+    }
+
+    // Package-private drain seam for NostrDedupRecordAfterOfferTest: empties
+    // the inbound queue so a replayed event finds room. Production draining is
+    // the delivery loop's inbound.poll only.
+    void drainInbound() {
+        inbound.clear();
     }
 
     /** Package-private accessor for the failed-sig counter used by the IT. */

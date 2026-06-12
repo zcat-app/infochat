@@ -37,7 +37,7 @@ public final class NostrDedupFilter {
 
     private final int maxEntries;
     private final Object lock = new Object();
-    private final Map<String, Boolean> seen;
+    private final Map<String, Boolean> seenIds;
 
     public NostrDedupFilter() {
         this(DEFAULT_MAX_ENTRIES);
@@ -45,11 +45,11 @@ public final class NostrDedupFilter {
 
     NostrDedupFilter(int maxEntries) {
         this.maxEntries = maxEntries;
-        // accessOrder=false → FIFO eviction. accept() puts only new keys
-        // and never re-puts duplicates, so insertion order is the eviction
-        // order. LRU would bias retention towards the spammiest ids, the
-        // opposite of what cross-relay dedup needs.
-        this.seen = new LinkedHashMap<>(maxEntries * 4 / 3 + 1, 0.75f, false) {
+        // accessOrder=false → FIFO eviction. record() puts only new keys
+        // (putIfAbsent) and never re-puts duplicates, so insertion order is
+        // the eviction order. LRU would bias retention towards the spammiest
+        // ids, the opposite of what cross-relay dedup needs.
+        this.seenIds = new LinkedHashMap<>(maxEntries * 4 / 3 + 1, 0.75f, false) {
             @Override
             protected boolean removeEldestEntry(Map.Entry<String, Boolean> eldest) {
                 return size() > NostrDedupFilter.this.maxEntries;
@@ -58,18 +58,31 @@ public final class NostrDedupFilter {
     }
 
     /**
-     * Returns {@code true} the first time {@code eventId} arrives within
-     * the dedup window and records it; {@code false} on every subsequent
-     * arrival until eviction. Callers that get {@code false} must drop
-     * the event before the outbox write.
+     * Returns {@code true} if {@code eventId} is already recorded within the
+     * dedup window, {@code false} if it is new. A read-only probe: it does
+     * NOT record the id. Split from the former single {@code accept} so the
+     * caller commits the id via {@link #record} only after the event has been
+     * accepted by the outbox queue — a queue-full drop between {@code seen}
+     * and {@code record} therefore leaves the id un-recorded and replayable
+     * on the relay's reconnect, rather than poisoning the dedup set.
      */
-    public boolean accept(String eventId) {
+    public boolean seen(String eventId) {
         synchronized (lock) {
-            if (seen.containsKey(eventId)) {
-                return false;
-            }
-            seen.put(eventId, Boolean.TRUE);
-            return true;
+            return seenIds.containsKey(eventId);
+        }
+    }
+
+    /**
+     * Records {@code eventId} as delivered, evicting the eldest id once the
+     * window is full. Idempotent: re-recording an id already in the window is
+     * a no-op that leaves the FIFO insertion (hence eviction) order unchanged,
+     * so the brief two-relay window where both deliveries record the same id
+     * does not corrupt the eviction order. Call only after the event was
+     * accepted by the outbox queue.
+     */
+    public void record(String eventId) {
+        synchronized (lock) {
+            seenIds.putIfAbsent(eventId, Boolean.TRUE);
         }
     }
 }

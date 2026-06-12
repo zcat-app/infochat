@@ -23,16 +23,19 @@ class NostrDedupFilterTest {
     void sameEventFromTwoRelays_onlyOneDelivered() {
         NostrDedupFilter filter = new NostrDedupFilter();
 
-        assertTrue(filter.accept(ID_A), "first arrival (from relay A) admitted");
-        assertFalse(filter.accept(ID_A), "second arrival (from relay B) suppressed");
+        assertFalse(filter.seen(ID_A), "first arrival (from relay A) is new");
+        filter.record(ID_A);
+        assertTrue(filter.seen(ID_A), "second arrival (from relay B) is a duplicate, suppressed");
     }
 
     @Test
     void distinctEvents_bothDelivered() {
         NostrDedupFilter filter = new NostrDedupFilter();
 
-        assertTrue(filter.accept(ID_A), "id A admitted");
-        assertTrue(filter.accept(ID_B), "distinct id B admitted");
+        assertFalse(filter.seen(ID_A), "id A is new");
+        filter.record(ID_A);
+        assertFalse(filter.seen(ID_B), "distinct id B is new");
+        filter.record(ID_B);
     }
 
     @Test
@@ -40,18 +43,22 @@ class NostrDedupFilterTest {
         // Tiny window so the eviction path fires within the test.
         NostrDedupFilter filter = new NostrDedupFilter(2);
 
-        assertTrue(filter.accept(ID_A), "id A admitted, window = {A}");
-        assertTrue(filter.accept(ID_B), "id B admitted, window = {A,B}");
-        // Inserting C overflows the 2-entry FIFO window; A (the eldest
+        assertFalse(filter.seen(ID_A), "id A is new, window = {A}");
+        filter.record(ID_A);
+        assertFalse(filter.seen(ID_B), "id B is new, window = {A,B}");
+        filter.record(ID_B);
+        // Recording C overflows the 2-entry FIFO window; A (the eldest
         // insertion) is evicted, window = {B,C}.
-        assertTrue(filter.accept(ID_C), "id C admitted, evicting eldest (A)");
-        // B is still inside the window — duplicates still suppressed.
-        // (Asserted before the next accept so the FIFO state is unambiguous:
-        // re-admitting A would evict B and obscure this check.)
-        assertFalse(filter.accept(ID_B), "id B still within window, suppressed");
-        // A re-arrives — same id, different relay — and is admitted again
-        // because the in-memory filter has forgotten it. This is the core
+        assertFalse(filter.seen(ID_C), "id C is new, window = {A,B}");
+        filter.record(ID_C);
+        // B is still inside the window — duplicates still suppressed. Checked
+        // before re-recording A so the FIFO state is unambiguous: recording A
+        // would evict B and obscure this check.
+        assertTrue(filter.seen(ID_B), "id B still within window, suppressed");
+        // A re-arrives — same id, different relay — and is new again because
+        // the in-memory filter has forgotten it. This is the core
         // "windowEviction_allowsRedelivery" behavior the ticket names.
-        assertTrue(filter.accept(ID_A), "id A re-admitted after eviction");
+        assertFalse(filter.seen(ID_A), "id A re-admitted after eviction");
+        filter.record(ID_A);
     }
 }
