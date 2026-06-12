@@ -15,6 +15,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -88,6 +89,32 @@ class HttpProviderSharedPipelineTest {
             // is single-sourced.
             assertTrue(ex.getMessage().contains("non-2xx status 503"),
                 name + " must report the shared non-2xx wording + status; got: " + ex.getMessage());
+        }
+    }
+
+    @Test
+    void non2xxOmitsResponseBodyButKeepsHostAndStatus() {
+        // U-13: provider error bodies can echo request fragments or user
+        // content, so they must never reach the exception message — only
+        // the provider, status, and host. A distinctive marker in the body
+        // proves the body is dropped; "localhost" proves the host survives.
+        String marker = "leak-secret-echoed-from-request-body";
+        byte[] body = ("{\"error\":\"" + marker + "\"}").getBytes(StandardCharsets.UTF_8);
+        respondToBothEndpoints(500, body);
+
+        for (Map.Entry<String, LlmProvider> entry : providers.entrySet()) {
+            String name = entry.getKey();
+            LlmProvider provider = entry.getValue();
+            LlmCallFailedException ex = assertThrows(LlmCallFailedException.class,
+                () -> provider.generate(ModelTask.SUMMARIZER, "sys", "usr"),
+                name + " must surface a non-2xx as LlmCallFailedException");
+            assertFalse(ex.getMessage().contains(marker),
+                name + " must not echo the provider error body into the exception; got: "
+                    + ex.getMessage());
+            assertTrue(ex.getMessage().contains("non-2xx status 500"),
+                name + " must report the status; got: " + ex.getMessage());
+            assertTrue(ex.getMessage().contains("localhost"),
+                name + " must name the host for triage; got: " + ex.getMessage());
         }
     }
 

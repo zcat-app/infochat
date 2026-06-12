@@ -138,8 +138,9 @@ class FetchSchedulerLogRedactionTest {
             "redacted log must still name the outer exception class: " + all);
         assertTrue(all.contains("IOException"),
             "redacted log must still name the root-cause exception class: " + all);
-        assertTrue(all.contains("example.com/feed"),
-            "redacted URL must still carry the non-credential host + path: " + all);
+        assertTrue(all.contains("example.com/[REDACTED]"),
+            "redacted URL must still carry the non-credential host (path collapsed to "
+                + "/[REDACTED] per U-11): " + all);
     }
 
     @Test

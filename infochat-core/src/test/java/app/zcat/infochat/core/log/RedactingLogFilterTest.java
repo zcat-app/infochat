@@ -9,6 +9,7 @@ import java.util.logging.LogRecord;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RedactingLogFilterTest {
@@ -250,6 +251,62 @@ class RedactingLogFilterTest {
         var record = new LogRecord(Level.INFO, safe);
         filter.isLoggable(record);
         assertEquals(safe, record.getMessage());
+    }
+
+    // --- RedactingLogFilter: each timeout arm fails closed and drops the
+    // unscanned thrown graph. The isLoggable(record, timeoutMs) seam runs
+    // the same body as production with a zero-ms budget so every redact
+    // call times out deterministically. A non-null thrown carrying a
+    // distinctive secret verifies it never survives the arm.
+
+    @Test
+    void messageTimeoutArmDropsThrownGraph() {
+        var filter = new Redactor();
+        var record = new LogRecord(Level.SEVERE, "message that will time out");
+        record.setThrown(new IllegalStateException("auth key sk-ant-leak-1234567890abcdef"));
+
+        assertTrue(filter.isLoggable(record, 0L));
+
+        assertEquals(Redactor.TIMEOUT_SENTINEL, record.getMessage(),
+            "a message-scan timeout must replace the whole message with the sentinel");
+        assertNull(record.getParameters(), "params must be dropped on the message-timeout arm");
+        assertNull(record.getThrown(),
+            "the unscanned thrown graph must be dropped on the message-timeout arm");
+    }
+
+    @Test
+    void parameterTimeoutArmDropsThrownGraph() {
+        var filter = new Redactor();
+        // Null message so the message arm is skipped and the timeout fires
+        // on the parameter scan.
+        var record = new LogRecord(Level.WARNING, null);
+        record.setParameters(new Object[]{"parameter that will time out"});
+        record.setThrown(new IllegalStateException("auth key sk-ant-leak-1234567890abcdef"));
+
+        assertTrue(filter.isLoggable(record, 0L));
+
+        assertEquals(Redactor.TIMEOUT_SENTINEL, record.getMessage(),
+            "a parameter-scan timeout must replace the whole message with the sentinel");
+        assertNull(record.getParameters(), "params must be dropped on the parameter-timeout arm");
+        assertNull(record.getThrown(),
+            "the unscanned thrown graph must be dropped on the parameter-timeout arm");
+    }
+
+    @Test
+    void thrownTimeoutArmDropsThrownGraph() {
+        var filter = new Redactor();
+        // Null message and no params so the timeout fires inside the
+        // thrown-chain scan.
+        var record = new LogRecord(Level.SEVERE, null);
+        record.setThrown(new IllegalStateException("auth key sk-ant-leak-1234567890abcdef"));
+
+        assertTrue(filter.isLoggable(record, 0L));
+
+        assertEquals(Redactor.TIMEOUT_SENTINEL, record.getMessage(),
+            "a thrown-scan timeout must replace the whole message with the sentinel");
+        assertNull(record.getParameters(), "params must be dropped on the thrown-timeout arm");
+        assertNull(record.getThrown(),
+            "the unscanned thrown graph must be dropped on the thrown-timeout arm");
     }
 
     private static void assertRedacted(String result, String key) {

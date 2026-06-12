@@ -3,36 +3,62 @@ package app.zcat.infochat.ssrf;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 /**
- * Plain JUnit 5 unit tests for {@link UrlRedactor}: per-shape redaction
- * over the four scenarios enumerated in M1-024 acceptance item 11. No
- * {@code @QuarkusTest}; this is a pure helper with no CDI surface.
+ * Plain JUnit 5 unit tests for {@link UrlRedactor}: per-shape redaction.
+ * The authority — scheme, host, port — is preserved for triage; userinfo,
+ * path, and query all collapse into the single {@code /[REDACTED]}
+ * placeholder. No {@code @QuarkusTest}; this is a pure helper with no CDI
+ * surface.
  */
 class UrlRedactorTest {
 
     @Test
-    void redactStripsUserinfoSegment() {
+    void redactCollapsesPathAndStripsUserinfo() {
         assertEquals(
-            "https://host/path",
+            "https://host/[REDACTED]",
             UrlRedactor.redact("https://user:secret@host/path"),
-            "userinfo (user:secret@) must be stripped from the rendered URL");
+            "userinfo must be stripped and the path collapsed to /[REDACTED]");
     }
 
     @Test
-    void redactReplacesQueryWithPlaceholder() {
+    void redactCollapsesPathBearingSecret() {
         assertEquals(
-            "https://host/p?[REDACTED]",
+            "https://host/[REDACTED]",
             UrlRedactor.redact("https://host/p?token=abc"),
-            "query string must be replaced with the literal [REDACTED] placeholder");
+            "path and query must both collapse into the single /[REDACTED] placeholder");
     }
 
     @Test
-    void redactStripsUserinfoAndQueryTogether() {
+    void redactStripsUserinfoAndCollapsesPathTogether() {
         assertEquals(
-            "https://host/p?[REDACTED]",
+            "https://host/[REDACTED]",
             UrlRedactor.redact("https://user:secret@host/p?token=abc"),
-            "both userinfo and query must be redacted in a single pass");
+            "userinfo, path, and query must all be redacted in a single pass");
+    }
+
+    @Test
+    void redactHostOnlyAppendsNothing() {
+        // Nothing after the authority to redact — scheme and host pass
+        // through unchanged with no spurious /[REDACTED] suffix.
+        assertEquals(
+            "https://host",
+            UrlRedactor.redact("https://host"),
+            "a bare scheme://host with no path or query must round-trip untouched");
+    }
+
+    @Test
+    void redactWebhookPathTokenNeverAppears() {
+        // Slack/Discord webhook tokens live in the URL PATH, not the
+        // query — collapsing the path is what keeps them out of WARN logs.
+        String token = "T00000000XXXXtokenXXXXsecret";
+        String webhook = "https://hooks.slack.com/services/B00000000/" + token;
+        String redacted = UrlRedactor.redact(webhook);
+        assertEquals("https://hooks.slack.com/[REDACTED]", redacted,
+            "webhook path must collapse to /[REDACTED]");
+        assertFalse(redacted.contains(token),
+            "the path-borne webhook token must never appear in the redacted output");
     }
 
     @Test
@@ -55,7 +81,7 @@ class UrlRedactorTest {
     @Test
     void redactPreservesPortInAuthority() {
         assertEquals(
-            "https://host:8443/p?[REDACTED]",
+            "https://host:8443/[REDACTED]",
             UrlRedactor.redact("https://user:pw@host:8443/p?token=abc"),
             "non-default port must round-trip into the redacted output");
     }
@@ -66,7 +92,7 @@ class UrlRedactorTest {
         // the rendered output must keep the brackets — otherwise the
         // address would be ambiguous against a port suffix (C-URLREDACTOR-IPV6).
         assertEquals(
-            "https://[::1]/p?[REDACTED]",
+            "https://[::1]/[REDACTED]",
             UrlRedactor.redact("https://[::1]/p?token=abc"),
             "IPv6 literal host must keep its brackets in the redacted output");
     }
@@ -74,9 +100,9 @@ class UrlRedactorTest {
     @Test
     void redactBracketsIpv6HostWithUserinfoAndPort() {
         assertEquals(
-            "https://[2606:4700::1111]:8443/p?[REDACTED]",
+            "https://[2606:4700::1111]:8443/[REDACTED]",
             UrlRedactor.redact("https://user:pw@[2606:4700::1111]:8443/p?token=abc"),
             "bracketed IPv6 with userinfo+port: brackets and port preserved, "
-            + "userinfo and query redacted");
+            + "path and query collapsed");
     }
 }

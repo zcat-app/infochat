@@ -148,11 +148,15 @@ final class LlmHttpSupport {
         }
 
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            String preview = preview(response.body());
-            LOG.warnf("%s: non-2xx %d from %s; body preview: %s",
-                providerLabel, response.statusCode(), uri, preview);
+            // Provider error bodies can echo request fragments or user
+            // content, so they never reach the log or the exception
+            // message by default — only the provider, status, and host,
+            // which is all triage needs.
+            String host = uri.getHost();
+            LOG.warnf("%s: non-2xx %d from %s",
+                providerLabel, response.statusCode(), host);
             throw failure.create(providerLabel + ": non-2xx status " + response.statusCode()
-                + " from " + uri + ": " + preview, null);
+                + " from " + host, null);
         }
 
         return response.body();
@@ -184,10 +188,10 @@ final class LlmHttpSupport {
     }
 
     /**
-     * Hard cap on the characters {@link #preview} retains. This is the
-     * log-leak bound for error-path body previews: a non-2xx provider
-     * reply reaches the log only through {@code preview}, so at most
-     * this many characters of a response body can ever be logged.
+     * Hard cap on the characters {@link #preview} retains. {@code preview}
+     * bounds the body fragment the chat/embedding providers include when a
+     * 2xx reply fails to parse, so at most this many characters of a
+     * response body can ever reach a log line or exception message.
      */
     static final int PREVIEW_MAX_CHARS = 200;
 
@@ -243,7 +247,7 @@ final class LlmHttpSupport {
         if (s.length() <= PREVIEW_MAX_CHARS) {
             return s;
         }
-        return s.substring(0, PREVIEW_MAX_CHARS) + "…(" + s.length() + " bytes)";
+        return s.substring(0, PREVIEW_MAX_CHARS) + "…(" + s.length() + " chars)";
     }
 
     /**

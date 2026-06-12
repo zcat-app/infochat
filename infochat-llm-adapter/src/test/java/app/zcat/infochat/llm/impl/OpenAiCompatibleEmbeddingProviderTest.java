@@ -15,6 +15,7 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -105,11 +106,12 @@ class OpenAiCompatibleEmbeddingProviderTest {
         // sequential calls: first a 500 (non-2xx), then a valid 2xx body.
         //
         // Non-2xx half: the thrown EmbeddingCallFailedException must carry the
-        // shared throw-site wording ("non-2xx status <code>") AND the appended
-        // body preview. The pre-migration copy threw a status-only message with
-        // no preview, so the preview substring is what proves the call now
-        // flows through the shared path. 2xx half: a well-formed reply still
-        // parses to one EmbeddingResult per input, unchanged.
+        // shared throw-site wording ("non-2xx status <code> from <host>"),
+        // which is unique to LlmHttpSupport.sendForBody and so proves the call
+        // flows through the shared path. Per U-13 the provider error body is no
+        // longer echoed into the message, so the body marker must be ABSENT.
+        // 2xx half: a well-formed reply still parses to one EmbeddingResult per
+        // input, unchanged.
         AtomicInteger callCount = new AtomicInteger();
         mockServer.createContext("/embeddings", exchange -> {
             boolean firstCall = callCount.getAndIncrement() == 0;
@@ -129,11 +131,11 @@ class OpenAiCompatibleEmbeddingProviderTest {
         EmbeddingCallFailedException ex = assertThrows(EmbeddingCallFailedException.class,
             () -> provider.embed(List.of("text")));
         assertTrue(ex.getMessage().contains("non-2xx status 500"),
-            "non-2xx must carry the shared LlmHttpSupport throw-site wording + status; got: "
+            "non-2xx must carry the shared LlmHttpSupport throw-site wording + status, which "
+                + "proves it routes through the shared path; got: " + ex.getMessage());
+        assertFalse(ex.getMessage().contains("server boom"),
+            "non-2xx must NOT echo the provider error body into the message (U-13); got: "
                 + ex.getMessage());
-        assertTrue(ex.getMessage().contains("server boom"),
-            "non-2xx must append the shared body preview, proving it routes through the shared "
-                + "path rather than the old status-only copy; got: " + ex.getMessage());
 
         List<EmbeddingResult> results = provider.embed(List.of("text"));
         assertEquals(1, results.size(), "a 2xx reply still parses to one EmbeddingResult per input");

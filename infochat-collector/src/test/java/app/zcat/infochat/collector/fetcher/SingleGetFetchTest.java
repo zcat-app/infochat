@@ -98,8 +98,8 @@ class SingleGetFetchTest {
 
         assertTrue(ex.getMessage().contains("Nitter fetch I/O failure for"),
             "I/O-branch message must carry the kind label: " + ex.getMessage());
-        assertTrue(ex.getMessage().contains("https://feeds.example.com/rss?[REDACTED]"),
-            "the identifier must be redacted (userinfo dropped, query replaced): " + ex.getMessage());
+        assertTrue(ex.getMessage().contains("https://feeds.example.com/[REDACTED]"),
+            "the identifier must be redacted (userinfo dropped, path+query collapsed): " + ex.getMessage());
         assertFalse(ex.getMessage().contains("secret"),
             "the userinfo credential from the identifier must not leak into the message: " + ex.getMessage());
         assertFalse(ex.getMessage().contains("abc123"),
@@ -124,7 +124,7 @@ class SingleGetFetchTest {
             "the helper must restore the interrupt flag the JDK clears when InterruptedException is thrown");
         assertTrue(ex.getMessage().contains("YouTube fetch interrupted for"),
             "interrupt-branch message must carry the kind label: " + ex.getMessage());
-        assertTrue(ex.getMessage().contains("https://feeds.example.com/rss?[REDACTED]"),
+        assertTrue(ex.getMessage().contains("https://feeds.example.com/[REDACTED]"),
             "the identifier must be redacted on the interrupt branch too: " + ex.getMessage());
         assertFalse(ex.getMessage().contains("secret"),
             "the userinfo credential must not leak into the message: " + ex.getMessage());

@@ -109,12 +109,29 @@ public final class Redactor implements Filter {
 
     @Override
     public boolean isLoggable(LogRecord record) {
+        return isLoggable(record, DEFAULT_TIMEOUT_MS);
+    }
+
+    /**
+     * Filter body with an injectable per-input redaction budget. Production
+     * always enters through {@link #isLoggable(LogRecord)} with
+     * {@link #DEFAULT_TIMEOUT_MS}; this overload exists as a test seam so
+     * each fail-closed timeout arm (message, parameter, thrown) can be
+     * driven deterministically with a zero-ms budget.
+     */
+    boolean isLoggable(LogRecord record, long timeoutMs) {
         String msg = record.getMessage();
         if (msg != null) {
-            String redacted = redact(msg);
+            String redacted = redact(msg, timeoutMs);
             if (TIMEOUT_SENTINEL.equals(redacted)) {
+                // A scan timeout leaves the thrown graph unscanned, and its
+                // raw messages are the very place secrets live — drop it
+                // alongside the message and params so nothing unscanned
+                // reaches the console formatter (fail-closed contract,
+                // security.md §Secrets handling).
                 record.setMessage(TIMEOUT_SENTINEL);
                 record.setParameters(null);
+                record.setThrown(null);
                 return true;
             }
             if (!redacted.equals(msg)) {
@@ -129,10 +146,13 @@ public final class Redactor implements Filter {
                     continue;
                 }
                 String str = params[i] instanceof String s ? s : params[i].toString();
-                String redacted = redact(str);
+                String redacted = redact(str, timeoutMs);
                 if (TIMEOUT_SENTINEL.equals(redacted)) {
+                    // Same fail-closed drop of the unscanned thrown graph
+                    // as the message arm above.
                     record.setMessage(TIMEOUT_SENTINEL);
                     record.setParameters(null);
+                    record.setThrown(null);
                     return true;
                 }
                 if (!redacted.equals(str)) {
@@ -143,7 +163,7 @@ public final class Redactor implements Filter {
 
         Throwable thrown = record.getThrown();
         if (thrown != null) {
-            Throwable replacement = redactThrownChain(thrown);
+            Throwable replacement = redactThrownChain(thrown, timeoutMs);
             if (replacement == null) {
                 // A chain message timed out in the catalogue scan —
                 // same fail-closed arm as message/params.
@@ -183,7 +203,7 @@ public final class Redactor implements Filter {
      * formatter. Returns {@code null} when any scan timed out (caller
      * fails closed).
      */
-    private static @Nullable Throwable redactThrownChain(Throwable thrown) {
+    private static @Nullable Throwable redactThrownChain(Throwable thrown, long timeoutMs) {
         // Both phases traverse pre-order (node, cause subtree, then
         // suppressed subtrees) and consume the node budget identically,
         // so every node the rebuild reaches was scanned in phase 1: a
@@ -192,7 +212,7 @@ public final class Redactor implements Filter {
         // cyclic graphs from re-scanning (and re-deciding) a message.
         Map<Throwable, String> redactedByNode = new IdentityHashMap<>();
         int[] budget = {MAX_THROWN_CHAIN_DEPTH};
-        ScanOutcome outcome = scanGraph(thrown, budget, redactedByNode);
+        ScanOutcome outcome = scanGraph(thrown, timeoutMs, budget, redactedByNode);
         if (outcome == ScanOutcome.TIMED_OUT) {
             return null;
         }
@@ -205,7 +225,7 @@ public final class Redactor implements Filter {
 
     private enum ScanOutcome { CLEAN, CHANGED, TIMED_OUT }
 
-    private static ScanOutcome scanGraph(Throwable node, int[] budget,
+    private static ScanOutcome scanGraph(Throwable node, long timeoutMs, int[] budget,
             Map<Throwable, String> redactedByNode) {
         if (budget[0] == 0) {
             // Past-cap nodes are unscanned and must not be emitted —
@@ -219,7 +239,7 @@ public final class Redactor implements Filter {
         if (message != null) {
             String redacted = redactedByNode.get(node);
             if (redacted == null) {
-                redacted = redact(message);
+                redacted = redact(message, timeoutMs);
                 if (TIMEOUT_SENTINEL.equals(redacted)) {
                     return ScanOutcome.TIMED_OUT;
                 }
@@ -229,14 +249,14 @@ public final class Redactor implements Filter {
         }
         Throwable cause = node.getCause();
         if (cause != null) {
-            ScanOutcome causeOutcome = scanGraph(cause, budget, redactedByNode);
+            ScanOutcome causeOutcome = scanGraph(cause, timeoutMs, budget, redactedByNode);
             if (causeOutcome == ScanOutcome.TIMED_OUT) {
                 return ScanOutcome.TIMED_OUT;
             }
             changed |= causeOutcome == ScanOutcome.CHANGED;
         }
         for (Throwable suppressed : node.getSuppressed()) {
-            ScanOutcome suppressedOutcome = scanGraph(suppressed, budget, redactedByNode);
+            ScanOutcome suppressedOutcome = scanGraph(suppressed, timeoutMs, budget, redactedByNode);
             if (suppressedOutcome == ScanOutcome.TIMED_OUT) {
                 return ScanOutcome.TIMED_OUT;
             }

@@ -1,6 +1,7 @@
 package app.zcat.infochat.collector.assets;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -235,6 +236,48 @@ class AssetSnapshotFetcherTest {
             assertNull(rs.getTimestamp("last_failure_at"),
                 "the disabled row must not have last_failure_at touched");
         }
+    }
+
+    // ---------- upstream-byte hygiene (U-12) ----------
+    // The fetcher control-strips and truncates the FetchException cause
+    // message before it reaches the WARN log line and the forwarded admin
+    // notification. The notifier re-sanitizes its own inputs and the WARN
+    // line is not observable through the public API, so the redaction is
+    // pinned at the helper directly.
+
+    @Test
+    void stripAndTruncateRemovesControlCharactersFromCauseMessage() {
+        // ESC (0x1B), C1 CSI (0x9B), SOH (0x01), CR and LF must all be
+        // replaced so a data source's error body cannot forge a log line
+        // or inject an ANSI escape into an operator's terminal.
+        String message = "Bitfinex: upstream error \u001b[2K\r\nADMIN-NOTIFY \u009bforged\u0001";
+        String result = AssetSnapshotFetcher.stripAndTruncate(message);
+
+        for (int i = 0; i < result.length(); i++) {
+            char c = result.charAt(i);
+            boolean control = c < 0x20 || (c >= 0x7F && c <= 0x9F);
+            assertFalse(control,
+                "no control character may survive at index " + i + ": " + (int) c);
+        }
+        assertTrue(result.contains("Bitfinex: upstream error"),
+            "the non-control text must survive the strip; got: " + result);
+    }
+
+    @Test
+    void stripAndTruncateCapsOverlongCauseMessage() {
+        String message = "x".repeat(500);
+        String result = AssetSnapshotFetcher.stripAndTruncate(message);
+
+        assertEquals(201, result.length(),
+            "an over-cap message must truncate to the 200-char cap plus the ellipsis marker");
+        assertTrue(result.endsWith("\u2026"),
+            "a truncated message must carry the ellipsis marker; got: " + result);
+    }
+
+    @Test
+    void stripAndTruncateMapsNullCauseMessageToEmpty() {
+        assertEquals("", AssetSnapshotFetcher.stripAndTruncate(null),
+            "a null cause message must forward as the empty string, never the literal \"null\"");
     }
 
     // ---------- mocks ----------

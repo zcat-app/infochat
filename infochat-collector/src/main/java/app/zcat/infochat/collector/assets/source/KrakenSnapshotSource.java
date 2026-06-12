@@ -18,6 +18,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import app.zcat.infochat.collector.assets.PriceSnapshot;
+import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.ssrf.SsrfGuardedHttpClient;
 import jakarta.enterprise.context.ApplicationScoped;
 
@@ -137,8 +138,12 @@ public class KrakenSnapshotSource implements AssetDataSource {
         // the result map's first entry.
         JsonNode errorArr = root.path("error");
         if (errorArr.isArray() && errorArr.size() > 0) {
+            // The error array is untrusted upstream bytes; control-strip
+            // and truncate it before it lands in exception text that may
+            // reach logs or admin notifications.
             throw new FetchException(
-                "KrakenSnapshotSource: API error for " + pair + ": " + errorArr.toString());
+                "KrakenSnapshotSource: API error for " + pair + ": "
+                    + stripAndTruncate(errorArr.toString()));
         }
         JsonNode result = root.path("result");
         if (!result.isObject() || !result.fields().hasNext()) {
@@ -176,6 +181,22 @@ public class KrakenSnapshotSource implements AssetDataSource {
     @Override
     public String attributionUrl(String asset, String vs) {
         return String.format("https://www.kraken.com/prices/%s-usd-%s-price-chart", asset, asset);
+    }
+
+    // Bound on upstream bytes admitted into exception text. A Kraken
+    // error array is a short JSON list; this leaves room for a couple of
+    // messages while capping a hostile or runaway body.
+    private static final int MAX_UPSTREAM_CHARS = 200;
+
+    // Package-private so a unit test can pin the control-strip + truncation
+    // shape directly; the production URL is hardcoded, so the error path
+    // cannot be reached through a loopback HTTP fixture.
+    static String stripAndTruncate(String upstream) {
+        String stripped = SafeLog.stripControls(upstream);
+        if (stripped.length() <= MAX_UPSTREAM_CHARS) {
+            return stripped;
+        }
+        return stripped.substring(0, MAX_UPSTREAM_CHARS) + "…";
     }
 
     private static @Nullable BigDecimal readBigDecimal(JsonNode node) {

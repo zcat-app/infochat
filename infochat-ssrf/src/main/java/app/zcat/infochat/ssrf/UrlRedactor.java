@@ -7,20 +7,24 @@ import java.net.URISyntaxException;
 
 /**
  * Pure-string redaction helper for URLs that may appear in exception
- * messages, JUL log lines, or audit-log-adjacent surfaces. Strips the
- * userinfo segment (which can carry credentials like
- * {@code user:secret@}) and replaces the query string (which can carry
- * tokens like {@code ?token=abc}) with the literal placeholder
- * {@code [REDACTED]}.
+ * messages, JUL log lines, or audit-log-adjacent surfaces. Preserves
+ * only the triage-relevant authority — scheme, host, and port — and
+ * collapses everything that can carry a secret into the single
+ * placeholder {@code /[REDACTED]}: the userinfo segment (credentials
+ * like {@code user:secret@}), the path (webhook tokens like
+ * {@code /services/T00/B00/XXXX}), and the query string (tokens like
+ * {@code ?token=abc}).
  *
  * <p>Output shapes:
  * <ul>
  *   <li>{@code https://user:secret@host/path}
- *       → {@code https://host/path}</li>
+ *       → {@code https://host/[REDACTED]}</li>
  *   <li>{@code https://host/p?token=abc}
- *       → {@code https://host/p?[REDACTED]}</li>
+ *       → {@code https://host/[REDACTED]}</li>
  *   <li>{@code https://user:secret@host/p?token=abc}
- *       → {@code https://host/p?[REDACTED]}</li>
+ *       → {@code https://host/[REDACTED]}</li>
+ *   <li>{@code https://host} (no path or query)
+ *       → {@code https://host}</li>
  *   <li>any unparseable input → the literal string
  *       {@code <malformed-url>}</li>
  * </ul>
@@ -35,7 +39,11 @@ public final class UrlRedactor {
 
     private static final String MALFORMED = "<malformed-url>";
 
-    private static final String REDACTED_QUERY = "?[REDACTED]";
+    // Single placeholder for everything after the authority. Path and
+    // query are collapsed together because both can carry secrets (a
+    // Slack/Discord webhook token lives in the path); the leading slash
+    // keeps the rendered value a recognizable URL.
+    private static final String REDACTED_PATH = "/[REDACTED]";
 
     private UrlRedactor() {
         // static-only
@@ -67,11 +75,9 @@ public final class UrlRedactor {
             out.append(':').append(port);
         }
         String path = uri.getRawPath();
-        if (path != null) {
-            out.append(path);
-        }
-        if (uri.getRawQuery() != null) {
-            out.append(REDACTED_QUERY);
+        boolean hasPath = path != null && !path.isEmpty();
+        if (hasPath || uri.getRawQuery() != null) {
+            out.append(REDACTED_PATH);
         }
         return out.toString();
     }

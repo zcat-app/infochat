@@ -39,7 +39,7 @@ class LlmHttpSupportTest {
 
         assertTrue(preview.startsWith("y".repeat(LlmHttpSupport.PREVIEW_MAX_CHARS)),
             "preview must retain exactly the capped prefix");
-        String expectedSuffix = "…(" + body.length() + " bytes)";
+        String expectedSuffix = "…(" + body.length() + " chars)";
         assertEquals(LlmHttpSupport.PREVIEW_MAX_CHARS + expectedSuffix.length(), preview.length(),
             "preview length must be the cap plus the truncation marker");
         assertTrue(preview.endsWith(expectedSuffix),

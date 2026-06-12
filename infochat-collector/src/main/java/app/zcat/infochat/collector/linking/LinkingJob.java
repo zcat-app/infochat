@@ -1,12 +1,14 @@
 package app.zcat.infochat.collector.linking;
 
 import app.zcat.infochat.collector.eval.TransactionHelper;
+import app.zcat.infochat.core.log.SafeLog;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jboss.logging.Logger;
 import org.jspecify.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -90,7 +92,7 @@ import java.util.UUID;
 @ApplicationScoped
 public class LinkingJob {
 
-    private static final Logger LOG = Logger.getLogger(LinkingJob.class);
+    private static final Logger LOG = LoggerFactory.getLogger(LinkingJob.class);
 
     /**
      * Batch size for the driving-set enumeration. Bounds the work one
@@ -141,16 +143,16 @@ public class LinkingJob {
         try {
             driving = enumerateDriving(DRIVING_BATCH_SIZE);
         } catch (SQLException e) {
-            LOG.warn("LinkingJob: failed to enumerate driving posts; skipping tick", e);
+            SafeLog.warn(LOG, "LinkingJob: failed to enumerate driving posts; skipping tick", e);
             return;
         }
         for (DrivingPost d : driving) {
             try {
                 processOne(d);
             } catch (RuntimeException e) {
-                LOG.warnf(e,
-                    "LinkingJob: processing failed for post_id=%s; will retry next tick",
-                    d.id());
+                SafeLog.warn(LOG,
+                    "LinkingJob: processing failed for post_id=" + d.id() + "; will retry next tick",
+                    e);
             }
         }
     }

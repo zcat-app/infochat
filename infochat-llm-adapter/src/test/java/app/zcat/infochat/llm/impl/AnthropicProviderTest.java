@@ -193,8 +193,12 @@ class AnthropicProviderTest {
         LlmCallFailedException ex = assertThrows(LlmCallFailedException.class,
             () -> provider.generate(ModelTask.SUMMARIZER, "sys", "usr"));
         assertTrue(ex.getMessage().contains("400"), "exception must include status code");
-        assertTrue(ex.getMessage().contains("max_tokens: must be positive"),
-            "exception must include Anthropic error message");
+        // U-13: the provider error body can echo request fragments or user
+        // content, so it is no longer surfaced — only status and host.
+        assertFalse(ex.getMessage().contains("max_tokens: must be positive"),
+            "exception must NOT echo the provider error body; got: " + ex.getMessage());
+        assertTrue(ex.getMessage().contains("localhost"),
+            "exception must name the host for triage; got: " + ex.getMessage());
     }
 
     @Test

@@ -19,6 +19,7 @@ import org.jspecify.annotations.Nullable;
 import app.zcat.infochat.collector.assets.source.AssetDataSource;
 import app.zcat.infochat.collector.assets.source.AssetDataSource.FetchException;
 import app.zcat.infochat.collector.assets.store.PriceSnapshotStore;
+import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import io.quarkus.runtime.Startup;
 import io.quarkus.scheduler.Scheduled;
@@ -276,8 +277,12 @@ public class AssetSnapshotFetcher {
             return;
         }
 
-        LOG.warnf(cause, "AssetSnapshotFetcher: fetch failed for asset=%s sub_verb=%s (count=%d)",
-            row.asset(), row.subVerb(), newCount);
+        // The FetchException message can carry untrusted upstream bytes
+        // (e.g. a data source's API error body). Log the control-stripped,
+        // truncated message rather than handing the raw throwable to the
+        // formatter, which would render its unsanitized message + stack.
+        LOG.warnf("AssetSnapshotFetcher: fetch failed for asset=%s sub_verb=%s (count=%d): %s",
+            row.asset(), row.subVerb(), newCount, stripAndTruncate(cause.getMessage()));
 
         if (newCount < failureThreshold) {
             return;
@@ -312,7 +317,7 @@ public class AssetSnapshotFetcher {
         String errorClass = cause.getCause() == null
             ? cause.getClass().getSimpleName()
             : cause.getCause().getClass().getSimpleName();
-        String message = cause.getMessage() == null ? "" : cause.getMessage();
+        String message = stripAndTruncate(cause.getMessage());
         adminNotifier.notifyOnce(key, errorClass, message);
     }
 
@@ -363,6 +368,26 @@ public class AssetSnapshotFetcher {
      */
     void resetSourceCacheForTest() {
         sourcesById = null;
+    }
+
+    // Bound on upstream-derived bytes admitted into the WARN log and the
+    // forwarded admin-notification message. The notifier re-sanitizes its
+    // own inputs, but the log line at recordFailure bypasses it, so the
+    // stripping happens here at the point the bytes leave the fetcher.
+    private static final int MAX_UPSTREAM_CHARS = 200;
+
+    // Package-private so a unit test can pin the control-strip + truncation
+    // shape directly; the notifier re-sanitizes its inputs and the WARN log
+    // line is not observable through the public API.
+    static String stripAndTruncate(@Nullable String upstream) {
+        if (upstream == null) {
+            return "";
+        }
+        String stripped = SafeLog.stripControls(upstream);
+        if (stripped.length() <= MAX_UPSTREAM_CHARS) {
+            return stripped;
+        }
+        return stripped.substring(0, MAX_UPSTREAM_CHARS) + "…";
     }
 
     record EnabledPair(String asset, String subVerb, String defaultQuoteCurrency) {}

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 13 |
+| pending | 12 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 338 |
+| done | 339 |
 | deferred | 3 |
 | **total** | **354** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-292 — Log hygiene: redactor timeout arms, URL paths, upstream bytes, LLM previews (complexity: medium, risk: medium)
 - M1-298 — Core contracts: dispatchKey rename, TargetKind enum, nullable-UUID bind helper (complexity: medium, risk: medium)
 - M1-302 — Ops posture: Stage-2 fail-open default, readiness topology exposure (decisions) (complexity: low, risk: medium)
 - M1-305 — Observability commitments: schedule implementation or amend as deferred (decision) (complexity: low, risk: low)
@@ -486,7 +485,7 @@ M1-288 (done)
 M1-289 (done)
 M1-290 (done)
 M1-291 (done)
-M1-292 (pending) ← runnable
+M1-292 (done)
 M1-293 (done)
 M1-294 (done)
   └── M1-314 (pending) [see above]
