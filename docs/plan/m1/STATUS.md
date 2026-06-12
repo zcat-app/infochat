@@ -14,9 +14,9 @@
 | in-progress | 0 |
 | in-review | 1 |
 | escalated | 0 |
-| done | 322 |
+| done | 323 |
 | deferred | 3 |
-| **total** | **350** |
+| **total** | **351** |
 
 ---
 
@@ -81,6 +81,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-315 | NostrDedupIT.multiRelayDedup over-asserts deliveryCount==1 (flake) | 2026-06-12 | — |
 | M1-290 | SECURITY DEFINER procedures reject banned admins as actors | 2026-06-12 | round 1 APPROVE |
 | M1-287 | Nostr dedup records event id only after a successful queue offer | 2026-06-12 | round 1 APPROVE |
 | M1-286 | UNKNOWN-rate auto-disable stops the running stream-source worker | 2026-06-12 | round 1 APPROVE |
@@ -90,7 +91,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-279 | §7/§7a sweep: defensive checks, broad catches, test seams | 2026-06-11 | round 1 APPROVE |
 | M1-283 | Over-cap outbound digest dropped on SimpleX | 2026-06-10 | round 1 APPROVE |
 | M1-282 | Redactor suppressed-throwable coverage | 2026-06-10 | round 1 APPROVE |
-| M1-281 | Core contracts: contact-id redaction parity, Fetcher rename | 2026-06-10 | round 1 APPROVE |
 
 ---
 
@@ -517,4 +517,5 @@ M1-309 (pending) ← runnable
 M1-310 (pending) ← runnable
 M1-311 (pending) ← runnable
 M1-312 (pending) ← runnable
+M1-315 (done)
 ```
