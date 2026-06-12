@@ -17,6 +17,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -114,10 +115,12 @@ public class ChatAgent {
 
     /**
      * Handle a chat-mode message. Returns the reply text to send back to
-     * the user. The in-flight slot is acquired and released within this
-     * method; callers need not manage it.
+     * the user, or {@code null} when {@code /stop} cancelled the request —
+     * the {@code /stop} handler already replied, so the router must send
+     * nothing further. The in-flight slot is acquired and released within
+     * this method; callers need not manage it.
      */
-    public String handle(UUID userId, String scopeKind,
+    public @Nullable String handle(UUID userId, String scopeKind,
                                    UUID scopeId, String userMessage) {
         // Resolved ahead of the in-flight gate so the contention notice
         // and the catch-all unavailable reply localize too (D43).
@@ -128,8 +131,24 @@ public class ChatAgent {
             return bundleLoader.get(BundleKeys.ERROR_CHAT_IN_FLIGHT, scopeLanguage);
         }
         try {
-            return doHandle(userId, scopeKind, scopeId, userMessage, scopeLanguage);
+            String reply = doHandle(userId, scopeKind, scopeId, userMessage, scopeLanguage);
+            // Delivery boundary: /stop may have marked this request cancelled
+            // even though the work completed — the interrupt landed after the
+            // last interruptible point, or it never landed at all (a "missed
+            // interrupt"). Discard the result so it is not delivered as a
+            // second, stale reply alongside the /stop acknowledgement.
+            if (slot.isCancelled()) {
+                return null;
+            }
+            return reply;
         } catch (Exception e) {
+            // A landed cancellation interrupt surfaces here as an exception.
+            // When /stop marked this request the /stop handler already
+            // replied — return null (no content) rather than double-replying
+            // with the unavailable notice.
+            if (slot.isCancelled()) {
+                return null;
+            }
             // LLM unreachable or any other failure → friendly error.
             // No session advance, no memory write, no tool invocation
             // beyond what already ran before the failure.

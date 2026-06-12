@@ -53,6 +53,12 @@ public class CancellationService {
 
         InFlightTracker.CancellationHandle handle = handleOpt.get();
 
+        // Mark cancelled BEFORE interrupting so the flag is visible at the
+        // delivery boundary even when the worker finished between
+        // interruptible points and never observes the interrupt — the flag,
+        // not the interrupt, is the system of record for "user said /stop".
+        handle.markCancelled();
+
         // Interrupt the worker thread — this propagates through the
         // LlmProvider.generate() HTTP call (virtual thread interruption
         // raises ClosedByInterruptException on the underlying channel).

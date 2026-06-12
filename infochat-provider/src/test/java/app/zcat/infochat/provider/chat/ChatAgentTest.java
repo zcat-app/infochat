@@ -22,6 +22,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ChatAgentTest {
@@ -97,6 +98,47 @@ class ChatAgentTest {
         assertEquals(0, dispatcherCalls, "no tool dispatch on LLM failure");
         assertFalse(inFlightTracker.isInFlight(USER_ID, SCOPE_KIND, SCOPE_ID),
                 "in-flight slot must be released");
+    }
+
+    @Test
+    void cancelledRequestWithCompletedResultIsDiscarded() {
+        // Race a completed result against /stop: the worker finishes (the LLM
+        // returns a normal answer) but /stop marked the request cancelled
+        // before the delivery boundary — a missed interrupt. The result must
+        // be discarded (no content reply), not delivered as if /stop never
+        // happened.
+        llmProvider.beforeGenerate = () ->
+                inFlightTracker.getCancellationHandle(USER_ID, SCOPE_KIND, SCOPE_ID)
+                        .ifPresent(InFlightTracker.CancellationHandle::markCancelled);
+        llmProvider.responses.add(new LlmResponse("Here is your answer."));
+
+        String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "hi");
+
+        assertNull(reply,
+                "a cancelled request must yield no content reply even when the "
+                        + "worker completed (missed interrupt)");
+        assertFalse(inFlightTracker.isInFlight(USER_ID, SCOPE_KIND, SCOPE_ID),
+                "the in-flight slot must be released");
+    }
+
+    @Test
+    void cancelledChatRequestDoesNotDoubleReply() {
+        // A landed cancellation interrupt surfaces as an exception out of the
+        // LLM call. Because /stop already marked the request (and its handler
+        // replied "Cancelled..."), the chat path must return no content — not
+        // the "unavailable" notice — so the user sees exactly one reply.
+        llmProvider.beforeGenerate = () ->
+                inFlightTracker.getCancellationHandle(USER_ID, SCOPE_KIND, SCOPE_ID)
+                        .ifPresent(InFlightTracker.CancellationHandle::markCancelled);
+        llmProvider.throwOnGenerate = true;
+
+        String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "hi");
+
+        assertNull(reply,
+                "a cancelled chat request must yield no second reply (the /stop "
+                        + "handler already replied)");
+        assertFalse(inFlightTracker.isInFlight(USER_ID, SCOPE_KIND, SCOPE_ID),
+                "the in-flight slot must be released");
     }
 
     @Test
@@ -485,9 +527,16 @@ class ChatAgentTest {
         boolean throwOnGenerate;
         String lastUserPrompt;
         String lastSystemPrompt;
+        // Runs at the top of generate() (before the throw path) so a test can
+        // model /stop landing mid-generation — e.g. marking the in-flight
+        // handle cancelled. Null by default, so existing tests are unaffected.
+        Runnable beforeGenerate;
 
         @Override
         public LlmResponse generate(ModelTask task, String systemPrompt, String userPrompt) {
+            if (beforeGenerate != null) {
+                beforeGenerate.run();
+            }
             if (throwOnGenerate) {
                 throw new RuntimeException("LLM unreachable");
             }

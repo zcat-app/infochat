@@ -308,11 +308,27 @@ public class SummaryCommandHandler implements CommandHandler {
                 // localized failure string and finalizes the placeholder
                 // so it is never left dangling.
                 progressNotifier.publish(scope, ProgressStage.FINALIZING);
-                progressNotifier.complete(scope, out.toString().stripTrailing());
+                if (slot.isCancelled()) {
+                    // /stop marked this request while the work completed (a
+                    // missed interrupt): discard the composed summary and
+                    // render the D35 stopped terminal instead of delivering a
+                    // result as if /stop never happened.
+                    progressNotifier.complete(scope, stoppedTerminal());
+                } else {
+                    progressNotifier.complete(scope, out.toString().stripTrailing());
+                }
                 delivered = true;
             } catch (RuntimeException e) {
-                SafeLog.error(log, "SummaryCommandHandler summary generation failed", e);
-                progressNotifier.fail(scope);
+                if (slot.isCancelled()) {
+                    // A landed cancellation interrupt surfaced as an exception
+                    // out of generation. Render the D35 stopped terminal, not
+                    // the generic failure reply — D31/D35 forbid the failure
+                    // terminal for a user-initiated /stop.
+                    progressNotifier.complete(scope, stoppedTerminal());
+                } else {
+                    SafeLog.error(log, "SummaryCommandHandler summary generation failed", e);
+                    progressNotifier.fail(scope);
+                }
                 delivered = true;
             } finally {
                 // A non-RuntimeException throwable (e.g. an Error such as
@@ -481,6 +497,15 @@ public class SummaryCommandHandler implements CommandHandler {
             return template;
         }
         return MessageFormat.format(template, args);
+    }
+
+    /**
+     * The D35 "stopped" terminal string in the requester's effective
+     * language — rendered through the progress notifier when /stop cancelled
+     * the in-flight summary, in place of the generic failure terminal.
+     */
+    private String stoppedTerminal() {
+        return bundleLoader.get(BundleKeys.PROGRESS_STOPPED, inboundContext.effectiveLanguage());
     }
 
     private OutboundMessage reply(ScopeRef scope, String text) {

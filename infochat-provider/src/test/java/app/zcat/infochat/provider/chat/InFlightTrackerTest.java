@@ -63,6 +63,15 @@ class InFlightTrackerTest {
     }
 
     @Test
+    void cancellationHandleStartsUncancelledAndMarksCancelled() {
+        CancellationHandle held = tracker.tryAcquire(USER_A, "dm", SCOPE_A);
+        assertNotNull(held);
+        assertFalse(held.isCancelled(), "a freshly acquired handle is not cancelled");
+        held.markCancelled();
+        assertTrue(held.isCancelled(), "markCancelled() flips the flag to true");
+    }
+
+    @Test
     void staleReleaseByPreviousWorkerDoesNotEvictNewHoldersSlot() {
         CancellationHandle first = tracker.tryAcquire(USER_A, "dm", SCOPE_A);
         assertNotNull(first);

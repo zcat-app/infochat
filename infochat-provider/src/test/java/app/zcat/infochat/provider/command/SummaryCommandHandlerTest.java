@@ -3,6 +3,7 @@ package app.zcat.infochat.provider.command;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ProgressStage;
 import app.zcat.infochat.messaging.ScopeRef;
+import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.chat.InFlightTracker;
 import app.zcat.infochat.provider.chat.LlmRateCap;
@@ -279,6 +280,31 @@ class SummaryCommandHandlerTest {
                 "the Error path must not call complete()");
         assertFalse(tracker.isInFlight(userId, "dm", userId),
                 "the in-flight slot must be released even when an Error escapes");
+    }
+
+    @Test
+    void landedInterruptRendersStoppedTerminalNotFailure() {
+        eligiblePostQuery.seedPosts(
+                List.of(post(PREFIX + "stop1", "Stopped headline", Instant.now())), 0);
+        // /stop lands mid-generation: mark the in-flight handle cancelled,
+        // then a RuntimeException escapes the prose generator (a landed
+        // interrupt). The catch must render the D35 stopped terminal, not the
+        // generic progress.failed reply (which D31/D35 forbid for /stop).
+        proseGenerator.runBeforeGenerate(() ->
+                tracker.getCancellationHandle(userId, "dm", userId)
+                        .ifPresent(InFlightTracker.CancellationHandle::markCancelled));
+        proseGenerator.setThrowRuntimeOnGenerate(true);
+
+        ScopeRef scope = new ScopeRef.Dm(PREFIX + "stop");
+        handler.handle(scope, "/summary");
+
+        assertEquals(bundleLoader.get(BundleKeys.PROGRESS_STOPPED, "en"),
+                progressNotifier.completedText(),
+                "a landed interrupt must render the D35 stopped terminal via complete()");
+        assertEquals(0, progressNotifier.failCount(),
+                "cancellation must not render the generic failure terminal");
+        assertFalse(tracker.isInFlight(userId, "dm", userId),
+                "the in-flight slot must be released after a cancelled summary");
     }
 
     @Test
@@ -579,6 +605,8 @@ class SummaryCommandHandlerTest {
         private String responseText = "default test summary";
         private boolean degradedMode = false;
         private boolean throwErrorOnGenerate = false;
+        private boolean throwRuntimeOnGenerate = false;
+        private @Nullable Runnable beforeGenerate;
         private @Nullable BooleanSupplier inFlightProbe;
         private boolean inFlightDuringGenerate;
 
@@ -600,6 +628,24 @@ class SummaryCommandHandlerTest {
         }
 
         /**
+         * Models a landed cancellation interrupt: a RuntimeException escapes
+         * generation (the catch is RuntimeException-aware, unlike the OOM
+         * Error path above).
+         */
+        void setThrowRuntimeOnGenerate(boolean throwRuntime) {
+            this.throwRuntimeOnGenerate = throwRuntime;
+        }
+
+        /**
+         * Side-effecting hook run at the top of {@link #generate} — lets a
+         * test mark the in-flight handle cancelled at the moment the LLM
+         * layer runs, modelling /stop landing mid-generation.
+         */
+        void runBeforeGenerate(Runnable hook) {
+            this.beforeGenerate = hook;
+        }
+
+        /**
          * Evaluated at the top of {@link #generate} — lets a test
          * observe tracker state at the moment the LLM layer runs.
          */
@@ -615,6 +661,12 @@ class SummaryCommandHandlerTest {
         public List<ClusterProse> generate(List<Cluster> clusters, String scopeLanguage) {
             if (inFlightProbe != null) {
                 inFlightDuringGenerate = inFlightProbe.getAsBoolean();
+            }
+            if (beforeGenerate != null) {
+                beforeGenerate.run();
+            }
+            if (throwRuntimeOnGenerate) {
+                throw new RuntimeException("test-injected interrupt during generate");
             }
             if (throwErrorOnGenerate) {
                 throw new OutOfMemoryError("test-injected error during generate");

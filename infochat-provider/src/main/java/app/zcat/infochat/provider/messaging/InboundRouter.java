@@ -1051,7 +1051,10 @@ public class InboundRouter {
      * before this point) without wiring a real
      * {@link app.zcat.infochat.provider.chat.ChatAgent}.
      */
-    String dispatchChat(UUID actorId, String scopeKind, UUID scopeId, String normalized) {
+    @Nullable String dispatchChat(UUID actorId, String scopeKind, UUID scopeId, String normalized) {
+        // Null propagates a /stop-cancelled chat turn: ChatAgent already let
+        // the /stop handler reply, so the router's null-body branch skips the
+        // send (no double-reply).
         return chatAgent.handle(actorId, scopeKind, scopeId, normalized);
     }
 

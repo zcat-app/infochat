@@ -896,6 +896,15 @@ public final class BundleKeys {
     /** Terminal-failure string rendered by {@code ProgressNotifier.fail} for {@code ProgressStage.FAILED}. */
     public static final String PROGRESS_FAILED = "progress.failed";
 
+    /**
+     * Terminal "stopped" string rendered when /stop cancels an in-flight
+     * request (decision D35 stopped state) — distinct from {@link #PROGRESS_FAILED}
+     * so a user-initiated cancellation never renders the generic failure
+     * reply, which D31/D35 forbid. Not a {@code ProgressStage} value: it is
+     * a terminal finalize text, not a progress stage.
+     */
+    public static final String PROGRESS_STOPPED = "progress.stopped";
+
     // ----- /clear + /compress + auto-compress (M1-064) -----------------------
     // Per docs/spec/commands.md §Conversation control and
     // docs/design/03-commands.md §3.9 Conversation control.

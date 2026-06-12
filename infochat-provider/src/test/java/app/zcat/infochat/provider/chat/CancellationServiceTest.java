@@ -73,6 +73,27 @@ class CancellationServiceTest {
     }
 
     @Test
+    void cancelMarksHandleCancelled() {
+        // The handle is captured before cancel() releases it (release only
+        // unmaps the slot; the handle object still carries the flag). The
+        // mark is what lets the delivery boundary discard a result even when
+        // the worker missed the interrupt.
+        tracker.tryAcquire(USER_A, "dm", SCOPE_A);
+        InFlightTracker.CancellationHandle handle =
+                tracker.getCancellationHandle(USER_A, "dm", SCOPE_A).orElseThrow();
+        assertFalse(handle.isCancelled(), "handle is not cancelled before /stop");
+
+        boolean cancelled = service.cancel(USER_A, "dm", SCOPE_A);
+
+        assertTrue(cancelled);
+        assertTrue(handle.isCancelled(),
+                "cancel() must mark the handle cancelled (before interrupting) so the "
+                        + "delivery boundary discards the result even on a missed interrupt");
+
+        Thread.interrupted();
+    }
+
+    @Test
     void cancelReturnsFalseWhenNothingInFlight() {
         boolean cancelled = service.cancel(USER_A, "dm", SCOPE_A);
         assertFalse(cancelled, "cancel must return false when no in-flight slot exists");

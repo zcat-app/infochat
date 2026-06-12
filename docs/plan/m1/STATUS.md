@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 18 |
+| pending | 17 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 331 |
+| done | 332 |
 | deferred | 3 |
 | **total** | **352** |
 
@@ -28,7 +28,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-292 — Log hygiene: redactor timeout arms, URL paths, upstream bytes, LLM previews (complexity: medium, risk: medium)
 - M1-293 — Signal adapter: mention overflow, sourceName, capability values, launch classification (complexity: medium, risk: medium)
 - M1-294 — SimpleX adapter: error classification, close race, bot-id validation, inbound cap (complexity: medium, risk: medium)
-- M1-297 — /stop cancellation is honored: cancelled flag, stopped terminal, single reply (complexity: medium, risk: medium)
 - M1-298 — Core contracts: dispatchKey rename, TargetKind enum, nullable-UUID bind helper (complexity: medium, risk: medium)
 - M1-301 — Adapter trust-anchor reconciliation: Gate 4 scope, bot-id provenance (decisions) (complexity: medium, risk: medium)
 - M1-302 — Ops posture: Stage-2 fail-open default, readiness topology exposure (decisions) (complexity: low, risk: medium)
@@ -81,11 +80,11 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-310 | Collector dedup: one fetchAndParse helper for the four single-GET fetchers | 2026-06-12 | round 1 APPROVE |
 | M1-300 | Asset-refresh config: one grammar (Duration) across both services | 2026-06-12 | round 1 APPROVE |
 | M1-299 | Core hardening smalls: notifier fallback throttle, probe outside lock, escaper allocation | 2026-06-12 | round 1 APPROVE |
+| M1-297 | /stop cancellation is honored: cancelled flag, stopped terminal, single reply | 2026-06-12 | round 1 APPROVE |
 | M1-295 | Ingest resilience: eval-queue boundary, fetch-ladder scope, parser boundary, re-eval predicate | 2026-06-12 | round 1 APPROVE |
 | M1-290 | SECURITY DEFINER procedures reject banned admins as actors | 2026-06-12 | round 1 APPROVE |
 | M1-288 | Group-scope /summary resolves its scope instead of returning no_posts_yet | 2026-06-12 | round 1 APPROVE |
 | M1-287 | Nostr dedup records event id only after a successful queue offer | 2026-06-12 | round 1 APPROVE |
-| M1-286 | UNKNOWN-rate auto-disable stops the running stream-source worker | 2026-06-12 | round 1 APPROVE |
 
 ---
 
@@ -496,7 +495,7 @@ M1-294 (pending) ← runnable
   └── M1-314 (pending) [see above]
 M1-295 (done)
 M1-296 (done)
-M1-297 (pending) ← runnable
+M1-297 (done)
 M1-298 (pending) ← runnable
 M1-299 (done)
 M1-300 (done)

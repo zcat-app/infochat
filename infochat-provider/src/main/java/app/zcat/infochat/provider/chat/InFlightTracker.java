@@ -6,6 +6,7 @@ import org.jspecify.annotations.Nullable;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -26,12 +27,26 @@ public class InFlightTracker {
     public static class CancellationHandle {
         private final Thread workerThread;
         private final AtomicInteger pgBackendPid = new AtomicInteger(-1);
+        // Source of truth for "the user said /stop on this request". Set by
+        // CancellationService.cancel() BEFORE the worker interrupt, and read
+        // at the delivery boundaries (ChatAgent reply, summary progress
+        // terminal). The interrupt status alone cannot distinguish a /stop
+        // from any other interrupt, and a worker that finished between
+        // interruptible points never observes the interrupt at all — so the
+        // flag, not the interrupt, decides whether a result is discarded.
+        private final AtomicBoolean cancelled = new AtomicBoolean(false);
 
         public CancellationHandle(Thread workerThread) {
             this.workerThread = workerThread;
         }
 
         public Thread workerThread() { return workerThread; }
+
+        /** Mark this in-flight request as cancelled by /stop. */
+        public void markCancelled() { cancelled.set(true); }
+
+        /** Whether /stop has marked this request cancelled. */
+        public boolean isCancelled() { return cancelled.get(); }
 
         public void registerPgBackendPid(int pid) { pgBackendPid.set(pid); }
 
