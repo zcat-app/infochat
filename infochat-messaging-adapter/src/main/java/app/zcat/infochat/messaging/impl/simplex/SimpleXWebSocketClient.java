@@ -486,6 +486,8 @@ final class SimpleXWebSocketClient {
                     dispatchAsync(gc.senderContactId(),
                             () -> groupCandidateConsumer.onGroupCandidate(gc));
             case SimpleXMessageCodec.SendAck ack -> completePending(ack.corrId(), ack.chatItemId());
+            case SimpleXMessageCodec.SelfAddress sa ->
+                    completePending(sa.corrId(), sa.queueAddressId());
             case SimpleXMessageCodec.CommandError err -> failPending(err);
             case SimpleXMessageCodec.Ignored ignored ->
                     LOG.debug("simplex-chat frame ignored: {}", ignored.reason());

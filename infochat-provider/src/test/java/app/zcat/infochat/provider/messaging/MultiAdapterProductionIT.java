@@ -11,7 +11,7 @@ import app.zcat.infochat.messaging.impl.signal.SignalAdapter;
 import app.zcat.infochat.messaging.impl.simplex.FakeSimpleXProcess;
 import app.zcat.infochat.messaging.impl.simplex.SimpleXAdapter;
 import app.zcat.infochat.messaging.impl.simplex.SimpleXConfig;
-import app.zcat.infochat.messaging.impl.simplex.SimpleXIdentity;
+import app.zcat.infochat.messaging.impl.simplex.SimpleXSelfAddressFixture;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.command.GrantAdminCommandHandler;
@@ -160,10 +160,24 @@ class MultiAdapterProductionIT {
     // static-init block as the fakes because Profile.getConfigOverrides()
     // runs after class load.
     static final Path sharedSignalStoreDir;
+    // SimpleXAdapter.start() likewise derives the bot's queue address (the
+    // D10 anchor) by querying simplex-chat over its own WebSocket, so the
+    // shared fake needs a standing responder answering every /show_address
+    // — the CDI bean's boot-time start() blocks awaiting it, and each
+    // supervised restart of the /bin/sleep stand-in re-derives through the
+    // same responder. The served queue id is the value the removed
+    // .bot-queue-address property used to supply, so the anchor the tests
+    // observe is unchanged. No test awaits non-query frames from the
+    // SHARED fake, so the standing (frame-consuming) loop is safe here;
+    // the crash tests use one-shot answerers on their own fakes instead.
+    static final String SIMPLEX_BOT_QUEUE_ADDRESS =
+            "M1109SimplexBotIdentityQueueAddr00000000000A";
     static {
         try {
             sharedFakeSimplex = new FakeSimpleXProcess();
             sharedFakeSimplex.start();
+            SimpleXSelfAddressFixture.startShowAddressResponder(sharedFakeSimplex,
+                    () -> SimpleXSelfAddressFixture.contactLink(SIMPLEX_BOT_QUEUE_ADDRESS));
             sharedFakeSignal = new FakeSignalCli();
             sharedSignalStoreDir = Files.createTempDirectory("m1-109-signal-store-");
             SignalAccountStoreFixture.writeStore(sharedSignalStoreDir,
@@ -377,6 +391,11 @@ class MultiAdapterProductionIT {
             SimpleXAdapter sx = newSimpleXAdapter(sxFake);
             SignalAdapter sg = newSignalAdapter(sgFake);
             try {
+                // One-shot (not standing) answerer: sx.start() blocks on
+                // the /show_address identity query; answering exactly one
+                // leaves the fake's frame queue to the test afterwards.
+                SimpleXSelfAddressFixture.answerNextShowAddress(sxFake,
+                        SimpleXSelfAddressFixture.contactLink(SIMPLEX_BOT_QUEUE_ADDRESS));
                 sx.start();
                 sg.start();
 
@@ -433,6 +452,12 @@ class MultiAdapterProductionIT {
             SimpleXAdapter sx = newSimpleXAdapter(sxFake);
             SignalAdapter sg = newSignalAdapter(sgFake);
             try {
+                // One-shot answerer for the start()-time identity query —
+                // see simpleXCrashDoesNotAffectSignal; here it matters even
+                // more because this test awaits the liveness-probe frame
+                // from sxFake below, which a standing responder would steal.
+                SimpleXSelfAddressFixture.answerNextShowAddress(sxFake,
+                        SimpleXSelfAddressFixture.contactLink(SIMPLEX_BOT_QUEUE_ADDRESS));
                 sx.start();
                 sg.start();
                 // Wait for SimpleX's WebSocket handshake to complete on
@@ -502,14 +527,10 @@ class MultiAdapterProductionIT {
                 // the notification channel. Wiring a logger here would
                 // surface the suppressed supervisor failures, which is
                 // the noise the per-test application.properties is set
-                // up to dampen.
-                notice -> { },
-                // Well-formed SimpleX queue address (URL-safe base64, >=43
-                // chars): SimpleXAdapter.start() now validates the bot queue
-                // address with SimpleXIdentity.isWellFormed (parity with
-                // Signal's startup ACI validation), so the prior 33-char
-                // kebab-slug would be rejected before the WS connect.
-                new SimpleXIdentity("M1109SimplexBotIdentityQueueAddr00000000000A"));
+                // up to dampen. The bot queue address is no construction
+                // input — start() derives it from the fake's /show_address
+                // answer (the caller spawns the one-shot answerer first).
+                notice -> { });
     }
 
     private static SignalAdapter newSignalAdapter(FakeSignalCli fake) {
@@ -637,13 +658,12 @@ class MultiAdapterProductionIT {
             // (every CSV name resolves to a registered bean — the
             // production beans live in ProductionAdapterBeans (M1-120)).
             // Gate 7 (bootstrap admin union non-empty) is satisfied by the
-            // two .admin entries. The .bot-queue-address entry — DISTINCT
-            // from the .admin value — wires SimpleX's D10 trust anchor per
-            // M1-120's post-redteam separation of bootstrap-admin from
-            // bot-identity; Signal's anchor is derived at start() from the
-            // account-store fixture under .data-dir, not configured. The
-            // .binary / .data-dir / .ws-port / .account / .endpoint
-            // entries point at the shared in-process fakes so
+            // two .admin entries. Neither bot-identity anchor is configured:
+            // Signal's is derived at start() from the account-store fixture
+            // under .data-dir, SimpleX's from the shared fake's
+            // /show_address answer (the standing responder in the static
+            // block). The .binary / .data-dir / .ws-port / .account /
+            // .endpoint entries point at the shared in-process fakes so
             // adapter.start() (called reflectively by MessagingStartup at
             // @PostConstruct) connects to the fakes' bound ephemeral
             // ports; /bin/sleep is the binary placeholder and the
@@ -661,12 +681,6 @@ class MultiAdapterProductionIT {
                     // SimpleXIdentity.isWellFormed (M1-208).
                     Map.entry("infochat.adapters.simplex.admin",
                             "M1109SimplexBootstrapAdminQueueAddr000000000A"),
-                    // Well-formed (>=43 chars), DISTINCT from .admin above:
-                    // SimpleXAdapter.start() now validates the bot-queue-address
-                    // with SimpleXIdentity.isWellFormed at @PostConstruct, so
-                    // the prior 27-char kebab-slug would fail boot here.
-                    Map.entry("infochat.adapters.simplex.bot-queue-address",
-                            "M1109SimplexBotIdentityQueueAddr00000000000A"),
                     Map.entry("infochat.adapters.signal.binary", "/bin/sleep"),
                     Map.entry("infochat.adapters.signal.data-dir",
                             sharedSignalStoreDir.toString()),

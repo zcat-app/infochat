@@ -38,7 +38,7 @@ import org.junit.jupiter.api.io.TempDir;
  * {@code reconnecting} flag; and an inbound frame pushed after the
  * rebuild is delivered exactly once.
  *
- * <p>Wiring: full 4-arg {@link SimpleXAdapter} constructor with a
+ * <p>Wiring: full 3-arg {@link SimpleXAdapter} constructor with a
  * {@link SimpleXConfig} whose ws-port is the fake's (the constructor
  * never validates; only {@code start()} calls {@code cfg.validate()}),
  * plus the package-private {@code attachSubprocess}/{@code
@@ -219,8 +219,7 @@ class SimpleXReconnectTest {
         return new SimpleXAdapter(
                 cfg,
                 HttpClient.newHttpClient(),
-                msg -> { /* admin notifications unused here */ },
-                new SimpleXIdentity("bot-queue-addr"));
+                msg -> { /* admin notifications unused here */ });
     }
 
     /**
@@ -276,7 +275,12 @@ class SimpleXReconnectTest {
     /**
      * Background acker: answer every client command frame with a
      * {@code newChatItems} success so {@code adapter.send} calls can
-     * complete. Exits on interrupt or when no frame arrives for 15 s.
+     * complete — except the {@code /show_address} identity query the
+     * post-restart reconnect now issues, which gets a {@code
+     * userContactLink} frame carrying a well-formed contact link (a
+     * generic ack would feed "acked-item-1" into the adoption gate and
+     * wedge the reconnect). Exits on interrupt or when no frame arrives
+     * for 15 s.
      */
     private static Thread startSendResponder(FakeSimpleXProcess fake) {
         return Thread.ofVirtual().name("fake-simplex-send-responder").start(() -> {
@@ -286,6 +290,19 @@ class SimpleXReconnectTest {
                     JsonNode root = MAPPER.readTree(envelope);
                     JsonNode corrId = root.get("corrId");
                     if (corrId == null) {
+                        continue;
+                    }
+                    JsonNode cmd = root.get("cmd");
+                    if (cmd != null && cmd.asText().startsWith("/show_address")) {
+                        // Percent escapes collide with formatted() syntax, so
+                        // the contact-link frame is built by concatenation.
+                        fake.sendFrame("{\"corrId\":\"" + corrId.asText()
+                                + "\",\"resp\":{\"type\":\"userContactLink\","
+                                + "\"contactLink\":{\"connLinkContact\":{\"connFullLink\":"
+                                + "\"simplex:/contact#/?v=2-7&smp=smp%3A%2F%2FKeyHash%3D"
+                                + "%40smp.example.org%2F"
+                                + "ReconnectRederivedBotQueueAddress00000000008"
+                                + "%23\"}}}}");
                         continue;
                     }
                     fake.sendFrame("""

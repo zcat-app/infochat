@@ -171,6 +171,19 @@ final class SimpleXMessageCodec {
         return envelope(corrId, cmd);
     }
 
+    /**
+     * Encode the self-address query ({@code ShowMyAddress}): the source of
+     * the bot's own queue address — the D10 trust anchor — derived at
+     * {@link SimpleXAdapter#start()} instead of being operator-typed. The
+     * user-level {@code /show_address} form targets the active user, so no
+     * userId round-trip is needed (the API-level {@code /_show_address
+     * <userId>} would require a prior {@code /user} query); both map to the
+     * same {@code userContactLink} response.
+     */
+    static String encodeShowMyAddressCommand(String corrId) {
+        return envelope(corrId, "/show_address");
+    }
+
     private static String targetSelector(ScopeRef scope) throws MessagingException {
         return switch (scope) {
             case ScopeRef.Dm dm -> {
@@ -284,6 +297,7 @@ final class SimpleXMessageCodec {
         return switch (type) {
             case "newChatItem" -> decodeNewChatItem(resp);
             case "sentMessage", "apiSendMessageResponse", "newChatItems" -> decodeSendAck(corrId, resp);
+            case "userContactLink" -> decodeSelfAddress(corrId, resp);
             case "chatCmdError", "chatItemUpdateError" -> decodeError(corrId, resp);
             // Fixed sentinel — same rule as the chatType-non-direct branch
             // below. The top-level resp.type is attacker-influenceable
@@ -570,6 +584,111 @@ final class SimpleXMessageCodec {
         return List.copyOf(spans);
     }
 
+    /**
+     * Decode the {@code userContactLink} response to the self-address query
+     * ({@link #encodeShowMyAddressCommand}): extract the bot's bare queue
+     * address id from the returned contact link. The simplex-chat shape is
+     * {@code resp.contactLink.connLinkContact.connFullLink} — the FULL link
+     * is read (never {@code connShortLink}: the short form carries a server
+     * link-id, not the queue id).
+     *
+     * <p>Extraction or validation failure maps to a {@link CommandError}
+     * with a fixed sentinel detail rather than {@link Ignored}: the pending
+     * future then fails promptly with the named cause instead of stalling
+     * the caller for the full ack timeout toward a vague TRANSIENT. The
+     * sentinel carries no link bytes (D37: the contact link embeds the
+     * queue address, a sensitive identifier; security.md §User content in
+     * exceptions). PERMANENT because a re-issued query returns the same
+     * undecodable shape — wire-contract drift is fixed by code, not
+     * retries.</p>
+     *
+     * <p>A {@code userContactLink} frame without a {@code corrId} is an
+     * async event nobody requested — ignored like every other unrequested
+     * variant.</p>
+     */
+    private static DecodedFrame decodeSelfAddress(@Nullable String corrId, JsonNode resp) {
+        if (corrId == null) {
+            return new Ignored("self-address-without-corrId");
+        }
+        String fullLink = optText(resp.path("contactLink").path("connLinkContact"),
+                "connFullLink");
+        if (fullLink == null) {
+            return new CommandError(corrId, FailureCategory.PERMANENT,
+                    "self-address-without-contact-link");
+        }
+        String queueAddressId = extractQueueAddressId(fullLink);
+        if (queueAddressId == null) {
+            return new CommandError(corrId, FailureCategory.PERMANENT,
+                    "self-address-extraction-failed");
+        }
+        return new SelfAddress(corrId, queueAddressId);
+    }
+
+    /**
+     * Extract the bare queue address id from a SimpleX contact link — the
+     * same identifier an operator extracts manually from their address. A
+     * contact link embeds the percent-encoded SMP queue URI as the
+     * {@code smp} query parameter of its fragment
+     * ({@code simplex:/contact#/?v=…&smp=smp%3A%2F%2F<keyhash>%40<host>%2F<queueId>…});
+     * decoded, the queue id is the path segment after the server authority:
+     * {@code smp://<keyhash>@<host>[,<host2>]/<queueId>[#…]}. Hostnames
+     * never contain {@code '/'}, so the first slash after {@code '@'}
+     * starts the id; {@code '#'}, {@code '/'} or {@code '?'} ends it.
+     *
+     * <p>Untrusted wire data: every step fails to {@code null} (the caller
+     * maps it to the sentinel {@link CommandError}), and the extracted id
+     * must pass {@link #isValidQueueAddressId} before it is surfaced — the
+     * same gate every other wire-sourced id passes (design §6.4.4).</p>
+     */
+    private static @Nullable String extractQueueAddressId(String contactLink) {
+        // The smp param key must be preceded by '?' or '&' so a raw '='
+        // inside another param's value (e.g. base64 padding in dh=) can
+        // never be misread as the key boundary.
+        int paramIdx = contactLink.indexOf("smp=");
+        while (paramIdx > 0
+                && contactLink.charAt(paramIdx - 1) != '?'
+                && contactLink.charAt(paramIdx - 1) != '&') {
+            paramIdx = contactLink.indexOf("smp=", paramIdx + 4);
+        }
+        if (paramIdx <= 0) {
+            return null;
+        }
+        int valueStart = paramIdx + 4;
+        int valueEnd = contactLink.indexOf('&', valueStart);
+        if (valueEnd < 0) {
+            valueEnd = contactLink.length();
+        }
+        String smpUri;
+        try {
+            smpUri = java.net.URLDecoder.decode(
+                    contactLink.substring(valueStart, valueEnd),
+                    java.nio.charset.StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+        if (!smpUri.startsWith("smp://")) {
+            return null;
+        }
+        int atIdx = smpUri.indexOf('@');
+        if (atIdx < 0) {
+            return null;
+        }
+        int slashIdx = smpUri.indexOf('/', atIdx + 1);
+        if (slashIdx < 0) {
+            return null;
+        }
+        int idStart = slashIdx + 1;
+        int idEnd = idStart;
+        while (idEnd < smpUri.length()
+                && smpUri.charAt(idEnd) != '#'
+                && smpUri.charAt(idEnd) != '/'
+                && smpUri.charAt(idEnd) != '?') {
+            idEnd++;
+        }
+        String id = smpUri.substring(idStart, idEnd);
+        return isValidQueueAddressId(id) ? id : null;
+    }
+
     private static DecodedFrame decodeSendAck(@Nullable String corrId, JsonNode resp) {
         // Known simplex-chat shapes only: the chat-item id lives either
         // directly on the response or under the chatItems container.
@@ -683,7 +802,8 @@ final class SimpleXMessageCodec {
     // --- Sealed decoded-frame surface ---------------------------------------
 
     /** Sealed hierarchy of frame variants returned by {@link #decode}. */
-    sealed interface DecodedFrame permits Inbound, GroupCandidate, SendAck, CommandError, Ignored {
+    sealed interface DecodedFrame
+            permits Inbound, GroupCandidate, SendAck, SelfAddress, CommandError, Ignored {
     }
 
     /** A direct-message inbound that should be delivered to Provider. */
@@ -727,6 +847,17 @@ final class SimpleXMessageCodec {
 
     /** Response to a command we previously issued, carrying the chat-item id. */
     record SendAck(String corrId, String chatItemId) implements DecodedFrame {
+    }
+
+    /**
+     * Response to the self-address query ({@link #encodeShowMyAddressCommand}),
+     * carrying the bot's bare queue address id extracted from the returned
+     * contact link and already validated through
+     * {@link #isValidQueueAddressId}. The cryptographic-length floor
+     * ({@link SimpleXIdentity#isWellFormed}) is applied at adoption in
+     * {@code SimpleXAdapter}, the same split every other wire id uses.
+     */
+    record SelfAddress(String corrId, String queueAddressId) implements DecodedFrame {
     }
 
     /** Error response to a command, with the categorised failure. */

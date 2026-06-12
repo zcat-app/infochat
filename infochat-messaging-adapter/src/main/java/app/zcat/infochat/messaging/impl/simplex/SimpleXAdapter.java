@@ -82,7 +82,6 @@ public final class SimpleXAdapter implements MessagingAdapter {
     private final @Nullable SimpleXConfig config;
     private final @Nullable HttpClient httpClient;
     private final @Nullable Consumer<String> adminNotifier;
-    private final @Nullable SimpleXIdentity botIdentity;
 
     /**
      * Upper bound on tracked send-handles. Pre-M1-148 the handle and
@@ -120,6 +119,13 @@ public final class SimpleXAdapter implements MessagingAdapter {
     private volatile @Nullable InboundHandler inboundHandler;
     private volatile @Nullable SimpleXSubprocess subprocess;
     private volatile @Nullable SimpleXWebSocketClient webSocket;
+    // Group-mention dispatch handler bound to the SimpleXIdentity derived
+    // from the running simplex-chat at start() and re-derived after each
+    // supervised restart (the D10 trust anchor — never operator-typed).
+    // Null until the first successful derivation; group candidates arriving
+    // earlier are dropped in onGroupCandidate. Volatile: written by the
+    // start()/reconnect threads, read on the WS inbound-dispatch thread.
+    private volatile @Nullable SimpleXGroupHandler groupHandler;
     // True from the moment the reconnect path starts tearing down the old
     // WebSocket client until a fresh one is swapped in. Sends during this
     // window classify TRANSIENT (the outage is recoverable); a closed
@@ -155,25 +161,25 @@ public final class SimpleXAdapter implements MessagingAdapter {
         this.config = null;
         this.httpClient = null;
         this.adminNotifier = null;
-        this.botIdentity = null;
     }
 
     /**
      * Full constructor used by Provider-side wiring (M1-105). Supplies
      * the operator config, the JDK {@link HttpClient} used to dial the
-     * simplex-chat WebSocket, the admin-notification consumer the
-     * subprocess supervisor calls at the FAILED transition, and the
-     * bot's per-adapter SimpleX identity used as the D10 trust anchor
-     * for group mention recognition (see {@link SimpleXGroupHandler}).
+     * simplex-chat WebSocket, and the admin-notification consumer the
+     * subprocess supervisor calls at the FAILED transition. The bot's
+     * per-adapter SimpleX identity — the D10 trust anchor for group
+     * mention recognition (see {@link SimpleXGroupHandler}) — is NOT a
+     * construction input: {@link #start()} derives it by querying the
+     * running simplex-chat for the bot's own address, so it cannot be
+     * mistyped and an admin-key rotation cannot move it.
      */
     public SimpleXAdapter(SimpleXConfig config,
                           HttpClient httpClient,
-                          Consumer<String> adminNotifier,
-                          SimpleXIdentity botIdentity) {
+                          Consumer<String> adminNotifier) {
         this.config = config;
         this.httpClient = httpClient;
         this.adminNotifier = adminNotifier;
-        this.botIdentity = botIdentity;
     }
 
     @Override
@@ -198,20 +204,23 @@ public final class SimpleXAdapter implements MessagingAdapter {
 
     /**
      * Start the simplex-chat subprocess, wait for its WebSocket endpoint
-     * to become reachable, then open the WebSocket. Acceptance items 5 +
-     * 6 of M1-103. Throws {@link MessagingException} (categorised) on
-     * launch / readiness / connect failure so Provider sees the failure
-     * via the same exception channel as transport faults.
+     * to become reachable, open the WebSocket, then derive the bot's own
+     * queue address — the D10 trust anchor — by querying the running
+     * simplex-chat (never from operator config). Acceptance items 5 + 6
+     * of M1-103. Throws {@link MessagingException} (categorised) on
+     * launch / readiness / connect / query failure, or
+     * {@link IllegalStateException} when the derived address fails the
+     * well-formedness gate; either way the failure fails THIS adapter
+     * only (MessagingStartup's §6.7 per-adapter catch absorbs both).
      */
     @Override
     public void start() throws MessagingException {
         SimpleXConfig cfg = requireWired();
         HttpClient http = httpClient;
         Consumer<String> notify = adminNotifier;
-        SimpleXIdentity identity = botIdentity;
-        if (http == null || notify == null || identity == null) {
+        if (http == null || notify == null) {
             throw new IllegalStateException(
-                    "SimpleXAdapter not fully wired (httpClient/adminNotifier/botIdentity are null)");
+                    "SimpleXAdapter not fully wired (httpClient/adminNotifier are null)");
         }
         // System-boundary validation: filesystem/port checks the operator
         // promised at config time. Runs only for activated adapters so an
@@ -220,21 +229,6 @@ public final class SimpleXAdapter implements MessagingAdapter {
         // surfaces deep inside subprocess launch as an opaque exception
         // that MessagingStartup's §6.7 per-adapter catch silently absorbs.
         cfg.validate();
-        // D10 trust anchor: the bot's queue address must be a well-formed
-        // SimpleX queue address — the same SimpleXIdentity.isWellFormed gate
-        // the registry applies to the bootstrap admin id, restoring parity
-        // with Signal's startup ACI validation. A blank OR malformed identity
-        // would let SimpleXMentionParser.botMentioned match a mention-list
-        // entry that decodes to empty/forged bytes (the forged-mention class
-        // the spec forever excludes per security.md §"What's intentionally NOT
-        // in v1"). Property key is named so an operator can fix it directly.
-        if (!SimpleXIdentity.isWellFormed(identity.queueAddress())) {
-            throw new IllegalStateException(
-                    "infochat.adapters.simplex.bot-queue-address must be a"
-                            + " well-formed SimpleX queue address (distinct from"
-                            + " the bootstrap admin's queue address in"
-                            + " infochat.adapters.simplex.admin)");
-        }
         SimpleXSubprocess sub = new SimpleXSubprocess(
                 SimpleXSubprocess.commandFor(cfg),
                 Duration.ofSeconds(1),
@@ -247,7 +241,20 @@ public final class SimpleXAdapter implements MessagingAdapter {
         try {
             waitForWebSocketReady(cfg.wsPort());
             rebuildWebSocket();
-        } catch (MessagingException e) {
+            deriveAndAdoptIdentity();
+        } catch (MessagingException | IllegalStateException e) {
+            // The identity derivation runs after the WS client is up, so a
+            // failed start() must tear BOTH halves down or the subprocess
+            // and the connected client leak past the failure. The catch
+            // covers the derivation step's two failure shapes — query
+            // transport/extraction (MessagingException) and adoption of a
+            // non-well-formed address (IllegalStateException) — plus the
+            // pre-existing readiness/connect failures.
+            SimpleXWebSocketClient ws = webSocket;
+            if (ws != null) {
+                ws.close();
+                this.webSocket = null;
+            }
             sub.stop();
             this.subprocess = null;
             throw e;
@@ -272,35 +279,86 @@ public final class SimpleXAdapter implements MessagingAdapter {
     }
 
     /**
-     * Build a fresh {@link SimpleXWebSocketClient} (with its group
-     * handler), start it, and swap it into {@link #webSocket}.
-     * {@code SimpleXWebSocketClient} is terminal after {@code close()}
-     * — its {@code closed} flag never resets — so reviving the
-     * transport always means a fresh instance; this method is the one
-     * construction site shared by {@link #start()} and the post-restart
-     * reconnect path.
+     * Build a fresh {@link SimpleXWebSocketClient}, start it, and swap it
+     * into {@link #webSocket}. {@code SimpleXWebSocketClient} is terminal
+     * after {@code close()} — its {@code closed} flag never resets — so
+     * reviving the transport always means a fresh instance; this method
+     * is the one construction site shared by {@link #start()} and the
+     * post-restart reconnect path.
      *
-     * <p>The group handler funnels its deliveries through onInbound so
-     * both DM and group paths share the volatile-field read of
-     * {@code inboundHandler} and the misbehaving-handler protection in
-     * one place. A Provider that calls setInboundHandler after
-     * start() still gets group messages routed correctly because
-     * onInbound re-reads the field on each dispatch.</p>
+     * <p>Group candidates route through {@link #onGroupCandidate}, which
+     * re-reads the volatile anchor-bound {@link #groupHandler} on each
+     * dispatch — the identity is derived only AFTER the WebSocket is up
+     * (see {@link #deriveAndAdoptIdentity}), so the client cannot capture
+     * it at construction time. The handler itself funnels deliveries
+     * through onInbound so both DM and group paths share the
+     * volatile-field read of {@code inboundHandler} and the
+     * misbehaving-handler protection in one place.</p>
      */
     void rebuildWebSocket() throws MessagingException {
         SimpleXConfig cfg = requireWired();
         HttpClient http = httpClient;
-        SimpleXIdentity identity = botIdentity;
-        if (http == null || identity == null) {
+        if (http == null) {
             throw new IllegalStateException(
-                    "SimpleXAdapter not fully wired (httpClient/botIdentity are null)");
+                    "SimpleXAdapter not fully wired (httpClient is null)");
         }
         URI uri = URI.create("ws://127.0.0.1:" + cfg.wsPort());
-        SimpleXGroupHandler groupHandler = new SimpleXGroupHandler(identity, this::onInbound);
         SimpleXWebSocketClient ws = new SimpleXWebSocketClient(
-                uri, http, this::onInbound, groupHandler::onGroupCandidate);
+                uri, http, this::onInbound, this::onGroupCandidate);
         ws.start();
         this.webSocket = ws;
+    }
+
+    /**
+     * Derive the bot's own queue address by querying the running
+     * simplex-chat over the just-(re)built WebSocket and adopt it as the
+     * D10 anchor. Composed by {@link #start()} and the reconnect path
+     * strictly AFTER {@code waitForWebSocketReady}/{@code rebuildWebSocket}
+     * — a query issued before the WebSocket is up would surface a spurious
+     * TRANSIENT failure. Package-private so FakeSimpleXProcess-driven
+     * tests can exercise the production derivation path without
+     * {@code start()}'s real-binary requirement.
+     */
+    void deriveAndAdoptIdentity() throws MessagingException {
+        SimpleXWebSocketClient ws = webSocket;
+        if (ws == null) {
+            // close() raced the (re)build and tore the client down — the
+            // anchor cannot be derived and the adapter is going away.
+            throw new MessagingException(FailureCategory.PERMANENT,
+                    "WebSocket torn down before the bot identity could be derived");
+        }
+        String corrId = nextCorrId();
+        String envelope = SimpleXMessageCodec.encodeShowMyAddressCommand(corrId);
+        adoptBotQueueAddress(ws.sendCommand(corrId, envelope, ACK_TIMEOUT));
+    }
+
+    /**
+     * Adopt a queue address derived from the running simplex-chat as the
+     * bot's D10 trust anchor: validate well-formedness (the same
+     * {@link SimpleXIdentity#isWellFormed} gate the registry applies to
+     * the bootstrap admin id — a malformed identity would let
+     * {@code SimpleXMentionParser.botMentioned} match a mention-list entry
+     * that decodes to empty/forged bytes, the class security.md §"What's
+     * intentionally NOT in v1" forever excludes), then bind a fresh
+     * {@link SimpleXGroupHandler} to it. No canonicalization, unlike
+     * Signal's {@code adoptBotAci} — queue addresses are case-sensitive
+     * URL-safe base64. The failure message names the derivation source,
+     * never the value (D37: queue addresses are never logged raw).
+     *
+     * <p>Package-private seam, mirroring {@code SignalAdapter.adoptBotAci}:
+     * FakeSimpleXProcess-driven tests that need a routable anchor without
+     * a full derivation round-trip adopt one directly.</p>
+     */
+    void adoptBotQueueAddress(String queueAddress) {
+        if (!SimpleXIdentity.isWellFormed(queueAddress)) {
+            throw new IllegalStateException(
+                    "queue address derived from simplex-chat's show-address query is not"
+                            + " a well-formed SimpleX queue address — the running"
+                            + " simplex-chat may not match the modeled wire contract"
+                            + " (length=" + queueAddress.length() + ")");
+        }
+        SimpleXIdentity identity = new SimpleXIdentity(queueAddress);
+        this.groupHandler = new SimpleXGroupHandler(identity, this::onInbound);
     }
 
     /**
@@ -337,6 +395,12 @@ public final class SimpleXAdapter implements MessagingAdapter {
             old.close();
             waitForWebSocketReady(cfg.wsPort());
             rebuildWebSocket();
+            // Re-establish the D10 anchor against the restarted process so
+            // post-restart group routing compares against a consistent
+            // anchor — the restarted simplex-chat is the same source the
+            // original derivation read, but it is re-queried rather than
+            // assumed unchanged.
+            deriveAndAdoptIdentity();
             if (subprocess == null) {
                 // close() won the race while we were rebuilding — do not
                 // resurrect the transport after teardown. Clear reconnecting
@@ -361,6 +425,14 @@ public final class SimpleXAdapter implements MessagingAdapter {
             // supervisor's FAILED transition) resolves it.
             LOG.warn("SimpleX reconnect failed ({}); awaiting next supervised restart",
                     e.category());
+        } catch (IllegalStateException e) {
+            // Re-derivation adopted nothing: the restarted simplex-chat
+            // answered with a non-well-formed address. Same posture as the
+            // transport failure above — the outage continues until the next
+            // supervised restart. The prior anchor stays in place for any
+            // frames the dying connection already dispatched.
+            LOG.warn("SimpleX reconnect failed (identity re-derivation);"
+                    + " awaiting next supervised restart");
         } finally {
             reconnectInFlight.set(false);
         }
@@ -610,6 +682,26 @@ public final class SimpleXAdapter implements MessagingAdapter {
     }
 
     // -- internals -----------------------------------------------------------
+
+    /**
+     * Group-candidate entry point handed to the WebSocket client. Re-reads
+     * the volatile anchor-bound handler on every dispatch (mirroring
+     * {@link #onInbound}'s volatile re-read of {@code inboundHandler}) so
+     * routing always compares against the most recently derived identity.
+     * A candidate arriving in the window between the WebSocket coming up
+     * and the anchor being derived is dropped — lifecycle state, the same
+     * shape as onInbound's no-handler drop. The recognised-but-unmentioned
+     * drop inside {@link SimpleXGroupHandler} stays log-free by design;
+     * this DEBUG line covers only the no-anchor window.
+     */
+    private void onGroupCandidate(SimpleXMessageCodec.GroupCandidate gc) {
+        SimpleXGroupHandler handler = groupHandler;
+        if (handler == null) {
+            LOG.debug("dropping group candidate; bot identity not yet derived");
+            return;
+        }
+        handler.onGroupCandidate(gc);
+    }
 
     private void onInbound(InboundMessage msg) {
         InboundHandler current = inboundHandler;

@@ -3,7 +3,6 @@ package app.zcat.infochat.provider.messaging;
 import app.zcat.infochat.messaging.impl.signal.SignalAdapter;
 import app.zcat.infochat.messaging.impl.simplex.SimpleXAdapter;
 import app.zcat.infochat.messaging.impl.simplex.SimpleXConfig;
-import app.zcat.infochat.messaging.impl.simplex.SimpleXIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Produces;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -43,22 +42,12 @@ import java.util.function.Consumer;
  *       {@link SimpleXConfig}. {@link SimpleXConfig#validate()} runs
  *       inside {@link SimpleXAdapter#start()} so a deployment that
  *       does not enable SimpleX never trips its filesystem checks.
- *       The bot's SimpleX queue address is sourced from
- *       {@code infochat.adapters.simplex.bot-queue-address} — a
- *       config key DISTINCT from {@code infochat.adapters.simplex.admin}
- *       (which is the bootstrap admin's queue address, per
- *       {@link AdapterRegistry} gate 7). Conflating the two would
- *       (a) let an admin-key rotation silently change the bot's D10
- *       trust anchor and (b) let a deployment that omits
- *       {@code simplex.admin} (allowed because gate 7 only requires
- *       the union across activated adapters to be non-empty) ship
- *       with a blank bot identity, reintroducing the forged-mention
- *       attack class the spec forever excludes per
- *       {@code security.md} §"What's intentionally NOT in v1".
- *       The config key is the identity's source of truth — a
- *       dataDir-to-identity parse ({@code SimpleXIdentity.resolve})
- *       was once planned and dropped; {@link SimpleXIdentity} is a
- *       plain config-sourced value holder.</li>
+ *       The bot's own SimpleX queue address — the D10 trust anchor —
+ *       is NOT a config input: {@code SimpleXAdapter.start()} derives
+ *       it by querying the running simplex-chat for the bot's own
+ *       address, so it cannot be mistyped and an admin-key rotation
+ *       ({@code .admin}, the bootstrap admin's queue address, consumed
+ *       by {@link AdapterRegistry} gate 7) cannot move it.</li>
  *   <li>Signal reads {@code infochat.adapters.signal.binary},
  *       {@code .data-dir}, {@code .account}, and {@code .endpoint}
  *       (host:port of signal-cli's TCP daemon). The bot's own ACI —
@@ -107,13 +96,6 @@ public class ProductionAdapterBeans {
     @ConfigProperty(name = SimpleXConfig.WS_PORT_KEY, defaultValue = "" + SimpleXConfig.DEFAULT_WS_PORT)
     int simplexWsPort;
 
-    // The bot's own SimpleX queue address — the D10 trust anchor for
-    // group-mode mention recognition. Distinct from .admin, which is
-    // the bootstrap admin's queue address consumed by AdapterRegistry
-    // gate 7. Validated as non-blank inside SimpleXAdapter.start().
-    @ConfigProperty(name = "infochat.adapters.simplex.bot-queue-address")
-    Optional<String> simplexBotQueueAddress;
-
     @ConfigProperty(name = "infochat.adapters.signal.binary")
     Optional<String> signalBinary;
 
@@ -155,8 +137,7 @@ public class ProductionAdapterBeans {
                 .build();
         Consumer<String> adminNotifier = msg ->
                 log.warn("simplex adapter admin notification: {}", msg);
-        SimpleXIdentity botIdentity = new SimpleXIdentity(simplexBotQueueAddress.orElse(""));
-        return new SimpleXAdapter(config, httpClient, adminNotifier, botIdentity);
+        return new SimpleXAdapter(config, httpClient, adminNotifier);
     }
 
     @Produces

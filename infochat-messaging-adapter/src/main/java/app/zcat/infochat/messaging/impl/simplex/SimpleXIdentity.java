@@ -5,9 +5,10 @@ package app.zcat.infochat.messaging.impl.simplex;
  * anchored identifier SimpleX surfaces for the bot's account (decision
  * D32, {@code docs/spec/messaging.md} §Per-adapter trust level and
  * identity). The queue address is the bot's stable {@code contact_id}
- * on SimpleX and the D10 trust anchor for this adapter. Sourced from
- * operator config ({@code infochat.adapters.simplex.bot-queue-address})
- * by Provider-side wiring.
+ * on SimpleX and the D10 trust anchor for this adapter. Derived at
+ * adapter startup by querying the running simplex-chat for the bot's
+ * own address ({@code SimpleXAdapter#deriveAndAdoptIdentity}) — never
+ * an operator-typed property.
  *
  * @param queueAddress the bot's SimpleX queue address; never null.
  */

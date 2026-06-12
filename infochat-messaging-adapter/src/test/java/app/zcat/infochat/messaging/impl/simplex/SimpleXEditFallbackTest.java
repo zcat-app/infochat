@@ -224,8 +224,7 @@ class SimpleXEditFallbackTest {
         return new SimpleXAdapter(
                 cfg,
                 HttpClient.newHttpClient(),
-                msg -> { /* admin notifications unused here */ },
-                new SimpleXIdentity("bot-queue-addr"));
+                msg -> { /* admin notifications unused here */ });
     }
 
     /** Concatenate the user-visible text of a list of {@code /_send} envelopes. */

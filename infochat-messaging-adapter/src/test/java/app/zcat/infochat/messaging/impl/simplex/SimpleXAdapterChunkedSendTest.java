@@ -109,8 +109,7 @@ class SimpleXAdapterChunkedSendTest {
         return new SimpleXAdapter(
                 cfg,
                 HttpClient.newHttpClient(),
-                msg -> { /* admin notifications unused here */ },
-                new SimpleXIdentity("bot-queue-addr"));
+                msg -> { /* admin notifications unused here */ });
     }
 
     /** Prose long enough for three chunks — a plausible 200-post group digest. */

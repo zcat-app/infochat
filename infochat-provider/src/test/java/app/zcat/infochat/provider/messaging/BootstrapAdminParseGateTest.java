@@ -81,8 +81,6 @@ class BootstrapAdminParseGateTest {
                     // Well-formed SimpleX queue address (URL-safe base64, >=43 chars).
                     Map.entry("infochat.adapters.simplex.admin",
                             "SimplexBootstrapAdminQueueAddr0000000000000A"),
-                    Map.entry("infochat.adapters.simplex.bot-queue-address",
-                            "SimplexBotIdentityQueueAddr00000000000000001"),
                     Map.entry("infochat.adapters.signal.binary", "/bin/sh"),
                     Map.entry("infochat.adapters.signal.data-dir", "/tmp"),
                     Map.entry("infochat.adapters.signal.account", "test-account"),

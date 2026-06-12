@@ -135,20 +135,15 @@ An operator must provide:
    in §Bootstrap behavior on startup applies — one adapter's
    identity-store failure does not abort Provider). The
    per-adapter bot contact id (the value mention recognition
-   compares against, `messaging.md` §Required SPI surface) has
-   adapter-specific provenance: the **Signal** bot contact id (the
-   ACI) is **derived from the adapter's own identity store at
-   adapter startup** — it is not an operator-typed property, so it
-   cannot be mistyped and rotating the bootstrap-admin contact
-   cannot move it; the **SimpleX** bot contact id remains an
-   operator-configured per-adapter property, distinct from the
-   bootstrap-admin contact id and validated at adapter startup —
-   deriving it from the adapter's identity material too is planned
-   hardening, and its operator-typed-anchor risk is recorded in
-   `security.md` §Per-adapter admin threat profile. The list is
-   closed at startup — adding or removing an adapter is a restart.
-   The exact property keys (and the multi-adapter list shape) live
-   in design notes.
+   compares against, `messaging.md` §Required SPI surface) is
+   **derived from the adapter's own identity material at adapter
+   startup** — SimpleX: queried from the running `simplex-chat`;
+   Signal: read from the `signal-cli` identity store — and is
+   **not an operator-typed property**, so it cannot be mistyped
+   and rotating the bootstrap-admin contact cannot move it. The
+   list is closed at startup — adding or removing an adapter is a
+   restart. The exact property keys (and the multi-adapter list
+   shape) live in design notes.
 
 Everything else has a profile default.
 

@@ -143,19 +143,17 @@ class ProductionAdapterActivationTest {
         public Map<String, String> getConfigOverrides() {
             // simplex,signal CSV exercises the production multi-adapter
             // activation shape. The .admin entries satisfy gate 7
-            // (bootstrap admin union non-empty). The .bot-queue-address
-            // entry — DISTINCT from the .admin value — wires SimpleX's
-            // D10 trust anchor per the post-/redteam separation of
-            // bootstrap-admin from bot-identity; Signal's anchor is
-            // derived inside SignalAdapter.start() from the account store
-            // under .data-dir, so it has no config entry. The .binary,
-            // .data-dir, .ws-port, .account, .endpoint entries satisfy
-            // the remaining @ConfigProperty injection points on
-            // ProductionAdapterBeans; values are placeholders only —
-            // MessagingStartup is excluded so adapter.start() (and thus
-            // the Signal derivation) is never invoked on the production
-            // SimpleX / Signal beans within this test class, so no store
-            // fixture is needed.
+            // (bootstrap admin union non-empty). Neither bot-identity
+            // anchor has a config entry: both are derived inside the
+            // adapters' start() (Signal from the account store under
+            // .data-dir, SimpleX from the running simplex-chat's
+            // /show_address answer). The .binary, .data-dir, .ws-port,
+            // .account, .endpoint entries satisfy the remaining
+            // @ConfigProperty injection points on ProductionAdapterBeans;
+            // values are placeholders only — MessagingStartup is excluded
+            // so adapter.start() (and thus either derivation) is never
+            // invoked on the production SimpleX / Signal beans within
+            // this test class, so no fixture is needed.
             return Map.ofEntries(
                     Map.entry("quarkus.arc.exclude-types",
                             "app.zcat.infochat.provider.messaging.MessagingStartup"),
@@ -170,7 +168,6 @@ class ProductionAdapterActivationTest {
                     // SimpleXIdentity.isWellFormed (M1-208).
                     Map.entry("infochat.adapters.simplex.admin",
                             "SimplexBootstrapAdminQueueAddr0000000000000A"),
-                    Map.entry("infochat.adapters.simplex.bot-queue-address", "simplex-test-bot-identity"),
                     Map.entry("infochat.adapters.signal.binary", "/bin/sh"),
                     Map.entry("infochat.adapters.signal.data-dir", "/tmp"),
                     Map.entry("infochat.adapters.signal.account", "test-account"),

@@ -1,9 +1,41 @@
 ---
 id: M1-320
 title: "Derive SimpleX bot queue address via APIShowMyAddress"
-status: pending
+status: done
 created: 2026-06-12
-last_updated: 2026-06-12
+last_updated: 2026-06-13
+escalations:
+  - date: 2026-06-13
+    reason: premise-fail
+    reviewer_verdict_excerpt: |
+      N/A — discovered at /m1-tick start, before any implementation. The
+      plan-writer outline (target/m1-tick-outline-M1-320.md §Risks) found
+      the ticket's construction sweep undercounted: 10 test files construct
+      SimpleXAdapter (ticket says 9), 6 construct SimpleXIdentity (ticket
+      says 5); the missed file is SimpleXStartIdentityValidationTest, which
+      cannot survive the change (both its tests pin a failure message naming
+      the removed infochat.adapters.simplex.bot-queue-address property).
+      The body's §Out-of-scope re-target sentence authorizes the
+      modification class descriptively, but test_plan.modifies — which the
+      body itself designates "the test-integrity authorization" — omits the
+      file, so the reviewer's mechanical check would trip. Refine should add
+      it to test_plan.modifies (files_budget: 22 already covers it — the
+      outline counts 21 of 22 including this file).
+revisions:
+  - date: 2026-06-13
+    reason: premise-fail refine (test_plan.modifies omitted
+      SimpleXStartIdentityValidationTest, which pins the removed property's
+      failure message and cannot survive the change; also pinned acceptance
+      item 4's test artifact, resolving the clarity WARN)
+    snapshot:
+      status: escalated
+      escalation_reason: premise-fail
+      test_plan_modifies_at_snapshot: 11 files; SimpleXStartIdentityValidationTest absent
+      acceptance_item4_at_snapshot: |
+        The derived queue address feeds the D10 anchor: the SimpleXIdentity
+        used for group-mention routing carries the derived value. Named test
+        (or assertion within the derivation test) pins that post-start() group
+        routing compares against the derived value.
 blocked_by: [M1-319]
 files_budget: 22
 complexity: high
@@ -47,9 +79,12 @@ acceptance:
     SimpleXAdapterIdentityDerivationTest.derivedAnchorIndependentOfAdminConfig
     (differing infochat.adapters.simplex.admin value, anchor unchanged)."
   - "The derived queue address feeds the D10 anchor: the SimpleXIdentity
-    used for group-mention routing carries the derived value. Named test
-    (or assertion within the derivation test) pins that post-start() group
-    routing compares against the derived value."
+    used for group-mention routing carries the derived value. Pinned by a
+    committed delivered/dropped group-mention assertion pair inside
+    SimpleXAdapterIdentityDerivationTest.startDerivesQueueAddressFromShowMyAddress
+    (mention memberRef equal to the derived bare id is delivered; a control
+    id is dropped), proving post-start() group routing compares against the
+    derived value."
   - "docs/spec/deployment.md §Operator inputs item 7 states that the
     per-adapter bot contact id is derived from the adapter's own identity
     material at adapter startup (SimpleX: queried from the running
@@ -65,6 +100,7 @@ test_plan:
   adds:
     - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXAdapterIdentityDerivationTest.java
   modifies:
+    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXStartIdentityValidationTest.java
     - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXAdapterSkeletonTest.java
     - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXReconnectTest.java
     - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXGroupHandlerTest.java
@@ -84,12 +120,47 @@ spec_refs:
   - docs/spec/security.md §Per-adapter admin threat profile
 decision_refs: []
 decomposed_from: M1-318
-reviews: {}
+outline_file: target/m1-tick-outline-M1-320.md
+reviews:
+  - round: 1
+    date: 2026-06-13
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 19
+      added: 1032
+      removed: 203
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-13
+    verdict: CLEAN
+    base: 757d39b6
+    head: m1/M1-320-derive-simplex-bot-queue-addre (working tree, pre-commit)
+    verdict_file: docs/plan/m1/redteam/M1-320-2026-06-13.md
+    out_of_model_count: 3
+    note: |
+      Pre-commit audit after round-1 APPROVE. CLEAN — no findings; the 3
+      OUT-OF-MODEL observations are advisory only and were not escalated.
+      Ticket proceeds to /m1-tick commit unchanged; the audit file rides
+      into the ticket commit under the lifecycle-path exemption.
+clarity_check:
+  date: 2026-06-13
+  verdict: WARN
+  warnings:
+    - "Acceptance item 4 leaves the test artifact undetermined ('Named test (or
+      assertion within the derivation test)'). Prefer either a distinct test name
+      (e.g. SimpleXAdapterIdentityDerivationTest.derivedValueReachesGroupRouting)
+      or a committed named assertion within item 1's test — either form gives the
+      reviewer a checkable artifact."
+  blockers: []
 ---
 
 # M1-320: Derive SimpleX bot queue address via APIShowMyAddress

@@ -541,21 +541,6 @@ should pick admin placement deliberately:
   invite-issuance rate. This carve-out is what the "elevation
   vs registration" distinction above turns on.
 
-**Operator-typed bot-identity anchor (SimpleX only).** The SimpleX
-bot contact id that mention recognition compares against
-(`deployment.md` §Operator inputs item 7) is an operator-configured
-property in v1, not derived from the adapter's identity material. A
-mistyped or maliciously substituted value silently misdirects
-mention recognition: the bot may never see legitimate `@mentions`
-of itself, or accept a forged one, with no startup error beyond the
-non-blank check. Its *correctness* is the operator's
-responsibility — copy it from the adapter's own tooling (the
-SimpleX queue address) rather than typing it by hand, and treat it
-with the same care as the bot's identity material. Deriving it
-automatically is planned hardening. The Signal anchor carries no
-such risk: the bot's ACI is derived from `signal-cli`'s own account
-store at adapter startup and is not an operator input.
-
 ## User ban
 
 - Bot-wide flag with reason, actor, timestamp.

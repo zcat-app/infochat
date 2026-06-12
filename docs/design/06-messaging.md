@@ -491,7 +491,7 @@
    
   - Connection: WebSocket to simplex-cli (default ws://localhost:5225), configurable via infochat.adapters.simplex.url.
   - Authentication: cookie-based session against the local simplex-cli; cookie configured via infochat.adapters.simplex.session-token (read from env in production).
-  - **Bot identity material** (per [../spec/deployment.md](../spec/deployment.md) §Operator inputs item 7): the SimpleX adapter owns its own bot queue keypair. The on-disk path is configured via `infochat.adapters.simplex.identity-dir` (a directory containing the SimpleX queue keypair file plus the auxiliary state simplex-cli persists). The adapter validates the directory at startup — readable, contains a usable keypair, queue address derivable; failure refuses *that adapter's* startup but does not abort the Provider (per-adapter resilience, §6.7). The bot's per-adapter contact id is the queue address derived from this material at adapter startup; it is the value used by the mention-recognition rule (§6.2.3 / §6.10) and is NOT an operator-typed property.
+  - **Bot identity** (per [../spec/deployment.md](../spec/deployment.md) §Operator inputs item 7): the bot's per-adapter contact id — the queue address the mention-recognition rule compares against (§6.2.3 / §6.10) — is **queried from the running simplex-chat over the adapter's own WebSocket at `start()`** (a `/show_address`-shaped self-address command; the bare queue id is extracted from the returned contact link) and re-derived on supervised subprocess restart so the post-restart anchor stays consistent with the process serving the frames. It is NOT an operator-typed property and is not parsed from disk — no identity-dir property exists. Query, decode, or extraction failure refuses *that adapter's* startup but does not abort the Provider (per-adapter resilience, §6.7).
   - Identity: the SimpleX contact display ID (e.g., xftp://...); cryptographically bound. trustLevel = HIGH.
   - **Mention anchoring:** SimpleX's group event payloads carry a structured mention list. The adapter compares the bot's queue address (derived from bot identity material above) byte-equal against the mention target's contact id; it does NOT scan the message body for the bot's display name. `supportsMentionByContactId = true`.
   - **Auth-failure distinction:** the adapter classifies WebSocket close codes into two buckets — *auth failures* (401-equivalent codes from simplex-cli, e.g., revoked or invalid session token) and *network failures* (everything else: TCP reset, server unreachable, idle timeout). The two are handled with different reconnection policies; see §6.4.6. After 3 consecutive auth failures the adapter transitions to the terminal `state=AUTH_FAILED` and stops reconnecting until process restart.                                                                                                                                            
@@ -897,13 +897,11 @@
   infochat.adapters=simplex
   infochat.adapters.simplex.url=ws://localhost:5225
   infochat.adapters.simplex.session-token=${SIMPLEX_SESSION_TOKEN}
-  infochat.adapters.simplex.identity-dir=/var/lib/infochat/simplex
 
   # Production: SimpleX + Signal in the same Provider (the v1 multi-adapter shape)
   infochat.adapters=simplex,signal
   infochat.adapters.simplex.url=ws://localhost:5225
   infochat.adapters.simplex.session-token=${SIMPLEX_SESSION_TOKEN}
-  infochat.adapters.simplex.identity-dir=/var/lib/infochat/simplex
   infochat.adapters.signal.identity-dir=/var/lib/infochat/signal-cli/data/+15551234567
 
   # CI / tests (test-time deployment shape — must NOT include simplex/signal, §6.6)
@@ -925,7 +923,7 @@
 
   **Readiness rule.** The Provider's readiness probe reports **ready when at least one** activated adapter is connected (Provider can serve traffic on that adapter); **not-ready when zero adapters are connected**. Per-adapter connection state is exposed separately via metrics (`adapter.connection.status{adapter}`) so an operator can distinguish "fully healthy" from "degraded — one adapter down" without parsing readiness alone.
 
-  **Per-adapter bot identity material.** Each adapter owns its own bot identity material (SimpleX queue keypair, Signal account directory; §6.4.1, §6.5.4) and validates it at adapter startup. Provider does not synthesize bot identity. The bot's per-adapter contact id used for mention recognition is derived from this material at adapter startup; it is not an operator-typed property.
+  **Per-adapter bot identity material.** Each adapter owns its own bot identity material (SimpleX: the running simplex-chat's account state; Signal: the `signal-cli` account directory; §6.4.1, §6.5.4) and validates it at adapter startup. Provider does not synthesize bot identity. The bot's per-adapter contact id used for mention recognition is derived from that material at adapter startup — SimpleX: **queried from the running simplex-chat** over the adapter's own WebSocket; Signal: **read from the `signal-cli` identity store** — never an operator-typed property.
                                                                                    
   ---
   ## 6.8 Trust levels and operator opt-in
@@ -962,7 +960,7 @@
   ---                                                                                                                                                                                                                                                   
   ## 6.10 @mention rules in groups
 
-  Mention recognition is anchored to the bot's per-adapter cryptographic contact id (§6.2.3). There is **no operator-typed mention name** — the prior `infochat.adapter.bot-mention-name=@infochat-bot` property has been removed. The bot's per-adapter contact id is derived from the adapter's bot identity material at adapter startup (SimpleX queue address; Signal ACI / `mentionUuid`).
+  Mention recognition is anchored to the bot's per-adapter cryptographic contact id (§6.2.3). There is **no operator-typed mention name** — the prior `infochat.adapter.bot-mention-name=@infochat-bot` property has been removed. The bot's per-adapter contact id is derived from the adapter's bot identity material at adapter startup (SimpleX queue address, queried from the running simplex-chat; Signal ACI / `mentionUuid`, read from the `signal-cli` identity store).
 
   The adapter must:
 
