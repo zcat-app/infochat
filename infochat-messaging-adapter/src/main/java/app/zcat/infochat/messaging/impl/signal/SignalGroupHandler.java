@@ -171,7 +171,11 @@ final class SignalGroupHandler {
             return;
         }
         String senderAci = sourceUuid.toLowerCase(Locale.ROOT);
-        Identity sender = new Identity(senderAci, null, Instant.now());
+        // displayName is informational only (D10: never authoritative);
+        // signal-cli surfaces the sender's profile name as the envelope's
+        // sourceName, absent on profile-less senders → null displayName.
+        String sourceName = envelope.getString("sourceName", null);
+        Identity sender = new Identity(senderAci, sourceName, Instant.now());
         InboundMessage inbound = new InboundMessage(
                 sender,
                 new ScopeRef.Group(groupId),
@@ -209,7 +213,12 @@ final class SignalGroupHandler {
             }
             int start = mention.getInt("start", -1);
             int length = mention.getInt("length", -1);
-            if (start < 0 || length <= 0 || start + length > body.length()) {
+            // (long) widening before the sum: start and length are
+            // attacker-controlled wire ints, so a 32-bit start + length
+            // can wrap negative (e.g. start=Integer.MAX_VALUE, length=1)
+            // and slip past a ">" guard, then throw out of
+            // StringBuilder.delete and silently drop the whole message.
+            if (start < 0 || length <= 0 || (long) start + (long) length > body.length()) {
                 continue;
             }
             spans.add(new int[] {start, start + length});

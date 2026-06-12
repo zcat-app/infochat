@@ -1,9 +1,9 @@
 ---
 id: M1-293
 title: "Signal adapter: mention overflow, sourceName, capability values, launch classification"
-status: pending
+status: done
 created: 2026-06-11
-last_updated: 2026-06-11
+last_updated: 2026-06-12
 blocked_by: []
 files_budget: 12
 files_scope:
@@ -36,12 +36,42 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-12
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 137
+      removed: 22
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-12
+    verdict: CLEAN
+    base: main
+    head: m1/M1-293-signal-adapter-mediums
+    verdict_file: docs/plan/m1/redteam/M1-293-2026-06-12.md
+    out_of_model_count: 0
+    note: |
+      Adversarial review of the committed branch tip (f2a61b67, pre-merge)
+      against docs/spec/security.md. CLEAN: U-10 overflow fix, U-21
+      sourceName→displayName (informational-only per D10), U-31 capability
+      reconciliation, and U-20 launch-classification note open no gap
+      between threat-model promises and the diff.
+clarity_check:
+  date: 2026-06-12
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-293: Signal adapter: mention overflow, sourceName, capability values, launch classification

@@ -366,6 +366,72 @@ class SignalGroupHandlerTest {
                 "supportsMembershipEvents MUST remain true per spec");
     }
 
+    @Test
+    void overflowMentionSpanSkipped_messageStillDispatched() {
+        // U-10: a hostile bot-mention entry with start=Integer.MAX_VALUE,
+        // length=1 rides alongside a legitimate bot mention. The 32-bit
+        // start+length sum wraps negative and (pre-fix) slipped the
+        // "> body.length()" guard, so StringBuilder.delete threw and the
+        // dispatch-thread catch silently dropped the whole message — a
+        // per-message DoS of group functionality. The (long)-widened guard
+        // must skip the overflow span and still dispatch the message.
+        RecordingInbound inbound = new RecordingInbound();
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, new RecordingMembership());
+
+        handler.handleReceive(parse("""
+                {
+                  "envelope": {
+                    "sourceUuid": "AABBCCDD-1111-2222-3333-444455556666",
+                    "timestamp": 1700000012000,
+                    "dataMessage": {
+                      "timestamp": 1700000012000,
+                      "message": "@bot summarise this",
+                      "groupV2": {"id": "Z3JvdXBJZEJhc2U2NEVuY29kZWQ="},
+                      "mentions": [
+                        {"uuid": "11112222-3333-4444-5555-666677778888", "start": 0, "length": 4},
+                        {"uuid": "11112222-3333-4444-5555-666677778888", "start": 2147483647, "length": 1}
+                      ]
+                    }
+                  }
+                }
+                """));
+
+        assertEquals(1, inbound.messages.size(),
+                "a hostile overflow mention span MUST NOT drop the whole message");
+        assertEquals("summarise this", inbound.messages.get(0).text(),
+                "only the valid bot-mention span is stripped; the overflow span is skipped");
+    }
+
+    @Test
+    void groupSenderDisplayNamePopulatedFromSourceName() {
+        // U-21: the inbound Identity's displayName (informational only,
+        // D10) is taken from the envelope's sourceName on the group path.
+        RecordingInbound inbound = new RecordingInbound();
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, new RecordingMembership());
+
+        handler.handleReceive(parse("""
+                {
+                  "envelope": {
+                    "sourceUuid": "AABBCCDD-1111-2222-3333-444455556666",
+                    "sourceName": "Alice",
+                    "timestamp": 1700000013000,
+                    "dataMessage": {
+                      "timestamp": 1700000013000,
+                      "message": "@bot ping",
+                      "groupV2": {"id": "Z3JvdXBJZEJhc2U2NEVuY29kZWQ="},
+                      "mentions": [
+                        {"uuid": "11112222-3333-4444-5555-666677778888", "start": 0, "length": 4}
+                      ]
+                    }
+                  }
+                }
+                """));
+
+        assertEquals(1, inbound.messages.size());
+        assertEquals("Alice", inbound.messages.get(0).sender().displayName(),
+                "group sender displayName must come from the envelope sourceName");
+    }
+
     private static JsonObject parse(String json) {
         try (JsonReader r = Json.createReader(new StringReader(json))) {
             return r.readObject();

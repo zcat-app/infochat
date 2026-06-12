@@ -169,6 +169,29 @@ class SignalInboundDispatchTest {
         }
     }
 
+    @Test
+    void dmSenderDisplayNamePopulatedFromSourceName() throws Exception {
+        // U-21: the DM-path Identity's displayName (informational only,
+        // D10) is taken from the envelope's sourceName, threaded through
+        // ReceivedDm into the dispatched InboundMessage.
+        try (FakeSignalCli fake = new FakeSignalCli()) {
+            SignalJsonRpcClient client = new SignalJsonRpcClient(
+                    fake.endpoint(), "+15551111111", new SignalMessageCodec(), TEST_RESPONSE_TIMEOUT);
+            LinkedBlockingQueue<InboundMessage> delivered = new LinkedBlockingQueue<>();
+            client.setInboundHandler(delivered::add);
+            client.connect();
+            try {
+                fake.pushNotification("receive", receiveParams("hello", 1700000020000L));
+                InboundMessage msg = delivered.poll(QUEUE_WAIT_MS, TimeUnit.MILLISECONDS);
+                assertNotNull(msg, "DM must be delivered");
+                assertEquals("Alice", msg.sender().displayName(),
+                        "DM sender displayName must come from the envelope sourceName");
+            } finally {
+                client.disconnect();
+            }
+        }
+    }
+
     private static JsonObject receiveParams(String body, long timestamp) {
         return Json.createObjectBuilder()
                 .add("envelope", Json.createObjectBuilder()

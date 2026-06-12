@@ -848,7 +848,8 @@ final class SignalJsonRpcClient {
             return;
         }
         SignalMessageCodec.ReceivedDm received = dm.get();
-        Identity sender = new Identity(received.senderContactId(), null, Instant.now());
+        Identity sender = new Identity(
+                received.senderContactId(), received.senderDisplayName(), Instant.now());
         InboundMessage inbound = new InboundMessage(
                 sender,
                 new ScopeRef.Dm(received.senderContactId()),

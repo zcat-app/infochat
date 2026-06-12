@@ -241,7 +241,10 @@ final class SignalMessageCodec {
         if (timestamp == null) {
             return Optional.empty();
         }
-        return Optional.of(new ReceivedDm(canonicalizeAci(sourceUuid), body, timestamp));
+        // sourceName is the sender's profile name (informational only,
+        // D10: never authoritative); absent on profile-less senders → null.
+        String sourceName = envelope.getString("sourceName", null);
+        return Optional.of(new ReceivedDm(canonicalizeAci(sourceUuid), sourceName, body, timestamp));
     }
 
     /**
@@ -316,6 +319,12 @@ final class SignalMessageCodec {
         record Notification(String method, JsonObject params) implements JsonRpcMessage {}
     }
 
-    /** Result of decoding a DM-scope inbound from a {@code receive} notification. */
-    record ReceivedDm(String senderContactId, String body, long timestamp) {}
+    /**
+     * Result of decoding a DM-scope inbound from a {@code receive}
+     * notification. {@code senderDisplayName} is the sender's Signal
+     * profile name (informational only, D10), null when the envelope
+     * carries no {@code sourceName}.
+     */
+    record ReceivedDm(String senderContactId, @Nullable String senderDisplayName,
+                      String body, long timestamp) {}
 }

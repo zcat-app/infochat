@@ -66,19 +66,21 @@ public final class SignalAdapter implements MessagingAdapter {
 
     private static final Logger LOG = Logger.getLogger(SignalAdapter.class);
 
-    // 16 KiB laptop default per docs/design/06-messaging.md §6.2.2;
-    // maxSendsPerSecond / minEditInterval are best-guess
-    // defaults expected to be tuned against a live signal-cli.
+    // Values per docs/design/06-messaging.md §6.5.2: 16 KiB laptop
+    // inbound cap (§6.2.2), maxSendsPerSecond 5 (conservative; Signal's
+    // per-account ceiling is higher but the v1 LLM concurrency cap is the
+    // binding constraint), minEditInterval 600ms (ProgressNotifier
+    // coalescing floor, matching SimpleX).
     private static final CapabilityFlags CAPABILITIES = new CapabilityFlags(
             /* supportsMentionByContactId */ true,
             /* supportsMembershipEvents   */ true,
             /* supportsCodeFormatting     */ true,
             /* supportsMarkdownLinks      */ false,
             /* maxInboundMessageBytes     */ 16_384,
-            /* maxSendsPerSecond          */ 8,
+            /* maxSendsPerSecond          */ 5,
             /* supportsMessageEdit        */ true,
             /* supportsTypingIndicator    */ true,
-            /* minEditInterval            */ Duration.ZERO);
+            /* minEditInterval            */ Duration.ofMillis(600));
 
     private static final Duration ENDPOINT_PROBE_TIMEOUT = Duration.ofSeconds(15);
     private static final Duration ENDPOINT_PROBE_INTERVAL = Duration.ofMillis(100);

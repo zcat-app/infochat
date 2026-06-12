@@ -26,9 +26,10 @@ class SignalAdapterSkeletonTest {
         assertTrue(caps.supportsCodeFormatting(), "design §6.5.2: Signal renders monospace");
         assertFalse(caps.supportsMarkdownLinks(), "v1 adapters MUST declare supportsMarkdownLinks=false");
         assertEquals(16_384, caps.maxInboundMessageBytes());
-        assertEquals(8, caps.maxSendsPerSecond());
+        assertEquals(5, caps.maxSendsPerSecond(), "design §6.5.2: conservative 5/s");
         assertTrue(caps.supportsMessageEdit());
         assertTrue(caps.supportsTypingIndicator());
-        assertEquals(Duration.ZERO, caps.minEditInterval());
+        assertEquals(Duration.ofMillis(600), caps.minEditInterval(),
+                "design §6.5.2: 600ms coalescing floor, matching SimpleX");
     }
 }
