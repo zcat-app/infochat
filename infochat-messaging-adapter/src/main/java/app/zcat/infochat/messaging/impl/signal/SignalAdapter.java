@@ -92,8 +92,15 @@ public final class SignalAdapter implements MessagingAdapter {
     @Nullable private final String binary;
     @Nullable private final String dataDir;
     @Nullable private final String account;
-    @Nullable private final String botAci;
     @Nullable private final InetSocketAddress daemonEndpoint;
+
+    // The D10 trust anchor for group-mode mention recognition. Derived
+    // at start() from the signal-cli account store under dataDir (via
+    // adoptBotAci) — never from operator config, so the anchor and the
+    // mention payloads it is compared against originate from the same
+    // tool. volatile: written by start()'s caller thread, read by
+    // groupHandler() on the JSON-RPC reader/dispatch threads.
+    @Nullable private volatile String botAci;
 
     @Nullable private volatile SignalSubprocess subprocess;
     @Nullable private volatile SignalJsonRpcClient client;
@@ -121,7 +128,6 @@ public final class SignalAdapter implements MessagingAdapter {
         this.binary = null;
         this.dataDir = null;
         this.account = null;
-        this.botAci = null;
         this.daemonEndpoint = null;
     }
 
@@ -133,14 +139,15 @@ public final class SignalAdapter implements MessagingAdapter {
      * misconfigured deployment fails startup, not the first
      * {@link #start()}.
      *
+     * <p>The bot's ACI — the D10 trust anchor for group-mode mention
+     * recognition — is NOT a construction input: {@link #start()}
+     * derives it from the signal-cli account store under
+     * {@code dataDir} (see {@link SignalAccountStore} /
+     * {@link #adoptBotAci}).</p>
+     *
      * @param binary         the signal-cli executable path.
      * @param dataDir        the signal-cli data directory.
      * @param account        the signal-cli account identifier (E.164 phone or ACI).
-     * @param botAci         the bot's per-adapter ACI (UUID) — the D10
-     *                       trust anchor for group-mode mention
-     *                       recognition. Sourced by Provider-side
-     *                       wiring (M1-035b/M1-105) from
-     *                       {@code infochat.adapters.signal.bot-aci}.
      * @param daemonEndpoint the local TCP endpoint signal-cli's
      *                       {@code daemon --tcp host:port} will bind
      *                       and the JSON-RPC client will connect to.
@@ -148,16 +155,10 @@ public final class SignalAdapter implements MessagingAdapter {
     public SignalAdapter(String binary,
                          String dataDir,
                          String account,
-                         String botAci,
                          InetSocketAddress daemonEndpoint) {
         this.binary = binary;
         this.dataDir = dataDir;
         this.account = account;
-        // Canonicalize at construction so the cross-adapter
-        // (adapter, contact_id) join key from messaging.md §Per-adapter
-        // trust level cannot be broken by case-folding upstream — the
-        // group handler's mention check compares lower-cased ACIs.
-        this.botAci = botAci.toLowerCase(Locale.ROOT);
         this.daemonEndpoint = daemonEndpoint;
     }
 
@@ -184,37 +185,31 @@ public final class SignalAdapter implements MessagingAdapter {
     /**
      * Start the signal-cli subprocess, wait for its TCP JSON-RPC
      * endpoint to become reachable, then open the JSON-RPC client.
+     * Before the spawn, derives the bot's ACI — the D10 trust anchor —
+     * from the signal-cli account store under the configured data dir
+     * ({@link SignalAccountStore} + {@link #adoptBotAci}), so a
+     * misconfigured or unreadable identity store fails THIS adapter's
+     * startup as a config-shaped error, never as spawn noise.
      *
      * @throws MessagingException on transport startup failure (the SPI
      *         contract): subprocess spawn failure, daemon endpoint not
      *         reachable within the probe timeout, or JSON-RPC connect
      *         failure.
      * @throws IllegalStateException if the capability-only constructor
-     *         was used, or on invalid operator config (malformed bot ACI) —
-     *         programming/config errors, not transport failures.
+     *         was used, or the bot-ACI derivation fails (missing,
+     *         unreadable, or malformed account store; no entry for the
+     *         configured account; malformed ACI) — programming/config
+     *         errors, not transport failures.
      */
     @Override
     public void start() throws MessagingException {
         if (binary == null || dataDir == null || account == null
-                || botAci == null || daemonEndpoint == null) {
+                || daemonEndpoint == null) {
             throw new IllegalStateException(
                     "SignalAdapter.start() requires the production constructor "
-                            + "(binary, dataDir, account, botAci, daemonEndpoint).");
+                            + "(binary, dataDir, account, daemonEndpoint).");
         }
-        // D10 trust anchor: the bot's ACI must be a well-formed Signal
-        // account identifier — a canonical UUID (the constructor already
-        // lower-cased the operator value). A blank or mistyped ACI breaks
-        // the ACI-anchored mention recognition group handler builds
-        // (lower-cased compare in SignalGroupHandler) silently: no mention
-        // ever matches the bot. Failing startup is the only observable
-        // moment; property key is named so the operator can fix it directly.
-        if (!SignalIdentity.isWellFormed(botAci)) {
-            throw new IllegalStateException(
-                    "infochat.adapters.signal.bot-aci must be set to the"
-                            + " bot's own Signal ACI — a canonical UUID"
-                            + " (distinct from the bootstrap admin's ACI in"
-                            + " infochat.adapters.signal.admin)");
-        }
+        adoptBotAci(SignalAccountStore.readAci(dataDir, account));
         ProcessBuilder pb = new ProcessBuilder(
                 binary,
                 "--config", dataDir,
@@ -257,6 +252,41 @@ public final class SignalAdapter implements MessagingAdapter {
         attachClient(c);
         connectClient(c, sp);
         LOG.infof("Signal adapter started; daemon endpoint=%s", daemonEndpoint);
+    }
+
+    /**
+     * Adopt a derived bot ACI as the D10 trust anchor: canonicalize to
+     * lowercase, validate well-formedness, assign. {@link #start()}
+     * composes this with {@link SignalAccountStore#readAci}; the
+     * canonicalization lives HERE (not in the store read or the
+     * constructor) so every adoption path applies the identical
+     * treatment — the cross-adapter (adapter, contact_id) join key from
+     * messaging.md §Per-adapter trust level must not be breakable by
+     * case-folding upstream, and {@code SignalGroupHandler}'s mention
+     * check compares lower-cased ACIs. Lower-casing runs BEFORE
+     * {@link SignalIdentity#isWellFormed} because well-formedness means
+     * canonical-lowercase-UUID.
+     *
+     * <p>Package-private seam mirroring {@link #attachClient} /
+     * {@link #attachSubprocess}: this is the exact production adoption
+     * path, exercised by tests that drive group-scope envelopes without
+     * {@link #start()} (which requires a real signal-cli account
+     * store).</p>
+     *
+     * @throws IllegalStateException if the canonicalized value is not a
+     *         well-formed ACI. The message names the config keys, never
+     *         the value (D37 log hygiene).
+     */
+    void adoptBotAci(String aci) {
+        String canonical = aci.toLowerCase(Locale.ROOT);
+        if (!SignalIdentity.isWellFormed(canonical)) {
+            throw new IllegalStateException(
+                    "ACI derived from the signal-cli account store is not a canonical UUID —"
+                            + " the store layout may not match the expected signal-cli format"
+                            + " (check " + SignalConfig.DATA_DIR_KEY
+                            + " and " + SignalConfig.ACCOUNT_KEY + ")");
+        }
+        this.botAci = canonical;
     }
 
     /**
@@ -499,16 +529,18 @@ public final class SignalAdapter implements MessagingAdapter {
      *
      * @return a SignalGroupHandler ready to translate group-scope
      *         signal-cli notifications.
-     * @throws IllegalStateException if the capability-only constructor
-     *         was used (no botAci available).
+     * @throws IllegalStateException if no bot ACI has been derived yet
+     *         ({@link #start()} / {@link #adoptBotAci} not run — ACI
+     *         mention recognition has no anchor without it).
      */
     SignalGroupHandler groupHandler() {
-        if (botAci == null) {
+        String anchor = botAci;
+        if (anchor == null) {
             throw new IllegalStateException(
-                    "SignalAdapter.groupHandler() requires the production constructor "
-                            + "(botAci is needed for ACI mention recognition).");
+                    "SignalAdapter.groupHandler() requires a derived bot ACI "
+                            + "(start() has not run).");
         }
-        return new SignalGroupHandler(botAci, handler, membershipHandler);
+        return new SignalGroupHandler(anchor, handler, membershipHandler);
     }
 
     private SignalJsonRpcClient requireConnected(String op) throws MessagingException {

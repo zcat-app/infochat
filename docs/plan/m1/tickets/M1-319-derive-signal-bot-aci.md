@@ -1,7 +1,7 @@
 ---
 id: M1-319
 title: "Derive Signal bot ACI from signal-cli identity store"
-status: pending
+status: done
 created: 2026-06-12
 last_updated: 2026-06-12
 blocked_by: []
@@ -11,6 +11,7 @@ risk: high
 round_cap: 3
 security_relevant: true
 migration_touch: false
+outline_file: target/m1-tick-outline-M1-319.md
 out_of_scope:
   - SimpleX derivation — that is M1-320.
   - The D10 mention-comparison logic itself (SignalGroupHandler's ACI
@@ -77,12 +78,42 @@ spec_refs:
   - docs/spec/security.md §Per-adapter admin threat profile
 decision_refs: []
 decomposed_from: M1-318
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-12
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 22
+      added: 519
+      removed: 135
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-12
+    verdict: CLEAN
+    base: de70d149a502a84df3c0dbb884bc9ca1eb309ce1
+    head: working tree of m1/M1-319-derive-signal-bot-aci-from-sig (pre-commit)
+    verdict_file: docs/plan/m1/redteam/M1-319-2026-06-12.md
+    out_of_model_count: 2
+    note: |
+      Pre-commit audit after round-1 APPROVE. CLEAN — the derivation
+      diff delivers the security.md §Per-adapter admin threat profile
+      narrowing it claims (Signal anchor no longer operator-typed).
+      Two advisory out-of-model observations recorded in the verdict
+      file; no remediation tickets spawned.
+clarity_check:
+  date: 2026-06-12
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-319: Derive Signal bot ACI from signal-cli identity store

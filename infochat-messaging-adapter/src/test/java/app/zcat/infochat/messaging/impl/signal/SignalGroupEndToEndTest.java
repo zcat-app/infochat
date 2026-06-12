@@ -44,8 +44,8 @@ class SignalGroupEndToEndTest {
                     "/usr/bin/signal-cli",
                     "/tmp/signal-data",
                     "+15551111111",
-                    BOT_ACI,
                     fake.endpoint());
+            adapter.adoptBotAci(BOT_ACI);
             LinkedBlockingQueue<InboundMessage> inbound = new LinkedBlockingQueue<>();
             LinkedBlockingQueue<MembershipEvent> membership = new LinkedBlockingQueue<>();
             adapter.setInboundHandler(inbound::add);
@@ -123,8 +123,8 @@ class SignalGroupEndToEndTest {
                     "/usr/bin/signal-cli",
                     "/tmp/signal-data",
                     "+15551111111",
-                    BOT_ACI,
                     fake.endpoint());
+            adapter.adoptBotAci(BOT_ACI);
             LinkedBlockingQueue<InboundMessage> delivered = new LinkedBlockingQueue<>();
             AtomicBoolean firstThrown = new AtomicBoolean(false);
             adapter.setInboundHandler(msg -> {

@@ -60,11 +60,14 @@ import java.util.function.Consumer;
  *       was once planned and dropped; {@link SimpleXIdentity} is a
  *       plain config-sourced value holder.</li>
  *   <li>Signal reads {@code infochat.adapters.signal.binary},
- *       {@code .data-dir}, {@code .account},
- *       {@code .bot-aci} (the bot's own per-adapter ACI — DISTINCT
- *       from {@code infochat.adapters.signal.admin}, which is the
- *       bootstrap admin's ACI), and {@code .endpoint} (host:port of
- *       signal-cli's TCP daemon).</li>
+ *       {@code .data-dir}, {@code .account}, and {@code .endpoint}
+ *       (host:port of signal-cli's TCP daemon). The bot's own ACI —
+ *       the D10 trust anchor — is NOT a config input: {@code
+ *       SignalAdapter.start()} derives it from the signal-cli account
+ *       store under {@code .data-dir}, so it cannot be mistyped and an
+ *       admin-key rotation ({@code .admin}, the bootstrap admin's ACI,
+ *       consumed by {@link AdapterRegistry} gate 7) cannot move
+ *       it.</li>
  * </ul>
  *
  * <p><b>Admin notifier stub.</b> {@link SimpleXAdapter}'s constructor
@@ -120,13 +123,6 @@ public class ProductionAdapterBeans {
     @ConfigProperty(name = "infochat.adapters.signal.account")
     Optional<String> signalAccount;
 
-    // The bot's own Signal ACI — the D10 trust anchor for ACI-anchored
-    // mention recognition. Distinct from .admin, which is the bootstrap
-    // admin's ACI consumed by AdapterRegistry gate 7. Validated as
-    // non-blank inside SignalAdapter.start().
-    @ConfigProperty(name = "infochat.adapters.signal.bot-aci")
-    Optional<String> signalBotAci;
-
     @ConfigProperty(name = "infochat.adapters.signal.endpoint", defaultValue = "127.0.0.1:7654")
     String signalEndpoint;
 
@@ -171,7 +167,6 @@ public class ProductionAdapterBeans {
                 signalBinary.orElse(""),
                 signalDataDir.orElse(""),
                 signalAccount.orElse(""),
-                signalBotAci.orElse(""),
                 endpoint);
     }
 

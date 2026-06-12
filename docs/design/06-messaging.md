@@ -726,8 +726,8 @@
 
   Per [../spec/deployment.md](../spec/deployment.md) §Operator inputs item 7, the Signal adapter owns its own bot identity material. The on-disk shape depends on the §6.5.1 wire-protocol decision; for the provisional `signal-cli` JSON-RPC default:
 
-  - The adapter expects a `signal-cli` account directory at the path configured via `infochat.adapters.signal.identity-dir` (typically `~/.local/share/signal-cli/data/<account>/` or a path mounted into the container). The directory contains the registered account's identity keys, profile keys, and signal-cli's local message store.
-  - The bot's per-adapter contact id (the ACI used by the mention-recognition rule, §6.2.3 / §6.10) is read from this directory at adapter startup; it is NOT an operator-typed property. The adapter validates that the directory is readable, contains a registered account, and the ACI is parseable — failure refuses *that adapter's* startup but does not abort the Provider (per-adapter resilience, §6.7).
+  - The adapter runs `signal-cli` against the operator-configured data directory `infochat.adapters.signal.data-dir` (passed as signal-cli's `--config` directory; typically `~/.local/share/signal-cli` or a path mounted into the container) with the account selected by `infochat.adapters.signal.account`. There is no separate identity-dir property. The directory contains the registered account's identity keys, profile keys, and signal-cli's local message store; the boot-time `SignalConfig` bean validates the binary / data-dir / account inputs eagerly.
+  - The bot's per-adapter contact id (the ACI used by the mention-recognition rule, §6.2.3 / §6.10) is derived at adapter startup from signal-cli's accounts index at `<data-dir>/data/accounts.json`: the entry whose `number` equals the configured account carries the account's ACI in its `uuid` field. It is NOT an operator-typed property. The derived value is canonicalized to lowercase and validated as a canonical UUID; any failure — missing/unreadable/malformed index, no entry for the configured account, absent or malformed ACI — refuses *that adapter's* startup but does not abort the Provider (per-adapter resilience, §6.7). The index is read in preference to the per-account data file because the index hop is required to locate that file anyway (its `path` need not equal the account number) and the index's flat entry shape has been stable across signal-cli versions while the per-account file's nested layout has churned. The format is signal-cli-internal and pinned to the one current layout: there is no integration test against a real signal-cli, so a signal-cli upgrade that changes the layout surfaces as a loud startup failure at the next restart, never as silent mis-derivation.
   - Account registration (`signal-cli register` / verification SMS) is an out-of-band operator step; the adapter never registers an account itself. A "directory present but no registered account" failure is logged at ERROR and surfaced as `state=AUTH_FAILED` (terminal until restart), parallel to the SimpleX session-token-revoked path in §6.4.6.
 
   An alternative wire-protocol path (`libsignal-service-java` or `signald`) would substitute its own identity-material shape; the spec-level commitment is "the adapter owns its identity material and validates it at startup," which is path-independent.
@@ -735,12 +735,11 @@
   ### 6.5.5 Lifecycle
 
   SignalAdapter.start(handler):
-    1. Validate `infochat.adapters.signal.identity-dir` (§6.5.4)
+    1. Derive the bot ACI from the account store under `infochat.adapters.signal.data-dir` (§6.5.4; the `.data-dir` / `.account` inputs themselves are validated by the boot-time `SignalConfig` bean); canonicalize, validate, cache as the bot's per-adapter contact id. Runs BEFORE the spawn so an unreadable or malformed store surfaces as a config-shaped startup failure, not as subprocess noise
     2. Spawn / connect to the `signal-cli` JSON-RPC endpoint
-    3. Read the account ACI from the identity store; cache as the bot's per-adapter contact id
-    4. Subscribe to the account's inbound message stream
-    5. Spawn event reader → SignalEventDecoder → InboundHandler
-    6. Spawn outbound queue worker → SignalCommandEncoder → JSON-RPC send
+    3. Subscribe to the account's inbound message stream
+    4. Spawn event reader → SignalEventDecoder → InboundHandler
+    5. Spawn outbound queue worker → SignalCommandEncoder → JSON-RPC send
 
   SignalAdapter.stop():
     1. Drain outbound queue (best-effort, max 5s)

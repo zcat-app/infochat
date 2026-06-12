@@ -6,6 +6,7 @@ import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.messaging.impl.signal.FakeSignalCli;
+import app.zcat.infochat.messaging.impl.signal.SignalAccountStoreFixture;
 import app.zcat.infochat.messaging.impl.signal.SignalAdapter;
 import app.zcat.infochat.messaging.impl.simplex.FakeSimpleXProcess;
 import app.zcat.infochat.messaging.impl.simplex.SimpleXAdapter;
@@ -31,6 +32,8 @@ import org.junit.jupiter.api.TestMethodOrder;
 import javax.sql.DataSource;
 import java.io.IOException;
 import java.net.http.HttpClient;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -148,11 +151,23 @@ class MultiAdapterProductionIT {
     // connects; SignalCli starts its accept thread in its own constructor.
     static final FakeSimpleXProcess sharedFakeSimplex;
     static final FakeSignalCli sharedFakeSignal;
+    // signal-cli account-store fixture: SignalAdapter.start() derives the
+    // bot's ACI (the D10 anchor) from the store under .data-dir, so every
+    // adapter that really starts in this IT — the CDI bean and the
+    // per-test factory adapters — needs a readable store. The fixture ACI
+    // is the value the removed .bot-aci property used to supply, so the
+    // anchor the tests observe is unchanged. Created in the same
+    // static-init block as the fakes because Profile.getConfigOverrides()
+    // runs after class load.
+    static final Path sharedSignalStoreDir;
     static {
         try {
             sharedFakeSimplex = new FakeSimpleXProcess();
             sharedFakeSimplex.start();
             sharedFakeSignal = new FakeSignalCli();
+            sharedSignalStoreDir = Files.createTempDirectory("m1-109-signal-store-");
+            SignalAccountStoreFixture.writeStore(sharedSignalStoreDir,
+                    "m1-109-test-account", "00000000-0000-0000-0000-000000000002");
         } catch (IOException e) {
             throw new ExceptionInInitializerError(e);
         }
@@ -499,12 +514,12 @@ class MultiAdapterProductionIT {
 
     private static SignalAdapter newSignalAdapter(FakeSignalCli fake) {
         // Same /bin/sleep stand-in pattern as SimpleX. SignalAdapter.start()
+        // derives the bot ACI from the shared account-store fixture, then
         // awaits the daemon endpoint via TCP connect probe; the fake
         // accepts on its bound port so the probe succeeds and the
         // SignalJsonRpcClient connects.
         return new SignalAdapter(
-                "/bin/sleep", "/tmp", "m1-109-test-account",
-                "00000000-0000-0000-0000-000000000002",
+                "/bin/sleep", sharedSignalStoreDir.toString(), "m1-109-test-account",
                 fake.endpoint());
     }
 
@@ -622,10 +637,11 @@ class MultiAdapterProductionIT {
             // (every CSV name resolves to a registered bean — the
             // production beans live in ProductionAdapterBeans (M1-120)).
             // Gate 7 (bootstrap admin union non-empty) is satisfied by the
-            // two .admin entries. The .bot-queue-address / .bot-aci
-            // entries — DISTINCT from the .admin values — wire each
-            // adapter's D10 trust anchor per M1-120's post-redteam
-            // separation of bootstrap-admin from bot-identity. The
+            // two .admin entries. The .bot-queue-address entry — DISTINCT
+            // from the .admin value — wires SimpleX's D10 trust anchor per
+            // M1-120's post-redteam separation of bootstrap-admin from
+            // bot-identity; Signal's anchor is derived at start() from the
+            // account-store fixture under .data-dir, not configured. The
             // .binary / .data-dir / .ws-port / .account / .endpoint
             // entries point at the shared in-process fakes so
             // adapter.start() (called reflectively by MessagingStartup at
@@ -652,12 +668,11 @@ class MultiAdapterProductionIT {
                     Map.entry("infochat.adapters.simplex.bot-queue-address",
                             "M1109SimplexBotIdentityQueueAddr00000000000A"),
                     Map.entry("infochat.adapters.signal.binary", "/bin/sleep"),
-                    Map.entry("infochat.adapters.signal.data-dir", "/tmp"),
+                    Map.entry("infochat.adapters.signal.data-dir",
+                            sharedSignalStoreDir.toString()),
                     Map.entry("infochat.adapters.signal.account", "m1-109-test-account"),
                     Map.entry("infochat.adapters.signal.admin",
                             "00000000-0000-0000-0000-000000000001"),
-                    Map.entry("infochat.adapters.signal.bot-aci",
-                            "00000000-0000-0000-0000-000000000002"),
                     Map.entry("infochat.adapters.signal.endpoint",
                             "127.0.0.1:" + sharedFakeSignal.endpoint().getPort())
             );

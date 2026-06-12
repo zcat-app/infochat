@@ -46,7 +46,6 @@ class SignalReconnectTest {
 
     private static final Duration TEST_RESPONSE_TIMEOUT = Duration.ofSeconds(1);
     private static final String ACCOUNT = "+15551111111";
-    private static final String BOT_ACI = "11112222-3333-4444-5555-666677778888";
     private static final String PEER = "+15557654321";
 
     // Same aggressive curve as SignalSubprocessTest.FAST_BACKOFF — the
@@ -59,7 +58,7 @@ class SignalReconnectTest {
     void sendDuringOutageFailsTransient() throws Exception {
         try (FakeSignalCli fake = new FakeSignalCli()) {
             SignalAdapter adapter = new SignalAdapter(
-                    "/usr/bin/signal-cli", "/tmp/signal-data", ACCOUNT, BOT_ACI, fake.endpoint());
+                    "/usr/bin/signal-cli", "/tmp/signal-data", ACCOUNT, fake.endpoint());
             SignalSubprocess sp = new SignalSubprocess(
                     new ProcessBuilder("/bin/sh", "-c", "sleep 30"),
                     fake.endpoint(), FAST_BACKOFF, /* maxRestarts */ 5);
@@ -96,7 +95,7 @@ class SignalReconnectTest {
     void sendSucceedsAfterSupervisedRestart() throws Exception {
         try (FakeSignalCli fake = new FakeSignalCli()) {
             SignalAdapter adapter = new SignalAdapter(
-                    "/usr/bin/signal-cli", "/tmp/signal-data", ACCOUNT, BOT_ACI, fake.endpoint());
+                    "/usr/bin/signal-cli", "/tmp/signal-data", ACCOUNT, fake.endpoint());
             SignalSubprocess sp = new SignalSubprocess(
                     new ProcessBuilder("/bin/sh", "-c", "sleep 30"),
                     fake.endpoint(), FAST_BACKOFF, /* maxRestarts */ 5);
@@ -134,7 +133,7 @@ class SignalReconnectTest {
     void inboundDeliveredExactlyOnceAfterReconnect() throws Exception {
         try (FakeSignalCli fake = new FakeSignalCli()) {
             SignalAdapter adapter = new SignalAdapter(
-                    "/usr/bin/signal-cli", "/tmp/signal-data", ACCOUNT, BOT_ACI, fake.endpoint());
+                    "/usr/bin/signal-cli", "/tmp/signal-data", ACCOUNT, fake.endpoint());
             LinkedBlockingQueue<InboundMessage> delivered = new LinkedBlockingQueue<>();
             adapter.setInboundHandler(delivered::add);
             SignalSubprocess sp = new SignalSubprocess(

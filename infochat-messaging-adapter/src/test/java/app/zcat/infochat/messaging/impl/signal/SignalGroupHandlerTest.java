@@ -309,8 +309,8 @@ class SignalGroupHandlerTest {
                 "/usr/bin/signal-cli",
                 "/tmp/signal-data",
                 "+15551234567",
-                BOT_ACI,
                 endpoint);
+        adapter.adoptBotAci(BOT_ACI);
         RecordingInbound inbound = new RecordingInbound();
         RecordingMembership membership = new RecordingMembership();
         adapter.setInboundHandler(inbound);

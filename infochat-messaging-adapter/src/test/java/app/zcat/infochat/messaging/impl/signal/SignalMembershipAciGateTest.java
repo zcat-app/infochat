@@ -102,8 +102,8 @@ class SignalMembershipAciGateTest {
                 "/usr/bin/signal-cli",
                 "/tmp/signal-data",
                 "+15551234567",
-                BOT_ACI,
                 new InetSocketAddress("127.0.0.1", 0));
+        adapter.adoptBotAci(BOT_ACI);
         List<MembershipEvent> delivered = new ArrayList<>();
         adapter.setMembershipEventHandler(delivered::add);
         adapter.groupHandler().handleReceive(parse(envelopeJson));

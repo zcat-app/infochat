@@ -106,8 +106,8 @@ class SignalInboundDispatchTest {
                     "/usr/bin/signal-cli",
                     "/tmp/signal-data",
                     "+15551111111",
-                    BOT_ACI,
                     fake.endpoint());
+            adapter.adoptBotAci(BOT_ACI);
             LinkedBlockingQueue<String> onMessageThreads = new LinkedBlockingQueue<>();
             LinkedBlockingQueue<String> onEventThreads = new LinkedBlockingQueue<>();
             adapter.setInboundHandler(

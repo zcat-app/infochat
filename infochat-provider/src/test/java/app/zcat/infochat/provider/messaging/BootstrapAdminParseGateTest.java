@@ -88,8 +88,6 @@ class BootstrapAdminParseGateTest {
                     Map.entry("infochat.adapters.signal.account", "test-account"),
                     // Malformed signal.admin: not a UUID, so gate 7b rejects it.
                     Map.entry("infochat.adapters.signal.admin", "not-a-valid-aci"),
-                    Map.entry("infochat.adapters.signal.bot-aci",
-                            "00000000-0000-0000-0000-000000000002"),
                     Map.entry("infochat.adapters.signal.endpoint", "127.0.0.1:7654")
             );
         }

@@ -33,8 +33,7 @@ class SignalStartRaceTest {
     void envelopeFlushedAtConnectTimeIsDelivered() throws Exception {
         try (FakeSignalCli fake = new FakeSignalCli()) {
             SignalAdapter adapter = new SignalAdapter(
-                    "/bin/true", "/tmp", "+15551111111",
-                    "11112222-3333-4444-5555-666677778888", fake.endpoint());
+                    "/bin/true", "/tmp", "+15551111111", fake.endpoint());
             LinkedBlockingQueue<InboundMessage> delivered = new LinkedBlockingQueue<>();
             // Registry wiring order: the handler is registered on the
             // adapter before the transport starts.
