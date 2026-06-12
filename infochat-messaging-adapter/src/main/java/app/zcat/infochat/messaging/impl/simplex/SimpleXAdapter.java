@@ -437,31 +437,85 @@ public final class SimpleXAdapter implements MessagingAdapter {
 
     @Override
     public void update(MessageHandle handle, String body) throws MessagingException {
-        SimpleXMessageHandle internal = requireKnownAndOpen(handle);
+        TrackedHandle tracked = requireKnownAndOpen(handle);
         SimpleXWebSocketClient ws = requireConnected();
-        String corrId = nextCorrId();
-        String envelope = SimpleXMessageCodec.encodeUpdateCommand(
-                corrId, internal.chatItemId(), internal.scope(), body);
-        // update returns the (possibly changed) chatItemId — the SimpleX
-        // surface re-acks edits with the same id. We don't need the return
-        // value here, only the success/failure outcome.
-        outboundRate.acquire();
-        ws.sendCommand(corrId, envelope, ACK_TIMEOUT);
+        if (hasFallenBack(tracked)) {
+            // A prior edit on this handle was unrecoverable; never edit
+            // again (design §6.4.5: "subsequent update calls continue to
+            // fall back") — go straight to a fresh send.
+            fallbackSend(ws, tracked.handle, body);
+            return;
+        }
+        try {
+            String corrId = nextCorrId();
+            String envelope = SimpleXMessageCodec.encodeUpdateCommand(
+                    corrId, tracked.handle.chatItemId(), tracked.handle.scope(), body);
+            // update returns the (possibly changed) chatItemId — the SimpleX
+            // surface re-acks edits with the same id. We don't need the return
+            // value here, only the success/failure outcome.
+            outboundRate.acquire();
+            ws.sendCommand(corrId, envelope, ACK_TIMEOUT);
+        } catch (MessagingException e) {
+            // TRANSIENT (reconnect gap, network reset) must propagate so the
+            // Provider retries the same edit; only an unrecoverable PERMANENT
+            // edit triggers the fresh-send fallback.
+            if (e.category() != FailureCategory.PERMANENT) {
+                throw e;
+            }
+            markFellBack(handle.opaqueValue());
+            fallbackSend(ws, tracked.handle, body);
+        }
     }
 
     @Override
     public void finalizeMessage(MessageHandle handle, String body) throws MessagingException {
-        SimpleXMessageHandle internal = requireKnownAndOpen(handle);
+        TrackedHandle tracked = requireKnownAndOpen(handle);
         SimpleXWebSocketClient ws = requireConnected();
-        String corrId = nextCorrId();
-        String envelope = SimpleXMessageCodec.encodeFinalizeCommand(
-                corrId, internal.chatItemId(), internal.scope(), body);
-        outboundRate.acquire();
-        ws.sendCommand(corrId, envelope, ACK_TIMEOUT);
+        if (hasFallenBack(tracked)) {
+            fallbackSend(ws, tracked.handle, body);
+            markFinalized(handle.opaqueValue());
+            return;
+        }
+        try {
+            String corrId = nextCorrId();
+            String envelope = SimpleXMessageCodec.encodeFinalizeCommand(
+                    corrId, tracked.handle.chatItemId(), tracked.handle.scope(), body);
+            outboundRate.acquire();
+            ws.sendCommand(corrId, envelope, ACK_TIMEOUT);
+        } catch (MessagingException e) {
+            if (e.category() != FailureCategory.PERMANENT) {
+                throw e;
+            }
+            // The terminal edit is unrecoverable (over-cap encode rejection,
+            // or a deleted/too-old item): fall back to a fresh send so the
+            // final body still reaches the reader instead of freezing the
+            // placeholder. finalize clears the fallback path (design §6.4.5)
+            // by finalizing the handle below.
+            fallbackSend(ws, tracked.handle, body);
+        }
         // SPI contract: after finalizeMessage, any update() on the same
         // handle MUST throw PERMANENT. The flag is checked above in
-        // requireKnownAndOpen — set it here on success.
+        // requireKnownAndOpen — set it here on success (edit or fallback).
         markFinalized(handle.opaqueValue());
+    }
+
+    /**
+     * Fresh-send fallback for an unrecoverable edit (design §6.3.8: "the
+     * adapter MUST fall back to sending a NEW message via {@code send}, with
+     * {@code correlationId} matching the original"; §6.4.5 restates it for
+     * SimpleX). The body routes through the same {@link SimpleXOutboundChunker}
+     * {@link #send} uses, so an over-cap final body — the placeholder-freeze
+     * loss path the encoder's {@code requireWithinCap} would otherwise reject
+     * a second time — is split to fit the SimpleX text cap. {@code internal}
+     * carries the original {@code correlationId}, so the fresh send stays tied
+     * to the originating outbound; the new chat-item id is discarded because a
+     * fallen-back handle never edits again.
+     */
+    private void fallbackSend(SimpleXWebSocketClient ws, SimpleXMessageHandle internal, String body)
+            throws MessagingException {
+        for (String chunk : SimpleXOutboundChunker.chunk(body)) {
+            transmitChunk(ws, internal.scope(), chunk);
+        }
     }
 
     @Override
@@ -498,7 +552,7 @@ public final class SimpleXAdapter implements MessagingAdapter {
         }
     }
 
-    private SimpleXMessageHandle requireKnownAndOpen(MessageHandle handle) throws MessagingException {
+    private TrackedHandle requireKnownAndOpen(MessageHandle handle) throws MessagingException {
         TrackedHandle tracked;
         synchronized (handles) {
             tracked = handles.get(handle.opaqueValue());
@@ -513,7 +567,22 @@ public final class SimpleXAdapter implements MessagingAdapter {
                         "handle already finalized: " + handle.opaqueValue());
             }
         }
-        return tracked.handle;
+        return tracked;
+    }
+
+    private boolean hasFallenBack(TrackedHandle tracked) {
+        synchronized (handles) {
+            return tracked.fellBack;
+        }
+    }
+
+    private void markFellBack(String opaqueValue) {
+        synchronized (handles) {
+            TrackedHandle tracked = handles.get(opaqueValue);
+            if (tracked != null) {
+                tracked.fellBack = true;
+            }
+        }
     }
 
     private void markFinalized(String opaqueValue) {
@@ -607,6 +676,13 @@ public final class SimpleXAdapter implements MessagingAdapter {
         final SimpleXMessageHandle handle;
         /** Guarded by the {@code handles} monitor. */
         boolean finalized;
+        /**
+         * Guarded by the {@code handles} monitor. Set once an unrecoverable
+         * edit has switched this handle to fresh-send fallback (design
+         * §6.3.8 / §6.4.5); every subsequent update/finalize then fresh-sends
+         * without re-attempting the doomed in-place edit.
+         */
+        boolean fellBack;
 
         TrackedHandle(SimpleXMessageHandle handle) {
             this.handle = handle;

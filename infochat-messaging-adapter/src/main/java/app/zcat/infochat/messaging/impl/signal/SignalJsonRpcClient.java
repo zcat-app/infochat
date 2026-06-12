@@ -358,25 +358,82 @@ final class SignalJsonRpcClient {
         long handleSerial = handleIdGen.incrementAndGet();
         MessageHandle handle = new MessageHandle(OPAQUE_PREFIX + handleSerial);
         synchronized (handles) {
-            handles.put(handle.opaqueValue(), new SignalMessageHandle(timestamp, destination, msg));
+            handles.put(handle.opaqueValue(), new SignalMessageHandle(timestamp, destination, msg, false));
         }
         return handle;
     }
 
     void update(MessageHandle handle, String body) throws MessagingException {
         SignalMessageHandle internal = lookupOpen(handle);
-        editMessage(internal, body);
+        if (internal.fellBack()) {
+            // A prior edit on this handle was unrecoverable; never edit again
+            // (design §6.3.8: subsequent updates continue to fall back).
+            fallbackSend(handle, internal, body);
+            return;
+        }
+        try {
+            editMessage(internal, body);
+        } catch (MessagingException e) {
+            // TRANSIENT (write failure, response timeout, closed-before-ack)
+            // must propagate so the Provider retries the same edit; only an
+            // unrecoverable PERMANENT edit (edit window expired, item deleted)
+            // triggers the fresh-send fallback (design §6.5.7).
+            if (e.category() != FailureCategory.PERMANENT) {
+                throw e;
+            }
+            fallbackSend(handle, internal, body);
+        }
     }
 
     void finalizeHandle(MessageHandle handle, String body) throws MessagingException {
         SignalMessageHandle internal = lookupOpen(handle);
-        editMessage(internal, body);
+        if (internal.fellBack()) {
+            fallbackSend(handle, internal, body);
+        } else {
+            try {
+                editMessage(internal, body);
+            } catch (MessagingException e) {
+                if (e.category() != FailureCategory.PERMANENT) {
+                    throw e;
+                }
+                fallbackSend(handle, internal, body);
+            }
+        }
         // Eviction-on-finalize bounds the open-handle map. Subsequent
         // update() on this handle resolves to a missing key in
         // lookupOpen, which throws PERMANENT — same category the SPI
         // requires for "already finalized", so no behavioral change.
         synchronized (handles) {
             handles.remove(handle.opaqueValue());
+        }
+    }
+
+    /**
+     * Fresh-send fallback for an unrecoverable {@code editMessage} (design
+     * §6.3.8: "the adapter MUST fall back to sending a NEW message via
+     * {@code send}, with {@code correlationId} matching the original";
+     * §6.5.7 restates it for Signal). The new message re-addresses the
+     * original recipient and scope; {@code internal.original()} carries the
+     * original {@code correlationId}, so the fresh send stays tied to the
+     * originating outbound. The new {@code timestamp} is discarded — the
+     * handle is now in fallback mode, so every later update/finalize
+     * fresh-sends too and never edits again.
+     */
+    private void fallbackSend(MessageHandle handle, SignalMessageHandle internal, String body)
+            throws MessagingException {
+        long rpcId = rpcIdGen.incrementAndGet();
+        String request = internal.original().scope() instanceof ScopeRef.Group
+                ? codec.encodeGroupSend(rpcId, account, internal.recipient(), body)
+                : codec.encodeSend(rpcId, account, internal.recipient(), body);
+        call(rpcId, request);
+        // Switch the stored handle into fallback mode so a subsequent
+        // update skips the doomed edit. A concurrent eviction/finalize may
+        // have removed it; re-put only if still present.
+        synchronized (handles) {
+            SignalMessageHandle present = handles.get(handle.opaqueValue());
+            if (present != null) {
+                handles.put(handle.opaqueValue(), present.asFallenBack());
+            }
         }
     }
 

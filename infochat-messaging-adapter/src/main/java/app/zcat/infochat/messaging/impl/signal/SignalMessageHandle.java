@@ -30,7 +30,18 @@ import app.zcat.infochat.messaging.OutboundMessage;
  *                  lowercase UUID, or E.164 phone) signal-cli requires
  *                  on every {@code updateMessage} request — the
  *                  protocol does not derive it from the timestamp.
- * @param original  the original outbound message (debugging context).
+ * @param original  the original outbound message — carries the scope and
+ *                  the {@code correlationId} the edit-failure fresh-send
+ *                  fallback reuses (design §6.5.7).
+ * @param fellBack  true once an unrecoverable {@code editMessage} has
+ *                  switched this handle to fresh-send fallback; every
+ *                  subsequent update/finalize then fresh-sends without
+ *                  re-attempting the doomed edit (design §6.3.8).
  */
-record SignalMessageHandle(long timestamp, String recipient, OutboundMessage original) {
+record SignalMessageHandle(long timestamp, String recipient, OutboundMessage original, boolean fellBack) {
+
+    /** A copy of this handle switched into fresh-send fallback mode. */
+    SignalMessageHandle asFallenBack() {
+        return new SignalMessageHandle(timestamp, recipient, original, true);
+    }
 }

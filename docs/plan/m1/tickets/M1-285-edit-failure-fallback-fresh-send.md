@@ -1,9 +1,9 @@
 ---
 id: M1-285
 title: "Edit-failure fallback to fresh send in both production adapters"
-status: pending
+status: done
 created: 2026-06-11
-last_updated: 2026-06-11
+last_updated: 2026-06-12
 blocked_by: []
 files_budget: 12
 files_scope:
@@ -35,12 +35,31 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-12
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 702
+      removed: 32
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-12
+  verdict: WARN
+  warnings:
+    - "Acceptance item 3 (Signal) says only 'a named test' without stating what the test asserts; the behavioral contract is present in the same sentence so the assertion is inferable, but being explicit (as items 1/2/4 are) would remove review-pass ambiguity."
+    - "Acceptance item 3 references design §6.4.5 for Signal behavior, but §6.4.5 is the SimpleX command-encoding section; the normative Signal fallback is §6.5.7 (which itself points to §6.4.5). Reference is imprecise but the inlined contract is correct."
+  blockers: []
 ---
 
 # M1-285: Edit-failure fallback to fresh send in both production adapters

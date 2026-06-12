@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 24 |
+| pending | 23 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 325 |
+| done | 326 |
 | deferred | 3 |
 | **total** | **352** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-285 — Edit-failure fallback to fresh send in both production adapters (complexity: medium, risk: medium)
 - M1-288 — Group-scope /summary resolves its scope instead of returning no_posts_yet (complexity: medium, risk: medium)
 - M1-291 — SSRF module: proxy posture, pinned-path policy, bounded discard, contract fixes (complexity: medium, risk: medium)
 - M1-292 — Log hygiene: redactor timeout arms, URL paths, upstream bytes, LLM previews (complexity: medium, risk: medium)
@@ -87,11 +86,11 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-290 | SECURITY DEFINER procedures reject banned admins as actors | 2026-06-12 | round 1 APPROVE |
 | M1-287 | Nostr dedup records event id only after a successful queue offer | 2026-06-12 | round 1 APPROVE |
 | M1-286 | UNKNOWN-rate auto-disable stops the running stream-source worker | 2026-06-12 | round 1 APPROVE |
+| M1-285 | Edit-failure fallback to fresh send in both production adapters | 2026-06-12 | round 1 APPROVE |
 | M1-284 | Outbound delivery failure layer: retry, cap escalation, cleanup | 2026-06-12 | round 2 APPROVE |
 | M1-304 | Declare jakarta.json (+ Parsson) in the messaging-adapter pom | 2026-06-11 | round 1 APPROVE |
 | M1-296 | LLM config/routing: deterministic order, typo fail-fast, base-url validation, structure | 2026-06-11 | round 1 APPROVE |
 | M1-289 | Unreadable bootstrap-assets file fails startup instead of silently disabling | 2026-06-11 | round 1 APPROVE |
-| M1-279 | §7/§7a sweep: defensive checks, broad catches, test seams | 2026-06-11 | round 1 APPROVE |
 
 ---
 
@@ -489,7 +488,7 @@ M1-282 (done)
 M1-284 (done)
   ├── M1-313 (pending) ← runnable
   └── M1-314 (pending)
-M1-285 (pending) ← runnable
+M1-285 (done)
 M1-286 (done)
 M1-287 (done)
 M1-288 (pending) ← runnable
