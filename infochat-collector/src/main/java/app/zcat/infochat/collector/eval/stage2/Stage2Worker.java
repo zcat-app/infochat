@@ -6,6 +6,7 @@ import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.llm.LlmProvider;
 import app.zcat.infochat.llm.LlmResponse;
 import app.zcat.infochat.llm.ModelTask;
+import app.zcat.infochat.llm.metrics.LlmMetrics;
 import app.zcat.infochat.llm.routing.LlmRouter;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -18,6 +19,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 import java.util.concurrent.Semaphore;
@@ -111,6 +113,9 @@ public class Stage2Worker {
     @Inject
     RetryBackoff retryBackoff;
 
+    @Inject
+    LlmMetrics llmMetrics;
+
     @ConfigProperty(name = "infochat.llm.security.max-concurrency")
     int maxConcurrency;
 
@@ -146,7 +151,7 @@ public class Stage2Worker {
      * (engineering-rules-verbatim.md §7).
      */
     public void judge(UUID postId, Instant postFetchedAt, Stage1Pipeline.Stage1Result stage1Result) {
-        concurrencyPermits.acquireUninterruptibly();
+        acquirePermitTimed();
         try {
             Stage2VerdictHandler.Verdict outcome = invokeWithRetryOnce(postId, stage1Result.originalBody());
             verdictHandler.apply(postId, postFetchedAt, outcome);
@@ -164,12 +169,28 @@ public class Stage2Worker {
      * <p>Bounded by the same concurrency semaphore as {@link #judge}.
      */
     public Stage2VerdictHandler.Verdict judgeBody(UUID postId, String originalBody) {
-        concurrencyPermits.acquireUninterruptibly();
+        acquirePermitTimed();
         try {
             return invokeWithRetryOnce(postId, originalBody);
         } finally {
             concurrencyPermits.release();
         }
+    }
+
+    /**
+     * Permit acquisition with {@code llm.queue.wait.ms} emission
+     * (M1-321): this semaphore IS the LLM queue the metric observes,
+     * and the wait is invisible at the provider boundary, so it must
+     * be measured here. The provider label re-runs the same
+     * deterministic {@code forTask} resolution the call itself
+     * performs — a map read, vs. the seconds-scale LLM call it fronts.
+     */
+    private void acquirePermitTimed() {
+        long waitStartNanos = System.nanoTime();
+        concurrencyPermits.acquireUninterruptibly();
+        Duration wait = Duration.ofNanos(System.nanoTime() - waitStartNanos);
+        llmMetrics.recordQueueWait(ModelTask.SECURITY_JUDGE,
+            llmRouter.forTask(ModelTask.SECURITY_JUDGE, "en").providerName(), wait);
     }
 
     /**

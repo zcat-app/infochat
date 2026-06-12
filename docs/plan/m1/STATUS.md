@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 12 |
+| pending | 11 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 342 |
+| done | 343 |
 | deferred | 4 |
 | **total** | **358** |
 
@@ -34,7 +34,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-313 — Chat-memory write ordering on permanent delivery failure (complexity: high, risk: high)
 - M1-314 — Group-deleted-upstream immediate cleanup, distinct from threshold-counted bot-removed (complexity: medium, risk: medium)
 - M1-320 — Derive SimpleX bot queue address via APIShowMyAddress (complexity: high, risk: high)
-- M1-321 — LLM observability: call context and Micrometer metrics (complexity: medium, risk: low)
+- M1-322 — Adapter observability: AdapterMetrics catalogue (complexity: medium, risk: low)
 
 ---
 
@@ -51,7 +51,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-322 — blocked_by: M1-321 (pending)
+_(none)_
 
 ---
 
@@ -70,6 +70,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-321 | LLM observability: call context and Micrometer metrics | 2026-06-12 | round 1 APPROVE |
 | M1-319 | Derive Signal bot ACI from signal-cli identity store | 2026-06-12 | round 1 APPROVE |
 | M1-317 | Parallel-worktree IT isolation: random test port + verify lock | 2026-06-12 | round 1 APPROVE |
 | M1-316 | Permanent-failure-driven group soft-removal writes a BOT_REMOVED audit row | 2026-06-12 | round 2 APPROVE |
@@ -79,7 +80,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-303 | D43 localization gaps: cluster labels, /help asset lines, source label + shared renderer | 2026-06-12 | round 1 APPROVE |
 | M1-301 | Adapter trust-anchor reconciliation: Gate 4 scope, bot-id provenance (decisions) | 2026-06-12 | round 1 APPROVE |
 | M1-300 | Asset-refresh config: one grammar (Duration) across both services | 2026-06-12 | round 1 APPROVE |
-| M1-299 | Core hardening smalls: notifier fallback throttle, probe outside lock, escaper allocation | 2026-06-12 | round 1 APPROVE |
 
 ---
 
@@ -513,6 +513,6 @@ M1-317 (done)
 M1-318 (deferred)
 M1-319 (done)
   └── M1-320 (pending) ← runnable
-M1-321 (pending) ← runnable
-  └── M1-322 (pending)
+M1-321 (done)
+  └── M1-322 (pending) ← runnable
 ```

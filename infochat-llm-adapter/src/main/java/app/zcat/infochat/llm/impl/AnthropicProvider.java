@@ -207,7 +207,17 @@ public class AnthropicProvider implements LlmProvider {
             throw new LlmCallFailedException(
                 "AnthropicProvider: response has no text content block from " + uri);
         }
-        return new LlmResponse(text.toString());
+        JsonNode modelNode = root.path("model");
+        String model = modelNode.isTextual() ? modelNode.asText() : null;
+        JsonNode usage = root.path("usage");
+        LlmResponse.TokenUsage tokenUsage = null;
+        if (usage.path("input_tokens").canConvertToLong()
+                && usage.path("output_tokens").canConvertToLong()) {
+            tokenUsage = new LlmResponse.TokenUsage(
+                usage.path("input_tokens").asLong(),
+                usage.path("output_tokens").asLong());
+        }
+        return new LlmResponse(text.toString(), model, tokenUsage);
     }
 
     private record TaskConfig(String baseUrl, String apiKey, String model, long timeoutMs, int maxTokens) {

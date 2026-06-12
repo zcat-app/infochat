@@ -1,7 +1,7 @@
 ---
 id: M1-321
 title: "LLM observability: call context and Micrometer metrics"
-status: pending
+status: done
 created: 2026-06-12
 last_updated: 2026-06-12
 blocked_by: []
@@ -21,19 +21,38 @@ acceptance:
   - "LlmMetrics emits the design 05 §5.9 catalogue via Micrometer: llm.calls.total{task, provider, model, outcome}, llm.tokens.in{task, provider, model}, llm.tokens.out{task, provider, model}, llm.latency.ms{task, provider, model}, llm.concurrency.inflight{task, provider}, llm.queue.wait.ms{task, provider}, embedding.calls.total{provider, model, outcome}, embedding.dimension{provider, model}, with outcome ∈ {ok, retry, fallback, fail}; named tests assert counter/outcome increments for an ok call and a fail call against a stub provider."
   - "mvn -B clean verify from the repo root exits 0."
 test_plan:
-  adds: []
+  adds:
+    - infochat-llm-adapter/src/test/java/app/zcat/infochat/llm/metrics/LlmObservabilityTest.java
   preserves:
     - all tests currently green on main
 spec_refs:
   - docs/spec/llm.md §SPI shape
   - docs/spec/llm.md §Bounded concurrency and observability
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-12
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 14
+      added: 708
+      removed: 25
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-12
+  verdict: WARN
+  warnings:
+    - "test_plan.adds is [] while acceptance items 1 and 2 each require new named test files. The implementer should populate test_plan.adds at start time with the actual test file paths; leaving it empty makes the test plan structurally inconsistent with the acceptance criteria."
+  blockers: []
 ---
 
 # M1-321: LLM observability: call context and Micrometer metrics

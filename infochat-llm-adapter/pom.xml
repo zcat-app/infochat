@@ -41,6 +41,11 @@
              standalone.
            org.jboss.logging:jboss-logging — WARN log lines on retry +
              infra failure paths; same shape as Stage1Pipeline.
+           io.micrometer:micrometer-core — MeterRegistry API for
+             LlmMetrics (M1-321). Provided-scope-only; the consumer
+             modules bring the runtime registry via quarkus-micrometer,
+             and module tests use the bundled SimpleMeterRegistry
+             (provided scope sits on the test classpath).
          The HTTP client is java.net.http.HttpClient (built into JDK 25);
          the rejected `quarkus-rest-client-reactive` alternative is
          documented in the M1-033 ticket's Implementation notes.
@@ -88,6 +93,11 @@
         <dependency>
             <groupId>org.jboss.logging</groupId>
             <artifactId>jboss-logging</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-core</artifactId>
             <scope>provided</scope>
         </dependency>
         <dependency>

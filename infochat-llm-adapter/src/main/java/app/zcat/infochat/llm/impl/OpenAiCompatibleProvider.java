@@ -38,9 +38,10 @@ import java.time.Duration;
  * }</pre>
  * Response body's load-bearing path is
  * {@code choices[0].message.content} — the model's plain text reply.
- * Token usage, finish-reason, and per-call latency are not exposed
- * through {@link LlmResponse} in v1 (spec commits only to the text;
- * future tickets that need them widen the wrapper).
+ * The optional {@code usage.prompt_tokens} / {@code usage.completion_tokens}
+ * counters and the root {@code model} field feed {@link LlmResponse}'s
+ * observability companions when present (M1-321); their absence is not
+ * an error — token metrics simply don't increment for that call.
  *
  * <h2>Per-task config</h2>
  * <p>Reads {@code (base-url, api-key, model, timeout-ms)} per
@@ -218,7 +219,17 @@ public class OpenAiCompatibleProvider implements LlmProvider {
                 "OpenAiCompatibleProvider: response missing choices[0].message.content from "
                     + uri + "; preview: " + LlmHttpSupport.preview(responseBody));
         }
-        return new LlmResponse(content.asText());
+        JsonNode modelNode = root.path("model");
+        String model = modelNode.isTextual() ? modelNode.asText() : null;
+        JsonNode usage = root.path("usage");
+        LlmResponse.TokenUsage tokenUsage = null;
+        if (usage.path("prompt_tokens").canConvertToLong()
+                && usage.path("completion_tokens").canConvertToLong()) {
+            tokenUsage = new LlmResponse.TokenUsage(
+                usage.path("prompt_tokens").asLong(),
+                usage.path("completion_tokens").asLong());
+        }
+        return new LlmResponse(content.asText(), model, tokenUsage);
     }
 
     /** Per-task config snapshot extracted by {@link #configFor}. */

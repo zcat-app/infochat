@@ -30,6 +30,16 @@
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-arc</artifactId>
         </dependency>
+        <!--
+             quarkus-micrometer supplies the CDI MeterRegistry that
+             infochat-llm-adapter's LlmMetrics injects (M1-321). No
+             registry exporter extension in v1 — the default composite
+             registry is the committed surface.
+        -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-micrometer</artifactId>
+        </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-jdbc-postgresql</artifactId>

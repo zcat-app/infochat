@@ -64,6 +64,16 @@
             <artifactId>quarkus-arc</artifactId>
         </dependency>
         <!--
+             quarkus-micrometer supplies the CDI MeterRegistry that
+             infochat-llm-adapter's LlmMetrics injects (M1-321). No
+             registry exporter extension in v1 — the default composite
+             registry is the committed surface.
+        -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-micrometer</artifactId>
+        </dependency>
+        <!--
              Migrations live in infochat-core (M1-017); both services see them
              on classpath via their transitive dependency on infochat-core.
              Production Provider does not run them: the operator runs Collector
