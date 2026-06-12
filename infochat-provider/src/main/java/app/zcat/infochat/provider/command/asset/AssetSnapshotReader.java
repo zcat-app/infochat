@@ -60,24 +60,24 @@ public class AssetSnapshotReader {
     // ships the same base + per-profile values as the collector so the keys
     // resolve to the same interval in both services under every profile.
     @ConfigProperty(name = "infochat.assets.refresh.coingecko")
-    long refreshCoingeckoSeconds;
+    Duration coingeckoRefresh;
 
     @ConfigProperty(name = "infochat.assets.refresh.kraken")
-    long refreshKrakenSeconds;
+    Duration krakenRefresh;
 
     @ConfigProperty(name = "infochat.assets.refresh.bitfinex")
-    long refreshBitfinexSeconds;
+    Duration bitfinexRefresh;
 
     /** CDI-required no-arg constructor. */
     public AssetSnapshotReader() {}
 
     /** Test constructor — bypasses CDI injection. */
-    AssetSnapshotReader(DataSource dataSource, long refreshCoingecko,
-                        long refreshKraken, long refreshBitfinex) {
+    AssetSnapshotReader(DataSource dataSource, Duration refreshCoingecko,
+                        Duration refreshKraken, Duration refreshBitfinex) {
         this.dataSource = dataSource;
-        this.refreshCoingeckoSeconds = refreshCoingecko;
-        this.refreshKrakenSeconds = refreshKraken;
-        this.refreshBitfinexSeconds = refreshBitfinex;
+        this.coingeckoRefresh = refreshCoingecko;
+        this.krakenRefresh = refreshKraken;
+        this.bitfinexRefresh = refreshBitfinex;
     }
 
     /**
@@ -135,12 +135,11 @@ public class AssetSnapshotReader {
     }
 
     private Duration refreshIntervalFor(String subVerb) {
-        long seconds = switch (subVerb) {
-            case "coingecko" -> refreshCoingeckoSeconds;
-            case "kraken" -> refreshKrakenSeconds;
-            case "bitfinex" -> refreshBitfinexSeconds;
-            default -> 90;
+        return switch (subVerb) {
+            case "coingecko" -> coingeckoRefresh;
+            case "kraken" -> krakenRefresh;
+            case "bitfinex" -> bitfinexRefresh;
+            default -> Duration.ofSeconds(90);
         };
-        return Duration.ofSeconds(seconds);
     }
 }

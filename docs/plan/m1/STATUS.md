@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 20 |
+| pending | 19 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 329 |
+| done | 330 |
 | deferred | 3 |
 | **total** | **352** |
 
@@ -30,7 +30,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-294 — SimpleX adapter: error classification, close race, bot-id validation, inbound cap (complexity: medium, risk: medium)
 - M1-297 — /stop cancellation is honored: cancelled flag, stopped terminal, single reply (complexity: medium, risk: medium)
 - M1-298 — Core contracts: dispatchKey rename, TargetKind enum, nullable-UUID bind helper (complexity: medium, risk: medium)
-- M1-300 — Asset-refresh config: one grammar (Duration) across both services (complexity: low, risk: medium)
 - M1-301 — Adapter trust-anchor reconciliation: Gate 4 scope, bot-id provenance (decisions) (complexity: medium, risk: medium)
 - M1-302 — Ops posture: Stage-2 fail-open default, readiness topology exposure (decisions) (complexity: low, risk: medium)
 - M1-303 — D43 localization gaps: cluster labels, /help asset lines, source label + shared renderer (complexity: medium, risk: medium)
@@ -80,6 +79,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 |---|---|---|---|
 | M1-316 | Permanent-failure-driven group soft-removal writes a BOT_REMOVED audit row | 2026-06-12 | round 2 APPROVE |
 | M1-315 | NostrDedupIT.multiRelayDedup over-asserts deliveryCount==1 (flake) | 2026-06-12 | — |
+| M1-300 | Asset-refresh config: one grammar (Duration) across both services | 2026-06-12 | round 1 APPROVE |
 | M1-299 | Core hardening smalls: notifier fallback throttle, probe outside lock, escaper allocation | 2026-06-12 | round 1 APPROVE |
 | M1-295 | Ingest resilience: eval-queue boundary, fetch-ladder scope, parser boundary, re-eval predicate | 2026-06-12 | round 1 APPROVE |
 | M1-290 | SECURITY DEFINER procedures reject banned admins as actors | 2026-06-12 | round 1 APPROVE |
@@ -87,7 +87,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-287 | Nostr dedup records event id only after a successful queue offer | 2026-06-12 | round 1 APPROVE |
 | M1-286 | UNKNOWN-rate auto-disable stops the running stream-source worker | 2026-06-12 | round 1 APPROVE |
 | M1-285 | Edit-failure fallback to fresh send in both production adapters | 2026-06-12 | round 1 APPROVE |
-| M1-284 | Outbound delivery failure layer: retry, cap escalation, cleanup | 2026-06-12 | round 2 APPROVE |
 
 ---
 
@@ -501,7 +500,7 @@ M1-296 (done)
 M1-297 (pending) ← runnable
 M1-298 (pending) ← runnable
 M1-299 (done)
-M1-300 (pending) ← runnable
+M1-300 (done)
 M1-301 (pending) ← runnable
 M1-302 (pending) ← runnable
 M1-303 (pending) ← runnable
