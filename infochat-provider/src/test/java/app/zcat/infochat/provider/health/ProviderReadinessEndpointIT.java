@@ -4,6 +4,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.quarkus.test.junit.QuarkusTest;
+import jakarta.json.Json;
+import jakarta.json.JsonObject;
+import jakarta.json.JsonValue;
+import java.io.StringReader;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -12,6 +16,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.eclipse.microprofile.config.ConfigProvider;
 import org.junit.jupiter.api.Test;
 
@@ -75,5 +81,59 @@ class ProviderReadinessEndpointIT {
                 baseProfilePasswordKeys,
                 "every base-profile password key must resolve only from the"
                         + " environment — no ${VAR:fallback} default, no literal");
+    }
+
+    @Test
+    void readinessAggregateCarriesExactlyTheMessagingAdaptersAndDatasourceChecks() throws Exception {
+        // The unauthenticated /q/health/ready response aggregates EVERY
+        // registered readiness check, not just the messaging-adapters one
+        // whose data map ReadinessPayloadShapeTest pins. Pinning the exact
+        // check-name set here makes aggregate-level widening loud: any
+        // dependency that auto-contributes a readiness check (the way
+        // quarkus-jdbc-postgresql contributes the Agroal datasource check)
+        // grows an unauthenticated, network-reachable payload and must be
+        // a deliberate, reviewed change (docs/design/07-deployment.md
+        // §7.12.1).
+        int port = ConfigProvider.getConfig()
+                .getValue("quarkus.http.test-port", Integer.class);
+        try (HttpClient client = HttpClient.newHttpClient()) {
+            HttpResponse<String> response = client.send(
+                    HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/q/health/ready"))
+                            .timeout(Duration.ofSeconds(10))
+                            .GET()
+                            .build(),
+                    HttpResponse.BodyHandlers.ofString());
+
+            JsonObject root = Json.createReader(new StringReader(response.body())).readObject();
+            Set<String> checkNames = root.getJsonArray("checks").stream()
+                    .map(JsonValue::asJsonObject)
+                    .map(check -> check.getString("name"))
+                    .collect(Collectors.toSet());
+            assertEquals(
+                    Set.of("messaging-adapters", "Database connections health check"),
+                    checkNames,
+                    "the readiness aggregate must carry exactly the adapter check"
+                            + " and the datasource check — any new check widens the"
+                            + " unauthenticated payload; body: " + response.body());
+        }
+    }
+
+    @Test
+    void baseConfigBindsHttpListenerToLoopback() throws Exception {
+        // Same raw main-resources read as the password-shape test above:
+        // the shipped bind default is the thing under test, and the test
+        // classpath's own application.properties would shadow it.
+        List<String> lines = Files.readAllLines(
+                Path.of("src/main/resources/application.properties"));
+
+        List<String> httpHostLines = lines.stream()
+                .filter(line -> !line.startsWith("#"))
+                .filter(line -> line.contains("quarkus.http.host="))
+                .toList();
+
+        assertEquals(List.of("quarkus.http.host=127.0.0.1"), httpHostLines,
+                "the shipped default must bind the HTTP listener (health"
+                        + " probes) to loopback, with no profile override widening"
+                        + " it — widening is an explicit operator action");
     }
 }

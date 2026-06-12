@@ -52,6 +52,13 @@ notes. The spec-level commitments below cover all of them.
 5. **LLM ↔ system state.** The LLM's tool surface is a fixed allowlist of                                                                                                                                                                             
    read-only, scope-filtered functions. There is no path from any LLM tool                                                                                                                                                                            
    to mutating authorization state, sources, subscriptions, or audit rows.
+6. **Health/management HTTP surface → network.** The health endpoints are
+   unauthenticated in v1 and disclose operational topology: which messaging
+   adapters are enabled and up, and whether the DB is reachable. The
+   shipped default binds them to loopback; exposing them beyond the host
+   is an explicit operator action (widen the bind, firewall the port to
+   the prober), never a default (`deployment.md` §Health and
+   observability).
 
 ## Ingest pipeline (security side)
 

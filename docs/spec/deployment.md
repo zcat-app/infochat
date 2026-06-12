@@ -327,6 +327,17 @@ service emits an explicit confirmation log line on startup
   failing provider surfaces as a degraded readiness signal but does                                                                                                                                                                                   
   *not* fail readiness outright (the eval pipeline is allowed to                 
   degrade per `security.md` failure handling).
+- **Endpoint exposure** — the health endpoints are unauthenticated
+  in v1, and the readiness payload names each enabled adapter with
+  its up/down state and reports DB connectivity: a topology
+  disclosure (which messaging transports the deployment runs,
+  whether its database is reachable) to any caller that can reach
+  the port. The shipped default binds the health port to loopback;
+  probing from another host is an explicit operator action — widen
+  the bind and firewall the port to the prober's address. The
+  per-adapter names stay in the payload because they are the
+  operator's degraded-vs-healthy signal; the exposure lever is
+  network reachability, not payload trimming.
 - **Metrics** — eval-stage counters, Stage-1 hits per rule, Stage-2              
   verdicts and infra failures, LLM latency/tokens per task/provider,
   fetch success/fail per source, rate-limit overflows. Exact metric                                                                                                                                                                                   
