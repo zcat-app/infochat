@@ -11,8 +11,8 @@
 | Status | Count |
 |---|---|
 | pending | 25 |
-| in-progress | 1 |
-| in-review | 0 |
+| in-progress | 0 |
+| in-review | 1 |
 | escalated | 0 |
 | done | 321 |
 | deferred | 3 |
@@ -54,7 +54,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 | ID | Title | Status | Last review |
 |---|---|---|---|
-| M1-284 | Outbound delivery failure layer: retry, cap escalation, cleanup | in-progress | (none) |
+| M1-284 | Outbound delivery failure layer: retry, cap escalation, cleanup | in-review | round 1 APPROVE on 2026-06-12 |
 
 ---
 
@@ -62,8 +62,8 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-313 — blocked_by: M1-284 (in-progress)
-- M1-314 — blocked_by: M1-284 (in-progress), M1-294 (pending)
+- M1-313 — blocked_by: M1-284 (in-review)
+- M1-314 — blocked_by: M1-284 (in-review), M1-294 (pending)
 
 ---
 
@@ -486,7 +486,7 @@ M1-279 (done)
 M1-280 (done)
 M1-281 (done)
 M1-282 (done)
-M1-284 (in-progress)
+M1-284 (in-review)
   ├── M1-313 (pending)
   └── M1-314 (pending)
 M1-285 (pending) ← runnable

@@ -1,11 +1,11 @@
 ---
 id: M1-284
 title: "Outbound delivery failure layer: retry, cap escalation, cleanup"
-status: in-progress
+status: in-review
 created: 2026-06-11
-last_updated: 2026-06-11
+last_updated: 2026-06-12
 blocked_by: []
-files_budget: 22
+files_budget: 26
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest
@@ -49,7 +49,20 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-12
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 26
+      added: 1043
+      removed: 71
 escalations:
   - date: 2026-06-11
     reason: outline-fail
@@ -72,6 +85,16 @@ escalations:
       removed_at NULL→non-NULL; DigestScheduler.queryActiveGroups() filters
       removed_at IS NULL, so GroupRepository.markRemoved alone achieves both
       cleanup effects in items 5/6.
+  - date: 2026-06-12
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A (developer-raised). Implementation complete and mvn -B clean verify
+      green, but the diff touches 26 files vs files_budget: 22. Every file is
+      within files_scope; the 4-over is mechanical test-wiring: injecting the
+      new OutboundDelivery chokepoint bean into InboundRouter and DigestWorker
+      forces wiring `outboundDelivery` into every plain-JUnit test that
+      constructs those beans directly (9 InboundRouter*Test + DigestWorkerTest
+      + StageProgressNotifierTest). User chose refine → bump files_budget to 26.
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -113,6 +136,25 @@ revisions:
         the "chat_memory is not written" clause to out_of_scope, owned by the
         new M1-313 (reorder chat-turn persistence + auto-compress to after
         send-success in provider/chat). Items 2/3/5/6/7/8 unchanged.
+  - date: 2026-06-12
+    reason: budget-breach rework
+    snapshot:
+      status: in-progress
+      escalation_reason: budget-breach
+      files_budget: 22
+    resolution: |
+      Refine (files_budget 22→26), confirmed against the green round-1 diff
+      2026-06-12. Acceptance, files_scope, and out_of_scope are UNCHANGED — the
+      bump is purely a count correction. The diff is 26 files, all within
+      files_scope: 9 production/doc files + 6 new test files (OutboundDeliveryTest,
+      OutboundDeliveryCleanupIT, FailingMessagingAdapter, RecordingAdminNotifier,
+      RecordingGroupRepository, TestOutboundDelivery) + 11 test files that only
+      gain a one-line `outboundDelivery` wire (StageProgressNotifierTest, the 9
+      InboundRouter*Test that construct the router directly, DigestWorkerTest).
+      The call-site sweep for the new injected chokepoint dependency drove the
+      over-budget breadth; acceptance item 1 (all sends route through the
+      chokepoint) is unsatisfiable without the InboundRouter/DigestWorker
+      injection that forces it.
 clarity_check:
   date: 2026-06-11
   verdict: WARN
