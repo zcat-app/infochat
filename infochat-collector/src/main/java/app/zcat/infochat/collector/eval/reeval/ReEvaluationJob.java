@@ -370,11 +370,16 @@ public class ReEvaluationJob {
      * UPDATE…RETURNING scopes the emit so rows closed by an earlier
      * verdict never re-fire. Runs on the caller's connection inside
      * applyBenignReEval's transaction (same-transaction NOTIFY rule).
+     *
+     * <p>Only Stage 1 rows are touched ({@code flagged_by='stage1'}),
+     * matching {@code Stage2VerdictHandler}'s BENIGN-close twin: a
+     * future non-stage1 quarantine writer (none in M1) must not be
+     * auto-closed by a re-eval BENIGN release.
      */
     private void closeQuarantineRows(Connection conn, UUID postId) throws SQLException {
         final String sql =
             "UPDATE quarantine SET status = 'BENIGN_CLOSED', updated_at = now() "
-                + "WHERE post_id = ? AND status = 'PENDING' RETURNING id";
+                + "WHERE post_id = ? AND flagged_by = 'stage1' AND status = 'PENDING' RETURNING id";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setObject(1, postId);
             try (ResultSet rs = ps.executeQuery()) {

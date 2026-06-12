@@ -53,12 +53,29 @@ final class RedditResponseParser {
 
         List<NormalizedPost> posts = new ArrayList<>(children.size());
         for (JsonNode child : children) {
-            posts.add(mapPost(dispatchKey, child.path("data"), fetchedAt));
+            NormalizedPost post = mapPost(dispatchKey, child.path("data"), fetchedAt);
+            if (post != null) {
+                posts.add(post);
+            }
         }
         return new ListingPage(List.copyOf(posts), after);
     }
 
-    private static NormalizedPost mapPost(long dispatchKey, JsonNode data, Instant fetchedAt) {
+    private static @Nullable NormalizedPost mapPost(long dispatchKey, JsonNode data, Instant fetchedAt) {
+        // Validate the upstream identifier at the parse boundary, the way
+        // RssFeedParser rejects an item with neither <guid> nor <link>.
+        // asText() maps a missing/null "name" node to "", which downstream
+        // trips PostPersister's NormalizedPost-SPI non-empty-identifier
+        // assertion and aborts the WHOLE tick. Skip the single malformed
+        // entry here instead so the rest of the listing still persists.
+        // Only dispatchKey in the log — the item's fields are
+        // upstream-controlled text.
+        String name = data.path("name").asText();
+        if (name.isEmpty()) {
+            LOG.warn("Reddit listing entry missing name for source_id={}; skipping entry",
+                dispatchKey);
+            return null;
+        }
         // Missing/non-numeric created_utc: substitute the fetch time
         // instead of silently storing epoch 0 (a missing node's
         // asDouble() is 0.0 → every malformed item dated 1970-01-01,
@@ -78,7 +95,7 @@ final class RedditResponseParser {
         }
         return new NormalizedPost(
             dispatchKey,
-            data.path("name").asText(),
+            name,
             data.path("title").asText(),
             data.path("selftext").asText(""),
             "https://www.reddit.com" + data.path("permalink").asText(),

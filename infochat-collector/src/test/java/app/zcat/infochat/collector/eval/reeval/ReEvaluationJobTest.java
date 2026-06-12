@@ -67,6 +67,28 @@ class ReEvaluationJobTest {
     }
 
     @Test
+    void benignReEval_closesOnlyStage1QuarantineRows_leavesNonStage1Pending() throws Exception {
+        // U-25: closeQuarantineRows carries the flagged_by='stage1'
+        // predicate its Stage2VerdictHandler twin has. A BENIGN re-eval
+        // must close the post's Stage 1 PENDING rows but leave a
+        // (hypothetical future) non-stage1 quarantine row untouched.
+        // 'stage2' is the only non-'stage1' value the quarantine.flagged_by
+        // CHECK admits (V10) — and is exactly the future Stage-2 quarantine
+        // writer the predicate guards against.
+        stub().setNextResponse("BENIGN");
+        SeededPost post = seedInfraFailurePost("u25-predicate");
+        seedQuarantineRow(post, "placeholder-1", "original content"); // flagged_by='stage1'
+        seedQuarantineRowFlaggedBy(post, "ph-other", "other original", "stage2");
+
+        reEvaluationJob.processOne(candidateFor(post, true, 0));
+
+        assertEquals("BENIGN_CLOSED", readQuarantineStatusByFlaggedBy(post.id, "stage1"),
+            "the Stage 1 quarantine row must close on a BENIGN re-eval");
+        assertEquals("PENDING", readQuarantineStatusByFlaggedBy(post.id, "stage2"),
+            "a non-stage1 quarantine row must NOT be closed by the re-eval BENIGN path");
+    }
+
+    @Test
     void infraFailureCapExhaustion_transitionsToNeedsReview() throws Exception {
         // Infra-failure post at cap → NEEDS_REVIEW.
         SeededPost post = seedInfraFailurePost("infra-cap");
@@ -360,6 +382,40 @@ class ReEvaluationJobTest {
             ps.setString(3, placeholderId);
             ps.setString(4, originalHtml);
             ps.executeUpdate();
+        }
+    }
+
+    /** Seed a PENDING quarantine row with a caller-supplied flagged_by. */
+    private void seedQuarantineRowFlaggedBy(SeededPost post, String placeholderId,
+                                            String originalHtml, String flaggedBy) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "INSERT INTO quarantine ("
+                     + "  id, post_id, post_uid, post_fetched_at, flagged_at, flagged_by,"
+                     + "  rule_id, placeholder_id, original_html, status"
+                     + ") VALUES ("
+                     + "  gen_random_uuid(), ?, 'uid', ?, now(), ?,"
+                     + "  'regex-test', ?, ?, 'PENDING'"
+                     + ")")) {
+            ps.setObject(1, post.id);
+            ps.setTimestamp(2, Timestamp.from(post.fetchedAt));
+            ps.setString(3, flaggedBy);
+            ps.setString(4, placeholderId);
+            ps.setString(5, originalHtml);
+            ps.executeUpdate();
+        }
+    }
+
+    private String readQuarantineStatusByFlaggedBy(UUID postId, String flaggedBy) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT status FROM quarantine WHERE post_id = ? AND flagged_by = ?")) {
+            ps.setObject(1, postId);
+            ps.setString(2, flaggedBy);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(), "expected a quarantine row with flagged_by=" + flaggedBy);
+                return rs.getString(1);
+            }
         }
     }
 

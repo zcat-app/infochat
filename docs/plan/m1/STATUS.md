@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 25 |
+| pending | 24 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 324 |
+| done | 325 |
 | deferred | 3 |
 | **total** | **352** |
 
@@ -30,7 +30,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-292 — Log hygiene: redactor timeout arms, URL paths, upstream bytes, LLM previews (complexity: medium, risk: medium)
 - M1-293 — Signal adapter: mention overflow, sourceName, capability values, launch classification (complexity: medium, risk: medium)
 - M1-294 — SimpleX adapter: error classification, close race, bot-id validation, inbound cap (complexity: medium, risk: medium)
-- M1-295 — Ingest resilience: eval-queue boundary, fetch-ladder scope, parser boundary, re-eval predicate (complexity: medium, risk: medium)
 - M1-297 — /stop cancellation is honored: cancelled flag, stopped terminal, single reply (complexity: medium, risk: medium)
 - M1-298 — Core contracts: dispatchKey rename, TargetKind enum, nullable-UUID bind helper (complexity: medium, risk: medium)
 - M1-299 — Core hardening smalls: notifier fallback throttle, probe outside lock, escaper allocation (complexity: low, risk: low)
@@ -84,6 +83,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-315 | NostrDedupIT.multiRelayDedup over-asserts deliveryCount==1 (flake) | 2026-06-12 | — |
+| M1-295 | Ingest resilience: eval-queue boundary, fetch-ladder scope, parser boundary, re-eval predicate | 2026-06-12 | round 1 APPROVE |
 | M1-290 | SECURITY DEFINER procedures reject banned admins as actors | 2026-06-12 | round 1 APPROVE |
 | M1-287 | Nostr dedup records event id only after a successful queue offer | 2026-06-12 | round 1 APPROVE |
 | M1-286 | UNKNOWN-rate auto-disable stops the running stream-source worker | 2026-06-12 | round 1 APPROVE |
@@ -92,7 +92,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-296 | LLM config/routing: deterministic order, typo fail-fast, base-url validation, structure | 2026-06-11 | round 1 APPROVE |
 | M1-289 | Unreadable bootstrap-assets file fails startup instead of silently disabling | 2026-06-11 | round 1 APPROVE |
 | M1-279 | §7/§7a sweep: defensive checks, broad catches, test seams | 2026-06-11 | round 1 APPROVE |
-| M1-283 | Over-cap outbound digest dropped on SimpleX | 2026-06-10 | round 1 APPROVE |
 
 ---
 
@@ -501,7 +500,7 @@ M1-292 (pending) ← runnable
 M1-293 (pending) ← runnable
 M1-294 (pending) ← runnable
   └── M1-314 (pending) [see above]
-M1-295 (pending) ← runnable
+M1-295 (done)
 M1-296 (done)
 M1-297 (pending) ← runnable
 M1-298 (pending) ← runnable

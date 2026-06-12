@@ -239,51 +239,19 @@ public class FetchScheduler {
             }
             return;
         }
+        // Stage 1 — fetch(). ONLY a fetch() failure is a source-health
+        // signal, so ONLY this is what the D42 per-source failure ladder
+        // counts. AssetSnapshotFetcher.tickOnePair splits the fetch from
+        // the store the same way.
+        List<NormalizedPost> posts;
+        boolean capHit;
         try {
-            List<NormalizedPost> posts = fetcher.fetch(row.dispatchKey(), row.identifier());
+            posts = fetcher.fetch(row.dispatchKey(), row.identifier());
             // Consume the thread-local cap-hit signal immediately after
             // fetch() returns — the flag is set on this thread inside
             // the fetcher's pagination loop and must not survive into
             // the next dispatch.
-            boolean capHit = saturationTracker.consumeCapHit();
-            for (NormalizedPost post : posts) {
-                Optional<PostPersister.PersistedPostKey> key =
-                    postPersister.persist(row.uuid(), post);
-                // Persist-before-enqueue per the outbox discipline.
-                // On ON-CONFLICT dedup (empty), skip the enqueue —
-                // the post has already been emitted on a prior tick.
-                key.ifPresent(evalQueueProducer::emit);
-            }
-            // D42 success path: zero the counter, refresh both
-            // timestamps. Done AFTER persist+enqueue so a mid-loop
-            // PostPersister/EvalQueueProducer throw lands on the
-            // failure path (the catch below).
-            try {
-                sourceRepository.recordSuccess(row.uuid());
-            } catch (SQLException sqlE) {
-                // The DB write itself failed; the tick's posts already
-                // landed, so this is a bookkeeping miss, not a tick
-                // failure. Log and continue — the next successful tick
-                // re-establishes the counter/timestamp state.
-                LOG.warnf(sqlE,
-                    "FetchScheduler: failed to record success for source uuid=%s",
-                    row.uuid());
-            }
-            // Spec §Ingest SPIs saturation counter: when the source
-            // has saturated its per-tick pagination cap for N
-            // consecutive ticks, fire the throttled notification once
-            // on the transition tick. uuid + kind only — never the
-            // identifier URL (M1-023 INFO-LEAK precedent).
-            if (saturationTracker.recordTick(row.uuid(), capHit)) {
-                throttledAdminNotifier.notifyOnce(
-                    "fetch_saturation:" + row.uuid(),
-                    "fetch_saturation",
-                    "Source uuid=" + row.uuid() + " kind=" + row.kind()
-                        + " saturated its per-tick pagination cap for "
-                        + saturationTracker.saturationThreshold()
-                        + " consecutive ticks; consider raising the per-source"
-                        + " page cap or increasing fetch frequency");
-            }
+            capHit = saturationTracker.consumeCapHit();
         } catch (Exception e) {
             // Log the numeric dispatch key + UUID; NEVER the
             // identifier URL (which can carry embedded credentials
@@ -319,6 +287,71 @@ public class FetchScheduler {
             // consecutive-saturation streak ("consistently saturates
             // ... across multiple ticks" reads consecutive).
             saturationTracker.recordTick(row.uuid(), false);
+            return;
+        }
+
+        // Stage 2 — persist + enqueue. A failure here is a Collector-side
+        // (DB / channel) fault, NOT a source-health signal: incrementing
+        // the ladder would let one partition/DB fault flip EVERY active
+        // source to terminal 'failed', each needing a manual
+        // /source-enable. Log + admin-notify, but leave the D42 ladder
+        // untouched. The saturation streak is broken exactly as the
+        // pre-split single catch did (an incomplete tick is not a
+        // saturating tick) — saturation semantics are unchanged.
+        try {
+            for (NormalizedPost post : posts) {
+                Optional<PostPersister.PersistedPostKey> key =
+                    postPersister.persist(row.uuid(), post);
+                // Persist-before-enqueue per the outbox discipline.
+                // On ON-CONFLICT dedup (empty), skip the enqueue —
+                // the post has already been emitted on a prior tick.
+                key.ifPresent(evalQueueProducer::emit);
+            }
+        } catch (Exception e) {
+            // uuid + kind + class only — never the identifier URL
+            // (M1-023 INFO-LEAK precedent) nor the exception message
+            // (which can echo DB-side content).
+            LOG.warnf(
+                "FetchScheduler: persist/enqueue failed for source uuid=%s (dispatch=%d); "
+                    + "D42 ladder left untouched (exception=%s)",
+                row.uuid(), row.dispatchKey(), e.getClass().getName());
+            throttledAdminNotifier.notifyOnce(
+                "fetch_persist_failure:" + row.uuid(),
+                "fetch_persist_failure",
+                "Source uuid=" + row.uuid() + " kind=" + row.kind()
+                    + " fetched successfully but a post failed to persist/enqueue;"
+                    + " the D42 failure ladder is deliberately not incremented."
+                    + " error class=" + e.getClass().getSimpleName());
+            saturationTracker.recordTick(row.uuid(), false);
+            return;
+        }
+
+        // D42 success path: zero the counter, refresh both timestamps.
+        try {
+            sourceRepository.recordSuccess(row.uuid());
+        } catch (SQLException sqlE) {
+            // The DB write itself failed; the tick's posts already
+            // landed, so this is a bookkeeping miss, not a tick
+            // failure. Log and continue — the next successful tick
+            // re-establishes the counter/timestamp state.
+            LOG.warnf(sqlE,
+                "FetchScheduler: failed to record success for source uuid=%s",
+                row.uuid());
+        }
+        // Spec §Ingest SPIs saturation counter: when the source
+        // has saturated its per-tick pagination cap for N
+        // consecutive ticks, fire the throttled notification once
+        // on the transition tick. uuid + kind only — never the
+        // identifier URL (M1-023 INFO-LEAK precedent).
+        if (saturationTracker.recordTick(row.uuid(), capHit)) {
+            throttledAdminNotifier.notifyOnce(
+                "fetch_saturation:" + row.uuid(),
+                "fetch_saturation",
+                "Source uuid=" + row.uuid() + " kind=" + row.kind()
+                    + " saturated its per-tick pagination cap for "
+                    + saturationTracker.saturationThreshold()
+                    + " consecutive ticks; consider raising the per-source"
+                    + " page cap or increasing fetch frequency");
         }
     }
 

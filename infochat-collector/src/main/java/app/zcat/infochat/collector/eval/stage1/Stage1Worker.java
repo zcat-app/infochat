@@ -1,10 +1,13 @@
 package app.zcat.infochat.collector.eval.stage1;
 
 import app.zcat.infochat.collector.eval.stage2.Stage2Worker;
+import app.zcat.infochat.collector.outbox.EvalQueueProducer;
 import app.zcat.infochat.collector.outbox.PostPersister;
+import io.quarkus.scheduler.Scheduled;
 import io.smallrye.common.annotation.RunOnVirtualThread;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.eclipse.microprofile.reactive.messaging.Incoming;
 import org.jboss.logging.Logger;
 import org.jspecify.annotations.Nullable;
@@ -15,6 +18,10 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
 
 /**
  * The first M1 consumer of the {@code eval-queue} channel authored
@@ -78,6 +85,23 @@ public class Stage1Worker {
     @Inject
     Stage2Worker stage2Worker;
 
+    @Inject
+    EvalQueueProducer evalQueueProducer;
+
+    // Profile-driven age past which a status='RAW' post is treated as
+    // stranded and re-enqueued by reEmitStaleRaw. No inline defaultValue
+    // — profile-driven keys carry their defaults in application.properties
+    // (FetchScheduler.java:95-100 convention); the base value is the
+    // test-time fallback.
+    @ConfigProperty(name = "infochat.eval.stale-raw.age")
+    Duration staleRawAge;
+
+    // Per-sweep cap on the stale-RAW re-emit. A wedged eval pipeline can
+    // leave the entire RAW set past the age threshold; the LIMIT bounds
+    // the in-memory key list (mirroring OutboxRehydrator's page-size
+    // bound) and any residual tail drains on the next sweep.
+    private static final int STALE_RAW_BATCH = 500;
+
     /**
      * Consume one {@link PostPersister.PersistedPostKey} from
      * {@code eval-queue}, load the parent post's columns, and run
@@ -101,6 +125,27 @@ public class Stage1Worker {
     @Incoming("eval-queue")
     @RunOnVirtualThread
     public void onPostKey(PostPersister.PersistedPostKey key) {
+        // System-boundary catch (messaging-channel consumer). An escape
+        // out of this @Incoming method either kills the subscription or
+        // drops the message depending on the SmallRye failure strategy —
+        // and no mp.messaging failure-strategy is configured, so the
+        // outcome is version-dependent; either branch strands the post
+        // and every later key. Swallow so the next key still gets
+        // processed. The post stays status='RAW' and reEmitStaleRaw
+        // re-enqueues it. Only the exception class name is logged: a
+        // pipeline escape can carry post-body text, and the raw message
+        // must not reach operator logs (docs/spec/security.md §Secrets
+        // handling — User content in exceptions).
+        try {
+            processKey(key);
+        } catch (RuntimeException e) {
+            LOG.errorf(
+                "Stage1Worker: evaluation failed for post_id=%s; left RAW for re-enqueue (exception=%s)",
+                key.id(), e.getClass().getName());
+        }
+    }
+
+    private void processKey(PostPersister.PersistedPostKey key) {
         PostRow row;
         try {
             row = loadPost(key);
@@ -131,6 +176,60 @@ public class Stage1Worker {
         if (result.flagged() && !result.quarantinedByWatchdog()) {
             stage2Worker.judge(key.id(), key.fetchedAt(), result);
         }
+    }
+
+    /**
+     * Recovery half of the {@link #onPostKey} boundary swallow: re-enqueue
+     * posts still stuck in {@code status='RAW'} past {@link #staleRawAge}.
+     * Reuses the {@link app.zcat.infochat.collector.outbox.OutboxRehydrator}
+     * query shape (the startup rehydrator scans the same {@code 'RAW'} set,
+     * minus the age floor) — it does not replace it. A post still draining
+     * through the eval pipeline keeps a fresh {@code status_changed_at} and
+     * is skipped; only genuinely-stranded posts are re-emitted. Idempotency
+     * lives at the eval-worker boundary (Invariant 5 {@code *_done} flags),
+     * so re-emitting a post that is in fact mid-flight is harmless.
+     */
+    @Scheduled(every = "{infochat.eval.stale-raw.poll-interval}",
+        concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
+    void reEmitStaleRaw() {
+        List<PostPersister.PersistedPostKey> stale;
+        try {
+            stale = loadStaleRawKeys();
+        } catch (SQLException e) {
+            LOG.errorf("Stage1Worker: stale-RAW sweep query failed (exception=%s)",
+                e.getClass().getName());
+            return;
+        }
+        for (PostPersister.PersistedPostKey key : stale) {
+            evalQueueProducer.emit(key);
+        }
+        if (!stale.isEmpty()) {
+            LOG.infof("Stage1Worker: re-enqueued %d post(s) stuck in status='RAW' past %s",
+                stale.size(), staleRawAge);
+        }
+    }
+
+    private List<PostPersister.PersistedPostKey> loadStaleRawKeys() throws SQLException {
+        final String sql =
+            "SELECT id, fetched_at FROM post "
+                + "WHERE status = 'RAW' "
+                + "  AND status_changed_at < now() - ?::INTERVAL "
+                + "ORDER BY fetched_at, id "
+                + "LIMIT ?";
+        List<PostPersister.PersistedPostKey> keys = new ArrayList<>();
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, staleRawAge.toSeconds() + " seconds");
+            ps.setInt(2, STALE_RAW_BATCH);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    keys.add(new PostPersister.PersistedPostKey(
+                        (UUID) rs.getObject("id"),
+                        rs.getTimestamp("fetched_at").toInstant()));
+                }
+            }
+        }
+        return keys;
     }
 
     private @Nullable PostRow loadPost(PostPersister.PersistedPostKey key) throws SQLException {
