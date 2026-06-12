@@ -35,8 +35,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-312 — Doc-truth v5: false comments and spec/design drift reconciliation (complexity: medium, risk: low)
 - M1-313 — Chat-memory write ordering on permanent delivery failure (complexity: high, risk: high)
 - M1-314 — Group-deleted-upstream immediate cleanup, distinct from threshold-counted bot-removed (complexity: medium, risk: medium)
-- M1-319 — Derive Signal bot ACI from signal-cli at startup (complexity: low, risk: low)
-- M1-320 — Derive SimpleX bot queue address via APIShowMyAddress (complexity: low, risk: low)
+- M1-319 — Derive Signal bot ACI from signal-cli identity store (complexity: high, risk: high)
 
 ---
 
@@ -53,7 +52,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-320 — blocked_by: M1-319 (pending)
 
 ---
 
@@ -514,5 +513,5 @@ M1-316 (done)
 M1-317 (done)
 M1-318 (deferred)
 M1-319 (pending) ← runnable
-M1-320 (pending) ← runnable
+  └── M1-320 (pending)
 ```
