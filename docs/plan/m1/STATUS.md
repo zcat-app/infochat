@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 14 |
+| pending | 15 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 336 |
 | deferred | 3 |
-| **total** | **353** |
+| **total** | **354** |
 
 ---
 
@@ -37,6 +37,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-311 — Strip ticket/finding provenance from permanent comments (policy + sweep) (complexity: medium, risk: low)
 - M1-312 — Doc-truth v5: false comments and spec/design drift reconciliation (complexity: medium, risk: low)
 - M1-313 — Chat-memory write ordering on permanent delivery failure (complexity: high, risk: high)
+- M1-318 — Derive per-adapter bot contact id from adapter identity material (SimpleX queue address, Signal ACI) (complexity: high, risk: high)
 
 ---
 
@@ -511,4 +512,5 @@ M1-312 (pending) ← runnable
 M1-315 (done)
 M1-316 (done)
 M1-317 (done)
+M1-318 (pending) ← runnable
 ```
