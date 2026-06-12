@@ -16,6 +16,10 @@ package app.zcat.infochat.core.util;
  */
 public final class JsonEscaper {
 
+    // Lowercase hex lookup for the \\uXXXX nibble emitter. Pinned lowercase to
+    // stay byte-identical to the String.format("\\u%04x", ...) this replaced.
+    private static final char[] HEX_DIGITS = "0123456789abcdef".toCharArray();
+
     private JsonEscaper() {
     }
 
@@ -31,7 +35,17 @@ public final class JsonEscaper {
                 case '\t' -> out.append("\\t");
                 default -> {
                     if (c < 0x20) {
-                        out.append(String.format("\\u%04x", (int) c));
+                        // Emit \\uXXXX by direct nibble lookup rather than
+                        // String.format: escape() runs on the attacker-influenced
+                        // ingest path (feed titles, post bodies) where a hostile
+                        // body can carry many control bytes, and String.format
+                        // allocates a Formatter + Appendable per call. The output
+                        // is byte-identical to format("\\u%04x", (int) c).
+                        out.append("\\u")
+                           .append(HEX_DIGITS[(c >> 12) & 0xF])
+                           .append(HEX_DIGITS[(c >> 8) & 0xF])
+                           .append(HEX_DIGITS[(c >> 4) & 0xF])
+                           .append(HEX_DIGITS[c & 0xF]);
                     } else {
                         out.append(c);
                     }

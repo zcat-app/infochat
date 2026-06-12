@@ -19,6 +19,7 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * T2-G throttled admin notifier per docs/spec/schema.md §Operational
@@ -83,6 +84,17 @@ public class ThrottledAdminNotifier {
     // notifier-cannot-persist case on the same pattern as ordinary
     // notifications.
     private static final String PERSISTENCE_FAILED_KEY = "admin-notifier-persistence-failed";
+
+    // Sentinel for "no fallback WARN emitted yet" — distinct from any real
+    // epoch-milli value, which clock.millis() never returns as Long.MIN_VALUE.
+    private static final long NO_FALLBACK_WINDOW = Long.MIN_VALUE;
+
+    // In-memory throttle for the degraded-DB fallback. The fallback cannot
+    // persist its throttle state in admin_notification_state (the DB is the
+    // thing that failed), so it carries its own window here. Holds the
+    // epoch-milli start of the current fallback WARN window; see
+    // shouldEmitFallback().
+    private final AtomicLong fallbackWindowStartMillis = new AtomicLong(NO_FALLBACK_WINDOW);
 
     /**
      * CDI producer for the production {@link Clock}. Static so CDI
@@ -245,13 +257,40 @@ public class ThrottledAdminNotifier {
             // sanitized — JDBC driver errors are a system-boundary
             // input (per CLAUDE.md §"No defensive code") whose text
             // we don't fully trust to be line-boundary safe.
-            String exceptionMessage = e.getMessage() == null ? "" : e.getMessage();
-            LOG.warnf("ADMIN-NOTIFY key=%s error=%s message=%s",
-                PERSISTENCE_FAILED_KEY,
-                e.getClass().getSimpleName(),
-                sanitize(exceptionMessage, MAX_MESSAGE_LENGTH));
+            //
+            // Throttled to one WARN per window: a sustained DB outage drives
+            // every caller through this fallback, and without the gate each
+            // would emit its own line. shouldEmitFallback() enforces the same
+            // per-(key,window) at-most-one contract the persisted path enforces,
+            // applied to the fixed PERSISTENCE_FAILED_KEY.
+            if (shouldEmitFallback()) {
+                String exceptionMessage = e.getMessage() == null ? "" : e.getMessage();
+                LOG.warnf("ADMIN-NOTIFY key=%s error=%s message=%s",
+                    PERSISTENCE_FAILED_KEY,
+                    e.getClass().getSimpleName(),
+                    sanitize(exceptionMessage, MAX_MESSAGE_LENGTH));
+            }
             return NotifyOutcome.SUPPRESSED;
         }
+    }
+
+    /**
+     * Throttle gate for the degraded-DB fallback WARN. Returns {@code true} for
+     * the first call in a window and {@code false} for every call inside it, so
+     * a DB outage produces one ADMIN-NOTIFY line per window rather than one per
+     * caller. Lock-free: among N racing callers the compare-and-set lets exactly
+     * one claim the window and emit. The window length reuses the configured
+     * {@link #throttleWindow}; the time source is the injected {@link #clock} so
+     * tests advance it deterministically.
+     */
+    private boolean shouldEmitFallback() {
+        long now = clock.millis();
+        long windowMillis = throttleWindow.toMillis();
+        long windowStart = fallbackWindowStartMillis.get();
+        if (windowStart != NO_FALLBACK_WINDOW && now - windowStart < windowMillis) {
+            return false;
+        }
+        return fallbackWindowStartMillis.compareAndSet(windowStart, now);
     }
 
     /**

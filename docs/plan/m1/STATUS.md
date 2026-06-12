@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 23 |
+| pending | 22 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 326 |
+| done | 327 |
 | deferred | 3 |
 | **total** | **352** |
 
@@ -31,7 +31,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-294 — SimpleX adapter: error classification, close race, bot-id validation, inbound cap (complexity: medium, risk: medium)
 - M1-297 — /stop cancellation is honored: cancelled flag, stopped terminal, single reply (complexity: medium, risk: medium)
 - M1-298 — Core contracts: dispatchKey rename, TargetKind enum, nullable-UUID bind helper (complexity: medium, risk: medium)
-- M1-299 — Core hardening smalls: notifier fallback throttle, probe outside lock, escaper allocation (complexity: low, risk: low)
 - M1-300 — Asset-refresh config: one grammar (Duration) across both services (complexity: low, risk: medium)
 - M1-301 — Adapter trust-anchor reconciliation: Gate 4 scope, bot-id provenance (decisions) (complexity: medium, risk: medium)
 - M1-302 — Ops posture: Stage-2 fail-open default, readiness topology exposure (decisions) (complexity: low, risk: medium)
@@ -82,6 +81,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-315 | NostrDedupIT.multiRelayDedup over-asserts deliveryCount==1 (flake) | 2026-06-12 | — |
+| M1-299 | Core hardening smalls: notifier fallback throttle, probe outside lock, escaper allocation | 2026-06-12 | round 1 APPROVE |
 | M1-295 | Ingest resilience: eval-queue boundary, fetch-ladder scope, parser boundary, re-eval predicate | 2026-06-12 | round 1 APPROVE |
 | M1-290 | SECURITY DEFINER procedures reject banned admins as actors | 2026-06-12 | round 1 APPROVE |
 | M1-287 | Nostr dedup records event id only after a successful queue offer | 2026-06-12 | round 1 APPROVE |
@@ -90,7 +90,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-284 | Outbound delivery failure layer: retry, cap escalation, cleanup | 2026-06-12 | round 2 APPROVE |
 | M1-304 | Declare jakarta.json (+ Parsson) in the messaging-adapter pom | 2026-06-11 | round 1 APPROVE |
 | M1-296 | LLM config/routing: deterministic order, typo fail-fast, base-url validation, structure | 2026-06-11 | round 1 APPROVE |
-| M1-289 | Unreadable bootstrap-assets file fails startup instead of silently disabling | 2026-06-11 | round 1 APPROVE |
 
 ---
 
@@ -503,7 +502,7 @@ M1-295 (done)
 M1-296 (done)
 M1-297 (pending) ← runnable
 M1-298 (pending) ← runnable
-M1-299 (pending) ← runnable
+M1-299 (done)
 M1-300 (pending) ← runnable
 M1-301 (pending) ← runnable
 M1-302 (pending) ← runnable

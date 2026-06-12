@@ -88,8 +88,10 @@ public abstract class AbstractInstanceLockGuard {
 
     private volatile boolean lockHeld;
 
-    // Guards heldConnection so the scheduled probe never touches it while
-    // shutdown is closing it.
+    // Guards the heldConnection reference and the shuttingDown flag. The probe
+    // snapshots the connection under this lock and runs its blocking round-trips
+    // outside it (so shutdown is never stalled behind the probe's network
+    // timeout); the lock still serializes the snapshot against shutdown's close.
     private final Object connectionLock = new Object();
     private volatile boolean shuttingDown;
 
@@ -154,47 +156,68 @@ public abstract class AbstractInstanceLockGuard {
      * session-scoped lock.
      */
     protected void probeHeldSession() {
+        // Snapshot the held connection under the lock, then release it before
+        // the blocking round-trips below. The probe's SELECT 1 can block up to
+        // NETWORK_TIMEOUT_MILLIS on a half-open socket; holding connectionLock
+        // across it would stall @PreDestroy (onShutdown synchronizes on the same
+        // lock) for the whole timeout. The reference is stable for the JVM
+        // lifetime — heldConnection is assigned once at startup and only ever
+        // nulled-out conceptually by shutdown closing it — so a local snapshot
+        // is safe to use outside the lock.
+        Connection conn;
         synchronized (connectionLock) {
             if (shuttingDown || !lockHeld || heldConnection == null) {
                 return;
             }
-            boolean owned;
-            try {
-                // SELECT 1 round-trip: throws if the held session died
-                // server-side (the dead-connection signal).
-                try (Statement st = heldConnection.createStatement();
-                     ResultSet rs = st.executeQuery("SELECT 1")) {
-                    rs.next();
-                }
-                // Ownership re-check on THIS backend session. The held session
-                // takes exactly one advisory lock (the single-instance gate)
-                // and never any other, so any advisory row for its own backend
-                // pid is that lock. pg_try_advisory_lock is deliberately not
-                // re-called here: it is reentrant, so re-acquiring would mask a
-                // server-side release rather than detect it.
-                try (Statement st = heldConnection.createStatement();
-                     ResultSet rs = st.executeQuery(
-                         "SELECT EXISTS (SELECT 1 FROM pg_locks "
-                             + "WHERE locktype = 'advisory' AND pid = pg_backend_pid())")) {
-                    rs.next();
-                    owned = rs.getBoolean(1);
-                }
-            } catch (SQLException e) {
-                // Class name only, never e.getMessage() — driver/server error
-                // text can carry connection-string secrets and control chars
-                // (the SafeLog convention for exception bodies).
-                log.fatal(String.format(
-                    "held lock session for %s is dead (%s); exiting to avoid running as a zombie",
-                    lockKeyHashInput(), e.getClass().getName()));
-                exitHook.exit(1);
-                return;
+            conn = heldConnection;
+        }
+
+        boolean owned;
+        try {
+            // SELECT 1 round-trip: throws if the held session died
+            // server-side (the dead-connection signal).
+            try (Statement st = conn.createStatement();
+                 ResultSet rs = st.executeQuery("SELECT 1")) {
+                rs.next();
             }
-            if (!owned) {
-                log.fatal(String.format(
-                    "advisory lock %s is no longer held by the lock session; exiting to avoid running as a zombie",
-                    lockKeyHashInput()));
-                exitHook.exit(1);
+            // Ownership re-check on THIS backend session. The held session
+            // takes exactly one advisory lock (the single-instance gate)
+            // and never any other, so any advisory row for its own backend
+            // pid is that lock. pg_try_advisory_lock is deliberately not
+            // re-called here: it is reentrant, so re-acquiring would mask a
+            // server-side release rather than detect it.
+            try (Statement st = conn.createStatement();
+                 ResultSet rs = st.executeQuery(
+                     "SELECT EXISTS (SELECT 1 FROM pg_locks "
+                         + "WHERE locktype = 'advisory' AND pid = pg_backend_pid())")) {
+                rs.next();
+                owned = rs.getBoolean(1);
             }
+        } catch (SQLException e) {
+            // A concurrent shutdown closing heldConnection looks like a dead
+            // session from out here (the probe no longer holds connectionLock
+            // across the round-trip). Re-check the shutdown flag before raising
+            // the zombie alarm so an orderly shutdown is not mistaken for a
+            // server-side session loss.
+            synchronized (connectionLock) {
+                if (shuttingDown) {
+                    return;
+                }
+            }
+            // Class name only, never e.getMessage() — driver/server error
+            // text can carry connection-string secrets and control chars
+            // (the SafeLog convention for exception bodies).
+            log.fatal(String.format(
+                "held lock session for %s is dead (%s); exiting to avoid running as a zombie",
+                lockKeyHashInput(), e.getClass().getName()));
+            exitHook.exit(1);
+            return;
+        }
+        if (!owned) {
+            log.fatal(String.format(
+                "advisory lock %s is no longer held by the lock session; exiting to avoid running as a zombie",
+                lockKeyHashInput()));
+            exitHook.exit(1);
         }
     }
 

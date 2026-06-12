@@ -5,6 +5,8 @@ import org.junit.jupiter.api.Test;
 import javax.sql.DataSource;
 import java.lang.reflect.Proxy;
 import java.sql.SQLException;
+import java.time.Clock;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -39,6 +41,12 @@ class ThrottledAdminNotifierThrowableHygieneTest {
                 (proxy, method, args) -> {
                     throw new SQLException(DRIVER_MESSAGE);
                 });
+        // The degraded-DB fallback throttle reads clock + throttleWindow; a
+        // hand-built bean (no CDI injection) must supply them or notifyOnce's
+        // catch path NPEs. Each test method builds a fresh notifier, so the
+        // throttle's first-in-window call always emits the one expected WARN.
+        notifier.clock = Clock.systemUTC();
+        notifier.throttleWindow = Duration.ofHours(1);
         return notifier;
     }
 

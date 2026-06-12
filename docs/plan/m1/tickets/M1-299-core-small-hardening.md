@@ -1,9 +1,9 @@
 ---
 id: M1-299
 title: "Core hardening smalls: notifier fallback throttle, probe outside lock, escaper allocation"
-status: pending
+status: done
 created: 2026-06-11
-last_updated: 2026-06-11
+last_updated: 2026-06-12
 blocked_by: []
 files_budget: 8
 files_scope:
@@ -28,16 +28,56 @@ acceptance:
 test_plan:
   adds:
     - infochat-core/src/test/java/app/zcat/infochat/core
+  modifies:
+    - infochat-core/src/test/java/app/zcat/infochat/core/notifier/ThrottledAdminNotifierThrowableHygieneTest.java
   preserves:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-12
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 9
+      added: 536
+      removed: 52
+escalations:
+  - date: 2026-06-12
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A — pre-review. Implementing U-59 surfaced that the production change
+      alters ThrottledAdminNotifier's construction contract (notifyOnce's
+      degraded-DB path now reads clock + throttleWindow via shouldEmitFallback),
+      breaking the existing in-scope test ThrottledAdminNotifierThrowableHygieneTest,
+      which constructs the bean with only dataSource set and now NPEs. test_plan
+      authorizes no modifies; refine to widen the authorized test scope.
+revisions:
+  - date: 2026-06-12
+    reason: budget-breach refine — authorize the existing-test modification U-59 surfaced
+    snapshot:
+      test_plan:
+        adds:
+          - infochat-core/src/test/java/app/zcat/infochat/core
+        preserves:
+          - all tests currently green on main
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-12
+  verdict: WARN
+  warnings:
+    - "TEST-CHANGES-AUTHORIZED: U-60 says 'or the existing lock-guard tests pin the new shape'; test_plan.modifies does not authorize modifying existing tests. Prefer a new named test for U-60."
+    - "SECURITY-FLAG-CONSISTENT: Notes call U-61's target a 'hostile-controlled path' while security_relevant: false. Flag arguably correct (byte-identical, no security property changes) but mildly inconsistent."
+  blockers: []
 ---
 
 # M1-299: Core hardening smalls: notifier fallback throttle, probe outside lock, escaper allocation
