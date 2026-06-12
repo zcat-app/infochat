@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 14 |
+| pending | 13 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 337 |
+| done | 338 |
 | deferred | 3 |
 | **total** | **354** |
 
@@ -25,7 +25,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-292 — Log hygiene: redactor timeout arms, URL paths, upstream bytes, LLM previews (complexity: medium, risk: medium)
-- M1-294 — SimpleX adapter: error classification, close race, bot-id validation, inbound cap (complexity: medium, risk: medium)
 - M1-298 — Core contracts: dispatchKey rename, TargetKind enum, nullable-UUID bind helper (complexity: medium, risk: medium)
 - M1-302 — Ops posture: Stage-2 fail-open default, readiness topology exposure (decisions) (complexity: low, risk: medium)
 - M1-305 — Observability commitments: schedule implementation or amend as deferred (decision) (complexity: low, risk: low)
@@ -36,6 +35,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-311 — Strip ticket/finding provenance from permanent comments (policy + sweep) (complexity: medium, risk: low)
 - M1-312 — Doc-truth v5: false comments and spec/design drift reconciliation (complexity: medium, risk: low)
 - M1-313 — Chat-memory write ordering on permanent delivery failure (complexity: high, risk: high)
+- M1-314 — Group-deleted-upstream immediate cleanup, distinct from threshold-counted bot-removed (complexity: medium, risk: medium)
 - M1-318 — Derive per-adapter bot contact id from adapter identity material (SimpleX queue address, Signal ACI) (complexity: high, risk: high)
 
 ---
@@ -53,7 +53,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-314 — blocked_by: M1-284 (done), M1-294 (pending)
+_(none)_
 
 ---
 
@@ -478,7 +478,7 @@ M1-281 (done)
 M1-282 (done)
 M1-284 (done)
   ├── M1-313 (pending) ← runnable
-  └── M1-314 (pending)
+  └── M1-314 (pending) ← runnable
 M1-285 (done)
 M1-286 (done)
 M1-287 (done)
@@ -488,7 +488,7 @@ M1-290 (done)
 M1-291 (done)
 M1-292 (pending) ← runnable
 M1-293 (done)
-M1-294 (pending) ← runnable
+M1-294 (done)
   └── M1-314 (pending) [see above]
 M1-295 (done)
 M1-296 (done)

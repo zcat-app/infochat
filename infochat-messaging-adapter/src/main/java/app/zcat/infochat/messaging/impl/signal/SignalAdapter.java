@@ -66,17 +66,19 @@ public final class SignalAdapter implements MessagingAdapter {
 
     private static final Logger LOG = Logger.getLogger(SignalAdapter.class);
 
-    // Values per docs/design/06-messaging.md §6.5.2: 16 KiB laptop
-    // inbound cap (§6.2.2), maxSendsPerSecond 5 (conservative; Signal's
-    // per-account ceiling is higher but the v1 LLM concurrency cap is the
-    // binding constraint), minEditInterval 600ms (ProgressNotifier
-    // coalescing floor, matching SimpleX).
+    // Values per docs/design/06-messaging.md §6.5.2: maxInboundMessageBytes
+    // single-sourced from the codec's enforcement constant (v1 fixed 16 KiB
+    // per §6.2.2, so the capability and the decode-time cap cannot drift),
+    // maxSendsPerSecond 5 (conservative; Signal's per-account ceiling is
+    // higher but the v1 LLM concurrency cap is the binding constraint),
+    // minEditInterval 600ms (ProgressNotifier coalescing floor, matching
+    // SimpleX).
     private static final CapabilityFlags CAPABILITIES = new CapabilityFlags(
             /* supportsMentionByContactId */ true,
             /* supportsMembershipEvents   */ true,
             /* supportsCodeFormatting     */ true,
             /* supportsMarkdownLinks      */ false,
-            /* maxInboundMessageBytes     */ 16_384,
+            /* maxInboundMessageBytes     */ SignalMessageCodec.MAX_INBOUND_TEXT_BYTES,
             /* maxSendsPerSecond          */ 5,
             /* supportsMessageEdit        */ true,
             /* supportsTypingIndicator    */ true,

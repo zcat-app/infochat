@@ -1,9 +1,9 @@
 ---
 id: M1-294
 title: "SimpleX adapter: error classification, close race, bot-id validation, inbound cap"
-status: pending
+status: done
 created: 2026-06-11
-last_updated: 2026-06-11
+last_updated: 2026-06-12
 blocked_by: []
 files_budget: 14
 files_scope:
@@ -13,6 +13,12 @@ files_scope:
   - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex
   - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal
   - docs/design/06-messaging.md
+  # Added by escalate→refine (round 1, budget-breach): U-35's isWellFormed
+  # gate on SimpleXAdapter.start() breaks this provider IT, which calls
+  # start() with a 33-char (<43) test bot-queue-address. The fix is one
+  # well-formed-value literal; the IT lives outside the messaging-adapter
+  # module so the path must be in files_scope.
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/MultiAdapterProductionIT.java
 complexity: medium
 risk: medium
 round_cap: 2
@@ -38,12 +44,65 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-12
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 13
+      added: 333
+      removed: 75
+escalations:
+  - date: 2026-06-12
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A (pre-review). U-35's new SimpleXIdentity.isWellFormed gate on
+      SimpleXAdapter.start() rejects bot-queue-address values < 43 chars.
+      MultiAdapterProductionIT (infochat-provider, outside files_scope)
+      calls sx.start() with new SimpleXIdentity("m1-109-simplex-bot-identity-queue")
+      (33 chars) and asserts start() succeeds, so the IT would fail.
+      Resolution: refine — add the one IT file to files_scope and change
+      its test identity to a well-formed >=43-char value.
+revisions:
+  - date: 2026-06-12
+    reason: budget-breach rework
+    snapshot:
+      files_scope: |
+        (pre-refine) simplex main + signal main (SignalAdapter,
+        SignalMessageCodec) + simplex/signal test dirs + docs/design/06-messaging.md
+        — did NOT include infochat-provider's MultiAdapterProductionIT.java
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-06-12
+    verdict: CLEAN
+    base: 45040c0c2211acbb188122f89b6a15eb1df4b4f4
+    head: 1fd84056a65d2db881c3b85f9d864278557eb0a9
+    verdict_file: docs/plan/m1/redteam/M1-294-2026-06-12.md
+    out_of_model_count: 0
+    note: |
+      Pre-merge adversarial audit of the done branch tip (run between
+      /m1-tick commit and /m1-tick merge per the security_relevant
+      reminder). CLEAN: no gap between docs/spec/security.md and the diff.
+      U-23's fail-closed classifier, U-35's isWellFormed bot-id gate,
+      U-30's single-sourced inbound cap, and U-14's closed-adapter
+      terminal guard all reviewed; nothing to remediate.
+clarity_check:
+  date: 2026-06-12
+  verdict: WARN
+  warnings:
+    - "U-30 acceptance item offers two equally-acceptable implementation paths without preference; reviewer must infer post-hoc which was chosen (ticket Notes do state a preference: thread profile if cheap, else codec-constant + design amendment)."
+    - "test_plan.modifies includes the Signal test directory but does not enumerate which Signal test files/methods change or their new assertion."
+    - "U-30 amendment path references design §6.2.2 without inlining the current text that would be replaced; amendment branch requires reading docs/design/06-messaging.md §6.2.2."
+  blockers: []
 ---
 
 # M1-294: SimpleX adapter: error classification, close race, bot-id validation, inbound cap

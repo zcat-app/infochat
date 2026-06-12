@@ -489,7 +489,12 @@ class MultiAdapterProductionIT {
                 // the noise the per-test application.properties is set
                 // up to dampen.
                 notice -> { },
-                new SimpleXIdentity("m1-109-simplex-bot-identity-queue"));
+                // Well-formed SimpleX queue address (URL-safe base64, >=43
+                // chars): SimpleXAdapter.start() now validates the bot queue
+                // address with SimpleXIdentity.isWellFormed (parity with
+                // Signal's startup ACI validation), so the prior 33-char
+                // kebab-slug would be rejected before the WS connect.
+                new SimpleXIdentity("M1109SimplexBotIdentityQueueAddr00000000000A"));
     }
 
     private static SignalAdapter newSignalAdapter(FakeSignalCli fake) {
@@ -640,8 +645,12 @@ class MultiAdapterProductionIT {
                     // SimpleXIdentity.isWellFormed (M1-208).
                     Map.entry("infochat.adapters.simplex.admin",
                             "M1109SimplexBootstrapAdminQueueAddr000000000A"),
+                    // Well-formed (>=43 chars), DISTINCT from .admin above:
+                    // SimpleXAdapter.start() now validates the bot-queue-address
+                    // with SimpleXIdentity.isWellFormed at @PostConstruct, so
+                    // the prior 27-char kebab-slug would fail boot here.
                     Map.entry("infochat.adapters.simplex.bot-queue-address",
-                            "m1-109-simplex-bot-identity"),
+                            "M1109SimplexBotIdentityQueueAddr00000000000A"),
                     Map.entry("infochat.adapters.signal.binary", "/bin/sleep"),
                     Map.entry("infochat.adapters.signal.data-dir", "/tmp"),
                     Map.entry("infochat.adapters.signal.account", "m1-109-test-account"),

@@ -59,17 +59,17 @@ public final class SimpleXAdapter implements MessagingAdapter {
 
     private static final Logger LOG = LoggerFactory.getLogger(SimpleXAdapter.class);
 
-    // maxInboundMessageBytes is the 16 KiB laptop default per
-    // docs/design/06-messaging.md §6.2.2 (profile-tunable).
-    // maxSendsPerSecond and minEditInterval take design
-    // §6.4.2's conservative values (5/s, 600 ms floor), to be raised only
-    // after observation.
+    // maxInboundMessageBytes is single-sourced from the codec's enforcement
+    // constant so the capability and the decode-time cap cannot drift; v1
+    // ships the fixed 16 KiB value per docs/design/06-messaging.md §6.2.2.
+    // maxSendsPerSecond and minEditInterval take design §6.4.2's conservative
+    // values (5/s, 600 ms floor), to be raised only after observation.
     private static final CapabilityFlags CAPABILITIES = new CapabilityFlags(
             /* supportsMentionByContactId */ true,
             /* supportsMembershipEvents   */ false,
             /* supportsCodeFormatting     */ false,
             /* supportsMarkdownLinks      */ false,
-            /* maxInboundMessageBytes     */ 16_384,
+            /* maxInboundMessageBytes     */ SimpleXMessageCodec.MAX_INBOUND_TEXT_BYTES,
             /* maxSendsPerSecond          */ 5,
             /* supportsMessageEdit        */ true,
             /* supportsTypingIndicator    */ false,
@@ -124,6 +124,14 @@ public final class SimpleXAdapter implements MessagingAdapter {
     // concurrent rebuilds (overlapping close/build would race the client
     // swap). Always cleared, unlike `reconnecting`.
     private final AtomicBoolean reconnectInFlight = new AtomicBoolean();
+    // Terminal latch: set by close()/stop(), never reset. Checked BEFORE
+    // `reconnecting` in requireConnected so a closed adapter classifies every
+    // subsequent send PERMANENT — even when an in-flight reconnect() set the
+    // reconnecting flag and then lost the teardown race, or is still parked in
+    // its ready-probe. `reconnecting` is owned by reconnect() (which clears it
+    // on every exit path); close() latches this guard instead of racing that
+    // flag.
+    private volatile boolean closedForGood;
 
     /**
      * Capability-only constructor. The resulting adapter can answer
@@ -205,17 +213,19 @@ public final class SimpleXAdapter implements MessagingAdapter {
         // surfaces deep inside subprocess launch as an opaque exception
         // that MessagingStartup's §6.7 per-adapter catch silently absorbs.
         cfg.validate();
-        // D10 trust anchor: the bot's queue address must be a real
-        // cryptographic identity, never blank. A blank identity would let
-        // SimpleXMentionParser.botMentioned match any mention list entry
-        // that decodes to empty bytes (the forged-mention class the spec
-        // forever excludes per security.md §"What's intentionally NOT in
-        // v1"). Property key is named so an operator can fix it directly.
-        if (identity.queueAddress().isBlank()) {
+        // D10 trust anchor: the bot's queue address must be a well-formed
+        // SimpleX queue address — the same SimpleXIdentity.isWellFormed gate
+        // the registry applies to the bootstrap admin id, restoring parity
+        // with Signal's startup ACI validation. A blank OR malformed identity
+        // would let SimpleXMentionParser.botMentioned match a mention-list
+        // entry that decodes to empty/forged bytes (the forged-mention class
+        // the spec forever excludes per security.md §"What's intentionally NOT
+        // in v1"). Property key is named so an operator can fix it directly.
+        if (!SimpleXIdentity.isWellFormed(identity.queueAddress())) {
             throw new IllegalStateException(
-                    "infochat.adapters.simplex.bot-queue-address must be set"
-                            + " to the bot's own SimpleX queue address (distinct"
-                            + " from the bootstrap admin's queue address in"
+                    "infochat.adapters.simplex.bot-queue-address must be a"
+                            + " well-formed SimpleX queue address (distinct from"
+                            + " the bootstrap admin's queue address in"
                             + " infochat.adapters.simplex.admin)");
         }
         SimpleXSubprocess sub = new SimpleXSubprocess(
@@ -322,12 +332,18 @@ public final class SimpleXAdapter implements MessagingAdapter {
             rebuildWebSocket();
             if (subprocess == null) {
                 // close() won the race while we were rebuilding — do not
-                // resurrect the transport after teardown.
+                // resurrect the transport after teardown. Clear reconnecting
+                // so the flag never outlives the reconnect: leaving it set
+                // here is what left a closed adapter classifying post-close
+                // sends TRANSIENT forever. (closedForGood is the authoritative
+                // terminal guard, but reconnect() still owns the full
+                // lifecycle of its own flag.)
                 SimpleXWebSocketClient fresh = webSocket;
                 if (fresh != null) {
                     fresh.close();
                     webSocket = null;
                 }
+                reconnecting = false;
                 return;
             }
             reconnecting = false;
@@ -350,6 +366,12 @@ public final class SimpleXAdapter implements MessagingAdapter {
      * prior close.
      */
     public void close() {
+        // Latch the terminal guard FIRST so a concurrent send observes the
+        // closed state before the transport fields are torn down. This is the
+        // authoritative "post-close sends are PERMANENT" signal; close() does
+        // not touch `reconnecting` (that flag is reconnect()'s to manage, and
+        // clearing it here only raced an in-flight reconnect).
+        closedForGood = true;
         SimpleXWebSocketClient ws = webSocket;
         if (ws != null) {
             ws.close();
@@ -360,9 +382,6 @@ public final class SimpleXAdapter implements MessagingAdapter {
             sub.stop();
             subprocess = null;
         }
-        // A closed adapter is not "reconnecting" — post-close sends must
-        // resolve to the null→PERMANENT branch, not a stale TRANSIENT.
-        reconnecting = false;
     }
 
     /**
@@ -605,6 +624,15 @@ public final class SimpleXAdapter implements MessagingAdapter {
     }
 
     private SimpleXWebSocketClient requireConnected() throws MessagingException {
+        // A terminally-closed adapter is PERMANENT, checked BEFORE the
+        // reconnecting branch: close() can race an in-flight reconnect() that
+        // (re-)set the reconnecting flag, and a closed adapter must never
+        // classify sends TRANSIENT — that would loop the Provider's retry
+        // forever against a transport that will never come back.
+        if (closedForGood) {
+            throw new MessagingException(FailureCategory.PERMANENT,
+                    "SimpleXAdapter is closed");
+        }
         // Checked BEFORE the null→PERMANENT branch: a send during the
         // restart→rebuild gap is a recoverable outage the Provider's retry
         // machinery should ride out, while an un-started adapter stays

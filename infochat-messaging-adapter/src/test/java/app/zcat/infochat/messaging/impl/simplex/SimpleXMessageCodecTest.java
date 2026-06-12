@@ -193,6 +193,42 @@ class SimpleXMessageCodecTest {
         assertEquals(FailureCategory.TRANSIENT, transientError.category());
     }
 
+    @Test
+    void classifyErrorUsesExactIncludeListNotSubstringMatch() {
+        // U-23: the classifier is an exact include-list, not substring
+        // matching. An unknown tag that merely CONTAINS a transient-looking
+        // fragment must classify PERMANENT — the spec's fail-closed default
+        // (messaging.md §Failure handling) — instead of being promoted to
+        // TRANSIENT and retried forever.
+        assertEquals(FailureCategory.PERMANENT,
+                SimpleXMessageCodec.classifyError("storeErrorTemporaryGlitch"),
+                "an unknown tag containing 'temporary' must be PERMANENT, not"
+                        + " promoted to TRANSIENT by substring matching");
+        assertEquals(FailureCategory.PERMANENT,
+                SimpleXMessageCodec.classifyError("temporary"),
+                "the bare 'temporary' fragment is not a recognised tag");
+        // Tags the old substring matchers caught only by fragment ("unavailable",
+        // a bare "...timeout"-suffixed unknown) now fail closed too.
+        assertEquals(FailureCategory.PERMANENT,
+                SimpleXMessageCodec.classifyError("serviceUnavailable"));
+        assertEquals(FailureCategory.PERMANENT,
+                SimpleXMessageCodec.classifyError("storeTimeout"));
+
+        // Each include-listed transient tag classifies TRANSIENT, folded
+        // case-insensitively from the wire spelling.
+        assertEquals(FailureCategory.TRANSIENT,
+                SimpleXMessageCodec.classifyError("rcvRateLimit"));
+        assertEquals(FailureCategory.TRANSIENT,
+                SimpleXMessageCodec.classifyError("tryAgainLater"));
+        assertEquals(FailureCategory.TRANSIENT,
+                SimpleXMessageCodec.classifyError("networkError"));
+        assertEquals(FailureCategory.TRANSIENT,
+                SimpleXMessageCodec.classifyError("connectionTimeout"));
+        // Case folding: an upper-cased include-listed tag is still TRANSIENT.
+        assertEquals(FailureCategory.TRANSIENT,
+                SimpleXMessageCodec.classifyError("RCVRATELIMIT"));
+    }
+
     // --- M1-118: queue-address character-set validation (Finding 2, INJECTION) ---
 
     @Test

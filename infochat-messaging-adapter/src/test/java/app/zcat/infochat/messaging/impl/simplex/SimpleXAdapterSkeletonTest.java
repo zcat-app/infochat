@@ -31,6 +31,11 @@ class SimpleXAdapterSkeletonTest {
         assertFalse(caps.supportsCodeFormatting());
         assertFalse(caps.supportsMarkdownLinks(), "v1 adapters MUST declare supportsMarkdownLinks=false");
         assertEquals(16_384, caps.maxInboundMessageBytes());
+        assertEquals(SimpleXMessageCodec.MAX_INBOUND_TEXT_BYTES, caps.maxInboundMessageBytes(),
+                "U-30: maxInboundMessageBytes is single-sourced from the codec's"
+                        + " enforcement constant — this test, not a hand-maintained"
+                        + " comment, is what keeps the capability and the decode-time"
+                        + " cap in lockstep");
         assertEquals(5, caps.maxSendsPerSecond(), "design §6.4.2: at most 5/s averaged");
         assertTrue(caps.supportsMessageEdit(), "SimpleX supports message edits");
         assertFalse(caps.supportsTypingIndicator(), "design §6.4.2: SimpleX has no first-class typing indicator");

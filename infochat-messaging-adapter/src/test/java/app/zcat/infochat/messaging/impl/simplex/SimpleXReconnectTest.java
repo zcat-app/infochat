@@ -3,6 +3,7 @@ package app.zcat.infochat.messaging.impl.simplex;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -92,6 +93,52 @@ class SimpleXReconnectTest {
             assertEquals(FailureCategory.TRANSIENT, failure.category(),
                     "gap send must classify TRANSIENT so Provider's retry"
                             + " machinery treats the outage as recoverable");
+        } finally {
+            adapter.close();
+            fake.close();
+        }
+    }
+
+    @Test
+    void closeMidReconnectClassifiesSubsequentSendsPermanent() throws Exception {
+        // U-14: park a reconnect in its (unsatisfiable) WebSocket-ready probe
+        // so the `reconnecting` flag is held true (the same deterministic
+        // mechanism as sendDuringOutageFailsTransient), then close() the
+        // adapter while that flag is still set. close() owns no part of
+        // `reconnecting` — the parked reconnect still holds it set — so the
+        // terminal closedForGood guard, checked BEFORE reconnecting in
+        // requireConnected, is what must classify the post-close send
+        // PERMANENT. Without that ordering the stale reconnecting flag would
+        // yield TRANSIENT, looping the Provider's retry forever against a
+        // transport that will never come back.
+        FakeSimpleXProcess fake = new FakeSimpleXProcess();
+        fake.start();
+        SimpleXAdapter adapter = newAdapter(fake);
+        SimpleXSubprocess sub = newOneShotSubprocess();
+        sub.start();
+        try {
+            adapter.attachSubprocess(sub);
+            adapter.rebuildWebSocket();
+            fake.awaitClient(WAIT);
+            fake.close();
+            touchDieFlag();
+            awaitRestartCountAtLeast(sub, 1, Duration.ofSeconds(5));
+            // Settle: the reconnect thread is now parked in the (unsatisfiable)
+            // ready probe with `reconnecting` set.
+            Thread.sleep(500);
+            // Precondition — while open and reconnecting, the gap send is TRANSIENT.
+            MessagingException duringOutage = assertThrows(MessagingException.class,
+                    () -> adapter.send(outbound("pre-close")));
+            assertEquals(FailureCategory.TRANSIENT, duringOutage.category(),
+                    "an open, reconnecting adapter classifies the gap send TRANSIENT");
+            // Close mid-reconnect: closedForGood latches; the parked reconnect
+            // still owns the (set) reconnecting flag.
+            adapter.close();
+            MessagingException afterClose = assertThrows(MessagingException.class,
+                    () -> adapter.send(outbound("post-close")));
+            assertEquals(FailureCategory.PERMANENT, afterClose.category(),
+                    "a closed adapter must classify sends PERMANENT even while a"
+                            + " reconnect left the reconnecting flag set");
         } finally {
             adapter.close();
             fake.close();

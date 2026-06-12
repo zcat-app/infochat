@@ -49,13 +49,15 @@ import org.jspecify.annotations.Nullable;
 final class SignalMessageCodec {
 
     /**
-     * Inbound decoded-body cap in UTF-8 bytes — the byte-domain
-     * enforcement of the {@code maxInboundMessageBytes} capability on
-     * the laptop profile, mirroring SimpleX's {@code MAX_INBOUND_TEXT_BYTES}.
-     * The coarse char-domain line cap in {@link SignalJsonRpcClient}
-     * bounds the raw envelope line against an unterminated-line OOM; this
-     * bounds the decoded message body so the Provider's downstream
-     * budgets plan against a real ceiling rather than the line cap.
+     * Inbound decoded-body cap in UTF-8 bytes — the single source of the
+     * {@code maxInboundMessageBytes} capability {@code SignalAdapter}
+     * advertises (which reads this constant directly, so the decode-time
+     * enforcement and the advertised SPI value cannot drift; v1 fixes the
+     * value at 16 KiB per {@code docs/design/06-messaging.md} §6.2.2). The
+     * coarse char-domain line cap in {@link SignalJsonRpcClient} bounds the
+     * raw envelope line against an unterminated-line OOM; this bounds the
+     * decoded message body so the Provider's downstream budgets plan against
+     * a real ceiling rather than the line cap.
      */
     static final int MAX_INBOUND_TEXT_BYTES = 16_384;
 

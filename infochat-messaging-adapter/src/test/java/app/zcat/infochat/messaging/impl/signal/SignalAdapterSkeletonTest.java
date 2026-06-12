@@ -26,6 +26,11 @@ class SignalAdapterSkeletonTest {
         assertTrue(caps.supportsCodeFormatting(), "design §6.5.2: Signal renders monospace");
         assertFalse(caps.supportsMarkdownLinks(), "v1 adapters MUST declare supportsMarkdownLinks=false");
         assertEquals(16_384, caps.maxInboundMessageBytes());
+        assertEquals(SignalMessageCodec.MAX_INBOUND_TEXT_BYTES, caps.maxInboundMessageBytes(),
+                "U-30: maxInboundMessageBytes is single-sourced from the codec's"
+                        + " enforcement constant — this test, not a hand-maintained"
+                        + " comment, is what keeps the capability and the decode-time"
+                        + " cap in lockstep");
         assertEquals(5, caps.maxSendsPerSecond(), "design §6.5.2: conservative 5/s");
         assertTrue(caps.supportsMessageEdit());
         assertTrue(caps.supportsTypingIndicator());

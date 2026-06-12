@@ -17,6 +17,7 @@ import app.zcat.infochat.messaging.ScopeRef;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -61,15 +62,16 @@ final class SimpleXMessageCodec {
 
     /**
      * Inbound text cap (UTF-8 bytes) enforced at decode time on the
-     * {@code text} field of every {@code newChatItem} frame. Mirrors the
-     * SPI-level cap {@link app.zcat.infochat.messaging.CapabilityFlags#maxInboundMessageBytes()}
-     * that {@code SimpleXAdapter} advertises — both values are
-     * 16 KiB on the laptop profile per {@code docs/design/06-messaging.md}
-     * §6.2.2 / §6.4.4. The codec MUST stay in lockstep with the SPI value:
-     * the SPI value is what the Provider's downstream budgets (LLM tokens,
-     * Stage 1 watchdog) plan against; this constant is the codec-local
-     * enforcement that keeps the SPI promise honest at the inbound trust
-     * boundary instead of relying on the 1 MiB WebSocket frame ceiling.
+     * {@code text} field of every {@code newChatItem} frame, and the single
+     * source of the {@code maxInboundMessageBytes} capability
+     * {@link app.zcat.infochat.messaging.CapabilityFlags#maxInboundMessageBytes()}
+     * that {@code SimpleXAdapter} advertises — the capability reads this
+     * constant directly, so the decode-time enforcement and the advertised
+     * SPI value cannot drift. v1 fixes the value at 16 KiB per
+     * {@code docs/design/06-messaging.md} §6.2.2 / §6.4.4; it is the ceiling
+     * the Provider's downstream budgets (LLM tokens, Stage 1 watchdog) plan
+     * against, enforced here at the inbound trust boundary instead of relying
+     * on the 1 MiB WebSocket frame ceiling.
      */
     static final int MAX_INBOUND_TEXT_BYTES = 16_384;
 
@@ -642,30 +644,40 @@ final class SimpleXMessageCodec {
     // --- Failure classification ---------------------------------------------
 
     /**
+     * simplex-chat error tags v1 buckets as {@link FailureCategory#TRANSIENT}
+     * — network resets, idle closes, rate limits, "try again" signals.
+     * Stored lowercased; {@link #classifyError} folds the wire tag before the
+     * membership test. This is the recognised transient vocabulary surfaced
+     * by the M1-105 / M1-109 integration work; any tag outside it is
+     * fail-closed to PERMANENT (the spec's "cannot tell → permanent"
+     * default), so the set is extended only when a new tag is observed to be
+     * genuinely transient.
+     */
+    private static final Set<String> TRANSIENT_ERROR_TAGS = Set.of(
+            "rcvratelimit",
+            "tryagainlater",
+            "networkerror",
+            "connectiontimeout");
+
+    /**
      * Bucket a simplex-chat error tag into {@link FailureCategory#TRANSIENT}
      * or {@link FailureCategory#PERMANENT} per {@code docs/spec/messaging.md}
      * §Failure handling and {@code docs/design/06-messaging.md} §6.4.7.
-     * Unknown tags default to {@code PERMANENT} per the spec rule.
+     *
+     * <p>Membership is an exact include-list ({@link #TRANSIENT_ERROR_TAGS},
+     * matched case-insensitively), deliberately NOT substring matching: a
+     * permanent tag whose name merely contains a transient-looking fragment
+     * (e.g. an unknown tag containing "temporary") would otherwise be
+     * promoted to TRANSIENT and retried forever, inverting the spec's
+     * fail-closed default. Everything not on the list — unknown, unmatched,
+     * or empty — classifies PERMANENT, per {@code docs/spec/messaging.md}
+     * §Failure handling: "An adapter that cannot tell the two apart MUST
+     * default to permanent."</p>
      */
     static FailureCategory classifyError(String errorTag) {
-        String lower = errorTag.toLowerCase(java.util.Locale.ROOT);
-        // Transient: anything that looks like a network reset, idle close,
-        // rate limit, or "try again" signal. The spec wants these retried by
-        // the Provider's uniform retry policy.
-        if (lower.contains("ratelimit")
-                || lower.contains("tryagain")
-                || lower.contains("networkerror")
-                || lower.contains("timeout")
-                || lower.contains("temporary")
-                || lower.contains("unavailable")
-                || lower.contains("connectionerror")) {
-            return FailureCategory.TRANSIENT;
-        }
-        // Permanent: blocked, gone, oversize, rotated identity, policy
-        // violation. The full list lives in design §6.4.7; the tags below
-        // are the ones M1-103 commits to bucketing — anything else falls
-        // through to PERMANENT by the spec's "cannot tell → PERMANENT" rule.
-        return FailureCategory.PERMANENT;
+        return TRANSIENT_ERROR_TAGS.contains(errorTag.toLowerCase(java.util.Locale.ROOT))
+                ? FailureCategory.TRANSIENT
+                : FailureCategory.PERMANENT;
     }
 
     // --- Sealed decoded-frame surface ---------------------------------------

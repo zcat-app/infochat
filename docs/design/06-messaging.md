@@ -265,6 +265,23 @@
   note; the application-level cap is then the only line of defense for
   that adapter.
 
+  **v1 implementation note.** The per-profile values above are the design
+  target. v1 ships a **fixed 16 KiB** transport cap (the `laptop` value) on
+  both production adapters, single-sourced from each codec's
+  `MAX_INBOUND_TEXT_BYTES` constant — the capability's
+  `maxInboundMessageBytes()` reads the constant, so the decode-time
+  enforcement and the advertised SPI value cannot drift (a test pins the
+  equality in place of the prior hand-maintained "stay in lockstep"
+  comment). Profile-driven sizing is deferred: the
+  `infochat-messaging-adapter` module is intentionally decoupled from the
+  `InfochatProfile` plumbing (it depends on neither `infochat-core` nor the
+  per-service config modules that define the profile enum), and the
+  capability is a compile-time constant on a static field, so threading a
+  runtime profile value would mean a new cross-module dependency for no v1
+  behavioural gain. Raising the cap on a larger profile is then a change to
+  the constant (or to profile threading, if that coupling is later
+  introduced), not a spec amendment.
+
   ### 6.2.3 Mention-recognition rule
 
   Per [../spec/messaging.md](../spec/messaging.md) §Required SPI
@@ -488,7 +505,7 @@
                                       //   See "Open questions" at end of file.
   supportsCodeFormatting     = false  // SimpleX renders backticks as literal characters
   supportsMarkdownLinks      = false  // hard-asserted at startup (§6.2.1); SimpleX renders bare URLs
-  maxInboundMessageBytes     = profile-driven (see §6.2.2)  // SimpleX bot-API inbound text frames
+  maxInboundMessageBytes     = 16 KiB, fixed in v1 (see §6.2.2)  // SimpleX bot-API inbound text frames
                                                             //   are bounded by the WS frame cap; the
                                                             //   adapter clamps tighter to give the
                                                             //   application-layer cap headroom.
@@ -679,7 +696,7 @@
                                       //   on Signal even though the protocol could carry link
                                       //   formatting — widening the rendering surface is a spec
                                       //   amendment, not a per-adapter footgun.
-  maxInboundMessageBytes     = profile-driven (see §6.2.2)
+  maxInboundMessageBytes     = 16 KiB, fixed in v1 (see §6.2.2)
   maxSendsPerSecond          = 5      // conservative; Signal's per-account ceiling is higher but
                                       //   the v1 LLM concurrency cap (D46 §Topology) is the
                                       //   binding constraint anyway.
