@@ -1,7 +1,7 @@
 ---
 id: M1-318
 title: "Derive per-adapter bot contact id from adapter identity material (SimpleX queue address, Signal ACI)"
-status: pending
+status: deferred
 created: 2026-06-12
 last_updated: 2026-06-12
 blocked_by: []
@@ -20,6 +20,22 @@ risk: high
 round_cap: 3
 security_relevant: true
 migration_touch: false
+outline_file: target/m1-tick-outline-M1-318.md
+deferred_reason: decomposed
+escalations:
+  - date: 2026-06-12
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A — escalated by developer before implementation. Feasibility-gate
+      investigation confirmed derivation is feasible for both adapters
+      (SimpleX: APIShowMyAddress → userContactLink; Signal: getUserStatus
+      self-query carries uuid/ACI, or identity-store read — listAccounts
+      does NOT carry the ACI, contra acceptance item 2's hint), but the
+      honest both-adapter accounting (codec/client/adapter code + new
+      tests + provider decoupling test + spec edits + 06-messaging.md
+      design alignment) exceeds files_budget: 10, and the decoupling test
+      and design file lie outside files_scope. Decomposed into M1-319
+      (Signal) and M1-320 (SimpleX).
 out_of_scope:
   - Bot-id well-formedness validation (M1-294 U-35) — only the SOURCE of the anchor value changes here, not its validation.
   - The D10 mention-comparison logic itself — only where the anchor VALUE originates.
@@ -40,7 +56,13 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-12
+  verdict: WARN
+  warnings:
+    - "Acceptance item 3 does not name a test that pins the decoupling invariant (admin-key rotation leaves the D10 anchor unchanged)."
+    - "Acceptance item 4 does not name the specific post-amendment wording that must appear in deployment.md §Operator inputs item 7."
+  blockers: []
 ---
 
 # M1-318: Derive per-adapter bot contact id from adapter identity material (SimpleX queue address, Signal ACI)

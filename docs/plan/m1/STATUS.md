@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 12 |
+| pending | 13 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 339 |
-| deferred | 3 |
-| **total** | **354** |
+| deferred | 4 |
+| **total** | **356** |
 
 ---
 
@@ -35,7 +35,8 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-312 — Doc-truth v5: false comments and spec/design drift reconciliation (complexity: medium, risk: low)
 - M1-313 — Chat-memory write ordering on permanent delivery failure (complexity: high, risk: high)
 - M1-314 — Group-deleted-upstream immediate cleanup, distinct from threshold-counted bot-removed (complexity: medium, risk: medium)
-- M1-318 — Derive per-adapter bot contact id from adapter identity material (SimpleX queue address, Signal ACI) (complexity: high, risk: high)
+- M1-319 — Derive Signal bot ACI from signal-cli at startup (complexity: low, risk: low)
+- M1-320 — Derive SimpleX bot queue address via APIShowMyAddress (complexity: low, risk: low)
 
 ---
 
@@ -86,8 +87,9 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 ## Deferred
 
-### decomposed (1)
+### decomposed (2)
 - M1-034 → M1-034a
+- M1-318 → unspecified
 
 ### post-mvp-hardening (1)
 - M1-031 → unspecified
@@ -510,5 +512,7 @@ M1-312 (pending) ← runnable
 M1-315 (done)
 M1-316 (done)
 M1-317 (done)
-M1-318 (pending) ← runnable
+M1-318 (deferred)
+M1-319 (pending) ← runnable
+M1-320 (pending) ← runnable
 ```
