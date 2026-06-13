@@ -15,8 +15,8 @@
 | in-review | 0 |
 | escalated | 0 |
 | done | 353 |
-| deferred | 4 |
-| **total** | **359** |
+| deferred | 5 |
+| **total** | **360** |
 
 ---
 
@@ -25,7 +25,7 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-311 — Comment policy: carve out stable decision-record anchors (complexity: low, risk: low)
-- M1-314 — Group-deleted-upstream immediate cleanup, distinct from threshold-counted bot-removed (complexity: medium, risk: medium)
+- M1-324 — Amend §Failure handling: group-deleted-upstream via threshold in v1 (complexity: low, risk: low)
 
 ---
 
@@ -82,6 +82,9 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 ### post-mvp-hardening (1)
 - M1-031 → unspecified
+
+### spec-amend (1)
+- M1-314 → M1-324
 
 ### wont-do-infeasible (1)
 - M1-258 → unspecified
@@ -468,7 +471,7 @@ M1-281 (done)
 M1-282 (done)
 M1-284 (done)
   ├── M1-313 (done)
-  └── M1-314 (pending) ← runnable
+  └── M1-314 (deferred)
 M1-285 (done)
 M1-286 (done)
 M1-287 (done)
@@ -479,7 +482,7 @@ M1-291 (done)
 M1-292 (done)
 M1-293 (done)
 M1-294 (done)
-  └── M1-314 (pending) [see above]
+  └── M1-314 (deferred) [see above]
 M1-295 (done)
 M1-296 (done)
 M1-297 (done)
@@ -507,4 +510,6 @@ M1-319 (done)
   └── M1-320 (done)
 M1-321 (done)
   └── M1-322 (done)
+M1-324 (pending) ← runnable
+  └── M1-314 (deferred) [see above]
 ```
