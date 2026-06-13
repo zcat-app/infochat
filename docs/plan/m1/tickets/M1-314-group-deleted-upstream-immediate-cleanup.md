@@ -1,9 +1,11 @@
 ---
 id: M1-314
 title: "Group-deleted-upstream immediate cleanup, distinct from threshold-counted bot-removed"
-status: pending
+status: deferred
 created: 2026-06-11
-last_updated: 2026-06-11
+last_updated: 2026-06-13
+deferred_on: M1-324
+deferred_reason: spec-amend
 blocked_by:
   - M1-284
   - M1-294
@@ -40,7 +42,28 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-13
+  verdict: WARN
+  warnings:
+    - "complexity: medium may be slightly over-calibrated for a single-branch addition with two tests. Consider complexity: low if the M1-294 API shape turns out to be a simple enum constant check. Does not block implementation."
+  blockers: []
+escalations:
+  - date: 2026-06-13
+    reason: premise-fail
+    reviewer_verdict_excerpt: |
+      N/A — premise failure found during start/implementation grounding,
+      before any test run. The ticket branches on "the distinct error class
+      M1-294 exposes" for group-not-found, but M1-294 as delivered exposes no
+      such signal: FailureCategory is binary TRANSIENT/PERMANENT, the only
+      method on MessagingException is category(), and SimpleXMessageCodec
+      .classifyError returns a binary FailureCategory (M1-294 U-23 deliberately
+      made it a TRANSIENT include-list → else PERMANENT). The acceptance items
+      require distinguishing group-not-found from generic PERMANENT, which is
+      impossible without that signal; branching on the raw message string is
+      explicitly forbidden by the ticket Notes and the spec's "No silent
+      extension" rule, and building the classifier here is out_of_scope
+      (owned by M1-294) and outside files_scope (messaging-adapter module).
 ---
 
 # M1-314: Group-deleted-upstream immediate cleanup, distinct from threshold-counted bot-removed

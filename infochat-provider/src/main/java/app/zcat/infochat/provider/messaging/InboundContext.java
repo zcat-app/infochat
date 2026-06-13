@@ -1,6 +1,8 @@
 package app.zcat.infochat.provider.messaging;
 
+import app.zcat.infochat.provider.chat.ChatAgent;
 import jakarta.enterprise.context.RequestScoped;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Per-inbound-dispatch context bean. Carries the originating
@@ -43,6 +45,15 @@ public class InboundContext {
     // legitimately fire before any language is resolvable — see
     // effectiveLanguage().
     private String effectiveLanguage = "en";
+
+    // The chat turn's deferred persistence step, stashed by the chat
+    // dispatch (InboundRouter.dispatchChat) and run by onMessage ONLY
+    // after the reply is delivered. Request-scoped so it cannot leak
+    // across dispatches; null on every non-chat reply path. Carried here
+    // rather than threaded as a method-local because the chat dispatch
+    // seam (dispatchChat) returns only the reply string — its signature
+    // is pinned by InboundRouterAcquisitionCountTest's override.
+    private ChatAgent.@Nullable PendingCommit pendingChatCommit;
 
     /**
      * The originating adapter's {@code name()} for the current
@@ -99,5 +110,28 @@ public class InboundContext {
 
     public void setEffectiveLanguage(String effectiveLanguage) {
         this.effectiveLanguage = effectiveLanguage;
+    }
+
+    /**
+     * Stash the chat turn's deferred persistence step for the current
+     * dispatch. Set by {@link InboundRouter#dispatchChat} when a chat
+     * reply was computed successfully; left unset (null) on every other
+     * reply path.
+     */
+    public void setPendingChatCommit(ChatAgent.PendingCommit pendingChatCommit) {
+        this.pendingChatCommit = pendingChatCommit;
+    }
+
+    /**
+     * Return the stashed deferred persistence step and clear it, or
+     * {@code null} if no chat turn was computed this dispatch. Read by
+     * {@link InboundRouter#onMessage} after the reply is delivered: a
+     * non-null value is run to persist the turn and auto-compress, but
+     * only when delivery succeeded.
+     */
+    public ChatAgent.@Nullable PendingCommit takePendingChatCommit() {
+        ChatAgent.PendingCommit pending = this.pendingChatCommit;
+        this.pendingChatCommit = null;
+        return pending;
     }
 }

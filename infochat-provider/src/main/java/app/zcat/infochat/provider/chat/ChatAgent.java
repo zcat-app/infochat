@@ -116,59 +116,106 @@ public class ChatAgent {
     }
 
     /**
-     * Handle a chat-mode message. Returns the reply text to send back to
-     * the user, or {@code null} when {@code /stop} cancelled the request —
-     * the {@code /stop} handler already replied, so the router must send
-     * nothing further. The in-flight slot is acquired and released within
-     * this method; callers need not manage it.
+     * The deferred persistence + auto-compress step for a successfully
+     * computed chat turn. Built by {@link #handleTurn} and run by the
+     * router ONLY after the reply has been delivered, so a permanent
+     * delivery failure leaves the context window "as if the message was
+     * never generated" (spec {@code messaging.md} §Failure handling).
+     * Returns the auto-compress notice to send as a follow-up message,
+     * or empty when no compression fired.
      */
-    public @Nullable String handle(UUID userId, String scopeKind,
-                                   UUID scopeId, String userMessage) {
+    @FunctionalInterface
+    public interface PendingCommit {
+        Optional<String> commit();
+    }
+
+    /**
+     * The outcome of computing a chat turn: the reply to deliver (or
+     * {@code null} when {@code /stop} cancelled the request) and the
+     * deferred {@link PendingCommit} to run after delivery succeeds.
+     * {@code pendingCommit} is {@code null} for every non-persisting
+     * outcome — a {@code /stop} cancellation, an in-flight rejection, a
+     * ceiling-gated rejection, and an LLM failure all carry no turn to
+     * commit.
+     */
+    public record ChatTurnResult(@Nullable String reply, @Nullable PendingCommit pendingCommit) {}
+
+    /**
+     * Handle a chat-mode message, computing the reply WITHOUT persisting.
+     * Returns the reply text to send back to the user plus a deferred
+     * {@link PendingCommit} the caller runs after delivery succeeds; on
+     * permanent delivery failure the caller drops the commit so neither
+     * turn is persisted and auto-compress does not run. Returns a
+     * {@code null} reply (and {@code null} commit) when {@code /stop}
+     * cancelled the request — the {@code /stop} handler already replied,
+     * so the router must send nothing further. The in-flight slot is
+     * acquired and released within this method; callers need not manage it.
+     */
+    public ChatTurnResult handleTurn(UUID userId, String scopeKind,
+                                     UUID scopeId, String userMessage) {
         // Resolved ahead of the in-flight gate so the contention notice
         // and the catch-all unavailable reply localize too (D43).
         String scopeLanguage = readScopeLanguage(scopeKind, scopeId);
         InFlightTracker.CancellationHandle slot =
                 inFlightTracker.tryAcquire(userId, scopeKind, scopeId);
         if (slot == null) {
-            return bundleLoader.get(BundleKeys.ERROR_CHAT_IN_FLIGHT, scopeLanguage);
+            return new ChatTurnResult(
+                    bundleLoader.get(BundleKeys.ERROR_CHAT_IN_FLIGHT, scopeLanguage), null);
         }
         try {
-            String reply = doHandle(userId, scopeKind, scopeId, userMessage, scopeLanguage);
+            ChatTurnResult result = doHandle(userId, scopeKind, scopeId, userMessage, scopeLanguage);
             // Delivery boundary: /stop may have marked this request cancelled
             // even though the work completed — the interrupt landed after the
             // last interruptible point, or it never landed at all (a "missed
-            // interrupt"). Discard the result so it is not delivered as a
-            // second, stale reply alongside the /stop acknowledgement.
+            // interrupt"). Discard the result (reply AND pending commit) so it
+            // is not delivered or persisted as a second, stale turn alongside
+            // the /stop acknowledgement.
             if (slot.isCancelled()) {
-                return null;
+                return new ChatTurnResult(null, null);
             }
-            return reply;
+            return result;
         } catch (Exception e) {
             // A landed cancellation interrupt surfaces here as an exception.
             // When /stop marked this request the /stop handler already
             // replied — return null (no content) rather than double-replying
             // with the unavailable notice.
             if (slot.isCancelled()) {
-                return null;
+                return new ChatTurnResult(null, null);
             }
             // LLM unreachable or any other failure → friendly error.
             // No session advance, no memory write, no tool invocation
-            // beyond what already ran before the failure.
+            // beyond what already ran before the failure: a null commit.
             SafeLog.error(log, "ChatAgent.handle failed for userId=" + userId, e);
-            return bundleLoader.get(BundleKeys.ERROR_CHAT_UNAVAILABLE, scopeLanguage);
+            return new ChatTurnResult(
+                    bundleLoader.get(BundleKeys.ERROR_CHAT_UNAVAILABLE, scopeLanguage), null);
         } finally {
             inFlightTracker.release(userId, scopeKind, scopeId, slot);
         }
     }
 
-    private String doHandle(UUID userId, String scopeKind, UUID scopeId,
-                            String userMessage, String scopeLanguage) {
+    /**
+     * Compute the reply for a chat-mode message and discard the deferred
+     * commit. Used where the caller does not orchestrate delivery and so
+     * cannot defer persistence to a post-delivery point — only the
+     * compute behaviour (prompt build, tool loop, sanitize, translate) is
+     * exercised, never the turn persistence. The production router uses
+     * {@link #handleTurn} instead, persisting only after a successful send.
+     */
+    public @Nullable String handle(UUID userId, String scopeKind,
+                                   UUID scopeId, String userMessage) {
+        return handleTurn(userId, scopeKind, scopeId, userMessage).reply();
+    }
+
+    private ChatTurnResult doHandle(UUID userId, String scopeKind, UUID scopeId,
+                                    String userMessage, String scopeLanguage) {
         // Ceiling gate: a failed auto-compress left this session at its
         // token ceiling — reject the turn outright (no LLM call, no
         // persist) instead of silently growing past the ceiling. Clears
-        // when a compress succeeds or /clear empties the session.
+        // when a compress succeeds or /clear empties the session. A
+        // rejected turn carries no commit (null) — nothing is persisted.
         if (autoCompressTrigger.isCeilingGated(userId, scopeKind, scopeId)) {
-            return bundleLoader.get(BundleKeys.ERROR_COMPRESS_FAILED, scopeLanguage);
+            return new ChatTurnResult(
+                    bundleLoader.get(BundleKeys.ERROR_COMPRESS_FAILED, scopeLanguage), null);
         }
 
         // 1. Build prompt (pre-fetches memory internally)
@@ -197,14 +244,13 @@ public class ChatAgent {
 
         // 6. Sanitize BEFORE persist so admin commands never enter the DB
         String sanitized = outputSanitizer.sanitize(finalText);
-
-        // 7. Persist both turns (user + sanitized assistant)
         int userTokens = ChatSessionRepository.estimateTokens(userMessage);
-        sessionRepository.persistTurn(userId, scopeKind, scopeId, "user", userMessage, userTokens);
         int assistantTokens = ChatSessionRepository.estimateTokens(sanitized);
-        sessionRepository.persistTurn(userId, scopeKind, scopeId, "assistant", sanitized, assistantTokens);
 
-        // 8. Translate if scope language is non-en
+        // 7. Translate if scope language is non-en. The persisted assistant
+        // turn is the untranslated `sanitized` text (chat memory is
+        // English-canonical, like source post bodies); only the delivered
+        // reply is translated.
         String reply;
         if (!"en".equals(scopeLanguage)) {
             reply = translationPipeline.run(sanitized, scopeLanguage);
@@ -212,14 +258,20 @@ public class ChatAgent {
             reply = sanitized;
         }
 
-        // 9. Auto-compress: fires between turns (after reply computed,
-        // before next message). Notification appended to the reply.
-        Optional<String> autoCompressNotice =
-                autoCompressTrigger.checkAndCompress(userId, scopeKind, scopeId, scopeLanguage);
-        if (autoCompressNotice.isPresent()) {
-            return reply + "\n\n" + autoCompressNotice.get();
-        }
-        return reply;
+        // 8. Defer persistence + auto-compress to a post-delivery commit.
+        // Honoring spec messaging.md §Failure handling requires that a
+        // permanent delivery failure leave the context window "as if the
+        // message was never generated, and chat_memory is not written" —
+        // so neither turn may be committed until the router confirms the
+        // reply was delivered. The persist-then-compress order is kept
+        // intact (compress reads the just-persisted session token_count);
+        // only the position of that pair relative to send moves.
+        PendingCommit pendingCommit = () -> {
+            sessionRepository.persistTurn(userId, scopeKind, scopeId, "user", userMessage, userTokens);
+            sessionRepository.persistTurn(userId, scopeKind, scopeId, "assistant", sanitized, assistantTokens);
+            return autoCompressTrigger.checkAndCompress(userId, scopeKind, scopeId, scopeLanguage);
+        };
+        return new ChatTurnResult(reply, pendingCommit);
     }
 
     /**

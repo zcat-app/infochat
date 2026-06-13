@@ -72,7 +72,11 @@ class ChatAgentTest {
     void orchestrationSequenceIsCorrect() {
         llmProvider.responses.add(new LlmResponse("Hello, how can I help?"));
 
-        String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "hi");
+        ChatAgent.ChatTurnResult result = agent.handleTurn(USER_ID, SCOPE_KIND, SCOPE_ID, "hi");
+        // Persistence is deferred to a post-delivery commit; the router runs
+        // it after a successful send. Drive that commit here to assert the
+        // turn-persistence behaviour the reorder preserves.
+        result.pendingCommit().commit();
 
         assertEquals(1, promptBuilderCalls, "prompt builder should be called once");
         assertEquals(1, auditCalls, "audit row should be written once before LLM call");
@@ -84,7 +88,7 @@ class ChatAgentTest {
         assertEquals("user", persistedRoles.get(0));
         assertEquals("assistant", persistedRoles.get(1));
         assertEquals(0, translationCalls, "no translation for en scope");
-        assertEquals("Hello, how can I help?", reply);
+        assertEquals("Hello, how can I help?", result.reply());
     }
 
     @Test
@@ -270,7 +274,9 @@ class ChatAgentTest {
         sanitizerOutput = "[redacted command]";
         llmProvider.responses.add(new LlmResponse("Try /ban user123"));
 
-        agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "help");
+        ChatAgent.ChatTurnResult result = agent.handleTurn(USER_ID, SCOPE_KIND, SCOPE_ID, "help");
+        // Run the deferred post-delivery commit to drive persistence.
+        result.pendingCommit().commit();
 
         // The persisted assistant text should be the sanitized version
         assertEquals(2, persistedTexts.size());
@@ -286,11 +292,13 @@ class ChatAgentTest {
         llmProvider.responses.add(new LlmResponse("Reply A"));
         llmProvider.responses.add(new LlmResponse("Reply B"));
 
-        String replyA = agent.handle(USER_ID, "group", groupA, "hello group A");
-        String replyB = agent.handle(USER_ID, "group", groupB, "hello group B");
+        ChatAgent.ChatTurnResult resultA = agent.handleTurn(USER_ID, "group", groupA, "hello group A");
+        resultA.pendingCommit().commit();
+        ChatAgent.ChatTurnResult resultB = agent.handleTurn(USER_ID, "group", groupB, "hello group B");
+        resultB.pendingCommit().commit();
 
-        assertEquals("Reply A", replyA);
-        assertEquals("Reply B", replyB);
+        assertEquals("Reply A", resultA.reply());
+        assertEquals("Reply B", resultB.reply());
         // 4 persisted turns: user-A, assistant-A, user-B, assistant-B
         assertEquals(4, sessionPersistCalls,
                 "distinct scopes must produce independent session persists");
@@ -373,10 +381,12 @@ class ChatAgentTest {
         ceilingGated = true;
         llmProvider.responses.add(new LlmResponse("recovered reply"));
 
-        String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "hi");
+        ChatAgent.ChatTurnResult gated = agent.handleTurn(USER_ID, SCOPE_KIND, SCOPE_ID, "hi");
 
-        assertEquals(BundleKeys.ERROR_COMPRESS_FAILED, reply,
+        assertEquals(BundleKeys.ERROR_COMPRESS_FAILED, gated.reply(),
                 "a ceiling-stuck session must reject the turn with the failure notice");
+        assertNull(gated.pendingCommit(),
+                "a ceiling-gated rejection carries no turn to commit");
         assertEquals(0, sessionPersistCalls,
                 "the rejected turn must not be silently appended to the session");
         assertEquals(0, llmProvider.callCount,
@@ -386,9 +396,10 @@ class ChatAgentTest {
 
         // Once a compress succeeds the gate clears and turns flow again.
         ceilingGated = false;
-        String recovered = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "hi again");
+        ChatAgent.ChatTurnResult recovered = agent.handleTurn(USER_ID, SCOPE_KIND, SCOPE_ID, "hi again");
+        recovered.pendingCommit().commit();
 
-        assertEquals("recovered reply", recovered);
+        assertEquals("recovered reply", recovered.reply());
         assertEquals(2, sessionPersistCalls,
                 "after the gate clears, turns persist normally");
     }

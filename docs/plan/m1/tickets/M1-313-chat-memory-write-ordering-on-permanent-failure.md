@@ -1,7 +1,7 @@
 ---
 id: M1-313
 title: "Chat-memory write ordering on permanent delivery failure"
-status: pending
+status: done
 created: 2026-06-11
 last_updated: 2026-06-13
 blocked_by:
@@ -36,7 +36,20 @@ test_plan:
 spec_refs:
   - docs/spec/messaging.md §Failure handling
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-13
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 471
+      removed: 59
 escalations:
   - date: 2026-06-13
     reason: outline-fail
@@ -96,7 +109,12 @@ revisions:
         preserves:
           - all tests currently green on main
         (no modifies: entry)
-clarity_check: {}
+clarity_check:
+  date: 2026-06-13
+  verdict: PASS
+  warnings: []
+  blockers: []
+outline_file: target/m1-tick-outline-M1-313.md
 ---
 
 # M1-313: Chat-memory write ordering on permanent delivery failure

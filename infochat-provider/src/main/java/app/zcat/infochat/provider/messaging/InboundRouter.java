@@ -10,6 +10,7 @@ import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.chat.ChatAgent;
 import app.zcat.infochat.provider.chat.LlmRateCap;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import app.zcat.infochat.provider.command.AssetCommandFamilyOracle;
@@ -775,7 +776,35 @@ public class InboundRouter {
         // A null body means a self-delivering handler already shipped
         // its reply through the ProgressNotifier — skip the router send.
         if (body != null) {
-            sendReply(msg.scope(), body, adapterName);
+            MessageHandle handle = sendReply(msg.scope(), body, adapterName);
+            // Post-delivery chat-turn persistence (spec messaging.md
+            // §Failure handling). takePendingChatCommit() is non-null only
+            // when this dispatch computed a chat reply; it is read (and
+            // cleared) unconditionally so a permanent failure does not
+            // strand it. Persist + auto-compress run ONLY when the reply
+            // was delivered (non-null handle): on permanent failure the
+            // commit is dropped, so neither turn is written.
+            ChatAgent.PendingCommit pendingChatCommit = inboundContext.takePendingChatCommit();
+            if (handle != null && pendingChatCommit != null) {
+                try {
+                    Optional<String> autoCompressNotice = pendingChatCommit.commit();
+                    // Auto-compress fires between turns; its notice now rides
+                    // a second outbound because persistence runs AFTER the
+                    // reply is delivered (it can no longer be appended to the
+                    // already-sent reply).
+                    autoCompressNotice.ifPresent(
+                            notice -> sendReply(msg.scope(), notice, adapterName));
+                } catch (RuntimeException e) {
+                    // Send succeeded but post-delivery persistence failed.
+                    // The user already received the reply, so a resend would
+                    // duplicate it — log and move on; do NOT re-enter the
+                    // send path.
+                    SafeLog.error(log,
+                            "Chat-turn persistence failed after delivery for scope="
+                                    + ContactIds.redact(scopeIdOf(msg.scope())),
+                            e);
+                }
+            }
         }
     }
 
@@ -869,7 +898,15 @@ public class InboundRouter {
         }
     }
 
-    private void sendReply(ScopeRef scope, String body, String adapterName) {
+    /**
+     * Deliver a reply through the outbound chokepoint. Returns the
+     * {@link MessageHandle} on success, or {@code null} when no adapter is
+     * bound for {@code adapterName} or the chokepoint aborted the send
+     * (permanent failure / exhausted retry). The chat path uses the return
+     * value to gate post-delivery chat-turn persistence (spec
+     * {@code messaging.md} §Failure handling); other reply paths ignore it.
+     */
+    private @Nullable MessageHandle sendReply(ScopeRef scope, String body, String adapterName) {
         MessagingAdapter target = replyTargets.get(adapterName);
         if (target == null) {
             // No adapter is bound under this inbound's adapterName. The
@@ -881,7 +918,7 @@ public class InboundRouter {
             // (per-adapter isolation, D46).
             log.error("InboundRouter has no replyTarget for adapter={}; dropping reply for scope={}",
                     adapterName, ContactIds.redact(scopeIdOf(scope)));
-            return;
+            return null;
         }
         // The chokepoint owns retry (TRANSIENT) and abort (PERMANENT /
         // exhausted). A null handle means the reply was aborted; log it
@@ -896,6 +933,7 @@ public class InboundRouter {
             log.error("InboundRouter reply aborted for adapter={} scope={}",
                     target.name(), ContactIds.redact(scopeIdOf(scope)));
         }
+        return handle;
     }
 
     /**
@@ -1053,10 +1091,23 @@ public class InboundRouter {
      * {@link app.zcat.infochat.provider.chat.ChatAgent}.
      */
     @Nullable String dispatchChat(UUID actorId, String scopeKind, UUID scopeId, String normalized) {
-        // Null propagates a /stop-cancelled chat turn: ChatAgent already let
-        // the /stop handler reply, so the router's null-body branch skips the
-        // send (no double-reply).
-        return chatAgent.handle(actorId, scopeKind, scopeId, normalized);
+        // Compute the reply WITHOUT persisting. The chat-turn persistence
+        // (and auto-compress) is deferred to a post-delivery commit so a
+        // permanent delivery failure leaves the context window "as if the
+        // message was never generated" (spec messaging.md §Failure
+        // handling). The pending commit is stashed on the request-scoped
+        // InboundContext for onMessage to run after the reply is delivered;
+        // it is left unset for a /stop-cancelled / rejected / failed turn.
+        ChatAgent.ChatTurnResult result =
+                chatAgent.handleTurn(actorId, scopeKind, scopeId, normalized);
+        ChatAgent.PendingCommit pending = result.pendingCommit();
+        if (pending != null) {
+            inboundContext.setPendingChatCommit(pending);
+        }
+        // Null reply propagates a /stop-cancelled chat turn: ChatAgent
+        // already let the /stop handler reply, so the router's null-body
+        // branch skips the send (no double-reply).
+        return result.reply();
     }
 
     /**
