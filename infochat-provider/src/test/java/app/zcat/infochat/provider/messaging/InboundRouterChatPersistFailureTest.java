@@ -36,7 +36,7 @@ class InboundRouterChatPersistFailureTest {
     @Test
     void persistFailureAfterDeliveredReplyDoesNotResend() {
         CountingDispatchDataSource counting =
-                new CountingDispatchDataSource(ACTOR_ID, GROUP_DB_ID);
+                new CountingDispatchDataSource(ACTOR_ID);
         AtomicInteger commitAttempts = new AtomicInteger();
 
         InboundRouter router = new InboundRouter() {
@@ -56,7 +56,7 @@ class InboundRouterChatPersistFailureTest {
         router.inboundContext = new InboundContext();
         router.rateCapBucket = new AdmitAllRateCapBucket();
         router.registeredContactSet = new NoopRegisteredContactSet();
-        router.groupApprovalCheck = new NoopGroupApprovalCheck();
+        router.groupApprovalCheck = new NoopGroupApprovalCheck(GROUP_DB_ID);
         router.inviteCodeConsumer = new NoopInviteCodeConsumer();
         router.bundleLoader = new NoopBundleLoader();
         router.commandHandlers = new SingletonInstance<>();
