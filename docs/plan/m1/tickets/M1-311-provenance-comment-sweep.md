@@ -1,7 +1,7 @@
 ---
 id: M1-311
 title: "Comment policy: carve out stable decision-record anchors"
-status: pending
+status: done
 created: 2026-06-11
 last_updated: 2026-06-13
 blocked_by: []
@@ -27,7 +27,20 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-13
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 3
+      added: 14
+      removed: 9
 escalations:
   - date: 2026-06-13
     reason: premise-fail
@@ -67,7 +80,13 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-13
+  verdict: WARN
+  warnings:
+    - "Acceptance item 4 (mvn -B clean verify exits 0) vs Notes lines 129-132: if landed as a plain process: commit the ticket gate (and its mvn verify) is bypassed, making item 4 a manual no-op with no enforcement path."
+    - "Acceptance item 3's 'UNCHANGED from main' grep over infochat-*/src implicitly requires a two-branch comparison; a reviewer running it only post-commit has no main baseline to diff against."
+  blockers: []
 ---
 
 # M1-311: Comment policy — carve out stable decision-record anchors

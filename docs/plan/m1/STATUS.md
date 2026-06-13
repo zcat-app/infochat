@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 355 |
+| done | 356 |
 | deferred | 5 |
 | **total** | **361** |
 
@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-311 — Comment policy: carve out stable decision-record anchors (complexity: low, risk: low)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -67,9 +67,9 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-320 | Derive SimpleX bot queue address via APIShowMyAddress | 2026-06-13 | round 1 APPROVE |
 | M1-313 | Chat-memory write ordering on permanent delivery failure | 2026-06-13 | round 1 APPROVE |
 | M1-312 | Doc-truth v5: false comments and spec/design drift reconciliation | 2026-06-13 | round 1 APPROVE |
+| M1-311 | Comment policy: carve out stable decision-record anchors | 2026-06-13 | round 1 APPROVE |
 | M1-309 | Provider structural dedup: PG listener base class, shared command tokenizer | 2026-06-13 | round 1 APPROVE |
 | M1-308 | Messaging/collector code lows: dead surfaces, helper drift, small perf/correctness | 2026-06-13 | round 1 APPROVE |
-| M1-307 | Provider code lows: JSON conventions, sanitizer seam, dead keys, misc one-liners | 2026-06-13 | round 1 APPROVE |
 
 ---
 
@@ -499,7 +499,7 @@ M1-307 (done)
 M1-308 (done)
 M1-309 (done)
 M1-310 (done)
-M1-311 (pending) ← runnable
+M1-311 (done)
 M1-312 (done)
 M1-315 (done)
 M1-316 (done)
