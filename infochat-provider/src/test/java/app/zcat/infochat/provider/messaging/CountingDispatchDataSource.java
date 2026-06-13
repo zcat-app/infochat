@@ -17,21 +17,20 @@ import java.util.logging.Logger;
  * Fully fake JDBC stack for {@link InboundRouterAcquisitionCountTest}:
  * counts pool acquisitions and tracks the open-connection balance while
  * serving canned rows for the router-owned dispatch statements —
- * the users-row snapshot (a vouched, non-banned actor), the groups-row
- * resolution, the scope-language read (no row → en), and the
- * membership upsert.
+ * the users-row snapshot (a vouched, non-banned actor), the
+ * scope-language read (no row → en), and the membership upsert. The
+ * group's id is no longer read here: it is carried from the step-3.5
+ * approval outcome, so the router issues no {@code FROM groups} query.
  */
 final class CountingDispatchDataSource implements DataSource {
 
     private final UUID actorId;
-    private final UUID groupDbId;
     private final AtomicInteger connectionCount = new AtomicInteger();
     private final AtomicInteger openConnections = new AtomicInteger();
     private final List<String> executedSql = new ArrayList<>();
 
-    CountingDispatchDataSource(UUID actorId, UUID groupDbId) {
+    CountingDispatchDataSource(UUID actorId) {
         this.actorId = actorId;
-        this.groupDbId = groupDbId;
     }
 
     int connectionCount() {
@@ -83,9 +82,6 @@ final class CountingDispatchDataSource implements DataSource {
         if (sql.contains("FROM users")) {
             return userSnapshotRow();
         }
-        if (sql.contains("FROM groups")) {
-            return groupIdRow();
-        }
         if (sql.contains("FROM scope_preferences")) {
             // No preferences row — InboundRouter.lookupScopeLanguage
             // maps the empty result to "en".
@@ -100,14 +96,6 @@ final class CountingDispatchDataSource implements DataSource {
             case "getObject" -> actorId;
             case "getString" -> "vouched";
             case "getBoolean" -> false;
-            default -> throw new UnsupportedOperationException("ResultSet." + name);
-        });
-    }
-
-    // Column read by InboundRouter.lookupGroupId: id.
-    private ResultSet groupIdRow() {
-        return singleRowResultSet(name -> switch (name) {
-            case "getObject" -> groupDbId;
             default -> throw new UnsupportedOperationException("ResultSet." + name);
         });
     }

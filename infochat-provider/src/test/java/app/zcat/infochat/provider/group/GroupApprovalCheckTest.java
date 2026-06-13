@@ -72,7 +72,7 @@ class GroupApprovalCheckTest {
         RateCapBucket bucket = bucketWithGroupCap(3);
 
         RecordingGroupApprovalService service = new RecordingGroupApprovalService(
-                new GroupApprovalCheck.Outcome.Approved());
+                new GroupApprovalCheck.Outcome.Approved(TEST_GROUP_ID));
         GroupApprovalCheck check = checkWith(
                 stubRepoWithExistingRow(TEST_GROUP_ID, "approved"),
                 bucket,

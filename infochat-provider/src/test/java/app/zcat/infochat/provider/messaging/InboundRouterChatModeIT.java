@@ -174,14 +174,6 @@ class InboundRouterChatModeIT {
     }
 
     @Test
-    void lookupGroupIdReturnsEmptyForUnknownGroupInsteadOfThrowing() {
-        try (InboundRouter.DispatchDb db = new InboundRouter.DispatchDb(dataSource)) {
-            assertTrue(router.lookupGroupId(db, ADAPTER, GROUP_PREFIX + "never-created").isEmpty(),
-                    "missing group row must yield Optional.empty(), not IllegalStateException");
-        }
-    }
-
-    @Test
     void probationUserBlockedFromChatMode() throws Exception {
         seedProbationUser("user-3");
 

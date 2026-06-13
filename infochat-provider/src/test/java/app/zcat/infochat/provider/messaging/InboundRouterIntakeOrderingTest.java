@@ -7,6 +7,7 @@ import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.chat.LlmRateCap;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import app.zcat.infochat.provider.command.AssetCommandFamilyOracle;
+import app.zcat.infochat.provider.group.GroupApprovalCheck;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -477,13 +478,16 @@ class InboundRouterIntakeOrderingTest {
                         + otherAdapter.captured);
     }
 
-    // ----- (l) vanished group row → silent drop, never an exception --------
+    // ----- (l) vanished/removed group → silent drop, never an exception ----
     //
-    // lookupGroupId returns Optional.empty() when the groups row is
-    // absent (removed between the step-3.5 approval read and a later
-    // lookup). The chat-mode dispatch must silently drop — no reply,
-    // no exception — closing the timing oracle the former
-    // IllegalStateException throw opened on group existence.
+    // A removed-but-approved (or otherwise vanished) group resolves at
+    // the step-3.5 approval read to GroupApprovalCheck.Outcome.SilentDrop
+    // (here the empty groupRowId drives the recording check to return
+    // SilentDrop). The chat-mode dispatch must silently drop — no reply,
+    // no exception — preserving the timing-oracle protection: an
+    // attacker cannot distinguish removed-group state by response shape.
+    // This is the mechanism that replaced the router's former step-4.1
+    // lookupGroupId re-read (removed_at IS NULL filter → empty → drop).
 
     @Test
     void groupChatMessageWithVanishedGroupRowIsSilentlyDroppedNotThrown() {
@@ -524,9 +528,13 @@ class InboundRouterIntakeOrderingTest {
     }
 
     /**
-     * Variant with an explicit {@code lookupGroupId} result —
+     * Variant with an explicit approved group id —
      * {@code Optional.empty()} simulates a groups row that vanished
-     * (removed) between the step-3.5 approval read and a later lookup.
+     * (removed): the step-3.5 approval read now resolves it to a
+     * {@link GroupApprovalCheck.Outcome.SilentDrop} (the router's
+     * former step-4.1 {@code lookupGroupId} re-read that produced the
+     * drop is gone). A present id yields {@code Approved(id)}, which the
+     * router carries forward as the group dispatch scope id.
      */
     private InboundRouter newRouterWithLog(CallLog log, Optional<InboundRouter.UserSnapshot> snapshot,
                                            Optional<UUID> groupRowId) {
@@ -540,11 +548,6 @@ class InboundRouterIntakeOrderingTest {
             @Override
             String lookupScopeLanguage(DispatchDb db, String scopeKind, UUID scopeId) {
                 return "en";
-            }
-
-            @Override
-            Optional<UUID> lookupGroupId(DispatchDb db, String adapter, String upstreamGroupId) {
-                return groupRowId;
             }
         };
         router.commandHandlers = new SingletonInstance<>();
@@ -575,8 +578,14 @@ class InboundRouterIntakeOrderingTest {
         // router's step-3.5 branch actually fires (group scope +
         // snapshot present). DM scenarios and unregistered-group
         // scenarios bypass step 3.5 entirely, so this fake emits no
-        // log entry in those cases.
-        router.groupApprovalCheck = new RecordingGroupApprovalCheck(log);
+        // log entry in those cases. The outcome encodes the group id
+        // the router carries to step 4.1 — or SilentDrop for the
+        // vanished-group case (empty groupRowId), since the former
+        // step-4.1 lookupGroupId re-read no longer produces that drop.
+        GroupApprovalCheck.Outcome approvalOutcome = groupRowId
+                .<GroupApprovalCheck.Outcome>map(GroupApprovalCheck.Outcome.Approved::new)
+                .orElseGet(GroupApprovalCheck.Outcome.SilentDrop::new);
+        router.groupApprovalCheck = new RecordingGroupApprovalCheck(log, approvalOutcome);
         router.summaryAnchorRepository = new SummaryAnchorRepository() {
             @Override public void clear(UUID userId, String scopeKind, UUID scopeId) {}
         };
@@ -589,7 +598,7 @@ class InboundRouterIntakeOrderingTest {
         router.registeredContactSet = new NoopRegisteredContactSet();
         router.assetCommandFamilyOracle = new AssetCommandFamilyOracle();
         CountingDispatchDataSource dispatchDataSource =
-                new CountingDispatchDataSource(UUID.randomUUID(), UUID.randomUUID());
+                new CountingDispatchDataSource(UUID.randomUUID());
         router.dataSource = dispatchDataSource;
         router.groupAutoPromoteService = new NoopGroupAutoPromoteService(dispatchDataSource);
         router.maxInboundBodyBytes = 65536;

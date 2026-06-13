@@ -31,14 +31,23 @@ import java.util.UUID;
  * {@link GroupApprovalCheck.Outcome.Approved} so every pre-existing
  * scenario flows down the step-4 ban-check arm of the splice. None of
  * the pre-existing scenarios seed pending or rejected approval_status,
- * so the always-approved shape matches their setup.</p>
+ * so the always-approved shape matches their setup. The carried
+ * {@code groupId} becomes the router's group dispatch scope id (the
+ * former step-4.1 {@code lookupGroupId} re-read that supplied it is
+ * gone), so callers asserting on that id pass the value they expect.</p>
  */
 class NoopGroupApprovalCheck extends GroupApprovalCheck {
+    private final UUID groupId;
+
+    NoopGroupApprovalCheck(UUID groupId) {
+        this.groupId = groupId;
+    }
+
     @Override
     public Outcome check(String adapter,
                                   String upstreamGroupId,
                                   UUID activatorUserId,
                                   String activatorRedactedContactId) {
-        return new Outcome.Approved();
+        return new Outcome.Approved(groupId);
     }
 }

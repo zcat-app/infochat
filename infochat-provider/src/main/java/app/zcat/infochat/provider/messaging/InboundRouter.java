@@ -36,6 +36,7 @@ import java.text.MessageFormat;
 import java.text.Normalizer;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -216,10 +217,6 @@ public class InboundRouter {
     private static final String USER_SNAPSHOT_SQL =
             "SELECT id, registration_state, is_banned FROM users "
                     + "WHERE adapter = ? AND contact_id = ?";
-
-    private static final String SELECT_GROUP_SQL =
-            "SELECT id FROM groups WHERE adapter = ? AND upstream_group_id = ? "
-                    + "AND removed_at IS NULL";
 
     private static final String ENSURE_MEMBERSHIP_SQL =
             "INSERT INTO group_membership (group_id, user_id) VALUES (?, ?) "
@@ -429,10 +426,15 @@ public class InboundRouter {
         // step 6 hands off to a command handler or the chat agent.
         Optional<UserSnapshot> snapshot;
         // DM → the actor's users.id; group → the groups.id resolved at
-        // most once at step 4.1 and carried forward (group rate caps,
-        // anchor clear, chat scope resolution — per-scope isolation,
-        // schema §Invariants).
+        // most once (by the step-3.5 approval read) and carried forward
+        // (group rate caps, anchor clear, chat scope resolution —
+        // per-scope isolation, schema §Invariants).
         UUID dispatchScopeId;
+        // The groups.id carried from the step-3.5 Approved outcome to the
+        // step-4.1 membership write. Null until the approval gate yields
+        // Approved; guaranteed non-null for any group reaching step 4.1
+        // (pending/rejected/silent-drop all return at step 3.5).
+        @Nullable UUID approvedGroupId = null;
         try (DispatchDb db = new DispatchDb(dataSource)) {
             snapshot = lookupUser(db, adapterName, contactId);
 
@@ -538,7 +540,10 @@ public class InboundRouter {
                         ContactIds.redact(contactId));
                 switch (outcome) {
                     case GroupApprovalCheck.Outcome.Approved a -> {
-                        // Fall through to step 4.1 (auto-promote).
+                        // Carry the groups.id the approval read resolved
+                        // to step 4.1 — no second SELECT. Fall through to
+                        // step 4.1 (auto-promote).
+                        approvedGroupId = a.groupId();
                     }
                     case GroupApprovalCheck.Outcome.FixedReply f -> {
                         sendReply(msg.scope(),
@@ -580,26 +585,33 @@ public class InboundRouter {
                 return;
             }
 
-            // Step 4.1 — Group resolution, auto-promote, membership
-            // (M1-079c). Placed AFTER the ban check (step 4) so banned
-            // users never get a membership row written. The groups-row
-            // id is resolved exactly once per dispatch, here, on the
-            // dispatch connection, and carried forward as
-            // dispatchScopeId. A missing row is the vanished-group race
-            // (concurrent removal after the step-3.5 approval read):
-            // silent drop with a specific debug log — throwing here was
-            // a timing oracle distinguishing removed-group state. For
-            // every non-banned group-scope sender, attempt auto-promote
-            // first (INSERT with is_group_admin=true ON CONFLICT DO
-            // NOTHING), then ensure a non-admin membership row exists.
-            if (msg.scope() instanceof ScopeRef.Group group) {
-                Optional<UUID> groupId = lookupGroupId(db, adapterName, group.adapterGroupId());
-                if (groupId.isEmpty()) {
-                    log.debug("InboundRouter: no active groups row for adapter={} group={}; dropping",
-                            adapterName, ContactIds.redact(group.adapterGroupId()));
-                    return;
-                }
-                dispatchScopeId = groupId.get();
+            // Step 4.1 — auto-promote + membership (M1-079c). Placed
+            // AFTER the ban check (step 4) so banned users never get a
+            // membership row written. The groups-row id is no longer
+            // re-read here: it is the id the step-3.5 approval read
+            // already resolved, carried forward as approvedGroupId
+            // (guaranteed non-null for any group reaching this point —
+            // pending/rejected and the removed-or-bucket silent drop all
+            // returned at step 3.5).
+            //
+            // Race trade (acceptance item 5): dropping the former
+            // step-4.1 re-read — which filtered removed_at IS NULL —
+            // narrows a window. A group removed BETWEEN the step-3.5
+            // approval read and this membership write now passes (the
+            // approval read is authoritative), so a benign membership
+            // INSERT for a just-removed group is tolerated rather than
+            // silently dropped. A group that was ALREADY removed at the
+            // approval read still drops silently: GroupApprovalCheck
+            // .dispatchByStatus maps approved + removed_at to SilentDrop,
+            // preserving the timing-oracle protection the old
+            // lookupGroupId removed_at filter provided.
+            //
+            // For every non-banned group-scope sender, attempt
+            // auto-promote first (INSERT with is_group_admin=true ON
+            // CONFLICT DO NOTHING), then ensure a non-admin membership
+            // row exists.
+            if (msg.scope() instanceof ScopeRef.Group) {
+                dispatchScopeId = Objects.requireNonNull(approvedGroupId);
                 // Group counterpart of the DM resolution above: the
                 // group's scope id exists from this point on, so every
                 // later reply on this dispatch renders in the group's
@@ -994,34 +1006,6 @@ public class InboundRouter {
             case ScopeRef.Dm ignored -> "dm";
             case ScopeRef.Group ignored -> "group";
         };
-    }
-
-    /**
-     * Resolve the {@code groups.id} for an active (not removed) group
-     * row, or empty when no such row exists. A missing row is a normal
-     * race outcome (group removed between the step-3.5 approval read
-     * and the step-4.1 resolution), NOT an error: the caller
-     * silent-drops instead of throwing, so an attacker cannot use the
-     * exception-vs-reply difference as a timing oracle on group
-     * existence. The {@link SQLException} branch (infrastructure
-     * failure) still throws. Same test seam as {@link #lookupUser}:
-     * package-private + non-final, runs on the shared per-dispatch
-     * connection.
-     */
-    Optional<UUID> lookupGroupId(DispatchDb db, String adapter, String upstreamGroupId) {
-        try (PreparedStatement ps = db.connection().prepareStatement(SELECT_GROUP_SQL)) {
-            ps.setString(1, adapter);
-            ps.setString(2, upstreamGroupId);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (!rs.next()) {
-                    return Optional.empty();
-                }
-                return Optional.of((UUID) rs.getObject("id"));
-            }
-        } catch (SQLException e) {
-            throw new IllegalStateException(
-                    "InboundRouter.lookupGroupId failed for adapter=" + adapter, e);
-        }
     }
 
     /**

@@ -20,10 +20,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Acceptance pin for the per-dispatch connection budget: a group
  * chat-mode dispatch borrows exactly ONE router-owned pool connection
- * for the whole pre-LLM read phase (users-row snapshot, groups-row
- * resolution, membership upsert), the groups.id resolved at step 4.1
- * is carried forward to the chat scope, and the connection is back in
- * the pool before the dispatch crosses the LLM boundary. Collaborators
+ * for the whole pre-LLM read phase (users-row snapshot, membership
+ * upsert), the groups.id resolved by the step-3.5 approval read is
+ * carried forward to the chat scope, and the connection is back in the
+ * pool before the dispatch crosses the LLM boundary. Collaborators
  * with their own connections (approval check, auto-promote internals,
  * probation, anchor repository) are stubbed log-silent Noops — the
  * count under test is the router's own budget.
@@ -38,7 +38,7 @@ class InboundRouterAcquisitionCountTest {
     @Test
     void groupChatDispatchBorrowsOneConnectionAndNoneSpansTheLlmCall() {
         CountingDispatchDataSource counting =
-                new CountingDispatchDataSource(ACTOR_ID, GROUP_DB_ID);
+                new CountingDispatchDataSource(ACTOR_ID);
         AtomicInteger openAtLlmBoundary = new AtomicInteger(-1);
         AtomicReference<UUID> llmScopeId = new AtomicReference<>();
 
@@ -57,7 +57,7 @@ class InboundRouterAcquisitionCountTest {
         // §7a wiring: both doubles are JDBC-free, so the router-owned
         // acquisition count under test is unchanged.
         router.registeredContactSet = new NoopRegisteredContactSet();
-        router.groupApprovalCheck = new NoopGroupApprovalCheck();
+        router.groupApprovalCheck = new NoopGroupApprovalCheck(GROUP_DB_ID);
         router.inviteCodeConsumer = new NoopInviteCodeConsumer();
         router.bundleLoader = new NoopBundleLoader();
         router.commandHandlers = new SingletonInstance<>();

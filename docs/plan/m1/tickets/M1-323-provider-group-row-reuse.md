@@ -1,7 +1,7 @@
 ---
 id: M1-323
 title: "Provider group-row reuse: Outcome.Approved carries groups.id, drop router step-4.1 re-read"
-status: pending
+status: done
 created: 2026-06-13
 last_updated: 2026-06-13
 blocked_by: [M1-306]
@@ -38,14 +38,79 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-13
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 14
+      added: 199
+      removed: 145
 overrides: []
 escalations: []
 revisions: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
-clarity_check: {}
+redteam_findings:
+  - date: 2026-06-13
+    category: PERM-ESCAL
+    severity: low
+    promise: |
+      docs/spec/security.md §Authorization model timing-oracle commitment
+      (step 3.5 silent-drop rule): the pre-diff router re-read groups WHERE
+      removed_at IS NULL at step 4.1, so a group removed between the step-3.5
+      approval read and the membership write produced no auto-promote, no
+      membership row, and no command/chat processing.
+    gap: |
+      InboundRouter step-4.1 now uses Objects.requireNonNull(approvedGroupId)
+      and calls tryAutoPromote / ensureGroupMembership with no re-validation
+      of removed_at (the former lookupGroupId WHERE removed_at IS NULL is
+      deleted). dispatchByStatus only catches the already-removed-at-read
+      case (approved + removed_at != null -> SilentDrop); it cannot see a
+      removal that lands after its own SELECT.
+    repro: |
+      An attacker @mentions the bot in an approved group at the same instant
+      an admin soft-removes that group. If the removal commits after the
+      step-3.5 findApprovalRow SELECT but before step 4.1, the router writes
+      an is_group_admin auto-promote row and a membership row against a
+      removed group. Window is microseconds inside one synchronous handler;
+      attacker cannot reliably trigger or observe it; resulting rows are
+      dormant (every subsequent @mention resolves to SilentDrop). Net effect
+      is a defense-in-depth reduction, not a reachable privilege gain.
+    suggested_fix_class: trust-boundary-tightening
+redteam_audits:
+  - date: 2026-06-13
+    verdict: FINDINGS
+    base: f012c146e7cc4bad5b4859e6c67ef1d6955ea791
+    head: working-tree (uncommitted, branch m1/M1-323-provider-group-row-reuse)
+    verdict_file: docs/plan/m1/redteam/M1-323-2026-06-13.md
+    findings_count: 1
+    out_of_model_count: 1
+    note: |
+      Ran on the in-review branch tip before /m1-tick commit (security_relevant
+      ticket). One LOW finding (PERM-ESCAL vanished-group race) — it is the exact
+      trade-off acceptance item 5 authorized and required to be documented in-code;
+      verified the InboundRouter step-4.1 race-trade comment and the
+      approved+removed_at -> SilentDrop mapping exist on disk. Threat-actor itself
+      rates it a defense-in-depth reduction with dormant rows, not a reachable
+      privilege gain. No remediation required; the gap was accepted by design.
+      One OUT-OF-MODEL advisory (in-flight command across a concurrent removal) —
+      outside the documented soft-delete threat model; user may decide whether to
+      constrain it in spec.
+outline_file: target/m1-tick-outline-M1-323.md
+clarity_check:
+  date: 2026-06-13
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE item 5: 'A code comment records the trade' is a by-inspection assertion, checkable in the diff but weaker than a behavioral test assertion."
+    - "FILES-BUDGET-PLAUSIBLE: files_budget 24 is ~85% above the author's own estimate of ~13 files; could be tightened after grounding confirms the call-site count."
+  blockers: []
 ---
 
 # M1-323: Provider group-row reuse — Outcome.Approved carries groups.id

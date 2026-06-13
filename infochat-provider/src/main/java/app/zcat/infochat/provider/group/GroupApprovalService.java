@@ -115,7 +115,7 @@ public class GroupApprovalService {
         Optional<GroupRepository.GroupApprovalRow> existing =
                 groupRepository.findApprovalRow(adapter, upstreamGroupId);
         if (existing.isPresent()) {
-            return GroupApprovalCheck.dispatchByStatus(existing.get().approvalStatus());
+            return GroupApprovalCheck.dispatchByStatus(existing.get());
         }
         // Missing-row branch — cap-checks first, INSERT second.
         // Per-user cap rejects activate-spam from one user; the global
@@ -140,7 +140,7 @@ public class GroupApprovalService {
         // admin approve/reject between INSERT and this SELECT, so
         // dispatch defensively on the full status set).
         return groupRepository.findApprovalRow(adapter, upstreamGroupId)
-                .map(row -> GroupApprovalCheck.dispatchByStatus(row.approvalStatus()))
+                .map(GroupApprovalCheck::dispatchByStatus)
                 .orElseThrow(() -> new IllegalStateException(
                         "GroupApprovalService.evaluate: tryInsertPending conflicted but no "
                                 + "row found on re-read for adapter=" + adapter

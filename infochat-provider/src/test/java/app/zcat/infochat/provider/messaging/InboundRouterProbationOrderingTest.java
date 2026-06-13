@@ -7,6 +7,7 @@ import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.command.AssetCommandFamilyOracle;
 import app.zcat.infochat.provider.command.CommandPermissions;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
+import app.zcat.infochat.provider.group.GroupApprovalCheck;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -305,14 +306,6 @@ class InboundRouterProbationOrderingTest {
             String lookupScopeLanguage(DispatchDb db, String scopeKind, UUID scopeId) {
                 return "en";
             }
-
-            // Group-scope scenarios reach the step-4.1 groups-row
-            // resolution (hoisted out of the auto-promote null-guard);
-            // a fixed id keeps them off JDBC, mirroring lookupUser.
-            @Override
-            Optional<UUID> lookupGroupId(DispatchDb db, String adapter, String upstreamGroupId) {
-                return Optional.of(GROUP_ROW_ID);
-            }
         };
         router.commandHandlers = new SingletonInstance<>();
         router.inboundContext = new RecordingInboundContext(log);
@@ -327,7 +320,11 @@ class InboundRouterProbationOrderingTest {
         // router's step-3.5 branch actually fires (group scope +
         // snapshot present). DM scenarios and unregistered-group
         // scenarios bypass step 3.5, so no spurious log entry appears.
-        router.groupApprovalCheck = new RecordingGroupApprovalCheck(log);
+        // The Approved outcome carries GROUP_ROW_ID — the id the router
+        // now forwards as the group dispatch scope id, replacing the
+        // former step-4.1 lookupGroupId re-read.
+        router.groupApprovalCheck = new RecordingGroupApprovalCheck(
+                log, new GroupApprovalCheck.Outcome.Approved(GROUP_ROW_ID));
         router.summaryAnchorRepository = new SummaryAnchorRepository() {
             @Override public void clear(UUID userId, String scopeKind, UUID scopeId) {}
         };
@@ -340,7 +337,7 @@ class InboundRouterProbationOrderingTest {
         router.registeredContactSet = new NoopRegisteredContactSet();
         router.assetCommandFamilyOracle = new AssetCommandFamilyOracle();
         CountingDispatchDataSource dispatchDataSource =
-                new CountingDispatchDataSource(snapshot.id(), GROUP_ROW_ID);
+                new CountingDispatchDataSource(snapshot.id());
         router.dataSource = dispatchDataSource;
         router.groupAutoPromoteService = new NoopGroupAutoPromoteService(dispatchDataSource);
         router.maxInboundBodyBytes = 65536;

@@ -169,14 +169,37 @@ class GroupApprovalServiceTest {
     }
 
     @Test
-    void approvedGroupReturnsApprovedOutcome() throws Exception {
+    void approvedGroupReturnsApprovedOutcomeCarryingTheGroupId() throws Exception {
         String upstream = TEST_UPSTREAM_ID_PREFIX + "approved";
         seedGroup(upstream, "approved", activatorUserId);
+        UUID seededGroupId =
+                groupRepository.findApprovalRow(TEST_ADAPTER, upstream).orElseThrow().id();
 
         GroupApprovalCheck.Outcome outcome = service.evaluate(
                 TEST_ADAPTER, upstream, otherUserId, REDACTED_CONTACT);
 
-        assertInstanceOf(GroupApprovalCheck.Outcome.Approved.class, outcome);
+        GroupApprovalCheck.Outcome.Approved approved = assertInstanceOf(
+                GroupApprovalCheck.Outcome.Approved.class, outcome);
+        assertEquals(seededGroupId, approved.groupId(),
+                "the Approved outcome must carry the groups.id the approval read resolved,"
+                        + " so the router needs no step-4.1 re-read");
+    }
+
+    @Test
+    void removedButApprovedGroupReturnsSilentDrop() throws Exception {
+        // An approved group whose removed_at is set must NOT yield
+        // Approved — it silent-drops, preserving the timing-oracle
+        // protection the router's former step-4.1 removed_at filter gave
+        // (docs/spec/security.md §Authorization model): an attacker
+        // cannot distinguish removed-group state by response shape.
+        String upstream = TEST_UPSTREAM_ID_PREFIX + "removed-approved";
+        seedRemovedApprovedGroup(upstream, activatorUserId);
+
+        GroupApprovalCheck.Outcome outcome = service.evaluate(
+                TEST_ADAPTER, upstream, otherUserId, REDACTED_CONTACT);
+
+        assertInstanceOf(GroupApprovalCheck.Outcome.SilentDrop.class, outcome,
+                "an approved-but-removed group must silent-drop, never Approved");
     }
 
     @Test
@@ -291,6 +314,20 @@ class GroupApprovalServiceTest {
             ps.setString(2, upstream);
             ps.setString(3, approvalStatus);
             ps.setObject(4, activatedBy);
+            ps.executeUpdate();
+        }
+    }
+
+    private void seedRemovedApprovedGroup(String upstream, UUID activatedBy)
+            throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO groups (adapter, upstream_group_id, approval_status, "
+                             + "activated_by, removed_at) "
+                             + "VALUES (?, ?, 'approved', ?, now())")) {
+            ps.setString(1, TEST_ADAPTER);
+            ps.setString(2, upstream);
+            ps.setObject(3, activatedBy);
             ps.executeUpdate();
         }
     }

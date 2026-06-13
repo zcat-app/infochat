@@ -62,8 +62,14 @@ public class GroupApprovalCheck {
      * this one.</p>
      */
     public sealed interface Outcome {
-        /** Approved group — InboundRouter falls through to step 4 (ban check). */
-        record Approved() implements Outcome {}
+        /**
+         * Approved group — InboundRouter falls through to step 4.1.
+         * Carries the {@code groups.id} the approval read already
+         * resolved so the router does not re-read the row to find it
+         * (the id feeds the membership write, the per-scope rate caps,
+         * and chat-scope resolution — schema.md §Invariants).
+         */
+        record Approved(UUID groupId) implements Outcome {}
 
         /** Fixed reply path — InboundRouter resolves the bundle key, sends the reply, stops. */
         record FixedReply(String bundleKey) implements Outcome {}
@@ -133,23 +139,38 @@ public class GroupApprovalCheck {
     }
 
     /**
-     * Map a {@code groups.approval_status} CHECK-constrained value to
-     * its user-visible {@link Outcome}. Package-private + {@code static}
-     * so {@link GroupApprovalService} reuses the same dispatch table
-     * for the existing-row branch and the race-loser branch.
+     * Map an approval {@link GroupRepository.GroupApprovalRow} to its
+     * user-visible {@link Outcome}. Package-private + {@code static} so
+     * {@link GroupApprovalService} reuses the same dispatch table for
+     * the existing-row branch and the race-loser branch.
+     *
+     * <p>An {@code approved} row whose {@code removed_at} is set yields
+     * {@link Outcome.SilentDrop}, NOT {@link Outcome.Approved}: a
+     * removed-but-approved group must drop silently (no reply, no
+     * membership write) so an attacker cannot distinguish removed-group
+     * state by response shape (docs/spec/security.md §Authorization
+     * model — timing oracle). Before this resolved here, the router's
+     * step-4.1 {@code lookupGroupId} re-read (filtering {@code removed_at
+     * IS NULL}) produced the same silent drop; moving it into the
+     * dispatch lets the router consume the carried id without a second
+     * read. {@code pending}/{@code rejected} ignore {@code removed_at}
+     * exactly as before — they short-circuit with a fixed reply
+     * regardless of removal.</p>
      *
      * <p>The default branch throws on an unknown status — V26's CHECK
      * constraint guarantees the column carries only the three valid
      * values, so reaching the default branch is a schema invariant
      * violation worth crashing on (not a defensive fall-back).</p>
      */
-    static Outcome dispatchByStatus(String approvalStatus) {
-        return switch (approvalStatus) {
-            case "approved" -> new Outcome.Approved();
+    static Outcome dispatchByStatus(GroupRepository.GroupApprovalRow row) {
+        return switch (row.approvalStatus()) {
+            case "approved" -> row.removedAt() == null
+                    ? new Outcome.Approved(row.id())
+                    : new Outcome.SilentDrop();
             case "pending" -> new Outcome.FixedReply(BundleKeys.GROUP_PENDING);
             case "rejected" -> new Outcome.FixedReply(BundleKeys.GROUP_REJECTED);
             default -> throw new IllegalStateException(
-                    "Unknown groups.approval_status value '" + approvalStatus
+                    "Unknown groups.approval_status value '" + row.approvalStatus()
                             + "' — V26 CHECK constraint was bypassed");
         };
     }
