@@ -1,7 +1,7 @@
 ---
 id: M1-324
 title: "Amend §Failure handling: group-deleted-upstream via threshold in v1"
-status: pending
+status: done
 created: 2026-06-13
 last_updated: 2026-06-13
 blocked_by: []
@@ -42,7 +42,11 @@ overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-13
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-324: Amend §Failure handling: group-deleted-upstream via threshold in v1

@@ -339,15 +339,25 @@ Provider produces plain text per decision D30. The adapter:
   remove/re-add cycles. Cleanup of long-removed groups is a v2
   admin command.
 - **Group deleted upstream.** If a periodic-digest delivery (or
-  any other send to the group) fails with a permanent
-  "group does not exist" error from the adapter (adapter-specific
-  signal — e.g. SimpleX's group-not-found, Signal's
-  group-no-longer-exists), Provider treats it identically to
-  bot-removed: `groups.removed_at = NOW()`, scheduler entries
-  cancelled, group state preserved. The bot-removed and
-  group-deleted cases are not distinguished to users or in the
-  scheduler, only in the adapter-side log; the same v2 cleanup
-  command will sweep both.
+  any other send to the group) fails permanently because the group
+  no longer exists upstream, **v1 handles it via the same
+  permanent-failure threshold path as bot-removed**: the failure
+  counts as a permanent send failure on the group, and when the
+  streak reaches the profile-driven threshold (always greater than
+  1) the bot-removed-from-group handler above fires —
+  `groups.removed_at = NOW()`, scheduler entries cancelled, group
+  state preserved. v1 does **not** treat a definitive single
+  "group does not exist" adapter signal (e.g. SimpleX's
+  group-not-found, Signal's group-no-longer-exists) as a distinct
+  immediate-cleanup trigger: there is no adapter→Provider carrier
+  for that failure sub-class today, and firing cleanup a few digest
+  cycles sooner is not worth acting on a single signal that may be
+  misclassified (a wrongly soft-removed live group does not
+  self-heal — recovery needs a re-add signal that never comes).
+  **Immediate cleanup on a definitive single group-not-found signal
+  is deferred to v2.** The bot-removed and group-deleted cases are
+  not distinguished to users or in the scheduler, only in the
+  adapter-side log; the same v2 cleanup command will sweep both.
 - **User left group.** When the adapter exposes a "user X left
   group Y" signal (or surfaces a permanent send failure to a
   specific user), Provider soft-clears the

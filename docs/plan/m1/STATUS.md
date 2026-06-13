@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 353 |
+| done | 354 |
 | deferred | 5 |
 | **total** | **360** |
 
@@ -25,7 +25,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-311 — Comment policy: carve out stable decision-record anchors (complexity: low, risk: low)
-- M1-324 — Amend §Failure handling: group-deleted-upstream via threshold in v1 (complexity: low, risk: low)
 
 ---
 
@@ -61,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-324 | Amend §Failure handling: group-deleted-upstream via threshold in v1 | 2026-06-13 | — |
 | M1-323 | Provider group-row reuse: Outcome.Approved carries groups.id, drop router step-4.1 re-read | 2026-06-13 | round 1 APPROVE |
 | M1-322 | Adapter observability: AdapterMetrics catalogue | 2026-06-13 | round 1 APPROVE |
 | M1-320 | Derive SimpleX bot queue address via APIShowMyAddress | 2026-06-13 | round 1 APPROVE |
@@ -70,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-308 | Messaging/collector code lows: dead surfaces, helper drift, small perf/correctness | 2026-06-13 | round 1 APPROVE |
 | M1-307 | Provider code lows: JSON conventions, sanitizer seam, dead keys, misc one-liners | 2026-06-13 | round 1 APPROVE |
 | M1-306 | Provider mediums: edit-interval floor, /retry counter order, chat-tool caps | 2026-06-13 | round 1 OVERRIDE-APPROVE |
-| M1-302 | Ops posture: Stage-2 fail-open default, readiness topology exposure (decisions) | 2026-06-13 | round 2 APPROVE |
 
 ---
 
@@ -510,6 +509,6 @@ M1-319 (done)
   └── M1-320 (done)
 M1-321 (done)
   └── M1-322 (done)
-M1-324 (pending) ← runnable
+M1-324 (done)
   └── M1-314 (deferred) [see above]
 ```
