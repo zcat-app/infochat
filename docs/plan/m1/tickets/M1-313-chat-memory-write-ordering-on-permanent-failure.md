@@ -3,7 +3,7 @@ id: M1-313
 title: "Chat-memory write ordering on permanent delivery failure"
 status: pending
 created: 2026-06-11
-last_updated: 2026-06-11
+last_updated: 2026-06-13
 blocked_by:
   - M1-284
 files_budget: 12
@@ -29,16 +29,73 @@ acceptance:
 test_plan:
   adds:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/chat
+  modifies:
+    - "infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentTest.java — the reorder moves persistTurn + auto-compress out of ChatAgent.handle to a post-delivery site, so the methods that assert persistence runs INSIDE a direct handle(...) call must be updated to drive the new shape (ChatAgent.handle returns the pending turn data without persisting; the caller persists after delivery success). Specifically: orchestrationSequenceIsCorrect (sessionPersistCalls / persistedRoles ordering), persistsSanitizedOutput (persistedTexts count), distinctGroupsProduceDistinctSessions (sessionPersistCalls count), and turnOnCeilingStuckSessionRejectedWithFailureNoticeUntilCompressSucceeds (sessionPersistCalls advance). The behavior they pin — both turns persist, sanitized text persisted, distinct sessions, compress gating — is preserved; only the call site that triggers persistence moves."
   preserves:
-    - all tests currently green on main
+    - all OTHER tests currently green on main (everything except the ChatAgentTest methods named under modifies)
 spec_refs:
   - docs/spec/messaging.md §Failure handling
 decision_refs: []
 reviews: {}
+escalations:
+  - date: 2026-06-13
+    reason: outline-fail
+    reviewer_verdict_excerpt: |
+      ## OUTLINE FAILED — escalation recommended
+
+      REASON: The reorder this ticket mandates cannot be implemented without
+      modifying pre-existing tests that the ticket body does not authorize.
+      The chosen implementation shape — named in the ticket's own §Notes
+      ("ChatAgent.handle computes the reply ... WITHOUT persisting, returns
+      the reply plus the pending turn data; the chokepoint persists both
+      turns and runs auto-compress") — necessarily removes the
+      ChatSessionRepository.persistTurn calls and the auto-compress step from
+      inside ChatAgent.handle (currently ChatAgent.java:201-218). At least
+      four methods in the plain-JUnit ChatAgentTest.java assert that
+      persistence runs inside a direct agent.handle(...) call, with no
+      delivery step: orchestrationSequenceIsCorrect (assertEquals(2,
+      sessionPersistCalls) + persistedRoles ordering, lines 83-85),
+      persistsSanitizedOutput (assertEquals(2, persistedTexts.size()), lines
+      276-278), distinctGroupsProduceDistinctSessions (assertEquals(4,
+      sessionPersistCalls), line 295), and
+      turnOnCeilingStuckSessionRejectedWithFailureNoticeUntilCompressSucceeds
+      (asserts sessionPersistCalls advances to 2 across handle calls, line
+      392). Once persist+compress move out of handle(), these assertions go
+      to 0 and fail; they must be rewritten to drive the new "return pending
+      turn data, persist after delivery" shape. The ticket's test_plan
+      carries only adds: and preserves: entries — there is no
+      test_plan.modifies entry, and neither §Out-of-scope nor §Notes names
+      ChatAgentTest. This is precisely the clarity round's
+      TEST-CHANGES-AUTHORIZED WARN. Falsified the escape hatch: because
+      ChatAgentTest invokes agent.handle(...) directly with no router/delivery
+      step, no deferred-callback shape lets the persist run within that single
+      call, so the test modification is unavoidable, not a style choice.
+
+      SUGGESTED ESCALATION: refine
+
+      EVIDENCE: ticket test_plan (lines 29-33) has no modifies: entry; clarity
+      WARN names the exact gap and remediation ("add a test_plan.modifies
+      entry if any need updating"); the forced-modify assertions are at
+      ChatAgentTest.java:83-85, 276-278, 295, 380, 392, contradicted by the
+      chosen shape in §Notes (lines 84-91) against current
+      ChatAgent.java:201-218. Refinement should add a test_plan.modifies entry
+      listing ChatAgentTest (and state the new expected behavior: persist/
+      compress assertions move to the post-delivery site), after which a fresh
+      Plan pass can produce an implementable outline.
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+revisions:
+  - date: 2026-06-13
+    reason: outline-fail rework — authorize the forced ChatAgentTest modifications. The chosen reorder shape (named in §Notes) moves persistTurn + auto-compress out of ChatAgent.handle, breaking four ChatAgentTest methods that assert persistence runs inside a direct handle(...) call. The original test_plan had no modifies: entry (only adds:/preserves:), so those edits were unauthorized — the exact clarity TEST-CHANGES-AUTHORIZED WARN that the plan-writer treats as a hard gate. Added test_plan.modifies listing ChatAgentTest and a §Notes bullet stating the preserved behavior; spec/premise/budget were sound and unchanged.
+    prior_values: |
+      test_plan:
+        adds:
+          - infochat-provider/src/test/java/app/zcat/infochat/provider/chat
+        preserves:
+          - all tests currently green on main
+        (no modifies: entry)
 clarity_check: {}
 ---
 
@@ -94,6 +151,15 @@ fork is handled.
 - Coordination: M1-285 (edit/finalize fallback) and M1-284 are the other
   parts of the outbound-failure story; this ticket is the chat-state-ordering
   slice that M1-284's refine (2026-06-11, outline-fail rework) deferred.
+- Authorized pre-existing test modification (see `test_plan.modifies`):
+  moving persist + auto-compress out of `ChatAgent.handle` to a post-delivery
+  site breaks the `ChatAgentTest` methods that assert persistence runs inside
+  a direct `handle(...)` call (`orchestrationSequenceIsCorrect`,
+  `persistsSanitizedOutput`, `distinctGroupsProduceDistinctSessions`,
+  `turnOnCeilingStuckSessionRejectedWithFailureNoticeUntilCompressSucceeds`).
+  Update them to drive the new shape — the behavior they pin (both turns
+  persist, sanitized text persisted, distinct sessions, compress gating) is
+  preserved; only the call site that triggers persistence moves.
 
 ## Pre-flight self-check (author-side)
 
