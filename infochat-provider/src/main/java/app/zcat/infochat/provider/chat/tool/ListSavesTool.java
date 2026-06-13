@@ -47,6 +47,13 @@ public class ListSavesTool implements ChatToolRegistry.ChatTool {
                 ? (List<String>) args.get("tags") : List.of();
         Duration window = args.containsKey("window")
                 ? Duration.parse((String) args.get("window")) : WINDOW_MAX;
+        // Clamp a model-supplied window to WINDOW_MAX. LLM tool-call
+        // arguments are a trust boundary: the model can request an arbitrary
+        // Duration, but the saved-post scan stays bounded to 30 days
+        // (mirrors SearchPostsTool's window clamp).
+        if (window.compareTo(WINDOW_MAX) > 0) {
+            window = WINDOW_MAX;
+        }
 
         StringBuilder sql = new StringBuilder();
         sql.append("SELECT post_uid, saved_at, personal_tags, title, url ")

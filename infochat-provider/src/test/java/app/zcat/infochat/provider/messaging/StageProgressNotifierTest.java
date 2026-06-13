@@ -9,6 +9,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
+import java.time.Duration;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -130,6 +131,28 @@ class StageProgressNotifierTest {
         assertEquals(bundleLoader.get(BundleKeys.PROGRESS_GENERATING),
                 adapter.updates.get(adapter.updates.size() - 1),
                 "the latest update carries the latest stage's localized string");
+    }
+
+    @Test
+    void adapterMinEditIntervalRaisesEffectiveFloorAboveSystemFloor() {
+        // With a 0ms system floor each stage would emit its own update
+        // (see zeroFloorEmitsEachStageUpdateProvingCoalescingIsTimeGated).
+        // An adapter that declares a 600ms minEditInterval must raise the
+        // effective floor to max(0ms, 600ms) = 600ms, so the rapid
+        // sub-600ms stage events coalesce to zero updates — proving the
+        // larger of the system floor and the adapter floor governs.
+        RecordingMessagingAdapter slowAdapter =
+                new RecordingMessagingAdapter().withMinEditInterval(Duration.ofMillis(600));
+        StageProgressNotifier slowFloorNotifier =
+                newNotifier(slowAdapter, bundleLoader, /* floorMs */ 0);
+
+        slowFloorNotifier.publish(SCOPE, ProgressStage.STARTED);     // placeholder send
+        slowFloorNotifier.publish(SCOPE, ProgressStage.RETRIEVING);  // within the adapter floor
+        slowFloorNotifier.publish(SCOPE, ProgressStage.GENERATING);  // within the adapter floor
+
+        assertEquals(0, slowAdapter.updateCount(),
+                "the adapter's 600ms minEditInterval must win over the 0ms system floor, "
+                        + "coalescing the sub-600ms stage events to zero updates");
     }
 
     @Test

@@ -41,10 +41,11 @@ import java.util.concurrent.ConcurrentHashMap;
  * a scope sends a placeholder via {@link MessagingAdapter#send},
  * captures the {@link MessageHandle}, and turns typing on. Subsequent
  * non-terminal publishes render the stage's localized string and emit a
- * coalesced {@link MessagingAdapter#update}, honoring a single
- * system-wide edit-interval floor ({@link #minEditIntervalMs}; the
- * spec's {@code max(adapterMin, systemFloor)} degrades to this floor in
- * v1 because per-adapter {@code adapterMin} is not exposed). On terminal
+ * coalesced {@link MessagingAdapter#update}, honoring the spec's
+ * {@code max(adapterMin, systemFloor)} edit-interval floor — the larger
+ * of the system-wide floor ({@link #minEditIntervalMs}) and the bound
+ * adapter's declared {@code minEditInterval} capability (SimpleX declares
+ * 600ms). On terminal
  * {@link #complete} / {@link #fail} the placeholder is finalized and
  * typing turned off via try/finally so it is never left dangling.</p>
  *
@@ -95,9 +96,11 @@ public class StageProgressNotifier implements ProgressNotifier {
     /**
      * Single system-wide edit-coalescing floor in milliseconds (design
      * {@code 06-messaging.md} §6.3.8 records 600ms). The notifier emits
-     * at most one {@link MessagingAdapter#update} per this interval per
-     * message; the terminal {@link #complete}/{@link #fail} finalize is
-     * always sent regardless of the window.
+     * at most one {@link MessagingAdapter#update} per the effective floor
+     * (the larger of this value and the bound adapter's declared
+     * {@code minEditInterval}) per message; the terminal
+     * {@link #complete}/{@link #fail} finalize is always sent regardless
+     * of the window.
      */
     @ConfigProperty(name = "infochat.messaging.progress.min-edit-interval-ms", defaultValue = "600")
     long minEditIntervalMs;
@@ -132,11 +135,17 @@ public class StageProgressNotifier implements ProgressNotifier {
                 adapter.setTyping(scope, true);
                 return;
             }
-            // Step 3: coalesce — emit at most one update per floor
-            // window; intermediate texts inside the window are discarded
-            // silently (the terminal finalize carries the real output).
+            // Step 3: coalesce — emit at most one update per the effective
+            // edit-interval floor; intermediate texts inside the window are
+            // discarded silently (the terminal finalize carries the real
+            // output). The effective floor is max(systemFloor, adapterMin)
+            // per docs/spec/messaging.md §Progress notifications: the
+            // adapter's declared minEditInterval (SimpleX's 600ms) wins when
+            // it is the stricter of the two.
+            long effectiveEditIntervalMs = Math.max(
+                    minEditIntervalMs, adapter.capabilities().minEditInterval().toMillis());
             Instant now = Instant.now();
-            if (Duration.between(state.lastEditAt, now).toMillis() < minEditIntervalMs) {
+            if (Duration.between(state.lastEditAt, now).toMillis() < effectiveEditIntervalMs) {
                 adapterMetrics.updateOutcome(adapter.name(), scope,
                         AdapterMetrics.UpdateOutcome.COALESCED);
                 return;

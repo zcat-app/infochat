@@ -137,6 +137,43 @@ class RetryCommandHandlerTest {
     }
 
     @Test
+    void atCapRetryConsumesNeitherCounterGrowthNorLlmToken() {
+        // U-42 residual: an at-cap /retry must read-then-check the cap
+        // BEFORE incrementing or spending an LLM token, so the monotonic
+        // counter does not grow past the cap and no token is burned on a
+        // re-roll the cap already forbids.
+        List<String> postUids = List.of(PREFIX + "atcap1");
+        String json = "[{\"topicId\":\"t-atcap\",\"postUids\":[\"" + postUids.get(0) + "\"]}]";
+        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary", "hash", postUids, json);
+        Post readyPost = post(postUids.get(0), "AtCap headline", Instant.now());
+        handler.dataSource = stubUserAndPostsDataSource(USER_ID, List.of(readyPost));
+
+        // Drive the counter to exactly the cap (3).
+        anchorRepo.incrementAndGetRetryCount(USER_ID, "dm", USER_ID);
+        anchorRepo.incrementAndGetRetryCount(USER_ID, "dm", USER_ID);
+        anchorRepo.incrementAndGetRetryCount(USER_ID, "dm", USER_ID);
+
+        // A single-token bucket: if the at-cap retry spent the token, the
+        // tryAcquire assertion below would fail.
+        LlmRateCap singleToken = new LlmRateCap(1);
+        handler.llmRateCap = singleToken;
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "atcap"), "/retry");
+
+        assertTrue(reply.text().contains("Retry limit reached"),
+                "at-cap /retry must get the cap-exhausted reply. Got: " + reply.text());
+        assertEquals(0, proseGenerator.callCount,
+                "at-cap /retry must make no LLM re-roll");
+        assertEquals(3, anchorRepo.incrementCallCount,
+                "at-cap /retry must NOT increment the counter — only the three "
+                        + "setup increments ran");
+        assertEquals(3, anchorRepo.peekRetryCount(USER_ID, "dm", USER_ID),
+                "the retry counter must stay pinned at the cap, never growing past it");
+        assertTrue(singleToken.tryAcquire(USER_ID),
+                "the at-cap retry must NOT have spent the LLM token — it is still available");
+    }
+
+    @Test
     void filtersNonReadyUids() {
         // Anchor has 4 UIDs but only 1 is READY (the rest are filtered out).
         // 3/4 = 75% drift > 25% threshold, so the drift notice must appear.

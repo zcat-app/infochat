@@ -159,6 +159,19 @@ public class SummaryAnchorRepository {
     }
 
     /**
+     * Read the current retry count for the given (user, scope) WITHOUT
+     * mutating it — returns 0 when no retry has been recorded since the
+     * last {@link #write}/{@link #clear}. {@code /retry} peeks this to
+     * enforce the cap before spending an LLM token or incrementing the
+     * counter: an at-cap retry must consume neither a rate-cap token nor
+     * further (monotonic, non-self-healing) counter growth.
+     */
+    public int peekRetryCount(UUID userId, String scopeKind, UUID scopeId) {
+        AtomicInteger counter = retryCounts.get(new RetryKey(userId, scopeKind, scopeId));
+        return counter == null ? 0 : counter.get();
+    }
+
+    /**
      * Clear the in-memory retry count.
      */
     public void clearRetryCount(UUID userId, String scopeKind,

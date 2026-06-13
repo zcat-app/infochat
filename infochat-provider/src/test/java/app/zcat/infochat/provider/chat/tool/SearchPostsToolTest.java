@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
 import java.io.PrintWriter;
+import java.nio.charset.StandardCharsets;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
@@ -40,6 +41,7 @@ import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -314,6 +316,76 @@ class SearchPostsToolTest {
             "both must return only the followed-tag post; got: " + searchUids);
     }
 
+    @Test
+    void tagValidationIssuesOneSelectForAllTagsAndRejectsUnknown() throws Exception {
+        UUID userId = seedUser("tag-batch");
+        UUID sourceId = seedSource("tag-batch-src", "Tag-batch source");
+        seedSubscription("dm", userId, sourceId);
+        seedTag(TAG_PREFIX + "alpha");
+        seedTag(TAG_PREFIX + "beta");
+        seedTag(TAG_PREFIX + "gamma");
+
+        // Count the tag-existence SELECTs across one execute() with three
+        // requested tags: the batched validation must issue exactly one,
+        // not one per tag.
+        CountingRecordingDataSource countingDs = new CountingRecordingDataSource(dataSource);
+        SearchPostsTool directTool = new SearchPostsTool(countingDs, cancellationService);
+        InFlightTracker.CancellationHandle slot =
+                Objects.requireNonNull(inFlightTracker.tryAcquire(userId, "dm", userId));
+        try {
+            directTool.execute(userId, "dm", userId, Map.of("tags",
+                    List.of(TAG_PREFIX + "alpha", TAG_PREFIX + "beta", TAG_PREFIX + "gamma")));
+
+            long tagSelects = countingDs.executedSql().stream()
+                    .filter(s -> s.contains("FROM tag WHERE name"))
+                    .count();
+            assertEquals(1, tagSelects,
+                    "validating N tags must issue exactly one tag-existence SELECT, not one "
+                            + "per tag. Got: " + countingDs.executedSql());
+        } finally {
+            inFlightTracker.release(userId, "dm", userId, slot);
+        }
+
+        // An unknown tag anywhere in the batch still rejects the whole call,
+        // naming the offending tag (request order).
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> tool.execute(userId, "dm", userId, Map.of("tags",
+                        List.of(TAG_PREFIX + "alpha", TAG_PREFIX + "nonexistent"))));
+        assertTrue(ex.getMessage().contains(TAG_PREFIX + "nonexistent"),
+                "the unknown tag must be named in the rejection; got: " + ex.getMessage());
+    }
+
+    @Test
+    void aggregateOutputIsBoundedByByteCap() throws Exception {
+        UUID userId = seedUser("bytecap");
+        UUID sourceId = seedSource("bytecap-src", "Byte-cap source");
+        seedSubscription("dm", userId, sourceId);
+        Instant publishedAt = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+                .minus(1, ChronoUnit.HOURS);
+        // A ~1500-char title per post over enough posts that the raw JSON
+        // would far exceed MAX_RESULT_BYTES (16 KiB) if unbounded. Tool
+        // outputs are reinjected verbatim into the chat prompt, so the
+        // aggregate must be byte-bounded.
+        String bigTitle = "T".repeat(1500);
+        int seeded = 40;
+        for (int i = 0; i < seeded; i++) {
+            seedReadyPostWithTitle("bytecap-" + i, sourceId,
+                    publishedAt.plusSeconds(i), publishedAt.plusSeconds(i), bigTitle);
+        }
+
+        String json = tool.execute(userId, "dm", userId, Map.of());
+
+        int bytes = json.getBytes(StandardCharsets.UTF_8).length;
+        assertTrue(bytes <= SearchPostsTool.MAX_RESULT_BYTES,
+                "the aggregate tool output must not exceed MAX_RESULT_BYTES; got " + bytes
+                        + " bytes");
+        int returned = uidsFromJson(json).size();
+        assertTrue(returned < seeded,
+                "the byte cap must drop entries past the budget (returned " + returned
+                        + " of " + seeded + " seeded posts)");
+        assertTrue(returned > 0, "at least one entry must fit under the budget; got " + returned);
+    }
+
     // ---------- helpers ----------
 
     private UUID seedUser(String suffix) throws Exception {
@@ -392,6 +464,25 @@ class SearchPostsToolTest {
             ps.setTimestamp(7, Timestamp.from(FETCHED_AT));
             ps.setTimestamp(8, Timestamp.from(readyAt));
             ps.setString(9, tagLiteral);
+            ps.executeUpdate();
+        }
+    }
+
+    private void seedReadyPostWithTitle(String slug, UUID sourceId, Instant publishedAt,
+                                        Instant readyAt, String title) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "INSERT INTO post (uid, source_id, title, body, url, published_at, "
+                     + "fetched_at, status, ready_at, tags) "
+                     + "VALUES (?, ?, ?, ?, ?, ?, ?, 'READY', ?, '{}')")) {
+            ps.setString(1, PREFIX + slug);
+            ps.setObject(2, sourceId);
+            ps.setString(3, title);
+            ps.setString(4, "Body " + slug);
+            ps.setString(5, "https://example.com/" + slug);
+            ps.setTimestamp(6, Timestamp.from(publishedAt));
+            ps.setTimestamp(7, Timestamp.from(FETCHED_AT));
+            ps.setTimestamp(8, Timestamp.from(readyAt));
             ps.executeUpdate();
         }
     }

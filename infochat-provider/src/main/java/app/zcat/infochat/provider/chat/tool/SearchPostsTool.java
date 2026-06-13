@@ -9,6 +9,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 import javax.sql.DataSource;
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -28,6 +29,16 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
 
     private static final Duration WINDOW_MIN = Duration.ofHours(1);
     private static final Duration WINDOW_MAX = Duration.ofDays(30);
+
+    /**
+     * Aggregate byte budget for the returned JSON array, measured in
+     * UTF-8 bytes. Tool results are reinjected verbatim into the chat
+     * prompt (LLM tool-call outputs are a trust boundary), so a large
+     * result set would otherwise consume the context window. Mirrors
+     * {@link RecallMemoryTool#MAX_RESULT_BYTES}: entries past the budget
+     * are dropped, newest-first (the ORDER BY) ordering kept.
+     */
+    static final int MAX_RESULT_BYTES = 16 * 1024;
 
     private enum TagMode { ALL, EXPLICIT }
 
@@ -63,11 +74,7 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
         try (Connection conn = dataSource.getConnection()) {
             cancellationService.armToolConnection(conn, userId, scopeKind, scopeId);
 
-            for (String tag : tags) {
-                if (!isKnownTag(conn, tag)) {
-                    throw new IllegalArgumentException("Unknown tag: " + tag);
-                }
-            }
+            validateTagsKnown(conn, tags);
 
             TagMode tagMode = readTagMode(conn, scopeKind, scopeId);
             EffectiveTags effectiveTags =
@@ -78,12 +85,31 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
         }
     }
 
-    private boolean isKnownTag(Connection conn, String tag) throws SQLException {
-        String sql = "SELECT 1 FROM tag WHERE name = ?";
+    /**
+     * Validate every requested tag in ONE SELECT rather than one per tag.
+     * The model-supplied tag list is a trust boundary; a per-tag round-trip
+     * is wasteful and scales with the (model-controlled) tag count. Any
+     * requested tag absent from the result set is unknown and rejects the
+     * whole call with the same {@code "Unknown tag: <tag>"} message the
+     * per-tag loop produced (first unknown in request order).
+     */
+    private void validateTagsKnown(Connection conn, List<String> tags) throws SQLException {
+        if (tags.isEmpty()) {
+            return;
+        }
+        Set<String> known = new LinkedHashSet<>();
+        String sql = "SELECT name FROM tag WHERE name = ANY(?)";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, tag);
+            ps.setArray(1, conn.createArrayOf("TEXT", tags.toArray(new String[0])));
             try (ResultSet rs = ps.executeQuery()) {
-                return rs.next();
+                while (rs.next()) {
+                    known.add(rs.getString("name"));
+                }
+            }
+        }
+        for (String tag : tags) {
+            if (!known.contains(tag)) {
+                throw new IllegalArgumentException("Unknown tag: " + tag);
             }
         }
     }
@@ -189,18 +215,31 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
             bindParams(ps, conn, params);
             try (ResultSet rs = ps.executeQuery()) {
                 StringBuilder json = new StringBuilder("[");
+                // '[' + ']' — every appended entry adds its own bytes (plus a
+                // joining comma) against MAX_RESULT_BYTES. The result is
+                // reinjected verbatim into the chat prompt (LLM tool-call
+                // outputs are a trust boundary), so the aggregate is bounded
+                // here exactly as RecallMemoryTool bounds its own; entries
+                // past the budget are dropped, newest-first ordering kept.
+                int budgetUsed = 2;
                 boolean first = true;
                 while (rs.next()) {
+                    StringBuilder entry = new StringBuilder();
+                    entry.append("{\"uid\":").append(jsonStr(rs.getString("uid")))
+                         .append(",\"title\":").append(jsonStr(rs.getString("title")))
+                         .append(",\"url\":").append(jsonStr(rs.getString("url")))
+                         .append(",\"ready_at\":").append(jsonStr(
+                                 instantStr(rs.getTimestamp("ready_at"))))
+                         .append(",\"tags\":");
+                    appendJsonArray(entry, (String[]) rs.getArray("tags").getArray());
+                    entry.append('}');
+                    int entryBytes = entry.toString()
+                            .getBytes(StandardCharsets.UTF_8).length + (first ? 0 : 1);
+                    if (budgetUsed + entryBytes > MAX_RESULT_BYTES) break;
+                    budgetUsed += entryBytes;
                     if (!first) json.append(',');
                     first = false;
-                    json.append("{\"uid\":").append(jsonStr(rs.getString("uid")))
-                        .append(",\"title\":").append(jsonStr(rs.getString("title")))
-                        .append(",\"url\":").append(jsonStr(rs.getString("url")))
-                        .append(",\"ready_at\":").append(jsonStr(
-                                instantStr(rs.getTimestamp("ready_at"))))
-                        .append(",\"tags\":");
-                    appendJsonArray(json, (String[]) rs.getArray("tags").getArray());
-                    json.append('}');
+                    json.append(entry);
                 }
                 json.append(']');
                 return json.toString();

@@ -7,6 +7,7 @@ import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -25,6 +26,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 final class RecordingMessagingAdapter implements MessagingAdapter {
 
     private final String name;
+    // Adapter-declared edit-interval floor surfaced through capabilities();
+    // ZERO by default so the system floor governs (the pre-U-32 behaviour the
+    // coalescing tests pin). A test that needs the adapter floor to win sets a
+    // non-zero value via withMinEditInterval().
+    private Duration minEditInterval = Duration.ZERO;
     private final AtomicInteger handleIds = new AtomicInteger();
     final List<String> sends = new ArrayList<>();
     final List<String> updates = new ArrayList<>();
@@ -37,6 +43,12 @@ final class RecordingMessagingAdapter implements MessagingAdapter {
 
     RecordingMessagingAdapter(String name) {
         this.name = name;
+    }
+
+    /** Set the adapter-declared minEditInterval surfaced through {@link #capabilities()}. */
+    RecordingMessagingAdapter withMinEditInterval(Duration interval) {
+        this.minEditInterval = interval;
+        return this;
     }
 
     @Override
@@ -72,7 +84,18 @@ final class RecordingMessagingAdapter implements MessagingAdapter {
 
     @Override
     public CapabilityFlags capabilities() {
-        throw new UnsupportedOperationException();
+        // Only minEditInterval is read by StageProgressNotifier; the rest are
+        // benign placeholders sufficient for the notifier's coalescing path.
+        return new CapabilityFlags(
+                /* supportsMentionByContactId */ false,
+                /* supportsMembershipEvents    */ false,
+                /* supportsCodeFormatting      */ false,
+                /* supportsMarkdownLinks       */ false,
+                /* maxInboundMessageBytes      */ 65536,
+                /* maxSendsPerSecond           */ 1,
+                /* supportsMessageEdit         */ true,
+                /* supportsTypingIndicator     */ true,
+                /* minEditInterval             */ minEditInterval);
     }
 
     @Override

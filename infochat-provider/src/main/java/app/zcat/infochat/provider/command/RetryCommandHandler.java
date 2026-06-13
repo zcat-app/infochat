@@ -180,23 +180,35 @@ public class RetryCommandHandler implements CommandHandler {
         }
 
         try {
-            // security.md §Rate limiting: /retry re-rolls draw from the
-            // same per-user LLM bucket as chat replies and /summary.
-            // Checked before the retry-counter increment so a rate-cap
-            // rejection does not burn a retry slot (bucket tokens
-            // self-heal after 60 s; the anchor's retry slots do not).
-            if (!llmRateCap.tryAcquire(userId.get())) {
-                return reply(scope, bundleLoader.get(BundleKeys.ERROR_CHAT_LLM_RATE_CAP, inboundContext.effectiveLanguage()));
-            }
-
-            // Enforce profile-driven retry cap
-            int retryCount = summaryAnchorRepository.incrementAndGetRetryCount(
-                    userId.get(), "dm", scopeId);
-            if (retryCount > retryCap) {
+            // Read-then-check the retry cap BEFORE acquiring an LLM token or
+            // incrementing the counter: an at-cap /retry must consume neither
+            // a rate-cap token nor further counter growth. The in-memory
+            // retry counter is monotonic and does NOT self-heal (unlike the
+            // rate-cap bucket), so an increment-then-check would let the
+            // counter grow unboundedly past the cap and would burn a token on
+            // a re-roll the cap already forbids. The in-flight slot acquired
+            // above serializes re-rolls for this (user, scope), so the peeked
+            // count cannot be raced by a concurrent increment before the
+            // increment below.
+            if (summaryAnchorRepository.peekRetryCount(userId.get(), "dm", scopeId) >= retryCap) {
                 return reply(scope, MessageFormat.format(
                         bundleLoader.get(BundleKeys.ERROR_RETRY_CAP_EXHAUSTED, inboundContext.effectiveLanguage()),
                         String.valueOf(retryCap)));
             }
+
+            // security.md §Rate limiting: /retry re-rolls draw from the
+            // same per-user LLM bucket as chat replies and /summary.
+            // Acquired AFTER the cap pre-check (no token spent on an at-cap
+            // retry) but BEFORE the counter increment so a rate-cap rejection
+            // does not burn a retry slot (bucket tokens self-heal after 60 s;
+            // the anchor's retry slots do not).
+            if (!llmRateCap.tryAcquire(userId.get())) {
+                return reply(scope, bundleLoader.get(BundleKeys.ERROR_CHAT_LLM_RATE_CAP, inboundContext.effectiveLanguage()));
+            }
+
+            // Under cap (checked above) — record this retry.
+            summaryAnchorRepository.incrementAndGetRetryCount(
+                    userId.get(), "dm", scopeId);
 
             // Reconstruct clusters from the stored cluster_map, filtering
             // to only READY posts
