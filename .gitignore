@@ -9,3 +9,25 @@ target/
 docs/deep-code-review/
 docker-compose.override.yml
 scripts/__pycache__/
+
+# Secrets & credentials — never commit
+.env
+.env.*
+!.env.example
+!.env.template
+*.pem
+*.key
+*.priv
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.ppk
+*.asc
+*.gpg
+*.pgp
+id_rsa
+id_ed25519
+*.secret
+secrets.*
+credentials.json
