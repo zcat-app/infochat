@@ -24,7 +24,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-311 — Strip ticket/finding provenance from permanent comments (policy + sweep) (complexity: medium, risk: low)
+- M1-311 — Comment policy: carve out stable decision-record anchors (complexity: low, risk: low)
 - M1-312 — Doc-truth v5: false comments and spec/design drift reconciliation (complexity: medium, risk: low)
 - M1-313 — Chat-memory write ordering on permanent delivery failure (complexity: high, risk: high)
 - M1-314 — Group-deleted-upstream immediate cleanup, distinct from threshold-counted bot-removed (complexity: medium, risk: medium)
