@@ -47,8 +47,6 @@ rule, this file links upward and only adds the implementation specifics.
                    │                  │
                    │  LISTEN/NOTIFY:  │
                    │  - new_post      │
-                   │  - new_price_    │
-                   │      snapshot    │
                    │  - quarantine_   │
                    │      review      │
                    └──────────────────┘
@@ -557,8 +555,8 @@ For the `new_post` channel:
 The `quarantine_review` channel uses the same cursor mechanism on its own
 `provider_state` row, with `cursor_high = reviewed_at` and
 `cursor_low_kind ∈ {'quarantine', 'post'}` matching the channel's tagged
-payload. M1 only ships the `new_post` reconciler;
-the `quarantine_review` reconciler lands in M2 alongside the admin
+payload. M1 ships both the `new_post` and `quarantine_review`
+reconcilers; the `quarantine_review` reconciler landed alongside the admin
 quarantine-review commands.
 
 ## 1.6 Concurrency and rate limiting

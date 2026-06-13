@@ -11,8 +11,9 @@ package app.zcat.infochat.llm;
  * {@code (ModelTask, scope_language) → LlmProvider} router, per-profile
  * model defaults, structured-output schema wiring, call-context
  * threading (trace-id / scope-id), and prompt-template / delimiter-wrap
- * logic are downstream concerns and land with the first concrete impl;
- * they are intentionally NOT method-shape commitments here.</p>
+ * logic are downstream concerns that live in the concrete impls and the
+ * router, not on this SPI surface; they are intentionally NOT
+ * method-shape commitments here.</p>
  *
  * <p>For LLM-backed translation of bot prose, see
  * {@code TranslationProvider} in {@code infochat-messaging-adapter}

@@ -84,7 +84,7 @@ import java.util.Set;
  * LLM-call path.
  *
  * <h2>Test seam</h2>
- * <p>{@link #validateLocalOnlyConfiguration(Map)} is package-private
+ * <p>{@link #validateLocalOnlyConfiguration(Map)} is public static
  * so {@code LocalOnlyConflictStartupIT} can invoke it directly
  * without re-bootstrapping Quarkus inside the test method. The CDI
  * @PostConstruct path delegates to the same validator after reading

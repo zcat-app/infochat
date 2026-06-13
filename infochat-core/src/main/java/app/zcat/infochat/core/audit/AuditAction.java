@@ -12,8 +12,8 @@ package app.zcat.infochat.core.audit;
  * {@link AuditAction} constant. The DB column value is
  * {@link #name()} — the enum's identifier is the wire format.</p>
  *
- * <p>The set tracks the V5 §2.1.8 line-comment catalogue plus
- * post-V5 additions:</p>
+ * <p>This enum is the authoritative catalogue that V5 §2.1.8 points to;
+ * it carries the original v1 verbs plus post-V5 additions:</p>
  * <ul>
  *   <li>V12 added {@link #INVITE_BRUTE_FORCE_BREACH} for the
  *       per-(adapter, contact_id) brute-force breach audit row.</li>
@@ -191,5 +191,14 @@ public enum AuditAction {
     DIGEST_RETRY,
     DIGEST_SLOT_MISSED,
     QUARANTINE_TTL_REJECT,
+    // The '_TRUE' suffix bakes a config value into the verb: this row is
+    // written only when infochat.security.release-on-stage2-failure=true is
+    // in effect, so the verb name doubles as the observed config state.
+    // Renaming it to a value-agnostic verb is a deferred judgment call, not
+    // a free edit — every historical audit_log.action TEXT value would need
+    // rewriting (a data migration). There is no SQL CHECK on
+    // audit_log.action to update (V5 §2.1.8 — the closure is
+    // application-layer), so the cost is the row rewrite, owned by a
+    // migration ticket if ever wanted.
     STARTUP_RELEASE_ON_STAGE2_FAILURE_TRUE
 }

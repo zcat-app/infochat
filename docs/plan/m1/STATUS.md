@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 351 |
+| done | 352 |
 | deferred | 4 |
 | **total** | **359** |
 
@@ -25,7 +25,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-311 — Comment policy: carve out stable decision-record anchors (complexity: low, risk: low)
-- M1-312 — Doc-truth v5: false comments and spec/design drift reconciliation (complexity: medium, risk: low)
 - M1-313 — Chat-memory write ordering on permanent delivery failure (complexity: high, risk: high)
 - M1-314 — Group-deleted-upstream immediate cleanup, distinct from threshold-counted bot-removed (complexity: medium, risk: medium)
 
@@ -66,13 +65,13 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-323 | Provider group-row reuse: Outcome.Approved carries groups.id, drop router step-4.1 re-read | 2026-06-13 | round 1 APPROVE |
 | M1-322 | Adapter observability: AdapterMetrics catalogue | 2026-06-13 | round 1 APPROVE |
 | M1-320 | Derive SimpleX bot queue address via APIShowMyAddress | 2026-06-13 | round 1 APPROVE |
+| M1-312 | Doc-truth v5: false comments and spec/design drift reconciliation | 2026-06-13 | round 1 APPROVE |
 | M1-309 | Provider structural dedup: PG listener base class, shared command tokenizer | 2026-06-13 | round 1 APPROVE |
 | M1-308 | Messaging/collector code lows: dead surfaces, helper drift, small perf/correctness | 2026-06-13 | round 1 APPROVE |
 | M1-307 | Provider code lows: JSON conventions, sanitizer seam, dead keys, misc one-liners | 2026-06-13 | round 1 APPROVE |
 | M1-306 | Provider mediums: edit-interval floor, /retry counter order, chat-tool caps | 2026-06-13 | round 1 OVERRIDE-APPROVE |
 | M1-302 | Ops posture: Stage-2 fail-open default, readiness topology exposure (decisions) | 2026-06-13 | round 2 APPROVE |
 | M1-321 | LLM observability: call context and Micrometer metrics | 2026-06-12 | round 1 APPROVE |
-| M1-319 | Derive Signal bot ACI from signal-cli identity store | 2026-06-12 | round 1 APPROVE |
 
 ---
 
@@ -500,7 +499,7 @@ M1-308 (done)
 M1-309 (done)
 M1-310 (done)
 M1-311 (pending) ← runnable
-M1-312 (pending) ← runnable
+M1-312 (done)
 M1-315 (done)
 M1-316 (done)
 M1-317 (done)

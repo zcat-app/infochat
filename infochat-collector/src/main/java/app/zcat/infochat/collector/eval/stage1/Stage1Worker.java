@@ -44,15 +44,14 @@ import java.util.UUID;
  * {@code quarantine} rows for the same matches).
  *
  * <h2>Broadcast wiring</h2>
- * <p>The {@code eval-queue} channel is configured with
- * {@code mp.messaging.outgoing.eval-queue.broadcast=true} (in
- * {@code application.properties}) so multiple subscribers receive
- * each emission. M1-028 left a test-scope subscriber
- * ({@code TestEvalQueueConsumer}) on the channel to assert the
- * producer's emissions; the production worker added here is the
- * second subscriber. SmallRye Reactive Messaging requires the
- * outgoing-side broadcast flag for a multi-subscriber channel; the
- * v1 single-subscriber default would reject the wiring.
+ * <p>The {@code eval-queue} channel fans out to multiple subscribers
+ * because {@link EvalQueueProducer}'s {@code @Channel("eval-queue")}
+ * emitter carries the SmallRye {@code @Broadcast} annotation. M1-028
+ * left a test-scope subscriber ({@code TestEvalQueueConsumer}) on the
+ * channel to assert the producer's emissions; the production worker
+ * added here is the second subscriber. SmallRye Reactive Messaging
+ * requires the outgoing-side {@code @Broadcast} for a multi-subscriber
+ * channel; the v1 single-subscriber default would reject the wiring.
  *
  * <h2>NULL post.body</h2>
  * <p>The {@code post.body} column is nullable per V7. Production

@@ -39,8 +39,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *       is language-agnostic by spec and skips this branch.</li>
  *   <li><b>Profile default</b> — the registered provider whose name
  *       matches {@code infochat.llm.default.provider} (defaulting to
- *       {@link OpenAiCompatibleProvider#PROVIDER_NAME} in v1, where
- *       only one concrete impl ships).</li>
+ *       {@link OpenAiCompatibleProvider#PROVIDER_NAME} in v1).</li>
  * </ol>
  *
  * <h2>No fallback chain</h2>
@@ -79,9 +78,9 @@ public class LlmRouter {
 
     /**
      * Configuration key that names the default provider when no
-     * per-task override is set. Operators rarely change this in v1
-     * (only one provider ships); future tickets that introduce
-     * additional providers may flip the default per profile.
+     * per-task override is set. Operators rarely change this in v1;
+     * it defaults to {@link OpenAiCompatibleProvider#PROVIDER_NAME}
+     * even though more than one provider now ships.
      */
     public static final String CONFIG_KEY_DEFAULT_PROVIDER = "infochat.llm.default.provider";
 
@@ -298,13 +297,12 @@ public class LlmRouter {
 
     /**
      * Build the production entry list from the live {@link LlmProvider}
-     * beans Quarkus discovered. In v1, only
-     * {@link OpenAiCompatibleProvider} is registered; future ticket
-     * authors add their providers here with capability sets that
-     * reflect what their backend can produce. Capability assignment
-     * is router-internal because the LlmProvider SPI surface is
-     * deliberately kept minimal — a {@code capabilities()} method on
-     * the SPI is intentionally avoided.
+     * beans Quarkus discovered ({@link OpenAiCompatibleProvider} and
+     * {@code AnthropicProvider} in v1). A new provider is added here
+     * with a capability set that reflects what its backend can produce.
+     * Capability assignment is router-internal because the LlmProvider
+     * SPI surface is deliberately kept minimal — a {@code capabilities()}
+     * method on the SPI is intentionally avoided.
      *
      * <p>A test {@code @Alternative} provider (e.g.
      * {@code Stage2WorkerIT.TestStubLlmProvider}) is registered

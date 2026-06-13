@@ -269,33 +269,14 @@ CREATE INDEX idx_audit_action_target ON audit_log(action, target_kind, target_id
 CREATE INDEX idx_audit_scope         ON audit_log(scope_id, created_at DESC) WHERE scope_id IS NOT NULL;
 CREATE INDEX idx_audit_request       ON audit_log(request_id) WHERE request_id IS NOT NULL;
 
--- 2.1.8 audit_log.action closed verb catalogue. Per-verb line comments
--- below document the v1 set without pinning it via a SQL CHECK — the
--- catalogue is open-ended for v2 additions and the application-layer
--- audit-write helper is the closure enforcer.
--- BOOTSTRAP_ADMIN
--- BOOTSTRAP_SOURCE_LOAD
--- BOOTSTRAP_ASSET_LOAD
--- GRANT_ADMIN
--- REVOKE_ADMIN
--- BAN
--- UNBAN
--- UNBAN_PREBAN_DELETE
--- VOUCH
--- INVITE_CREATE
--- INVITE_REVOKE
--- INVITE_CONSUME
--- PROMOTE_GROUP_ADMIN
--- DEMOTE_GROUP_ADMIN
--- ADD_SOURCE
--- REMOVE_SOURCE
--- SOURCE_ENABLE
--- SOURCE_DISABLE
--- APPROVE_QUARANTINE
--- REJECT_QUARANTINE
--- FORGET
--- SET_LANG
--- SET_TIMEZONE
+-- 2.1.8 audit_log.action closed verb catalogue. The verb set is NOT
+-- pinned via a SQL CHECK — the catalogue is open-ended for v2 additions
+-- and the application-layer audit-write helper is the closure enforcer.
+-- The authoritative verb list lives in the AuditAction enum
+-- (infochat-core: app.zcat.infochat.core.audit.AuditAction). The V5-era
+-- per-verb line comments that sat here listed only the original v1 subset
+-- and drifted as later migrations added verbs; they are replaced by this
+-- pointer so the enum is the single source of truth.
 
 CREATE OR REPLACE FUNCTION trg_audit_log_append_only()
 RETURNS TRIGGER AS $$

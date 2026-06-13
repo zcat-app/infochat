@@ -45,7 +45,12 @@ import java.time.Duration;
  *                                   the raw backticks. URLs are always
  *                                   rendered bare (decision D30) — this
  *                                   flag does NOT widen to markdown
- *                                   links.
+ *                                   links. v1 has no consumer that
+ *                                   branches on this flag (no renderer
+ *                                   reads it yet); it is retained because
+ *                                   it is spec-pinned (CLAUDE.md §Key
+ *                                   conventions) and a v2 richer-rendering
+ *                                   path will consume it.
  * @param supportsMarkdownLinks      MUST be false for every v1 adapter.
  *                                   Provider validates this at adapter
  *                                   registration (startup) and fails

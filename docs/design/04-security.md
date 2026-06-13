@@ -47,7 +47,14 @@ startup |
                                                                                  
 ## 4.2 Layered ingest security
 
-Each post entering the Collector goes through **two stages** of security before it can reach a user.                                                                                                                                                  
+Each post entering the Collector goes through **two stages** of security before it can reach a user.
+
+> **Layering is conceptual, not a process boundary.** Stage 1 and Stage 2 run
+> in the same Collector process: when Stage 1 flags a post, `Stage1Worker`
+> invokes the Stage 2 LLM judge **in-process** (no inter-stage queue or
+> channel — the `@Channel("stage2-queue")` shape was rejected in M1-033). The
+> two-stage split below describes the security contract (Stage 2 runs only on
+> Stage 1 hits), not a distributed pipeline.                                                                                                                                                  
 
 ### Stage 1 — deterministic, runs on every post                                                                                                                                                                                                       
 Implemented in pure Java, no LLM. Fast (≤5 ms per post). Outputs: a sanitized body plus a list of suspicious spans.
@@ -60,8 +67,8 @@ Steps in order — **Unicode-first, OWASP-last** so the canonicalization the reg
    - Strip zero-width characters (U+200B, U+200C, U+200D, U+FEFF) unless inside fenced code
 
 2. **Prompt-injection regex set** (case-insensitive, applied to normalized text):                                                                                                                                                                     
-   - `\b(ignore|disregard|forget)\b.{0,40}\b(previous|prior|above|all|earlier)\b.{0,40}\b(instruction|prompt|rule|directive)s?\b`                                                                                                                     
-   - `\b(you are|act as|pretend to be|roleplay)\b.{0,40}(admin|root|system|developer)`                                                                                                                                                                
+   - `\b(ignore|disregard|forget|override|skip)\b.{0,40}\b(previous|prior|above|all|earlier|preceding)\b.{0,40}\b(instruction|prompt|rule|directive|command)s?\b`                                                                                                                     
+   - `\b(you are|act as|pretend to be|behave like|from now on you are)\b.{0,40}(admin(istrator)?|root|system|developer|sudo|superuser|owner|maintainer)`                                                                                                                                                                
    - `\b(system|assistant)\s*[:>]\s*` at line start (impersonation prefix)                                                                                                                                                                            
    - `\b(reveal|leak|print|output)\b.{0,40}\b(system prompt|instructions|api key|password)\b`                                                                                                                                                         
    - `<!--.*?-->` (HTML comments — sometimes used to hide instructions)                                                                                                                                                                               

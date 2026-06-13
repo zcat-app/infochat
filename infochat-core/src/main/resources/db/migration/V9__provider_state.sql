@@ -76,13 +76,14 @@ REVOKE DELETE ON provider_state FROM infochat_collector, infochat_provider, PUBL
 -- real event because 'epoch' < any real ready_at on the leftmost
 -- tuple component.
 --
--- The `quarantine_review` row is NOT seeded here: that channel's
--- reconciler ships in M2 per docs/design/01-architecture.md §1.5
--- ("M1 only ships the new_post reconciler; the quarantine_review
--- reconciler lands in M2 alongside the admin quarantine-review
--- commands"). The `new_price_snapshot` channel does NOT maintain a
--- provider_state row at all (flush-on-Postgres-reconnect is the
--- correctness mechanism per §2.9.1).
+-- The `quarantine_review` row is NOT seeded here: this migration predates
+-- the quarantine_review channel, whose provider_state row is seeded later
+-- by V21 (`V21__quarantine_admin.sql`) alongside the admin
+-- quarantine-review commands. Both the channel reconciler and those
+-- commands shipped in M1 (see docs/design/01-architecture.md §1.5). The
+-- `new_price_snapshot` channel does NOT maintain a provider_state row at
+-- all (flush-on-Postgres-reconnect is the correctness mechanism per
+-- §2.9.1).
 -- ---------------------------------------------------------------------
 
 INSERT INTO provider_state (channel, cursor_high, cursor_low_kind, cursor_low_id, updated_at)

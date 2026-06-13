@@ -201,15 +201,9 @@ class Stage1PipelineIT {
 
         assertPostState(post.id, true, true, "RAW");
         List<QuarantineRow> rows = selectQuarantineRowsForPost(post.id);
-        // The body contains TWO injection patterns:
-        // (1) ignore-previous-instructions
-        // (2) reveal ... secrets (matches the secrets-leak pattern
-        //     because 'secrets' contains 'secret' and the pattern's
-        //     '\bsecret\s+key' branch... actually no, the
-        //     secrets-leak pattern requires specific anchor verbs.
-        //     Let me re-check.)
-        // Conservative assertion: at least one row exists with the
-        // expected rule_id, and original_html contains no bidi.
+        // The body contains an ignore-previous-instructions injection
+        // pattern. Conservative assertion: at least one row exists with
+        // the expected rule_id, and original_html contains no bidi.
         assertTrue(rows.size() >= 1,
             "bidi-stripped body must produce at least one quarantine row");
         boolean foundIgnoreRule = false;

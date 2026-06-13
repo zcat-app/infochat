@@ -12,7 +12,9 @@ import java.time.Instant;
  * <p>The record's components mirror the V16 schema 1:1:
  * <ul>
  *   <li>{@code key} — the caller-supplied notification key (PK).</li>
- *   <li>{@code errorClass} — canonical error_class string for the key.</li>
+ *   <li>{@code errorClass} — error_class from the most recent emitting
+ *       notifyOnce call for the key; an emit overwrites it, a suppressed
+ *       call leaves it unchanged.</li>
  *   <li>{@code lastNotifiedAt} — wall-clock of the most recent emit.</li>
  *   <li>{@code notificationCount} — total emits since {@code firstSeenAt}.</li>
  *   <li>{@code suppressedCount} — total within-window suppressions

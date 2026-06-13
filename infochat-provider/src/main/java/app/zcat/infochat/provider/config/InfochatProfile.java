@@ -31,8 +31,9 @@ import java.util.Optional;
  * profile; this enum reuses the built-in and validates that the active
  * Quarkus profile chain contains one of the four allowed names.
  *
- * <p>This file is duplicated between Collector and Provider in v1; the
- * duplication goes away once {@code infochat-core} lands in M1-007a.
+ * <p>This file is duplicated between Collector and Provider in v1.
+ * {@code infochat-core} has landed, but this enum was not moved into
+ * it; the duplication remains.
  */
 public enum InfochatProfile {
     LAPTOP("laptop"),

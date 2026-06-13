@@ -63,8 +63,8 @@ public final class PinnedDnsResolver {
      * {@code IPV4} and/or {@code IPV6}. When exactly one family bit is
      * set the set is filtered to that family; when both (or neither)
      * are set there is no family restriction and the set passes through
-     * unchanged. Every returned address is still one a still-active
-     * holder blocklist-validated — filtering narrows, never widens.
+     * unchanged. Every returned address was blocklist-validated at the
+     * pin that installed it — filtering narrows, never widens.
      *
      * <p>Package-private static so both the production lens
      * ({@link Provider.ForwardingResolver}) and the U-39 tests invoke
@@ -142,11 +142,14 @@ public final class PinnedDnsResolver {
          *
          * <p>When overlapping holders of the same host validated
          * DIVERGENT address sets, the most recent pin's set is served
-         * (latest-wins). Every address served has passed the
-         * {@link IpBlocklist} in some still-active holder's
-         * validation, and the freshest validation is the one closest
-         * to its connect — the strongest TOCTOU posture available
-         * without per-call resolver scoping.
+         * (latest-wins). Every address served passed the
+         * {@link IpBlocklist} at the pin that installed it; that pin's
+         * holder may since have released — release() decrements the
+         * refcount but never reverts the stored set — so the served
+         * set is the freshest validation, not necessarily one a
+         * still-active holder validated. That freshest validation is
+         * the one closest to its connect — the strongest TOCTOU posture
+         * available without per-call resolver scoping.
          *
          * <p>{@code canonicalHost} must already be canonical (the
          * install side canonicalizes in

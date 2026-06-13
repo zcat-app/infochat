@@ -278,10 +278,9 @@ final class SignalMessageCodec {
     /**
      * Normalize a Signal ACI to its canonical lowercase-UUID form so
      * {@code (adapter, contact_id)} comparisons cannot be broken by
-     * case-folding upstream (design §6.5.3). Returns the input
-     * untouched if it does not parse as a UUID — the caller decides
-     * whether to accept non-UUID identifiers (e.g. legacy phone-number
-     * sources during account migration).
+     * case-folding upstream (design §6.5.3). Lowercases unconditionally;
+     * the UUID gate runs upstream in {@link #isAcceptableAci}, so every
+     * value reaching here has already been asserted as a canonical UUID.
      */
     String canonicalizeAci(String aci) {
         return aci.toLowerCase(Locale.ROOT);

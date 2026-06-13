@@ -1049,8 +1049,15 @@ Three Postgres roles, least-privilege (decision D34):
   Provider reads the latest snapshot per `(asset, sub_verb)` for
   `/zcash` and `/monero` and reads `asset_config` to gate `/help`,
   parse sub-verbs, and surface stale-data warnings; never writes to
-  either); `SELECT` on the quarantine review *view* (no raw
-  original content); **`SELECT` on the redacted `audit_log_view`,
+  either); the source-management commands are the documented write
+  exception to "`SELECT` on collector-owned tables" — per V31 the
+  Provider holds `INSERT` on `source` and `tag` plus a **column-scoped**
+  `UPDATE` on `source` (`status`, `consecutive_failures`, `deleted_at`,
+  `deleted_by`, `bootstrap_tags` only; identity columns stay read-only so
+  a Provider SQL-injection foothold cannot repoint a trusted source) for
+  the deterministic `/add-source` / `/enable-source` / `/disable-source` /
+  `/remove-source` commands; `SELECT` on the quarantine review *view* (no
+  raw original content); **`SELECT` on the redacted `audit_log_view`,
   not on `audit_log` itself** (`/audit` reads through the view, see
   below); `INSERT`-only on `audit_log`; `EXECUTE` on the
   `approve_quarantine` and `reject_quarantine` stored procedures
@@ -1080,10 +1087,11 @@ Three Postgres roles, least-privilege (decision D34):
 **`audit_log_view`** is a Postgres view that exposes the same columns
 as `audit_log` minus any redacted fields (raw secrets, full contact
 ids — replaced with the redacted form per §Secrets handling).
-`SELECT` on `audit_log_view` is granted to the Provider role only;
-this is the path `/audit` uses. Granting `SELECT` directly on
-`audit_log` to the Provider would expose unredacted columns; the
-view is the single read path for the Provider role.
+`SELECT` on `audit_log_view` is granted to the Provider role (the path
+`/audit` uses) and, per V43, to the operator Admin role — both routine
+audit-read paths pass through the same redaction. Granting `SELECT`
+directly on `audit_log` to the Provider would expose unredacted columns;
+the view is the single read path for the Provider role.
 
 The split means a SQL-injection bug in the Provider cannot delete
 posts, mutate price snapshots, alter quarantine entries, read
