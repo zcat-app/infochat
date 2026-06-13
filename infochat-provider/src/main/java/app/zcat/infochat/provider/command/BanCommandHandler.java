@@ -229,7 +229,7 @@ public class BanCommandHandler implements CommandHandler {
                     adapter, intentRequestId,
                     banDetailsJson(args.reason, targetOpt.isPresent()));
         } catch (SQLException e) {
-            throw new RuntimeException("Failed to write BAN_INTENT audit row", e);
+            throw new IllegalStateException("Failed to write BAN_INTENT audit row", e);
         }
 
         // Self-ban guard — refused at execution semantics AFTER the

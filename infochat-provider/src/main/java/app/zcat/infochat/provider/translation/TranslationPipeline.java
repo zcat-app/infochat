@@ -78,7 +78,7 @@ public class TranslationPipeline {
             translated = translationProvider.translate(
                     postSanitizer1English,
                     Locale.ENGLISH,
-                    new Locale(scopeLanguage));
+                    Locale.of(scopeLanguage));
         } catch (RuntimeException e) {
             LOG.warnf(e, "TranslationPipeline: translator failed for target_language=%s; "
                     + "returning post-sanitizer-1 English text", scopeLanguage);

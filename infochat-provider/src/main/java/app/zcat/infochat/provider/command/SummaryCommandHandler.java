@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.command;
 
 import app.zcat.infochat.core.log.SafeLog;
+import app.zcat.infochat.core.util.JsonEscaper;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ProgressNotifier;
 import app.zcat.infochat.messaging.ProgressStage;
@@ -482,11 +483,11 @@ public class SummaryCommandHandler implements CommandHandler {
         for (int i = 0; i < clusters.size(); i++) {
             if (i > 0) sb.append(",");
             Cluster c = clusters.get(i);
-            sb.append("{\"topicId\":\"").append(c.topicId()).append("\",\"postUids\":[");
+            sb.append("{\"topicId\":\"").append(JsonEscaper.escape(c.topicId())).append("\",\"postUids\":[");
             List<Post> posts = c.posts();
             for (int j = 0; j < posts.size(); j++) {
                 if (j > 0) sb.append(",");
-                sb.append("\"").append(posts.get(j).uid()).append("\"");
+                sb.append("\"").append(JsonEscaper.escape(posts.get(j).uid())).append("\"");
             }
             sb.append("]}");
         }

@@ -80,6 +80,20 @@ class LlmOutputSanitizerAuditRowIT {
     }
 
     @Test
+    void cdiInjectedSanitizerAlwaysAuditsWithoutManualWiring() throws SQLException {
+        // U-64: the @Inject sanitizer is built by CDI with no manual
+        // field-setting. A single closed-list hit must still land one
+        // audit row — there is no no-audit seam reachable in the CDI
+        // path (that seam is the no-arg test constructor only).
+        long before = countLlmOutputSanitizedRows();
+        sanitizer.sanitize("Run /ban now");
+        long after = countLlmOutputSanitizedRows();
+        assertEquals(1L, after - before,
+                "a CDI-built sanitizer always emits the per-occurrence audit row; "
+                        + "sanitization without audit wiring is impossible in the CDI path");
+    }
+
+    @Test
     void noHitsProduceNoAuditRow() throws SQLException {
         long before = countLlmOutputSanitizedRows();
         sanitizer.sanitize("No privileged tokens in this benign LLM output.");
@@ -125,9 +139,8 @@ class LlmOutputSanitizerAuditRowIT {
         // This test wires the sanitizer with a DataSource that throws
         // SQLException on getConnection() and asserts sanitize() bubbles
         // an IllegalStateException — the caller's response build aborts.
-        LlmOutputSanitizer brokenSanitizer = new LlmOutputSanitizer();
-        brokenSanitizer.auditLogWriter = auditLogWriter;
-        brokenSanitizer.dataSource = new ThrowingDataSource();
+        LlmOutputSanitizer brokenSanitizer =
+                new LlmOutputSanitizer(auditLogWriter, new ThrowingDataSource());
 
         long before = countLlmOutputSanitizedRows();
         IllegalStateException ex = assertThrows(

@@ -274,7 +274,7 @@ public class InviteCommandHandler implements CommandHandler {
                     UUID.randomUUID().toString(), null, actor, inboundAdapter,
                     intentRequestId, inviteCreateOpenIntentDetailsJson(targetAdapter));
         } catch (SQLException e) {
-            throw new RuntimeException("Failed to write INVITE_CREATE_INTENT audit row", e);
+            throw new IllegalStateException("Failed to write INVITE_CREATE_INTENT audit row", e);
         }
         confirmStateService.remember(actor.id, scope,
                 new InviteCreateOpenConfirm(targetAdapter));
@@ -550,7 +550,7 @@ public class InviteCommandHandler implements CommandHandler {
                     null, actor, inboundAdapter, intentRequestId,
                     inviteRevokeIntentDetailsJson());
         } catch (SQLException e) {
-            throw new RuntimeException("Failed to write INVITE_REVOKE_INTENT audit row", e);
+            throw new IllegalStateException("Failed to write INVITE_REVOKE_INTENT audit row", e);
         }
         confirmStateService.remember(actor.id, scope,
                 new InviteRevokeConfirm(code));
@@ -695,7 +695,7 @@ public class InviteCommandHandler implements CommandHandler {
 
     /** One row of a {@code /invite list} result page. */
     private record PendingInviteRow(UUID code, String inviteType, String adapter,
-                                    String expectedContactId, @Nullable Instant expiresAt) {}
+                                    @Nullable String expectedContactId, @Nullable Instant expiresAt) {}
 
     /**
      * Parsed form of {@code /invite create --adapter <name>

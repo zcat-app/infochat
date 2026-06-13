@@ -1,9 +1,9 @@
 ---
 id: M1-307
 title: "Provider code lows: JSON conventions, sanitizer seam, dead keys, misc one-liners"
-status: pending
+status: done
 created: 2026-06-11
-last_updated: 2026-06-11
+last_updated: 2026-06-13
 blocked_by: []
 files_budget: 18
 files_scope:
@@ -45,12 +45,30 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-13
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 19
+      added: 131
+      removed: 65
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-13
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE U-68: sub-items (b) Locale.of, (c) five RuntimeException→IllegalStateException replacements, and (d) unused import removal have no named automated test; verifiable only by diff inspection (mvn verify compile step catches (d)). Ticket already labels them 'each verified 2026-06-11'."
+  blockers: []
 ---
 
 # M1-307: Provider code lows: JSON conventions, sanitizer seam, dead keys, misc one-liners

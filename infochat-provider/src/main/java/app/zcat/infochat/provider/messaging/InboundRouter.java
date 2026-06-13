@@ -201,10 +201,6 @@ public class InboundRouter {
 
     private static final Logger log = LoggerFactory.getLogger(InboundRouter.class);
 
-    /** Deterministic English literal for chat-mode (non-slash) input until T2-D wires the real dispatcher. */
-    static final String CHAT_MODE_REPLY =
-            "Chat-mode replies are not in the MVP; try /help for the available commands.";
-
     /**
      * Test-only seam: incremented on entry to {@link #normalize}. The
      * size-cap test asserts this counter does not advance across an

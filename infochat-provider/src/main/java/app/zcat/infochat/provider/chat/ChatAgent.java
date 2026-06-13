@@ -5,6 +5,7 @@ import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
+import app.zcat.infochat.core.util.JsonEscaper;
 import app.zcat.infochat.llm.LlmProvider;
 import app.zcat.infochat.llm.LlmResponse;
 import app.zcat.infochat.llm.ModelTask;
@@ -421,8 +422,8 @@ public class ChatAgent {
                     .action(AuditAction.CHAT_MODE)
                     .targetKind(TargetKind.USER)
                     .targetId(userId.toString())
-                    .detailsJson("{\"scope_kind\":\"" + scopeKind
-                            + "\",\"scope_id\":\"" + scopeId + "\"}")
+                    .detailsJson("{\"scope_kind\":\"" + JsonEscaper.escape(scopeKind)
+                            + "\",\"scope_id\":\"" + JsonEscaper.escape(scopeId.toString()) + "\"}")
                     .build();
             auditLogWriter.write(conn, row);
         } catch (SQLException e) {

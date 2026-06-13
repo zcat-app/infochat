@@ -129,6 +129,20 @@ class SummaryCommandHandlerTest {
     }
 
     @Test
+    void serializeClusterMapProducesStableJsonForStandardIds() {
+        // U-62: routing the persisted cluster-map JSON through JsonEscaper
+        // must leave the bytes for today's t-/p- id shapes byte-identical
+        // to the prior raw concatenation (escape() is the identity for
+        // ids with no backslash/quote/control characters).
+        Cluster cluster = new Cluster("t-1", List.of(
+                post("p-1", "Title one", Instant.now()),
+                post("p-2", "Title two", Instant.now())));
+        String json = SummaryCommandHandler.serializeClusterMap(List.of(cluster));
+        assertEquals("[{\"topicId\":\"t-1\",\"postUids\":[\"p-1\",\"p-2\"]}]", json,
+                "standard t-/p- ids serialize byte-identically through JsonEscaper");
+    }
+
+    @Test
     void handlerNameIsLiteralSummary() {
         assertEquals("summary", handler.name(),
                 "name() returns the literal `summary` (router strips the slash)");

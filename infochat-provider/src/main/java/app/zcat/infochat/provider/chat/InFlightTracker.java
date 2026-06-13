@@ -8,7 +8,6 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 
 // Enforces at most one in-flight interruptible request per (user, scope).
 // Consumed by ChatAgent (M1-063) and by /stop + CancellationService (M1-065).

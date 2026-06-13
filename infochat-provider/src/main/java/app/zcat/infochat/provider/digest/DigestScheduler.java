@@ -188,7 +188,7 @@ public class DigestScheduler {
             }
             return null;
         } catch (SQLException e) {
-            throw new RuntimeException(
+            throw new IllegalStateException(
                     "Digest scheduler failed for group " + group.id + " slot " + slotKind, e);
         }
     }
@@ -313,7 +313,7 @@ public class DigestScheduler {
                 }
             }
         } catch (SQLException e) {
-            throw new RuntimeException("Failed to query active groups for digest scheduling", e);
+            throw new IllegalStateException("Failed to query active groups for digest scheduling", e);
         }
         return groups;
     }

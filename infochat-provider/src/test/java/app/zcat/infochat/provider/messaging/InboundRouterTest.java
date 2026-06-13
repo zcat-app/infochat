@@ -182,10 +182,6 @@ class InboundRouterTest {
         List<OutboundMessage> sent = inMemoryAdapter.sentMessages();
         assertEquals(1, sent.size(),
                 "chat-mode body should produce exactly one outbound reply");
-        // Chat mode now dispatches to ChatAgent (M1-063); the reply comes
-        // from TestLlmProvider, not the old CHAT_MODE_REPLY constant.
-        assertNotEquals(InboundRouter.CHAT_MODE_REPLY, sent.get(0).text(),
-                "Should dispatch to ChatAgent, not return the static sentinel");
     }
 
     @Test

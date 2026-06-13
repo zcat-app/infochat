@@ -319,17 +319,6 @@ public final class BundleKeys {
      */
     public static final String REPLY_WELCOME_DM_FRESH = "reply.welcome.dm_fresh";
 
-    /**
-     * Welcome reply sent on a group's first non-banned {@code @mention}
-     * after step 3 group auto-register. Text from
-     * {@code docs/design/03-commands.md} §3.11 Welcome messages, Mode 3.
-     * The intake-step splice (M1-044b) reserves this key for use by the
-     * group auto-promote / first-mention reply path (M1-044c / T2-A).
-     * M1-044b lands the key + bundle entry so the bundle stays in sync
-     * with {@link BundleKeys} reflection.
-     */
-    public static final String REPLY_WELCOME_GROUP_FIRST_MENTION = "reply.welcome.group_first_mention";
-
     // ----- Admin command handler errors + replies (M1-044c) ---------------
     // Per docs/spec/security.md §User ban + §Invite-code registration +
     // §Authorization model, and docs/spec/commands.md §Admin (bot admin).

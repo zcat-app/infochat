@@ -154,6 +154,17 @@ class AssetHandlerTest {
     }
 
     @Test
+    void valuelessVsFlagRepliesWithUsage() {
+        // A trailing --vs with no currency value must not be silently
+        // dropped; the handler replies with the usage message instead.
+        OutboundMessage reply = handler.handle("zcash", SCOPE, "/zcash --vs");
+        assertTrue(reply.text().contains("Usage:"),
+                "value-less --vs yields the usage message; got: " + reply.text());
+        assertTrue(reply.text().contains("--vs"),
+                "usage message names the --vs flag; got: " + reply.text());
+    }
+
+    @Test
     void noLlmCall() {
         // The handler path makes ZERO LLM calls. This test verifies
         // the handler completes a happy-path /zcash invocation without

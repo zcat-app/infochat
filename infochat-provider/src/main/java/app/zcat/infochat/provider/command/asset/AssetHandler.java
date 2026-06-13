@@ -80,6 +80,11 @@ public class AssetHandler {
         }
 
         ParsedArgs args = parseArgs(rawText);
+        if (args.missingVsValue) {
+            return reply(scope, MessageFormat.format(
+                    bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT, language),
+                    "/" + assetName + " [sub-verb] [--vs <currency>]"));
+        }
         List<String> enabledSubVerbs = asset.enabledSubVerbNames();
 
         // Resolve sub-verb
@@ -159,7 +164,12 @@ public class AssetHandler {
 
         int i = 1; // skip the command name (e.g. "/zcash")
         while (i < tokens.length) {
-            if ("--vs".equals(tokens[i]) && i + 1 < tokens.length) {
+            if ("--vs".equals(tokens[i])) {
+                if (i + 1 >= tokens.length) {
+                    // Value-less --vs: signal a usage error rather than
+                    // silently dropping the flag.
+                    return new ParsedArgs(subVerb, null, true);
+                }
                 vsCurrency = tokens[i + 1].toLowerCase(Locale.ROOT);
                 i += 2;
             } else if (!tokens[i].startsWith("--")) {
@@ -171,11 +181,12 @@ public class AssetHandler {
                 i++;
             }
         }
-        return new ParsedArgs(subVerb, vsCurrency);
+        return new ParsedArgs(subVerb, vsCurrency, false);
     }
 
     record ParsedArgs(@org.jspecify.annotations.Nullable String subVerb,
-                      @org.jspecify.annotations.Nullable String vsCurrency) {}
+                      @org.jspecify.annotations.Nullable String vsCurrency,
+                      boolean missingVsValue) {}
 
     private static List<String> fuzzySuggest(String supplied, List<String> vocabulary, int max) {
         record Scored(String name, int shared) {}
