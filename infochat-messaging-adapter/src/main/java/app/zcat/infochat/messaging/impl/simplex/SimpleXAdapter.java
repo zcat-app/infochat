@@ -722,21 +722,21 @@ public final class SimpleXAdapter implements MessagingAdapter {
     }
 
     private TrackedHandle requireKnownAndOpen(MessageHandle handle) throws MessagingException {
-        TrackedHandle tracked;
+        // One lock acquisition across the lookup and the finalized check: the
+        // two are read atomically so a concurrent finalize cannot land between
+        // them, and the single critical section replaces the prior pair.
         synchronized (handles) {
-            tracked = handles.get(handle.opaqueValue());
-        }
-        if (tracked == null) {
-            throw new MessagingException(FailureCategory.PERMANENT,
-                    "unknown handle: " + handle.opaqueValue());
-        }
-        synchronized (handles) {
+            TrackedHandle tracked = handles.get(handle.opaqueValue());
+            if (tracked == null) {
+                throw new MessagingException(FailureCategory.PERMANENT,
+                        "unknown handle: " + handle.opaqueValue());
+            }
             if (tracked.finalized) {
                 throw new MessagingException(FailureCategory.PERMANENT,
                         "handle already finalized: " + handle.opaqueValue());
             }
+            return tracked;
         }
-        return tracked;
     }
 
     private boolean hasFallenBack(TrackedHandle tracked) {

@@ -73,10 +73,7 @@ public class PartitionPruner {
             try {
                 List<String> prunable = PartitionDdl.prunablePartitions(
                     table, listChildren(table), activeMonth, retentionDays, now);
-                for (String partition : prunable) {
-                    drop(partition);
-                    LOG.infof("Dropped aged partition %s (retention %d days)", partition, retentionDays);
-                }
+                dropAll(prunable, retentionDays);
             } catch (SQLException e) {
                 // Per-table isolation: one table's failure must not block the
                 // others' aging-out; the next tick retries.
@@ -114,14 +111,22 @@ public class PartitionPruner {
         return children;
     }
 
-    // The name is interpolated, not bound: DDL takes no parameters. Safe
-    // because prunablePartitions only returns names that round-trip the
+    // One connection + statement reused across a table's whole drop batch,
+    // instead of a fresh connection per partition (cold daily maintenance
+    // path). The name is interpolated, not bound: DDL takes no parameters.
+    // Safe because prunablePartitions only returns names that round-trip the
     // partition-name convention (prefix + yyyyMM) — no other identifier can
     // reach this statement.
-    private void drop(String partitionName) throws SQLException {
+    private void dropAll(List<String> partitionNames, int retentionDays) throws SQLException {
+        if (partitionNames.isEmpty()) {
+            return;
+        }
         try (Connection conn = dataSource.getConnection();
              Statement stmt = conn.createStatement()) {
-            stmt.execute(PartitionDdl.dropPartition(partitionName));
+            for (String partitionName : partitionNames) {
+                stmt.execute(PartitionDdl.dropPartition(partitionName));
+                LOG.infof("Dropped aged partition %s (retention %d days)", partitionName, retentionDays);
+            }
         }
     }
 }

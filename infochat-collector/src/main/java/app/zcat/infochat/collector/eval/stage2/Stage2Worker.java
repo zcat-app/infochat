@@ -151,13 +151,19 @@ public class Stage2Worker {
      * (engineering-rules-verbatim.md §7).
      */
     public void judge(UUID postId, Instant postFetchedAt, Stage1Pipeline.Stage1Result stage1Result) {
+        Stage2VerdictHandler.Verdict outcome;
         acquirePermitTimed();
         try {
-            Stage2VerdictHandler.Verdict outcome = invokeWithRetryOnce(postId, stage1Result.originalBody());
-            verdictHandler.apply(postId, postFetchedAt, outcome);
+            outcome = invokeWithRetryOnce(postId, stage1Result.originalBody());
         } finally {
             concurrencyPermits.release();
         }
+        // The verdict DB write runs AFTER the permit is released: it consumes
+        // no LLM concurrency, so holding the permit across its latency would
+        // shrink effective eval concurrency for nothing. The verdict itself is
+        // computed under the permit (including the retry back-off sleep — see
+        // invokeWithRetryOnce); only the write is moved out.
+        verdictHandler.apply(postId, postFetchedAt, outcome);
     }
 
     /**

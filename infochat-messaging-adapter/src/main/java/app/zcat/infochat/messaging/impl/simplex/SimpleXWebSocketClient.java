@@ -6,7 +6,6 @@ import org.slf4j.LoggerFactory;
 
 import app.zcat.infochat.messaging.FailureCategory;
 import app.zcat.infochat.messaging.InboundMessage;
-import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.MessagingException;
 
 import java.net.URI;
@@ -300,32 +299,6 @@ final class SimpleXWebSocketClient {
                             + e.getClass().getSimpleName(), e);
         } finally {
             pending.remove(corrId);
-        }
-    }
-
-    /**
-     * Fire-and-forget variant used by {@link MessagingAdapter#setTyping},
-     * which the SPI defines as best-effort and not allowed to throw. A
-     * send failure here is logged at DEBUG and absorbed.
-     */
-    void sendFireAndForget(String envelopeJson) {
-        WebSocket ws = webSocket;
-        if (ws == null || closed) {
-            LOG.debug("dropping fire-and-forget send; socket not available");
-            return;
-        }
-        try {
-            // Best-effort, but still serialized through transmit(): an
-            // unserialized fire-and-forget colliding with a command send
-            // would get the command's frame silently dropped by the JDK's
-            // one-outstanding-send rule. Failures are absorbed by design.
-            transmit(ws, "fire-and-forget", envelopeJson);
-        } catch (MessagingException e) {
-            // The message is a fixed string plus the corrId label — no
-            // envelope bytes — so logging it is D37-safe.
-            LOG.debug("fire-and-forget send failed: {}", e.getMessage());
-        } catch (RuntimeException e) {
-            LOG.debug("fire-and-forget send failed: {}", e.getClass().getSimpleName());
         }
     }
 

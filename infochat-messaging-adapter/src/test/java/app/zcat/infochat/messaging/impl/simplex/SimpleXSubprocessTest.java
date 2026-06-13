@@ -11,11 +11,7 @@ import java.util.Random;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.logging.Handler;
-import java.util.logging.LogRecord;
-import java.util.logging.Logger;
 
-import org.jboss.logmanager.LogContext;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -341,61 +337,5 @@ class SimpleXSubprocessTest {
         throw new AssertionError(
                 "expected captured log to contain `" + needle + "` within "
                         + timeout + "; captured: " + capture.formatted());
-    }
-
-    /**
-     * Test-only JUL handler that records every {@link LogRecord} a target
-     * named logger publishes. Attaches to BOTH the jboss-logmanager Logger
-     * and the JUL Logger so the capture is robust to whether
-     * jboss-logmanager is the active LogManager under surefire (the same
-     * pattern as {@code InboundRouterContactIdRedactionTest} in
-     * infochat-provider — see CLAUDE.md feedback memory
-     * "avoid-test-inner-classes": one named inner per file is within the
-     * &gt;3 rule of thumb).
-     */
-    private static final class CapturingLogHandler extends Handler {
-
-        private final List<LogRecord> records = new CopyOnWriteArrayList<>();
-        private final org.jboss.logmanager.Logger jbossLogger;
-        private final Logger julLogger;
-
-        private CapturingLogHandler(org.jboss.logmanager.Logger jbossLogger,
-                                    Logger julLogger) {
-            this.jbossLogger = jbossLogger;
-            this.julLogger = julLogger;
-            jbossLogger.addHandler(this);
-            julLogger.addHandler(this);
-        }
-
-        static CapturingLogHandler attach(Class<?> target) {
-            org.jboss.logmanager.Logger jboss =
-                    LogContext.getLogContext().getLogger(target.getName());
-            Logger jul = Logger.getLogger(target.getName());
-            return new CapturingLogHandler(jboss, jul);
-        }
-
-        void detach() {
-            jbossLogger.removeHandler(this);
-            julLogger.removeHandler(this);
-        }
-
-        @Override
-        public void publish(LogRecord record) {
-            records.add(record);
-        }
-
-        @Override
-        public void flush() { }
-
-        @Override
-        public void close() { }
-
-        String formatted() {
-            StringBuilder sb = new StringBuilder("[");
-            for (LogRecord r : records) {
-                sb.append(r.getLevel()).append(": ").append(r.getMessage()).append("; ");
-            }
-            return sb.append("]").toString();
-        }
     }
 }

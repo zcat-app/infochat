@@ -8,8 +8,6 @@ import org.junit.jupiter.api.Test;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import java.util.logging.Logger;
@@ -192,7 +190,7 @@ class LlmRouterStartupGuardLocalOnlyTest {
 
         List<LogRecord> warns = capturer.recordsAtLevel(Level.WARNING);
         assertTrue(warns.stream().anyMatch(r -> {
-            String m = formatMessage(r);
+            String m = CapturingHandler.formatMessage(r);
             return m.contains(REMOTE_BASE_URL) && m.contains("leave the host");
         }), "remote embedding without local-only must emit a confirmation log "
             + "naming the base-url and that post bodies leave the host; captured: "
@@ -212,60 +210,6 @@ class LlmRouterStartupGuardLocalOnlyTest {
         assertTrue(capturer.recordsAtLevel(Level.WARNING).isEmpty(),
             "loopback embedding must NOT emit a confirmation log; captured: "
                 + capturer.formattedAll());
-    }
-
-    private static String formatMessage(LogRecord record) {
-        String raw = record.getMessage();
-        if (raw == null) {
-            return "";
-        }
-        Object[] params = record.getParameters();
-        if (params == null || params.length == 0) {
-            return raw;
-        }
-        return String.format(raw, params);
-    }
-
-    /**
-     * Minimal JUL handler that records every {@link LogRecord} the logger
-     * emits — supports both the JBoss-LogManager bootstrap (Quarkus
-     * production) and the stock JUL bootstrap (plain JUnit5). Identical
-     * pattern to {@code LlmRouterUnknownDefaultTest}'s CapturingHandler.
-     */
-    private static final class CapturingHandler extends Handler {
-        final List<LogRecord> records = new CopyOnWriteArrayList<>();
-
-        @Override
-        public void publish(LogRecord record) {
-            records.add(record);
-        }
-
-        @Override
-        public void flush() {
-            // no-op
-        }
-
-        @Override
-        public void close() {
-            // no-op
-        }
-
-        List<LogRecord> recordsAtLevel(Level level) {
-            return records.stream()
-                .filter(r -> r.getLevel().intValue() >= level.intValue())
-                .toList();
-        }
-
-        String formattedAll() {
-            StringBuilder sb = new StringBuilder();
-            for (LogRecord r : records) {
-                if (sb.length() > 0) {
-                    sb.append(" | ");
-                }
-                sb.append(r.getLevel()).append(": ").append(formatMessage(r));
-            }
-            return sb.toString();
-        }
     }
 
     static {

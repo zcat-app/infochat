@@ -115,7 +115,7 @@ final class SimpleXMessageCodec {
                                              String text) throws MessagingException {
         requireWithinCap(text);
         String target = targetSelector(scope);
-        String cmd = "/_send " + target + " json " + jsonString(textContent(text));
+        String cmd = "/_send " + target + " json " + textContent(text);
         return envelope(corrId, cmd);
     }
 
@@ -151,23 +151,7 @@ final class SimpleXMessageCodec {
         String target = targetSelector(scope);
         String cmd = "/_update item " + target + " " + chatItemId
                 + " live=" + (live ? "on" : "off")
-                + " json " + jsonString(textContent(text));
-        return envelope(corrId, cmd);
-    }
-
-    /**
-     * Encode a typing on/off pulse. Per acceptance item 11 the adapter
-     * exposes this even though design §6.4.2 calls SimpleX's first-class
-     * typing surface absent: the ticket commits to issuing the
-     * {@code apiSetContactTyping}-shaped command, and the SimpleX server
-     * either acts on it or returns an error envelope the codec classifies
-     * via {@link #classifyError(String)}.
-     */
-    static String encodeTypingCommand(String corrId,
-                                               ScopeRef scope,
-                                               boolean typing) throws MessagingException {
-        String target = targetSelector(scope);
-        String cmd = "/_set_contact_typing " + target + " " + (typing ? "on" : "off");
+                + " json " + textContent(text);
         return envelope(corrId, cmd);
     }
 
@@ -235,11 +219,6 @@ final class SimpleXMessageCodec {
         root.put("corrId", corrId);
         root.put("cmd", cmd);
         return root.toString();
-    }
-
-    private static String jsonString(String raw) {
-        // raw is already a serialised JSON object; pass through as-is.
-        return raw;
     }
 
     private static void requireWithinCap(String text) throws MessagingException {
@@ -740,22 +719,17 @@ final class SimpleXMessageCodec {
         return value == null || value.isNull() ? null : value.asText();
     }
 
-    /** First textual node among the given candidates, or null. */
-    private static @Nullable String firstTextual(@Nullable JsonNode first,
-                                                 @Nullable JsonNode second,
-                                                 @Nullable JsonNode third,
-                                                 @Nullable JsonNode fourth) {
-        if (first != null && first.isTextual()) {
-            return first.asText();
-        }
-        if (second != null && second.isTextual()) {
-            return second.asText();
-        }
-        if (third != null && third.isTextual()) {
-            return third.asText();
-        }
-        if (fourth != null && fourth.isTextual()) {
-            return fourth.asText();
+    /**
+     * First textual node among the given candidates, or null. A candidate
+     * may be null at runtime — these are {@code JsonNode.get(...)} results
+     * that return null for an absent field — so each is null-checked before
+     * use even though the varargs array itself is never null.
+     */
+    private static @Nullable String firstTextual(JsonNode... candidates) {
+        for (JsonNode candidate : candidates) {
+            if (candidate != null && candidate.isTextual()) {
+                return candidate.asText();
+            }
         }
         return null;
     }

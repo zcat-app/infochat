@@ -57,15 +57,6 @@ class SimpleXMessageCodecTest {
         assertTrue(finalizeCmd.contains("live=off"),
                 "terminal edit uses live=off: " + finalizeCmd);
 
-        // --- Encode: typing on/off (acceptance item 11).
-        String typingFrame = SimpleXMessageCodec.encodeTypingCommand(
-                "corr-4",
-                new ScopeRef.Dm("contact-abc"),
-                true);
-        String typingCmd = MAPPER.readTree(typingFrame).get("cmd").asText();
-        assertTrue(typingCmd.startsWith("/_set_contact_typing @contact-abc on"),
-                "typing-on emits the apiSetContactTyping form: " + typingCmd);
-
         // --- Decode: an inbound direct-message newChatItem yields an Inbound
         //     carrying the (contact_id, scope, body) tuple per acceptance item 7.
         String inboundJson = """
@@ -355,8 +346,6 @@ class SimpleXMessageCodecTest {
                 () -> SimpleXMessageCodec.encodeUpdateCommand("corr-1", "chat-item-1", badDm, "hi")).category());
         assertEquals(FailureCategory.PERMANENT, assertThrows(MessagingException.class,
                 () -> SimpleXMessageCodec.encodeFinalizeCommand("corr-1", "chat-item-1", badDm, "hi")).category());
-        assertEquals(FailureCategory.PERMANENT, assertThrows(MessagingException.class,
-                () -> SimpleXMessageCodec.encodeTypingCommand("corr-1", badDm, true)).category());
 
         // chatItemId is round-tripped from simplex-chat in a SendAck; an
         // attacker-poisoned ack would surface here. encodeUpdate / encodeFinalize

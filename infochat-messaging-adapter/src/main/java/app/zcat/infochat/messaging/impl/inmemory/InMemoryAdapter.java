@@ -43,8 +43,9 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * <p>Thread-safety: all mutable state lives in concurrent collections
  * ({@link CopyOnWriteArrayList} for sent / typing / per-handle
- * history, {@link ConcurrentHashMap} for the handle table, an
- * {@link AtomicLong} for handle ids). Tests may dispatch from the test
+ * history, {@link ConcurrentHashMap} for the per-handle history,
+ * identity, and group tables, an {@link AtomicLong} for handle ids).
+ * Tests may dispatch from the test
  * thread while the registered handler does its own work — concurrency
  * cost is negligible at test scale and prevents a flaky test from
  * masking a real bug.</p>
@@ -73,7 +74,6 @@ public final class InMemoryAdapter implements MessagingAdapter {
 
     private final List<OutboundMessage> sent = new CopyOnWriteArrayList<>();
     private final List<TypingEvent> typingEvents = new CopyOnWriteArrayList<>();
-    private final Map<String, InMemoryMessageHandle> handles = new ConcurrentHashMap<>();
     private final Map<String, List<UpdateEvent>> history = new ConcurrentHashMap<>();
     private final Map<String, Boolean> finalized = new ConcurrentHashMap<>();
     private final Map<String, Identity> knownIdentities = new ConcurrentHashMap<>();
@@ -131,8 +131,6 @@ public final class InMemoryAdapter implements MessagingAdapter {
     public MessageHandle send(OutboundMessage msg) throws MessagingException {
         long id = handleIdGen.incrementAndGet();
         MessageHandle handle = new MessageHandle("inmem-" + id);
-        InMemoryMessageHandle internal = new InMemoryMessageHandle(id, msg);
-        handles.put(handle.opaqueValue(), internal);
         history.put(handle.opaqueValue(), new CopyOnWriteArrayList<>(
                 List.of(new UpdateEvent(msg.text(), false))));
         sent.add(msg);
@@ -339,7 +337,6 @@ public final class InMemoryAdapter implements MessagingAdapter {
     public void reset() {
         sent.clear();
         typingEvents.clear();
-        handles.clear();
         history.clear();
         finalized.clear();
         knownIdentities.clear();
@@ -354,7 +351,7 @@ public final class InMemoryAdapter implements MessagingAdapter {
         // the type system). Surface the misuse as a PERMANENT
         // MessagingException so the failure mode lines up with what
         // production adapters would raise for the same misuse.
-        if (!handles.containsKey(handle.opaqueValue())) {
+        if (!history.containsKey(handle.opaqueValue())) {
             throw new MessagingException(
                     FailureCategory.PERMANENT,
                     "Unknown handle: " + handle.opaqueValue());
@@ -364,9 +361,8 @@ public final class InMemoryAdapter implements MessagingAdapter {
                     FailureCategory.PERMANENT,
                     "Handle already finalized: " + handle.opaqueValue());
         }
-        // send() populates `handles` and `history` together under the same
-        // key, and entries are only ever cleared together (reset()); a known,
-        // open handle therefore always has a history list.
+        // The containsKey check above guarantees a present history list, and
+        // the map never stores null values, so the get is non-null.
         return Objects.requireNonNull(history.get(handle.opaqueValue()));
     }
 

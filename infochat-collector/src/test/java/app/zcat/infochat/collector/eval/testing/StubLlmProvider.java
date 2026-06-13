@@ -8,10 +8,9 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Alternative;
 import org.jspecify.annotations.Nullable;
 
-import java.util.ArrayDeque;
-import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -59,12 +58,14 @@ import java.util.concurrent.TimeUnit;
 @ApplicationScoped
 public final class StubLlmProvider implements LlmProvider {
 
-    private final Deque<String> queuedResponses = new ArrayDeque<>();
-    private final List<ModelTask> calls = new ArrayList<>();
-    private boolean failAll = false;
-    // Thread-name capture + gate are read/written across threads once
-    // the eval queue dispatches on virtual threads, so unlike the
-    // single-thread fields above they must be thread-safe.
+    // All mutable state is thread-safe: the eval queue dispatches generate()
+    // on virtual threads, so the queued responses, the call log, the fail
+    // flag, and the captured-call list / gate are all read and written across
+    // threads. Concurrent collections + volatile flags keep a flaky test from
+    // masking a real concurrency bug.
+    private final Deque<String> queuedResponses = new ConcurrentLinkedDeque<>();
+    private final List<ModelTask> calls = new CopyOnWriteArrayList<>();
+    private volatile boolean failAll = false;
     private final List<CapturedCall> capturedCalls = new CopyOnWriteArrayList<>();
     private volatile @Nullable CountDownLatch gate;
 
