@@ -550,7 +550,7 @@ public class BanCommandHandler implements CommandHandler {
             // Drop the leading /ban token. Tokenize honoring double-quoted values.
             String[] split = rawText.trim().split("\\s+", 2);
             String remainder = split.length > 1 ? split[1].trim() : "";
-            List<String> tokens = tokenize(remainder);
+            List<String> tokens = CommandTokenizer.tokenize(remainder);
 
             String contact = null;
             String reason = null;
@@ -578,31 +578,6 @@ public class BanCommandHandler implements CommandHandler {
                 return null;
             }
             return new BanArgs(contact, reason);
-        }
-
-        private static List<String> tokenize(String s) {
-            List<String> out = new ArrayList<>();
-            StringBuilder current = new StringBuilder();
-            boolean inQuotes = false;
-            for (int i = 0; i < s.length(); i++) {
-                char c = s.charAt(i);
-                if (c == '"') {
-                    inQuotes = !inQuotes;
-                    continue;
-                }
-                if (!inQuotes && Character.isWhitespace(c)) {
-                    if (current.length() > 0) {
-                        out.add(current.toString());
-                        current.setLength(0);
-                    }
-                    continue;
-                }
-                current.append(c);
-            }
-            if (current.length() > 0) {
-                out.add(current.toString());
-            }
-            return out;
         }
     }
 }

@@ -706,7 +706,7 @@ public class InviteCommandHandler implements CommandHandler {
     record CreateArgs(@Nullable String adapter, @Nullable String contact, boolean open) {
 
         static CreateArgs parse(String remainder) {
-            List<String> tokens = tokenize(remainder);
+            List<String> tokens = CommandTokenizer.tokenize(remainder);
             String adapter = null;
             String contact = null;
             boolean open = false;
@@ -740,7 +740,7 @@ public class InviteCommandHandler implements CommandHandler {
     record ListArgs(int page) {
 
         static ListArgs parse(String remainder) {
-            List<String> tokens = tokenize(remainder);
+            List<String> tokens = CommandTokenizer.tokenize(remainder);
             int page = 1;
             for (int i = 0; i < tokens.size(); i++) {
                 String tok = tokens.get(i);
@@ -760,30 +760,5 @@ public class InviteCommandHandler implements CommandHandler {
             }
             return new ListArgs(page);
         }
-    }
-
-    private static List<String> tokenize(String s) {
-        List<String> out = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
-        boolean inQuotes = false;
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            if (c == '"') {
-                inQuotes = !inQuotes;
-                continue;
-            }
-            if (!inQuotes && Character.isWhitespace(c)) {
-                if (current.length() > 0) {
-                    out.add(current.toString());
-                    current.setLength(0);
-                }
-                continue;
-            }
-            current.append(c);
-        }
-        if (current.length() > 0) {
-            out.add(current.toString());
-        }
-        return out;
     }
 }

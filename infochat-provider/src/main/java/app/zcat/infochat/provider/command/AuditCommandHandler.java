@@ -259,7 +259,7 @@ public class AuditCommandHandler implements CommandHandler {
 
     record AuditArgs(@Nullable String actor, @Nullable String action, int page) {
         static AuditArgs parse(String rawText) {
-            List<String> tokens = tokenize(rawText);
+            List<String> tokens = CommandTokenizer.tokenize(rawText);
             String actor = null;
             String action = null;
             int page = 1;
@@ -293,31 +293,6 @@ public class AuditCommandHandler implements CommandHandler {
                 }
             }
             return new AuditArgs(actor, action, page);
-        }
-
-        private static List<String> tokenize(String s) {
-            List<String> out = new ArrayList<>();
-            StringBuilder current = new StringBuilder();
-            boolean inQuotes = false;
-            for (int i = 0; i < s.length(); i++) {
-                char c = s.charAt(i);
-                if (c == '"') {
-                    inQuotes = !inQuotes;
-                    continue;
-                }
-                if (!inQuotes && Character.isWhitespace(c)) {
-                    if (!current.isEmpty()) {
-                        out.add(current.toString());
-                        current.setLength(0);
-                    }
-                    continue;
-                }
-                current.append(c);
-            }
-            if (!current.isEmpty()) {
-                out.add(current.toString());
-            }
-            return out;
         }
     }
 }

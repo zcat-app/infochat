@@ -9,29 +9,26 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 import org.jboss.logging.Logger;
-import org.postgresql.PGConnection;
 import org.postgresql.PGNotification;
 
-import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.time.Instant;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
-import java.util.Objects;
 
 /**
  * LISTEN/NOTIFY consumer for the {@code quarantine_review} channel.
- * Parallel to {@link NewPostListener} — dedicated long-lived connection,
- * virtual-thread worker, reconnect-resilient backoff. Routes actionable
- * events (row status PENDING, NEEDS_REVIEW) to a throttled admin
- * notification; routes terminal transitions (BENIGN_CLOSED, APPROVED,
- * REJECTED) to cursor-advance only.
+ * Parallel to {@link NewPostListener} — the dedicated long-lived
+ * connection, virtual-thread worker, and reconnect-resilient backoff live
+ * in {@link AbstractPgListener}. Routes actionable events (row status
+ * PENDING, NEEDS_REVIEW) to a throttled admin notification; routes
+ * terminal transitions (BENIGN_CLOSED, APPROVED, REJECTED) to
+ * cursor-advance only.
  *
  * <p><b>Row truth, not payload truth.</b> The NOTIFY payload is purely
  * the wake-up signal (docs/spec/architecture.md §Inter-service
@@ -70,13 +67,9 @@ import java.util.Objects;
 @Startup
 @Priority(260)
 @ApplicationScoped
-public class QuarantineReviewListener {
+public class QuarantineReviewListener extends AbstractPgListener {
 
     static final String CHANNEL = "quarantine_review";
-    static final int NOTIFICATION_TIMEOUT_MS = 1000;
-    static final long SHUTDOWN_JOIN_TIMEOUT_MS = 5000;
-    static final long INITIAL_BACKOFF_MS = 1000;
-    static final long MAX_BACKOFF_MS = 30_000;
 
     private static final Logger LOG = Logger.getLogger(QuarantineReviewListener.class);
 
@@ -87,7 +80,6 @@ public class QuarantineReviewListener {
     private static final Pattern NEW_STATUS_PATTERN =
             Pattern.compile("\"new_status\"\\s*:\\s*\"([^\"]+)\"");
 
-    @Inject DataSource dataSource;
     @Inject ProviderStateDao providerStateDao;
     @Inject ThrottledAdminNotifier throttledAdminNotifier;
     @Inject QuarantineReviewReconciler reconciler;
@@ -98,39 +90,34 @@ public class QuarantineReviewListener {
     // while proxy-routed tests keep passing (see class javadoc).
     @Inject QuarantineReviewListener self;
 
-    // listenConnection and workerThread are (re)assigned across the
-    // LISTEN lifecycle and reset to null on close/shutdown — both are
-    // genuinely nullable.
-    private @Nullable Connection listenConnection;
-    private @Nullable Thread workerThread;
-    private volatile boolean stopRequested;
-
     @PostConstruct
     void onStartup() {
-        try {
-            openListenConnection();
-        } catch (SQLException e) {
-            throw new IllegalStateException(
-                    "QuarantineReviewListener could not acquire its dedicated Postgres session "
-                            + "or issue LISTEN " + CHANNEL, e);
-        }
-        workerThread = Thread.ofVirtual()
-                .name("quarantine-review-listener")
-                .start(this::runLoop);
+        start();
     }
 
     @PreDestroy
     void onShutdown() {
-        stopRequested = true;
-        if (workerThread != null) {
-            workerThread.interrupt();
-            try {
-                workerThread.join(SHUTDOWN_JOIN_TIMEOUT_MS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        }
-        closeListenConnectionQuietly();
+        stop();
+    }
+
+    @Override
+    String channelName() {
+        return CHANNEL;
+    }
+
+    @Override
+    String workerThreadName() {
+        return "quarantine-review-listener";
+    }
+
+    @Override
+    Logger log() {
+        return LOG;
+    }
+
+    @Override
+    void runCatchUp() throws SQLException {
+        reconciler.runCatchUp();
     }
 
     /**
@@ -208,45 +195,8 @@ public class QuarantineReviewListener {
     /** Current row state read from the base table. */
     record RowState(String status, Instant eventTime) {}
 
-    // ---- LISTEN/NOTIFY loop (mirrors NewPostListener) ----
-
-    private void runLoop() {
-        long backoffMs = INITIAL_BACKOFF_MS;
-        while (!stopRequested) {
-            PGConnection pg;
-            try {
-                pg = ensureListenConnection();
-            } catch (SQLException e) {
-                if (stopRequested) return;
-                LOG.errorf(e,
-                        "QuarantineReviewListener: reconnect sequence failed "
-                                + "(acquire/LISTEN/catch-up); backing off %dms", backoffMs);
-                if (!sleepBackoff(backoffMs)) return;
-                backoffMs = Math.min(backoffMs * 2, MAX_BACKOFF_MS);
-                continue;
-            }
-            PGNotification[] notifications;
-            try {
-                notifications = pg.getNotifications(NOTIFICATION_TIMEOUT_MS);
-            } catch (SQLException e) {
-                if (stopRequested) return;
-                LOG.errorf(e,
-                        "QuarantineReviewListener: getNotifications failed; "
-                                + "will reconnect after %dms backoff", backoffMs);
-                closeListenConnectionQuietly();
-                if (!sleepBackoff(backoffMs)) return;
-                backoffMs = Math.min(backoffMs * 2, MAX_BACKOFF_MS);
-                continue;
-            }
-            backoffMs = INITIAL_BACKOFF_MS;
-            if (notifications == null) continue;
-            for (PGNotification n : notifications) {
-                dispatch(n);
-            }
-        }
-    }
-
     // Package-private for unit testing, like parsePayload.
+    @Override
     void dispatch(PGNotification n) {
         if (!CHANNEL.equals(n.getName())) return;
         Payload payload;
@@ -307,85 +257,4 @@ public class QuarantineReviewListener {
     }
 
     record Payload(String targetKind, UUID targetId, String newStatus) {}
-
-    // ---- LISTEN connection management ----
-    //
-    // The lifecycle methods below are synchronized: the worker's
-    // check-reopen-catch-up sequence races against a concurrent close
-    // (the @PreDestroy shutdown path, or the test hook) — an
-    // unsynchronized close landing between the reopen and the field
-    // read would null out the FRESH connection and NPE-kill the worker
-    // thread. The poll itself (getNotifications in runLoop) stays
-    // outside the monitor so a close is never blocked for the full
-    // notification timeout.
-
-    private synchronized PGConnection ensureListenConnection() throws SQLException {
-        if (listenConnection == null || listenConnection.isClosed()) {
-            closeListenConnectionQuietly();
-            openListenConnection();
-            LOG.info("QuarantineReviewListener: (re)acquired LISTEN connection "
-                    + "and re-issued LISTEN " + CHANNEL);
-            reconcileAfterReconnect();
-        }
-        return Objects.requireNonNull(listenConnection).unwrap(PGConnection.class);
-    }
-
-    /**
-     * Post-reconnect catch-up (mirrors {@link NewPostListener}):
-     * NOTIFYs fired between the connection loss and the re-LISTEN
-     * above were dropped by Postgres, so the reconciler replays
-     * quarantine_review events past the cursor — advancing the cursor
-     * AND notifying actionable ones through the same
-     * {@link #handleEvent} path. A catch-up failure closes the fresh
-     * connection and rethrows so the caller's backoff path retries
-     * the full reconnect-plus-reconcile sequence — otherwise a live
-     * connection with an unreconciled gap would short-circuit future
-     * {@link #ensureListenConnection()} calls and the gap would
-     * persist silently.
-     */
-    private void reconcileAfterReconnect() throws SQLException {
-        try {
-            reconciler.runCatchUp();
-        } catch (SQLException e) {
-            closeListenConnectionQuietly();
-            throw e;
-        }
-    }
-
-    private synchronized void openListenConnection() throws SQLException {
-        listenConnection = dataSource.getConnection();
-        listenConnection.setAutoCommit(true);
-        try (Statement stmt = listenConnection.createStatement()) {
-            stmt.execute("LISTEN " + CHANNEL);
-        }
-    }
-
-    private synchronized void closeListenConnectionQuietly() {
-        if (listenConnection != null) {
-            try {
-                listenConnection.close();
-            } catch (SQLException ignored) { }
-            listenConnection = null;
-        }
-    }
-
-    private boolean sleepBackoff(long ms) {
-        try {
-            Thread.sleep(ms);
-            return true;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return false;
-        }
-    }
-
-    // ---- Test hooks ----
-
-    void closeListenConnectionForTest() {
-        closeListenConnectionQuietly();
-    }
-
-    boolean isWorkerAlive() {
-        return workerThread != null && workerThread.isAlive();
-    }
 }

@@ -80,7 +80,7 @@ public record AddSourceArgs(
         String[] split = rawBody.trim().split("\\s+", 2);
         String remainder = split.length > 1 ? split[1].trim() : "";
 
-        List<String> tokens = tokenize(remainder);
+        List<String> tokens = CommandTokenizer.tokenize(remainder);
 
         URI url = null;
         List<String> tags = null;
@@ -177,37 +177,6 @@ public record AddSourceArgs(
         }
 
         return new Success(new AddSourceArgs(url, tags, typeOverride, category, displayNameOverride));
-    }
-
-    /**
-     * Whitespace-respecting tokenizer that honors double-quoted values
-     * for {@code --name "Display Name With Spaces"}. The router has
-     * already done NFKC + bidi/ZWS strip; this method only splits on
-     * runs of ASCII whitespace and unwraps double-quote pairs.
-     */
-    private static List<String> tokenize(String s) {
-        List<String> out = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
-        boolean inQuotes = false;
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            if (c == '"') {
-                inQuotes = !inQuotes;
-                continue;
-            }
-            if (!inQuotes && Character.isWhitespace(c)) {
-                if (current.length() > 0) {
-                    out.add(current.toString());
-                    current.setLength(0);
-                }
-                continue;
-            }
-            current.append(c);
-        }
-        if (current.length() > 0) {
-            out.add(current.toString());
-        }
-        return out;
     }
 
     private static List<String> parseTagList(String csv) {

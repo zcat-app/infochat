@@ -1,9 +1,9 @@
 ---
 id: M1-309
 title: "Provider structural dedup: PG listener base class, shared command tokenizer"
-status: pending
+status: done
 created: 2026-06-11
-last_updated: 2026-06-11
+last_updated: 2026-06-13
 blocked_by: []
 files_budget: 14
 files_scope:
@@ -32,12 +32,29 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-06-13
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 12
+      added: 668
+      removed: 522
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-06-13
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-309: Provider structural dedup: PG listener base class, shared command tokenizer
