@@ -139,8 +139,7 @@ class SimpleXEditFallbackMetricsTest {
         return new SimpleXAdapter(
                 cfg,
                 HttpClient.newHttpClient(),
-                msg -> { /* admin notifications unused here */ },
-                new SimpleXIdentity("bot-queue-addr"));
+                msg -> { /* admin notifications unused here */ });
     }
 
     private static OutboundMessage outbound(String text) {
