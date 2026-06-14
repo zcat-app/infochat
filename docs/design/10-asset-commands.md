@@ -378,7 +378,7 @@ hot path. They share the parser-only command bucket
 LLM-triggering bucket.
 
 The fetcher side has its own per-source budget (already part of the                                                                                                                                                                                   
-`Fetcher` SPI's tick scheduling) — a misbehaving exchange does not
+asset-fetch tick scheduling) — a misbehaving exchange does not
 get hammered by user load, only by the tick interval.
 
 ## 10.11 Verification
