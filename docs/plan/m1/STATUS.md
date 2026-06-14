@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 8 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 372 |
+| done | 373 |
 | deferred | 5 |
 | **total** | **385** |
 
@@ -25,7 +25,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-330 — LLM providers: redact base-url credentials on parse-failure paths + reject userinfo at config boundary (complexity: medium, risk: low)
-- M1-336 — Adapter inbound: single-source UTF-8 byte length across codec cap + metric (complexity: medium, risk: medium)
 - M1-342 — ReEvaluationJob: bound infra-failure re-judge fan-out to one call per tick during an outage (complexity: low, risk: low)
 - M1-344 — llm-adapter: single-source per-task config keys and the embedding provider name (complexity: medium, risk: low)
 - M1-345 — infochat-ssrf: bracket-host IPv6 validation, redirect drain order, IPv6 zero-scan helper reuse (complexity: low, risk: low)
@@ -74,9 +73,9 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-339 | Stage1Pipeline: narrow the EscapedEntity suppression to the doc | 2026-06-14 | round 1 APPROVE |
 | M1-338 | AbstractInstanceLockGuard: scope the ownership probe to the gate's lock id | 2026-06-14 | round 1 APPROVE |
 | M1-337 | NotifyOutcome: distinguish degraded-DB persistence-failure from throttle-suppressed | 2026-06-14 | round 1 APPROVE |
+| M1-336 | Adapter inbound: single-source UTF-8 byte length across codec cap + metric | 2026-06-14 | round 1 APPROVE |
 | M1-335 | ChatToolDispatcher: deterministic per-turn cache key for nested args | 2026-06-14 | round 1 APPROVE |
 | M1-334 | StageProgressNotifier: terminate abandoned per-scope state at request end | 2026-06-14 | round 1 APPROVE |
-| M1-333 | ChatAgent: consume cached InboundContext.effectiveLanguage instead of re-querying | 2026-06-14 | round 1 APPROVE |
 
 ---
 
@@ -529,7 +528,7 @@ M1-332 (done)
 M1-333 (done)
 M1-334 (done)
 M1-335 (done)
-M1-336 (pending) ← runnable
+M1-336 (done)
 M1-337 (done)
 M1-338 (done)
 M1-339 (done)

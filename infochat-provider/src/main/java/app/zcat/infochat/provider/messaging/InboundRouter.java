@@ -7,6 +7,7 @@ import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
+import app.zcat.infochat.messaging.Utf8;
 import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
@@ -367,12 +368,16 @@ public class InboundRouter {
 
         // §6.12 observability, ahead of every intake gate: the inbound
         // counter is a transport-level traffic count, so rate-capped,
-        // oversize, and banned messages are all counted. The byte count
-        // mirrors exceedsUtf8ByteLength's allocation-free walk — a
-        // hostile flood must not buy a getBytes() copy per message.
+        // oversize, and banned messages are all counted. Walk the body's
+        // UTF-8 byte length once here (Utf8.byteLength, alloc-free — a
+        // hostile flood must not buy a getBytes() copy per message) and
+        // reuse the same int for both the size summary and the M1-038
+        // body-size cap below, so the recorded value and the cap decision
+        // cannot drift and the body is not walked twice in the Provider.
         adapterMetrics.inbound(adapterName, msg.scope());
+        int inboundByteLength = raw == null ? 0 : Utf8.byteLength(raw);
         if (raw != null) {
-            adapterMetrics.messageBytes(adapterName, AdapterMetrics.Direction.INBOUND, raw);
+            adapterMetrics.messageBytes(adapterName, AdapterMetrics.Direction.INBOUND, inboundByteLength);
         }
 
         // Step 1.5 — transport-level rate cap. Fires FIRST per spec
@@ -402,7 +407,7 @@ public class InboundRouter {
         // flood cannot leak MESSAGE_TOO_LARGE_REPLY outbound, and BEFORE
         // normalize so NFKC amplification cannot drive cost on
         // adversarial inputs.
-        if (raw != null && exceedsUtf8ByteLength(raw, maxInboundBodyBytes)) {
+        if (raw != null && inboundByteLength > maxInboundBodyBytes) {
             // Fires before any DB step by design (the hostile-flood path
             // must stay query-free), so the context language is still the
             // pre-resolution "en" default — see InboundContext#effectiveLanguage.
@@ -1108,31 +1113,6 @@ public class InboundRouter {
         // already let the /stop handler reply, so the router's null-body
         // branch skips the send (no double-reply).
         return result.reply();
-    }
-
-    /**
-     * Count UTF-8 byte length without allocating a byte[]. Returns true
-     * as soon as the running count exceeds {@code limit} (early exit).
-     */
-    static boolean exceedsUtf8ByteLength(String s, int limit) {
-        int count = 0;
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            if (c <= 0x7F) {
-                count += 1;
-            } else if (c <= 0x7FF) {
-                count += 2;
-            } else if (Character.isHighSurrogate(c)) {
-                count += 4;
-                i++;
-            } else {
-                count += 3;
-            }
-            if (count > limit) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /**

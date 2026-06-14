@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.messaging;
 
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
+import app.zcat.infochat.messaging.Utf8;
 import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
@@ -263,21 +264,24 @@ class InboundRouterTest {
 
     @Test
     void bodySizeCheckDoesNotAllocateArray() {
+        // The Provider body-size cap (onMessage) now tests the once-walked
+        // length against maxInboundBodyBytes; the alloc-free early-exit
+        // arithmetic is single-sourced in Utf8.exceedsByteLength.
         // ASCII: 1 byte per char
-        assertFalse(InboundRouter.exceedsUtf8ByteLength("hello", 5));
-        assertTrue(InboundRouter.exceedsUtf8ByteLength("hello", 4));
+        assertFalse(Utf8.exceedsByteLength("hello", 5));
+        assertTrue(Utf8.exceedsByteLength("hello", 4));
 
         // U+00E9 (é): 2 bytes in UTF-8
-        assertFalse(InboundRouter.exceedsUtf8ByteLength("é", 2));
-        assertTrue(InboundRouter.exceedsUtf8ByteLength("é", 1));
+        assertFalse(Utf8.exceedsByteLength("é", 2));
+        assertTrue(Utf8.exceedsByteLength("é", 1));
 
         // U+20AC (€): 3 bytes in UTF-8
-        assertFalse(InboundRouter.exceedsUtf8ByteLength("€", 3));
-        assertTrue(InboundRouter.exceedsUtf8ByteLength("€", 2));
+        assertFalse(Utf8.exceedsByteLength("€", 3));
+        assertTrue(Utf8.exceedsByteLength("€", 2));
 
         // U+1D11E (𝄞): 4 bytes in UTF-8 (surrogate pair in Java)
-        assertFalse(InboundRouter.exceedsUtf8ByteLength("𝄞", 4));
-        assertTrue(InboundRouter.exceedsUtf8ByteLength("𝄞", 3));
+        assertFalse(Utf8.exceedsByteLength("𝄞", 4));
+        assertTrue(Utf8.exceedsByteLength("𝄞", 3));
     }
 
     /**

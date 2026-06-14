@@ -2,6 +2,7 @@ package app.zcat.infochat.messaging.metrics;
 
 import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.ScopeRef;
+import app.zcat.infochat.messaging.Utf8;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -231,32 +232,27 @@ public final class AdapterMetrics {
      * One message's body size, by transport direction. The UTF-8 byte
      * length is walked without a {@code getBytes} copy — the inbound
      * call site sits ahead of the Provider's rate cap, so a hostile
-     * flood must not buy a byte-array allocation per message.
+     * flood must not buy a byte-array allocation per message. Used by the
+     * outbound callers ({@code OutboundDelivery}, {@code StageProgressNotifier})
+     * that hold only the body String; the inbound caller in
+     * {@code InboundRouter} precomputes the length once and uses the
+     * {@code int} overload below so the body is not walked twice.
      */
     public void messageBytes(String adapter, Direction direction, String body) {
-        registry.summary("adapter.message.bytes",
-                        "adapter", adapter, "direction", direction.label())
-                .record(utf8ByteLength(body));
+        messageBytes(adapter, direction, Utf8.byteLength(body));
     }
 
-    // Same per-char arithmetic as InboundRouter.exceedsUtf8ByteLength,
-    // minus its early exit.
-    private static int utf8ByteLength(String s) {
-        int count = 0;
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            if (c <= 0x7F) {
-                count += 1;
-            } else if (c <= 0x7FF) {
-                count += 2;
-            } else if (Character.isHighSurrogate(c)) {
-                count += 4;
-                i++;
-            } else {
-                count += 3;
-            }
-        }
-        return count;
+    /**
+     * One message's body size, by transport direction, from a UTF-8 byte
+     * length the caller has already computed (single-sourced through
+     * {@link Utf8}). Lets the inbound path record the same {@code int} it
+     * tested against the size cap, so the metric value and the cap
+     * decision cannot diverge.
+     */
+    public void messageBytes(String adapter, Direction direction, int utf8ByteLength) {
+        registry.summary("adapter.message.bytes",
+                        "adapter", adapter, "direction", direction.label())
+                .record(utf8ByteLength);
     }
 
     /** §6.12 {@code scope_kind} label value for a scope. */

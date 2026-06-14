@@ -1,11 +1,17 @@
 ---
 id: M1-336
 title: "Adapter inbound: single-source UTF-8 byte length across codec cap + metric"
-status: pending
+status: done
 created: 2026-06-14
 last_updated: 2026-06-14
+clarity_check:
+  date: 2026-06-14
+  verdict: WARN
+  warnings:
+    - "SECURITY-FLAG-CONSISTENT: ticket modifies codec-level inbound cap enforcement paths that guard against hostile large messages (restoring an existing security commitment); security_relevant: false understates the surface. Consider security_relevant: true. Non-blocking — change is strictly defensive, cap value unchanged."
+  blockers: []
 blocked_by: []
-files_budget: 7
+files_budget: 8
 files_scope:
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/Utf8.java
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/metrics/AdapterMetrics.java
@@ -40,7 +46,20 @@ test_plan:
     - all tests currently green on main (InboundMessage unchanged, so the 12 new InboundMessage(...) construction sites compile untouched)
 spec_refs: []
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-14
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 373
+      removed: 101
 escalations:
   - date: 2026-06-14
     reason: clarity-fail
@@ -49,6 +68,21 @@ escalations:
       Root cause: the original design threaded the codec's precomputed int across
       the module boundary via InboundMessage, fanning to ~7 production + 12 test
       files past files_budget:6. Resolved by refine (see revisions[0]).
+  - date: 2026-06-14
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A — budget-breach. Implementation complete, mvn -B clean verify green, at
+      8 code/test files vs files_budget:7. The overage is one provider TEST file:
+      the budget modeled "1 modified provider test," but the work splits across two
+      existing files for non-discretionary reasons — acceptance 4(a) (re-point the
+      exceedsUtf8ByteLength boundary assertions) is COMPILE-FORCED into
+      InboundRouterTest because this ticket removes InboundRouter.exceedsUtf8ByteLength,
+      while acceptance 4(b) (end-to-end onMessage: recorded adapter.message.bytes ==
+      the single cap-tested length) needs the plain-constructed-router + size-cap +
+      AdapterMetrics harness that lives in InboundRouterNormalizeTest (InboundRouterTest
+      is a @QuarkusTest with no such harness). files_scope already authorizes the whole
+      infochat-provider/.../provider/messaging test directory; only the numeric count is
+      short by one. Resolution: refine files_budget 7 -> 8.
 revisions:
   - date: 2026-06-14
     reason: clarity-fail refine — redesigned from threading the codec's
@@ -78,10 +112,36 @@ revisions:
         - "The metric name adapter.message.bytes and its dimensions — unchanged; only the computation is single-sourced."
         - "The MAX_INBOUND_TEXT_BYTES cap value — unchanged."
         - "The alloc-free utf8ByteLength arithmetic itself — kept (it is the correct walk-only form); the fix is to compute it ONCE and thread it, not to change the algorithm."
+  - date: 2026-06-14
+    reason: budget-breach refine — widened files_budget 7 -> 8. The implementation
+      (complete and green) touches two provider test files, not one: re-pointing the
+      exceedsUtf8ByteLength boundary assertions is compile-forced into InboundRouterTest
+      by this ticket removing InboundRouter.exceedsUtf8ByteLength, while the end-to-end
+      onMessage assertion (recorded adapter.message.bytes == the single cap-tested length)
+      needs the plain-constructed-router + cap harness in InboundRouterNormalizeTest.
+      files_scope already authorized the whole provider/messaging test directory; only the
+      numeric count was short by one. No acceptance, scope, or design change.
+    snapshot:
+      status: in-progress
+      escalation_reason: budget-breach
+      files_budget_at_snapshot: 7
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-06-14
+    verdict: CLEAN
+    base: 2fd38f0a
+    head: working-tree (uncommitted M1-336 impl, pre-commit, --in-progress audit)
+    verdict_file: docs/plan/m1/redteam/M1-336-2026-06-14.md
+    out_of_model_count: 0
+    note: |
+      In-progress (post-APPROVE / pre-commit) adversarial audit of the working-tree
+      implementation diff, restricted to the code/test modules. CLEAN — 0 findings,
+      0 out-of-model. The threat-actor saw only docs/spec/security.md + the diff. No
+      remediation needed; the change restores (does not weaken) the AdapterMetrics
+      alloc-free commitment and the M1-038 defense-in-depth cap, both semantics-preserving.
 ---
 
 # M1-336: Adapter inbound — single-source UTF-8 byte length

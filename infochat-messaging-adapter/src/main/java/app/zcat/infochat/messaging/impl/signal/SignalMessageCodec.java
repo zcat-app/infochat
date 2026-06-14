@@ -1,6 +1,8 @@
 package app.zcat.infochat.messaging.impl.signal;
 
 
+import app.zcat.infochat.messaging.Utf8;
+
 import jakarta.json.Json;
 import jakarta.json.JsonNumber;
 import jakarta.json.JsonObject;
@@ -9,7 +11,6 @@ import jakarta.json.JsonReader;
 import jakarta.json.JsonValue;
 
 import java.io.StringReader;
-import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.regex.Pattern;
@@ -293,7 +294,7 @@ final class SignalMessageCodec {
      * so both reject an oversize decoded body the same way SimpleX does.
      */
     static boolean exceedsInboundByteCap(String body) {
-        return body.getBytes(StandardCharsets.UTF_8).length > MAX_INBOUND_TEXT_BYTES;
+        return Utf8.exceedsByteLength(body, MAX_INBOUND_TEXT_BYTES);
     }
 
     /**

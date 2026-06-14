@@ -13,6 +13,7 @@ import app.zcat.infochat.messaging.Identity;
 import app.zcat.infochat.messaging.InboundMessage;
 import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.ScopeRef;
+import app.zcat.infochat.messaging.Utf8;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -357,7 +358,7 @@ final class SimpleXMessageCodec {
         // against a real ceiling rather than the 1 MiB WebSocket frame
         // ceiling. UTF-8 byte length, not Java char length — the cap is a
         // wire-level budget.
-        if (text.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > MAX_INBOUND_TEXT_BYTES) {
+        if (Utf8.exceedsByteLength(text, MAX_INBOUND_TEXT_BYTES)) {
             return new Ignored("newChatItem-text-exceeds-inbound-cap");
         }
         String adapterMessageId = optText(itemBody, "itemId");
@@ -468,7 +469,7 @@ final class SimpleXMessageCodec {
         if (text == null) {
             return new Ignored("newChatItem-group-without-text");
         }
-        if (text.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > MAX_INBOUND_TEXT_BYTES) {
+        if (Utf8.exceedsByteLength(text, MAX_INBOUND_TEXT_BYTES)) {
             return new Ignored("newChatItem-group-text-exceeds-inbound-cap");
         }
         List<String> mentions = extractMentionQueueAddresses(itemBody.get("formattedText"));

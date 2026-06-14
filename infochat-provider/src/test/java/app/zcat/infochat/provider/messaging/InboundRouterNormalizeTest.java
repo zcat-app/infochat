@@ -3,8 +3,11 @@ package app.zcat.infochat.provider.messaging;
 import app.zcat.infochat.messaging.Identity;
 import app.zcat.infochat.messaging.InboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
+import app.zcat.infochat.messaging.Utf8;
+import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.util.TypeLiteral;
 import org.junit.jupiter.api.BeforeEach;
@@ -215,6 +218,56 @@ class InboundRouterNormalizeTest {
                 "the oversize reply must be the fixed too-large bundle entry");
         assertEquals(invocationsBefore, InboundRouter.NORMALIZE_INVOCATIONS.get(),
                 "normalize() must NOT be invoked on an oversize body; counter must not advance");
+    }
+
+    /**
+     * Single-sourcing (M1-336): the {@code adapter.message.bytes} value
+     * recorded for an inbound body equals the same UTF-8 byte length the
+     * size cap tests it against — both read one {@code Utf8.byteLength}
+     * walk. A multibyte body (18 bytes / 9 chars) proves the recorded
+     * value is the byte length, not the char count, and that the cap
+     * rejected the body on that very value.
+     */
+    @Test
+    void recordedInboundBytesEqualTheCapTestedByteLength() {
+        InboundRouter router = new InboundRouter();
+        router.outboundDelivery = TestOutboundDelivery.passThrough();
+        router.maxInboundBodyBytes = 16; // tiny cap so an 18-byte body overflows
+        router.commandHandlers = new EmptyHandlerInstance();
+        router.inboundContext = new InboundContext();
+        router.rateCapBucket = new NoopRateCapBucket();
+        router.registeredContactSet = new NoopRegisteredContactSet();
+        router.bundleLoader = new NoopBundleLoader();
+        router.commandPermissions = new NoopCommandPermissions();
+        router.probationCheck = new NoopProbationCheck();
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        router.adapterMetrics = new AdapterMetrics(registry);
+        CapturingAdapter target = new CapturingAdapter();
+        router.setReplyTarget(target);
+
+        // 9 × U+00E9 (é): 18 UTF-8 bytes but 9 Java chars — over the 16-byte cap.
+        String body = "é".repeat(9);
+        int expected = Utf8.byteLength(body);
+
+        router.onMessage(
+                new InboundMessage(
+                        new Identity("alice-contact-id-1234567890abcdef", "Alice", Instant.now()),
+                        new ScopeRef.Dm("alice-contact-id-1234567890abcdef"),
+                        body,
+                        Instant.now(),
+                        "msg-1"),
+                "inmemory");
+
+        assertEquals("noop:" + BundleKeys.ERROR_ROUTER_MESSAGE_TOO_LARGE,
+                target.captured.get(0).text(),
+                "the over-cap multibyte body must be rejected by the size cap");
+        assertEquals((double) expected,
+                registry.get("adapter.message.bytes")
+                        .tags("adapter", "inmemory", "direction", "inbound")
+                        .summary().totalAmount(),
+                "the recorded byte length must equal the single Utf8.byteLength the cap tested");
+        assertTrue(expected > router.maxInboundBodyBytes,
+                "guard: the recorded length is the value that tripped the cap (byte length, not char count)");
     }
 
     /**
