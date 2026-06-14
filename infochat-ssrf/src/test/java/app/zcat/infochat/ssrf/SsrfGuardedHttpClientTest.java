@@ -571,6 +571,34 @@ class SsrfGuardedHttpClientTest {
             "IPv6 hex must be lowercased and the brackets preserved");
     }
 
+    @Test
+    void canonicalizeHostRejectsNonIpv6BracketedHost() {
+        // M1-345: the bracket branch must validate the inner is a real IPv6
+        // literal, mirroring the IDN branch's rejection of un-parseable hosts.
+        // A bracketed hostname or a bracketed bare IPv4 is not an IPv6 literal;
+        // Inet6Address.ofLiteral throws IllegalArgumentException for both, which
+        // resolveAndValidate wraps as INVALID_HOST.
+        assertThrows(IllegalArgumentException.class,
+            () -> SsrfGuardedHttpClient.canonicalizeHost("[example.com]"),
+            "a [...]-bracketed non-IPv6 host must be rejected, not re-bracketed");
+        assertThrows(IllegalArgumentException.class,
+            () -> SsrfGuardedHttpClient.canonicalizeHost("[1.2.3.4]"),
+            "a [...]-bracketed bare IPv4 is not an IPv6 literal and must be rejected");
+    }
+
+    @Test
+    void canonicalizeHostAcceptsBracketedIpv4MappedLiteral() {
+        // M1-345 no-regression pin: URI.getHost() yields [::ffff:8.8.8.8] for an
+        // IPv4-mapped destination, which today flows to the IpBlocklist
+        // embedded-v4 decode. Inet6Address.ofLiteral accepts it as a valid IPv6
+        // literal, so canonicalization still round-trips. (InetAddress.getByName
+        // would have normalized it to an Inet4Address, which an
+        // instanceof Inet6Address check would then have wrongly rejected.)
+        assertEquals("[::ffff:8.8.8.8]",
+            SsrfGuardedHttpClient.canonicalizeHost("[::ffff:8.8.8.8]"),
+            "bracketed IPv4-mapped IPv6 literal must still canonicalize, not be rejected");
+    }
+
     // -----------------------------------------------------------------
     // 3xx narrowing (C-SSRF-304). 304/305/306 are 3xx but are not
     // follow-able redirects; the wrapper must return them as the

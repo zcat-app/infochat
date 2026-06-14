@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 376 |
+| done | 377 |
 | deferred | 5 |
 | **total** | **385** |
 
@@ -26,7 +26,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-330 — LLM providers: redact base-url credentials on parse-failure paths + reject userinfo at config boundary (complexity: medium, risk: low)
 - M1-344 — llm-adapter: single-source per-task config keys and the embedding provider name (complexity: medium, risk: low)
-- M1-345 — infochat-ssrf: bracket-host IPv6 validation, redirect drain order, IPv6 zero-scan helper reuse (complexity: low, risk: low)
 - M1-349 — Spec/design: correct the asset-fetch SPI name (AssetDataSource, not the post Fetcher) (complexity: low, risk: low)
 
 ---
@@ -66,13 +65,13 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-348 | DefaultRedactionHook: fail-closed to the sentinel on non-JSON redacted output | 2026-06-14 | round 1 APPROVE |
 | M1-347 | InviteCodeConsumer: drop the empty-transaction commit on the already-breached path | 2026-06-14 | round 1 APPROVE |
 | M1-346 | infochat-core: schema-test javadoc, audit-denorm IT package, contact-id parity comment | 2026-06-14 | round 1 APPROVE |
+| M1-345 | infochat-ssrf: bracket-host IPv6 validation, redirect drain order, IPv6 zero-scan helper reuse | 2026-06-14 | round 1 APPROVE |
 | M1-343 | Provider --page parsing: surface a usage error on a malformed page value | 2026-06-14 | round 1 APPROVE |
 | M1-342 | ReEvaluationJob: bound infra-failure re-judge fan-out to one call per tick during an outage | 2026-06-14 | round 1 APPROVE |
 | M1-341 | FetchScheduler: exclude stream-shaped kinds + filter due kinds at SQL | 2026-06-14 | round 1 APPROVE |
 | M1-340 | Asset freshness: decouple Provider staleness window from the Collector cadence keys | 2026-06-14 | round 1 APPROVE |
 | M1-339 | Stage1Pipeline: narrow the EscapedEntity suppression to the doc | 2026-06-14 | round 1 APPROVE |
 | M1-338 | AbstractInstanceLockGuard: scope the ownership probe to the gate's lock id | 2026-06-14 | round 1 APPROVE |
-| M1-337 | NotifyOutcome: distinguish degraded-DB persistence-failure from throttle-suppressed | 2026-06-14 | round 1 APPROVE |
 
 ---
 
@@ -534,7 +533,7 @@ M1-341 (done)
 M1-342 (done)
 M1-343 (done)
 M1-344 (pending) ← runnable
-M1-345 (pending) ← runnable
+M1-345 (done)
 M1-346 (done)
 M1-347 (done)
 M1-348 (done)

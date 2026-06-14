@@ -6,6 +6,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.IDN;
+import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.UnknownHostException;
@@ -325,7 +326,22 @@ public final class SsrfGuardedHttpClient {
         // case-fold the inner literal, and re-add the brackets so the
         // pin key and the dial target agree on the IPv6 literal form.
         if (host.startsWith("[") && host.endsWith("]")) {
-            return "[" + host.substring(1, host.length() - 1).toLowerCase(Locale.ROOT) + "]";
+            String inner = host.substring(1, host.length() - 1);
+            // Validate the inner is a real IPv6 literal before re-bracketing,
+            // closing the asymmetry with the IDN branch (M1-345). ofLiteral is a
+            // pure parse that never performs DNS for ANY input, so the rejection
+            // path adds no I/O; it throws IllegalArgumentException for a
+            // non-IPv6-literal, which the caller (resolveAndValidate) wraps as
+            // INVALID_HOST. IPv4-mapped literals (::ffff:a.b.c.d) parse OK here
+            // and still flow to the IpBlocklist embedded-v4 decode, so no
+            // currently-correct caller changes. getByName is deliberately NOT
+            // used: it would DNS-resolve a non-literal inner and normalize
+            // ::ffff:a.b.c.d to an Inet4Address, which an instanceof Inet6Address
+            // check would then wrongly reject. The parsed value is discarded —
+            // the original cased string is re-bracketed so the pin key stays
+            // byte-stable with the dial target.
+            Inet6Address.ofLiteral(inner);
+            return "[" + inner.toLowerCase(Locale.ROOT) + "]";
         }
         String ascii = IDN.toASCII(host);
         String lower = ascii.toLowerCase(Locale.ROOT);
@@ -410,13 +426,20 @@ public final class SsrfGuardedHttpClient {
 
                 int status = response.statusCode();
                 if (isFollowableRedirect(status)) {
-                    discardBounded(response.body(), bodyCap);
                     redirectCount++;
                     if (redirectCount > redirectCap) {
+                        // Over the cap: this hop will NOT be followed, so do not
+                        // drain the (bodyCap-bounded) body we are about to discard
+                        // (M1-345). Close it explicitly so an ofInputStream()-backed
+                        // body releases its connection without the read-and-discard
+                        // that a drain would perform.
+                        response.body().close();
                         throw new SsrfPolicyException(
                             SsrfPolicyException.Reason.REDIRECT_CAP_EXCEEDED,
                             "redirect cap exceeded");
                     }
+                    // Drain only the hops we actually follow.
+                    discardBounded(response.body(), bodyCap);
                     String location = response.headers().firstValue("Location")
                         .orElseThrow(() -> new SsrfPolicyException(
                             SsrfPolicyException.Reason.REDIRECT_LOCATION_MISSING,

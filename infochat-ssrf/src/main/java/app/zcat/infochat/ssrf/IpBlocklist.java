@@ -346,21 +346,11 @@ public class IpBlocklist {
     }
 
     private static boolean isLoopbackV6(byte[] raw) {
-        for (int i = 0; i < 15; i++) {
-            if (raw[i] != 0) {
-                return false;
-            }
-        }
-        return raw[15] == 1;
+        return allZero(raw, 0, 15) && raw[15] == 1;
     }
 
     private static boolean isAllZeroV6(byte[] raw) {
-        for (int i = 0; i < 16; i++) {
-            if (raw[i] != 0) {
-                return false;
-            }
-        }
-        return true;
+        return allZero(raw, 0, 16);
     }
 
     private static boolean isIpv4Mapped(byte[] raw) {
