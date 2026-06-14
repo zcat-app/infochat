@@ -152,7 +152,7 @@ public class OpenAiCompatibleProvider implements LlmProvider {
      * absent) — local Ollama is the canonical empty-key case.
      */
     private TaskConfig configFor(ModelTask task) {
-        String prefix = "infochat.llm." + task.keySegment() + ".";
+        String prefix = task.configPrefix();
         String baseUrl = config.getValue(prefix + "base-url", String.class);
         LlmHttpSupport.requireHttpBaseUrl(baseUrl, prefix + "base-url");
         String apiKey = config.getOptionalValue(prefix + "api-key", String.class).orElse("");

@@ -30,4 +30,27 @@ public interface EmbeddingProvider {
      *         Never null; size equals {@code texts.size()}.
      */
     List<EmbeddingResult> embed(List<String> texts);
+
+    /**
+     * Stable, operator-visible name for this embedding provider — the
+     * embedding-side counterpart of {@link LlmProvider#providerName()},
+     * so the {@code embedding.*} metrics' {@code provider} label joins
+     * cleanly with the LLM-side {@code llm.*} metrics and survives a
+     * class rename. A concrete impl whose stable name differs from its
+     * class name MUST override this to return its constant.
+     *
+     * <p>The default walks up from a CDI client-proxy subclass (whose
+     * simple name carries a framework suffix such as {@code _ClientProxy})
+     * to the developer-authored class and returns that simple name, so a
+     * provider that does not override still gets a stable name across
+     * framework versions.
+     */
+    default String providerName() {
+        Class<?> cls = getClass();
+        while (cls.getSimpleName().contains("_") && cls.getSuperclass() != null
+                && EmbeddingProvider.class.isAssignableFrom(cls.getSuperclass())) {
+            cls = cls.getSuperclass();
+        }
+        return cls.getSimpleName();
+    }
 }

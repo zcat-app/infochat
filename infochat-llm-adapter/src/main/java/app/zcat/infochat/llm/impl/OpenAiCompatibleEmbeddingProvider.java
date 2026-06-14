@@ -74,6 +74,15 @@ import java.util.Optional;
 @ApplicationScoped
 public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
 
+    /**
+     * Stable, operator-visible name for the embedding metric's
+     * {@code provider} label. Distinct from the chat-completions
+     * {@link OpenAiCompatibleProvider#PROVIDER_NAME} ({@code openai-compatible})
+     * because they are separate SPIs with separate selection, so the
+     * metric label must not collapse the two onto one identifier.
+     */
+    public static final String PROVIDER_NAME = "openai-compatible-embedding";
+
     private final HttpClient http;
 
     @ConfigProperty(name = "infochat.embeddings.base-url")
@@ -127,6 +136,11 @@ public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
     /** Test seam: exposes the shared client so tests can pin its construction. */
     HttpClient httpClient() {
         return http;
+    }
+
+    @Override
+    public String providerName() {
+        return PROVIDER_NAME;
     }
 
     @Override

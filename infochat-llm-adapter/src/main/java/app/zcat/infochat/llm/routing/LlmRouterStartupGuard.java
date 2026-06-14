@@ -284,7 +284,7 @@ public class LlmRouterStartupGuard {
      * against the hand-spelled operator-facing literals.
      */
     static String baseUrlKeyFor(ModelTask task) {
-        return "infochat.llm." + task.keySegment() + ".base-url";
+        return task.baseUrlKey();
     }
 
     /**
@@ -294,7 +294,7 @@ public class LlmRouterStartupGuard {
      * over the base-url key) so the two key surfaces cannot drift.
      */
     static String providerKeyFor(ModelTask task) {
-        return "infochat.llm." + task.keySegment() + ".provider";
+        return task.providerKey();
     }
 
     /**
@@ -304,7 +304,7 @@ public class LlmRouterStartupGuard {
      * priority-2 capability set.
      */
     static String languagesKeyFor(String providerName) {
-        return "infochat.llm." + providerName + ".languages";
+        return ModelTask.languagesKey(providerName);
     }
 
     /**

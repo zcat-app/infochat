@@ -121,10 +121,10 @@ class LlmObservabilityTest {
         meteredEmbedding.embed(List.of("text"));
 
         assertEquals(1.0, registry.get("embedding.calls.total")
-            .tags("provider", "CapturingEmbeddingProvider", "model", "stub-embed-model", "outcome", "ok")
+            .tags("provider", "stub-embed", "model", "stub-embed-model", "outcome", "ok")
             .counter().count());
         assertEquals(3.0, registry.get("embedding.dimension")
-            .tags("provider", "CapturingEmbeddingProvider", "model", "stub-embed-model")
+            .tags("provider", "stub-embed", "model", "stub-embed-model")
             .gauge().value());
     }
 
@@ -138,7 +138,7 @@ class LlmObservabilityTest {
 
         assertSame(boom, thrown);
         assertEquals(1.0, registry.get("embedding.calls.total")
-            .tags("provider", "CapturingEmbeddingProvider", "model", "stub-embed-model", "outcome", "fail")
+            .tags("provider", "stub-embed", "model", "stub-embed-model", "outcome", "fail")
             .counter().count());
     }
 
@@ -185,6 +185,11 @@ class LlmObservabilityTest {
             return texts.stream()
                 .map(text -> new EmbeddingResult(new float[] {1.0f, 2.0f, 3.0f}))
                 .toList();
+        }
+
+        @Override
+        public String providerName() {
+            return "stub-embed";
         }
     }
 }

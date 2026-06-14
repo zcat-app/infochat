@@ -292,7 +292,7 @@ public class LlmRouter {
      * abbreviation of {@code SECURITY_JUDGE} → {@code security}.
      */
     private static String perTaskOverrideKey(ModelTask task) {
-        return "infochat.llm." + task.keySegment() + ".provider";
+        return task.providerKey();
     }
 
     /**
@@ -344,7 +344,7 @@ public class LlmRouter {
      * exercise the helper directly with a hand-rolled {@link Config}.
      */
     static Set<String> supportedLanguagesFor(LlmProvider p, Config config) {
-        String key = "infochat.llm." + p.providerName() + ".languages";
+        String key = ModelTask.languagesKey(p.providerName());
         Optional<String> raw = config.getOptionalValue(key, String.class);
         if (raw.isEmpty() || raw.get().isBlank()) {
             return Set.of("en");

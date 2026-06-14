@@ -26,12 +26,11 @@ import java.util.List;
  *
  * <p>Label sources differ from the LLM side because the embedding SPI
  * carries no per-call provider/model reporting: the {@code provider}
- * label derives from the delegate's class name (same proxy-suffix walk
- * as {@link app.zcat.infochat.llm.LlmProvider#providerName()}), and
- * the {@code model} label reads the single-model-per-deployment
- * property {@code infochat.embeddings.model} — defaulted to
- * {@code unknown} so the decorator never fails a boot the undecorated
- * bean would survive.</p>
+ * label reads {@link EmbeddingProvider#providerName()} (the stable,
+ * operator-visible name, symmetric with the LLM side), and the
+ * {@code model} label reads the single-model-per-deployment property
+ * {@code infochat.embeddings.model} — defaulted to {@code unknown} so
+ * the decorator never fails a boot the undecorated bean would survive.</p>
  */
 @Decorator
 @Priority(Interceptor.Priority.APPLICATION)
@@ -55,7 +54,7 @@ public class MeteredEmbeddingProvider implements EmbeddingProvider {
     @Override
     public List<EmbeddingResult> embed(List<String> texts) {
         LlmCallContext context = LlmCallContext.currentOrFresh().withTask(null);
-        String provider = providerLabel(delegate);
+        String provider = delegate.providerName();
         long startNanos = System.nanoTime();
         try {
             List<EmbeddingResult> results =
@@ -74,20 +73,5 @@ public class MeteredEmbeddingProvider implements EmbeddingProvider {
                 context.traceId(), provider, model, texts.size());
             throw e;
         }
-    }
-
-    /**
-     * {@code EmbeddingProvider} has no {@code providerName()} on its
-     * SPI, so the label walks up from a CDI proxy/subclass to the
-     * developer-authored class — the same walk as
-     * {@code LlmProvider.providerName()}'s default.
-     */
-    private static String providerLabel(EmbeddingProvider delegate) {
-        Class<?> cls = delegate.getClass();
-        while (cls.getSimpleName().contains("_") && cls.getSuperclass() != null
-                && EmbeddingProvider.class.isAssignableFrom(cls.getSuperclass())) {
-            cls = cls.getSuperclass();
-        }
-        return cls.getSimpleName();
     }
 }
