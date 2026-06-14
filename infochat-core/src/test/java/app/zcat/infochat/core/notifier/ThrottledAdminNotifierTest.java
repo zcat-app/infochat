@@ -386,8 +386,8 @@ class ThrottledAdminNotifierTest {
         }
         try {
             NotifyOutcome outcome = notifier.notifyOnce("any-key", "EC", "boom");
-            assertEquals(NotifyOutcome.SUPPRESSED, outcome,
-                "SQLException fallback must return SUPPRESSED so callers don't retry-spam");
+            assertEquals(NotifyOutcome.PERSISTENCE_FAILED, outcome,
+                "SQLException fallback must return PERSISTENCE_FAILED (DB unreachable, count not bumped) so callers don't retry-spam");
 
             LogRecord fallback = logCapture.records.stream()
                 .filter(r -> r.getMessage() != null

@@ -270,7 +270,12 @@ public class ThrottledAdminNotifier {
                     e.getClass().getSimpleName(),
                     sanitize(exceptionMessage, MAX_MESSAGE_LENGTH));
             }
-            return NotifyOutcome.SUPPRESSED;
+            // PERSISTENCE_FAILED, not SUPPRESSED: the DB is unreachable so
+            // suppressed_count was NOT bumped and a fallback WARN may have been
+            // emitted — both halves of the SUPPRESSED contract are false here. A
+            // caller branching on the outcome to decide "did the operator see this
+            // failure?" needs the distinct state (deep-review v5.5 F1, M1-337).
+            return NotifyOutcome.PERSISTENCE_FAILED;
         }
     }
 

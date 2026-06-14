@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 16 |
+| pending | 15 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 364 |
+| done | 365 |
 | deferred | 5 |
 | **total** | **385** |
 
@@ -27,7 +27,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-330 — LLM providers: redact base-url credentials on parse-failure paths + reject userinfo at config boundary (complexity: medium, risk: low)
 - M1-332 — SignalJsonRpcClient: bounded connect timeout on the daemon socket (complexity: low, risk: medium)
 - M1-336 — Adapter inbound: single-source UTF-8 byte length across codec cap + metric (complexity: medium, risk: medium)
-- M1-337 — NotifyOutcome: distinguish degraded-DB persistence-failure from throttle-suppressed (complexity: low, risk: low)
 - M1-338 — AbstractInstanceLockGuard: scope the ownership probe to the gate's lock id (complexity: medium, risk: medium)
 - M1-339 — Stage1Pipeline: narrow the EscapedEntity suppression to the doc (complexity: low, risk: low)
 - M1-340 — Asset freshness: decouple Provider staleness window from the Collector cadence keys (complexity: medium, risk: low)
@@ -75,6 +74,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-337 | NotifyOutcome: distinguish degraded-DB persistence-failure from throttle-suppressed | 2026-06-14 | round 1 APPROVE |
 | M1-335 | ChatToolDispatcher: deterministic per-turn cache key for nested args | 2026-06-14 | round 1 APPROVE |
 | M1-334 | StageProgressNotifier: terminate abandoned per-scope state at request end | 2026-06-14 | round 1 APPROVE |
 | M1-333 | ChatAgent: consume cached InboundContext.effectiveLanguage instead of re-querying | 2026-06-14 | round 1 APPROVE |
@@ -84,7 +84,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-327 | EmbeddingWorker: notify-once + skip on non-finite vector components | 2026-06-14 | round 1 APPROVE |
 | M1-326 | Nostr: gate relay productivity on signature-verified delivery | 2026-06-14 | round 1 APPROVE |
 | M1-325 | Align InboundRouterChatPersistFailureTest with M1-323 test-double constructors | 2026-06-13 | — |
-| M1-324 | Amend §Failure handling: group-deleted-upstream via threshold in v1 | 2026-06-13 | — |
 
 ---
 
@@ -538,7 +537,7 @@ M1-333 (done)
 M1-334 (done)
 M1-335 (done)
 M1-336 (pending) ← runnable
-M1-337 (pending) ← runnable
+M1-337 (done)
 M1-338 (pending) ← runnable
 M1-339 (pending) ← runnable
 M1-340 (pending) ← runnable

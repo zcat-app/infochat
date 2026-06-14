@@ -63,8 +63,8 @@ class ThrottledAdminNotifierFallbackThrottleTest {
             for (int i = 0; i < 50; i++) {
                 NotifyOutcome outcome =
                         notifier.notifyOnce("caller-key-" + i, "EC" + i, "boom " + i);
-                assertEquals(NotifyOutcome.SUPPRESSED, outcome,
-                        "every degraded-DB fallback must return SUPPRESSED");
+                assertEquals(NotifyOutcome.PERSISTENCE_FAILED, outcome,
+                        "every degraded-DB fallback must return PERSISTENCE_FAILED");
             }
         });
 
