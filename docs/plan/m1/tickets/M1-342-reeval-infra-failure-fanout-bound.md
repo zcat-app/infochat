@@ -1,9 +1,15 @@
 ---
 id: M1-342
 title: "ReEvaluationJob: bound infra-failure re-judge fan-out to one call per tick during an outage"
-status: pending
+status: done
 created: 2026-06-14
 last_updated: 2026-06-14
+clarity_check:
+  date: 2026-06-14
+  verdict: WARN
+  warnings:
+    - "SECURITY-FLAG-CONSISTENT: ReEvaluationJob is part of the Stage-2 security pipeline (re-judges fail-open posts); consider security_relevant: true. out_of_scope explicitly preserves the security invariants, sufficient to proceed."
+  blockers: []
 blocked_by: []
 files_budget: 2
 files_scope:
@@ -30,13 +36,38 @@ test_plan:
 spec_refs:
   - docs/spec/security.md §Re-evaluation job
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-14
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 311
+      removed: 10
 escalations: []
 revisions: []
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-06-14
+    verdict: CLEAN
+    base: bcc20205
+    head: f69c43ad
+    verdict_file: docs/plan/m1/redteam/M1-342-2026-06-14.md
+    out_of_model_count: 0
+    note: |
+      Post-commit / pre-merge adversarial review of branch commit
+      f69c43ad. CLEAN — no gaps between the threat model and the diff.
+      The per-tick fan-out bound leaves the no-increment rule, candidate
+      query, and verdict transitions unchanged. No remediation needed.
 ---
 
 # M1-342: ReEvaluationJob — bound infra-failure re-judge fan-out

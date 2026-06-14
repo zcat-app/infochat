@@ -136,9 +136,20 @@ public class ReEvaluationJob {
             SafeLog.warn(LOG, "ReEvaluationJob: failed to enumerate candidates; skipping tick", e);
             return;
         }
+        // Per-tick provider-down latch (M1-342). The first candidate whose
+        // Stage-2 re-judge returns INFRA_FAILURE proves the LLM is unreachable
+        // this tick; every remaining candidate would issue an identical failing
+        // provider call and gain nothing (an INFRA_FAILURE verdict never
+        // advances re_eval_attempts, so there is no progress to make). Bound the
+        // outage-time fan-out to one provider call per tick and defer the rest
+        // to the next tick's ordered scan from the top.
+        boolean providerDown = false;
         for (ReEvalCandidate candidate : candidates) {
+            if (providerDown) {
+                break;
+            }
             try {
-                processOne(candidate);
+                providerDown = processOne(candidate);
             } catch (RuntimeException e) {
                 // SafeLog, never the raw Throwable: processOne weaves
                 // the reconstructed pre-redaction body into the Stage 2
@@ -152,12 +163,17 @@ public class ReEvaluationJob {
         checkNeedsReviewDepth();
     }
 
-    void processOne(ReEvalCandidate candidate) {
+    /**
+     * Re-judge one candidate. Returns {@code true} iff the Stage-2 verdict
+     * was INFRA_FAILURE — the signal {@link #onTick} latches to bound the
+     * per-tick provider-call fan-out during an outage (M1-342).
+     */
+    boolean processOne(ReEvalCandidate candidate) {
         int cap = candidate.stage2Failed() ? infraFailureCap : unknownCap;
 
         if (candidate.reEvalAttempts() >= cap) {
             transitionToNeedsReview(candidate);
-            return;
+            return false;
         }
 
         String originalBody = reconstructOriginalBody(candidate);
@@ -165,13 +181,16 @@ public class ReEvaluationJob {
 
         if (verdict == Stage2VerdictHandler.Verdict.BENIGN) {
             applyBenignReEval(candidate);
+            return false;
         } else if (verdict == Stage2VerdictHandler.Verdict.INFRA_FAILURE) {
             // Transient LLM outage — do not consume an attempt.
             // The spec limits counter increments to INJECTION/MALWARE/UNKNOWN.
             LOG.info("ReEvaluationJob: INFRA_FAILURE for post_id={} — skipping attempt increment",
                 candidate.postId());
+            return true;
         } else {
             applyNonBenignReEval(candidate, verdict);
+            return false;
         }
     }
 
