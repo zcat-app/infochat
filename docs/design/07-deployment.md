@@ -102,7 +102,7 @@ Profile is read once at startup. To switch:
 
 1. Stop both services.
 2. Set the active profile: `quarkus.profile=...` in `application.properties` (or `QUARKUS_PROFILE=...` in the environment).
-3. If embedding dimension changes (e.g., laptop→pi), run the embedding migration: `scripts/reembed.sh`.
+3. If embedding dimension changes (e.g., laptop→pi), run the embedding migration: `prod/scripts/reembed.sh`.
 4. Start collector, then provider.
 
 The collector logs the active profile and any individual overrides at INFO on boot:
@@ -484,68 +484,85 @@ Per-adapter admin threat profiles (Signal SIM-swap exposure vs. SimpleX cryptogr
 
 ---
 
-## 7.7 Local development with `docker-compose`
+## 7.7 Local and containerized stack (`docker-compose`)
 
-A `docker-compose.yml` ships with the repo. Brings up:
+A single `docker-compose.yml` ships at the repo root and serves **both** audiences through Compose **profiles** — one file, two shapes, so the Postgres / pgvector / LLM service definitions stay a single source of truth and cannot drift apart:
 
-- `postgres:16` with pgvector extension, init-loaded from `docker/postgres-init.sql` (creates roles, extensions, empty DB).
-- `ollama/ollama:latest` with a volume for downloaded models.
-- `infochat-collector` and `infochat-provider` (Quarkus dev or built jars).
-- The **in-memory test adapter only** is wired for compose-time tests; a compose deployment that wants to talk to a real messaging app runs `simplex-cli` and/or `signal-cli` **out of band** (see operator note below).
+- **`dev` profile** (`docker compose --profile dev up -d`) — Postgres+pgvector and Ollama only. The developer runs the two Quarkus services on the host via `quarkus:dev` (live reload, source on disk). The *developer inner loop*; see the `dev/scripts/` wrappers in §7.7.1.
+- **`prod` profile** (`docker compose --profile prod up -d`) — Postgres+pgvector, the chosen LLM service (Ollama **or** llama.cpp), and the Collector and Provider as **built container images**. This is what the §7.7.2 wizard drives and what a public-test or simple single-host install runs.
+
+The Postgres service carries no `profiles:` key, so it starts under both; every other service is tagged `dev` or `prod` and starts only under its profile. For tests/CI, set `infochat.adapters=inmemory` to bypass SimpleX and Signal; production deployments MUST NOT mix `inmemory` with `simplex` or `signal` ([06-messaging.md §6.6, §6.7](06-messaging.md)).
 
 ```bash
-# Start everything
-docker compose up -d
+# Developer inner loop: infra in containers, apps on the host via quarkus:dev
+docker compose --profile dev up -d
+mvn -pl infochat-collector quarkus:dev
+mvn -pl infochat-provider  quarkus:dev
 
-# First-time model pull
+# Full containerized stack (what the §7.7.2 wizard drives)
+docker compose --profile prod up -d
+
+# First-time Ollama model pulls (either profile)
 docker compose exec ollama ollama pull llama3.1:8b
 docker compose exec ollama ollama pull llama3.2:3b
 docker compose exec ollama ollama pull nomic-embed-text
-
-# Run the apps in dev mode against compose-managed Postgres + Ollama
-mvn -pl infochat-collector quarkus:dev
-mvn -pl infochat-provider  quarkus:dev
 ```
 
-(or use the one-click wrappers in §7.7.1.)
+### Repo layout — operator vs developer assets
 
-For tests/CI, set `infochat.adapters=inmemory` to bypass SimpleX and Signal. Production deployments MUST NOT mix `inmemory` with `simplex` or `signal` ([06-messaging.md §6.6, §6.7](06-messaging.md)).
+So the operator-facing entry point is not buried under developer tooling, scripts and config are split by audience:
 
-### 7.7.1 One-click scripts
+```
+docker-compose.yml        # single file, dev + prod profiles
+docker/
+  postgres-init.sql       # service-role password bootstrap (below)
+prod/
+  setup.sh                # the first-run wizard (§7.7.2) — the one command an operator runs
+  scripts/                # wizard subscripts + ops scripts (backup.sh, reembed.sh)
+  config/                 # COMMITTED TEMPLATES only:
+                          #   application.properties.example, secrets.env.example,
+                          #   bootstrap-sources.json
+dev/
+  scripts/                # developer inner-loop wrappers (build/dev/run-*/down) — §7.7.1
+```
 
-A `scripts/` directory at the repo root holds thin wrappers around the raw `mvn` and `docker compose` invocations above. The point is **discoverability**: an operator (or new contributor) who knows nothing about the project can `ls scripts/` and have a working mental map within thirty seconds, without having to assemble the right command for the right phase from prose elsewhere in this document.
+`prod/config/` holds only the `*.example` templates and the default `bootstrap-sources.json`. The wizard's **generated** output — a real `secrets.env`, the filled `application.properties`, the per-adapter identity directories — is written to a **git-ignored runtime directory** and never committed; a production install relocates that runtime state out of the checkout entirely (§7.8.1). Version-controlled templates and per-host secrets stay cleanly separated, so a stray `git add` cannot publish a tester's credentials.
+
+### 7.7.1 Developer inner-loop scripts (`dev/scripts/`)
+
+`dev/scripts/` holds thin wrappers around the raw `mvn` and `docker compose` invocations a **developer** uses for the `quarkus:dev` inner loop. These are **not** for operators or testers — anyone standing up a real deployment uses the §7.7.2 wizard, which runs built containers, never `quarkus:dev`. Keeping the dev wrappers under `dev/` is what stops them from being mistaken for the operator entry point.
 
 The committed set:
 
 | Script | Wraps | Notes |
 |---|---|---|
-| `scripts/build.sh` | `mvn clean install` from the repo root | Validates that JDK 25 is on `PATH` (§7.8.1) before invoking Maven; fails fast with a friendly message naming the required JDK version if not. |
-| `scripts/dev.sh` | `docker compose up -d`, then `mvn -pl infochat-collector quarkus:dev` and `mvn -pl infochat-provider quarkus:dev` in two backgrounded panes (e.g., `tmux` windows, or two `&`-backgrounded shells with PIDs printed for `down.sh` to reap). | Brings up Postgres+pgvector and Ollama, then both Quarkus services in dev mode against them. Idempotent: re-running while the compose stack is already up only restarts the services, leaving compose containers as-is. |
-| `scripts/run-collector.sh` | `mvn -pl infochat-collector quarkus:dev` | Assumes the compose stack is already up; useful when iterating on the Collector alone. |
-| `scripts/run-provider.sh` | `mvn -pl infochat-provider quarkus:dev` | Same shape, Provider side. |
-| `scripts/down.sh` | `docker compose down`, plus killing any background `quarkus:dev` PIDs that `dev.sh` recorded. | Cleanup. |
+| `dev/scripts/build.sh` | `mvn clean install` from the repo root | Validates that JDK 25 is on `PATH` (§7.8.1) before invoking Maven; fails fast with a friendly message naming the required JDK version if not. |
+| `dev/scripts/dev.sh` | `docker compose --profile dev up -d`, then both `quarkus:dev` services in backgrounded panes (e.g. `tmux` windows, or two `&`-backgrounded shells with PIDs printed for `down.sh` to reap). | Brings up Postgres+pgvector and Ollama, then both Quarkus services in dev mode against them. Idempotent: re-running while the stack is up only restarts the services. |
+| `dev/scripts/run-collector.sh` | `mvn -pl infochat-collector quarkus:dev` | Assumes the dev stack is already up; iterate on the Collector alone. |
+| `dev/scripts/run-provider.sh` | `mvn -pl infochat-provider quarkus:dev` | Same shape, Provider side. |
+| `dev/scripts/down.sh` | `docker compose --profile dev down`, plus killing any background `quarkus:dev` PIDs that `dev.sh` recorded. | Cleanup. Developer-only — the wizard's own reset is plain `docker compose down` (§7.7.2). |
 
-Two operational scripts referenced elsewhere in this document belong to the same set:
+The two **operator** ops scripts live under `prod/scripts/`, not here (they are production upkeep, not the dev inner loop):
 
 | Script | Wraps | Notes |
 |---|---|---|
-| `scripts/reembed.sh` | The embedding migration described in §7.2.1 / §7.15. | Already named in §7.2.1 ("Switching profiles") and §7.15 ("Disaster scenarios"); listed here for completeness. |
-| `scripts/backup.sh` | The cron commands in §7.10 (`pg_dump` + per-adapter identity-dir tarball). | Wraps the two-line cron pair so an operator's crontab can call a single script; raw commands stay documented in §7.10 as the wrapper's contents. |
+| `prod/scripts/reembed.sh` | The embedding migration described in §7.2.1 / §7.15. | Named in §7.2.1 ("Switching profiles") and §7.15 ("Disaster scenarios"). |
+| `prod/scripts/backup.sh` | The cron commands in §7.10 (`pg_dump` + per-adapter identity-dir tarball). | Wraps the two-line cron pair so an operator's crontab can call one script. |
 
-Every script in the set obeys the same shape:
+Every script in both sets obeys the same shape:
 
 - Begins with `set -euo pipefail` for fail-fast semantics.
-- Echoes the wrapped command before running it, so the operator can see exactly what is being invoked.
+- Echoes the wrapped command before running it, so the reader can see exactly what is being invoked.
 - Returns the wrapped command's exit code unchanged (no rewriting to `0` on success or `1` on any failure).
 - Has a one-line `--help` synopsis printed when invoked with `-h` or `--help`.
 
-The scripts themselves are not implemented in Milestone 0 — they ship at Milestone 1 alongside the modules they wrap, since wrappers around POMs that do not yet exist would be dead files. This subsection is the design commitment to the contract.
+The scripts themselves are not implemented in Milestone 0 — they ship at Milestone 1 alongside the modules and compose services they wrap. This subsection is the design commitment to the contract.
 
-**Operator note — `simplex-cli` and `signal-cli` are out-of-band.** v1 does not ship containers for the messaging clients. The `simplex-cli` WebSocket bot client and the `signal-cli` JSON-RPC subprocess each require interactive bot-account registration (queue creation for SimpleX; phone-number/captcha for Signal — [06-messaging.md §6.5.1](06-messaging.md)) that doesn't fit cleanly into compose. Operators run them on the host (or in their own dedicated containers) and point the per-adapter `identity-dir` at the on-disk state directory each tool produces. For a SimpleX-only or Signal-only deployment, omit the other client; for the SimpleX + Signal v1 production shape, run both.
+### Database role bootstrap — `docker/postgres-init.sql`
 
-`docker/postgres-init.sql`:
+Flyway already creates the application roles and the pgvector extension: `V1__init.sql` runs `CREATE EXTENSION vector`, `V2__roles.sql` creates `infochat_collector` / `infochat_provider` / `infochat_admin`, and `V31` grants `LOGIN` to the two service roles. What Flyway **cannot** do is set the service-role *passwords* — a SQL migration cannot read the container's environment, and the passwords live in env vars (§7.5). `docker/postgres-init.sql` fills exactly that gap. It runs at container init (before the Collector's first Flyway pass), so it creates the roles **with** their passwords; Flyway's `IF NOT EXISTS` role creation then idempotently no-ops and only layers attributes + grants on top.
 
-Idempotent role/database/extension setup. Runs once on container init. **No literal passwords in this file** — the official `postgres` image substitutes `${VAR}` references in `/docker-entrypoint-initdb.d/*.sql` from the container's environment, and the trailing `:?` makes the substitution **fail-loud at container start** if the variable is unset (the container exits non-zero rather than silently creating a role with an empty or default password).
+**No literal passwords in this file** — the official `postgres` image substitutes `${VAR}` references in `/docker-entrypoint-initdb.d/*.sql` from the container's environment, and the trailing `:?` makes the substitution **fail-loud at container start** if the variable is unset (the container exits non-zero rather than silently creating a role with an empty or default password).
 
 ```sql
 CREATE ROLE infochat WITH LOGIN PASSWORD '${INFOCHAT_DB_PASSWORD:?INFOCHAT_DB_PASSWORD is required}' SUPERUSER;
@@ -555,10 +572,11 @@ CREATE DATABASE infochat OWNER infochat;
 \c infochat
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;     -- for gen_random_uuid()
--- Grants are applied by Flyway migration V0001__roles.sql
+-- Role attributes (NOLOGIN/LOGIN) and per-table grants are managed by Flyway
+-- migrations V2__roles.sql / V31, run by the Collector as the owner role.
 ```
 
-`docker-compose.yml` wires those variables to the Postgres container's environment. For local dev convenience, the compose file uses bash-style defaults that **only** apply in dev — production deployments MUST set the variables explicitly:
+`docker-compose.yml` wires those variables to the Postgres container's environment. For local dev convenience, the compose file uses bash-style defaults that **only** apply in dev — the wizard (which writes a real `secrets.env`) and any production deployment MUST set the variables explicitly:
 
 ```yaml
 environment:
@@ -567,32 +585,32 @@ environment:
   INFOCHAT_PROVIDER_PASSWORD:  ${INFOCHAT_PROVIDER_PASSWORD:-$(openssl rand -hex 24)}
 ```
 
-Result: a fresh `docker compose up` on a developer laptop generates random per-container passwords (printable in `docker compose logs postgres` once, then irretrievable), while the same compose file on a production-like host with the env vars set picks up the operator's chosen secrets. There is no `'changeme'` baked anywhere in the repo — copy-paste cannot leak a known password.
+Result: a fresh `docker compose up` on a developer laptop generates random per-container passwords (printable in `docker compose logs postgres` once, then irretrievable), while the same compose file with the env vars set (the wizard's `secrets.env`, a secrets manager, or an `EnvironmentFile` mounted at 0600) picks up the operator's chosen secrets. There is no `'changeme'` baked anywhere in the repo — copy-paste cannot leak a known password.
 
-In production the init script runs once with strong passwords from env-substituted secrets (e.g., a secrets manager, sealed-secret, or `EnvironmentFile` mounted at 0600).
+**Operator note — `simplex-cli` and `signal-cli` are out-of-band.** v1 does not ship containers for the messaging clients. The `simplex-cli` WebSocket bot client and the `signal-cli` JSON-RPC subprocess each require interactive bot-account registration (queue creation for SimpleX; phone-number/captcha for Signal — [06-messaging.md §6.5.1](06-messaging.md)) that doesn't fit cleanly into compose. Operators — and the wizard's step 6 (§7.7.2) — run them on the host or in their own dedicated containers and point the per-adapter `identity-dir` at the on-disk state directory each tool produces. For a SimpleX-only or Signal-only deployment, omit the other client; for the SimpleX + Signal v1 production shape, run both.
 
 ---
 
-### 7.7.2 First-run setup wizard (`setup.sh`)
+### 7.7.2 First-run setup wizard (`prod/setup.sh`)
 
-The §7.7.1 wrappers assume an operator who has *already* produced `secrets.env`, a bootstrap-sources file, registered messaging-client identities, and a working `application.properties`. Producing that input set is the hard part for a first-time operator or a public-beta tester. The **first-run setup wizard** closes that gap: a single interactive entry point that walks an operator from a bare Linux host to a running, verified deployment, asking one question at a time with a sensible default pre-filled for every prompt so a tester can accept the defaults by pressing Enter.
+The §7.7.1 dev wrappers assume a developer with the source tree and `quarkus:dev`. An operator or public-beta tester wants the opposite: no source build, no Maven, just a running deployment. The **first-run setup wizard** is that path — a single interactive entry point, `prod/setup.sh`, that walks an operator from a bare Linux host to a running, verified **containerized** deployment, asking one question at a time with a sensible default pre-filled for every prompt so a tester can accept the defaults by pressing Enter.
 
-This subsection is the design commitment to the wizard's contract. Like the §7.7.1 wrappers, the wizard ships at Milestone 1, not Milestone 0 — there is nothing to stand up before the modules and compose services it drives exist.
+This subsection is the design commitment to the wizard's contract. Like the §7.7.1 wrappers, the wizard ships at Milestone 1, not Milestone 0 — there is nothing to stand up before the container images and compose services it drives exist.
 
 First-phase scope:
 
 - **Linux only.** macOS/Windows are out of scope for the first phase; `0-doctor.sh` checks the host OS and refuses elsewhere with a clear message.
-- **Containerized apps.** Collector and Provider run as compose services, so the wizard's only host prerequisites are Docker and Docker Compose v2 — no host JDK 25, because the build happens inside the image (contrast §7.8.1's host-jar/systemd shape, which does require a host JDK 25).
+- **Containerized apps.** The wizard drives the `prod` compose profile (§7.7): Collector and Provider run as built container images, so the only host prerequisites are Docker and Docker Compose v2 — no host JDK 25 (contrast §7.8.1's host-jar/systemd shape, which does require one).
 - **Local LLM is operator-chosen:** Ollama (the design default — [05-llm-and-embeddings.md §5.7](05-llm-and-embeddings.md) model table) **or** llama.cpp via the `openai-compatible` provider (§7.4); plus the remote-API path for the `remote-llm` profile.
 - **Both v1 production adapters (SimpleX + Signal)** are offered. At least one MUST be configured: the in-memory adapter is test-only (§7.7), and a deployment needs a non-empty bootstrap-admin union to start (§7.6.3).
 
 #### Relationship to §7.7.1
 
-The wizard sits **above** the one-click wrappers; it does not replace them. The wizard's responsibility ends once the deployment is up and verified. Day-to-day operation (restart a service, tear down, re-embed, back up) stays with the §7.7.1 scripts. The wizard MAY call those wrappers internally (e.g., `down.sh` during a reset) but owns no steady-state responsibility.
+The wizard and the §7.7.1 wrappers serve **different audiences and runtimes** and do not overlap. The §7.7.1 wrappers drive `quarkus:dev` — the *developer* inner loop, source on disk, live reload — and are never a runtime for a tester or production host. The wizard brings up the **built container images** via the `prod` compose profile. Consequently the wizard does **not** call the §7.7.1 wrappers: it manages its own compose deployment directly (e.g. `--reset` is `docker compose down`, not `dev/scripts/down.sh`, which would additionally try to reap non-existent `quarkus:dev` PIDs).
 
 #### Structure
 
-A menu/orchestrator `setup.sh` at the repo root drives a set of single-purpose subscripts under `scripts/setup/`, run in dependency order. `setup.sh` records completed steps in a git-ignored `.setup-state` file alongside the generated config, so a re-run resumes from the first incomplete step rather than restarting, and never regenerates a value that already exists.
+The orchestrator `prod/setup.sh` drives a set of single-purpose subscripts under `prod/scripts/` (the `N-name.sh` files below), run in dependency order. It records completed steps in a **git-ignored** `.setup-state` file in the runtime directory, so a re-run resumes from the first incomplete step rather than restarting, and never regenerates a value that already exists.
 
 The right-hand column maps each step to the operator inputs enumerated in [../spec/deployment.md](../spec/deployment.md) §Operator inputs — the table is the audit that the wizard covers all seven and drops none.
 
@@ -600,12 +618,12 @@ The right-hand column maps each step to the operator inputs enumerated in [../sp
 |---|---|---|---|
 | 0 | `0-doctor.sh` | Preflight: Linux host; Docker daemon reachable; Compose v2; TCP ports 5432 / 8080 / 8081 (and 11434 for Ollama) free; minimum free disk. Fails fast naming the unmet check. | — |
 | 1 | `1-profile.sh` | Pick `laptop`\|`vps`\|`pi`\|`remote-llm` (§7.2). Default `laptop`. Writes `quarkus.profile`. | 1 (profile) |
-| 2 | `2-secrets.sh` | `openssl rand` the three DB-role passwords; prompt for any LLM API key. Writes `secrets.env` mode 0600 (§7.3 — secrets never enter the properties file). Skips any value already present. | 5 (DB creds), 6 (API key) |
-| 3 | `3-postgres.sh` | `docker compose up -d postgres`; the role / extension / database setup runs from `docker/postgres-init.sql` (§7.7) on first container init. | 5 (DB creds) |
+| 2 | `2-secrets.sh` | `openssl rand` the three DB-role passwords; prompt for any LLM API key. Writes the runtime `secrets.env` mode 0600 (§7.3 — secrets never enter a committed file). Skips any value already present. | 5 (DB creds), 6 (API key) |
+| 3 | `3-postgres.sh` | `docker compose --profile prod up -d postgres`; the service-role password bootstrap runs from `docker/postgres-init.sql` (§7.7) on first container init. | 5 (DB creds) |
 | 4 | `4-llm.sh` | Branch on the choice. **Ollama:** start the ollama service and `ollama pull` the profile's chat / security / embedding models. **llama.cpp:** start the llama.cpp service and fetch the configured GGUF. **Remote:** collect base-URL + key only. Writes `infochat.llm.*` and `infochat.embeddings.*` (§7.4). | 6 (LLM config) |
-| 5 | `5-bootstrap.sh` | Install the default `bootstrap-sources.json` (the §7.6.1 example) if none exists; optionally enable `bootstrap-assets.json` (§7.6.2). | 3 (sources), 4 (assets) |
+| 5 | `5-bootstrap.sh` | Copy the `prod/config/bootstrap-sources.json` template into the runtime dir if none exists; optionally enable `bootstrap-assets.json` (§7.6.2). | 3 (sources), 4 (assets) |
 | 6 | `6-adapter.sh` | For each chosen adapter: drive the out-of-band registration (SimpleX queue creation; Signal phone+captcha — §7.7 operator note, [06-messaging.md §6.5.1](06-messaging.md)), capture the resulting `identity-dir` (plus `SIMPLEX_SESSION_TOKEN`), and collect that adapter's `bootstrap-admin-contact-id`. Enforces a non-empty admin union before proceeding (§7.6.3). Writes `infochat.adapters` and the per-adapter blocks (§7.4). | 2 (bootstrap admin), 7 (adapters) |
-| 7 | `7-apps.sh` | `docker compose up -d` the Collector (which runs Flyway), wait until it is healthy, then the Provider — encoding the [../spec/deployment.md](../spec/deployment.md) §Topology startup ordering (only the Collector migrates in production). | — |
+| 7 | `7-apps.sh` | `docker compose --profile prod up -d` the Collector (which runs Flyway), wait until it is healthy, then the Provider — encoding the [../spec/deployment.md](../spec/deployment.md) §Topology startup ordering (only the Collector migrates in production). | — |
 | 8 | `8-verify.sh` | Poll `/q/health` on the loopback management bind (§7.4) until ready or timeout; print a green/red summary naming any unhealthy component. | — |
 
 #### Behavior contract
@@ -613,9 +631,9 @@ The right-hand column maps each step to the operator inputs enumerated in [../sp
 Every subscript obeys the §7.7.1 script shape (`set -euo pipefail`, echoes the command it runs, returns the wrapped exit code unchanged, prints a one-line `-h`/`--help` synopsis) and additionally:
 
 - **Prefilled defaults.** Every prompt shows its default in brackets; an empty answer takes the default. A `laptop`-profile, Ollama, single-adapter setup is completable by pressing Enter at every prompt except the adapter-registration interaction that genuinely needs a human (below).
-- **Idempotent / resumable.** Re-running `setup.sh` reads `.setup-state` and offers to resume from the first incomplete step. No generated secret is overwritten and no DB role is re-created.
-- **Non-interactive escape hatch.** `setup.sh --defaults` runs end-to-end taking every default (still pausing only where adapter registration needs a human), for scripted or CI smoke use.
-- **Reset.** `setup.sh --reset` tears the deployment down (via `down.sh`) and clears `.setup-state`, prompting for confirmation before deleting any generated secret or data volume (the repo's confirm-before-delete posture).
+- **Idempotent / resumable.** Re-running `prod/setup.sh` reads `.setup-state` and offers to resume from the first incomplete step. No generated secret is overwritten and no DB role is re-created.
+- **Non-interactive escape hatch.** `prod/setup.sh --defaults` runs end-to-end taking every default (still pausing only where adapter registration needs a human), for scripted or CI smoke use.
+- **Reset.** `prod/setup.sh --reset` tears the deployment down (`docker compose down`, with `-v` to drop data volumes on explicit confirmation) and clears `.setup-state`, prompting for confirmation before deleting any generated secret or data volume (the repo's confirm-before-delete posture).
 
 #### What stays manual
 
@@ -625,15 +643,17 @@ The wizard drives but cannot fully eliminate the interactive parts of messaging-
 
 The wizard is a thin layer over artifacts that must exist first. None are new spec commitments; they are the concrete pieces the wizard orchestrates:
 
-- App container images and a `docker-compose.yml` extended with Collector and Provider services (today's §7.7 compose file is Postgres-only).
-- `docker/postgres-init.sql` creating the three roles + extensions (§7.7).
-- A committed default `bootstrap-sources.json` (§7.6.1).
+- App container images and the `prod` compose profile carrying Collector and Provider services (§7.7).
+- `docker/postgres-init.sql` setting the service-role passwords from env (§7.7).
+- The default `bootstrap-sources.json` template under `prod/config/` (§7.6.1).
 
 ---
 
 ## 7.8 Production deployment
 
 ### 7.8.1 Single-host (recommended for v1)
+
+This section describes the **bare-metal** production runtime — Collector and Provider as host JVM processes under systemd. It is the alternative to the wizard-driven **containerized** runtime (the `prod` compose profile, §7.7.2); an operator picks one. Bare-metal suits operators who do not want Docker for the application JVMs; the wizard's containerized path is the simpler default for a public-test or first install.
 
 A modest Linux box (4 vCPU, 8–16 GB RAM, 50 GB disk) runs everything. Recommended layout:
 
@@ -645,7 +665,7 @@ A modest Linux box (4 vCPU, 8–16 GB RAM, 50 GB disk) runs everything. Recommen
   │       ├── infochat-collector.jar
   │       ├── infochat-provider.jar
   │       ├── application.properties
-  │       └── scripts/               # one-click wrappers (§7.7.1)
+  │       └── scripts/               # ops scripts: backup.sh, reembed.sh (from prod/scripts/, §7.7.1)
   ├── data/
   │   └── postgres/                  # Postgres data directory (bind mount)
   ├── models/                        # Ollama model cache (bind mount)
@@ -802,7 +822,7 @@ Typical RPO: 24 hours (one nightly backup). RTO: 30 minutes for a small DB.
 
 Backup script (cron):
 
-The recommended entry point is `scripts/backup.sh` (§7.7.1) so the operator's crontab calls one named wrapper rather than inlining `pg_dump` / `tar` invocations. The wrapper's contents are exactly the two commands shown below; the retention `find` lines are independent of the backup script and stay in the crontab directly.
+The recommended entry point is `prod/scripts/backup.sh` (§7.7.1) so the operator's crontab calls one named wrapper rather than inlining `pg_dump` / `tar` invocations. The wrapper's contents are exactly the two commands shown below; the retention `find` lines are independent of the backup script and stay in the crontab directly.
 
 ```
 0 3 * * * /opt/infochat/current/scripts/backup.sh
@@ -810,7 +830,7 @@ The recommended entry point is `scripts/backup.sh` (§7.7.1) so the operator's c
 0 4 * * * find /backups -name 'adapters-*.tgz' -mtime +14 -delete
 ```
 
-`scripts/backup.sh` wraps:
+`prod/scripts/backup.sh` wraps:
 
 ```
 pg_dump -U infochat -F c -f /backups/infochat-$(date +%Y%m%d).pgc infochat
@@ -1049,7 +1069,7 @@ See §7.8.5. Likely causes: a previous Provider crashed without releasing its ad
 | LLM outage > 1 day | Eval pipeline degrades; user-facing summaries become "raw post lists". Restore Ollama / switch provider; the eval queue auto-drains via outbox rehydrator. |
 | One adapter wedged, others fine | Per-adapter resilience ([06-messaging.md §6.7](06-messaging.md)): Provider stays ready, remaining adapters continue serving. Diagnose the failing adapter via §7.14 (SimpleX session-token rotation, `signal-cli` re-registration); cycle Provider once the underlying client is healthy again. |
 | All adapters wedged | Bot appears offline. Fix at least one adapter; on reconnect, queued outbounds (if any, in-memory only — see §7.16) flush. No DB state loss. |
-| Profile mistake (e.g., switched embedding dimension) | Run `scripts/reembed.sh`. 4-day window self-heals. |
+| Profile mistake (e.g., switched embedding dimension) | Run `prod/scripts/reembed.sh`. 4-day window self-heals. |
 | Compromised LLM API key | Rotate the env var. Restart Provider. Add an audit row noting rotation reason. |
 | Lost SimpleX bootstrap admin | Edit `application.properties` to point `infochat.adapters.simplex.bootstrap-admin-contact-id` at a different SimpleX contact. Restart Provider (bootstrap admin drift, §7.6.3). The new contact becomes admin; the old admin keeps `is_admin=true` until `/revoke-admin`. |
 | Lost Signal bootstrap admin | Same shape on the Signal adapter: rotate `infochat.adapters.signal.bootstrap-admin-contact-id`, restart, `/revoke-admin` the prior. |
