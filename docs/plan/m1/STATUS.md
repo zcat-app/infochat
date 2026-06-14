@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 10 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 398 |
 | deferred | 5 |
-| **total** | **403** |
+| **total** | **413** |
 
 ---
 
@@ -24,7 +24,16 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-368 — collector: bound Stage 1 regex match collection with a fail-closed match-count cap (complexity: low, risk: low)
+- M1-369 — llm-adapter: honor the OpenAI embeddings wire index field instead of trusting positional order (complexity: low, risk: low)
+- M1-370 — collector: add a per-attempt re-eval cooldown so the fail-open backlog is not re-judged each tick (complexity: medium, risk: low)
+- M1-371 — collector: give stream dispatch keys a distinct type so they cannot collide with FetchScheduler source keys (complexity: medium, risk: low)
+- M1-372 — messaging: align the SimpleX auth-failure design note with the loopback-trusted v1 transport and drop the dead auth.fail meter (complexity: low, risk: low)
+- M1-373 — core+provider: reconcile internal null-handling with the null-marked contract (InfochatProfile, RateCapBucket.Key) (complexity: low, risk: low)
+- M1-374 — ssrf: seal IpBlocklist and drive the test loopback carve-out through an injected predicate instead of subclassing (complexity: medium, risk: low)
+- M1-375 — provider: key the per-turn chat-tool cache on clamped args so over-cap duplicates do not double-charge the call budget (complexity: low, risk: low)
+- M1-376 — messaging: deterministic SimpleX adapterMessageId fallback and shared decode-ladder helper (complexity: low, risk: low)
+- M1-377 — collector: replace the re-eval one-element-array transaction workaround and unify the two fail-closed test-seam idioms (complexity: low, risk: low)
 
 ---
 
@@ -554,4 +563,14 @@ M1-364 (done)
 M1-365 (done)
 M1-366 (done)
 M1-367 (done)
+M1-368 (pending) ← runnable
+M1-369 (pending) ← runnable
+M1-370 (pending) ← runnable
+M1-371 (pending) ← runnable
+M1-372 (pending) ← runnable
+M1-373 (pending) ← runnable
+M1-374 (pending) ← runnable
+M1-375 (pending) ← runnable
+M1-376 (pending) ← runnable
+M1-377 (pending) ← runnable
 ```
