@@ -145,7 +145,7 @@ class NostrSsrfTest {
     private static NostrRelayConnection newConnection(SsrfGuardedHttpClient ssrfClient) {
         return new NostrRelayConnection(
                 RELAY_URI, FILTER,
-                OptionalLong::empty, event -> { },
+                OptionalLong::empty, event -> true,
                 FAST_BASE, FAST_MAX,
                 HttpClient.newHttpClient(), ssrfClient,
                 NostrRelayConnection.DEFAULT_PEER_IP_CHECK_INTERVAL,

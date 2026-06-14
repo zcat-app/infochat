@@ -1,11 +1,16 @@
 ---
 id: M1-326
 title: "Nostr: gate relay productivity on signature-verified delivery"
-status: pending
+status: done
 created: 2026-06-14
 last_updated: 2026-06-14
+clarity_check:
+  date: 2026-06-14
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
-files_budget: 3
+files_budget: 4
 files_scope:
   - infochat-collector/src/main/java/app/zcat/infochat/collector/stream/nostr/NostrRelayConnection.java
   - infochat-collector/src/main/java/app/zcat/infochat/collector/stream/nostr/NostrStreamSource.java
@@ -27,18 +32,78 @@ acceptance:
 test_plan:
   adds:
     - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr (productivity-after-verify cases)
+  modifies:
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrSsrfTest.java
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/NostrSsrfIT.java
   preserves:
     - all tests currently green on main
 spec_refs:
   - docs/spec/architecture.md §Ingest SPIs
 decision_refs: []
-reviews: []
-escalations: []
-revisions: []
+reviews:
+  - round: 1
+    date: 2026-06-14
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 249
+      removed: 21
+escalations:
+  - date: 2026-06-14
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A — budget-breach. The mandated Consumer<NostrEvent> →
+      Predicate<NostrEvent> signature change forces edits to two direct
+      test construction sites (NostrSsrfTest:148, NostrSsrfIT:105, both
+      pass a void-body `event -> {}` Consumer lambda that cannot satisfy
+      Predicate). Total files: NostrRelayConnection.java + new productivity
+      test + NostrSsrfTest + NostrSsrfIT = 4, vs files_budget: 3. All four
+      are inside files_scope; only the numeric budget is exceeded, by one.
+      NostrStreamSource.java is NOT touched (this::enqueueInbound already
+      returns boolean, so it adapts to Predicate unchanged), so the clarity
+      estimate of "2 prod + 1 test" was off: actual is 1 prod + 3 test.
+revisions:
+  - date: 2026-06-14
+    reason: budget-breach refine — the mandated Consumer<NostrEvent> →
+      Predicate<NostrEvent> eventSink type change forces edits to two direct
+      NostrRelayConnection construction sites in pre-existing tests
+      (NostrSsrfTest:148, NostrSsrfIT:105), each passing a void-body
+      `event -> {}` Consumer lambda that cannot satisfy Predicate. Total file
+      count is 4 (NostrRelayConnection.java + new productivity test +
+      NostrSsrfTest + NostrSsrfIT), not 3: NostrStreamSource.java is NOT
+      touched because this::enqueueInbound already returns boolean and adapts
+      to Predicate unchanged. Bump files_budget 3→4, add a test_plan.modifies
+      list to authorize the two mechanical SSRF-test call-site fixes, and add a
+      §Notes line scoping those edits to a signature-forced lambda swap with no
+      assertion change. No acceptance-item, production-scope, or migration
+      change.
+    prior_values: |
+      files_budget: 3
+      test_plan had no modifies list (all test work was additive).
+      clarity_check: PASS 2026-06-14 (evaluated the files_budget:3 ticket; its
+        estimate assumed 2 prod + 1 test, missing the two SSRF-test call sites
+        and wrongly counting NostrStreamSource.java as touched).
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-06-14
+    verdict: CLEAN
+    base: 9a001c51a17ea615fa1ec41597e88ca5124ac60b
+    head: "working-tree (uncommitted impl + refine commit on worktree-M1-326)"
+    verdict_file: docs/plan/m1/redteam/M1-326-2026-06-14.md
+    out_of_model_count: 0
+    note: |
+      In-progress audit (between review APPROVE round 1 and commit) on the
+      security_relevant productivity-after-verify change. CLEAN — no gap
+      between the threat model and the diff; no remediation needed.
 ---
 
 # M1-326: Nostr — gate relay productivity on signature-verified delivery
@@ -87,3 +152,10 @@ See frontmatter.
   socket variant and is rejected.
 - The `failedSig` counter stays a log/observability surface; this ticket does
   not wire it into the health state machine.
+- Test-modification authorization (budget-breach refine, 2026-06-14):
+  `NostrSsrfTest` and `NostrSsrfIT` each construct `NostrRelayConnection`
+  directly with a `event -> {}` event-sink lambda. The eventSink type change
+  (`Consumer` → `Predicate`) forces those two lambdas to a boolean-returning
+  form (`event -> true`). This is a mechanical compile-fix only — both are SSRF
+  tests whose assertions never depend on the sink return value; no assertion is
+  altered, weakened, or removed.

@@ -19,7 +19,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Consumer;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /**
@@ -33,8 +33,9 @@ import java.util.function.Supplier;
  * <h2>Reconnect</h2>
  * <p>On disconnect the loop reconnects with exponential backoff plus jitter
  * (see {@link #backoffDelay}). The backoff counter resets only after the
- * subscription proves productive — the relay answered with an EOSE or an
- * EVENT — so a relay that accepts the socket and immediately drops it backs
+ * subscription proves productive — the relay answered with an EOSE or a
+ * signature-verified EVENT — so a relay that accepts the socket and
+ * immediately drops it backs
  * off instead of hot-looping (acceptance: "no tight-loop reconnect storm").
  * Each (re)connect re-reads the {@code since} cursor so the relay replays
  * only events newer than the last persisted one.</p>
@@ -82,7 +83,11 @@ final class NostrRelayConnection {
     private final String subscriptionId;
     private final String filterSpec;
     private final Supplier<OptionalLong> sinceCursor;
-    private final Consumer<NostrEvent> eventSink;
+    // Returns true iff the event crossed the signature trust boundary and was
+    // accepted (NostrStreamSource::enqueueInbound runs verifier.verify()). Typed
+    // as a Predicate, not a Consumer, so handleFrame can gate markProductive()
+    // on the post-verify result (M1-326).
+    private final Predicate<NostrEvent> eventSink;
     private final Duration backoffBase;
     private final Duration backoffMax;
     private final HttpClient httpClient;
@@ -111,7 +116,7 @@ final class NostrRelayConnection {
 
     NostrRelayConnection(URI relayUri, String filterSpec,
                          Supplier<OptionalLong> sinceCursor,
-                         Consumer<NostrEvent> eventSink,
+                         Predicate<NostrEvent> eventSink,
                          Duration backoffBase, Duration backoffMax,
                          HttpClient httpClient,
                          SsrfGuardedHttpClient ssrfClient,
@@ -219,7 +224,8 @@ final class NostrRelayConnection {
             }
             // Report the (un)productive outcome to the health tracker. A
             // productive connection had its recordSuccess fired inline by
-            // handleFrame on the first EOSE/EVENT (so the source-level
+            // handleFrame on the first EOSE or signature-verified EVENT (so the
+            // source-level
             // RECOVERED notification fires in real time, not retrospectively
             // on disconnect); only the unproductive close path records a
             // failure here.
@@ -311,7 +317,11 @@ final class NostrRelayConnection {
         return true;
     }
 
-    private void handleFrame(String frame) {
+    // Package-private (not private) so NostrProductivityAfterVerifyTest can
+    // feed raw frames through the message dispatch and assert the post-verify
+    // productivity gate without standing up a live WebSocket — mirrors the
+    // connectAndSubscribe test seam above. M1-326.
+    void handleFrame(String frame) {
         NostrMessage message;
         try {
             message = NostrMessage.parse(frame);
@@ -321,8 +331,16 @@ final class NostrRelayConnection {
         }
         switch (message) {
             case NostrMessage.Event event -> {
-                markProductive();
-                eventSink.accept(event.event());
+                // Credit productivity only AFTER the event crosses the signature
+                // trust boundary. eventSink (NostrStreamSource::enqueueInbound)
+                // runs verifier.verify() and returns false on a forged/invalid
+                // signature. Crediting before verify would let a relay flooding
+                // well-framed but signature-invalid EVENTs reset backoff every
+                // connect and score healthy, silencing the per-relay cooldown /
+                // terminal-failed safety valve (M1-326).
+                if (eventSink.test(event.event())) {
+                    markProductive();
+                }
             }
             case NostrMessage.Eose ignored -> markProductive();
             case NostrMessage.Notice notice ->
@@ -347,6 +365,14 @@ final class NostrRelayConnection {
             productiveSinceConnect = true;
             healthTracker.recordSuccess(relayUri);
         }
+    }
+
+    // Read-only test seam (M1-326): NostrProductivityAfterVerifyTest asserts a
+    // signature-invalid EVENT flood leaves this false. markProductive() is the
+    // sole writer and the sole caller of healthTracker.recordSuccess, so a
+    // false reading proves recordSuccess never fired for this connection.
+    boolean productiveSinceConnect() {
+        return productiveSinceConnect;
     }
 
     /**

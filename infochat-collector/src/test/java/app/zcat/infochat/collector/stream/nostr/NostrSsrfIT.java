@@ -102,7 +102,7 @@ class NostrSsrfIT {
 
         connection = new NostrRelayConnection(
                 relay.uri(), FILTER,
-                OptionalLong::empty, event -> { },
+                OptionalLong::empty, event -> true,
                 Duration.ofMillis(50), Duration.ofMillis(200),
                 HttpClient.newHttpClient(), ssrfClient,
                 PEER_IP_CHECK_INTERVAL,
