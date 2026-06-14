@@ -8,8 +8,12 @@ import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -216,7 +220,69 @@ class SourceUpsertServiceIT {
                 "the audit row's action verb must be the V5-closed 'ADD_SOURCE' literal");
     }
 
+    // M1-365: the tag-vocab union must be ONE round-trip for N tags, not one
+    // executeUpdate per tag. Drives the package-private upsertTagVocab with a
+    // Connection proxy that counts executeUpdate on the tag INSERT, then asserts
+    // exactly one execution AND that all three tags landed (the single statement
+    // still unions every supplied tag, ON CONFLICT DO NOTHING idempotency intact).
+    @Test
+    void tagVocabUpsertIssuesOneStatementForManyTags() throws Exception {
+        int[] tagSqlExecuteCount = {0};
+        try (Connection real = dataSource.getConnection()) {
+            Connection counting = countingTagExecuteUpdates(real, tagSqlExecuteCount);
+            service.upsertTagVocab(counting,
+                    List.of("m1-036-tag-a", "m1-036-tag-b", "m1-036-tag-c"));
+        }
+
+        assertEquals(1, tagSqlExecuteCount[0],
+                "the array-bind unnest upsert must issue ONE executeUpdate for N tags, "
+                        + "not one per tag");
+        assertEquals(3L, countTags("m1-036-tag-a", "m1-036-tag-b", "m1-036-tag-c"),
+                "the single statement must still union all three supplied tags");
+    }
+
     // --- helpers ---------------------------------------------------------
+
+    // Wraps a real Connection so executeUpdate on the tag INSERT is counted; every
+    // other call (createArrayOf, the actual prepare/execute) delegates so the
+    // union runs for real against the DevServices DB.
+    private static Connection countingTagExecuteUpdates(Connection real, int[] count) {
+        return (Connection) Proxy.newProxyInstance(
+                Connection.class.getClassLoader(),
+                new Class<?>[] { Connection.class },
+                (proxy, method, args) -> {
+                    Object result = invoke(real, method, args);
+                    if (method.getName().equals("prepareStatement")
+                            && args != null && args.length > 0
+                            && args[0] instanceof String sql && sql.contains("INSERT INTO tag")
+                            && result instanceof PreparedStatement ps) {
+                        return countingStatement(ps, count);
+                    }
+                    return result;
+                });
+    }
+
+    private static PreparedStatement countingStatement(PreparedStatement real, int[] count) {
+        return (PreparedStatement) Proxy.newProxyInstance(
+                PreparedStatement.class.getClassLoader(),
+                new Class<?>[] { PreparedStatement.class },
+                (proxy, method, args) -> {
+                    if (method.getName().equals("executeUpdate")) {
+                        count[0]++;
+                    }
+                    return invoke(real, method, args);
+                });
+    }
+
+    private static @Nullable Object invoke(Object target, Method method,
+                                           Object @Nullable [] args) throws Throwable {
+        try {
+            return method.invoke(target, args);
+        } catch (InvocationTargetException e) {
+            Throwable cause = e.getCause();
+            throw cause != null ? cause : e;
+        }
+    }
 
     private UUID insertUser(String contactId, boolean isAdmin) throws Exception {
         try (Connection conn = dataSource.getConnection();

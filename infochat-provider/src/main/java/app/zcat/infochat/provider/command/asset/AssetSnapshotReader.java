@@ -1,5 +1,7 @@
 package app.zcat.infochat.provider.command.asset;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -68,6 +70,29 @@ public class AssetSnapshotReader {
     @ConfigProperty(name = "infochat.assets.freshness-window")
     Duration freshnessWindow;
 
+    // Short-TTL read cache (M1-365): repeated /zcash|/monero invocations of the
+    // same (asset, sub_verb, vs_currency) within the window are served from
+    // memory so a burst of identical commands does not take a pool connection
+    // each. The TTL is set well below every profile's fetch cadence
+    // (application.properties), so the cached staleness verdict cannot drift
+    // meaningfully from a live read — the M1-340 freshness window is unchanged.
+    @ConfigProperty(name = "infochat.assets.snapshot-cache-ttl")
+    Duration snapshotCacheTtl;
+
+    // Memory belt, not a spec commitment: the live key space is the operator-
+    // configured (asset, sub_verb, vs_currency) triples — a few dozen entries.
+    private static final long MAX_CACHE_ENTRIES = 256;
+
+    // Built lazily on first read, not as a final inline field: the TTL is a
+    // @ConfigProperty injected AFTER construction, so it is unavailable at
+    // field-initialization time. @Nullable + volatile keeps the double-build
+    // race (two concurrent first-readers) benign — both build idempotent caches,
+    // last write wins, the loser is GC'd; no entry is ever lost.
+    private volatile @Nullable Cache<CacheKey, SnapshotResult> snapshotCache;
+
+    /** Cache key: the (asset, sub_verb, vs_currency) triple the read selects on. */
+    private record CacheKey(String asset, String subVerb, String vsCurrency) {}
+
     /** CDI-required no-arg constructor. */
     public AssetSnapshotReader() {}
 
@@ -78,11 +103,44 @@ public class AssetSnapshotReader {
     }
 
     /**
-     * Reads the latest {@code price_snapshot} row for the given triple.
+     * Reads the latest {@code price_snapshot} row for the given triple,
+     * serving repeated reads within the cache TTL from memory.
+     *
+     * <p>A DB miss (no row) is NOT cached — so a snapshot that lands after a
+     * miss becomes visible on the next read rather than being masked by a
+     * cached null. Mirrors the {@code TranslationCache} getIfPresent/put idiom.
      *
      * @return the snapshot with staleness metadata, or null if no row exists
      */
     public @Nullable SnapshotResult readLatest(String asset,
+                                                String subVerb,
+                                                String vsCurrency) {
+        CacheKey key = new CacheKey(asset, subVerb, vsCurrency);
+        SnapshotResult cached = snapshotCache().getIfPresent(key);
+        if (cached != null) {
+            return cached;
+        }
+        SnapshotResult loaded = loadLatest(asset, subVerb, vsCurrency);
+        if (loaded != null) {
+            snapshotCache().put(key, loaded);
+        }
+        return loaded;
+    }
+
+    private Cache<CacheKey, SnapshotResult> snapshotCache() {
+        Cache<CacheKey, SnapshotResult> existing = snapshotCache;
+        if (existing != null) {
+            return existing;
+        }
+        Cache<CacheKey, SnapshotResult> built = Caffeine.newBuilder()
+                .expireAfterWrite(snapshotCacheTtl)
+                .maximumSize(MAX_CACHE_ENTRIES)
+                .build();
+        snapshotCache = built;
+        return built;
+    }
+
+    private @Nullable SnapshotResult loadLatest(String asset,
                                                 String subVerb,
                                                 String vsCurrency) {
         try (Connection conn = dataSource.getConnection();

@@ -77,7 +77,7 @@ public class SourceUpsertService {
 
     private static final String UPSERT_TAG_SQL =
             "INSERT INTO tag (name, display, source_origin) "
-                    + "VALUES (?, ?, 'user') "
+                    + "SELECT t, t, 'user' FROM unnest(?::text[]) AS t "
                     + "ON CONFLICT (name) DO NOTHING";
 
     private static final String UPSERT_SOURCE_SQL =
@@ -172,13 +172,17 @@ public class SourceUpsertService {
         }
     }
 
-    private void upsertTagVocab(Connection conn, List<String> tags) throws SQLException {
+    // Package-private (not private) so SourceUpsertServiceIT can drive it with a
+    // statement-counting Connection and assert the single round-trip (M1-365). A
+    // single array-bind unnest INSERT replaces the prior executeUpdate-per-tag
+    // loop: the ON CONFLICT (name) DO NOTHING idempotency and the
+    // run-unconditionally-on-every-call append-only union contract (class javadoc)
+    // are both preserved — only the round-trip count changes (N → 1).
+    void upsertTagVocab(Connection conn, List<String> tags) throws SQLException {
+        Array tagArray = conn.createArrayOf("TEXT", tags.toArray(new String[0]));
         try (PreparedStatement ps = conn.prepareStatement(UPSERT_TAG_SQL)) {
-            for (String tag : tags) {
-                ps.setString(1, tag);
-                ps.setString(2, tag);
-                ps.executeUpdate();
-            }
+            ps.setArray(1, tagArray);
+            ps.executeUpdate();
         }
     }
 

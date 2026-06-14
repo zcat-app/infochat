@@ -1,9 +1,16 @@
 ---
 id: M1-365
 title: "provider: batch the tag-vocab upsert into one round-trip; cache asset-snapshot reads within the freshness window"
-status: pending
+status: done
 created: 2026-06-14
 last_updated: 2026-06-14
+clarity_check:
+  date: 2026-06-14
+  verdict: WARN
+  warnings:
+    - "AC 2: No property key name or concrete TTL value is specified for the Caffeine cache TTL. The implementer must choose both, including per-profile values consistent with the existing profile-driven infochat.assets.freshness-window structure in application.properties."
+    - "AC 3: The mechanism for proving one statement (not N) and does not hit the DB a second time in tests is unspecified. The implementer must design the instrumentation (DataSource proxy, Caffeine statistics, or a unit test with a mock DataSource)."
+  blockers: []
 blocked_by: []
 files_budget: 6
 files_scope:
@@ -35,7 +42,20 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-14
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 244
+      removed: 8
 escalations: []
 revisions: []
 overrides: []
