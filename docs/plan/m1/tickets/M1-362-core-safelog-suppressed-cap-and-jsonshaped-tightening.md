@@ -1,7 +1,7 @@
 ---
 id: M1-362
 title: "core: cap per-node suppressed-throwable width in SafeLog; tighten isJsonShaped to reject trailing junk"
-status: pending
+status: done
 created: 2026-06-14
 last_updated: 2026-06-14
 blocked_by: []
@@ -33,13 +33,33 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-14
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 90
+      removed: 9
 escalations: []
 revisions: []
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+clarity_check:
+  date: 2026-06-14
+  verdict: WARN
+  warnings:
+    - "Acceptance item 1 leaves the suppressed-width cap as \"e.g. 5\" without fixing a constant; implementer will pin a value and the item-3 test pins to it. (Resolved at implementation: cap = 5, mirroring MAX_CAUSE_DEPTH.)"
+    - "security_relevant: false is defensible but borderline given the isJsonShaped fix keeps the audit transaction fail-closed; flip to true if the team treats audit-transaction integrity as security-flagged."
+  blockers: []
 ---
 
 # M1-362: SafeLog suppressed-width cap + isJsonShaped tightening

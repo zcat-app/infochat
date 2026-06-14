@@ -193,6 +193,31 @@ class RedactionHookTest {
     }
 
     @Test
+    void trailingContentAfterBalancedTokenFailsClosed() {
+        // {"a":1}garbage and two concatenated documents are brace-balanced but
+        // the ?::jsonb cast rejects both; isJsonShaped must reject the trailing
+        // content so the hook fails closed to the sentinel instead of letting
+        // the value reach the cast and abort the audit transaction.
+        for (String offContract : new String[]{"{\"a\":1}garbage", "{\"a\":1}{\"b\":2}"}) {
+            RedactionHook.AuditRow redacted = hook.redact(audit(offContract));
+            assertEquals(DefaultRedactionHook.REDACTED_FIELD_JSONB, redacted.detailsJson(),
+                    "trailing content must fail closed to the sentinel: " + offContract);
+        }
+    }
+
+    @Test
+    void cleanTokenWithTrailingWhitespaceIsAccepted() {
+        // A balanced top-level token followed only by whitespace is valid JSON
+        // (the cast accepts it after trimming); the hook must NOT fail closed —
+        // it returns the row's value unchanged.
+        String detailsJson = "{\"a\":1}  ";
+        RedactionHook.AuditRow redacted = hook.redact(audit(detailsJson));
+        assertEquals(detailsJson, redacted.detailsJson(),
+                "clean token followed by whitespace must pass through unchanged: "
+                        + redacted.detailsJson());
+    }
+
+    @Test
     void genericPatternProducesValidJson() {
         String value = "A".repeat(64);
         String detailsJson = "{\"token\":\"" + value + "\"}";

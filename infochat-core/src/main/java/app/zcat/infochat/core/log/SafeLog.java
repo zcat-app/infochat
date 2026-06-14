@@ -18,6 +18,8 @@ public final class SafeLog {
 
     static final int MAX_CAUSE_DEPTH = 5;
 
+    static final int MAX_SUPPRESSED_WIDTH = 5;
+
     private SafeLog() {}
 
     /**
@@ -88,12 +90,22 @@ public final class SafeLog {
         if (suppressed.length == 0) {
             return;
         }
+        // Width-cap the per-node suppressed list the same way the cause chain is
+        // depth-capped (MAX_CAUSE_DEPTH): a pathological throwable can carry
+        // thousands of suppressed exceptions (e.g. a try-with-resources loop over
+        // attacker-sized input), which would otherwise expand into an unbounded
+        // single log line. Emit at most MAX_SUPPRESSED_WIDTH names and name the
+        // elision with a +Nmore token, mirroring the truncate-and-name shape.
+        int emitted = Math.min(suppressed.length, MAX_SUPPRESSED_WIDTH);
         sb.append("[");
-        for (int i = 0; i < suppressed.length; i++) {
+        for (int i = 0; i < emitted; i++) {
             if (i > 0) {
                 sb.append(",");
             }
             sb.append("+").append(suppressed[i].getClass().getName());
+        }
+        if (suppressed.length > emitted) {
+            sb.append(",+").append(suppressed.length - emitted).append("more");
         }
         sb.append("]");
     }

@@ -119,6 +119,32 @@ class SafeLogTest {
     }
 
     @Test
+    void formatSafeCapsSuppressedWidthWithMoreToken() {
+        var ex = new RuntimeException("primary");
+        int count = SafeLog.MAX_SUPPRESSED_WIDTH + 3;
+        for (int i = 0; i < count; i++) {
+            ex.addSuppressed(new IllegalStateException("suppressed-body-" + i));
+        }
+        String result = SafeLog.formatSafe("bounded", ex);
+
+        // Exactly MAX_SUPPRESSED_WIDTH class names are emitted (each carrying one
+        // '+'), then the elision "+Nmore" token adds one more '+' — so the total
+        // '+' count is bounded regardless of how many suppressed were attached.
+        int plusCount = 0;
+        int idx = 0;
+        while ((idx = result.indexOf('+', idx)) != -1) {
+            plusCount++;
+            idx++;
+        }
+        assertEquals(SafeLog.MAX_SUPPRESSED_WIDTH + 1, plusCount,
+                "suppressed width must be capped and the elision named; got: " + result);
+        assertTrue(result.contains("+" + (count - SafeLog.MAX_SUPPRESSED_WIDTH) + "more"),
+                "elision token must name the omitted suppressed count; got: " + result);
+        assertFalse(result.contains("suppressed-body-"),
+                "suppressed message bodies must not leak; got: " + result);
+    }
+
+    @Test
     void formatSafeOmitsBracketsWhenNoSuppressed() {
         var ex = new RuntimeException("plain");
         String result = SafeLog.formatSafe("simple", ex);

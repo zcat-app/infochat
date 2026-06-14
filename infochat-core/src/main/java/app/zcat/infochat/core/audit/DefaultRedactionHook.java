@@ -72,7 +72,10 @@ public class DefaultRedactionHook implements RedactionHook {
      * Cheap structural check that {@code value} could be a JSON
      * document: it starts with {@code {} or {@code [} and its braces,
      * brackets, and quotes are balanced (quotes scanned with escape
-     * awareness so a brace inside a string literal is not miscounted).
+     * awareness so a brace inside a string literal is not miscounted),
+     * and nothing follows the balanced top-level token (so
+     * {@code {"a":1}garbage} and two concatenated documents are
+     * rejected, matching what the {@code ?::jsonb} cast would reject).
      * This is deliberately not a full parse — the authoritative parse
      * runs server-side at {@link AuditLogWriter}'s {@code ?::jsonb}
      * cast; this guard only has to be tight enough to keep off-contract
@@ -114,6 +117,16 @@ public class DefaultRedactionHook implements RedactionHook {
                 default -> { }
             }
             if (braces < 0 || brackets < 0) {
+                return false;
+            }
+            // Reject anything after the balanced top-level token closes. The
+            // first char is guaranteed '{' or '[', so braces==brackets==0 here
+            // can only mean the top-level structure just closed; any further
+            // (non-whitespace, since the value is stripped) char is trailing
+            // junk like {"a":1}garbage or a second concatenated document. The
+            // ?::jsonb cast rejects these, so catching them here keeps the gate
+            // fail-closed instead of aborting the audit transaction downstream.
+            if (!inString && braces == 0 && brackets == 0 && i < trimmed.length() - 1) {
                 return false;
             }
         }
