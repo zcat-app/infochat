@@ -598,7 +598,7 @@ coordinated change.
   `/help`, (b) accept or reject sub-verb arguments at parse time,
   (c) surface stale-data warnings when `last_success_at` is too
   old per the freshness contract.
-- **Price snapshot.** One row per `(asset, sub_verb, captured_at)`
+- **Price snapshot.** One row per `(asset, sub_verb, vs_currency, captured_at)`
   (decision D39). Columns: `asset` (matches `asset_config.asset` by
   convention; deliberately **no FK** — `asset_config`'s key is the
   composite `(asset, sub_verb)`, so a single-column FK has no unique

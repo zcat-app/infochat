@@ -18,9 +18,11 @@ import jakarta.transaction.Transactional;
 /**
  * Persists one {@link PriceSnapshot} into {@code price_snapshot}
  * inside a {@code @Transactional} boundary. A duplicate
- * {@code (asset, sub_verb, captured_at)} is dropped by
- * {@code ON CONFLICT DO NOTHING} (V38 UNIQUE, spec schema.md
- * §Operational "one row per"). The table read is the sole
+ * {@code (asset, sub_verb, vs_currency, captured_at)} is dropped by
+ * {@code ON CONFLICT DO NOTHING} (the {@code price_snapshot_dedup_uq}
+ * UNIQUE, widened by V51 to include {@code vs_currency} so the write
+ * key matches the read key; spec schema.md §Operational "one row
+ * per"). The table read is the sole
  * correctness path for the Provider's asset commands (spec
  * commands.md §Asset commands — Provider/Collector contract): the
  * Provider reads the latest row directly on every invocation, so
@@ -34,9 +36,10 @@ import jakarta.transaction.Transactional;
 public class PriceSnapshotStore {
 
     // ON CONFLICT DO NOTHING enforces the spec's one-row-per-
-    // (asset, sub_verb, captured_at) invariant against the V38 UNIQUE:
-    // the table is INSERT-only (spec: "no updates"), so a duplicate
-    // write is dropped, never updated.
+    // (asset, sub_verb, vs_currency, captured_at) invariant against the
+    // price_snapshot_dedup_uq UNIQUE (V51-widened to include vs_currency,
+    // matching the read key): the table is INSERT-only (spec: "no
+    // updates"), so a duplicate write is dropped, never updated.
     private static final String INSERT_SQL =
         "INSERT INTO price_snapshot ("
         + "  asset, sub_verb, vs_currency, price,"
@@ -44,7 +47,7 @@ public class PriceSnapshotStore {
         + "  change_1h_pct, change_24h_pct, change_7d_pct,"
         + "  captured_at, source_url, raw_payload"
         + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::JSONB)"
-        + " ON CONFLICT (asset, sub_verb, captured_at) DO NOTHING";
+        + " ON CONFLICT (asset, sub_verb, vs_currency, captured_at) DO NOTHING";
 
     @Inject
     DataSource dataSource;

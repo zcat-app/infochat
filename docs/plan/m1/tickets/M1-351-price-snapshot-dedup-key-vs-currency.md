@@ -1,9 +1,16 @@
 ---
 id: M1-351
 title: "assets: widen the price_snapshot dedup key to include vs_currency, realigning spec + design DDL"
-status: pending
+status: done
 created: 2026-06-14
 last_updated: 2026-06-14
+clarity_check:
+  date: 2026-06-14
+  verdict: WARN
+  warnings:
+    - "Acceptance item 1 embeds a pre-implementation process note (re-confirm migration version vs MIG-lane queue) inside a post-implementation criterion; belongs in Notes. Not a blocker — V51 confirmed available."
+    - "test_plan.modifies describes the store-test change as an addition; the existing duplicateTripleInsertsExactlyOneRow comment (line 94) and assertion message (line 104) reference the V38 key and will be stale after V51 — update them."
+  blockers: []
 blocked_by: []
 files_budget: 6
 files_scope:
@@ -38,7 +45,20 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-14
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 103
+      removed: 32
 escalations: []
 revisions: []
 overrides: []

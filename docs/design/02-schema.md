@@ -1424,20 +1424,39 @@ never hard-deleted, so prior `price_snapshot` rows remain queryable.
 
 ```sql
 CREATE TABLE price_snapshot (
-  asset       TEXT        NOT NULL,
-  sub_verb    TEXT        NOT NULL,
-  captured_at TIMESTAMPTZ NOT NULL,
-  price       NUMERIC(38, 18) NOT NULL,
-  currency    TEXT        NOT NULL,
-  source_url  TEXT        NOT NULL,
-  raw_payload JSONB       NOT NULL,                      -- upstream response fragment for forensic replay
-  PRIMARY KEY (asset, sub_verb, captured_at),
-  FOREIGN KEY (asset, sub_verb) REFERENCES asset_config(asset, sub_verb)
+  id             BIGSERIAL,
+  asset          TEXT            NOT NULL,
+  sub_verb       TEXT            NOT NULL,
+  vs_currency    TEXT            NOT NULL,              -- quote currency the price is denominated in
+  price          NUMERIC(24, 12) NOT NULL,
+  volume_24h     NUMERIC(28, 8),
+  high_24h       NUMERIC(24, 12),
+  low_24h        NUMERIC(24, 12),
+  change_1h_pct  NUMERIC(8, 4),
+  change_24h_pct NUMERIC(8, 4),
+  change_7d_pct  NUMERIC(8, 4),
+  captured_at    TIMESTAMPTZ     NOT NULL,
+  fetched_at     TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+  source_url     TEXT,
+  raw_payload    JSONB,                                 -- upstream response fragment for forensic replay
+  -- Surrogate PK: the partition key (captured_at) must participate in every
+  -- PK/UNIQUE on a partitioned table; the surrogate id keeps the PK narrow.
+  -- Deliberately NO FK to asset_config: snapshots are immutable history that
+  -- must survive config edits, and asset_config's key is the composite
+  -- (asset, sub_verb), so a single-column FK has no unique target.
+  PRIMARY KEY (id, captured_at)
 ) PARTITION BY RANGE (captured_at);
 
--- Latest-snapshot lookup:
-CREATE INDEX idx_price_snapshot_latest
-  ON price_snapshot(asset, sub_verb, captured_at DESC);
+-- Dedup invariant (D39): one row per (asset, sub_verb, vs_currency,
+-- captured_at). V38 added this UNIQUE without vs_currency; V51 widened it to
+-- include vs_currency so the write (dedup) key matches the read key below.
+ALTER TABLE price_snapshot
+  ADD CONSTRAINT price_snapshot_dedup_uq
+  UNIQUE (asset, sub_verb, vs_currency, captured_at);
+
+-- Latest-snapshot lookup (read path keys on vs_currency):
+CREATE INDEX idx_price_snapshot_lookup
+  ON price_snapshot(asset, sub_verb, vs_currency, captured_at DESC);
 ```
 
 **INSERT-only.** No UPDATE / DELETE paths; partitioned and aged by
@@ -1689,7 +1708,7 @@ exist.
 | Provider startup reconcile (`new_post`)            | `idx_post_ready_at`                                            |
 | Provider startup reconcile (`quarantine_review`)   | `idx_quarantine_review_cursor` + `idx_post_status_changed`     |
 | Bare `/zcash` / `/monero` default sub-verb         | `one_default_per_asset` partial unique                         |
-| Latest `price_snapshot` for `(asset, sub_verb)`    | `idx_price_snapshot_latest`                                    |
+| Latest `price_snapshot` for `(asset, sub_verb, vs_currency)` | `idx_price_snapshot_lookup`                              |
 | `/invite consume` race-safe UPDATE                 | `idx_invite_code_pending`                                      |
 
 ---

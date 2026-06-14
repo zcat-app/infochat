@@ -89,11 +89,11 @@ class PriceSnapshotStoreTest {
     }
 
     @Test
-    void duplicateTripleInsertsExactlyOneRow() throws Exception {
+    void duplicateKeyInsertsExactlyOneRow() throws Exception {
         String asset = TEST_ASSET_PREFIX + "dedup";
         PriceSnapshot first = newSnapshot(asset, "coingecko", "usd", new BigDecimal("123.456"));
-        // Same (asset, sub_verb, captured_at) triple — CAPTURED_AT is a
-        // shared constant — with a divergent price: ON CONFLICT DO
+        // Same (asset, sub_verb, vs_currency, captured_at) key — CAPTURED_AT
+        // is a shared constant — with a divergent price: ON CONFLICT DO
         // NOTHING must drop it, never update the first row.
         PriceSnapshot duplicate = newSnapshot(asset, "coingecko", "usd", new BigDecimal("999.0"));
 
@@ -101,7 +101,24 @@ class PriceSnapshotStoreTest {
         store.store(duplicate);
 
         assertEquals(1, countRowsByAsset("price_snapshot", asset),
-            "exactly one row for the duplicate triple (V38 UNIQUE + ON CONFLICT DO NOTHING)");
+            "exactly one row for the duplicate key (V51 UNIQUE + ON CONFLICT DO NOTHING)");
+    }
+
+    @Test
+    void differentVsCurrencySameTriplePersistsBothRows() throws Exception {
+        String asset = TEST_ASSET_PREFIX + "multicurrency";
+        // Same (asset, sub_verb, captured_at) but distinct vs_currency. Under
+        // the pre-V51 key (asset, sub_verb, captured_at) the second INSERT
+        // would have been silently dropped by ON CONFLICT DO NOTHING; the
+        // V51-widened key (… , vs_currency, …) keeps both rows.
+        PriceSnapshot usd = newSnapshot(asset, "coingecko", "usd", new BigDecimal("123.456"));
+        PriceSnapshot eur = newSnapshot(asset, "coingecko", "eur", new BigDecimal("114.200"));
+
+        store.store(usd);
+        store.store(eur);
+
+        assertEquals(2, countRowsByAsset("price_snapshot", asset),
+            "both vs_currency rows persist under the V51-widened dedup key");
     }
 
     @Test
