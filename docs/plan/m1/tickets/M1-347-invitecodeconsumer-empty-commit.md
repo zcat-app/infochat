@@ -1,7 +1,7 @@
 ---
 id: M1-347
 title: "InviteCodeConsumer: drop the empty-transaction commit on the already-breached path"
-status: pending
+status: done
 created: 2026-06-14
 last_updated: 2026-06-14
 blocked_by: []
@@ -27,13 +27,33 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-14
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 3
+      added: 19
+      removed: 9
 escalations: []
 revisions: []
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+clarity_check:
+  date: 2026-06-14
+  verdict: WARN
+  warnings:
+    - "ACCEPTANCE-RUNNABLE item 3: conditional phrasing ('if any test...') is non-verifiable as written; strengthen by grep-confirming no connection-spy test exists for this path, or by naming the test and its new commit-count expectation."
+    - "SECURITY-FLAG-CONSISTENT: mechanical warn — invite-code path touched while security_relevant: false; change is cosmetic (empty-commit removal) and the risk argument in the body is sound."
+  blockers: []
 ---
 
 # M1-347: InviteCodeConsumer — drop the empty-transaction commit

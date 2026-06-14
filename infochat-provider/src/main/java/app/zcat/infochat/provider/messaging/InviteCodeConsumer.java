@@ -206,11 +206,16 @@ public class InviteCodeConsumer {
                     // quiet for a full window — by which point every attempt
                     // inside the window has aged out and eviction is
                     // equivalent to the below-threshold remove path.
-                    if (!breachAudited.containsKey(key)) {
+                    boolean wrote = !breachAudited.containsKey(key);
+                    if (wrote) {
                         insertAudit(conn, contactId, adapter, AuditAction.INVITE_BRUTE_FORCE_BREACH,
                                 contactId, contactId);
+                        // Commit only when a row was actually inserted: on the
+                        // already-breached path no statement ran, so an empty
+                        // commit would sit beneath the durability comment with
+                        // no DB row to make durable.
+                        conn.commit();
                     }
-                    conn.commit();
                     breachAudited.put(key, Instant.now());
                     recordInviteDrop();
                     return new BruteForceThresholdBreached();

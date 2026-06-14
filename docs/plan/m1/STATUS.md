@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 6 |
+| pending | 5 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 374 |
+| done | 375 |
 | deferred | 5 |
 | **total** | **385** |
 
@@ -27,7 +27,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-330 — LLM providers: redact base-url credentials on parse-failure paths + reject userinfo at config boundary (complexity: medium, risk: low)
 - M1-344 — llm-adapter: single-source per-task config keys and the embedding provider name (complexity: medium, risk: low)
 - M1-345 — infochat-ssrf: bracket-host IPv6 validation, redirect drain order, IPv6 zero-scan helper reuse (complexity: low, risk: low)
-- M1-347 — InviteCodeConsumer: drop the empty-transaction commit on the already-breached path (complexity: low, risk: low)
 - M1-348 — DefaultRedactionHook: fail-closed to the sentinel on non-JSON redacted output (complexity: low, risk: low)
 - M1-349 — Spec/design: correct the asset-fetch SPI name (AssetDataSource, not the post Fetcher) (complexity: low, risk: low)
 
@@ -65,6 +64,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-347 | InviteCodeConsumer: drop the empty-transaction commit on the already-breached path | 2026-06-14 | round 1 APPROVE |
 | M1-346 | infochat-core: schema-test javadoc, audit-denorm IT package, contact-id parity comment | 2026-06-14 | round 1 APPROVE |
 | M1-343 | Provider --page parsing: surface a usage error on a malformed page value | 2026-06-14 | round 1 APPROVE |
 | M1-342 | ReEvaluationJob: bound infra-failure re-judge fan-out to one call per tick during an outage | 2026-06-14 | round 1 APPROVE |
@@ -74,7 +74,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-338 | AbstractInstanceLockGuard: scope the ownership probe to the gate's lock id | 2026-06-14 | round 1 APPROVE |
 | M1-337 | NotifyOutcome: distinguish degraded-DB persistence-failure from throttle-suppressed | 2026-06-14 | round 1 APPROVE |
 | M1-336 | Adapter inbound: single-source UTF-8 byte length across codec cap + metric | 2026-06-14 | round 1 APPROVE |
-| M1-335 | ChatToolDispatcher: deterministic per-turn cache key for nested args | 2026-06-14 | round 1 APPROVE |
 
 ---
 
@@ -538,7 +537,7 @@ M1-343 (done)
 M1-344 (pending) ← runnable
 M1-345 (pending) ← runnable
 M1-346 (done)
-M1-347 (pending) ← runnable
+M1-347 (done)
 M1-348 (pending) ← runnable
 M1-349 (pending) ← runnable
 ```
