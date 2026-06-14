@@ -20,6 +20,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import javax.sql.DataSource;
+import java.sql.Array;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -46,10 +47,11 @@ import org.jspecify.annotations.Nullable;
  * <h2>Polymorphic dispatch</h2>
  * <p>At startup, discovers all {@link Fetcher} CDI beans annotated with
  * {@link FetcherKind} and builds a kind&rarr;Fetcher dispatch map. A
- * periodic heartbeat enumerates all active sources and dispatches each
- * to the Fetcher registered for its kind. Sources whose kind has no
- * registered Fetcher are skipped with a WARN log (once per kind per
- * scheduler lifecycle).
+ * periodic heartbeat enumerates the active sources of the kinds that are
+ * due this tick (filtered at SQL) and dispatches each to the Fetcher
+ * registered for its kind. A genuinely-missing polled-fetch binding (an
+ * active kind with no registered Fetcher, excluding stream-shaped kinds)
+ * is reported with a WARN log once per kind per scheduler lifecycle.
  *
  * <h2>Per-kind intervals</h2>
  * <p>Each source kind ticks at its own configured interval via
@@ -115,6 +117,19 @@ public class FetchScheduler {
 
     private static final Duration DEFAULT_KIND_INTERVAL = Duration.ofMinutes(5);
 
+    // Closed v1 set of stream-shaped source kinds. Per
+    // docs/spec/architecture.md §Ingest SPIs a source is EITHER polled
+    // via a Fetcher OR event-driven via a StreamSource — the two MUST NOT
+    // straddle — and stream kinds ingest through the
+    // {@code StreamSourceSupervisor}, not this polled-fetch loop. They are
+    // therefore deliberately never bound to a Fetcher, so they must be
+    // excluded from the orphan-warning check: a missing Fetcher for a
+    // stream kind is expected, not a misconfiguration. Without this
+    // exclusion the heartbeat logs a misleading "No fetcher registered for
+    // kind 'nostr'" for a deliberately-absent binding. nostr is the only
+    // v1 stream kind.
+    private static final Set<String> STREAM_KINDS = Set.of("nostr");
+
     @Inject
     DataSource dataSource;
 
@@ -152,10 +167,11 @@ public class FetchScheduler {
     // Per-kind last-tick tracking for interval gating.
     private final Map<String, Instant> lastTickByKind = new ConcurrentHashMap<>();
 
-    // Tracks kinds already warned about (no registered Fetcher) to
-    // avoid WARN-per-heartbeat noise for expected orphan kinds
-    // (bootstrap-sources.json ships bluesky/nostr before their
-    // Fetcher implementations land).
+    // Tracks polled kinds already warned about (no registered Fetcher) to
+    // avoid WARN-per-heartbeat noise. A genuine orphan is a polled kind
+    // shipped in bootstrap-sources.json (or added via /add-source) before
+    // its Fetcher implementation lands; STREAM_KINDS are excluded upstream
+    // so they never enter this set.
     private final Set<String> warnedOrphanKinds = ConcurrentHashMap.newKeySet();
 
     @PostConstruct
@@ -187,6 +203,10 @@ public class FetchScheduler {
     void onTick() {
         Instant now = Instant.now();
 
+        // Which registered (bound) kinds are due this heartbeat? Built
+        // from the in-memory fetcher map, so a fully-idle heartbeat issues
+        // no SQL at all — the 1m heartbeat polls far more often than the
+        // 5–30m per-kind intervals, so most heartbeats are idle.
         Set<String> kindsToTick = new HashSet<>();
         for (String kind : fetchersByKind.keySet()) {
             if (shouldTick(kind, now)) {
@@ -197,28 +217,88 @@ public class FetchScheduler {
             return;
         }
 
+        // Orphan warning: warn once per active polled kind that has no
+        // registered Fetcher. Driven by the distinct active kinds (a
+        // handful of strings), not the full row set, and excludes
+        // STREAM_KINDS so the signal flags only genuinely-missing
+        // polled-fetch bindings. Non-fatal — a failure here must not
+        // block the dispatch enumeration below.
+        try {
+            warnUnboundPolledKinds(distinctActiveKinds());
+        } catch (SQLException e) {
+            LOG.warn("FetchScheduler: failed to enumerate source kinds for orphan check", e);
+        }
+
+        // Enumerate only the due kinds' rows at SQL: the result set scales
+        // by due-source count, not total active source count. Stream kinds
+        // never appear here — they are never in fetchersByKind, hence
+        // never in kindsToTick.
         List<SourceRow> rows;
         try {
-            rows = enumerateActiveSources();
+            rows = enumerateActiveSourcesByKinds(kindsToTick);
         } catch (SQLException e) {
             LOG.warn("FetchScheduler: failed to enumerate sources; skipping tick", e);
             return;
         }
         for (SourceRow row : rows) {
-            if (!kindsToTick.contains(row.kind())) {
-                if (!fetchersByKind.containsKey(row.kind())
-                        && warnedOrphanKinds.add(row.kind())) {
-                    LOG.warnf("No fetcher registered for source kind '%s', skipping",
-                        row.kind());
-                }
-                continue;
-            }
             tickOnce(row);
         }
 
         for (String kind : kindsToTick) {
             lastTickByKind.put(kind, now);
         }
+    }
+
+    /**
+     * Warn once per active <em>polled</em> kind that has no registered
+     * Fetcher. {@link #STREAM_KINDS} are excluded: they ingest via the
+     * {@code StreamSourceSupervisor}, not this polled-fetch loop, so a
+     * deliberately-absent Fetcher binding for a stream kind is expected
+     * rather than a misconfiguration. Excluding them keeps the orphan
+     * signal meaningful for genuinely-missing polled-fetch bindings (a
+     * polled kind shipped in {@code bootstrap-sources.json} with no
+     * Fetcher impl).
+     *
+     * <p>Package-private so {@code FetchSchedulerKindFilterIT} can drive
+     * the warn decision with a controlled present-kind set, without
+     * seeding the DB or waiting on the scheduler clock.
+     *
+     * @param activeKinds the distinct {@code kind} values across all
+     *                    active, non-soft-deleted sources.
+     */
+    void warnUnboundPolledKinds(Set<String> activeKinds) {
+        for (String kind : activeKinds) {
+            if (STREAM_KINDS.contains(kind)) {
+                continue;
+            }
+            if (!fetchersByKind.containsKey(kind) && warnedOrphanKinds.add(kind)) {
+                LOG.warnf("No fetcher registered for source kind '%s', skipping", kind);
+            }
+        }
+    }
+
+    /**
+     * Distinct {@code kind} values across all active, non-soft-deleted
+     * sources. The result is bounded by the number of configured source
+     * kinds, not the number of sources, so it stays cheap as source count
+     * grows. Used by {@link #warnUnboundPolledKinds(Set)}.
+     *
+     * <p>Package-private so {@code FetchSchedulerKindFilterIT} can confirm
+     * a seeded active nostr source reaches the orphan check.
+     */
+    Set<String> distinctActiveKinds() throws SQLException {
+        final String sql =
+            "SELECT DISTINCT kind FROM source "
+                + "WHERE status = 'active' AND deleted_at IS NULL";
+        Set<String> kinds = new HashSet<>();
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                kinds.add(rs.getString(1));
+            }
+        }
+        return kinds;
     }
 
     /**
@@ -484,6 +564,44 @@ public class FetchScheduler {
                 String identifier = rs.getString(2);
                 String kind = rs.getString(3);
                 rows.add(new SourceRow(id, identifier, dispatch++, kind));
+            }
+        }
+        return rows;
+    }
+
+    /**
+     * Reads active source rows whose kind is in {@code kinds} —
+     * the due-kind-filtered variant of {@link #enumerateActiveSources()}.
+     * The heartbeat passes the kinds whose interval has elapsed, so the
+     * SQL {@code kind = ANY(?)} filter makes the result set scale by
+     * due-source count rather than total active source count.
+     *
+     * <p>Soft-deleted rows ({@code deleted_at IS NOT NULL}) and non-active
+     * rows ({@code status != 'active'}) are skipped, identically to
+     * {@link #enumerateActiveSources()}. An empty {@code kinds} set yields
+     * an empty result (the SQL array matches nothing).
+     */
+    public List<SourceRow> enumerateActiveSourcesByKinds(Set<String> kinds) throws SQLException {
+        final String sql =
+            "SELECT id, identifier, kind FROM source "
+                + "WHERE status = 'active' "
+                + "  AND deleted_at IS NULL "
+                + "  AND kind = ANY(?) "
+                + "ORDER BY added_at, id";
+
+        List<SourceRow> rows = new ArrayList<>();
+        long dispatch = 1L;
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            Array kindArray = conn.createArrayOf("TEXT", kinds.toArray());
+            ps.setArray(1, kindArray);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    UUID id = (UUID) rs.getObject(1);
+                    String identifier = rs.getString(2);
+                    String kind = rs.getString(3);
+                    rows.add(new SourceRow(id, identifier, dispatch++, kind));
+                }
             }
         }
         return rows;

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 9 |
+| pending | 8 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 371 |
+| done | 372 |
 | deferred | 5 |
 | **total** | **385** |
 
@@ -26,7 +26,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-330 — LLM providers: redact base-url credentials on parse-failure paths + reject userinfo at config boundary (complexity: medium, risk: low)
 - M1-336 — Adapter inbound: single-source UTF-8 byte length across codec cap + metric (complexity: medium, risk: medium)
-- M1-341 — FetchScheduler: exclude stream-shaped kinds + filter due kinds at SQL (complexity: low, risk: low)
 - M1-342 — ReEvaluationJob: bound infra-failure re-judge fan-out to one call per tick during an outage (complexity: low, risk: low)
 - M1-344 — llm-adapter: single-source per-task config keys and the embedding provider name (complexity: medium, risk: low)
 - M1-345 — infochat-ssrf: bracket-host IPv6 validation, redirect drain order, IPv6 zero-scan helper reuse (complexity: low, risk: low)
@@ -70,6 +69,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 |---|---|---|---|
 | M1-346 | infochat-core: schema-test javadoc, audit-denorm IT package, contact-id parity comment | 2026-06-14 | round 1 APPROVE |
 | M1-343 | Provider --page parsing: surface a usage error on a malformed page value | 2026-06-14 | round 1 APPROVE |
+| M1-341 | FetchScheduler: exclude stream-shaped kinds + filter due kinds at SQL | 2026-06-14 | round 1 APPROVE |
 | M1-340 | Asset freshness: decouple Provider staleness window from the Collector cadence keys | 2026-06-14 | round 1 APPROVE |
 | M1-339 | Stage1Pipeline: narrow the EscapedEntity suppression to the doc | 2026-06-14 | round 1 APPROVE |
 | M1-338 | AbstractInstanceLockGuard: scope the ownership probe to the gate's lock id | 2026-06-14 | round 1 APPROVE |
@@ -77,7 +77,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-335 | ChatToolDispatcher: deterministic per-turn cache key for nested args | 2026-06-14 | round 1 APPROVE |
 | M1-334 | StageProgressNotifier: terminate abandoned per-scope state at request end | 2026-06-14 | round 1 APPROVE |
 | M1-333 | ChatAgent: consume cached InboundContext.effectiveLanguage instead of re-querying | 2026-06-14 | round 1 APPROVE |
-| M1-332 | SignalJsonRpcClient: bounded connect timeout on the daemon socket | 2026-06-14 | round 1 APPROVE |
 
 ---
 
@@ -535,7 +534,7 @@ M1-337 (done)
 M1-338 (done)
 M1-339 (done)
 M1-340 (done)
-M1-341 (pending) ← runnable
+M1-341 (done)
 M1-342 (pending) ← runnable
 M1-343 (done)
 M1-344 (pending) ← runnable
