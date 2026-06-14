@@ -1,5 +1,6 @@
 package app.zcat.infochat.llm.impl;
 
+import app.zcat.infochat.llm.LlmProvider;
 import app.zcat.infochat.llm.LlmResponse;
 import app.zcat.infochat.llm.ModelTask;
 import app.zcat.infochat.llm.routing.LlmRouter;
@@ -13,16 +14,17 @@ import org.junit.jupiter.api.Test;
 
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -137,8 +139,21 @@ class OpenAiCompatibleProviderTest {
                 OpenAiCompatibleProvider.PROVIDER_NAME, provider, Set.of("en"))),
             LlmRouter.ConfigReader.fromMap(Map.of()));
 
-        assertThrows(NoSuchElementException.class, router::assertAllTasksResolve,
-            "the startup scan must surface a missing per-task model key instead of booting");
+        assertThrows(LlmProvider.TaskConfigUnresolvableException.class, router::assertAllTasksResolve,
+            "the startup scan must surface a missing per-task model key as the "
+                + "SPI-owned type, not the config system's NoSuchElementException");
+    }
+
+    @Test
+    void httpClientSeamCtorUsesSuppliedClient() {
+        // Symmetric with AnthropicProvider's HttpClient-accepting seam ctor:
+        // the supplied client must be the one the provider holds.
+        HttpClient supplied = HttpClient.newHttpClient();
+        OpenAiCompatibleProvider provider =
+            new OpenAiCompatibleProvider(new StubConfig(Map.of()), supplied);
+
+        assertSame(supplied, provider.httpClient(),
+            "the package-private seam ctor must use the caller-supplied HttpClient");
     }
 
 }

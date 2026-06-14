@@ -61,7 +61,7 @@ public class MeteredEmbeddingProvider implements EmbeddingProvider {
                 LlmCallContext.callWith(context, () -> delegate.embed(texts));
             metrics.recordEmbeddingCall(provider, model, LlmMetrics.Outcome.OK);
             if (!results.isEmpty()) {
-                metrics.recordEmbeddingDimension(provider, model, results.get(0).vector().length);
+                metrics.recordEmbeddingDimension(provider, model, results.get(0).dimension());
             }
             LOG.debugf("embed call ok: trace=%s provider=%s model=%s batch=%d latencyMs=%d",
                 context.traceId(), provider, model, texts.size(),

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 8 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 390 |
+| done | 391 |
 | deferred | 5 |
 | **total** | **403** |
 
@@ -25,7 +25,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-354 — collector eval: load prompt templates via the class's own loader; coalesce pgvector format rejections instead of wedging the batch (complexity: medium, risk: low)
-- M1-357 — llm-adapter: SPI-owned task-config exception, one no-providers exception type, symmetric HttpClient seam, non-cloning EmbeddingResult.dimension() (complexity: medium, risk: low)
 - M1-359 — messaging: OutboundRateLimiter sub-millisecond cap rounding + charge a token per wire frame on the Signal edit-failure fallback (complexity: medium, risk: low)
 - M1-360 — messaging: reset subprocess consecutive-crash counters on healthy uptime; make the config-bean enablement gate honest; route outbound cap check through Utf8 (complexity: medium, risk: low)
 - M1-361 — core: split SQL-only audit verbs out of the writer-facing AuditAction enum; rename the config-baked STARTUP_RELEASE_ON_STAGE2_FAILURE_TRUE verb (complexity: medium, risk: medium)
@@ -71,12 +70,12 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-365 | provider: batch the tag-vocab upsert into one round-trip; cache asset-snapshot reads within the freshness window | 2026-06-14 | round 1 APPROVE |
 | M1-363 | provider: remove the audit-bypassing LlmOutputSanitizer constructor; type-check tool-arg list elements at the LLM dispatch boundary | 2026-06-14 | round 1 APPROVE |
 | M1-358 | messaging: emit the adapter.inbound.dropped{reason=oversize} counter + WARN; log inbound-handler stack traces | 2026-06-14 | round 2 APPROVE |
+| M1-357 | llm-adapter: SPI-owned task-config exception, one no-providers exception type, symmetric HttpClient seam, non-cloning EmbeddingResult.dimension() | 2026-06-14 | round 1 APPROVE |
 | M1-356 | llm-adapter: stop echoing provider body on 2xx parse-failure; add the remote LLM-task startup disclosure WARN | 2026-06-14 | round 1 APPROVE |
 | M1-355 | ssrf: resolve the close-drain body-cap contradiction on the followed-redirect path and unify the two bounded-read loops | 2026-06-14 | round 1 APPROVE |
 | M1-353 | collector eval: give ReadyPromoter its own poll-interval and add a partition-scan floor to per-stage pickup queries | 2026-06-14 | round 1 APPROVE |
 | M1-352 | assets: Kraken attribution URL must honour the quote currency; drop dead AssetSnapshotFetcher refresh fields | 2026-06-14 | round 1 APPROVE |
 | M1-351 | assets: widen the price_snapshot dedup key to include vs_currency, realigning spec + design DDL | 2026-06-14 | round 1 APPROVE |
-| M1-350 | arch: consolidate the duplicated InfochatProfile enum + Validator into infochat-core | 2026-06-14 | round 1 APPROVE |
 
 ---
 
@@ -550,7 +549,7 @@ M1-353 (done)
 M1-354 (pending) ← runnable
 M1-355 (done)
 M1-356 (done)
-M1-357 (pending) ← runnable
+M1-357 (done)
 M1-358 (done)
 M1-359 (pending) ← runnable
 M1-360 (pending) ← runnable

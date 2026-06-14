@@ -16,6 +16,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.time.Duration;
+import java.util.NoSuchElementException;
 
 /**
  * The first concrete {@link LlmProvider} impl, per
@@ -108,10 +109,18 @@ public class OpenAiCompatibleProvider implements LlmProvider {
 
     @Inject
     public OpenAiCompatibleProvider(Config config) {
-        this.config = config;
-        this.http = HttpClient.newBuilder()
+        // Explicit connect-timeout: the per-call .timeout(...) caps the
+        // full exchange per request, but on HTTP/1.1 an unroutable
+        // endpoint would otherwise hang on the OS connect default.
+        this(config, HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
-            .build();
+            .build());
+    }
+
+    /** Test seam: caller-supplied HttpClient targets a local mock server. */
+    OpenAiCompatibleProvider(Config config, HttpClient http) {
+        this.config = config;
+        this.http = http;
     }
 
     /** Test seam: exposes the shared client so tests can pin its construction. */
@@ -153,12 +162,22 @@ public class OpenAiCompatibleProvider implements LlmProvider {
      */
     private TaskConfig configFor(ModelTask task) {
         String prefix = task.configPrefix();
-        String baseUrl = config.getValue(prefix + "base-url", String.class);
-        LlmHttpSupport.requireHttpBaseUrl(baseUrl, prefix + "base-url");
-        String apiKey = config.getOptionalValue(prefix + "api-key", String.class).orElse("");
-        String model = config.getValue(prefix + "model", String.class);
-        long timeoutMs = config.getOptionalValue(prefix + "timeout-ms", Long.class).orElse(30000L);
-        return new TaskConfig(baseUrl, apiKey, model, timeoutMs);
+        // Wrap the config system's own missing-required-property failure
+        // (SmallRye-Config throws NoSuchElementException from getValue) in
+        // the SPI-owned type so the misconfiguration surfaces as an
+        // LlmProvider contract and never leaks the third-party type to
+        // callers or the startup-scan tests. (M1-357)
+        try {
+            String baseUrl = config.getValue(prefix + "base-url", String.class);
+            LlmHttpSupport.requireHttpBaseUrl(baseUrl, prefix + "base-url");
+            String apiKey = config.getOptionalValue(prefix + "api-key", String.class).orElse("");
+            String model = config.getValue(prefix + "model", String.class);
+            long timeoutMs = config.getOptionalValue(prefix + "timeout-ms", Long.class).orElse(30000L);
+            return new TaskConfig(baseUrl, apiKey, model, timeoutMs);
+        } catch (NoSuchElementException e) {
+            throw new LlmProvider.TaskConfigUnresolvableException(
+                "OpenAiCompatibleProvider: missing required per-task config for " + task, e);
+        }
     }
 
     private LlmResponse doCall(TaskConfig cfg, String systemPrompt, String userPrompt) {

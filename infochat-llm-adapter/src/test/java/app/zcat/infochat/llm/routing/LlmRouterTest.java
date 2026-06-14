@@ -13,7 +13,6 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
-import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
 
@@ -351,7 +350,7 @@ class LlmRouterTest {
             LlmRouter.ConfigReader.fromMap(Map.of(
                 LlmRouter.CONFIG_KEY_DEFAULT_PROVIDER, NAME_DEFAULT)));
 
-        assertThrows(NoSuchElementException.class, router::assertAllTasksResolve,
+        assertThrows(LlmProvider.TaskConfigUnresolvableException.class, router::assertAllTasksResolve,
             "the cs-reachable provider's unresolvable TRANSLATOR config must fail "
                 + "the startup scan via the language-branch sweep");
     }
@@ -400,9 +399,9 @@ class LlmRouterTest {
     /**
      * Stub whose per-task config check fails for one designated task,
      * mirroring a provider with a missing required property (the real
-     * providers throw {@link NoSuchElementException} from the config
-     * read). Lets the scan tests prove a given (task, language) pair
-     * is actually probed.
+     * providers throw {@link LlmProvider.TaskConfigUnresolvableException}
+     * from the config read). Lets the scan tests prove a given
+     * (task, language) pair is actually probed.
      */
     private static final class UnresolvableTaskConfigStubProvider implements LlmProvider {
         private final ModelTask unresolvableTask;
@@ -421,7 +420,7 @@ class LlmRouterTest {
         @Override
         public void assertTaskConfigResolvable(ModelTask task) {
             if (task == unresolvableTask) {
-                throw new NoSuchElementException(
+                throw new LlmProvider.TaskConfigUnresolvableException(
                     "stub: no per-task config for " + task);
             }
         }

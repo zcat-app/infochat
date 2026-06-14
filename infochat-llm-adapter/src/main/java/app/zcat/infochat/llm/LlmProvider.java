@@ -76,4 +76,25 @@ public interface LlmProvider {
         }
         return cls.getSimpleName();
     }
+
+    /**
+     * Thrown when a provider's required per-task configuration cannot be
+     * resolved — the missing/typoed-property failure that
+     * {@link #assertTaskConfigResolvable} surfaces at boot and that the
+     * shared per-call config read surfaces at the first {@link #generate}
+     * call. Owned by the SPI so the config-system's own missing-property
+     * type (e.g. SmallRye-Config's {@link java.util.NoSuchElementException})
+     * stays an implementation detail: callers and the startup-scan tests
+     * assert this type and never reach through the public API into a
+     * third-party exception class. (M1-357)
+     */
+    final class TaskConfigUnresolvableException extends RuntimeException {
+        public TaskConfigUnresolvableException(String message, Throwable cause) {
+            super(message, cause);
+        }
+
+        public TaskConfigUnresolvableException(String message) {
+            super(message);
+        }
+    }
 }

@@ -34,6 +34,16 @@ public record EmbeddingResult(float[] vector) {
         return vector.clone();
     }
 
+    /**
+     * The embedding's dimensionality. Reads the stored array's length
+     * directly — no defensive clone — so a caller that only needs the
+     * size (e.g. the per-batch dimension metric on the ingest hot path)
+     * does not pay the 768–1536-float copy {@link #vector()} performs.
+     */
+    public int dimension() {
+        return vector.length;
+    }
+
     @Override
     public boolean equals(@Nullable Object o) {
         return o instanceof EmbeddingResult other && Arrays.equals(vector, other.vector);

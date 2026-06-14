@@ -16,6 +16,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.time.Duration;
+import java.util.NoSuchElementException;
 
 /**
  * Native Anthropic Messages API provider. Uses the Anthropic-specific
@@ -121,13 +122,23 @@ public class AnthropicProvider implements LlmProvider {
 
     private TaskConfig configFor(ModelTask task) {
         String prefix = task.configPrefix();
-        String baseUrl = config.getValue(prefix + "base-url", String.class);
-        LlmHttpSupport.requireHttpBaseUrl(baseUrl, prefix + "base-url");
-        String apiKey = config.getOptionalValue(prefix + "api-key", String.class).orElse("");
-        String model = config.getValue(prefix + "model", String.class);
-        long timeoutMs = config.getOptionalValue(prefix + "timeout-ms", Long.class).orElse(30000L);
-        int maxTokens = config.getValue(prefix + "max-tokens", Integer.class);
-        return new TaskConfig(baseUrl, apiKey, model, timeoutMs, maxTokens);
+        // Wrap the config system's own missing-required-property failure
+        // (SmallRye-Config throws NoSuchElementException from getValue) in
+        // the SPI-owned type so the misconfiguration surfaces as an
+        // LlmProvider contract and never leaks the third-party type to
+        // callers or the startup-scan tests. (M1-357)
+        try {
+            String baseUrl = config.getValue(prefix + "base-url", String.class);
+            LlmHttpSupport.requireHttpBaseUrl(baseUrl, prefix + "base-url");
+            String apiKey = config.getOptionalValue(prefix + "api-key", String.class).orElse("");
+            String model = config.getValue(prefix + "model", String.class);
+            long timeoutMs = config.getOptionalValue(prefix + "timeout-ms", Long.class).orElse(30000L);
+            int maxTokens = config.getValue(prefix + "max-tokens", Integer.class);
+            return new TaskConfig(baseUrl, apiKey, model, timeoutMs, maxTokens);
+        } catch (NoSuchElementException e) {
+            throw new LlmProvider.TaskConfigUnresolvableException(
+                "AnthropicProvider: missing required per-task config for " + task, e);
+        }
     }
 
     private LlmResponse doCall(TaskConfig cfg, String systemPrompt, String userPrompt) {

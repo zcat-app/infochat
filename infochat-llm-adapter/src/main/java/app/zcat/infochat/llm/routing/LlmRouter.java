@@ -84,6 +84,20 @@ public class LlmRouter {
      */
     public static final String CONFIG_KEY_DEFAULT_PROVIDER = "infochat.llm.default.provider";
 
+    /**
+     * Single message for the "no provider registered" misconfiguration,
+     * shared by both detection sites — the test-seam constructor's
+     * {@code entries.isEmpty()} check and the CDI factory's
+     * {@code out.isEmpty()} check — so both throw an identical
+     * {@link IllegalStateException}. The router uses
+     * {@code IllegalStateException} for every config-shape misconfiguration
+     * (unknown override / default provider); an empty provider set is the
+     * same class of fault, so it no longer throws the odd-one-out
+     * {@code IllegalArgumentException} it once did from the seam ctor. (M1-357)
+     */
+    static final String NO_PROVIDERS_REGISTERED_MESSAGE =
+        "LlmRouter: at least one LlmProvider must be registered";
+
     private final List<Entry> entries;
     private final Map<String, Entry> entriesByName;
     private final ConfigReader config;
@@ -106,8 +120,7 @@ public class LlmRouter {
      */
     public LlmRouter(List<Entry> entries, ConfigReader config) {
         if (entries.isEmpty()) {
-            throw new IllegalArgumentException(
-                "LlmRouter: at least one provider entry must be registered");
+            throw new IllegalStateException(NO_PROVIDERS_REGISTERED_MESSAGE);
         }
         this.entries = List.copyOf(entries);
         this.config = config;
@@ -319,9 +332,7 @@ public class LlmRouter {
             out.add(new Entry(name, p, langs));
         }
         if (out.isEmpty()) {
-            throw new IllegalStateException(
-                "LlmRouter: no LlmProvider beans discovered via CDI; "
-                    + "at least OpenAiCompatibleProvider must be on the classpath");
+            throw new IllegalStateException(NO_PROVIDERS_REGISTERED_MESSAGE);
         }
         // Deterministic order: CDI bean-discovery order is not stable across
         // services or restarts, yet both the priority-2 language-tie
