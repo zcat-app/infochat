@@ -5,6 +5,9 @@ import app.zcat.infochat.provider.chat.tool.GetReferencesTool;
 import app.zcat.infochat.provider.chat.tool.ListSavesTool;
 import app.zcat.infochat.provider.chat.tool.RecallMemoryTool;
 import app.zcat.infochat.provider.chat.tool.SearchPostsTool;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -16,7 +19,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.TreeMap;
 import java.util.UUID;
 
 // Routes a tool call by name to the matching implementation; rejects
@@ -44,6 +46,17 @@ public class ChatToolDispatcher {
 
         public TurnContext(int callCap) { this.callCap = callCap; }
     }
+
+    // Canonical JSON serialization of tool args for the per-turn cache key.
+    // ORDER_MAP_ENTRIES_BY_KEYS sorts map keys at EVERY nesting depth, so two
+    // logically-equal arg maps that differ only in nested-map insertion order
+    // serialize identically and hit the cache. The Jackson tool-arg parser
+    // materializes nested objects as HashMap (and arrays as List), whose
+    // iteration order is implementation-defined; the prior new TreeMap<>(args)
+    // sorted only the top-level keys, so nested differences produced distinct
+    // keys and silent cache misses (M1-335).
+    private static final ObjectMapper CACHE_KEY_MAPPER = new ObjectMapper()
+            .enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS);
 
     private final ChatToolRegistry registry;
     private final Map<String, ChatToolRegistry.ChatTool> tools;
@@ -127,7 +140,7 @@ public class ChatToolDispatcher {
 
         // Per-turn cache: identical calls return the cached result
         String cacheKey = toolName + "|" + userId + "|" + scopeKind
-                        + "|" + scopeId + "|" + new TreeMap<>(args);
+                        + "|" + scopeId + "|" + canonicalArgs(args);
         String cached = turn.cache.get(cacheKey);
         if (cached != null) {
             return new ToolResult.Success(cached);
@@ -208,6 +221,19 @@ public class ChatToolDispatcher {
             }
         }
         return null;
+    }
+
+    private static String canonicalArgs(Map<String, Object> args) {
+        try {
+            return CACHE_KEY_MAPPER.writeValueAsString(args);
+        } catch (JsonProcessingException e) {
+            // args originate from the Jackson tool-arg parser (JSON text →
+            // Map/List/scalar), so they are always JSON-serializable; this
+            // branch is unreachable. Rethrow rather than swallow so a future
+            // arg shape that breaks the invariant fails loudly (M1-335).
+            throw new IllegalStateException(
+                    "Tool args not serializable for cache key", e);
+        }
     }
 
     private void clampLimit(Map<String, Object> args) {

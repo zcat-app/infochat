@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -156,6 +157,55 @@ class ChatToolDispatcherTest {
                 ((ChatToolDispatcher.ToolResult.Success) first).content(),
                 ((ChatToolDispatcher.ToolResult.Success) second).content(),
                 "Identical calls within the same turn must return the cached result");
+    }
+
+    // --- M1-335: the per-turn cache key is deterministic across nested-map
+    // insertion order. Two logically-equal arg maps that differ only in the
+    // insertion order of a nested map must produce the SAME cache key, so the
+    // second dispatch is a cache hit. Pre-fix, new TreeMap<>(args).toString()
+    // sorted only the top-level keys, leaving the nested map's order-dependent
+    // toString() in the key and causing a silent miss. ---
+
+    @Test
+    void cacheKeyIsDeterministicAcrossNestedMapOrder() {
+        ChatToolRegistry.ChatTool counter = new ChatToolRegistry.ChatTool() {
+            int calls;
+            @Override
+            public String execute(UUID u, String sk, UUID si, Map<String, Object> a) {
+                calls++;
+                return "[{\"call\":" + calls + "}]";
+            }
+        };
+        ChatToolDispatcher d = dispatcher(Map.of("searchPosts", counter));
+        ChatToolDispatcher.TurnContext turn = new ChatToolDispatcher.TurnContext();
+
+        // LinkedHashMap preserves insertion order, so the two nested maps below
+        // iterate (and toString) in different orders despite being logically
+        // equal — the exact shape that produced distinct keys before the fix.
+        Map<String, Object> nestedXY = new LinkedHashMap<>();
+        nestedXY.put("x", 1);
+        nestedXY.put("y", 2);
+        Map<String, Object> firstArgs = new HashMap<>();
+        firstArgs.put("filter", nestedXY);
+
+        Map<String, Object> nestedYX = new LinkedHashMap<>();
+        nestedYX.put("y", 2);
+        nestedYX.put("x", 1);
+        Map<String, Object> secondArgs = new HashMap<>();
+        secondArgs.put("filter", nestedYX);
+
+        ChatToolDispatcher.ToolResult first =
+                d.dispatch("searchPosts", firstArgs, USER_A, "dm", SCOPE_A, turn);
+        ChatToolDispatcher.ToolResult second =
+                d.dispatch("searchPosts", secondArgs, USER_A, "dm", SCOPE_A, turn);
+
+        assertInstanceOf(ChatToolDispatcher.ToolResult.Success.class, first);
+        assertInstanceOf(ChatToolDispatcher.ToolResult.Success.class, second);
+        assertEquals(
+                ((ChatToolDispatcher.ToolResult.Success) first).content(),
+                ((ChatToolDispatcher.ToolResult.Success) second).content(),
+                "Logically-equal args differing only in nested-map order must "
+                        + "share a cache key (a hit on the second dispatch)");
     }
 
     // --- Acceptance item 4: scope-filtered search ---
