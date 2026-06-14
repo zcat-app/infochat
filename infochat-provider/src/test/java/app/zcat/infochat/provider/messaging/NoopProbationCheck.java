@@ -1,6 +1,5 @@
 package app.zcat.infochat.provider.messaging;
 
-import java.time.Instant;
 import java.util.UUID;
 
 /**
@@ -18,10 +17,9 @@ import java.util.UUID;
  * per-step call-order assertions in scenarios across
  * {@code InboundRouter*Test} (most notably
  * {@code InboundRouterIntakeOrderingTest} scenarios (g) and (h))
- * pin precise sequences that would break if {@code inProbation},
- * {@code clearIfPromoted}, or {@code probationExpiry} appended
- * spurious entries. The same rule applies to the
- * {@code NoopConfirmStateService} precedent in
+ * pin precise sequences that would break if {@code inProbation} or
+ * {@code clearIfPromoted} appended spurious entries. The same rule
+ * applies to the {@code NoopConfirmStateService} precedent in
  * {@code InboundRouterIntakeOrderingTest}.
  *
  * <p><b>Chosen behavior.</b> {@code inProbation} returns {@code false}
@@ -38,10 +36,5 @@ class NoopProbationCheck extends ProbationCheck {
 
     @Override
     public void clearIfPromoted(UUID userId) {
-    }
-
-    @Override
-    public Instant probationExpiry(UUID userId) {
-        return null;
     }
 }

@@ -152,7 +152,7 @@ class InboundRouterContactIdRedactionTest {
         InboundRouter router = new InboundRouter() {
             @Override
             Optional<UserSnapshot> lookupUser(DispatchDb db, String adapter, String contactId) {
-                return Optional.of(new UserSnapshot(UUID.randomUUID(), "vouched", false));
+                return Optional.of(new UserSnapshot(UUID.randomUUID(), "vouched", false, null));
             }
 
             @Override

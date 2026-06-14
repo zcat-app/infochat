@@ -142,7 +142,7 @@ class InboundRouterConfirmCancelTest {
         InboundRouter router = new InboundRouter() {
             @Override
             Optional<UserSnapshot> lookupUser(DispatchDb db, String adapter, String contactId) {
-                return Optional.of(new UserSnapshot(ACTOR_ID, "vouched", false));
+                return Optional.of(new UserSnapshot(ACTOR_ID, "vouched", false, null));
             }
 
             @Override

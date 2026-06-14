@@ -159,7 +159,7 @@ class AdapterMetricsWiringTest {
         InboundRouter router = new InboundRouter() {
             @Override
             Optional<UserSnapshot> lookupUser(DispatchDb db, String adapter, String contactId) {
-                return Optional.of(new UserSnapshot(UUID.randomUUID(), "vouched", true));
+                return Optional.of(new UserSnapshot(UUID.randomUUID(), "vouched", true, null));
             }
 
             @Override

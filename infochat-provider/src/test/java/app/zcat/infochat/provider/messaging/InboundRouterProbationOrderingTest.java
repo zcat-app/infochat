@@ -4,10 +4,12 @@ import app.zcat.infochat.messaging.Identity;
 import app.zcat.infochat.messaging.InboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
+import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.command.AssetCommandFamilyOracle;
 import app.zcat.infochat.provider.command.CommandPermissions;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import app.zcat.infochat.provider.group.GroupApprovalCheck;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -24,7 +26,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * steps 3 (D47 group drop), 4 (ban) and 6 (parse + dispatch) in
  * {@link InboundRouter#onMessage} per
  * {@code docs/spec/security.md} §Slow-start tier +
- * §Authorization model. Scenarios cover the runnable shape:
+ * §Authorization model. Since M1-364 the gate decides probation from
+ * the per-dispatch {@link InboundRouter.UserSnapshot}'s
+ * {@code probation_until} (no {@code probationCheck.inProbation} or
+ * {@code probationExpiry} SELECT); the only step-5 collaborator call
+ * left is the lazy {@code clearIfPromoted} UPDATE on the
+ * just-graduated path. Scenarios cover the runnable shape:
  *
  * <ol>
  *   <li>(a) Registered, non-banned, in-probation user sending
@@ -38,8 +45,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *       lazy clear on the way to dispatch); dispatch fires.</li>
  *   <li>(d) Banned user in probation sending {@code /help} → step 4
  *       short-circuits with {@code error.ban.fixed} BEFORE step 5
- *       consults probation; {@code probationCheck.inProbation} NOT
- *       called.</li>
+ *       consults probation.</li>
  *   <li>(e) D47 gate #1: an unregistered group sender (no users row)
  *       is silently dropped at step 3 — no reply, dispatch returns
  *       before the ban check.</li>
@@ -47,6 +53,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *       dropped the same way.</li>
  *   <li>(g) The drop does NOT over-fire — a registered group sender
  *       in probation still reaches the step 5 probation gate.</li>
+ *   <li>(h) M1-364: a steady-state non-probation inbound
+ *       ({@code probation_until = NULL}) issues NO probation
+ *       SELECT/UPDATE beyond the single user-snapshot SELECT — not
+ *       even {@code commandPermissions.allowedDuringProbation}.</li>
+ *   <li>(i) M1-364: the blocked-during-probation reply's
+ *       time-until-unlock token is sourced from the snapshot's
+ *       {@code probation_until}, not a live {@code probationExpiry}
+ *       read.</li>
  * </ol>
  *
  * <p>Plain JUnit (no DevServices Postgres) — every collaborator is
@@ -69,8 +83,8 @@ class InboundRouterProbationOrderingTest {
     void inProbationBlockedCommandShortCircuitsAtStep5() {
         CallLog log = new CallLog();
         UserSnapshotSeed snapshot = new UserSnapshotSeed(UUID.randomUUID(), "invited");
-        Instant expiry = Instant.now().plus(2, ChronoUnit.HOURS);
-        InboundRouter router = newRouter(log, snapshot, false, true, expiry, false);
+        Instant probationUntil = Instant.now().plus(2, ChronoUnit.HOURS);
+        InboundRouter router = newRouter(log, snapshot, false, probationUntil, false);
         // RecordingCommandHandler wired but MUST NOT be invoked.
         router.commandHandlers = new SingletonInstance<>(new RecordingCommandHandler(log, "add-source"));
         CapturingAdapter target = new CapturingAdapter();
@@ -89,13 +103,12 @@ class InboundRouterProbationOrderingTest {
                         "setAdapterName",
                         "rateCapBucket.tryAcquire",
                         "lookupUser",
-                        "probationCheck.inProbation",
                         "commandPermissions.allowedDuringProbation(add-source)",
-                        "probationCheck.probationExpiry",
                         "bundleLoader.get(error.probation.blocked)"),
                 log.calls,
                 "blocked-during-probation path must short-circuit at step 5 BEFORE dispatch — "
-                        + "handler.handle and probationCheck.clearIfPromoted MUST NOT appear; got: " + log.calls);
+                        + "handler.handle and probationCheck.clearIfPromoted MUST NOT appear, and the gate "
+                        + "reads the snapshot (no probationCheck SELECT); got: " + log.calls);
     }
 
     // ----- (b) in-probation user + allowed command → falls through to dispatch
@@ -104,8 +117,8 @@ class InboundRouterProbationOrderingTest {
     void inProbationAllowedCommandFallsThroughToDispatch() {
         CallLog log = new CallLog();
         UserSnapshotSeed snapshot = new UserSnapshotSeed(UUID.randomUUID(), "invited");
-        Instant expiry = Instant.now().plus(2, ChronoUnit.HOURS);
-        InboundRouter router = newRouter(log, snapshot, false, true, expiry, true);
+        Instant probationUntil = Instant.now().plus(2, ChronoUnit.HOURS);
+        InboundRouter router = newRouter(log, snapshot, false, probationUntil, true);
         router.commandHandlers = new SingletonInstance<>(new RecordingCommandHandler(log, "help"));
         CapturingAdapter target = new CapturingAdapter();
         router.setReplyTarget(target);
@@ -121,11 +134,10 @@ class InboundRouterProbationOrderingTest {
                         "setAdapterName",
                         "rateCapBucket.tryAcquire",
                         "lookupUser",
-                        "probationCheck.inProbation",
                         "commandPermissions.allowedDuringProbation(help)",
                         "handler.handle(help)"),
                 log.calls,
-                "allowed-during-probation path must reach dispatch; probationExpiry and clearIfPromoted MUST NOT appear; got: "
+                "allowed-during-probation path must reach dispatch; clearIfPromoted MUST NOT appear; got: "
                         + log.calls);
     }
 
@@ -135,7 +147,10 @@ class InboundRouterProbationOrderingTest {
     void pastProbationClearsAndDispatches() {
         CallLog log = new CallLog();
         UserSnapshotSeed snapshot = new UserSnapshotSeed(UUID.randomUUID(), "invited");
-        InboundRouter router = newRouter(log, snapshot, false, false, null, true);
+        // probation_until in the past: the snapshot reports not-in-probation,
+        // so the lazy clearIfPromoted UPDATE fires on the way to dispatch.
+        Instant probationUntil = Instant.now().minus(2, ChronoUnit.HOURS);
+        InboundRouter router = newRouter(log, snapshot, false, probationUntil, true);
         router.commandHandlers = new SingletonInstance<>(new RecordingCommandHandler(log, "add-source"));
         CapturingAdapter target = new CapturingAdapter();
         router.setReplyTarget(target);
@@ -151,11 +166,73 @@ class InboundRouterProbationOrderingTest {
                         "setAdapterName",
                         "rateCapBucket.tryAcquire",
                         "lookupUser",
-                        "probationCheck.inProbation",
                         "probationCheck.clearIfPromoted",
                         "handler.handle(add-source)"),
                 log.calls,
                 "past-probation path must call clearIfPromoted on the way to dispatch; got: " + log.calls);
+    }
+
+    // ----- (h) M1-364: steady-state non-probation issues no probation query --
+
+    @Test
+    void steadyStateNonProbationIssuesNoProbationQueryBeyondSnapshot() {
+        // probation_until = NULL: the snapshot reports not-in-probation AND
+        // the column is null, so step 5 issues no clearIfPromoted UPDATE and
+        // never consults commandPermissions — the gate is invisible. Proves
+        // the common-case hot path costs exactly the one user-snapshot SELECT.
+        CallLog log = new CallLog();
+        UserSnapshotSeed snapshot = new UserSnapshotSeed(UUID.randomUUID(), "invited");
+        InboundRouter router = newRouter(log, snapshot, false, null, true);
+        router.commandHandlers = new SingletonInstance<>(new RecordingCommandHandler(log, "help"));
+        CapturingAdapter target = new CapturingAdapter();
+        router.setReplyTarget(target);
+
+        router.onMessage(dmInbound("/help"), ADAPTER);
+
+        assertEquals(1, target.captured.size(),
+                "steady-state path must produce exactly one reply; got: " + target.captured);
+        assertEquals(
+                List.of(
+                        "setAdapterName",
+                        "rateCapBucket.tryAcquire",
+                        "lookupUser",
+                        "handler.handle(help)"),
+                log.calls,
+                "steady-state non-probation inbound must issue NO probation SELECT/UPDATE and NO "
+                        + "commandPermissions call beyond the single user-snapshot SELECT; got: " + log.calls);
+        assertTrue(log.calls.stream().noneMatch(c -> c.startsWith("probationCheck.")),
+                "no probationCheck collaborator call may appear for a NULL-probation inbound; got: " + log.calls);
+    }
+
+    // ----- (i) M1-364: blocked reply's unlock time is sourced from snapshot --
+
+    @Test
+    void probationBlockedReplyUnlockTimeSourcedFromSnapshot() {
+        CallLog log = new CallLog();
+        UserSnapshotSeed snapshot = new UserSnapshotSeed(UUID.randomUUID(), "invited");
+        // A wide margin so the truncated-hours formatting is stable across
+        // the microseconds between the router's format call and this one.
+        Instant probationUntil = Instant.now().plus(5, ChronoUnit.HOURS).plus(30, ChronoUnit.MINUTES);
+        InboundRouter router = newRouter(log, snapshot, false, probationUntil, false);
+        // A {0}-bearing template for the probation key so the interpolated
+        // unlock token actually lands in the reply text (the default stub
+        // has no placeholder).
+        router.bundleLoader = new ProbationTemplateBundleLoader(log);
+        router.commandHandlers = new SingletonInstance<>(new RecordingCommandHandler(log, "add-source"));
+        CapturingAdapter target = new CapturingAdapter();
+        router.setReplyTarget(target);
+
+        router.onMessage(dmInbound("/add-source https://example.org/feed --tags x"), ADAPTER);
+
+        assertEquals(1, target.captured.size(),
+                "blocked-during-probation path must produce exactly one reply; got: " + target.captured);
+        assertEquals("unlock-in " + InboundRouter.formatTimeUntilUnlock(probationUntil),
+                target.captured.get(0).text(),
+                "the unlock token must be formatted from the snapshot's probation_until; got: "
+                        + target.captured.get(0).text());
+        assertTrue(log.calls.stream().noneMatch(c -> c.startsWith("probationCheck.")),
+                "the blocked path must source the expiry from the snapshot, not a probationCheck SELECT; got: "
+                        + log.calls);
     }
 
     // ----- (e) D47: unregistered group sender → silent drop at step 3 --------
@@ -194,7 +271,7 @@ class InboundRouterProbationOrderingTest {
         // dropped the same way as an unregistered one.
         CallLog log = new CallLog();
         UserSnapshotSeed snapshot = new UserSnapshotSeed(UUID.randomUUID(), "preban");
-        InboundRouter router = newRouter(log, snapshot, false, false, null, true);
+        InboundRouter router = newRouter(log, snapshot, false, null, true);
         router.commandHandlers = new SingletonInstance<>(new RecordingCommandHandler(log, "help"));
         CapturingAdapter target = new CapturingAdapter();
         router.setReplyTarget(target);
@@ -222,8 +299,8 @@ class InboundRouterProbationOrderingTest {
         // drop is scoped to unregistered / preban contacts only.
         CallLog log = new CallLog();
         UserSnapshotSeed snapshot = new UserSnapshotSeed(UUID.randomUUID(), "invited");
-        Instant expiry = Instant.now().plus(2, ChronoUnit.HOURS);
-        InboundRouter router = newRouter(log, snapshot, false, true, expiry, false);
+        Instant probationUntil = Instant.now().plus(2, ChronoUnit.HOURS);
+        InboundRouter router = newRouter(log, snapshot, false, probationUntil, false);
         router.commandHandlers = new SingletonInstance<>(new RecordingCommandHandler(log, "add-source"));
         CapturingAdapter target = new CapturingAdapter();
         router.setReplyTarget(target);
@@ -243,9 +320,7 @@ class InboundRouterProbationOrderingTest {
                         "rateCapBucket.tryAcquire",
                         "lookupUser",
                         "groupApprovalCheck.check",
-                        "probationCheck.inProbation",
                         "commandPermissions.allowedDuringProbation(add-source)",
-                        "probationCheck.probationExpiry",
                         "bundleLoader.get(error.probation.blocked)"),
                 log.calls,
                 "registered group sender falls through step 3 to the probation gate; got: " + log.calls);
@@ -257,8 +332,8 @@ class InboundRouterProbationOrderingTest {
     void bannedInProbationShortCircuitsAtStep4BeforeProbation() {
         CallLog log = new CallLog();
         UserSnapshotSeed snapshot = new UserSnapshotSeed(UUID.randomUUID(), "invited");
-        Instant expiry = Instant.now().plus(2, ChronoUnit.HOURS);
-        InboundRouter router = newRouter(log, snapshot, true, true, expiry, true);
+        Instant probationUntil = Instant.now().plus(2, ChronoUnit.HOURS);
+        InboundRouter router = newRouter(log, snapshot, true, probationUntil, true);
         router.commandHandlers = new SingletonInstance<>(new RecordingCommandHandler(log, "help"));
         CapturingAdapter target = new CapturingAdapter();
         router.setReplyTarget(target);
@@ -277,8 +352,8 @@ class InboundRouterProbationOrderingTest {
                         "lookupUser",
                         "bundleLoader.get(error.ban.fixed)"),
                 log.calls,
-                "step 4 ban check must fire BEFORE step 5 probation check — "
-                        + "probationCheck.inProbation MUST NOT appear; got: " + log.calls);
+                "step 4 ban check must fire BEFORE step 5 probation gate — "
+                        + "no probation collaborator call may appear; got: " + log.calls);
     }
 
     // ----- helpers ------------------------------------------------------------
@@ -289,8 +364,7 @@ class InboundRouterProbationOrderingTest {
             CallLog log,
             UserSnapshotSeed snapshot,
             boolean banned,
-            boolean inProbation,
-            Instant probationExpiry,
+            @Nullable Instant probationUntil,
             boolean allowedDuringProbation) {
         InboundRouter router = new InboundRouter() {
             @Override
@@ -299,7 +373,8 @@ class InboundRouterProbationOrderingTest {
                 return Optional.of(new UserSnapshot(
                         snapshot.id(),
                         snapshot.registrationState(),
-                        banned));
+                        banned,
+                        probationUntil));
             }
 
             @Override
@@ -314,7 +389,7 @@ class InboundRouterProbationOrderingTest {
         router.bundleLoader = new FakeBundleLoader(log);
         router.confirmStateService = new NoopConfirmStateService();
         router.commandPermissions = new RecordingCommandPermissions(log, allowedDuringProbation);
-        router.probationCheck = new RecordingProbationCheck(log, inProbation, probationExpiry);
+        router.probationCheck = new RecordingProbationCheck(log);
         // M1-112: step 3.5 D47 approval gate. The recording fake logs
         // "groupApprovalCheck.check" into the CallLog ONLY when the
         // router's step-3.5 branch actually fires (group scope +
@@ -390,7 +465,7 @@ class InboundRouterProbationOrderingTest {
         router.bundleLoader = new FakeBundleLoader(log);
         router.confirmStateService = new NoopConfirmStateService();
         router.commandPermissions = new RecordingCommandPermissions(log, true);
-        router.probationCheck = new RecordingProbationCheck(log, false, null);
+        router.probationCheck = new RecordingProbationCheck(log);
         // M1-112: step 3.5 D47 approval gate. The recording fake logs
         // "groupApprovalCheck.check" into the CallLog ONLY when the
         // router's step-3.5 branch actually fires (group scope +
@@ -410,32 +485,20 @@ class InboundRouterProbationOrderingTest {
     }
 
     /**
-     * Records step 5 probation reads/UPDATEs into the {@link CallLog}.
-     * The three knobs ({@code inProbation}, {@code probationExpiry},
-     * and the no-op {@code clearIfPromoted}) drive scenarios (a)–(d).
+     * Records the lazy graduation {@code clearIfPromoted} UPDATE into
+     * the {@link CallLog}. Since M1-364 the router no longer calls
+     * {@code inProbation} or {@code probationExpiry} — the snapshot
+     * answers both — so this fake records only the one call that
+     * remains on the step-5 path.
      */
     private static final class RecordingProbationCheck extends ProbationCheck {
         private final CallLog log;
-        private final boolean inProbationFlag;
-        private final Instant expiry;
-        RecordingProbationCheck(CallLog log, boolean inProbationFlag, Instant expiry) {
+        RecordingProbationCheck(CallLog log) {
             this.log = log;
-            this.inProbationFlag = inProbationFlag;
-            this.expiry = expiry;
-        }
-        @Override
-        public boolean inProbation(UUID userId) {
-            log.calls.add("probationCheck.inProbation");
-            return inProbationFlag;
         }
         @Override
         public void clearIfPromoted(UUID userId) {
             log.calls.add("probationCheck.clearIfPromoted");
-        }
-        @Override
-        public Instant probationExpiry(UUID userId) {
-            log.calls.add("probationCheck.probationExpiry");
-            return expiry;
         }
     }
 
@@ -456,6 +519,35 @@ class InboundRouterProbationOrderingTest {
         public boolean allowedDuringProbation(String slashCommand) {
             log.calls.add("commandPermissions.allowedDuringProbation(" + slashCommand + ")");
             return allowed;
+        }
+    }
+
+    /**
+     * A {@link BundleLoader} double that returns a {@code {0}}-bearing
+     * template for {@code error.probation.blocked} so scenario (i) can
+     * assert the snapshot-sourced unlock token lands in the reply. All
+     * other keys fall through to the shared {@link FakeBundleLoader}
+     * stub, and every lookup is recorded into the {@link CallLog} with
+     * the same {@code bundleLoader.get(key)} shape the recording fakes
+     * use. (It extends {@code BundleLoader} rather than
+     * {@code FakeBundleLoader}, which is {@code final}.)
+     */
+    private static final class ProbationTemplateBundleLoader extends BundleLoader {
+        private final CallLog log;
+        ProbationTemplateBundleLoader(CallLog log) {
+            this.log = log;
+        }
+        @Override
+        public String get(String key) {
+            return get(key, "en");
+        }
+        @Override
+        public String get(String key, String langCode) {
+            log.calls.add("bundleLoader.get(" + key + ")");
+            if (BundleKeys.ERROR_PROBATION_BLOCKED.equals(key)) {
+                return "unlock-in {0}";
+            }
+            return FakeBundleLoader.stubFor(key);
         }
     }
 }

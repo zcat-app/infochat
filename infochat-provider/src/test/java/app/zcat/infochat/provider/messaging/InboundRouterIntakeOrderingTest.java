@@ -299,7 +299,7 @@ class InboundRouterIntakeOrderingTest {
     void knownBannedDmStopsWithFixedReplyAndNoHandleSlash() {
         CallLog log = new CallLog();
         InboundRouter router = newRouterWithLog(log,
-                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), "vouched", true)));
+                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), "vouched", true, null)));
         CapturingAdapter target = new CapturingAdapter();
         router.setReplyTarget(target);
 
@@ -353,7 +353,7 @@ class InboundRouterIntakeOrderingTest {
     void registeredGroupSenderDispatchesNormally() {
         CallLog log = new CallLog();
         InboundRouter router = newRouterWithLog(log,
-                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), "vouched", false)));
+                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), "vouched", false, null)));
         router.commandHandlers = new SingletonInstance<>(new RecordingCommandHandler(log, "help"));
         CapturingAdapter target = new CapturingAdapter();
         router.setReplyTarget(target);
@@ -392,7 +392,7 @@ class InboundRouterIntakeOrderingTest {
     void bannedRegisteredGroupSenderShortCircuitsAtBanCheckBeforeStep35() {
         CallLog log = new CallLog();
         InboundRouter router = newRouterWithLog(log,
-                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), "vouched", true)));
+                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), "vouched", true, null)));
         router.commandHandlers = new SingletonInstance<>(new RecordingCommandHandler(log, "help"));
         CapturingAdapter target = new CapturingAdapter();
         router.setReplyTarget(target);
@@ -428,7 +428,7 @@ class InboundRouterIntakeOrderingTest {
     void replyRoutesThroughInboundAdapterNeverAnotherActivatedAdapter() {
         CallLog log = new CallLog();
         InboundRouter router = newRouterWithLog(log,
-                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), "vouched", false)));
+                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), "vouched", false, null)));
         CapturingAdapter inboundAdapter = new CapturingAdapter("inmemory");
         CapturingAdapter otherAdapter = new CapturingAdapter("other");
         router.setReplyTarget(inboundAdapter);
@@ -459,7 +459,7 @@ class InboundRouterIntakeOrderingTest {
     void bannedUserFixedReplyDeliveredThroughInboundAdapterNotDroppedOrCrossRouted() {
         CallLog log = new CallLog();
         InboundRouter router = newRouterWithLog(log,
-                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), "vouched", true)));
+                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), "vouched", true, null)));
         CapturingAdapter inboundAdapter = new CapturingAdapter("inmemory");
         CapturingAdapter otherAdapter = new CapturingAdapter("other");
         router.setReplyTarget(inboundAdapter);
@@ -493,7 +493,7 @@ class InboundRouterIntakeOrderingTest {
     void groupChatMessageWithVanishedGroupRowIsSilentlyDroppedNotThrown() {
         CallLog log = new CallLog();
         InboundRouter router = newRouterWithLog(log,
-                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), "vouched", false)),
+                Optional.of(new InboundRouter.UserSnapshot(UUID.randomUUID(), "vouched", false, null)),
                 Optional.empty());
         // Outside CDI the chat-mode body-cap config field defaults to 0
         // and the LLM rate-cap collaborator is null; lift both so the

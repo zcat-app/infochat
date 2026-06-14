@@ -42,7 +42,7 @@ class InboundRouterBanSnapshotTest {
             @Override
             Optional<UserSnapshot> lookupUser(DispatchDb db, String adapter, String contactId) {
                 lookups.incrementAndGet();
-                return Optional.of(new UserSnapshot(UUID.randomUUID(), "vouched", true));
+                return Optional.of(new UserSnapshot(UUID.randomUUID(), "vouched", true, null));
             }
 
             @Override

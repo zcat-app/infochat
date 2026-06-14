@@ -34,6 +34,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.text.MessageFormat;
 import java.text.Normalizer;
 import java.time.Duration;
@@ -119,13 +120,16 @@ import java.util.concurrent.atomic.AtomicLong;
  *       {@code error.command.body_too_large} reply and stops at the
  *       same position as the chat-mode cap — before the parser
  *       ({@code handleSlash}) and any DB write;</li>
- *   <li>5 slow-start probation gate (M1-045): if {@link ProbationCheck}
- *       reports {@code inProbation == true} AND the command is NOT in
+ *   <li>5 slow-start probation gate (M1-045): if the step-1
+ *       {@link UserSnapshot#inProbation(Instant)} (from the snapshot's
+ *       {@code probation_until}) is true AND the command is NOT in
  *       {@link CommandPermissions}'s allowed-during-probation set, the
  *       router emits {@code error.probation.blocked} with the time-
- *       until-unlock interpolated; otherwise
+ *       until-unlock interpolated from the snapshot value; otherwise
  *       {@link ProbationCheck#clearIfPromoted} runs as the lazy
- *       graduation clear;</li>
+ *       graduation clear, but only when {@code probation_until} is
+ *       non-null and already past (the NULL steady state issues no
+ *       UPDATE);</li>
  *   <li>4.5 confirm-cancel sweep (M1-051): if the resolved snapshot
  *       has pending confirm state for this {@code (actor.id, scope)},
  *       AND the inbound body is NOT the confirm-shape for the pending
@@ -142,10 +146,16 @@ import java.util.concurrent.atomic.AtomicLong;
  * exactly one users-row SELECT per inbound. Steps 2 (DM emptiness),
  * 3 (group unregistered/preban drop), 4 (ban check), and 5 (probation
  * gate) all consume the SAME {@link UserSnapshot} resolved at step 1.
- * The step-1 SELECT projects {@code is_banned} so the step 4 ban
- * predicate reads {@code snapshot.isBanned()} rather than issuing a
- * second query; the step-1→step-4 TOCTOU is microseconds and the ban
- * takes effect on the next inbound regardless.</p>
+ * The step-1 SELECT projects {@code is_banned} AND
+ * {@code probation_until} so the step 4 ban predicate reads
+ * {@code snapshot.isBanned()} and the step 5 gate reads
+ * {@code snapshot.inProbation(now)} rather than issuing further queries;
+ * the step-1→step-4/5 TOCTOU is microseconds and both the ban and a
+ * probation graduation take effect on the next inbound regardless. The
+ * only remaining step-5 write is the lazy graduation
+ * {@link ProbationCheck#clearIfPromoted} UPDATE, now issued solely on the
+ * first post-graduation inbound (non-null past {@code probation_until}),
+ * never on the NULL steady state.</p>
  *
  * <p><b>Dispatch connection (pre-LLM phase).</b> Every router-owned DB
  * step of one inbound — the users-row snapshot, the groups-row
@@ -217,7 +227,7 @@ public class InboundRouter {
 
     /** Single users-row lookup feeding steps 2, 3, 4, and 5 from one SELECT. */
     private static final String USER_SNAPSHOT_SQL =
-            "SELECT id, registration_state, is_banned FROM users "
+            "SELECT id, registration_state, is_banned, probation_until FROM users "
                     + "WHERE adapter = ? AND contact_id = ?";
 
     private static final String ENSURE_MEMBERSHIP_SQL =
@@ -635,31 +645,43 @@ public class InboundRouter {
             // §Slow-start tier + §Authorization model step 5. A probation
             // user invoking a non-allowed command receives the
             // error.probation.blocked reply (with the {0} time-until-
-            // unlock interpolated from probation_until); a probation
-            // user invoking an allowed command falls through to the
-            // rest of the pipeline; a non-probation user gets the
-            // opportunistic clearIfPromoted (the lazy clear) on the way.
+            // unlock interpolated from the snapshot's probation_until); a
+            // probation user invoking an allowed command falls through to
+            // the rest of the pipeline; a just-graduated user (probation_until
+            // set but already past) gets the opportunistic clearIfPromoted
+            // on the way — the NULL steady state issues no UPDATE at all.
+            //
+            // probation_until is served from the step-1 snapshot (M1-364):
+            // no inProbation() SELECT on the hot path, no probationExpiry()
+            // SELECT on the blocked path. The step-1→step-5 TOCTOU is the
+            // same microsecond window the is_banned check documents above;
+            // the probation timer is hours-scale, so a graduation landing
+            // inside that window costs at most this one in-flight message.
             //
             // Invariant: snapshot is always present here — DM-empty
             // short-circuited at step 2's invite-consume; group senders
             // with no row (or 'preban') were silently dropped at step 3.
             // The defensive isPresent guard removed by M1-045 redteam-fix.
-            UUID probationActorId = snapshot.get().id();
+            UserSnapshot probationActor = snapshot.get();
+            Instant probationNow = Instant.now();
             String commandName = commandNameOf(normalized);
-            if (probationCheck.inProbation(probationActorId)) {
+            if (probationActor.inProbation(probationNow)) {
                 if (!commandPermissions.allowedDuringProbation(commandName)) {
-                    Instant expiry = probationCheck.probationExpiry(probationActorId);
                     String body = MessageFormat.format(
                             bundleLoader.get(BundleKeys.ERROR_PROBATION_BLOCKED, inboundContext.effectiveLanguage()),
-                            formatTimeUntilUnlock(expiry));
+                            formatTimeUntilUnlock(probationActor.probationUntil()));
                     sendReply(msg.scope(), body, adapterName);
                     return;
                 }
-            } else {
-                // Lazy clear: nulls probation_until on the next
-                // request after graduation. Idempotent after first
-                // success (WHERE clause matches zero rows).
-                probationCheck.clearIfPromoted(probationActorId);
+            } else if (probationActor.probationUntil() != null) {
+                // Lazy clear: probation_until is set but already elapsed
+                // (inProbation(now) was false with a non-null column — the
+                // just-graduated case). Nulls the column on this first
+                // post-graduation inbound; idempotent thereafter (WHERE
+                // matches zero rows). Skipped entirely for the NULL steady
+                // state, removing the per-inbound UPDATE that matched zero
+                // rows in the common case (the M1-364 finding).
+                probationCheck.clearIfPromoted(probationActor.id());
             }
 
             // Step 4.5 — confirm-cancel sweep (M1-051). Per spec
@@ -839,10 +861,12 @@ public class InboundRouter {
                 if (!rs.next()) {
                     return Optional.empty();
                 }
+                Timestamp probationUntil = rs.getTimestamp("probation_until");
                 return Optional.of(new UserSnapshot(
                         rs.getObject("id", UUID.class),
                         rs.getString("registration_state"),
-                        rs.getBoolean("is_banned")));
+                        rs.getBoolean("is_banned"),
+                        probationUntil == null ? null : probationUntil.toInstant()));
             }
         } catch (SQLException e) {
             throw new IllegalStateException(
@@ -855,11 +879,28 @@ public class InboundRouter {
      * Per-dispatch snapshot of one users-row's state. Captures the
      * columns the splice needs: {@code id} (for downstream audit
      * hooks if any), {@code registration_state} (step 3 group
-     * unregistered/preban drop predicate), and {@code is_banned}
-     * (step 4 ban check). Package-private so test subclasses can
+     * unregistered/preban drop predicate), {@code is_banned}
+     * (step 4 ban check), and {@code probation_until} (step 5
+     * slow-start gate — nullable; NULL means the user graduated or
+     * was never in probation). Package-private so test subclasses can
      * construct instances when overriding {@link #lookupUser}.
      */
-    record UserSnapshot(UUID id, String registrationState, boolean isBanned) {}
+    record UserSnapshot(UUID id, String registrationState, boolean isBanned,
+                        @Nullable Instant probationUntil) {
+
+        /**
+         * @return {@code true} iff {@code probation_until} is set and
+         *         still in the future relative to {@code now} — the
+         *         snapshot-local equivalent of the former
+         *         {@code ProbationCheck.inProbation} SELECT
+         *         ({@code probation_until IS NOT NULL AND probation_until
+         *         > NOW()}), letting step 5 decide probation from the
+         *         single per-dispatch users-row read.
+         */
+        boolean inProbation(Instant now) {
+            return probationUntil != null && probationUntil.isAfter(now);
+        }
+    }
 
     /**
      * Per-dispatch database context: one lazily-borrowed pool
@@ -1011,10 +1052,11 @@ public class InboundRouter {
      * is approximate ({@code "~Nh"} or {@code "~Nm"}) because the
      * probation window is hours-scale and users do not need
      * second-precision. A null or past expiry renders as
-     * {@code "<1m"} — defends the user-visible reply against the
-     * tight race where {@link ProbationCheck#inProbation} returned
-     * true but a concurrent {@code clearIfPromoted} on the same
-     * row nulled the column between the two reads.
+     * {@code "<1m"}. The expiry now comes from the same per-dispatch
+     * {@link UserSnapshot#probationUntil()} the step-5 gate read, so it
+     * is non-null whenever the gate fires and the null branch is a
+     * formatter-totality guard; the sub-minute branch still covers an
+     * expiry that elapses between the snapshot read and this call.
      */
     static String formatTimeUntilUnlock(@Nullable Instant expiry) {
         if (expiry == null) {

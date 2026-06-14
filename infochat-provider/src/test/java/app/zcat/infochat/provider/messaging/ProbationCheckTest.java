@@ -15,7 +15,6 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -24,7 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Integration tests for {@link ProbationCheck} against the
  * DevServices Postgres container (Flyway-applied V5 users table).
- * Eight scenarios pin the three methods against the three column
+ * Six scenarios pin the two methods against the three column
  * states (in-probation / past-probation / NULL):
  *
  * <ul>
@@ -39,10 +38,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   <li>(e) {@code clearIfPromoted} does NOT modify a still-
  *       in-probation row.</li>
  *   <li>(f) {@code clearIfPromoted} is a no-op for a NULL row.</li>
- *   <li>(g) {@link ProbationCheck#probationExpiry} returns the
- *       {@link Instant} for a row with a populated future
- *       probation_until.</li>
- *   <li>(h) {@code probationExpiry} returns null for a NULL row.</li>
  * </ul>
  *
  * <p>Per-test PREFIX isolation via {@code contact_id LIKE
@@ -114,27 +109,6 @@ class ProbationCheckTest {
         probationCheck.clearIfPromoted(id);
         assertNull(readProbationUntil(id),
                 "clearIfPromoted must remain a no-op for a row whose probation_until is already NULL");
-    }
-
-    @Test
-    void probationExpiryReturnsInstantForFuture() throws Exception {
-        Instant future = Instant.now().plus(2, ChronoUnit.HOURS).truncatedTo(ChronoUnit.MILLIS);
-        UUID id = seedUser("probation-test-expiry-future", future);
-        Instant returned = probationCheck.probationExpiry(id);
-        assertNotNull(returned,
-                "probationExpiry must return a non-null Instant for a populated probation_until");
-        // The TIMESTAMPTZ round-trip preserves the seeded instant
-        // at millisecond precision (truncated above to match what
-        // Postgres stores).
-        assertEquals(future, returned,
-                "probationExpiry must return the populated probation_until value");
-    }
-
-    @Test
-    void probationExpiryReturnsNullForNullColumn() throws Exception {
-        UUID id = seedUser("probation-test-expiry-null", null);
-        assertNull(probationCheck.probationExpiry(id),
-                "probationExpiry must return null for a row whose probation_until is NULL");
     }
 
     private UUID seedUser(String contactId, Instant probationUntil) throws Exception {

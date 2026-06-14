@@ -90,12 +90,15 @@ final class CountingDispatchDataSource implements DataSource {
         throw new UnsupportedOperationException("query: " + sql);
     }
 
-    // Columns read by InboundRouter.lookupUser: id, registration_state, is_banned.
+    // Columns read by InboundRouter.lookupUser: id, registration_state,
+    // is_banned, probation_until. getTimestamp returns null so the snapshot
+    // is not in probation (the counted actor is a vouched, graduated user).
     private ResultSet userSnapshotRow() {
         return singleRowResultSet(name -> switch (name) {
             case "getObject" -> actorId;
             case "getString" -> "vouched";
             case "getBoolean" -> false;
+            case "getTimestamp" -> null;
             default -> throw new UnsupportedOperationException("ResultSet." + name);
         });
     }
