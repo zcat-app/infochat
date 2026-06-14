@@ -588,7 +588,7 @@ First-phase scope:
 
 #### Relationship to §7.7.1
 
-The wizard and the §7.7.1 wrappers serve **different audiences and runtimes** and do not overlap. The §7.7.1 wrappers drive `quarkus:dev` — the *developer* inner loop, with source on disk and live reload — and are never a runtime for a tester or a production host. The wizard brings up the **built container images** (§7.7 compose, extended with the Collector and Provider services) via `docker compose up -d`; the apps run as packaged jars in containers, never under `quarkus:dev`. Consequently the wizard does **not** call the §7.7.1 wrappers: it manages its own compose deployment directly (e.g., `--reset` is `docker compose down`, not `down.sh`, which would additionally try to reap non-existent `quarkus:dev` PIDs).
+The wizard sits **above** the one-click wrappers; it does not replace them. The wizard's responsibility ends once the deployment is up and verified. Day-to-day operation (restart a service, tear down, re-embed, back up) stays with the §7.7.1 scripts. The wizard MAY call those wrappers internally (e.g., `down.sh` during a reset) but owns no steady-state responsibility.
 
 #### Structure
 
@@ -615,7 +615,7 @@ Every subscript obeys the §7.7.1 script shape (`set -euo pipefail`, echoes the 
 - **Prefilled defaults.** Every prompt shows its default in brackets; an empty answer takes the default. A `laptop`-profile, Ollama, single-adapter setup is completable by pressing Enter at every prompt except the adapter-registration interaction that genuinely needs a human (below).
 - **Idempotent / resumable.** Re-running `setup.sh` reads `.setup-state` and offers to resume from the first incomplete step. No generated secret is overwritten and no DB role is re-created.
 - **Non-interactive escape hatch.** `setup.sh --defaults` runs end-to-end taking every default (still pausing only where adapter registration needs a human), for scripted or CI smoke use.
-- **Reset.** `setup.sh --reset` tears the deployment down (`docker compose down`, with `-v` to drop data volumes on explicit confirmation) and clears `.setup-state`, prompting for confirmation before deleting any generated secret or data volume (the repo's confirm-before-delete posture).
+- **Reset.** `setup.sh --reset` tears the deployment down (via `down.sh`) and clears `.setup-state`, prompting for confirmation before deleting any generated secret or data volume (the repo's confirm-before-delete posture).
 
 #### What stays manual
 
