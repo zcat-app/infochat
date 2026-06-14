@@ -26,13 +26,15 @@ import java.util.List;
  * re-spinning the container per test would be orders of magnitude
  * slower than a TRUNCATE.
  *
- * <p>Image: {@code pgvector/pgvector:pg16}. V5 doesn't exercise
- * pgvector but V1 declares {@code CREATE EXTENSION vector} so a
- * non-pgvector image would fail Flyway at V1. Using the same image
- * the rest of the stack uses keeps DB shape consistent.
+ * <p>Image: {@code pgvector/pgvector:pg16}. V1 declares
+ * {@code CREATE EXTENSION vector} and V11 adds {@code vector(N)}
+ * columns, so a non-pgvector image would fail Flyway. Using the same
+ * image the rest of the stack uses keeps DB shape consistent.
  *
- * <p>Flyway runs once on container start, applying V1..V5 against the
- * container's JDBC URL pointed at {@code classpath:db/migration}.
+ * <p>Flyway runs once on container start, applying every migration
+ * under {@code classpath:db/migration} (V1 through the current head —
+ * the {@code migrate()} call sets no {@code target}) against the
+ * container's JDBC URL.
  * Tests open Connections as the bootstrap superuser (the container's
  * default credentials) so they can issue both privileged setup
  * statements and the application-role grants are validated only

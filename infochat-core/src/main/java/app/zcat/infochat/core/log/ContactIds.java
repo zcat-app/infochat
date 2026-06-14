@@ -90,6 +90,18 @@ public final class ContactIds {
     /**
      * Redact a contact-id-shaped string for non-audit logging.
      *
+     * <p><b>SQL-parity contract.</b> This method counts UTF-16 units
+     * ({@code length()}/{@code substring()}) whereas the SQL mirror
+     * {@code redact_contact_id} (V31) counts code points
+     * ({@code char_length}/{@code left}/{@code right}); the two layers
+     * agree only for BMP inputs, where one {@code char} is exactly one
+     * code point. Contact ids are ASCII/BMP-shaped cryptographic
+     * identifiers (decision D10), so the inputs never carry a
+     * supplementary-plane code point and the two never diverge in
+     * practice. A future non-BMP id alphabet would break the parity
+     * that {@code ContactIdsSqlParityIT} pins — fix both layers
+     * together rather than silently relying on UTF-16 counting here.
+     *
      * @param id the contact id; may be null or empty.
      * @return the redacted form: {@link #NULL_SENTINEL} for null,
      *         the bare {@link #ELLIPSIS} for inputs shorter than

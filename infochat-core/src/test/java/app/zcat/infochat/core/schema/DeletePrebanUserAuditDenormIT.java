@@ -1,6 +1,5 @@
-package app.zcat.infochat;
+package app.zcat.infochat.core.schema;
 
-import app.zcat.infochat.core.schema.PostgresSchemaTestBase;
 import org.junit.jupiter.api.Test;
 
 import java.sql.Connection;
