@@ -176,6 +176,23 @@ class RedactionHookTest {
     }
 
     @Test
+    void nonJsonDetailsJsonFailsClosedToSentinel() {
+        // Off-contract input: a detailsJson that is not JSON-shaped (no
+        // API-key match, so the Redactor leaves it unchanged). Before
+        // M1-348 it would reach AuditLogWriter's ?::jsonb cast and abort
+        // the surrounding audit transaction; the hook must now fail closed
+        // to the REDACTED_FIELD_JSONB sentinel instead of letting the
+        // broken value through.
+        String detailsJson = "not valid json at all }}}";
+        RedactionHook.AuditRow row = audit(detailsJson);
+
+        RedactionHook.AuditRow redacted = hook.redact(row);
+
+        assertEquals(DefaultRedactionHook.REDACTED_FIELD_JSONB, redacted.detailsJson(),
+                "non-JSON detailsJson must fail closed to the sentinel: " + redacted.detailsJson());
+    }
+
+    @Test
     void genericPatternProducesValidJson() {
         String value = "A".repeat(64);
         String detailsJson = "{\"token\":\"" + value + "\"}";

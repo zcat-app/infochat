@@ -1,9 +1,15 @@
 ---
 id: M1-348
 title: "DefaultRedactionHook: fail-closed to the sentinel on non-JSON redacted output"
-status: pending
+status: done
 created: 2026-06-14
 last_updated: 2026-06-14
+clarity_check:
+  date: 2026-06-14
+  verdict: WARN
+  warnings:
+    - "COMPLEXITY-RISK-CALIBRATED: risk: low is mildly optimistic for a change on the audit-log write path. Consider risk: medium. Not a blocker because security_relevant: true is set and the change is strictly fail-closed."
+  blockers: []
 blocked_by: []
 files_budget: 2
 files_scope:
@@ -30,13 +36,38 @@ test_plan:
 spec_refs:
   - docs/spec/security.md §Secrets handling
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-14
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 95
+      removed: 9
 escalations: []
 revisions: []
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-06-14
+    verdict: CLEAN
+    base: 579fb46c^
+    head: 579fb46c
+    verdict_file: docs/plan/m1/redteam/M1-348-2026-06-14.md
+    out_of_model_count: 0
+    note: |
+      Adversarial review of the audit-path fail-closed widening
+      (DefaultRedactionHook structural JSONB guard). CLEAN — no findings,
+      no out-of-model observations. Ran pre-merge against branch commit
+      579fb46c; nothing feeds future tickets.
 ---
 
 # M1-348: DefaultRedactionHook — fail-closed on non-JSON redacted output
