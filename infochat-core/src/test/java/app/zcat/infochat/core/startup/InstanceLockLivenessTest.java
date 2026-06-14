@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import javax.sql.DataSource;
 import java.lang.reflect.Proxy;
 import java.sql.Connection;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Instant;
@@ -91,6 +92,67 @@ class InstanceLockLivenessTest {
                 // the advisory lock does not linger on the pooled session.
                 try (Statement st = conn.createStatement()) {
                     st.execute("SELECT pg_advisory_unlock(hashtext('infochat.test'))");
+                }
+            }
+        }
+    }
+
+    @Test
+    void probeScopesOwnershipToTheGateLockNotAnyAdvisoryLock() throws Exception {
+        // M1-338: the probe must verify this session holds the SPECIFIC
+        // single-instance gate lock, not merely "some advisory lock". A second,
+        // unrelated advisory lock on the same session must NOT mask a
+        // server-side release of the gate — under the pre-M1-338 bare EXISTS
+        // predicate the lingering second lock would keep the probe reporting
+        // owned=true after the gate was released, hiding a zombie. The scoped
+        // predicate must report lost ownership and exit instead.
+        try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(true);
+
+            long gateLockId;
+            try (Statement st = conn.createStatement();
+                 ResultSet rs = st.executeQuery("SELECT hashtext('infochat.test')::int8")) {
+                rs.next();
+                gateLockId = rs.getLong(1);
+            }
+            // A distinct advisory key (+1 cannot collide with the gate's id) so
+            // the second lock is a genuinely different (classid, objid) row.
+            long otherLockId = gateLockId + 1;
+
+            try {
+                try (Statement st = conn.createStatement()) {
+                    st.execute("SELECT pg_advisory_lock(" + gateLockId + ")");
+                    st.execute("SELECT pg_advisory_lock(" + otherLockId + ")");
+                }
+
+                RecordingExitHook exit = new RecordingExitHook();
+                TestLockGuard guard = new TestLockGuard();
+                guard.primeForTest(conn, exit);
+
+                // Gate lock present (alongside the unrelated lock): the probe
+                // sees its own gate and must not exit.
+                guard.probeHeldSession();
+                assertFalse(exit.fired(),
+                        "with the gate lock held the probe must not exit, even though a second advisory lock is also held");
+
+                // Release ONLY the gate lock; the unrelated advisory lock stays
+                // held on the same session.
+                try (Statement st = conn.createStatement()) {
+                    st.execute("SELECT pg_advisory_unlock(" + gateLockId + ")");
+                }
+
+                // The gate is gone; the scoped probe must now report lost
+                // ownership and exit, even though the session still holds another
+                // advisory lock. A bare EXISTS over any advisory row would still
+                // see otherLockId and falsely stay owned=true here.
+                guard.probeHeldSession();
+                assertEquals(1, exit.lastCode(),
+                        "releasing the gate lock must trigger exit(1) even while another advisory lock is held");
+            } finally {
+                // Release every advisory lock before the connection returns to
+                // the Agroal pool, so neither lock lingers on the pooled session.
+                try (Statement st = conn.createStatement()) {
+                    st.execute("SELECT pg_advisory_unlock_all()");
                 }
             }
         }

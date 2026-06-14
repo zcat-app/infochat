@@ -1,11 +1,17 @@
 ---
 id: M1-338
 title: "AbstractInstanceLockGuard: scope the ownership probe to the gate's lock id"
-status: pending
+status: done
 created: 2026-06-14
 last_updated: 2026-06-14
+clarity_check:
+  date: 2026-06-14
+  verdict: WARN
+  warnings:
+    - "Acceptance item 2 ('the invariant becomes a coincidence rather than load-bearing') is a design-intent statement, not a runnable check; belongs as an implementation comment. Items 1, 3, 4 fully bound the behavioral contract, so it does not block."
+  blockers: []
 blocked_by: []
-files_budget: 2
+files_budget: 3
 files_scope:
   - infochat-core/src/main/java/app/zcat/infochat/core/startup/AbstractInstanceLockGuard.java
   - infochat-core/src/test/java/app/zcat/infochat/core/startup
@@ -29,9 +35,43 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: []
-escalations: []
-revisions: []
+reviews:
+  - round: 1
+    date: 2026-06-14
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 174
+      removed: 22
+escalations:
+  - date: 2026-06-14
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A — about to touch 3 files (AbstractInstanceLockGuard.java + two test
+      files under the in-scope startup test dir) against files_budget: 2. The
+      probe's new prepareStatement calls force a modify of
+      InstanceLockProbeLockScopeTest.java (its Connection proxy returned null
+      for prepareStatement → probe-thread NPE); the new scoping test (acceptance
+      item 3) needs real Postgres pg_locks, so it lands in the @QuarkusTest
+      InstanceLockLivenessTest.java — a distinct 3rd file. All three paths are
+      within files_scope; only the numeric files_budget is exceeded.
+revisions:
+  - date: 2026-06-14
+    reason: budget-breach refine — widen files_budget 2 → 3
+    snapshot:
+      files_budget: 2
+      note: |
+        files_scope unchanged (both touched test files already live under the
+        in-scope startup test dir). Only the numeric files_budget rose: the
+        probe's new prepareStatement calls force a modify of
+        InstanceLockProbeLockScopeTest.java in addition to the new scoping test
+        in InstanceLockLivenessTest.java, so 3 files are touched, not 2.
 overrides: []
 aborted_attempts: []
 reopens: []

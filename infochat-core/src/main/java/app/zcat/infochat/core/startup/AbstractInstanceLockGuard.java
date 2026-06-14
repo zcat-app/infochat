@@ -7,6 +7,7 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
 import java.lang.management.ManagementFactory;
@@ -88,6 +89,16 @@ public abstract class AbstractInstanceLockGuard {
 
     private volatile boolean lockHeld;
 
+    // The advisory lock id this guard's gate occupies, i.e. hashtext('infochat.
+    // <service>')::int8 (M1-338). Computed once on the held backend and cached
+    // so the liveness probe's ownership predicate binds the SPECIFIC gate lock
+    // id rather than testing for "any advisory lock on this backend". volatile:
+    // written at startup (or on the first probe via the test seam, which
+    // bypasses onStartup) and read on the scheduler's probe thread. A null value
+    // means "not yet computed", never "no lock".
+    @Nullable
+    private volatile Long gateLockId;
+
     // Guards the heldConnection reference and the shuttingDown flag. The probe
     // snapshots the connection under this lock and runs its blocking round-trips
     // outside it (so shutdown is never stalled behind the probe's network
@@ -124,6 +135,11 @@ public abstract class AbstractInstanceLockGuard {
             upsertHeartbeat(heldConnection, hostId, pid);
             heldConnection.setNetworkTimeout(Runnable::run, NETWORK_TIMEOUT_MILLIS);
             lockHeld = true;
+            // Compute the gate lock id once at startup on the held backend so
+            // the lock-holding session itself hashes the key — an HA replica
+            // could hash 'infochat.<service>' to a different int4 and the probe
+            // would then look for the wrong lock id (M1-338).
+            resolveGateLockId(heldConnection);
         } catch (SQLException e) {
             throw new IllegalStateException(
                 "InstanceLockGuard could not acquire its Postgres session for "
@@ -180,18 +196,32 @@ public abstract class AbstractInstanceLockGuard {
                  ResultSet rs = st.executeQuery("SELECT 1")) {
                 rs.next();
             }
-            // Ownership re-check on THIS backend session. The held session
-            // takes exactly one advisory lock (the single-instance gate)
-            // and never any other, so any advisory row for its own backend
-            // pid is that lock. pg_try_advisory_lock is deliberately not
-            // re-called here: it is reentrant, so re-acquiring would mask a
-            // server-side release rather than detect it.
-            try (Statement st = conn.createStatement();
-                 ResultSet rs = st.executeQuery(
+            // Ownership re-check on THIS backend session, scoped to the gate's
+            // SPECIFIC advisory lock id (M1-338). Binding the lock id — rather
+            // than a bare EXISTS over any advisory row for this pid — means a
+            // future second advisory lock taken on the held connection cannot
+            // mask a server-side release of the single-instance gate: the
+            // predicate matches only the gate's own (classid, objid) key. The
+            // held session taking exactly one advisory lock is now a
+            // coincidence, not a load-bearing invariant. pg_try_advisory_lock is
+            // deliberately not re-called here: it is reentrant, so re-acquiring
+            // would mask a server-side release rather than detect it.
+            //
+            // pg_locks stores a bigint advisory key split across two oid columns
+            // (classid = high 32 bits, objid = low 32 bits); the shift-and-or
+            // reconstructs the int8 key the lock was taken with. oid is
+            // unsigned, so ::bigint widens each half without sign extension and
+            // the combined value reproduces a negative hashtext result exactly.
+            long lockId = resolveGateLockId(conn);
+            try (PreparedStatement ps = conn.prepareStatement(
                      "SELECT EXISTS (SELECT 1 FROM pg_locks "
-                         + "WHERE locktype = 'advisory' AND pid = pg_backend_pid())")) {
-                rs.next();
-                owned = rs.getBoolean(1);
+                         + "WHERE locktype = 'advisory' AND pid = pg_backend_pid() "
+                         + "AND ((classid::bigint << 32) | objid::bigint) = ?)")) {
+                ps.setLong(1, lockId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    rs.next();
+                    owned = rs.getBoolean(1);
+                }
             }
         } catch (SQLException e) {
             // A concurrent shutdown closing heldConnection looks like a dead
@@ -218,6 +248,29 @@ public abstract class AbstractInstanceLockGuard {
                 "advisory lock %s is no longer held by the lock session; exiting to avoid running as a zombie",
                 lockKeyHashInput()));
             exitHook.exit(1);
+        }
+    }
+
+    /**
+     * Computes (and caches) the gate's advisory lock id —
+     * {@code hashtext('infochat.<service>')::int8} — on the given connection.
+     * Run on the held connection so the lock-holding Postgres backend hashes the
+     * key itself; the probe's ownership predicate binds the result. Idempotent:
+     * the first caller computes and caches, every later caller reads the cache.
+     */
+    private long resolveGateLockId(Connection conn) throws SQLException {
+        Long cached = gateLockId;
+        if (cached != null) {
+            return cached;
+        }
+        try (PreparedStatement ps = conn.prepareStatement("SELECT hashtext(?)::int8")) {
+            ps.setString(1, lockKeyHashInput());
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                long id = rs.getLong(1);
+                gateLockId = id;
+                return id;
+            }
         }
     }
 

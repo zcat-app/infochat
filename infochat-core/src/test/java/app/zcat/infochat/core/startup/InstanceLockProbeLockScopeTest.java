@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Proxy;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.concurrent.CountDownLatch;
@@ -68,7 +69,10 @@ class InstanceLockProbeLockScopeTest {
     // A Connection whose first statement's SELECT 1 parks until releaseProbe,
     // signalling probeInSelect on entry; every query otherwise reports a live,
     // lock-owning session (next() true, getBoolean() true) so the probe's
-    // ownership re-check passes and it exits cleanly.
+    // ownership re-check passes and it exits cleanly. The gate-lock-id
+    // resolution and the bound ownership re-check both run via prepareStatement,
+    // so the connection proxy hands those back a PreparedStatement that yields
+    // the same live result set.
     private static Connection blockingConnection(CountDownLatch probeInSelect, CountDownLatch releaseProbe) {
         ClassLoader cl = InstanceLockProbeLockScopeTest.class.getClassLoader();
         ResultSet liveResultSet = (ResultSet) Proxy.newProxyInstance(cl,
@@ -91,10 +95,18 @@ class InstanceLockProbeLockScopeTest {
                     case "close" -> null;
                     default -> defaultValue(method.getReturnType());
                 });
+        PreparedStatement preparedStatement = (PreparedStatement) Proxy.newProxyInstance(cl,
+                new Class<?>[] {PreparedStatement.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "executeQuery" -> liveResultSet;
+                    case "close" -> null;
+                    default -> defaultValue(method.getReturnType());
+                });
         return (Connection) Proxy.newProxyInstance(cl,
                 new Class<?>[] {Connection.class},
                 (proxy, method, args) -> switch (method.getName()) {
                     case "createStatement" -> statement;
+                    case "prepareStatement" -> preparedStatement;
                     case "close" -> null;
                     default -> defaultValue(method.getReturnType());
                 });
