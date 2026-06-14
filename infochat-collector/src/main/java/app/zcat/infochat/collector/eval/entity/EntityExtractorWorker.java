@@ -1,5 +1,6 @@
 package app.zcat.infochat.collector.eval.entity;
 
+import app.zcat.infochat.collector.eval.PartitionScan;
 import app.zcat.infochat.collector.eval.RetryBackoff;
 import app.zcat.infochat.collector.eval.TransactionHelper;
 import app.zcat.infochat.collector.eval.entity.EntityExtractionResult.Entity;
@@ -162,6 +163,9 @@ public class EntityExtractorWorker {
 
     @Inject
     RetryBackoff retryBackoff;
+
+    @Inject
+    PartitionScan partitionScan;
 
     @ConfigProperty(name = "infochat.llm.entity.max-concurrency")
     int maxConcurrency;
@@ -408,7 +412,10 @@ public class EntityExtractorWorker {
      * pickup filter excludes quarantined posts ({@code status='RAW'})
      * and already-processed posts ({@code entity_done=FALSE}); it does
      * NOT reference {@code embedding_done} (parallel-stage independence).
-     * The ORDER BY makes the pickup deterministic against test fixtures.
+     * The {@code fetched_at} floor ({@link PartitionScan#scanWindow()})
+     * lets the planner prune partitions of the RANGE(fetched_at) post
+     * table. The ORDER BY makes the pickup deterministic against test
+     * fixtures.
      */
     List<PostRow> enumeratePending(int limit) throws SQLException {
         final String sql =
@@ -417,12 +424,14 @@ public class EntityExtractorWorker {
                 + " WHERE status = 'RAW' "
                 + "   AND tagger_done = TRUE "
                 + "   AND entity_done = FALSE "
+                + "   AND fetched_at >= now() - ?::INTERVAL "
                 + " ORDER BY fetched_at, id "
                 + " LIMIT ?";
         List<PostRow> rows = new ArrayList<>();
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setInt(1, limit);
+            ps.setString(1, partitionScan.scanWindow());
+            ps.setInt(2, limit);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     UUID id = (UUID) rs.getObject(1);

@@ -1,5 +1,6 @@
 package app.zcat.infochat.collector.eval.embedding;
 
+import app.zcat.infochat.collector.eval.PartitionScan;
 import app.zcat.infochat.collector.eval.TransactionHelper;
 import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
@@ -171,6 +172,9 @@ public class EmbeddingWorker {
 
     @Inject
     ThrottledAdminNotifier throttledAdminNotifier;
+
+    @Inject
+    PartitionScan partitionScan;
 
     @ConfigProperty(name = "infochat.embeddings.batch-size")
     int batchSize;
@@ -448,8 +452,10 @@ public class EmbeddingWorker {
      * Enumerate the next batch of pending posts. The pickup filter
      * excludes quarantined posts ({@code status='RAW'} is the
      * load-bearing column) and already-embedded posts
-     * ({@code embedding_done=FALSE}). The ORDER BY makes the pickup
-     * deterministic.
+     * ({@code embedding_done=FALSE}). The {@code fetched_at} floor
+     * ({@link PartitionScan#scanWindow()}) lets the planner prune
+     * partitions of the RANGE(fetched_at) post table. The ORDER BY
+     * makes the pickup deterministic.
      */
     List<PostRow> enumeratePending(int limit) throws SQLException {
         final String sql =
@@ -458,12 +464,14 @@ public class EmbeddingWorker {
                 + " WHERE status = 'RAW' "
                 + "   AND tagger_done = TRUE "
                 + "   AND embedding_done = FALSE "
+                + "   AND fetched_at >= now() - ?::INTERVAL "
                 + " ORDER BY fetched_at, id "
                 + " LIMIT ?";
         List<PostRow> rows = new ArrayList<>();
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setInt(1, limit);
+            ps.setString(1, partitionScan.scanWindow());
+            ps.setInt(2, limit);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     UUID id = (UUID) rs.getObject(1);

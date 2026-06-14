@@ -1,9 +1,15 @@
 ---
 id: M1-353
 title: "collector eval: give ReadyPromoter its own poll-interval and add a partition-scan floor to per-stage pickup queries"
-status: pending
+status: done
 created: 2026-06-14
 last_updated: 2026-06-14
+clarity_check:
+  date: 2026-06-14
+  verdict: WARN
+  warnings:
+    - "TEST-CHANGES-AUTHORIZED: test_plan.modifies names the eval test directory rather than the specific test files whose existing assertions will be updated (likely ReadyPromoterIT.java for the cadence-key change, plus EmbeddingWorkerIT/TaggerWorkerIT/EntityExtractorWorkerIT for the pickup-floor). The intent is deducible from the acceptance items, but naming the files explicitly would make the authorization unambiguous."
+  blockers: []
 blocked_by: []
 files_budget: 9
 files_scope:
@@ -37,7 +43,20 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-14
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 311
+      removed: 18
 escalations: []
 revisions: []
 overrides: []

@@ -2,6 +2,7 @@ package app.zcat.infochat.collector.eval.tagger;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import app.zcat.infochat.collector.eval.PartitionScan;
 import app.zcat.infochat.collector.eval.RetryBackoff;
 import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
@@ -177,6 +178,9 @@ public class TaggerWorker {
 
     @Inject
     RetryBackoff retryBackoff;
+
+    @Inject
+    PartitionScan partitionScan;
 
     @ConfigProperty(name = "infochat.llm.tagger.max-concurrency")
     int maxConcurrency;
@@ -495,8 +499,10 @@ public class TaggerWorker {
      * Enumerate the next batch of pending posts. The pickup filter
      * excludes quarantined posts ({@code status='RAW'} is the
      * load-bearing column) and posts already-processed
-     * ({@code tagger_done=false}). The ORDER BY makes the pickup
-     * deterministic against test fixtures.
+     * ({@code tagger_done=false}). The {@code fetched_at} floor
+     * ({@link PartitionScan#scanWindow()}) lets the planner prune
+     * partitions of the RANGE(fetched_at) post table. The ORDER BY
+     * makes the pickup deterministic against test fixtures.
      */
     List<PostRow> enumeratePending(int limit) throws SQLException {
         final String sql =
@@ -508,12 +514,14 @@ public class TaggerWorker {
                 + "   AND p.stage1_done = TRUE "
                 + "   AND (p.stage1_flagged = FALSE OR p.stage2_done = TRUE) "
                 + "   AND p.tagger_done = FALSE "
+                + "   AND p.fetched_at >= now() - ?::INTERVAL "
                 + " ORDER BY p.fetched_at, p.id "
                 + " LIMIT ?";
         List<PostRow> rows = new ArrayList<>();
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setInt(1, limit);
+            ps.setString(1, partitionScan.scanWindow());
+            ps.setInt(2, limit);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     UUID id = (UUID) rs.getObject(1);

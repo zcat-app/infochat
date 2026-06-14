@@ -1,5 +1,6 @@
 package app.zcat.infochat.collector.eval.ready;
 
+import app.zcat.infochat.collector.eval.PartitionScan;
 import app.zcat.infochat.core.log.SafeLog;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -99,6 +100,9 @@ public class ReadyPromoter {
     @Inject
     DataSource dataSource;
 
+    @Inject
+    PartitionScan partitionScan;
+
     /**
      * Test-only seam: invoked with the in-transaction connection AFTER
      * the UPDATE succeeds but BEFORE the {@code pg_notify} statement.
@@ -116,8 +120,14 @@ public class ReadyPromoter {
      * Scheduled tick. Enumerates pending posts and promotes each one
      * (each promotion is its own transaction — a failure on one post
      * does not block the rest of the batch).
+     *
+     * <p>Cadence is owned by {@code infochat.eval.ready-promoter.poll-interval},
+     * independent of the embedding stage: Stage 5 promotion is a distinct
+     * step whose latency must not be coupled to embedding poll tuning.
+     * The key defaults to the same value the embedding poll uses, so
+     * observable steady-state behaviour is unchanged.
      */
-    @Scheduled(every = "{infochat.embeddings.poll-interval}",
+    @Scheduled(every = "{infochat.eval.ready-promoter.poll-interval}",
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     public void onTick() {
         List<PromotionCandidate> pending;
@@ -238,7 +248,10 @@ public class ReadyPromoter {
      * {@code stage1_done}, the Stage-2-only-if-flagged conjunction,
      * {@code tagger_done}, and the two independent parallel stages
      * {@code entity_done} and {@code embedding_done}. The
-     * {@code status='RAW'} filter excludes quarantined posts.
+     * {@code status='RAW'} filter excludes quarantined posts. The
+     * {@code fetched_at} floor ({@link PartitionScan#scanWindow()})
+     * lets the planner prune partitions of the RANGE(fetched_at) post
+     * table.
      */
     List<PromotionCandidate> enumeratePending(int limit) throws SQLException {
         final String sql =
@@ -250,12 +263,14 @@ public class ReadyPromoter {
                 + "   AND tagger_done = TRUE "
                 + "   AND entity_done = TRUE "
                 + "   AND embedding_done = TRUE "
+                + "   AND fetched_at >= now() - ?::INTERVAL "
                 + " ORDER BY fetched_at, id "
                 + " LIMIT ?";
         List<PromotionCandidate> rows = new ArrayList<>();
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setInt(1, limit);
+            ps.setString(1, partitionScan.scanWindow());
+            ps.setInt(2, limit);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     UUID id = (UUID) rs.getObject(1);

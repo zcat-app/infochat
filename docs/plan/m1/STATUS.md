@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 17 |
+| pending | 16 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 381 |
+| done | 382 |
 | deferred | 5 |
 | **total** | **403** |
 
@@ -26,7 +26,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-351 — assets: widen the price_snapshot dedup key to include vs_currency, realigning spec + design DDL (complexity: medium, risk: medium)
 - M1-352 — assets: Kraken attribution URL must honour the quote currency; drop dead AssetSnapshotFetcher refresh fields (complexity: medium, risk: low)
-- M1-353 — collector eval: give ReadyPromoter its own poll-interval and add a partition-scan floor to per-stage pickup queries (complexity: medium, risk: medium)
 - M1-354 — collector eval: load prompt templates via the class's own loader; coalesce pgvector format rejections instead of wedging the batch (complexity: medium, risk: low)
 - M1-355 — ssrf: resolve the close-drain body-cap contradiction on the followed-redirect path and unify the two bounded-read loops (complexity: medium, risk: medium)
 - M1-356 — llm-adapter: stop echoing provider body on 2xx parse-failure; add the remote LLM-task startup disclosure WARN (complexity: medium, risk: low)
@@ -76,6 +75,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-353 | collector eval: give ReadyPromoter its own poll-interval and add a partition-scan floor to per-stage pickup queries | 2026-06-14 | round 1 APPROVE |
 | M1-350 | arch: consolidate the duplicated InfochatProfile enum + Validator into infochat-core | 2026-06-14 | round 1 APPROVE |
 | M1-349 | Spec/design: correct the asset-fetch SPI name (AssetDataSource, not the post Fetcher) | 2026-06-14 | — |
 | M1-348 | DefaultRedactionHook: fail-closed to the sentinel on non-JSON redacted output | 2026-06-14 | round 1 APPROVE |
@@ -85,7 +85,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-344 | llm-adapter: single-source per-task config keys and the embedding provider name | 2026-06-14 | round 1 APPROVE |
 | M1-343 | Provider --page parsing: surface a usage error on a malformed page value | 2026-06-14 | round 1 APPROVE |
 | M1-342 | ReEvaluationJob: bound infra-failure re-judge fan-out to one call per tick during an outage | 2026-06-14 | round 1 APPROVE |
-| M1-341 | FetchScheduler: exclude stream-shaped kinds + filter due kinds at SQL | 2026-06-14 | round 1 APPROVE |
 
 ---
 
@@ -555,7 +554,7 @@ M1-349 (done)
 M1-350 (done)
 M1-351 (pending) ← runnable
 M1-352 (pending) ← runnable
-M1-353 (pending) ← runnable
+M1-353 (done)
 M1-354 (pending) ← runnable
 M1-355 (pending) ← runnable
 M1-356 (pending) ← runnable
