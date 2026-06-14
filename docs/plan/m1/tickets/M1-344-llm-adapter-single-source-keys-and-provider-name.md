@@ -5,13 +5,14 @@ status: pending
 created: 2026-06-14
 last_updated: 2026-06-14
 blocked_by: []
-files_budget: 8
+files_budget: 9
 files_scope:
   - infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/ModelTask.java
   - infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/routing/LlmRouter.java
   - infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/routing/LlmRouterStartupGuard.java
   - infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/impl/OpenAiCompatibleProvider.java
   - infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/impl/AnthropicProvider.java
+  - infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/impl/OpenAiCompatibleEmbeddingProvider.java
   - infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/EmbeddingProvider.java
   - infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/metrics/MeteredEmbeddingProvider.java
   - infochat-llm-adapter/src/test/java/app/zcat/infochat/llm
@@ -37,8 +38,30 @@ test_plan:
 spec_refs: []
 decision_refs: []
 reviews: []
-escalations: []
-revisions: []
+escalations:
+  - date: 2026-06-14
+    reason: clarity-fail
+    reviewer_verdict_excerpt: |
+      FILES-BUDGET-PLAUSIBLE: FAIL — files_scope is missing
+      OpenAiCompatibleEmbeddingProvider
+      (infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/impl/OpenAiCompatibleEmbeddingProvider.java).
+      Acceptance item 2 requires it to pin a stable name, but it is not in
+      files_scope; files_budget 8 would need adjustment to admit it.
+revisions:
+  - date: 2026-06-14
+    reason: clarity-fail rework — acceptance item 2 names OpenAiCompatibleEmbeddingProvider (it pins the stable embedding provider name) but that file was absent from files_scope; add it and bump files_budget 8→9. No acceptance/out_of_scope text changes; the gap was scope-list-only.
+    prior_values: |
+      status: escalated
+      files_budget: 8
+      files_scope:
+        - infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/ModelTask.java
+        - infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/routing/LlmRouter.java
+        - infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/routing/LlmRouterStartupGuard.java
+        - infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/impl/OpenAiCompatibleProvider.java
+        - infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/impl/AnthropicProvider.java
+        - infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/EmbeddingProvider.java
+        - infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/metrics/MeteredEmbeddingProvider.java
+        - infochat-llm-adapter/src/test/java/app/zcat/infochat/llm
 overrides: []
 aborted_attempts: []
 reopens: []
