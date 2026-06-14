@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 18 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 380 |
 | deferred | 5 |
-| **total** | **385** |
+| **total** | **403** |
 
 ---
 
@@ -24,7 +24,24 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-350 — arch: consolidate the duplicated InfochatProfile enum + Validator into infochat-core (complexity: medium, risk: low)
+- M1-351 — assets: widen the price_snapshot dedup key to include vs_currency, realigning spec + design DDL (complexity: medium, risk: medium)
+- M1-352 — assets: Kraken attribution URL must honour the quote currency; drop dead AssetSnapshotFetcher refresh fields (complexity: medium, risk: low)
+- M1-353 — collector eval: give ReadyPromoter its own poll-interval and add a partition-scan floor to per-stage pickup queries (complexity: medium, risk: medium)
+- M1-354 — collector eval: load prompt templates via the class's own loader; coalesce pgvector format rejections instead of wedging the batch (complexity: medium, risk: low)
+- M1-355 — ssrf: resolve the close-drain body-cap contradiction on the followed-redirect path and unify the two bounded-read loops (complexity: medium, risk: medium)
+- M1-356 — llm-adapter: stop echoing provider body on 2xx parse-failure; add the remote LLM-task startup disclosure WARN (complexity: medium, risk: low)
+- M1-357 — llm-adapter: SPI-owned task-config exception, one no-providers exception type, symmetric HttpClient seam, non-cloning EmbeddingResult.dimension() (complexity: medium, risk: low)
+- M1-358 — messaging: emit the adapter.inbound.dropped{reason=oversize} counter + WARN; log inbound-handler stack traces (complexity: medium, risk: low)
+- M1-359 — messaging: OutboundRateLimiter sub-millisecond cap rounding + charge a token per wire frame on the Signal edit-failure fallback (complexity: medium, risk: low)
+- M1-360 — messaging: reset subprocess consecutive-crash counters on healthy uptime; make the config-bean enablement gate honest; route outbound cap check through Utf8 (complexity: medium, risk: low)
+- M1-361 — core: split SQL-only audit verbs out of the writer-facing AuditAction enum; rename the config-baked STARTUP_RELEASE_ON_STAGE2_FAILURE_TRUE verb (complexity: medium, risk: medium)
+- M1-362 — core: cap per-node suppressed-throwable width in SafeLog; tighten isJsonShaped to reject trailing junk (complexity: low, risk: low)
+- M1-363 — provider: remove the audit-bypassing LlmOutputSanitizer constructor; type-check tool-arg list elements at the LLM dispatch boundary (complexity: medium, risk: medium)
+- M1-364 — provider: fold probation_until into the per-dispatch UserSnapshot to remove the per-inbound probation queries (complexity: medium, risk: medium)
+- M1-365 — provider: batch the tag-vocab upsert into one round-trip; cache asset-snapshot reads within the freshness window (complexity: medium, risk: low)
+- M1-366 — provider: extract the InboundRouter.onMessage post-LLM dispatch/commit section into named methods (complexity: low, risk: medium)
+- M1-367 — docs/comments: fix the Stage1RegexSet grammar, the EmbeddingMetadataDao 'defensive' framing, and the SimpleX mention-parser constant-time claim (complexity: low, risk: low)
 
 ---
 
@@ -536,4 +553,22 @@ M1-346 (done)
 M1-347 (done)
 M1-348 (done)
 M1-349 (done)
+M1-350 (pending) ← runnable
+M1-351 (pending) ← runnable
+M1-352 (pending) ← runnable
+M1-353 (pending) ← runnable
+M1-354 (pending) ← runnable
+M1-355 (pending) ← runnable
+M1-356 (pending) ← runnable
+M1-357 (pending) ← runnable
+M1-358 (pending) ← runnable
+M1-359 (pending) ← runnable
+M1-360 (pending) ← runnable
+M1-361 (pending) ← runnable
+M1-362 (pending) ← runnable
+M1-363 (pending) ← runnable
+M1-364 (pending) ← runnable
+M1-365 (pending) ← runnable
+M1-366 (pending) ← runnable
+M1-367 (pending) ← runnable
 ```
