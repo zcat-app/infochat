@@ -74,7 +74,7 @@ public final class Stage1RegexSet {
     /**
      * Delimiter injection — attacker tries to forge the
      * {@code <<<UNTRUSTED>>>} markers or a role tag that survives
-     * the Stage-1 strip. This rule catches pre-existing
+     * the Stage-1 strip. Catching pre-existing
      * {@code [REDACTED:...]}-shaped placeholders is NOT this rule's
      * job; per-row placeholder randomization in
      * {@link PlaceholderIds#next()} is what stops that vector.

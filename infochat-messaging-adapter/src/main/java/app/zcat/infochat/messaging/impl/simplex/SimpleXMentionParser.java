@@ -49,11 +49,17 @@ final class SimpleXMentionParser {
      * byte-equal to {@code botQueueAddress}. An empty list returns false
      * (no mentions → cannot mention the bot).
      *
-     * <p>The per-entry comparison is constant-time
-     * ({@link MessageDigest#isEqual}) so the number of leading bytes a
-     * mention shares with the bot's queue address is not observable via
-     * timing — the queue address is the group-mode authorization trust
-     * anchor (D10) and must not leak byte-by-byte.</p>
+     * <p>The per-entry comparison uses {@link MessageDigest#isEqual},
+     * which is constant-time only across operands of equal length and
+     * short-circuits on a length mismatch. That short-circuit leaks
+     * nothing usable here: a SimpleX queue address has a protocol-fixed
+     * length determined by its key size, not a secret, so an attacker
+     * already knows the bot address's length. Within equal-length
+     * operands the comparison does not short-circuit, so the number of
+     * leading bytes a same-length mention shares with the bot's queue
+     * address is not observable via timing — the queue address is the
+     * group-mode authorization trust anchor (D10) and must not leak
+     * byte-by-byte.</p>
      *
      * @param mentionQueueAddresses queue addresses extracted from the
      *                              frame's mention metadata; never null,

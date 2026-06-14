@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 15 |
+| pending | 14 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 383 |
+| done | 384 |
 | deferred | 5 |
 | **total** | **403** |
 
@@ -38,7 +38,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-364 — provider: fold probation_until into the per-dispatch UserSnapshot to remove the per-inbound probation queries (complexity: medium, risk: medium)
 - M1-365 — provider: batch the tag-vocab upsert into one round-trip; cache asset-snapshot reads within the freshness window (complexity: medium, risk: low)
 - M1-366 — provider: extract the InboundRouter.onMessage post-LLM dispatch/commit section into named methods (complexity: low, risk: medium)
-- M1-367 — docs/comments: fix the Stage1RegexSet grammar, the EmbeddingMetadataDao 'defensive' framing, and the SimpleX mention-parser constant-time claim (complexity: low, risk: low)
 
 ---
 
@@ -74,6 +73,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-367 | docs/comments: fix the Stage1RegexSet grammar, the EmbeddingMetadataDao 'defensive' framing, and the SimpleX mention-parser constant-time claim | 2026-06-14 | round 1 APPROVE |
 | M1-356 | llm-adapter: stop echoing provider body on 2xx parse-failure; add the remote LLM-task startup disclosure WARN | 2026-06-14 | round 1 APPROVE |
 | M1-353 | collector eval: give ReadyPromoter its own poll-interval and add a partition-scan floor to per-stage pickup queries | 2026-06-14 | round 1 APPROVE |
 | M1-350 | arch: consolidate the duplicated InfochatProfile enum + Validator into infochat-core | 2026-06-14 | round 1 APPROVE |
@@ -83,7 +83,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-346 | infochat-core: schema-test javadoc, audit-denorm IT package, contact-id parity comment | 2026-06-14 | round 1 APPROVE |
 | M1-345 | infochat-ssrf: bracket-host IPv6 validation, redirect drain order, IPv6 zero-scan helper reuse | 2026-06-14 | round 1 APPROVE |
 | M1-344 | llm-adapter: single-source per-task config keys and the embedding provider name | 2026-06-14 | round 1 APPROVE |
-| M1-343 | Provider --page parsing: surface a usage error on a malformed page value | 2026-06-14 | round 1 APPROVE |
 
 ---
 
@@ -567,5 +566,5 @@ M1-363 (pending) ← runnable
 M1-364 (pending) ← runnable
 M1-365 (pending) ← runnable
 M1-366 (pending) ← runnable
-M1-367 (pending) ← runnable
+M1-367 (done)
 ```

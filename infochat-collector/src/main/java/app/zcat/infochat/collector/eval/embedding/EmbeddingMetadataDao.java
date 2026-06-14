@@ -50,9 +50,11 @@ public class EmbeddingMetadataDao {
 
     /**
      * Read the singleton metadata row. Returns {@link Optional#empty()}
-     * if no row exists (defensive: V11's seed INSERT guarantees the
-     * row from the first Flyway run forward, but a hand-cleaned test
-     * DB or a future migration that removed the seed should not NPE).
+     * if no row exists — the legitimate empty case at the SQL
+     * deserialization boundary. V11's seed INSERT guarantees the row
+     * from the first Flyway run forward, but a hand-cleaned test DB or
+     * a future migration that removed the seed yields no row, and the
+     * caller chooses how to handle that absence.
      */
     public Optional<Metadata> readSingleton() {
         final String sql =
