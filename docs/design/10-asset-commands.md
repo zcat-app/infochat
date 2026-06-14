@@ -31,7 +31,7 @@ the operator-secret SPI surface, which is its own decision.
   ```                                                  
   infochat-collector                                                                                                                                                                                                                                    
   └── assets/                                                                                                                                                                                                                                           
-      ├── AssetSnapshotFetcher           // implements Fetcher (polled)                                                                                                                                                                                 
+      ├── AssetSnapshotFetcher           // @Scheduled bean: drives AssetDataSource impls                                                                                                                                                                                 
       ├── source/                                                                                                                                                                                                                                       
       │   ├── AssetDataSource            // SPI: fetch one snapshot for (asset, vs)                                                                                                                                                                     
       │   ├── CoingeckoSnapshotSource    // impl        
@@ -157,7 +157,8 @@ producerless channel was dead machinery. The closed NOTIFY list is now
 
 ## 10.4 Refresh & cache strategy
 
-Each `(asset, source, vs_currency)` triple is a `Fetcher` tick. Per                                                                                                                                                                                   
+Each `(asset, source, vs_currency)` triple is one `AssetDataSource`
+fetch per asset-fetch tick. Per                                                                                                                                                                                   
 profile:
 
 | Profile | Refresh interval | Notes |                                                                                                                                                                                                                

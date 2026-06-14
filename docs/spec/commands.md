@@ -267,8 +267,11 @@ Cross-cutting rules for asset commands (D39):
   table outside the post pipeline. They never go through Stage 1/2,
   tagging, entity extraction, or embedding, and they are never
   surfaced via `/summary`, `/save`, or `/saved`.
-- **Polled, cached, refreshed on a tick.** Polled data sources reuse
-  the existing `Fetcher` SPI. **The refresh interval is keyed
+- **Polled, cached, refreshed on a tick.** Polled data sources use the
+  dedicated asset-fetch SPI (`architecture.md` §Ingest SPIs — Output
+  type), separate from the post `Fetcher`: snapshots are written
+  **directly** to `price_snapshot` and never enter the post outbox or
+  Stage 1/2. **The refresh interval is keyed
   per-data-source-host** (i.e., per `sub_verb` family — one interval
   for `coingecko`, another for `kraken`, another for `bitfinex`),
   not per-`(asset, sub_verb)` and not per-asset. This mirrors the
