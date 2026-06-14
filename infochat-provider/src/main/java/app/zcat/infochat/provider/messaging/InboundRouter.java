@@ -727,112 +727,153 @@ public class InboundRouter {
         // handlers and the chat agent borrow (and release) their own,
         // and nothing may pin a connection under an LLM call.
 
-        // Step 6 — Parse + dispatch (slash-command resolver or
-        // chat-mode fallback). The body is @Nullable: a slash handler
-        // that owns its own message lifecycle via the ProgressNotifier
-        // returns null (handleSlash propagates it) to signal
-        // "already delivered" — the router then performs NO send for
-        // that invocation, so a placeholder→finalize handler does not
-        // double-send. Every other branch assigns a non-null body.
-        @Nullable String body;
+        // Step 6 — parse + dispatch (slash-command resolver or chat-mode
+        // fallback), then deliver. A DispatchResult.AlreadyDelivered means a
+        // self-delivering handler already shipped its reply through the
+        // ProgressNotifier, so the router performs NO send for that
+        // invocation (no double-send); a DispatchResult.Reply carries the
+        // body to send and gates the post-delivery chat-turn commit.
+        DispatchResult dispatchResult =
+                dispatchSlashOrChat(msg.scope(), normalized, snapshot.get().id(), dispatchScopeId);
+        if (dispatchResult instanceof DispatchResult.Reply reply) {
+            MessageHandle handle = sendReply(msg.scope(), reply.body(), adapterName);
+            runPostDeliveryCommit(msg.scope(), adapterName, handle);
+        }
+    }
+
+    /**
+     * Step-6 dispatch: route a normalized inbound to the slash-command
+     * resolver or the chat-mode agent, applying the per-group command and
+     * LLM rate caps, wrapped in the dispatch-failure catch. Returns a
+     * {@link DispatchResult} — {@link DispatchResult.Reply} carrying a body
+     * for the router to send, or {@link DispatchResult.AlreadyDelivered}
+     * when a self-delivering slash/chat handler already shipped its reply
+     * via the ProgressNotifier (the router then performs no send).
+     *
+     * <p>Runs AFTER the dispatch connection is closed — no router-held pool
+     * connection survives into the LLM call; command handlers and the chat
+     * agent borrow (and release) their own.</p>
+     */
+    private DispatchResult dispatchSlashOrChat(ScopeRef scope, String normalized,
+                                               UUID actorId, UUID dispatchScopeId) {
         try {
             if (normalized.startsWith("/")) {
-                // Per-group command rate cap (D47) per spec §Rate
-                // limiting: an aggregate sub-bucket keyed on groups.id
-                // bounding slash-command dispatch volume from all
-                // members. "Approved only" holds by position
-                // (pending/rejected stopped at step 3.5); DM slash
-                // dispatch never consults the group bucket. Overflow
-                // sends the fixed group.command_rate_limit reply per
-                // design §4.9 — unlike the reply bucket's silent drop.
-                // The bucket keys on the carried dispatchScopeId — the
-                // groups.id resolved once at step 4.1.
-                if (msg.scope() instanceof ScopeRef.Group
+                // Per-group command rate cap (D47) per spec §Rate limiting:
+                // an aggregate sub-bucket keyed on groups.id bounding slash-
+                // command dispatch volume from all members. "Approved only"
+                // holds by position (pending/rejected stopped at step 3.5);
+                // DM slash dispatch never consults the group bucket. Overflow
+                // sends the fixed group.command_rate_limit reply per design
+                // §4.9 — unlike the reply bucket's silent drop. The bucket
+                // keys on the carried dispatchScopeId — the groups.id resolved
+                // once at step 4.1.
+                if (scope instanceof ScopeRef.Group
                         && !rateCapBucket.tryAcquireGroupCommand(dispatchScopeId)) {
-                    body = bundleLoader.get(BundleKeys.GROUP_COMMAND_RATE_LIMIT, inboundContext.effectiveLanguage());
-                } else {
-                    body = handleSlash(msg.scope(), normalized);
+                    return new DispatchResult.Reply(
+                            bundleLoader.get(BundleKeys.GROUP_COMMAND_RATE_LIMIT, inboundContext.effectiveLanguage()));
                 }
-            } else {
-                // Chat-mode dispatch: enforce LLM rate cap, then delegate
-                // to the chat agent (the chat-mode body cap already fired
-                // before step 4.1 — see the intake-step order above).
-                // scope_kind is "dm" or "group"; the scope id is the
-                // carried dispatchScopeId — the user's UUID for DM, the
-                // group's UUID for group scope (per-scope isolation,
-                // schema §Invariants).
-                UUID actorId = snapshot.get().id();
-                if (!llmRateCap.tryAcquire(actorId)) {
-                    body = bundleLoader.get(BundleKeys.ERROR_CHAT_LLM_RATE_CAP, inboundContext.effectiveLanguage());
-                } else {
-                    String scopeKind = chatModeScopeKindOf(msg.scope());
-                    // Per-group LLM backstop (D47, M1-222) per spec
-                    // §Rate limiting: the per-user cap above fires
-                    // first; this aggregate sub-bucket keyed on
-                    // groups.id bounds LLM cost for groups with many
-                    // active members. Group scope only — the DM case
-                    // never consults the group bucket. "Approved only"
-                    // holds by position (pending/rejected stopped at
-                    // step 3.5). Overflow sends the fixed
-                    // group.llm_rate_limit reply per design §4.9 —
-                    // unlike the reply bucket's silent drop. Periodic
-                    // digests are system-initiated and never reach
-                    // this path.
-                    if (msg.scope() instanceof ScopeRef.Group
-                            && !rateCapBucket.tryAcquireGroupLlm(dispatchScopeId)) {
-                        // Group-cap rejection refunds the per-user token
-                        // acquired above — the backstop must not drain the
-                        // sender's personal budget on fixed replies.
-                        llmRateCap.refund(actorId);
-                        body = bundleLoader.get(BundleKeys.GROUP_LLM_RATE_LIMIT, inboundContext.effectiveLanguage());
-                    } else {
-                        body = dispatchChat(actorId, scopeKind, dispatchScopeId, normalized);
-                    }
-                }
+                // A null handleSlash return signals the handler already
+                // delivered its reply via the ProgressNotifier — map it to
+                // AlreadyDelivered so the router skips the send (no
+                // double-send for a placeholder→finalize handler).
+                @Nullable String slashBody = handleSlash(scope, normalized);
+                return slashBody == null
+                        ? new DispatchResult.AlreadyDelivered()
+                        : new DispatchResult.Reply(slashBody);
             }
+
+            // Chat-mode dispatch: enforce LLM rate cap, then delegate to the
+            // chat agent (the chat-mode body cap already fired before step
+            // 4.1 — see the intake-step order above). scope_kind is "dm" or
+            // "group"; the scope id is the carried dispatchScopeId — the
+            // user's UUID for DM, the group's UUID for group scope (per-scope
+            // isolation, schema §Invariants).
+            if (!llmRateCap.tryAcquire(actorId)) {
+                return new DispatchResult.Reply(
+                        bundleLoader.get(BundleKeys.ERROR_CHAT_LLM_RATE_CAP, inboundContext.effectiveLanguage()));
+            }
+            String scopeKind = chatModeScopeKindOf(scope);
+            // Per-group LLM backstop (D47, M1-222) per spec §Rate limiting:
+            // the per-user cap above fires first; this aggregate sub-bucket
+            // keyed on groups.id bounds LLM cost for groups with many active
+            // members. Group scope only — the DM case never consults the
+            // group bucket. "Approved only" holds by position (pending/
+            // rejected stopped at step 3.5). Overflow sends the fixed
+            // group.llm_rate_limit reply per design §4.9 — unlike the reply
+            // bucket's silent drop. Periodic digests are system-initiated and
+            // never reach this path.
+            if (scope instanceof ScopeRef.Group
+                    && !rateCapBucket.tryAcquireGroupLlm(dispatchScopeId)) {
+                // Group-cap rejection refunds the per-user token acquired
+                // above — the backstop must not drain the sender's personal
+                // budget on fixed replies.
+                llmRateCap.refund(actorId);
+                return new DispatchResult.Reply(
+                        bundleLoader.get(BundleKeys.GROUP_LLM_RATE_LIMIT, inboundContext.effectiveLanguage()));
+            }
+            // A null dispatchChat return propagates a /stop-cancelled chat
+            // turn — map to AlreadyDelivered so the router skips the send
+            // (no double-reply; ChatAgent already let the /stop handler reply).
+            @Nullable String chatBody = dispatchChat(actorId, scopeKind, dispatchScopeId, normalized);
+            return chatBody == null
+                    ? new DispatchResult.AlreadyDelivered()
+                    : new DispatchResult.Reply(chatBody);
         } catch (RuntimeException e) {
             SafeLog.error(log,
                     "InboundRouter dispatch failed for scope="
-                            + ContactIds.redact(scopeIdOf(msg.scope())),
+                            + ContactIds.redact(scopeIdOf(scope)),
                     e);
             // The exception's own message is NEVER interpolated here —
             // a fixed bundle reply sidesteps M1-020's sanitization concern.
-            body = bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage());
+            return new DispatchResult.Reply(
+                    bundleLoader.get(BundleKeys.ERROR_INTERNAL, inboundContext.effectiveLanguage()));
         }
+    }
 
-        // A null body means a self-delivering handler already shipped
-        // its reply through the ProgressNotifier — skip the router send.
-        if (body != null) {
-            MessageHandle handle = sendReply(msg.scope(), body, adapterName);
-            // Post-delivery chat-turn persistence (spec messaging.md
-            // §Failure handling). takePendingChatCommit() is non-null only
-            // when this dispatch computed a chat reply; it is read (and
-            // cleared) unconditionally so a permanent failure does not
-            // strand it. Persist + auto-compress run ONLY when the reply
-            // was delivered (non-null handle): on permanent failure the
-            // commit is dropped, so neither turn is written.
-            ChatAgent.PendingCommit pendingChatCommit = inboundContext.takePendingChatCommit();
-            if (handle != null && pendingChatCommit != null) {
-                try {
-                    Optional<String> autoCompressNotice = pendingChatCommit.commit();
-                    // Auto-compress fires between turns; its notice now rides
-                    // a second outbound because persistence runs AFTER the
-                    // reply is delivered (it can no longer be appended to the
-                    // already-sent reply).
-                    autoCompressNotice.ifPresent(
-                            notice -> sendReply(msg.scope(), notice, adapterName));
-                } catch (RuntimeException e) {
-                    // Send succeeded but post-delivery persistence failed.
-                    // The user already received the reply, so a resend would
-                    // duplicate it — log and move on; do NOT re-enter the
-                    // send path.
-                    SafeLog.error(log,
-                            "Chat-turn persistence failed after delivery for scope="
-                                    + ContactIds.redact(scopeIdOf(msg.scope())),
-                            e);
-                }
-            }
+    /**
+     * Post-delivery chat-turn persistence (spec messaging.md §Failure
+     * handling). {@link InboundContext#takePendingChatCommit()} is non-null
+     * only when this dispatch computed a chat reply; it is read (and cleared)
+     * unconditionally so a permanent failure does not strand it. Persist +
+     * auto-compress run ONLY when the reply was delivered (non-null
+     * {@code handle}): on permanent failure the commit is dropped, so neither
+     * turn is written.
+     */
+    private void runPostDeliveryCommit(ScopeRef scope, String adapterName, @Nullable MessageHandle handle) {
+        ChatAgent.PendingCommit pendingChatCommit = inboundContext.takePendingChatCommit();
+        if (handle == null || pendingChatCommit == null) {
+            return;
         }
+        try {
+            Optional<String> autoCompressNotice = pendingChatCommit.commit();
+            // Auto-compress fires between turns; its notice now rides a second
+            // outbound because persistence runs AFTER the reply is delivered
+            // (it can no longer be appended to the already-sent reply).
+            autoCompressNotice.ifPresent(
+                    notice -> sendReply(scope, notice, adapterName));
+        } catch (RuntimeException e) {
+            // Send succeeded but post-delivery persistence failed. The user
+            // already received the reply, so a resend would duplicate it —
+            // log and move on; do NOT re-enter the send path.
+            SafeLog.error(log,
+                    "Chat-turn persistence failed after delivery for scope="
+                            + ContactIds.redact(scopeIdOf(scope)),
+                    e);
+        }
+    }
+
+    /**
+     * Outcome of the step-6 {@link #dispatchSlashOrChat} call: either a
+     * {@link Reply} body the router must send, or {@link AlreadyDelivered}
+     * when a self-delivering handler already shipped its reply via the
+     * ProgressNotifier and the router must NOT send. Makes the former
+     * {@code @Nullable String body} null-sentinel an explicit type so the
+     * skip-send branch is a pattern match, not a null check.
+     */
+    private sealed interface DispatchResult {
+        record Reply(String body) implements DispatchResult {}
+
+        record AlreadyDelivered() implements DispatchResult {}
     }
 
     /**

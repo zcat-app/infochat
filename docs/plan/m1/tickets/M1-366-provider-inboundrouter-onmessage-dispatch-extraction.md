@@ -1,9 +1,14 @@
 ---
 id: M1-366
 title: "provider: extract the InboundRouter.onMessage post-LLM dispatch/commit section into named methods"
-status: pending
+status: done
 created: 2026-06-14
 last_updated: 2026-06-14
+clarity_check:
+  date: 2026-06-14
+  verdict: WARN
+  warnings: ["Acceptance item 1 is verifiable only by diff inspection (\"flat top-to-bottom read\", method names introduced with \"e.g.\"); for a pure refactor the suite-green items 2/3 anchor it sufficiently."]
+  blockers: []
 blocked_by: []
 files_budget: 3
 files_scope:
@@ -28,7 +33,20 @@ test_plan:
     - all tests currently green on main (this is a behaviour-preserving refactor)
 spec_refs: []
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-14
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 3
+      added: 143
+      removed: 99
 escalations: []
 revisions: []
 overrides: []
