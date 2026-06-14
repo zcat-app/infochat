@@ -573,6 +573,64 @@ In production the init script runs once with strong passwords from env-substitut
 
 ---
 
+### 7.7.2 First-run setup wizard (`setup.sh`)
+
+The §7.7.1 wrappers assume an operator who has *already* produced `secrets.env`, a bootstrap-sources file, registered messaging-client identities, and a working `application.properties`. Producing that input set is the hard part for a first-time operator or a public-beta tester. The **first-run setup wizard** closes that gap: a single interactive entry point that walks an operator from a bare Linux host to a running, verified deployment, asking one question at a time with a sensible default pre-filled for every prompt so a tester can accept the defaults by pressing Enter.
+
+This subsection is the design commitment to the wizard's contract. Like the §7.7.1 wrappers, the wizard ships at Milestone 1, not Milestone 0 — there is nothing to stand up before the modules and compose services it drives exist.
+
+First-phase scope:
+
+- **Linux only.** macOS/Windows are out of scope for the first phase; `0-doctor.sh` checks the host OS and refuses elsewhere with a clear message.
+- **Containerized apps.** Collector and Provider run as compose services, so the wizard's only host prerequisites are Docker and Docker Compose v2 — no host JDK 25, because the build happens inside the image (contrast §7.8.1's host-jar/systemd shape, which does require a host JDK 25).
+- **Local LLM is operator-chosen:** Ollama (the design default — [05-llm-and-embeddings.md §5.7](05-llm-and-embeddings.md) model table) **or** llama.cpp via the `openai-compatible` provider (§7.4); plus the remote-API path for the `remote-llm` profile.
+- **Both v1 production adapters (SimpleX + Signal)** are offered. At least one MUST be configured: the in-memory adapter is test-only (§7.7), and a deployment needs a non-empty bootstrap-admin union to start (§7.6.3).
+
+#### Relationship to §7.7.1
+
+The wizard sits **above** the one-click wrappers; it does not replace them. The wizard's responsibility ends once the deployment is up and verified. Day-to-day operation (restart a service, tear down, re-embed, back up) stays with the §7.7.1 scripts. The wizard MAY call those wrappers internally (e.g., `down.sh` during a reset) but owns no steady-state responsibility.
+
+#### Structure
+
+A menu/orchestrator `setup.sh` at the repo root drives a set of single-purpose subscripts under `scripts/setup/`, run in dependency order. `setup.sh` records completed steps in a git-ignored `.setup-state` file alongside the generated config, so a re-run resumes from the first incomplete step rather than restarting, and never regenerates a value that already exists.
+
+The right-hand column maps each step to the operator inputs enumerated in [../spec/deployment.md](../spec/deployment.md) §Operator inputs — the table is the audit that the wizard covers all seven and drops none.
+
+| Step | Subscript | Does | Operator input |
+|---|---|---|---|
+| 0 | `0-doctor.sh` | Preflight: Linux host; Docker daemon reachable; Compose v2; TCP ports 5432 / 8080 / 8081 (and 11434 for Ollama) free; minimum free disk. Fails fast naming the unmet check. | — |
+| 1 | `1-profile.sh` | Pick `laptop`\|`vps`\|`pi`\|`remote-llm` (§7.2). Default `laptop`. Writes `quarkus.profile`. | 1 (profile) |
+| 2 | `2-secrets.sh` | `openssl rand` the three DB-role passwords; prompt for any LLM API key. Writes `secrets.env` mode 0600 (§7.3 — secrets never enter the properties file). Skips any value already present. | 5 (DB creds), 6 (API key) |
+| 3 | `3-postgres.sh` | `docker compose up -d postgres`; the role / extension / database setup runs from `docker/postgres-init.sql` (§7.7) on first container init. | 5 (DB creds) |
+| 4 | `4-llm.sh` | Branch on the choice. **Ollama:** start the ollama service and `ollama pull` the profile's chat / security / embedding models. **llama.cpp:** start the llama.cpp service and fetch the configured GGUF. **Remote:** collect base-URL + key only. Writes `infochat.llm.*` and `infochat.embeddings.*` (§7.4). | 6 (LLM config) |
+| 5 | `5-bootstrap.sh` | Install the default `bootstrap-sources.json` (the §7.6.1 example) if none exists; optionally enable `bootstrap-assets.json` (§7.6.2). | 3 (sources), 4 (assets) |
+| 6 | `6-adapter.sh` | For each chosen adapter: drive the out-of-band registration (SimpleX queue creation; Signal phone+captcha — §7.7 operator note, [06-messaging.md §6.5.1](06-messaging.md)), capture the resulting `identity-dir` (plus `SIMPLEX_SESSION_TOKEN`), and collect that adapter's `bootstrap-admin-contact-id`. Enforces a non-empty admin union before proceeding (§7.6.3). Writes `infochat.adapters` and the per-adapter blocks (§7.4). | 2 (bootstrap admin), 7 (adapters) |
+| 7 | `7-apps.sh` | `docker compose up -d` the Collector (which runs Flyway), wait until it is healthy, then the Provider — encoding the [../spec/deployment.md](../spec/deployment.md) §Topology startup ordering (only the Collector migrates in production). | — |
+| 8 | `8-verify.sh` | Poll `/q/health` on the loopback management bind (§7.4) until ready or timeout; print a green/red summary naming any unhealthy component. | — |
+
+#### Behavior contract
+
+Every subscript obeys the §7.7.1 script shape (`set -euo pipefail`, echoes the command it runs, returns the wrapped exit code unchanged, prints a one-line `-h`/`--help` synopsis) and additionally:
+
+- **Prefilled defaults.** Every prompt shows its default in brackets; an empty answer takes the default. A `laptop`-profile, Ollama, single-adapter setup is completable by pressing Enter at every prompt except the adapter-registration interaction that genuinely needs a human (below).
+- **Idempotent / resumable.** Re-running `setup.sh` reads `.setup-state` and offers to resume from the first incomplete step. No generated secret is overwritten and no DB role is re-created.
+- **Non-interactive escape hatch.** `setup.sh --defaults` runs end-to-end taking every default (still pausing only where adapter registration needs a human), for scripted or CI smoke use.
+- **Reset.** `setup.sh --reset` tears the deployment down (via `down.sh`) and clears `.setup-state`, prompting for confirmation before deleting any generated secret or data volume (the repo's confirm-before-delete posture).
+
+#### What stays manual
+
+The wizard drives but cannot fully eliminate the interactive parts of messaging-client registration: SimpleX queue creation and Signal phone-number / captcha enrolment require human steps (§7.7 operator note). The wizard's contribution is to *sequence* those steps, capture their on-disk output into the correct `identity-dir`, and wire the resulting properties — not to remove the human from the loop.
+
+#### Dependencies
+
+The wizard is a thin layer over artifacts that must exist first. None are new spec commitments; they are the concrete pieces the wizard orchestrates:
+
+- App container images and a `docker-compose.yml` extended with Collector and Provider services (today's §7.7 compose file is Postgres-only).
+- `docker/postgres-init.sql` creating the three roles + extensions (§7.7).
+- A committed default `bootstrap-sources.json` (§7.6.1).
+
+---
+
 ## 7.8 Production deployment
 
 ### 7.8.1 Single-host (recommended for v1)
