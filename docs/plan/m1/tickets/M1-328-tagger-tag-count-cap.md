@@ -1,9 +1,14 @@
 ---
 id: M1-328
 title: "TaggerWorker: cap accepted tag count per post"
-status: pending
+status: done
 created: 2026-06-14
 last_updated: 2026-06-14
+clarity_check:
+  date: 2026-06-14
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
 files_budget: 2
 files_scope:
@@ -32,13 +37,41 @@ test_plan:
 spec_refs:
   - docs/spec/llm.md §Failure handling
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-14
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 97
+      removed: 15
 escalations: []
 revisions: []
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-06-14
+    verdict: CLEAN
+    base: 9a001c51a17ea615fa1ec41597e88ca5124ac60b
+    head: working-tree (uncommitted, branch worktree-M1-328)
+    verdict_file: docs/plan/m1/redteam/M1-328-2026-06-14.md
+    out_of_model_count: 1
+    note: |
+      CLEAN — no findings at any severity on the tag-count-cap diff. One
+      OUT-OF-MODEL advisory: parseTags() materializes the full LLM tag list
+      before MAX_TAGS_PER_POST drops the overflow. Adversary judged this NOT a
+      threat-model gap — the spec's bounded-input commitment is the Provider LLM
+      tool surface, not the Collector ingest tagger, and the diff is itself a
+      hardening addition. Surfaced for the user to decide whether to extend the
+      model with an explicit ingest-side parse cap; no remediation ticket filed.
 ---
 
 # M1-328: TaggerWorker — cap accepted tag count per post

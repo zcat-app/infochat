@@ -15,6 +15,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
@@ -92,6 +93,52 @@ class TaggerWorkerTest {
         var state = throttledAdminNotifier.getState(TaggerWorker.ERROR_CLASS_TAGGER_FALLBACK);
         assertTrue(state.isPresent(),
             "ThrottledAdminNotifier should fire on bootstrap fallback");
+    }
+
+    @Test
+    void capsValidTagsAtMax_keepsFirstByEmissionOrder_reportsCappedCount() throws Exception {
+        // Seed MAX+2 distinct vocabulary tags so the cap actually bites.
+        int over = TaggerWorker.MAX_TAGS_PER_POST + 2;
+        List<String> emitted = new ArrayList<>();
+        for (int i = 0; i < over; i++) {
+            String name = "captag" + i;
+            seedVocabularyTag(name);
+            emitted.add(name);
+        }
+        tagVocabulary.load();
+
+        // Direct assertion: validate truncates to the cap in emission
+        // order and counts the distinct tags dropped purely by the cap.
+        TaggerWorker.ValidationResult result = taggerWorker.validate(emitted);
+        assertEquals(emitted.subList(0, TaggerWorker.MAX_TAGS_PER_POST), result.valid(),
+            "first MAX_TAGS_PER_POST tags kept in emission order");
+        assertEquals(over - TaggerWorker.MAX_TAGS_PER_POST, result.cappedCount(),
+            "tags past the cap reported as capped");
+
+        // End-to-end: persisted post.tags holds exactly the first MAX,
+        // bootstrap fallback does NOT fire (the LLM succeeded).
+        List<String> quoted = new ArrayList<>();
+        for (String t : emitted) {
+            quoted.add("\"" + t + "\"");
+        }
+        stub().setNextResponse("{\"tags\":[" + String.join(",", quoted) + "]}");
+        SeededPost post = seedPost("tag-cap", List.of("ai", "java"));
+
+        taggerWorker.processOne(rowFor(post, List.of("ai", "java")));
+
+        assertPostState(post.id, true, false,
+            new HashSet<>(emitted.subList(0, TaggerWorker.MAX_TAGS_PER_POST)));
+    }
+
+    @Test
+    void normalTagCount_belowCap_keepsAllAndReportsZeroCapped() {
+        // A normal 1–4 tag response is unchanged by the cap.
+        List<String> emitted = List.of("security", "news", "finance");
+
+        TaggerWorker.ValidationResult result = taggerWorker.validate(emitted);
+
+        assertEquals(emitted, result.valid(), "all valid tags kept below the cap");
+        assertEquals(0, result.cappedCount(), "nothing capped below the cap");
     }
 
     // ---------- helpers ----------

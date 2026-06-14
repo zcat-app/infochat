@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 20 |
+| pending | 19 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 360 |
+| done | 361 |
 | deferred | 5 |
 | **total** | **385** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-328 — TaggerWorker: cap accepted tag count per post (complexity: low, risk: low)
 - M1-330 — LLM providers: redact base-url credentials on parse-failure paths + reject userinfo at config boundary (complexity: medium, risk: low)
 - M1-332 — SignalJsonRpcClient: bounded connect timeout on the daemon socket (complexity: low, risk: medium)
 - M1-333 — ChatAgent: consume cached InboundContext.effectiveLanguage instead of re-querying (complexity: medium, risk: low)
@@ -81,6 +80,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 |---|---|---|---|
 | M1-331 | Signal group inbound: coalesce overlapping bot-mention spans + instanceof-guard JSON accessors | 2026-06-14 | round 1 APPROVE |
 | M1-329 | ListSavesTool: aggregate byte budget + title truncation at the LLM tool boundary | 2026-06-14 | round 1 APPROVE |
+| M1-328 | TaggerWorker: cap accepted tag count per post | 2026-06-14 | round 1 APPROVE |
 | M1-327 | EmbeddingWorker: notify-once + skip on non-finite vector components | 2026-06-14 | round 1 APPROVE |
 | M1-326 | Nostr: gate relay productivity on signature-verified delivery | 2026-06-14 | round 1 APPROVE |
 | M1-325 | Align InboundRouterChatPersistFailureTest with M1-323 test-double constructors | 2026-06-13 | — |
@@ -88,7 +88,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-323 | Provider group-row reuse: Outcome.Approved carries groups.id, drop router step-4.1 re-read | 2026-06-13 | round 1 APPROVE |
 | M1-322 | Adapter observability: AdapterMetrics catalogue | 2026-06-13 | round 1 APPROVE |
 | M1-320 | Derive SimpleX bot queue address via APIShowMyAddress | 2026-06-13 | round 1 APPROVE |
-| M1-313 | Chat-memory write ordering on permanent delivery failure | 2026-06-13 | round 1 APPROVE |
 
 ---
 
@@ -533,7 +532,7 @@ M1-324 (done)
 M1-325 (done)
 M1-326 (done)
 M1-327 (done)
-M1-328 (pending) ← runnable
+M1-328 (done)
 M1-329 (done)
 M1-330 (pending) ← runnable
 M1-331 (done)

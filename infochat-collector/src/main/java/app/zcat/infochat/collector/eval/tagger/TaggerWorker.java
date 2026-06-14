@@ -140,6 +140,18 @@ public class TaggerWorker {
     /** Canonical error class emitted by the bootstrap-fallback path. */
     public static final String ERROR_CLASS_TAGGER_FALLBACK = "tagger.fallback_to_bootstrap";
 
+    /**
+     * Hard upper bound on valid tags accepted from one LLM response —
+     * 2x headroom over the design-intended 1–4 tags per post. This is a
+     * STRUCTURAL bound on the LLM trust boundary, separate from the
+     * vocabulary/validity filtering: a misbehaving or prompt-injected
+     * model returning many vocabulary-valid tags must not be able to
+     * inflate {@code post.tags} unboundedly and multiply the post's
+     * match count across every downstream {@code tags && ARRAY[...]}
+     * overlap query (M1-328).
+     */
+    static final int MAX_TAGS_PER_POST = 8;
+
     private static final Logger LOG = LoggerFactory.getLogger(TaggerWorker.class);
 
     /**
@@ -328,8 +340,9 @@ public class TaggerWorker {
         // when zero passed (the zero-valid path is the most useful
         // signal for vocabulary drift).
         LOG.info(
-            "TaggerWorker: post_id={} attempt={} tagger_partial_valid valid tags={} invalid={}",
-            row.id(), attempt, validated.valid().size(), validated.invalidCount());
+            "TaggerWorker: post_id={} attempt={} tagger_partial_valid valid tags={} invalid={} capped={}",
+            row.id(), attempt, validated.valid().size(), validated.invalidCount(),
+            validated.cappedCount());
 
         if (validated.valid().isEmpty()) {
             return AttemptResult.zeroValid();
@@ -416,19 +429,31 @@ public class TaggerWorker {
      * Normalize every parsed tag and partition into valid / invalid
      * by vocabulary membership. Duplicates after normalization are
      * dropped (the {@link LinkedHashSet} preserves first-emit order).
+     * At most {@link #MAX_TAGS_PER_POST} valid tags are accepted, in
+     * emission order (the {@link LinkedHashSet} order is the model's
+     * relevance signal); distinct vocabulary-valid tags past the cap
+     * are counted as capped, not added. Package-private so the unit
+     * test can assert the cap and the capped count directly.
      */
-    private ValidationResult validate(List<String> parsed) {
+    ValidationResult validate(List<String> parsed) {
         Set<String> valid = new LinkedHashSet<>();
         int invalid = 0;
+        int capped = 0;
         for (String raw : parsed) {
             String normalized = normalizeTag(raw);
-            if (normalized != null && tagVocabulary.contains(normalized)) {
-                valid.add(normalized);
-            } else {
+            if (normalized == null || !tagVocabulary.contains(normalized)) {
                 invalid++;
+                continue;
+            }
+            if (valid.size() < MAX_TAGS_PER_POST) {
+                valid.add(normalized);
+            } else if (!valid.contains(normalized)) {
+                // A distinct vocab-valid tag rejected purely by the cap.
+                // A duplicate of an already-accepted tag is not a drop.
+                capped++;
             }
         }
-        return new ValidationResult(List.copyOf(valid), invalid);
+        return new ValidationResult(List.copyOf(valid), invalid, capped);
     }
 
     /**
@@ -555,6 +580,13 @@ public class TaggerWorker {
 
     private enum AttemptKind { SUCCESS, SCHEMA_VIOLATING, ZERO_VALID, UNREACHABLE }
 
-    private record ValidationResult(List<String> valid, int invalidCount) {
+    /**
+     * Partition of one parsed tag list: {@code valid} is the accepted
+     * (capped) tag set, {@code invalidCount} the vocabulary/character-
+     * class rejects, {@code cappedCount} the distinct vocab-valid tags
+     * dropped purely by {@link #MAX_TAGS_PER_POST}. Package-private so
+     * the unit test can assert the capped count.
+     */
+    record ValidationResult(List<String> valid, int invalidCount, int cappedCount) {
     }
 }
