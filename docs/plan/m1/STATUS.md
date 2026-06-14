@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 396 |
+| done | 397 |
 | deferred | 5 |
 | **total** | **403** |
 
@@ -25,7 +25,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-360 — messaging: reset subprocess consecutive-crash counters on healthy uptime; make the config-bean enablement gate honest; route outbound cap check through Utf8 (complexity: medium, risk: low)
-- M1-361 — core: split SQL-only audit verbs out of the writer-facing AuditAction enum; rename the config-baked STARTUP_RELEASE_ON_STAGE2_FAILURE_TRUE verb (complexity: medium, risk: medium)
 
 ---
 
@@ -67,10 +66,10 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-364 | provider: fold probation_until into the per-dispatch UserSnapshot to remove the per-inbound probation queries | 2026-06-14 | round 1 APPROVE |
 | M1-363 | provider: remove the audit-bypassing LlmOutputSanitizer constructor; type-check tool-arg list elements at the LLM dispatch boundary | 2026-06-14 | round 1 APPROVE |
 | M1-362 | core: cap per-node suppressed-throwable width in SafeLog; tighten isJsonShaped to reject trailing junk | 2026-06-14 | round 1 APPROVE |
+| M1-361 | core: split SQL-only audit verbs out of the writer-facing AuditAction enum; rename the config-baked STARTUP_RELEASE_ON_STAGE2_FAILURE_TRUE verb | 2026-06-14 | round 1 APPROVE |
 | M1-359 | messaging: OutboundRateLimiter sub-millisecond cap rounding + charge a token per wire frame on the Signal edit-failure fallback | 2026-06-14 | round 1 APPROVE |
 | M1-358 | messaging: emit the adapter.inbound.dropped{reason=oversize} counter + WARN; log inbound-handler stack traces | 2026-06-14 | round 2 APPROVE |
 | M1-357 | llm-adapter: SPI-owned task-config exception, one no-providers exception type, symmetric HttpClient seam, non-cloning EmbeddingResult.dimension() | 2026-06-14 | round 1 APPROVE |
-| M1-356 | llm-adapter: stop echoing provider body on 2xx parse-failure; add the remote LLM-task startup disclosure WARN | 2026-06-14 | round 1 APPROVE |
 
 ---
 
@@ -548,7 +547,7 @@ M1-357 (done)
 M1-358 (done)
 M1-359 (done)
 M1-360 (pending) ← runnable
-M1-361 (pending) ← runnable
+M1-361 (done)
 M1-362 (done)
 M1-363 (done)
 M1-364 (done)

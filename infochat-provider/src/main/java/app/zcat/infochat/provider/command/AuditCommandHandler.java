@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.command;
 
 import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.AuditVerb;
 import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
@@ -50,8 +51,12 @@ public class AuditCommandHandler implements CommandHandler {
     private static final String SELECT_USER_SQL =
             "SELECT id, contact_id, is_admin FROM users WHERE adapter = ? AND contact_id = ?";
 
-    private static final String ACCEPTED_ACTIONS = Arrays.stream(AuditAction.values())
-            .map(Enum::name)
+    // The /audit filter resolves over the FULL verb catalogue (AuditVerb),
+    // not just application-writable verbs: a bot admin must be able to filter
+    // for procedure-only rows such as APPROVE_QUARANTINE that the SECURITY
+    // DEFINER procedures wrote (M1-361).
+    private static final String ACCEPTED_ACTIONS = Arrays.stream(AuditVerb.values())
+            .map(AuditVerb::name)
             .collect(Collectors.joining(", "));
 
     @Inject BundleLoader bundleLoader;
@@ -91,7 +96,7 @@ public class AuditCommandHandler implements CommandHandler {
 
         if (args.action != null) {
             try {
-                AuditAction.valueOf(args.action.toUpperCase(Locale.ROOT));
+                AuditVerb.valueOf(args.action.toUpperCase(Locale.ROOT));
             } catch (IllegalArgumentException e) {
                 return reply(scope, MessageFormat.format(
                         bundleLoader.get(BundleKeys.ERROR_AUDIT_UNKNOWN_ACTION, inboundContext.effectiveLanguage()),

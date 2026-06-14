@@ -1,7 +1,7 @@
 package app.zcat.infochat.collector.flyway;
 
 import app.zcat.infochat.collector.testsupport.SeedDataSource;
-import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.ProcedureOnlyAction;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
@@ -34,8 +34,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *       never writes the column) is rejected with SQLState 23514
  *       (check_violation).</li>
  *   <li>The audit verb the V27 migration writes directly in SQL is
- *       represented in the {@link AuditAction} application-layer
- *       closure — cross-checked against the literal in the V27
+ *       represented in the {@link ProcedureOnlyAction} closure (the
+ *       procedure/migration-only verbs split out of {@code AuditAction}
+ *       in M1-361) — cross-checked against the literal in the V27
  *       classpath resource so the two cannot silently diverge.</li>
  *   <li>The {@code idx_post_source_published} composite index exists
  *       on {@code post(source_id, published_at DESC)} — the
@@ -73,16 +74,18 @@ class SchemaHardeningIT {
     }
 
     @Test
-    void v27AuditVerbIsInAuditActionClosedSet() throws IOException {
+    void v27AuditVerbIsInProcedureOnlyClosedSet() throws IOException {
         // The enum lookup throws IllegalArgumentException if the verb is
-        // missing, failing the test.
-        assertNotNull(AuditAction.valueOf(V27_AUDIT_VERB));
+        // missing, failing the test. The V27 verb is procedure/migration-only,
+        // so it lives in ProcedureOnlyAction, not the writer-facing AuditAction
+        // (M1-361).
+        assertNotNull(ProcedureOnlyAction.valueOf(V27_AUDIT_VERB));
 
         // Cross-check against the migration source so a rename on either
         // side surfaces here instead of as an unrepresented audit verb.
         String v27Sql = readClasspathResource("db/migration/V27__d47_remove_group_only.sql");
         assertTrue(v27Sql.contains("'" + V27_AUDIT_VERB + "'"),
-            "V27 must write the verb the AuditAction closed set represents: " + V27_AUDIT_VERB);
+            "V27 must write the verb the ProcedureOnlyAction closed set represents: " + V27_AUDIT_VERB);
     }
 
     @Test

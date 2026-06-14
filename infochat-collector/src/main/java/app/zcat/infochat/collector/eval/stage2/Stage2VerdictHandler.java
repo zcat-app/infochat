@@ -182,7 +182,7 @@ public class Stage2VerdictHandler {
      * Number of posts released through the Stage-2 fail-open path
      * (release-on-stage2-failure=true + INFRA_FAILURE) since process
      * start. The operator-visible counter complementing the boot-time
-     * {@code STARTUP_RELEASE_ON_STAGE2_FAILURE_TRUE} audit row: the row
+     * {@code STARTUP_RELEASE_ON_STAGE2_FAILURE} audit row: the row
      * says the posture is armed, this says how often it fired.
      */
     public long releasedStage2FailedCount() {

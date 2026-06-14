@@ -1,6 +1,6 @@
 package app.zcat.infochat.provider.command;
 
-import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.audit.AuditVerb;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
@@ -142,8 +142,8 @@ class AuditCommandHandlerTest {
         String expected = MessageFormat.format(
                 bundleLoader.get(BundleKeys.ERROR_AUDIT_UNKNOWN_ACTION),
                 "NONSENSE",
-                Arrays.stream(AuditAction.values())
-                        .map(Enum::name).collect(Collectors.joining(", ")));
+                Arrays.stream(AuditVerb.values())
+                        .map(AuditVerb::name).collect(Collectors.joining(", ")));
         assertEquals(expected, reply.text(),
                 "unknown --action must return friendly error listing accepted values");
     }

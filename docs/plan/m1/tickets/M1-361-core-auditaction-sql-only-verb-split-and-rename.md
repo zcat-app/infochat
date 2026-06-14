@@ -1,9 +1,15 @@
 ---
 id: M1-361
 title: "core: split SQL-only audit verbs out of the writer-facing AuditAction enum; rename the config-baked STARTUP_RELEASE_ON_STAGE2_FAILURE_TRUE verb"
-status: pending
+status: done
 created: 2026-06-14
 last_updated: 2026-06-14
+clarity_check:
+  date: 2026-06-14
+  verdict: WARN
+  warnings:
+    - "TEST-CHANGES-AUTHORIZED: SchemaHardeningIT.v27AuditVerbIsInAuditActionClosedSet() calls AuditAction.valueOf(\"D47_GROUP_ONLY_PREBAN_CONVERSION\") — breaks when that verb moves to ProcedureOnlyAction; collector test_plan 'if any' hedge understates a definite change."
+  blockers: []
 blocked_by: []
 files_budget: 9
 files_scope:
@@ -41,13 +47,40 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-14
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 162
+      removed: 53
 escalations: []
 revisions: []
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-06-14
+    verdict: CLEAN
+    base: main
+    head: m1/M1-361-core-auditaction-sql-only-verb-split-and-rename
+    verdict_file: docs/plan/m1/redteam/M1-361-2026-06-14.md
+    out_of_model_count: 0
+    note: |
+      Branch-tip (committed, pre-merge) adversarial review. CLEAN. The
+      verb split strengthens the audit-before-effect boundary (procedure-only
+      verbs are now compile-time unreachable from AuditLogWriter.write); the
+      /audit read path widening to the full AuditVerb catalogue relaxes an
+      input allowlist only for an already admin-gated read of the redacted
+      audit_log_view, surfacing no new disclosure. No remediation ticket.
 ---
 
 # M1-361: AuditAction SQL-only verb split + verb rename

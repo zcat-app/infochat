@@ -52,20 +52,19 @@ package app.zcat.infochat.core.audit;
  *       the verb carries no {@code _ALL} suffix.</li>
  * </ul>
  *
- * <p>{@link #STARTUP_RELEASE_ON_STAGE2_FAILURE_TRUE} pre-dates this
+ * <p>{@link #STARTUP_RELEASE_ON_STAGE2_FAILURE} pre-dates this
  * enum: it was minted inline by M1-033's
  * {@code StartupReleaseOnStage2FailureWarn} bean and is centralized
  * here so the writer-migration call site has a single symbol.</p>
  *
- * <p>SECURITY DEFINER stored procedures
- * ({@code delete_preban_user}, {@code approve_quarantine},
- * {@code reject_quarantine}) carve out their own INSERT path and
- * write verbs directly in SQL ({@code UNBAN_PREBAN_DELETE},
- * {@code APPROVE_QUARANTINE}, {@code REJECT_QUARANTINE}). Those
- * verbs are still represented here so application-layer code
- * (read-paths, future admin reviews) can reference one symbol.</p>
+ * <p>This enum carries ONLY application-writable verbs. The verbs
+ * that exclusively SECURITY DEFINER stored procedures write in SQL
+ * live in {@link ProcedureOnlyAction} (M1-361) so that
+ * {@link AuditLogWriter#write}, which takes an {@link AuditAction},
+ * cannot be handed a procedure-only verb — the compiler now enforces
+ * the audit-before-effect carve-out the comment used to police.</p>
  */
-public enum AuditAction {
+public enum AuditAction implements AuditVerb {
     BOOTSTRAP_ADMIN,
     BOOTSTRAP_SOURCE_LOAD,
     BOOTSTRAP_ASSET_LOAD,
@@ -106,7 +105,6 @@ public enum AuditAction {
     // and no-op probes leave a surviving intent row while
     // non-admin-caller refusals stay audit-silent.
     UNBAN_INTENT,
-    UNBAN_PREBAN_DELETE,
     VOUCH,
     VOUCH_INTENT,
     INVITE_CREATE,
@@ -140,13 +138,6 @@ public enum AuditAction {
     APPROVE_GROUP,
     REJECT_GROUP,
     REJECT_GROUP_INTENT,
-    // D47_GROUP_ONLY_PREBAN_CONVERSION is written directly in SQL by
-    // the V27 migration: one row recording the bulk group_only →
-    // preban conversion when the group_only registration path was
-    // removed. Same represented-here pattern as the SECURITY DEFINER
-    // verbs — no application code writes it, but the closure stays
-    // complete so read-paths can reference one symbol.
-    D47_GROUP_ONLY_PREBAN_CONVERSION,
     // LIST_GROUPS records the bot-admin-only /list-groups read — a
     // deployment-wide enumeration of every groups row (id,
     // approval_status, activated_by contact id (redacted),
@@ -169,8 +160,6 @@ public enum AuditAction {
     LIST_SOURCES_ALL,
     AUDIT_READ,
     QUARANTINE_LIST,
-    APPROVE_QUARANTINE,
-    REJECT_QUARANTINE,
     EXPORT,
     FORGET,
     CHAT_MODE,
@@ -191,14 +180,10 @@ public enum AuditAction {
     DIGEST_RETRY,
     DIGEST_SLOT_MISSED,
     QUARANTINE_TTL_REJECT,
-    // The '_TRUE' suffix bakes a config value into the verb: this row is
-    // written only when infochat.security.release-on-stage2-failure=true is
-    // in effect, so the verb name doubles as the observed config state.
-    // Renaming it to a value-agnostic verb is a deferred judgment call, not
-    // a free edit — every historical audit_log.action TEXT value would need
-    // rewriting (a data migration). There is no SQL CHECK on
-    // audit_log.action to update (V5 §2.1.8 — the closure is
-    // application-layer), so the cost is the row rewrite, owned by a
-    // migration ticket if ever wanted.
-    STARTUP_RELEASE_ON_STAGE2_FAILURE_TRUE
+    // Names the EVENT (the boot-time release-on-stage2-failure posture
+    // warning), not the config VALUE: the observed
+    // infochat.security.release-on-stage2-failure value rides in the row's
+    // details_json at the emitting call site, so config evolution lands in
+    // JSON without a verb rewrite.
+    STARTUP_RELEASE_ON_STAGE2_FAILURE
 }

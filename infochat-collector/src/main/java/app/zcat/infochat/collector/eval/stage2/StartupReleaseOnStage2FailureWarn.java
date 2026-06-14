@@ -67,7 +67,7 @@ public class StartupReleaseOnStage2FailureWarn {
      * spec design commits to. Held as a public constant so the
      * audit-write helper and the IT both reference one literal.
      */
-    public static final String AUDIT_VERB = AuditAction.STARTUP_RELEASE_ON_STAGE2_FAILURE_TRUE.name();
+    public static final String AUDIT_VERB = AuditAction.STARTUP_RELEASE_ON_STAGE2_FAILURE.name();
 
     private static final Logger LOG = Logger.getLogger(StartupReleaseOnStage2FailureWarn.class);
 
@@ -114,10 +114,17 @@ public class StartupReleaseOnStage2FailureWarn {
 
     private void writeAuditRow() throws SQLException {
         String targetId = hostPidTargetId();
-        String detailsJson = "{\"profile\":\"" + JsonEscaper.escape(profileLabel) + "\"}";
+        // The verb (STARTUP_RELEASE_ON_STAGE2_FAILURE) names the event; the
+        // observed config value rides here in details_json so the verb stays
+        // value-agnostic (M1-361). releaseOnStage2Failure is always true on this
+        // path — the !releaseOnStage2Failure early return above already excluded
+        // the false case — but it is emitted from the field rather than a
+        // hard-coded literal so the row records what was actually observed.
+        String detailsJson = "{\"profile\":\"" + JsonEscaper.escape(profileLabel) + "\""
+                + ",\"release_on_stage2_failure\":" + releaseOnStage2Failure + "}";
 
         RedactionHook.AuditRow row = RedactionHook.AuditRow.builder()
-                .action(AuditAction.STARTUP_RELEASE_ON_STAGE2_FAILURE_TRUE)
+                .action(AuditAction.STARTUP_RELEASE_ON_STAGE2_FAILURE)
                 .targetKind(TargetKind.SYSTEM)
                 .targetId(targetId)
                 .detailsJson(detailsJson)
