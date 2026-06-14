@@ -75,6 +75,58 @@ class OpenAiCompatibleEmbeddingProviderTest {
     }
 
     @Test
+    void embedPlacesVectorsByWireIndexNotResponsePosition() {
+        // The OpenAI /embeddings contract lets a provider return elements out
+        // of order, tagging each with the input `index` it belongs to. A reply
+        // whose data[] is reversed (index 1 first, then index 0) must map each
+        // vector back to its input slot, not zip-index by response position.
+        respondWith("{\"data\":["
+            + "{\"index\":1,\"embedding\":[0.3,0.4]},"
+            + "{\"index\":0,\"embedding\":[0.1,0.2]}]}");
+
+        OpenAiCompatibleEmbeddingProvider provider = provider();
+
+        List<EmbeddingResult> results = provider.embed(List.of("first text", "second text"));
+
+        assertEquals(2, results.size(), "one result per input");
+        assertEquals(new EmbeddingResult(new float[] {0.1f, 0.2f}), results.get(0),
+            "the index-0 vector must land at input slot 0 even though it arrived second");
+        assertEquals(new EmbeddingResult(new float[] {0.3f, 0.4f}), results.get(1),
+            "the index-1 vector must land at input slot 1 even though it arrived first");
+    }
+
+    @Test
+    void embedThrowsWhenWireIndexDuplicated() {
+        // Two elements claiming the same input slot would overwrite one vector
+        // and leave another input uncovered — a batch failure at the seam, not
+        // a silently short or mis-attributed result.
+        respondWith("{\"data\":["
+            + "{\"index\":0,\"embedding\":[0.1,0.2]},"
+            + "{\"index\":0,\"embedding\":[0.3,0.4]}]}");
+
+        OpenAiCompatibleEmbeddingProvider provider = provider();
+
+        EmbeddingCallFailedException ex = assertThrows(EmbeddingCallFailedException.class,
+            () -> provider.embed(List.of("first text", "second text")));
+        assertTrue(ex.getMessage().contains("duplicate index 0"),
+            "a duplicated wire index must throw naming the collision; got: " + ex.getMessage());
+    }
+
+    @Test
+    void embedThrowsWhenWireIndexOutOfRange() {
+        // An index outside [0, inputCount) cannot name any input slot; treat it
+        // as a batch failure rather than risk an out-of-bounds placement.
+        respondWith("{\"data\":[{\"index\":5,\"embedding\":[0.1,0.2]}]}");
+
+        OpenAiCompatibleEmbeddingProvider provider = provider();
+
+        EmbeddingCallFailedException ex = assertThrows(EmbeddingCallFailedException.class,
+            () -> provider.embed(List.of("only one input")));
+        assertTrue(ex.getMessage().contains("out of range"),
+            "an out-of-range wire index must throw naming the range violation; got: " + ex.getMessage());
+    }
+
+    @Test
     void embedThrowsOn503RegardlessOfRetryAfterHeader() {
         // The Retry-After machinery was deleted (no consumer ever slept on
         // it). Surviving behavior: an unavailable 503 — header or not — is

@@ -34,11 +34,14 @@ import java.util.Optional;
  * }
  * }</pre>
  * Response body's load-bearing path is {@code data[i].embedding} — a
- * dense float array per input element, in input order per the OpenAI
- * /embeddings contract. {@code data.length} must equal the request's
- * {@code input.length}; a divergence is treated as a wrong-shape
- * failure by the caller (EmbeddingWorker's one-failure-fails-batch
- * retry).
+ * dense float array per input element. The OpenAI /embeddings contract
+ * tags each element with the input {@code index} it belongs to, so order
+ * is recoverable via that field rather than guaranteed positional; the
+ * parse places each vector at its declared slot (falling back to response
+ * position when {@code index} is absent). The set of indices must cover
+ * {@code [0, input.length)} exactly; a divergence is treated as a
+ * wrong-shape failure by the caller (EmbeddingWorker's
+ * one-failure-fails-batch retry).
  *
  * <h2>Per-deployment config</h2>
  * <p>Per {@code docs/spec/llm.md} §SPI shape "Scope of the enum":
@@ -198,9 +201,44 @@ public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
             throw new EmbeddingCallFailedException(
                 "OpenAiCompatibleEmbeddingProvider: response missing data[] from " + uri.getHost());
         }
-        List<EmbeddingResult> results = new ArrayList<>(data.size());
+        // The OpenAI /embeddings contract tags each data[] element with the
+        // input `index` it belongs to: order is recoverable via that field,
+        // NOT guaranteed positional. Place each parsed vector at its declared
+        // input slot rather than zip-indexing by response position, so a
+        // reordered reply cannot silently attribute the wrong vector to a post
+        // (the silent cosine-corruption class the per-coordinate type check
+        // below also guards). A reply that omits `index` — the in-order,
+        // index-less shape the default local provider returns — falls back to
+        // response position, so an already-in-order reply yields output
+        // identical to the positional loop this replaced. (M1-369)
+        EmbeddingResult[] slots = new EmbeddingResult[expectedCount];
+        int placed = 0;
         for (int i = 0; i < data.size(); i++) {
-            JsonNode embedding = data.get(i).path("embedding");
+            JsonNode element = data.get(i);
+            JsonNode indexNode = element.path("index");
+            int slot;
+            if (indexNode.isMissingNode()) {
+                slot = i;
+            } else if (indexNode.isIntegralNumber()) {
+                slot = indexNode.intValue();
+            } else {
+                throw new EmbeddingCallFailedException(
+                    "OpenAiCompatibleEmbeddingProvider: data[" + i + "].index is not an integer from "
+                        + uri.getHost());
+            }
+            if (slot < 0 || slot >= expectedCount) {
+                throw new EmbeddingCallFailedException(
+                    "OpenAiCompatibleEmbeddingProvider: data[" + i + "].index " + slot
+                        + " out of range [0," + expectedCount + ") from " + uri.getHost());
+            }
+            // A duplicate slot (two elements claiming one input) would overwrite
+            // a placed vector and leave another input uncovered — caught here so
+            // the message names the collision, not a downstream gap.
+            if (slots[slot] != null) {
+                throw new EmbeddingCallFailedException(
+                    "OpenAiCompatibleEmbeddingProvider: duplicate index " + slot + " from " + uri.getHost());
+            }
+            JsonNode embedding = element.path("embedding");
             if (!embedding.isArray()) {
                 throw new EmbeddingCallFailedException(
                     "OpenAiCompatibleEmbeddingProvider: data[" + i + "].embedding missing or not array from "
@@ -222,18 +260,25 @@ public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
                 }
                 vector[j] = (float) coordinate.doubleValue();
             }
-            results.add(new EmbeddingResult(vector));
+            slots[slot] = new EmbeddingResult(vector);
+            placed++;
         }
-        // The SPI contract is one EmbeddingResult per input, in input
-        // order. A size divergence means the provider truncated or padded
-        // the batch reply; a caller zip-indexing vectors to texts would
-        // silently mis-attribute embeddings. Throw at the seam so the
-        // divergence becomes a batch failure (EmbeddingWorker's
-        // one-failure-fails-batch retry) rather than a corrupt result.
-        if (results.size() != expectedCount) {
+        // The SPI contract is one EmbeddingResult per input, in input order. A
+        // gap (some input slot never filled) or a short reply leaves placed <
+        // expectedCount; a caller would otherwise under-count or mis-attribute
+        // embeddings. Full, gap-free, duplicate-free [0, expectedCount)
+        // coverage is exactly the guarantee the old positional size check made,
+        // so this subsumes it. Throw at the seam so the divergence becomes a
+        // batch failure (EmbeddingWorker's one-failure-fails-batch retry)
+        // rather than a corrupt result.
+        if (placed != expectedCount) {
             throw new EmbeddingCallFailedException(
                 "OpenAiCompatibleEmbeddingProvider: response shape mismatch from " + uri.getHost()
-                    + " — expected " + expectedCount + " embeddings, got " + results.size());
+                    + " — expected " + expectedCount + " embeddings, got " + placed);
+        }
+        List<EmbeddingResult> results = new ArrayList<>(expectedCount);
+        for (EmbeddingResult result : slots) {
+            results.add(result);
         }
         return results;
     }
