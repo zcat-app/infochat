@@ -88,6 +88,22 @@ import java.util.concurrent.Semaphore;
  * every tick, so a throw would log a fresh stack trace forever while
  * no operator is told.
  *
+ * <h2>Non-finite vector component — operator alert + skip (M1-327)</h2>
+ *
+ * <p>A right-length vector still wedges the pipeline if any component is
+ * {@code Float.NaN} or {@code ±Infinity}: pgvector rejects those literals,
+ * so {@link #formatVector}'s {@code ?::vector} cast throws {@code SQLException}
+ * out of the transaction, and the idempotent pickup re-selects the same
+ * dimension-check-passing batch on every tick — a silent stack-trace-per-poll
+ * wedge with no operator alert. This worker handles it with the SAME
+ * notify-once + skip shape as the dimension-mismatch path above: it fires ONE
+ * coalesced alert keyed on {@link #ERROR_CLASS_EMBEDDING_NONFINITE} and returns
+ * BEFORE any INSERT or UPDATE, so {@code embedding_done} stays {@code FALSE} and
+ * the affected post resumes automatically once the provider emits a finite
+ * vector on a later tick (a buggy/compromised remote provider, transport
+ * corruption, or normalization underflow can all produce a non-finite
+ * component).
+ *
  * <h2>Persistence cursor</h2>
  *
  * <p>Per Invariant 5 ({@code docs/spec/schema.md} §Invariants — "the
@@ -122,6 +138,15 @@ public class EmbeddingWorker {
      * collapse to one notification per throttle window.
      */
     public static final String ERROR_CLASS_EMBEDDING_DIMENSION_MISMATCH = "embedding.dimension_mismatch";
+
+    /**
+     * Canonical error class for the non-finite vector component operator
+     * alert. Used as both the {@code notifyOnce} coalescing key and the
+     * {@code error_class} so repeated per-poll detections collapse to one
+     * notification per throttle window — same shape as
+     * {@link #ERROR_CLASS_EMBEDDING_DIMENSION_MISMATCH}.
+     */
+    public static final String ERROR_CLASS_EMBEDDING_NONFINITE = "embedding.nonfinite";
 
     private static final Logger LOG = LoggerFactory.getLogger(EmbeddingWorker.class);
 
@@ -264,7 +289,8 @@ public class EmbeddingWorker {
             // INSERT so the skip leaves no partial state.
             List<EmbeddingResult> results = attempt.results();
             for (int i = 0; i < results.size(); i++) {
-                int actualDimension = results.get(i).vector().length;
+                float[] vector = results.get(i).vector();
+                int actualDimension = vector.length;
                 if (actualDimension != cachedDimension) {
                     // Operator-action-required condition, not a self-healing
                     // batch failure: the metadata invariant is violated and the
@@ -288,6 +314,32 @@ public class EmbeddingWorker {
                         "Embedding dimensionality mismatch; run the re-embed procedure ("
                             + EmbeddingMetadataStartupGuard.REEMBED_PROCEDURE_PATH + ")");
                     return;
+                }
+                // Non-finite component guard (M1-327). pgvector rejects NaN and
+                // ±Infinity literals, so a single non-finite component would make
+                // formatVector's ?::vector cast throw SQLException out of the
+                // transaction every tick — and because the idempotent pickup
+                // re-selects the same right-length (so dimension-check-passing)
+                // batch forever, the pipeline wedges with stack-trace spam and no
+                // operator alert. Mirror the dimension-mismatch path exactly: one
+                // coalesced operator alert + return BEFORE any INSERT/UPDATE, so
+                // the post stays embedding_done=FALSE and resumes automatically
+                // once the provider output normalizes (a finite vector on a later
+                // tick completes the embedding).
+                for (int j = 0; j < vector.length; j++) {
+                    if (!Float.isFinite(vector[j])) {
+                        LOG.error(
+                            "EmbeddingWorker: non-finite embedding component for post_id={} "
+                                + "(index={} value={}); embedding halted until the provider recovers "
+                                + "(error_class={})",
+                            batch.get(i).id(), j, vector[j], ERROR_CLASS_EMBEDDING_NONFINITE);
+                        throttledAdminNotifier.notifyOnce(
+                            ERROR_CLASS_EMBEDDING_NONFINITE,
+                            ERROR_CLASS_EMBEDDING_NONFINITE,
+                            "Embedding produced a non-finite vector component (NaN/Infinity); "
+                                + "embedding stalled until the provider output normalizes");
+                        return;
+                    }
                 }
             }
 
