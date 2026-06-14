@@ -1,6 +1,8 @@
 package app.zcat.infochat.messaging.impl.signal;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import jakarta.json.Json;
@@ -9,11 +11,14 @@ import jakarta.json.JsonObject;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
 import app.zcat.infochat.messaging.InboundMessage;
 import app.zcat.infochat.messaging.MessagingAdapter;
+import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 
 /**
  * T1: the decoded-body UTF-8 byte cap ({@link SignalMessageCodec#MAX_INBOUND_TEXT_BYTES})
@@ -47,29 +52,53 @@ class SignalInboundByteCapTest {
     }
 
     @Test
-    void dmPathRejectsOversizeBody() {
-        assertTrue(codec.extractDm(dmParams(OVERSIZE_BODY)).isEmpty(),
+    void dmPathClassifiesOversizeBodyWithAttribution() {
+        // The decode-time cap still drops the DM (enforcement point
+        // unchanged); the codec now classifies it as OversizeDm carrying the
+        // sender + adapterMessageId the consumer needs for the §6.3.10 WARN.
+        SignalMessageCodec.OversizeDm drop = assertInstanceOf(SignalMessageCodec.OversizeDm.class,
+                codec.extractDm(dmParams(OVERSIZE_BODY)),
                 "a decoded body over the byte cap must drop on the DM path");
+        assertEquals(SENDER_ACI.toLowerCase(Locale.ROOT), drop.senderContactId(),
+                "the oversize drop must carry the canonicalized sender for the WARN");
+        assertEquals("signal-1700000001000", drop.adapterMessageId(),
+                "the oversize drop must carry the adapterMessageId for the WARN");
     }
 
     @Test
-    void groupPathRejectsOversizeBody() {
+    void groupPathDropsOversizeBodyAndCountsAndWarns() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
         RecordingInbound inbound = new RecordingInbound();
         // Membership handler unused — message frames never hit that branch.
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, null);
-        handler.handleReceive(groupParams(OVERSIZE_BODY));
+        SignalGroupHandler handler = new SignalGroupHandler(
+                BOT_ACI, inbound, null, new AdapterMetrics(registry));
+        CapturingLogHandler log = CapturingLogHandler.attach(SignalGroupHandler.class);
+        try {
+            handler.handleReceive(groupParams(OVERSIZE_BODY));
+        } finally {
+            log.detach();
+        }
         assertEquals(0, inbound.messages.size(),
                 "a decoded body over the byte cap must drop on the group path "
                         + "(before the bot-mention check)");
+        assertEquals(1.0, registry.get("adapter.inbound.dropped")
+                        .tags("adapter", "signal", "scope_kind", "group", "reason", "oversize")
+                        .counter().count(),
+                "the group oversize drop must increment adapter.inbound.dropped{reason=oversize}");
+        String logged = log.formatted();
+        assertTrue(logged.contains("WARN"), "the oversize drop must log at WARN");
+        assertTrue(logged.contains("contact#"), "the WARN must carry the redacted sender");
+        assertTrue(logged.contains("signal-1700000001000"), "the WARN must carry the adapterMessageId");
+        assertFalse(logged.contains(OVERSIZE_BODY), "the WARN must NOT carry the message body (D37)");
     }
 
     @Test
     void wellFormedBodyDeliveredOnBothPaths() {
-        assertTrue(codec.extractDm(dmParams("hi from Alice")).isPresent(),
+        assertInstanceOf(SignalMessageCodec.DmMessage.class, codec.extractDm(dmParams("hi from Alice")),
                 "a body under the cap must extract on the DM path");
 
         RecordingInbound inbound = new RecordingInbound();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, null);
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, null, AdapterMetrics.noop());
         handler.handleReceive(groupParams("@bot summarise"));
         assertEquals(1, inbound.messages.size(),
                 "a body under the cap with a bot mention must deliver on the group path");

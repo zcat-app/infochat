@@ -353,17 +353,20 @@ final class SimpleXMessageCodec {
         if (text == null) {
             return new Ignored("newChatItem-without-text");
         }
+        String adapterMessageId = optText(itemBody, "itemId");
+        if (adapterMessageId == null) {
+            adapterMessageId = "simplex-" + System.nanoTime();
+        }
         // Enforce the SPI-declared inbound cap at the parse boundary so the
         // Provider's downstream budgets (LLM tokens, Stage 1 watchdog) plan
         // against a real ceiling rather than the 1 MiB WebSocket frame
         // ceiling. UTF-8 byte length, not Java char length — the cap is a
-        // wire-level budget.
+        // wire-level budget. Surfaced as OversizeDropped (not Ignored) so the
+        // consumer raises adapter.inbound.dropped{reason=oversize} + the
+        // §6.3.10 WARN with the sender and adapterMessageId in hand; the cap
+        // CHECK here is unchanged, only the drop's observability.
         if (Utf8.exceedsByteLength(text, MAX_INBOUND_TEXT_BYTES)) {
-            return new Ignored("newChatItem-text-exceeds-inbound-cap");
-        }
-        String adapterMessageId = optText(itemBody, "itemId");
-        if (adapterMessageId == null) {
-            adapterMessageId = "simplex-" + System.nanoTime();
+            return new OversizeDropped(new ScopeRef.Dm(contactId), contactId, adapterMessageId);
         }
         Identity sender = new Identity(contactId, displayName, Instant.now());
         InboundMessage msg = new InboundMessage(
@@ -469,14 +472,18 @@ final class SimpleXMessageCodec {
         if (text == null) {
             return new Ignored("newChatItem-group-without-text");
         }
-        if (Utf8.exceedsByteLength(text, MAX_INBOUND_TEXT_BYTES)) {
-            return new Ignored("newChatItem-group-text-exceeds-inbound-cap");
-        }
-        List<String> mentions = extractMentionQueueAddresses(itemBody.get("formattedText"));
         String adapterMessageId = optText(itemBody, "itemId");
         if (adapterMessageId == null) {
             adapterMessageId = "simplex-" + System.nanoTime();
         }
+        // Same transport cap as the DM path; surfaced as OversizeDropped
+        // (scope = group) so the consumer raises the §6.3.10 counter + WARN.
+        // The cap CHECK is unchanged — only the silent drop becomes observable.
+        if (Utf8.exceedsByteLength(text, MAX_INBOUND_TEXT_BYTES)) {
+            return new OversizeDropped(
+                    new ScopeRef.Group(adapterGroupId), senderContactId, adapterMessageId);
+        }
+        List<String> mentions = extractMentionQueueAddresses(itemBody.get("formattedText"));
         return new GroupCandidate(
                 adapterGroupId,
                 senderContactId,
@@ -778,7 +785,7 @@ final class SimpleXMessageCodec {
 
     /** Sealed hierarchy of frame variants returned by {@link #decode}. */
     sealed interface DecodedFrame
-            permits Inbound, GroupCandidate, SendAck, SelfAddress, CommandError, Ignored {
+            permits Inbound, GroupCandidate, OversizeDropped, SendAck, SelfAddress, CommandError, Ignored {
     }
 
     /** A direct-message inbound that should be delivered to Provider. */
@@ -843,6 +850,21 @@ final class SimpleXMessageCodec {
 
     /** A frame we recognised but do not handle in this milestone. */
     record Ignored(String reason) implements DecodedFrame {
+    }
+
+    /**
+     * An inbound dropped at the decode boundary for exceeding the
+     * transport size cap (design §6.3.10). Distinct from {@link Ignored}
+     * so the consumer ({@link SimpleXWebSocketClient}) can raise the
+     * {@code adapter.inbound.dropped{reason=oversize}} counter and the
+     * §6.3.10 WARN with the attribution in hand: the decoded {@code scope}
+     * (dm/group, for {@code scope_kind}), the raw {@code senderContactId}
+     * (redacted at the log site, never logged raw — D37), and the
+     * {@code adapterMessageId}. The decode-time cap CHECK is unchanged;
+     * this variant only makes the existing silent drop observable.
+     */
+    record OversizeDropped(ScopeRef scope, String senderContactId, String adapterMessageId)
+            implements DecodedFrame {
     }
 
     /**

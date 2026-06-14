@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import app.zcat.infochat.messaging.InboundMessage;
 import app.zcat.infochat.messaging.MembershipEvent;
 import app.zcat.infochat.messaging.MessagingAdapter;
+import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 
 /**
  * M1-331: robustness of the Signal group inbound path against untrusted
@@ -105,7 +106,7 @@ class SignalGroupInboundRobustnessTest {
         // escapes handleReceive or botMentioned.
         RecordingInbound inbound = new RecordingInbound();
         RecordingMembership membership = new RecordingMembership();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, membership);
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, membership, AdapterMetrics.noop());
 
         assertDoesNotThrow(() -> handler.handleReceive(parse(
                 "{\"envelope\": \"x\"}")),
@@ -150,7 +151,7 @@ class SignalGroupInboundRobustnessTest {
     void wellFormedFramesBehaveUnchanged() {
         RecordingInbound inbound = new RecordingInbound();
         RecordingMembership membership = new RecordingMembership();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, membership);
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, membership, AdapterMetrics.noop());
 
         handler.handleReceive(parse("""
                 {
@@ -200,7 +201,7 @@ class SignalGroupInboundRobustnessTest {
      */
     private String deliveredText(String body, JsonObject... mentionSpans) {
         RecordingInbound inbound = new RecordingInbound();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, null);
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, null, AdapterMetrics.noop());
         JsonArrayBuilder mentions = Json.createArrayBuilder();
         for (JsonObject span : mentionSpans) {
             mentions.add(span);

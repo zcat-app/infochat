@@ -8,6 +8,7 @@ import app.zcat.infochat.messaging.InboundMessage;
 import app.zcat.infochat.messaging.MembershipEvent;
 import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.ScopeRef;
+import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 
 import jakarta.json.JsonArray;
 import jakarta.json.JsonObject;
@@ -59,6 +60,7 @@ final class SignalGroupHandler {
     private final String botAci;
     private final MessagingAdapter.@Nullable InboundHandler inboundHandler;
     private final MessagingAdapter.@Nullable MembershipHandler membershipHandler;
+    private final AdapterMetrics metrics;
 
     /**
      * @param botAci            the bot's per-adapter ACI (UUID string)
@@ -71,13 +73,19 @@ final class SignalGroupHandler {
      * @param membershipHandler Provider's membership-event callback;
      *                          null means membership events are dropped
      *                          (early-boot wiring case).
+     * @param metrics           the adapter metrics emission point for the
+     *                          §6.3.10 oversize-drop counter; never null
+     *                          (the adapter passes its bound instance, or
+     *                          a noop for unit tests).
      */
     SignalGroupHandler(String botAci,
                        MessagingAdapter.@Nullable InboundHandler inboundHandler,
-                       MessagingAdapter.@Nullable MembershipHandler membershipHandler) {
+                       MessagingAdapter.@Nullable MembershipHandler membershipHandler,
+                       AdapterMetrics metrics) {
         this.botAci = botAci.toLowerCase(Locale.ROOT);
         this.inboundHandler = inboundHandler;
         this.membershipHandler = membershipHandler;
+        this.metrics = metrics;
     }
 
     /**
@@ -153,8 +161,18 @@ final class SignalGroupHandler {
             return;
         }
         if (SignalMessageCodec.exceedsInboundByteCap(body)) {
-            // Decoded-body UTF-8 byte cap, mirroring the DM path and
-            // SimpleX — the coarse envelope-line cap does not bound the body.
+            // §6.3.10 transport size-cap shed, mirroring the DM path and
+            // SimpleX — the coarse envelope-line cap does not bound the
+            // decoded body. Silent at the boundary (no reply) but observable:
+            // count + WARN with the redacted sender (D37) and adapterMessageId.
+            // The cap CHECK is unchanged; only the silent drop becomes visible.
+            Long oversizeTimestamp = SignalMessageCodec.usableTimestamp(envelope, dataMessage);
+            metrics.inboundDropped(SignalConfig.ADAPTER_NAME,
+                    new ScopeRef.Group(groupId), AdapterMetrics.DropReason.OVERSIZE);
+            LOG.warnf("inbound dropped — exceeds %d-byte size cap; from %s adapterMessageId %s",
+                    SignalMessageCodec.MAX_INBOUND_TEXT_BYTES,
+                    SignalMessageCodec.redactContactId(sourceUuid.toLowerCase(Locale.ROOT)),
+                    oversizeTimestamp == null ? "signal-unknown" : "signal-" + oversizeTimestamp);
             return;
         }
         if (!SignalMentionParser.botMentioned(dataMessage, botAci)) {

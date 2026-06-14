@@ -19,6 +19,7 @@ import app.zcat.infochat.messaging.InboundMessage;
 import app.zcat.infochat.messaging.MembershipEvent;
 import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.ScopeRef;
+import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 
 class SignalGroupHandlerTest {
 
@@ -29,7 +30,7 @@ class SignalGroupHandlerTest {
     void mentionByAci_delivered() {
         RecordingInbound inbound = new RecordingInbound();
         RecordingMembership membership = new RecordingMembership();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, membership);
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, membership, AdapterMetrics.noop());
 
         JsonObject params = parse("""
                 {
@@ -70,7 +71,7 @@ class SignalGroupHandlerTest {
         // the mentions entry) may be removed — a display-name text
         // search would also eat the trailing "bot".
         RecordingInbound inbound = new RecordingInbound();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, new RecordingMembership());
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, new RecordingMembership(), AdapterMetrics.noop());
 
         handler.handleReceive(parse("""
                 {
@@ -97,7 +98,7 @@ class SignalGroupHandlerTest {
     @Test
     void groupSlashCommandParseableAfterStrip() {
         RecordingInbound inbound = new RecordingInbound();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, new RecordingMembership());
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, new RecordingMembership(), AdapterMetrics.noop());
 
         handler.handleReceive(parse("""
                 {
@@ -128,7 +129,7 @@ class SignalGroupHandlerTest {
         // Mention in the middle of the body: removing the span must not
         // leave the surrounding spaces doubled.
         RecordingInbound inbound = new RecordingInbound();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, new RecordingMembership());
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, new RecordingMembership(), AdapterMetrics.noop());
 
         handler.handleReceive(parse("""
                 {
@@ -161,7 +162,7 @@ class SignalGroupHandlerTest {
         // dropped.
         RecordingInbound inbound = new RecordingInbound();
         RecordingMembership membership = new RecordingMembership();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, membership);
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, membership, AdapterMetrics.noop());
 
         JsonObject params = parse("""
                 {
@@ -194,7 +195,7 @@ class SignalGroupHandlerTest {
         // when the bot is @mentioned").
         RecordingInbound inbound = new RecordingInbound();
         RecordingMembership membership = new RecordingMembership();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, membership);
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, membership, AdapterMetrics.noop());
 
         JsonObject params = parse("""
                 {
@@ -223,7 +224,7 @@ class SignalGroupHandlerTest {
         // mapped to MembershipEvent.UserJoined for each ACI.
         RecordingInbound inbound = new RecordingInbound();
         RecordingMembership membership = new RecordingMembership();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, membership);
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, membership, AdapterMetrics.noop());
 
         JsonObject params = parse("""
                 {
@@ -262,7 +263,7 @@ class SignalGroupHandlerTest {
         // mapped to MembershipEvent.UserLeft for each ACI.
         RecordingInbound inbound = new RecordingInbound();
         RecordingMembership membership = new RecordingMembership();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, membership);
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, membership, AdapterMetrics.noop());
 
         JsonObject params = parse("""
                 {
@@ -376,7 +377,7 @@ class SignalGroupHandlerTest {
         // per-message DoS of group functionality. The (long)-widened guard
         // must skip the overflow span and still dispatch the message.
         RecordingInbound inbound = new RecordingInbound();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, new RecordingMembership());
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, new RecordingMembership(), AdapterMetrics.noop());
 
         handler.handleReceive(parse("""
                 {
@@ -407,7 +408,7 @@ class SignalGroupHandlerTest {
         // U-21: the inbound Identity's displayName (informational only,
         // D10) is taken from the envelope's sourceName on the group path.
         RecordingInbound inbound = new RecordingInbound();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, new RecordingMembership());
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, new RecordingMembership(), AdapterMetrics.noop());
 
         handler.handleReceive(parse("""
                 {

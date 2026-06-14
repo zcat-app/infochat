@@ -11,7 +11,6 @@ import jakarta.json.JsonObject;
 import jakarta.json.JsonReader;
 
 import java.io.StringReader;
-import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 
@@ -88,14 +87,15 @@ class SignalMessageCodecTest {
         SignalMessageCodec.JsonRpcMessage.Notification notif = assertInstanceOf(
                 SignalMessageCodec.JsonRpcMessage.Notification.class, decoded);
         assertEquals("receive", notif.method());
-        Optional<SignalMessageCodec.ReceivedDm> dm = codec.extractDm(notif.params());
-        assertTrue(dm.isPresent(), "DM extraction must succeed for envelope with dataMessage");
+        SignalMessageCodec.ReceivedDm dm = assertInstanceOf(SignalMessageCodec.DmMessage.class,
+                codec.extractDm(notif.params()),
+                "DM extraction must succeed for envelope with dataMessage").received();
         assertEquals(
                 "aabbccdd-1111-2222-3333-444455556666",
-                dm.get().senderContactId(),
+                dm.senderContactId(),
                 "ACI must be lower-cased per design §6.5.3 canonicalization");
-        assertEquals("hi from Alice", dm.get().body());
-        assertEquals(1700000001000L, dm.get().timestamp());
+        assertEquals("hi from Alice", dm.body());
+        assertEquals(1700000001000L, dm.timestamp());
 
         // Inbound success Response — `send` returns timestamp result.
         String responseLine = """
@@ -150,7 +150,7 @@ class SignalMessageCodecTest {
                 """;
         SignalMessageCodec.JsonRpcMessage.Notification notif =
                 (SignalMessageCodec.JsonRpcMessage.Notification) codec.decode(groupReceive);
-        assertTrue(codec.extractDm(notif.params()).isEmpty(),
+        assertInstanceOf(SignalMessageCodec.NotDm.class, codec.extractDm(notif.params()),
                 "Group-scope receive notification must NOT extract as a DM");
 
         // groupV2 path — newer signal-cli format.
@@ -173,7 +173,7 @@ class SignalMessageCodecTest {
                 """;
         SignalMessageCodec.JsonRpcMessage.Notification notifV2 =
                 (SignalMessageCodec.JsonRpcMessage.Notification) codec.decode(groupV2Receive);
-        assertTrue(codec.extractDm(notifV2.params()).isEmpty(),
+        assertInstanceOf(SignalMessageCodec.NotDm.class, codec.extractDm(notifV2.params()),
                 "groupV2 receive notification must NOT extract as a DM");
     }
 
@@ -196,7 +196,7 @@ class SignalMessageCodecTest {
                 """;
         SignalMessageCodec.JsonRpcMessage.Notification notif =
                 (SignalMessageCodec.JsonRpcMessage.Notification) codec.decode(typingOnly);
-        assertTrue(codec.extractDm(notif.params()).isEmpty());
+        assertInstanceOf(SignalMessageCodec.NotDm.class, codec.extractDm(notif.params()));
     }
 
     @Test

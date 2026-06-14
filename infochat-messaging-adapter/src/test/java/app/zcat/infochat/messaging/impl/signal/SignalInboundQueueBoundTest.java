@@ -13,7 +13,10 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
+
+import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 
 /**
  * Pins the M1-224 DoS bound for the Signal transport: the inbound
@@ -37,10 +40,12 @@ class SignalInboundQueueBoundTest {
         int expectedDropped = fed - capacity - 1;
         int expectedDelivered = capacity + 1;
 
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
         try (FakeSignalCli fake = new FakeSignalCli()) {
             SignalJsonRpcClient client = new SignalJsonRpcClient(
                     fake.endpoint(), "+15551111111", new SignalMessageCodec(),
                     TEST_RESPONSE_TIMEOUT, () -> { }, capacity);
+            client.bindMetrics(new AdapterMetrics(registry));
             CountDownLatch release = new CountDownLatch(1);
             LinkedBlockingQueue<String> delivered = new LinkedBlockingQueue<>();
             client.setInboundHandler(msg -> {
@@ -80,6 +85,13 @@ class SignalInboundQueueBoundTest {
                         "dropped notifications must never reach the handler");
                 assertEquals(expectedDropped, client.droppedInboundCount(),
                         "the drop count must be stable after the flood drains");
+                // §6.3.7 overflow drops route through the shared inbound-drop
+                // counter with reason=queue_full and scope_kind=unknown (the
+                // drop fires before the notification is decoded into a scope).
+                assertEquals((double) expectedDropped, registry.get("adapter.inbound.dropped")
+                                .tags("adapter", "signal", "scope_kind", "unknown", "reason", "queue_full")
+                                .counter().count(),
+                        "every queue-overflow drop must increment adapter.inbound.dropped{reason=queue_full}");
             } finally {
                 release.countDown();
                 client.disconnect();

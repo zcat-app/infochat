@@ -21,14 +21,10 @@ import java.io.OutputStreamWriter;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -817,6 +813,10 @@ class SignalJsonRpcClient {
             // without bound and OOM the only user-facing service
             // (docs/design/06-messaging.md §6.3.7).
             long dropped = droppedInboundCount.incrementAndGet();
+            // §6.3.7 overflow shed. scope_kind is "unknown" (null scope): the
+            // drop fires at enqueue, before the notification is decoded into a
+            // dm/group scope.
+            metrics.inboundDropped(ADAPTER_NAME, null, AdapterMetrics.DropReason.QUEUE_FULL);
             LOG.warnf("inbound dispatch queue full (cap %d); dropped newest from %s (total dropped %d)",
                     inboundQueueCapacity, redactSender(n), dropped);
         }
@@ -890,26 +890,30 @@ class SignalJsonRpcClient {
      * {@code "non-dm"}.
      */
     private String redactSender(SignalMessageCodec.JsonRpcMessage.Notification n) {
-        return codec.extractDm(n.params())
-                .map(dm -> redactContactId(dm.senderContactId()))
-                .orElse("non-dm");
+        return switch (codec.extractDm(n.params())) {
+            case SignalMessageCodec.DmMessage dm ->
+                    SignalMessageCodec.redactContactId(dm.received().senderContactId());
+            case SignalMessageCodec.OversizeDm od ->
+                    SignalMessageCodec.redactContactId(od.senderContactId());
+            case SignalMessageCodec.NotDm ignored -> "non-dm";
+        };
     }
 
     /**
-     * Non-reversible short token for a sender contact id, safe to log
-     * under D37 (a Signal ACI / phone number is a sensitive identifier and
-     * is never logged raw). Stable per sender so a repeat flooder stays
-     * correlatable in the overflow WARN line without exposing the id.
+     * Render a throwable's class name and stack frames (class/method/file/
+     * line) WITHOUT its message — {@link Throwable#getMessage()} /
+     * {@code toString()} may carry inbound chat-mode body bytes (D37), but
+     * {@link StackTraceElement} and class names never do. Lets an inbound
+     * handler bug be localized from the log without leaking user content
+     * (M1-358). Package-private: the D37 "stack yes, message no" property
+     * is pinned directly in a unit test.
      */
-    private static String redactContactId(String contactId) {
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest(contactId.getBytes(StandardCharsets.UTF_8));
-            return "contact#" + HexFormat.of().formatHex(digest, 0, 4);
-        } catch (NoSuchAlgorithmException e) {
-            // SHA-256 is a JDK-mandated algorithm; its absence cannot happen.
-            throw new AssertionError(e);
+    static String stackWithoutMessage(Throwable t) {
+        StringBuilder sb = new StringBuilder(t.getClass().getName());
+        for (StackTraceElement frame : t.getStackTrace()) {
+            sb.append("\n\tat ").append(frame);
         }
+        return sb.toString();
     }
 
     private void completePending(String id, SignalMessageCodec.JsonRpcMessage msg) {
@@ -925,22 +929,34 @@ class SignalJsonRpcClient {
         if (!"receive".equals(n.method())) {
             return;
         }
-        Optional<SignalMessageCodec.ReceivedDm> dm = codec.extractDm(n.params());
-        if (dm.isEmpty()) {
-            // Not a DM — group-scope envelopes, typing, receipts, and
-            // sync notifications all land here. The group route's own
-            // decode (SignalGroupHandler.handleReceive) keeps only the
-            // group-scope shapes, so handing it every non-DM receive
-            // notification is safe.
-            dispatchGroupNotification(n.params());
-            return;
+        switch (codec.extractDm(n.params())) {
+            // Not a DM — group-scope envelopes, typing, receipts, and sync
+            // notifications all land here. The group route's own decode
+            // (SignalGroupHandler.handleReceive) keeps only the group-scope
+            // shapes, so handing it every non-DM receive notification is safe.
+            case SignalMessageCodec.NotDm ignored -> dispatchGroupNotification(n.params());
+            // §6.3.10 transport size-cap shed: silent at the boundary (no
+            // reply), but observable. Sender redacted before logging (D37);
+            // adapterMessageId is a synthetic id, safe to log.
+            case SignalMessageCodec.OversizeDm od -> {
+                metrics.inboundDropped(ADAPTER_NAME,
+                        new ScopeRef.Dm(od.senderContactId()), AdapterMetrics.DropReason.OVERSIZE);
+                LOG.warnf("inbound dropped — exceeds %d-byte size cap; from %s adapterMessageId %s",
+                        SignalMessageCodec.MAX_INBOUND_TEXT_BYTES,
+                        SignalMessageCodec.redactContactId(od.senderContactId()),
+                        od.adapterMessageId());
+            }
+            case SignalMessageCodec.DmMessage dm -> dispatchDm(dm.received());
         }
+    }
+
+    /** Deliver a decoded DM to the registered inbound handler on the dispatch thread. */
+    private void dispatchDm(SignalMessageCodec.ReceivedDm received) {
         MessagingAdapter.InboundHandler handler = inboundHandler;
         if (handler == null) {
             LOG.debugf("inbound Signal DM dropped — no InboundHandler set");
             return;
         }
-        SignalMessageCodec.ReceivedDm received = dm.get();
         Identity sender = new Identity(
                 received.senderContactId(), received.senderDisplayName(), Instant.now());
         InboundMessage inbound = new InboundMessage(
@@ -955,10 +971,11 @@ class SignalJsonRpcClient {
             // Mirror SimpleXAdapter.onInbound: a Provider-side handler that
             // throws must NOT propagate and kill the dispatch thread, which
             // would leave the subprocess alive but deaf. Drop this message
-            // and keep dispatching. D37: log the exception class only — the
-            // Throwable's message may carry inbound chat-mode bytes.
-            LOG.warnf("inbound Signal handler threw %s; dropping message, dispatch continues",
-                    e.getClass().getSimpleName());
+            // and keep dispatching. D37: the Throwable's MESSAGE may carry
+            // inbound chat-mode body bytes, so it stays suppressed — the class
+            // + stack (no user content) localize a Provider handler bug (M1-358).
+            LOG.warnf("inbound Signal handler threw, message suppressed per D37; "
+                    + "dispatch continues; class + stack:\n%s", stackWithoutMessage(e));
         }
     }
 
@@ -972,10 +989,11 @@ class SignalJsonRpcClient {
         } catch (RuntimeException e) {
             // Same dispatch-survival invariant as the DM path above: a
             // throw from group translation or a Provider-side handler
-            // must not kill the dispatch thread. D37: class name only —
-            // the Throwable's message may carry inbound group bytes.
-            LOG.warnf("Signal group-route handler threw %s; dropping notification, dispatch continues",
-                    e.getClass().getSimpleName());
+            // must not kill the dispatch thread. D37: the Throwable's
+            // message may carry inbound group bytes, so it stays suppressed
+            // — the class + stack (no user content) localize the bug (M1-358).
+            LOG.warnf("Signal group-route handler threw, message suppressed per D37; "
+                    + "dispatch continues; class + stack:\n%s", stackWithoutMessage(e));
         }
     }
 }

@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 
 import app.zcat.infochat.messaging.InboundMessage;
 import app.zcat.infochat.messaging.MessagingAdapter;
+import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 
 /**
  * T21 (regression pin, no production change): a group frame carrying a
@@ -39,7 +40,7 @@ class SignalGroupSpanTypeTest {
         // delivered — but the malformed span is skipped, leaving the
         // body unstripped, and no exception escapes handleReceive.
         RecordingInbound inbound = new RecordingInbound();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, null);
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, null, AdapterMetrics.noop());
 
         assertDoesNotThrow(() -> handler.handleReceive(parse("""
                 {
@@ -67,7 +68,7 @@ class SignalGroupSpanTypeTest {
     @Test
     void wellFormedSpanStrippedAsBefore() {
         RecordingInbound inbound = new RecordingInbound();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, null);
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, null, AdapterMetrics.noop());
 
         handler.handleReceive(parse("""
                 {

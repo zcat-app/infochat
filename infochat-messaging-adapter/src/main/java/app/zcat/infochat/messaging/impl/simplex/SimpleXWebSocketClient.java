@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import app.zcat.infochat.messaging.FailureCategory;
 import app.zcat.infochat.messaging.InboundMessage;
 import app.zcat.infochat.messaging.MessagingException;
+import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -80,6 +81,9 @@ final class SimpleXWebSocketClient {
     // path with a small queue.
     static final int INBOUND_QUEUE_CAPACITY = 1_000;
 
+    // Adapter label for the inbound-drop counter; mirrors SimpleXAdapter.name().
+    private static final String ADAPTER_NAME = "simplex";
+
     /**
      * Receives decoded inbound chat messages on the client's dedicated
      * inbound-dispatch thread (never the WS listener thread — the
@@ -132,6 +136,11 @@ final class SimpleXWebSocketClient {
     // Cumulative count of inbound deliveries dropped on queue overflow
     // (distinct from the benign shutdown-time drops in dispatchAsync).
     private final AtomicLong droppedInboundCount = new AtomicLong();
+    // Late-bound by SimpleXAdapter (rebuildWebSocket / bindMetrics) from
+    // AdapterMetrics.bindAdapter at registration; the noop() initializer keeps
+    // a never-bound client (unit tests, pre-registration) emitting into a
+    // throwaway registry rather than NPE-ing on a drop.
+    private volatile AdapterMetrics metrics = AdapterMetrics.noop();
     // Null until connect() completes the handshake; every read copies to a
     // local and guards on null before use.
     private volatile @Nullable WebSocket webSocket;
@@ -364,6 +373,11 @@ final class SimpleXWebSocketClient {
         return dispatchQueue.size();
     }
 
+    /** Late-binding from {@link SimpleXAdapter}; see the {@code metrics} field. */
+    void bindMetrics(AdapterMetrics metrics) {
+        this.metrics = metrics;
+    }
+
     /**
      * Non-reversible short token for a sender contact id, safe to log
      * under D37 (a SimpleX queue address is a sensitive identifier and is
@@ -462,6 +476,17 @@ final class SimpleXWebSocketClient {
             case SimpleXMessageCodec.SelfAddress sa ->
                     completePending(sa.corrId(), sa.queueAddressId());
             case SimpleXMessageCodec.CommandError err -> failPending(err);
+            case SimpleXMessageCodec.OversizeDropped od -> {
+                // §6.3.10 transport size-cap shed: silent at the boundary (no
+                // reply — emitting one below the Provider rate cap reopens the
+                // DoS-amplification surface), but observable. Sender is
+                // redacted before logging (D37: queue addresses never raw);
+                // adapterMessageId is a server id, safe to log.
+                metrics.inboundDropped(ADAPTER_NAME, od.scope(), AdapterMetrics.DropReason.OVERSIZE);
+                LOG.warn("inbound dropped — exceeds {}-byte size cap; from {} adapterMessageId {}",
+                        SimpleXMessageCodec.MAX_INBOUND_TEXT_BYTES,
+                        redactContactId(od.senderContactId()), od.adapterMessageId());
+            }
             case SimpleXMessageCodec.Ignored ignored ->
                     LOG.debug("simplex-chat frame ignored: {}", ignored.reason());
         }
@@ -494,6 +519,9 @@ final class SimpleXWebSocketClient {
             // rather than let the queue grow without bound and OOM the only
             // user-facing service (docs/design/06-messaging.md §6.3.7).
             long dropped = droppedInboundCount.incrementAndGet();
+            // §6.3.7 overflow shed. scope_kind is "unknown" (null scope): the
+            // drop fires at enqueue, decoupled from the decoded dm/group scope.
+            metrics.inboundDropped(ADAPTER_NAME, null, AdapterMetrics.DropReason.QUEUE_FULL);
             LOG.warn("inbound dispatch queue full (cap {}); dropped newest from {} (total dropped {})",
                     inboundQueueCapacity, redactContactId(senderContactId), dropped);
         }

@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 
 import app.zcat.infochat.messaging.MembershipEvent;
 import app.zcat.infochat.messaging.MessagingAdapter;
+import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 
 /**
  * Per-event isolation in {@code SignalGroupHandler}'s membership
@@ -32,7 +33,7 @@ class SignalGroupHandlerMembershipIsolationTest {
     @Test
     void firstEventFailureDoesNotDropSiblingMemberLeftEntries() {
         ThrowOnFirstEventMembership membership = new ThrowOnFirstEventMembership();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, null, membership);
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, null, membership, AdapterMetrics.noop());
 
         JsonObject params = parse("""
                 {

@@ -305,6 +305,10 @@ public final class SimpleXAdapter implements MessagingAdapter {
         URI uri = URI.create("ws://127.0.0.1:" + cfg.wsPort());
         SimpleXWebSocketClient ws = new SimpleXWebSocketClient(
                 uri, http, this::onInbound, this::onGroupCandidate);
+        // Bind the current metrics before start() so a drop on the very first
+        // frame is counted; bindMetrics() below re-binds a live ws if metrics
+        // arrive after the transport is already up.
+        ws.bindMetrics(metrics);
         ws.start();
         this.webSocket = ws;
     }
@@ -516,6 +520,13 @@ public final class SimpleXAdapter implements MessagingAdapter {
     @Override
     public void bindMetrics(AdapterMetrics metrics) {
         this.metrics = metrics;
+        SimpleXWebSocketClient ws = webSocket;
+        if (ws != null) {
+            // Registration may bind metrics after the transport is already up
+            // (reconnect path); propagate so the live client's drop counters
+            // are not stranded on the noop registry.
+            ws.bindMetrics(metrics);
+        }
     }
 
     @Override
@@ -716,9 +727,31 @@ public final class SimpleXAdapter implements MessagingAdapter {
             current.onMessage(msg);
         } catch (RuntimeException e) {
             // The handler is Provider-side code; a misbehaving handler must
-            // not tear the WebSocket listener thread down.
-            LOG.warn("inbound handler threw: {}", e.getClass().getSimpleName());
+            // not tear the WebSocket listener thread down. D37: the exception
+            // MESSAGE may carry inbound chat-mode body bytes, so it stays
+            // suppressed — but the class + stack (class/method/file/line carry
+            // no user content) are logged so a Provider handler bug is
+            // localizable from the log (M1-358).
+            LOG.warn("inbound handler threw, message suppressed per D37; class + stack:\n{}",
+                    stackWithoutMessage(e));
         }
+    }
+
+    /**
+     * Render a throwable's class name and stack frames (class/method/file/
+     * line) WITHOUT its message — {@link Throwable#getMessage()} /
+     * {@code toString()} may carry inbound chat-mode body bytes (D37), but
+     * {@link StackTraceElement} and class names never do. Lets an inbound
+     * handler bug be localized from the log without leaking user content
+     * (M1-358). Package-private: the D37 "stack yes, message no" property
+     * is pinned directly in a unit test.
+     */
+    static String stackWithoutMessage(Throwable t) {
+        StringBuilder sb = new StringBuilder(t.getClass().getName());
+        for (StackTraceElement frame : t.getStackTrace()) {
+            sb.append("\n\tat ").append(frame);
+        }
+        return sb.toString();
     }
 
     private TrackedHandle requireKnownAndOpen(MessageHandle handle) throws MessagingException {

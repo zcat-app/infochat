@@ -1,19 +1,19 @@
 package app.zcat.infochat.messaging.impl.signal;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import jakarta.json.Json;
 import jakarta.json.JsonObject;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 
 import app.zcat.infochat.messaging.InboundMessage;
 import app.zcat.infochat.messaging.MessagingAdapter;
+import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 
 /**
  * T2: an inbound Signal contact id (the DM {@code sourceUuid} and the
@@ -33,25 +33,26 @@ class SignalAciValidationTest {
 
     @Test
     void canonicalLowercaseUuidAcceptedOnDmPath() {
-        Optional<SignalMessageCodec.ReceivedDm> dm = codec.extractDm(dmParams(CANONICAL_UUID));
-        assertTrue(dm.isPresent(), "a canonical lowercase UUID ACI must be accepted");
-        assertEquals(CANONICAL_UUID, dm.get().senderContactId());
+        SignalMessageCodec.ReceivedDm dm = assertInstanceOf(SignalMessageCodec.DmMessage.class,
+                codec.extractDm(dmParams(CANONICAL_UUID)),
+                "a canonical lowercase UUID ACI must be accepted").received();
+        assertEquals(CANONICAL_UUID, dm.senderContactId());
     }
 
     @Test
     void uppercaseUuidAcceptedAndCanonicalizedOnDmPath() {
         // Case-fold contract: an uppercase wire UUID is accepted and
         // normalized so the (adapter, contact_id) join key is stable.
-        Optional<SignalMessageCodec.ReceivedDm> dm =
-                codec.extractDm(dmParams("AABBCCDD-1111-2222-3333-444455556666"));
-        assertTrue(dm.isPresent(), "an uppercase UUID ACI must be accepted");
-        assertEquals(CANONICAL_UUID, dm.get().senderContactId(),
+        SignalMessageCodec.ReceivedDm dm = assertInstanceOf(SignalMessageCodec.DmMessage.class,
+                codec.extractDm(dmParams("AABBCCDD-1111-2222-3333-444455556666")),
+                "an uppercase UUID ACI must be accepted").received();
+        assertEquals(CANONICAL_UUID, dm.senderContactId(),
                 "the accepted UUID must be canonicalized to lowercase");
     }
 
     @Test
     void nonUuidWireStringDroppedOnDmPath() {
-        assertTrue(codec.extractDm(dmParams("not-a-uuid")).isEmpty(),
+        assertInstanceOf(SignalMessageCodec.NotDm.class, codec.extractDm(dmParams("not-a-uuid")),
                 "a non-UUID sourceUuid must drop at decode rather than become a join key");
     }
 
@@ -59,14 +60,14 @@ class SignalAciValidationTest {
     void e164PhoneNumberDroppedOnDmPath() {
         // v1 is UUID-only (M1-242 §Notes): an E.164 phone-number identity is
         // NOT accepted — it cannot anchor a stable cryptographic join key.
-        assertTrue(codec.extractDm(dmParams("+15557654321")).isEmpty(),
+        assertInstanceOf(SignalMessageCodec.NotDm.class, codec.extractDm(dmParams("+15557654321")),
                 "an E.164 ACI must drop under the v1 UUID-only policy");
     }
 
     @Test
     void uuidGroupSenderDelivered() {
         RecordingInbound inbound = new RecordingInbound();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, null);
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, null, AdapterMetrics.noop());
         handler.handleReceive(groupParams(CANONICAL_UUID));
         assertEquals(1, inbound.messages.size(),
                 "a group message from a canonical-UUID sender must deliver");
@@ -76,7 +77,7 @@ class SignalAciValidationTest {
     @Test
     void nonUuidGroupSenderDropped() {
         RecordingInbound inbound = new RecordingInbound();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, null);
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, null, AdapterMetrics.noop());
         handler.handleReceive(groupParams("not-a-uuid"));
         assertEquals(0, inbound.messages.size(),
                 "a group message from a non-UUID sender must drop at decode");

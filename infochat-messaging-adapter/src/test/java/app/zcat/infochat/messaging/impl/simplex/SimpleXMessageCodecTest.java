@@ -398,10 +398,17 @@ class SimpleXMessageCodecTest {
                 }
                 """.formatted(jsonStringLiteral(oversizeText));
         var decoded = SimpleXMessageCodec.decode(frame);
-        var ignored = assertInstanceOf(SimpleXMessageCodec.Ignored.class, decoded,
-                "oversize inbound text must decode as Ignored");
-        assertTrue(ignored.reason().contains("cap"),
-                "Ignored reason should name the cap: " + ignored.reason());
+        // The decode-time cap still drops the message (enforcement point
+        // unchanged); it now surfaces as OversizeDropped carrying the scope +
+        // sender + adapterMessageId the consumer needs for the §6.3.10 WARN.
+        var dropped = assertInstanceOf(SimpleXMessageCodec.OversizeDropped.class, decoded,
+                "oversize inbound text must decode as OversizeDropped");
+        assertInstanceOf(ScopeRef.Dm.class, dropped.scope(),
+                "a direct oversize drop must carry a DM scope for scope_kind");
+        assertEquals("contact-abc", dropped.senderContactId(),
+                "the oversize drop must carry the sender for the WARN");
+        assertEquals("msg-big", dropped.adapterMessageId(),
+                "the oversize drop must carry the adapterMessageId for the WARN");
     }
 
     @Test

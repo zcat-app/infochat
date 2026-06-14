@@ -96,6 +96,28 @@ class AdapterMetricsTest {
     }
 
     @Test
+    void inboundDroppedCounterCarriesScopeKindAndReason() {
+        metrics.inboundDropped("stub", DM, AdapterMetrics.DropReason.OVERSIZE);
+        metrics.inboundDropped("stub", GROUP, AdapterMetrics.DropReason.OVERSIZE);
+        // A queue-overflow drop fires before the frame is decoded into a
+        // scope: a null scope is recorded as scope_kind="unknown".
+        metrics.inboundDropped("stub", null, AdapterMetrics.DropReason.QUEUE_FULL);
+
+        assertEquals(1.0, registry.get("adapter.inbound.dropped")
+                        .tags("adapter", "stub", "scope_kind", "dm", "reason", "oversize")
+                        .counter().count(),
+                "a DM oversize drop must carry scope_kind=dm, reason=oversize");
+        assertEquals(1.0, registry.get("adapter.inbound.dropped")
+                        .tags("adapter", "stub", "scope_kind", "group", "reason", "oversize")
+                        .counter().count(),
+                "a group oversize drop must carry scope_kind=group, reason=oversize");
+        assertEquals(1.0, registry.get("adapter.inbound.dropped")
+                        .tags("adapter", "stub", "scope_kind", "unknown", "reason", "queue_full")
+                        .counter().count(),
+                "a queue-overflow drop with no decoded scope must record scope_kind=unknown");
+    }
+
+    @Test
     void outboundCounterCoversTheOutcomeDomain() {
         for (AdapterMetrics.SendOutcome outcome : AdapterMetrics.SendOutcome.values()) {
             metrics.outbound("stub", DM, outcome);

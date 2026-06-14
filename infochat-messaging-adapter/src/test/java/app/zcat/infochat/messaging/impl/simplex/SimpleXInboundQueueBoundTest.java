@@ -10,7 +10,10 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
+
+import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 
 /**
  * Pins the M1-224 DoS bound for the SimpleX transport: the inbound
@@ -33,6 +36,7 @@ class SimpleXInboundQueueBoundTest {
         int expectedDropped = fed - capacity - 1;
         int expectedDelivered = capacity + 1;
 
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
         try (FakeSimpleXProcess fake = new FakeSimpleXProcess()) {
             fake.start();
             CountDownLatch release = new CountDownLatch(1);
@@ -53,6 +57,7 @@ class SimpleXInboundQueueBoundTest {
                     },
                     gc -> { /* no group candidate in this test */ },
                     capacity);
+            client.bindMetrics(new AdapterMetrics(registry));
             client.start();
             try {
                 fake.awaitClient(WAIT);
@@ -77,6 +82,13 @@ class SimpleXInboundQueueBoundTest {
                         "dropped messages must never reach the consumer");
                 assertEquals(expectedDropped, client.droppedInboundCount(),
                         "the drop count must be stable after the flood drains");
+                // §6.3.7 overflow drops route through the shared inbound-drop
+                // counter with reason=queue_full and scope_kind=unknown (the
+                // drop fires before the frame is decoded into a scope).
+                assertEquals((double) expectedDropped, registry.get("adapter.inbound.dropped")
+                                .tags("adapter", "simplex", "scope_kind", "unknown", "reason", "queue_full")
+                                .counter().count(),
+                        "every queue-overflow drop must increment adapter.inbound.dropped{reason=queue_full}");
             } finally {
                 release.countDown();
                 client.close();

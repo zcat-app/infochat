@@ -587,7 +587,10 @@ public final class SignalAdapter implements MessagingAdapter {
                     "SignalAdapter.groupHandler() requires a derived bot ACI "
                             + "(start() has not run).");
         }
-        return new SignalGroupHandler(anchor, handler, membershipHandler);
+        // metrics is the adapter's bound emission point (volatile read of
+        // the late-bound field) so the group handler's §6.3.10 oversize-drop
+        // counter lands on the deployment registry, not the noop.
+        return new SignalGroupHandler(anchor, handler, membershipHandler, metrics);
     }
 
     private SignalJsonRpcClient requireConnected(String op) throws MessagingException {

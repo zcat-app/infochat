@@ -11,8 +11,11 @@ import jakarta.json.JsonReader;
 import jakarta.json.JsonValue;
 
 import java.io.StringReader;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.Locale;
-import java.util.Optional;
 import java.util.regex.Pattern;
 
 import org.jspecify.annotations.Nullable;
@@ -201,53 +204,63 @@ final class SignalMessageCodec {
     }
 
     /**
-     * Try to extract a DM-scope inbound message from a
-     * {@code method=receive} notification. Returns empty when the
-     * envelope is a group message, a sync/typing/receipt notification,
-     * or otherwise lacks a usable sender ACI + body.
+     * Classify a {@code method=receive} notification as a DM-scope
+     * outcome ({@link DmDecode}): a usable {@link DmMessage}, an
+     * {@link OversizeDm} (the decoded body exceeds the inbound size cap —
+     * dropped at decode, but the sender + adapterMessageId are surfaced so
+     * the consumer can count the drop and WARN per §6.3.10), or
+     * {@link NotDm#INSTANCE} (a group / sync / typing / receipt frame, or
+     * one lacking a usable sender ACI, body, or timestamp). Stays a pure
+     * function: the cap CHECK and the attribution extraction happen here;
+     * the counter + WARN are the consumer's job.
      */
-    Optional<ReceivedDm> extractDm(JsonObject receiveParams) {
+    DmDecode extractDm(JsonObject receiveParams) {
         // This method must be total over arbitrary inbound frame shapes:
         // the daemon stream is a trust boundary, and an NPE/CCE escaping
         // here used to kill the thread that processes inbound frames while
         // the subprocess stayed alive — a permanently deaf adapter with no
         // restart trigger. instanceof doubles as null-check + type check.
         if (!(receiveParams.get("envelope") instanceof JsonObject envelope)) {
-            return Optional.empty();
+            return NotDm.INSTANCE;
         }
         String sourceUuid = envelope.getString("sourceUuid", null);
         if (sourceUuid == null || !isAcceptableAci(sourceUuid)) {
             // v1 accepts only canonical-UUID identities: an inbound ACI
             // that cannot be asserted is dropped at decode rather than
             // becoming a permanent (adapter, contact_id) join key.
-            return Optional.empty();
+            return NotDm.INSTANCE;
         }
         if (!(envelope.get("dataMessage") instanceof JsonObject dataMessage)) {
-            return Optional.empty();
+            return NotDm.INSTANCE;
         }
         // Group messages carry groupInfo / groupV2 — skip (not a DM); the
         // group route handles them.
         if (dataMessage.containsKey("groupInfo") || dataMessage.containsKey("groupV2")) {
-            return Optional.empty();
+            return NotDm.INSTANCE;
         }
         String body = dataMessage.getString("message", null);
         if (body == null || body.isEmpty()) {
-            return Optional.empty();
-        }
-        if (exceedsInboundByteCap(body)) {
-            // Decoded-body UTF-8 byte cap (the maxInboundMessageBytes
-            // capability), mirroring SimpleX — the coarse char-domain line
-            // cap in SignalJsonRpcClient does not bound the body.
-            return Optional.empty();
+            return NotDm.INSTANCE;
         }
         Long timestamp = usableTimestamp(envelope, dataMessage);
         if (timestamp == null) {
-            return Optional.empty();
+            return NotDm.INSTANCE;
+        }
+        String senderContactId = canonicalizeAci(sourceUuid);
+        if (exceedsInboundByteCap(body)) {
+            // Decoded-body UTF-8 byte cap (the maxInboundMessageBytes
+            // capability), mirroring SimpleX — the coarse char-domain line
+            // cap in SignalJsonRpcClient does not bound the body. The cap
+            // CHECK stays here at decode (enforcement point unchanged); the
+            // drop is surfaced as OversizeDm rather than silently swallowed
+            // so the consumer raises adapter.inbound.dropped{reason=oversize}
+            // and the §6.3.10 WARN with the sender + adapterMessageId.
+            return new OversizeDm(senderContactId, "signal-" + timestamp);
         }
         // sourceName is the sender's profile name (informational only,
         // D10: never authoritative); absent on profile-less senders → null.
         String sourceName = envelope.getString("sourceName", null);
-        return Optional.of(new ReceivedDm(canonicalizeAci(sourceUuid), sourceName, body, timestamp));
+        return new DmMessage(new ReceivedDm(senderContactId, sourceName, body, timestamp));
     }
 
     /**
@@ -329,4 +342,49 @@ final class SignalMessageCodec {
      */
     record ReceivedDm(String senderContactId, @Nullable String senderDisplayName,
                       String body, long timestamp) {}
+
+    /**
+     * Outcome of {@link #extractDm}. Sealed so the consumer's dispatch is
+     * an exhaustive, compile-checked switch over the three DM-decode
+     * results.
+     */
+    sealed interface DmDecode permits DmMessage, OversizeDm, NotDm {}
+
+    /** A usable DM-scope inbound, ready for delivery to Provider. */
+    record DmMessage(ReceivedDm received) implements DmDecode {}
+
+    /**
+     * A DM dropped at decode for exceeding the inbound size cap
+     * (§6.3.10). Carries the attribution the consumer needs to raise
+     * {@code adapter.inbound.dropped{reason=oversize}} and the WARN: the
+     * canonicalized sender contact id (redacted at the log site — never
+     * logged raw, D37) and the {@code adapterMessageId}.
+     */
+    record OversizeDm(String senderContactId, String adapterMessageId) implements DmDecode {}
+
+    /**
+     * Not a usable DM: a group / sync / typing / receipt frame, or one
+     * lacking a usable sender ACI, body, or timestamp. The group route
+     * ({@link SignalGroupHandler}) owns the group-scope shapes.
+     */
+    enum NotDm implements DmDecode { INSTANCE }
+
+    /**
+     * Non-reversible short token for a sender contact id, safe to log
+     * under D37 (a Signal ACI is a sensitive identifier and is never
+     * logged raw). Stable per sender so a repeat flooder stays
+     * correlatable across drop WARN lines without exposing the id. A pure
+     * function, so it lives on the codec and is shared by every Signal
+     * drop site ({@link SignalJsonRpcClient}, {@link SignalGroupHandler}).
+     */
+    static String redactContactId(String contactId) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(contactId.getBytes(StandardCharsets.UTF_8));
+            return "contact#" + HexFormat.of().formatHex(digest, 0, 4);
+        } catch (NoSuchAlgorithmException e) {
+            // SHA-256 is a JDK-mandated algorithm; its absence cannot happen.
+            throw new AssertionError(e);
+        }
+    }
 }

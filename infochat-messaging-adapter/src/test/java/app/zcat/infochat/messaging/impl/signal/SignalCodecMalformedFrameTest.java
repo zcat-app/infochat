@@ -11,7 +11,6 @@ import jakarta.json.JsonObject;
 import jakarta.json.JsonReader;
 
 import java.io.StringReader;
-import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 
@@ -33,33 +32,33 @@ class SignalCodecMalformedFrameTest {
     void frameWithoutUsableTimestampIsDroppedNotThrown() {
         // Timestamp absent in BOTH envelope and dataMessage — the old
         // getJsonNumber(...).longValueExact() chain threw NPE here.
-        assertTrue(codec.extractDm(parse("""
+        assertInstanceOf(SignalMessageCodec.NotDm.class, codec.extractDm(parse("""
                 {"envelope":{"sourceUuid":"%s",
                   "dataMessage":{"message":"hi"}}}
-                """.formatted(SOURCE_ACI))).isEmpty(),
+                """.formatted(SOURCE_ACI))),
                 "absent-in-both timestamp must drop the frame, not throw");
 
         // Wrong-typed timestamp in envelope, absent in dataMessage —
         // the old envelope.getJsonNumber("timestamp") threw CCE here.
-        assertTrue(codec.extractDm(parse("""
+        assertInstanceOf(SignalMessageCodec.NotDm.class, codec.extractDm(parse("""
                 {"envelope":{"sourceUuid":"%s","timestamp":"soon",
                   "dataMessage":{"message":"hi"}}}
-                """.formatted(SOURCE_ACI))).isEmpty(),
+                """.formatted(SOURCE_ACI))),
                 "wrong-typed envelope timestamp with no fallback must drop the frame, not throw");
 
         // Wrong-typed timestamp in both fields.
-        assertTrue(codec.extractDm(parse("""
+        assertInstanceOf(SignalMessageCodec.NotDm.class, codec.extractDm(parse("""
                 {"envelope":{"sourceUuid":"%s","timestamp":[1],
                   "dataMessage":{"message":"hi","timestamp":{"x":1}}}}
-                """.formatted(SOURCE_ACI))).isEmpty(),
+                """.formatted(SOURCE_ACI))),
                 "wrong-typed timestamp in both fields must drop the frame, not throw");
 
         // Fractional timestamp — longValueExact would have thrown
         // ArithmeticException.
-        assertTrue(codec.extractDm(parse("""
+        assertInstanceOf(SignalMessageCodec.NotDm.class, codec.extractDm(parse("""
                 {"envelope":{"sourceUuid":"%s","timestamp":17.5,
                   "dataMessage":{"message":"hi","timestamp":17.5}}}
-                """.formatted(SOURCE_ACI))).isEmpty(),
+                """.formatted(SOURCE_ACI))),
                 "fractional timestamp must drop the frame, not throw");
     }
 
@@ -67,36 +66,37 @@ class SignalCodecMalformedFrameTest {
     void timestampFallsBackToDataMessageWhenEnvelopeTimestampUnusable() {
         // Positive control for the guard: an unusable envelope timestamp
         // with a usable dataMessage timestamp still delivers.
-        Optional<SignalMessageCodec.ReceivedDm> dm = codec.extractDm(parse("""
+        SignalMessageCodec.ReceivedDm dm = assertInstanceOf(
+                SignalMessageCodec.DmMessage.class, codec.extractDm(parse("""
                 {"envelope":{"sourceUuid":"%s","timestamp":"soon",
                   "dataMessage":{"message":"hi","timestamp":1700000001000}}}
-                """.formatted(SOURCE_ACI)));
-        assertTrue(dm.isPresent(),
-                "usable dataMessage timestamp must rescue an unusable envelope timestamp");
-        assertEquals(1700000001000L, dm.get().timestamp());
+                """.formatted(SOURCE_ACI))),
+                "usable dataMessage timestamp must rescue an unusable envelope timestamp")
+                .received();
+        assertEquals(1700000001000L, dm.timestamp());
     }
 
     @Test
     void wrongTypedEnvelopeShapesAreDroppedNotThrown() {
         // Wrong-typed envelope — the old getJsonObject("envelope") threw CCE.
-        assertTrue(codec.extractDm(parse("""
+        assertInstanceOf(SignalMessageCodec.NotDm.class, codec.extractDm(parse("""
                 {"envelope":"junk"}
-                """)).isEmpty(),
+                """)),
                 "wrong-typed envelope must drop the frame, not throw");
 
         // Wrong-typed dataMessage.
-        assertTrue(codec.extractDm(parse("""
+        assertInstanceOf(SignalMessageCodec.NotDm.class, codec.extractDm(parse("""
                 {"envelope":{"sourceUuid":"%s","timestamp":1700000001000,
                   "dataMessage":5}}
-                """.formatted(SOURCE_ACI))).isEmpty(),
+                """.formatted(SOURCE_ACI))),
                 "wrong-typed dataMessage must drop the frame, not throw");
 
         // Wrong-typed sourceUuid — the default-value getString variant
         // must swallow the shape mismatch and report absence.
-        assertTrue(codec.extractDm(parse("""
+        assertInstanceOf(SignalMessageCodec.NotDm.class, codec.extractDm(parse("""
                 {"envelope":{"sourceUuid":5,"timestamp":1700000001000,
                   "dataMessage":{"message":"hi","timestamp":1700000001000}}}
-                """)).isEmpty(),
+                """)),
                 "wrong-typed sourceUuid must drop the frame, not throw");
     }
 

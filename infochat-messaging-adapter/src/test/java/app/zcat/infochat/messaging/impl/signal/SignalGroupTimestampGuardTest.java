@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 
 import app.zcat.infochat.messaging.InboundMessage;
 import app.zcat.infochat.messaging.MessagingAdapter;
+import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 
 /**
  * Pins the group inbound path's timestamp guard: a group frame that passes
@@ -38,7 +39,7 @@ class SignalGroupTimestampGuardTest {
     @Test
     void wellFormedFrameDelivered() {
         RecordingInbound inbound = new RecordingInbound();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, new RecordingMembership());
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, new RecordingMembership(), AdapterMetrics.noop());
 
         handler.handleReceive(parse("""
                 {
@@ -153,7 +154,7 @@ class SignalGroupTimestampGuardTest {
 
     private static void assertDroppedCleanly(String frameJson) {
         RecordingInbound inbound = new RecordingInbound();
-        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, new RecordingMembership());
+        SignalGroupHandler handler = new SignalGroupHandler(BOT_ACI, inbound, new RecordingMembership(), AdapterMetrics.noop());
         JsonObject params = parse(frameJson);
         assertDoesNotThrow(() -> handler.handleReceive(params),
                 "an unusable group timestamp must not throw out of handleReceive");

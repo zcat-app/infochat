@@ -6,6 +6,7 @@ import app.zcat.infochat.messaging.Utf8;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.jspecify.annotations.Nullable;
 
 import java.time.Duration;
 
@@ -15,6 +16,9 @@ import java.time.Duration;
  *
  * <ul>
  *   <li>{@code adapter.inbound.total}{adapter, scope_kind} — counter</li>
+ *   <li>{@code adapter.inbound.dropped}{adapter, scope_kind, reason} — counter,
+ *       reason ∈ {oversize, queue_full} (§6.3.10 transport size cap, §6.3.7
+ *       inbound-queue overflow)</li>
  *   <li>{@code adapter.outbound.total}{adapter, scope_kind, outcome} — counter,
  *       outcome ∈ {ok, retry, fail}</li>
  *   <li>{@code adapter.inbound.queue.size}{adapter} — gauge</li>
@@ -115,6 +119,26 @@ public final class AdapterMetrics {
         }
     }
 
+    /**
+     * {@code adapter.inbound.dropped} reason label domain. {@link #OVERSIZE}
+     * is the §6.3.10 transport size-cap shed (the decoded body exceeded
+     * {@code maxInboundMessageBytes}); {@link #QUEUE_FULL} is the §6.3.7
+     * inbound-dispatch-queue overflow drop-newest.
+     */
+    public enum DropReason {
+        OVERSIZE("oversize"), QUEUE_FULL("queue_full");
+
+        private final String label;
+
+        DropReason(String label) {
+            this.label = label;
+        }
+
+        public String label() {
+            return label;
+        }
+    }
+
     /** {@code adapter.message.bytes} direction label domain (§6.12). */
     public enum Direction {
         INBOUND("inbound"), OUTBOUND("outbound");
@@ -188,6 +212,22 @@ public final class AdapterMetrics {
     public void inbound(String adapter, ScopeRef scope) {
         registry.counter("adapter.inbound.total",
                         "adapter", adapter, "scope_kind", scopeKind(scope))
+                .increment();
+    }
+
+    /**
+     * One inbound message dropped at the adapter boundary before delivery
+     * to Provider (§6.3.10 oversize shed, §6.3.7 queue overflow). {@code
+     * scope} is the decoded scope where the drop site knows it (every
+     * oversize drop); it is {@code null} for the queue-overflow drop, which
+     * fires before the frame is decoded into a scope, and is recorded as
+     * {@code scope_kind="unknown"}.
+     */
+    public void inboundDropped(String adapter, @Nullable ScopeRef scope, DropReason reason) {
+        registry.counter("adapter.inbound.dropped",
+                        "adapter", adapter,
+                        "scope_kind", scope == null ? "unknown" : scopeKind(scope),
+                        "reason", reason.label())
                 .increment();
     }
 
