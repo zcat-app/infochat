@@ -95,7 +95,7 @@ import jakarta.json.JsonObject;
  * closed-before-ack → PERMANENT) follow the classification matrix in
  * {@link FailureCategory}.</p>
  */
-final class SignalJsonRpcClient {
+class SignalJsonRpcClient {
 
     private static final Logger LOG = Logger.getLogger(SignalJsonRpcClient.class);
 
@@ -149,6 +149,23 @@ final class SignalJsonRpcClient {
      * so tests can drive the overflow path with a small queue.
      */
     static final int INBOUND_QUEUE_CAPACITY = 1_000;
+
+    /**
+     * Bound on the daemon-socket TCP connect, in milliseconds. Without it,
+     * {@code new Socket(addr, port)} connects with the OS default (~75–120s
+     * on Linux): a SYN that never draws a SYN-ACK — the daemon crashed in the
+     * gap after {@code SignalAdapter.awaitEndpoint}'s probe, the host's accept
+     * backlog saturated, or a partition opened — pins the calling thread for
+     * over a minute. {@code SignalAdapter.start()} calls {@link #connect()}
+     * synchronously, so that hang blocks Provider startup past its grace
+     * window; the bound turns it into a fast {@link java.net.SocketTimeoutException}
+     * the {@code connectClient} seam already classifies TRANSIENT, driving a
+     * supervisor restart instead. Aligned to {@code SignalAdapter}'s own
+     * per-attempt endpoint-probe connect timeout ({@code ENDPOINT_PROBE_INTERVAL*2
+     * = 200 ms} against the same just-probed localhost daemon); the probe's
+     * symbol is private to that class and cannot be shared.
+     */
+    static final int CONNECT_TIMEOUT_MS = 200;
 
     private final InetSocketAddress endpoint;
     private final String account;
@@ -277,7 +294,13 @@ final class SignalJsonRpcClient {
     }
 
     void connect() throws IOException {
-        Socket s = new Socket(endpoint.getAddress(), endpoint.getPort());
+        // Bounded connect (CONNECT_TIMEOUT_MS): an unconnected socket plus an
+        // explicit connect(endpoint, timeout) so an unanswered SYN fails fast
+        // instead of pinning startup on the OS default. The socket comes from
+        // the newSocket() seam so a test can inject one that records the
+        // timeout argument without opening a real connection.
+        Socket s = newSocket();
+        s.connect(endpoint, CONNECT_TIMEOUT_MS);
         BufferedWriter w = new BufferedWriter(
                 new OutputStreamWriter(s.getOutputStream(), StandardCharsets.UTF_8));
         // A fresh connection talks to a fresh daemon: a timeout streak
@@ -300,6 +323,18 @@ final class SignalJsonRpcClient {
         t.setDaemon(true);
         this.readerThread = t;
         t.start();
+    }
+
+    /**
+     * Socket factory seam mirroring {@code SignalAdapter.connectClient}'s
+     * test idiom: {@link #connect()} obtains its unconnected socket here so a
+     * test can override this to inject a socket that records the
+     * {@link #CONNECT_TIMEOUT_MS} argument (and throws to exercise the
+     * timeout path) without a real network connection — the connect window is
+     * one no test can produce deterministically through {@code start()}.
+     */
+    Socket newSocket() {
+        return new Socket();
     }
 
     void disconnect() {
