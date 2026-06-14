@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 377 |
+| done | 378 |
 | deferred | 5 |
 | **total** | **385** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-330 — LLM providers: redact base-url credentials on parse-failure paths + reject userinfo at config boundary (complexity: medium, risk: low)
 - M1-344 — llm-adapter: single-source per-task config keys and the embedding provider name (complexity: medium, risk: low)
 - M1-349 — Spec/design: correct the asset-fetch SPI name (AssetDataSource, not the post Fetcher) (complexity: low, risk: low)
 
@@ -518,7 +517,7 @@ M1-326 (done)
 M1-327 (done)
 M1-328 (done)
 M1-329 (done)
-M1-330 (pending) ← runnable
+M1-330 (done)
 M1-331 (done)
 M1-332 (done)
 M1-333 (done)

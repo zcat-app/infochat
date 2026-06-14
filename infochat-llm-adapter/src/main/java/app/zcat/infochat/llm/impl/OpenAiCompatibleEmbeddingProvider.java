@@ -176,12 +176,13 @@ public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
             root = LlmHttpSupport.JSON.readTree(responseBody);
         } catch (IOException e) {
             throw new EmbeddingCallFailedException(
-                "OpenAiCompatibleEmbeddingProvider: failed to parse JSON response from " + uri, e);
+                "OpenAiCompatibleEmbeddingProvider: failed to parse JSON response from "
+                    + uri.getHost(), e);
         }
         JsonNode data = root.path("data");
         if (!data.isArray()) {
             throw new EmbeddingCallFailedException(
-                "OpenAiCompatibleEmbeddingProvider: response missing data[] from " + uri
+                "OpenAiCompatibleEmbeddingProvider: response missing data[] from " + uri.getHost()
                     + "; preview: " + LlmHttpSupport.preview(responseBody));
         }
         List<EmbeddingResult> results = new ArrayList<>(data.size());
@@ -190,7 +191,7 @@ public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
             if (!embedding.isArray()) {
                 throw new EmbeddingCallFailedException(
                     "OpenAiCompatibleEmbeddingProvider: data[" + i + "].embedding missing or not array from "
-                        + uri + "; preview: " + LlmHttpSupport.preview(responseBody));
+                        + uri.getHost() + "; preview: " + LlmHttpSupport.preview(responseBody));
             }
             float[] vector = new float[embedding.size()];
             for (int j = 0; j < embedding.size(); j++) {
@@ -204,7 +205,7 @@ public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
                 if (!coordinate.isNumber()) {
                     throw new EmbeddingCallFailedException(
                         "OpenAiCompatibleEmbeddingProvider: data[" + i + "].embedding[" + j
-                            + "] is not numeric from " + uri + "; preview: "
+                            + "] is not numeric from " + uri.getHost() + "; preview: "
                             + LlmHttpSupport.preview(responseBody));
                 }
                 vector[j] = (float) coordinate.doubleValue();
@@ -219,7 +220,7 @@ public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
         // one-failure-fails-batch retry) rather than a corrupt result.
         if (results.size() != expectedCount) {
             throw new EmbeddingCallFailedException(
-                "OpenAiCompatibleEmbeddingProvider: response shape mismatch from " + uri
+                "OpenAiCompatibleEmbeddingProvider: response shape mismatch from " + uri.getHost()
                     + " — expected " + expectedCount + " embeddings, got " + results.size());
         }
         return results;

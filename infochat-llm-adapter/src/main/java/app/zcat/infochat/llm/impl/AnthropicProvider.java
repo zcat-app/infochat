@@ -60,9 +60,11 @@ import java.time.Duration;
  * <p>Same contract as {@link OpenAiCompatibleProvider}, surfaced
  * through the shared {@link LlmHttpSupport#executeJsonCall} pipeline:
  * any {@link IOException}, {@link InterruptedException}, or non-2xx
- * HTTP status throws {@link LlmCallFailedException}. A non-2xx reply
- * carries a bounded body preview, which includes the inner Anthropic
- * {@code error.message} for the small JSON error bodies the API returns.
+ * HTTP status throws {@link LlmCallFailedException}. A non-2xx reply's
+ * body is intentionally NOT placed in the exception (U-13): the message
+ * carries only the provider label, status code, and host, because
+ * provider error bodies can echo request fragments or user content and
+ * must never reach a log line or exception message.
  */
 @ApplicationScoped
 public class AnthropicProvider implements LlmProvider {
@@ -179,12 +181,12 @@ public class AnthropicProvider implements LlmProvider {
             root = LlmHttpSupport.JSON.readTree(responseBody);
         } catch (IOException e) {
             throw new LlmCallFailedException(
-                "AnthropicProvider: failed to parse JSON response from " + uri, e);
+                "AnthropicProvider: failed to parse JSON response from " + uri.getHost(), e);
         }
         JsonNode content = root.path("content");
         if (!content.isArray() || content.isEmpty()) {
             throw new LlmCallFailedException(
-                "AnthropicProvider: response missing content[] from " + uri);
+                "AnthropicProvider: response missing content[] from " + uri.getHost());
         }
         // Concatenate every text-typed block rather than reading
         // content[0].text: the Messages API may lead with non-text
@@ -205,7 +207,7 @@ public class AnthropicProvider implements LlmProvider {
         }
         if (!sawTextBlock) {
             throw new LlmCallFailedException(
-                "AnthropicProvider: response has no text content block from " + uri);
+                "AnthropicProvider: response has no text content block from " + uri.getHost());
         }
         JsonNode modelNode = root.path("model");
         String model = modelNode.isTextual() ? modelNode.asText() : null;

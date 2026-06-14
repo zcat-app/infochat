@@ -205,19 +205,19 @@ public class OpenAiCompatibleProvider implements LlmProvider {
             root = LlmHttpSupport.JSON.readTree(responseBody);
         } catch (IOException e) {
             throw new LlmCallFailedException(
-                "OpenAiCompatibleProvider: failed to parse JSON response from " + uri, e);
+                "OpenAiCompatibleProvider: failed to parse JSON response from " + uri.getHost(), e);
         }
         JsonNode choices = root.path("choices");
         if (!choices.isArray() || choices.isEmpty()) {
             throw new LlmCallFailedException(
-                "OpenAiCompatibleProvider: response missing choices[] from " + uri
+                "OpenAiCompatibleProvider: response missing choices[] from " + uri.getHost()
                     + "; preview: " + LlmHttpSupport.preview(responseBody));
         }
         JsonNode content = choices.get(0).path("message").path("content");
         if (!content.isTextual()) {
             throw new LlmCallFailedException(
                 "OpenAiCompatibleProvider: response missing choices[0].message.content from "
-                    + uri + "; preview: " + LlmHttpSupport.preview(responseBody));
+                    + uri.getHost() + "; preview: " + LlmHttpSupport.preview(responseBody));
         }
         JsonNode modelNode = root.path("model");
         String model = modelNode.isTextual() ? modelNode.asText() : null;

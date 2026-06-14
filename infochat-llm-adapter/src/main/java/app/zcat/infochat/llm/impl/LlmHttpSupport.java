@@ -198,7 +198,8 @@ final class LlmHttpSupport {
     /**
      * Config-boundary validation of an operator-supplied LLM/embedding
      * base-url: the value must parse as a URI, carry an {@code http} or
-     * {@code https} scheme, and name a host. A malformed value dies here —
+     * {@code https} scheme, name a host, and carry no inline credentials
+     * (userinfo). A malformed value dies here —
      * at startup, where every provider's config is asserted — naming
      * {@code propertyKey}, rather than throwing {@link IllegalArgumentException}
      * from a per-call {@code URI.create} deep inside a live call, where the
@@ -206,8 +207,11 @@ final class LlmHttpSupport {
      * misconfiguration as a transient outage.
      *
      * @throws IllegalArgumentException when {@code baseUrl} does not parse,
-     *     uses a non-http(s) scheme, or names no host; the message names
-     *     {@code propertyKey} so the operator can find the offending property.
+     *     uses a non-http(s) scheme, names no host, or embeds userinfo; the
+     *     message names {@code propertyKey} so the operator can find the
+     *     offending property. The userinfo case is the only one whose message
+     *     does NOT echo {@code baseUrl} — echoing it would leak the very
+     *     credential the check exists to keep out of diagnostics (M1-330).
      */
     static void requireHttpBaseUrl(String baseUrl, String propertyKey) {
         URI uri;
@@ -226,6 +230,17 @@ final class LlmHttpSupport {
         if (host == null || host.isEmpty()) {
             throw new IllegalArgumentException(
                 propertyKey + "='" + baseUrl + "' must name a host");
+        }
+        // Reject inline credentials (https://user:pass@host). The
+        // OpenAI-compatible wire shape accepts userinfo in the URL, but the
+        // uri then flows into per-call diagnostic messages; rejecting it here
+        // at the config boundary makes that credential leak structurally
+        // impossible and steers operators to the api-key property. The message
+        // must NOT echo baseUrl — that would re-leak the userinfo it rejects.
+        if (uri.getUserInfo() != null) {
+            throw new IllegalArgumentException(
+                propertyKey + " must not embed credentials (userinfo) in the URL;"
+                    + " supply the credential via the corresponding api-key property instead");
         }
     }
 

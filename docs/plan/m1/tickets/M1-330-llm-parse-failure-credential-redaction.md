@@ -1,10 +1,16 @@
 ---
 id: M1-330
 title: "LLM providers: redact base-url credentials on parse-failure paths + reject userinfo at config boundary"
-status: pending
+status: done
 created: 2026-06-14
 last_updated: 2026-06-14
 blocked_by: []
+clarity_check:
+  date: 2026-06-14
+  verdict: WARN
+  warnings:
+    - "COMPLEXITY-RISK-CALIBRATED: risk: low is a mild under-statement for a security_relevant ticket closing a credential-leak at a config validation boundary; consider risk: medium. Does not block implementation."
+  blockers: []
 files_budget: 5
 files_scope:
   - infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/impl/LlmHttpSupport.java
@@ -35,13 +41,39 @@ test_plan:
 spec_refs:
   - docs/spec/security.md §Secrets handling
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-14
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 7
+      added: 149
+      removed: 24
 escalations: []
 revisions: []
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-06-14
+    verdict: CLEAN
+    base: 18feceed^
+    head: 18feceed
+    verdict_file: docs/plan/m1/redteam/M1-330-2026-06-14.md
+    out_of_model_count: 3
+    note: |
+      CLEAN. Adversary found no gap between security.md §Secrets handling and
+      the diff: userinfo rejected at requireHttpBaseUrl (message does not echo
+      the credential) and parse-failure messages narrowed to host-only keep
+      base-url credentials out of exception/log surfaces. 3 advisory
+      out-of-model observations recorded in the verdict file; none block merge.
 ---
 
 # M1-330: LLM providers — redact base-url credentials on parse-failure paths
