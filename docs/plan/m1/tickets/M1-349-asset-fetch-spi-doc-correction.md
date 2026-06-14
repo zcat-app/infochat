@@ -1,7 +1,7 @@
 ---
 id: M1-349
 title: "Spec/design: correct the asset-fetch SPI name (AssetDataSource, not the post Fetcher)"
-status: pending
+status: done
 created: 2026-06-14
 last_updated: 2026-06-14
 blocked_by: []

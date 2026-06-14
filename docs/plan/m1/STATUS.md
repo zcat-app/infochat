@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 378 |
+| done | 379 |
 | deferred | 5 |
 | **total** | **385** |
 
@@ -25,7 +25,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-344 — llm-adapter: single-source per-task config keys and the embedding provider name (complexity: medium, risk: low)
-- M1-349 — Spec/design: correct the asset-fetch SPI name (AssetDataSource, not the post Fetcher) (complexity: low, risk: low)
 
 ---
 
@@ -61,6 +60,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-349 | Spec/design: correct the asset-fetch SPI name (AssetDataSource, not the post Fetcher) | 2026-06-14 | — |
 | M1-348 | DefaultRedactionHook: fail-closed to the sentinel on non-JSON redacted output | 2026-06-14 | round 1 APPROVE |
 | M1-347 | InviteCodeConsumer: drop the empty-transaction commit on the already-breached path | 2026-06-14 | round 1 APPROVE |
 | M1-346 | infochat-core: schema-test javadoc, audit-denorm IT package, contact-id parity comment | 2026-06-14 | round 1 APPROVE |
@@ -70,7 +70,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-341 | FetchScheduler: exclude stream-shaped kinds + filter due kinds at SQL | 2026-06-14 | round 1 APPROVE |
 | M1-340 | Asset freshness: decouple Provider staleness window from the Collector cadence keys | 2026-06-14 | round 1 APPROVE |
 | M1-339 | Stage1Pipeline: narrow the EscapedEntity suppression to the doc | 2026-06-14 | round 1 APPROVE |
-| M1-338 | AbstractInstanceLockGuard: scope the ownership probe to the gate's lock id | 2026-06-14 | round 1 APPROVE |
 
 ---
 
@@ -536,5 +535,5 @@ M1-345 (done)
 M1-346 (done)
 M1-347 (done)
 M1-348 (done)
-M1-349 (pending) ← runnable
+M1-349 (done)
 ```
