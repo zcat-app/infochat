@@ -55,8 +55,12 @@ final class SignalMentionParser {
      *         of the bot.
      */
     static boolean botMentioned(JsonObject dataMessage, String botAci) {
-        JsonArray mentions = dataMessage.getJsonArray("mentions");
-        if (mentions == null || mentions.isEmpty()) {
+        // instanceof doubles as the null-check and the type-check (the
+        // codec's discipline): a present-but-wrong-typed mentions field
+        // (untrusted wire data) collapses into the same 'not a mention ->
+        // false' branch as an absent one rather than throwing CCE out of
+        // the typed getJsonArray accessor.
+        if (!(dataMessage.get("mentions") instanceof JsonArray mentions) || mentions.isEmpty()) {
             return false;
         }
         byte[] botBytes = botAci.toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8);

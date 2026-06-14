@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 23 |
+| pending | 22 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 357 |
+| done | 358 |
 | deferred | 5 |
 | **total** | **385** |
 
@@ -28,7 +28,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-327 — EmbeddingWorker: notify-once + skip on non-finite vector components (complexity: medium, risk: medium)
 - M1-328 — TaggerWorker: cap accepted tag count per post (complexity: low, risk: low)
 - M1-330 — LLM providers: redact base-url credentials on parse-failure paths + reject userinfo at config boundary (complexity: medium, risk: low)
-- M1-331 — Signal group inbound: coalesce overlapping bot-mention spans + instanceof-guard JSON accessors (complexity: medium, risk: medium)
 - M1-332 — SignalJsonRpcClient: bounded connect timeout on the daemon socket (complexity: low, risk: medium)
 - M1-333 — ChatAgent: consume cached InboundContext.effectiveLanguage instead of re-querying (complexity: medium, risk: low)
 - M1-334 — StageProgressNotifier: terminate abandoned per-scope state at request end (complexity: medium, risk: medium)
@@ -82,6 +81,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-331 | Signal group inbound: coalesce overlapping bot-mention spans + instanceof-guard JSON accessors | 2026-06-14 | round 1 APPROVE |
 | M1-329 | ListSavesTool: aggregate byte budget + title truncation at the LLM tool boundary | 2026-06-14 | round 1 APPROVE |
 | M1-325 | Align InboundRouterChatPersistFailureTest with M1-323 test-double constructors | 2026-06-13 | — |
 | M1-324 | Amend §Failure handling: group-deleted-upstream via threshold in v1 | 2026-06-13 | — |
@@ -91,7 +91,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-313 | Chat-memory write ordering on permanent delivery failure | 2026-06-13 | round 1 APPROVE |
 | M1-312 | Doc-truth v5: false comments and spec/design drift reconciliation | 2026-06-13 | round 1 APPROVE |
 | M1-311 | Comment policy: carve out stable decision-record anchors | 2026-06-13 | round 1 APPROVE |
-| M1-309 | Provider structural dedup: PG listener base class, shared command tokenizer | 2026-06-13 | round 1 APPROVE |
 
 ---
 
@@ -539,7 +538,7 @@ M1-327 (pending) ← runnable
 M1-328 (pending) ← runnable
 M1-329 (done)
 M1-330 (pending) ← runnable
-M1-331 (pending) ← runnable
+M1-331 (done)
 M1-332 (pending) ← runnable
 M1-333 (pending) ← runnable
 M1-334 (pending) ← runnable

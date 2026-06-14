@@ -102,16 +102,21 @@ final class SignalGroupHandler {
      *                      {@code receive} notification; never null.
      */
     void handleReceive(JsonObject receiveParams) {
-        JsonObject envelope = receiveParams.getJsonObject("envelope");
-        if (envelope == null) {
+        // instanceof doubles as the null-check and the type-check (the
+        // codec's discipline, SignalMessageCodec.decode/extractDm): the
+        // daemon stream is a trust boundary, so a present-but-wrong-typed
+        // envelope/dataMessage/groupV2 (untrusted Signal-peer wire data)
+        // collapses into the same drop branch as an absent field rather
+        // than throwing CCE out of the typed getJsonObject accessor —
+        // making the boundary guard intrinsic here, not resting on the
+        // incidental catch(RuntimeException) in dispatchGroupNotification.
+        if (!(receiveParams.get("envelope") instanceof JsonObject envelope)) {
             return;
         }
-        JsonObject dataMessage = envelope.getJsonObject("dataMessage");
-        if (dataMessage == null) {
+        if (!(envelope.get("dataMessage") instanceof JsonObject dataMessage)) {
             return;
         }
-        JsonObject groupV2 = dataMessage.getJsonObject("groupV2");
-        if (groupV2 == null) {
+        if (!(dataMessage.get("groupV2") instanceof JsonObject groupV2)) {
             // DM scope or non-group notification — owned by
             // SignalMessageCodec.extractDm via SignalJsonRpcClient.
             return;
@@ -128,8 +133,8 @@ final class SignalGroupHandler {
         // on the same update (a mod swap, an admin reshuffle); the spec
         // models them as independent per-user events.
         boolean dispatchedMembership =
-                dispatchMembership(groupId, groupV2.getJsonArray("memberJoined"), true)
-                | dispatchMembership(groupId, groupV2.getJsonArray("memberLeft"), false);
+                dispatchMembership(groupId, arrayOrNull(groupV2, "memberJoined"), true)
+                | dispatchMembership(groupId, arrayOrNull(groupV2, "memberLeft"), false);
         if (dispatchedMembership) {
             return;
         }
@@ -226,10 +231,31 @@ final class SignalGroupHandler {
         if (spans.isEmpty()) {
             return body;
         }
-        // Delete right-to-left so earlier spans' offsets stay valid.
-        spans.sort((a, b) -> Integer.compare(b[0], a[0]));
-        StringBuilder stripped = new StringBuilder(body);
+        // Coalesce overlapping/adjacent spans BEFORE stripping. Each
+        // (start, length) pair is untrusted Signal-peer wire data: two
+        // overlapping bot-uuid spans (e.g. {start=5,length=10} and
+        // {start=8,length=10}) deleted sequentially would let the second
+        // StringBuilder.delete clamp against the already-shortened buffer
+        // and silently mutilate the body. Sorting ascending and merging
+        // into disjoint intervals (span start <= running end extends the
+        // interval) makes the strip a single contiguous, well-defined,
+        // idempotent operation for any overlap shape a hostile peer can
+        // author. Non-overlapping spans keep a gap, so they stay separate
+        // intervals and the prior single-mention behavior is unchanged.
+        spans.sort((a, b) -> Integer.compare(a[0], b[0]));
+        List<int[]> merged = new ArrayList<>();
         for (int[] span : spans) {
+            if (!merged.isEmpty() && span[0] <= merged.get(merged.size() - 1)[1]) {
+                int[] last = merged.get(merged.size() - 1);
+                last[1] = Math.max(last[1], span[1]);
+            } else {
+                merged.add(new int[] {span[0], span[1]});
+            }
+        }
+        // Delete right-to-left so earlier intervals' offsets stay valid.
+        StringBuilder stripped = new StringBuilder(body);
+        for (int i = merged.size() - 1; i >= 0; i--) {
+            int[] span = merged.get(i);
             stripped.delete(span[0], span[1]);
             // Whitespace normalization at the removal junction: a
             // mid-text mention leaves the spaces on both of its sides
@@ -276,6 +302,15 @@ final class SignalGroupHandler {
             }
         }
         return true;
+    }
+
+    private static @Nullable JsonArray arrayOrNull(JsonObject object, String name) {
+        // instanceof doubles as the null-check and the type-check (the
+        // codec's discipline): a present-but-wrong-typed memberJoined /
+        // memberLeft field (untrusted wire data) collapses into the same
+        // 'absent -> not usable' branch as a missing one rather than
+        // throwing CCE out of the typed getJsonArray accessor.
+        return object.get(name) instanceof JsonArray array ? array : null;
     }
 
     private static @Nullable String aciFromArrayEntry(JsonValue entry) {

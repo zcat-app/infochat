@@ -1,9 +1,14 @@
 ---
 id: M1-331
 title: "Signal group inbound: coalesce overlapping bot-mention spans + instanceof-guard JSON accessors"
-status: pending
+status: done
 created: 2026-06-14
 last_updated: 2026-06-14
+clarity_check:
+  date: 2026-06-14
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
 files_budget: 3
 files_scope:
@@ -33,13 +38,39 @@ test_plan:
 spec_refs:
   - docs/spec/security.md §Trust boundaries
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-14
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 317
+      removed: 20
 escalations: []
 revisions: []
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-06-14
+    verdict: CLEAN
+    base: 9a001c51a17ea615fa1ec41597e88ca5124ac60b
+    head: "working-tree (worktree-M1-331, uncommitted)"
+    verdict_file: docs/plan/m1/redteam/M1-331-2026-06-14.md
+    out_of_model_count: 0
+    note: |
+      In-progress adversarial review of the uncommitted branch tip between
+      review APPROVE and commit. Surface: Signal group adapter-inbound parse
+      (overlap-span coalescing + instanceof-guarded JSON accessors). CLEAN —
+      net-positive boundary hardening, no gap vs §Trust boundaries, nothing
+      to remediate before commit.
 ---
 
 # M1-331: Signal group inbound — robustness against untrusted wire data
