@@ -35,12 +35,12 @@ import jakarta.enterprise.context.ApplicationScoped;
  * concatenated with the upper-cased vs ({@code ZECUSD}, {@code XMRBTC}).
  * The v1 closed asset set's ticker map lives in {@link #TICKERS}.
  *
- * Attribution URL per design §10.7 ToS table:
- * {@code https://www.kraken.com/prices/<asset>-usd-<asset>-price-chart}.
- * The template hardcodes {@code -usd-} regardless of {@code vs}; this
- * matches {@code BootstrapAssetsLoader.attributionUrl} which Kraken's
- * URL scheme requires (the chart page is indexed by asset slug, not
- * by quote currency).
+ * Attribution URL per design §10.7 ToS table, with the quote-currency
+ * segment reflecting the requested {@code vs} so a non-USD reply links
+ * to the matching chart rather than the USD one:
+ * {@code https://www.kraken.com/prices/<asset>-<vs>-<asset>-price-chart}.
+ * {@code BootstrapAssetsLoader.attributionUrl} builds the same shape
+ * from each asset's default quote currency.
  */
 @ApplicationScoped
 public class KrakenSnapshotSource implements AssetDataSource {
@@ -180,7 +180,8 @@ public class KrakenSnapshotSource implements AssetDataSource {
 
     @Override
     public String attributionUrl(String asset, String vs) {
-        return String.format("https://www.kraken.com/prices/%s-usd-%s-price-chart", asset, asset);
+        return String.format("https://www.kraken.com/prices/%s-%s-%s-price-chart",
+            asset, vs.toLowerCase(Locale.ROOT), asset);
     }
 
     // Bound on upstream bytes admitted into exception text. A Kraken

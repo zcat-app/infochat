@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -53,5 +54,26 @@ class KrakenSnapshotSourceTest {
         String payload = "[\"EQuery:Unknown asset pair\"]";
         assertEquals(payload, KrakenSnapshotSource.stripAndTruncate(payload),
             "a short body with no control characters must pass through untouched");
+    }
+
+    @Test
+    void attributionUrlReflectsQuoteCurrency() {
+        KrakenSnapshotSource source = new KrakenSnapshotSource();
+        String usd = source.attributionUrl("zcash", "usd");
+        String btc = source.attributionUrl("zcash", "btc");
+
+        // A non-USD reply must link to the matching chart, not the USD one
+        // (deep-review F7): the URL has to differ and carry the quote
+        // currency so the user can validate the price against the page.
+        assertNotEquals(usd, btc,
+            "a non-USD vs must not link to the USD chart; got identical: " + btc);
+        assertTrue(btc.contains("-btc-"),
+            "the URL must carry the quote-currency segment; got: " + btc);
+        assertTrue(usd.contains("-usd-"),
+            "the USD URL must still carry the usd segment; got: " + usd);
+        // The vs segment is lower-cased regardless of caller casing.
+        assertEquals(source.attributionUrl("monero", "eur"),
+            source.attributionUrl("monero", "EUR"),
+            "quote-currency casing must not change the URL");
     }
 }

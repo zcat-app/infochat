@@ -4,7 +4,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -57,16 +56,10 @@ import jakarta.inject.Inject;
  * <h2>Profile-driven cadence</h2>
  * The three {@code infochat.assets.refresh.<host>} keys are profile-
  * driven per design §10.4 (laptop 60s, vps 90s, pi 300s, remote-llm
- * 90s). Following the codebase convention enforced at
- * {@code FetchScheduler.java}:95-100, the {@code @ConfigProperty}
- * fields carry NO inline {@code defaultValue} — defaults live in
- * {@code application.properties}. The {@code @ConfigProperty} fields
- * also satisfy the M1-055b acceptance contract that mandates both
- * a {@code @Scheduled(every=...)} reference and a backing
- * {@code @ConfigProperty} declaration per host; Quarkus binds the
- * Duration value into each field even though the per-tick logic
- * reads the configured cadence indirectly via the
- * {@code @Scheduled} expression.
+ * 90s); the {@code @Scheduled(every="{...}")} expressions below resolve
+ * them directly from {@code application.properties}, which carries the
+ * per-profile defaults (NO inline {@code defaultValue}, per the
+ * {@code FetchScheduler.java}:95-100 convention).
  *
  * <h2>Startup ordering</h2>
  * {@code @Priority(400)} per
@@ -108,28 +101,6 @@ public class AssetSnapshotFetcher {
     // via AssetDataSource.id() at tick time (see resolveSource).
     @Inject
     Instance<AssetDataSource> sources;
-
-    // Profile-driven cadences per design §10.4. NO inline defaultValue
-    // — the per-profile blocks in application.properties are the
-    // source of truth; the base value is the test-time fallback.
-    // (FetchScheduler.java:95-100 codifies this rule.) The @Scheduled
-    // expression below resolves the same property string at deploy
-    // time, so the per-tick logic never reads these fields directly;
-    // they are kept because M1-055b's acceptance contract mandates a
-    // backing @ConfigProperty declaration per host alongside the
-    // @Scheduled(every=...) reference (see the class javadoc
-    // §Profile-driven cadence).
-    @SuppressWarnings("unused")
-    @ConfigProperty(name = "infochat.assets.refresh.coingecko")
-    Duration coingeckoRefresh;
-
-    @SuppressWarnings("unused")
-    @ConfigProperty(name = "infochat.assets.refresh.kraken")
-    Duration krakenRefresh;
-
-    @SuppressWarnings("unused")
-    @ConfigProperty(name = "infochat.assets.refresh.bitfinex")
-    Duration bitfinexRefresh;
 
     // Single-global-default property: inline defaultValue is permitted
     // per the codebase's split convention (FetchScheduler.java:95-100

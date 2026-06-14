@@ -347,7 +347,8 @@ public class BootstrapAssetsLoader {
         return switch (sv.id()) {
             case "coingecko" -> "https://www.coingecko.com/en/coins/" + sv.externalId();
             case "kraken"    -> "https://www.kraken.com/prices/" + entry.id()
-                                    + "-usd-" + entry.id() + "-price-chart";
+                                    + "-" + entry.defaultQuoteCurrency().toLowerCase(Locale.ROOT)
+                                    + "-" + entry.id() + "-price-chart";
             case "bitfinex"  -> "https://www.bitfinex.com/t/" + entry.ticker() + ":" + quote;
             default -> throw new IllegalStateException(
                 "BootstrapAssetsLoader: unsupported sub_verb '" + sv.id()
