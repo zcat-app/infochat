@@ -36,7 +36,7 @@ The codebase ships as six Maven modules. Dependencies are strictly one-direction
 
 Notes:
 
-- `infochat-core` MUST stay free of JAX-RS and Hibernate, and keeps its Quarkus/JDBC coupling to the deliberate `@Startup`/CDI beans noted in the table row above (the single-instance lock guard, the throttled admin notifier, the audit-log writer, and its redaction hook). Otherwise test-friendly and reusable.
+- `infochat-core` MUST stay free of JAX-RS and Hibernate, and keeps its Quarkus/JDBC coupling to the deliberate `@Startup`/CDI beans noted in the table row above (the single-instance lock guard, the throttled admin notifier, the audit-log writer, its redaction hook, and the hardware-profile validator `InfochatProfile.Validator` — the single home for the `LAPTOP`/`VPS`/`PI`/`REMOTE_LLM` selector, shared by both services). Otherwise test-friendly and reusable.
 - `infochat-core` is deliberately one module — splitting DTOs from entities is a v2 candidate if a third consumer appears. The rationale lives in [01-architecture.md](01-architecture.md) §1.2.
 - `infochat-collector` MUST NOT depend on `infochat-messaging-adapter`. Enforced by a `maven-enforcer-plugin` `bannedDependencies` rule in `infochat-collector/pom.xml` (no CI pipeline exists in v1); an attempt to add the dependency fails the build with a clear error. This is the architectural guarantee that the Collector cannot accidentally become user-facing.
 - The three sibling shared modules — `infochat-ssrf`, `infochat-llm-adapter`, and `infochat-messaging-adapter` — MUST NOT depend on each other.

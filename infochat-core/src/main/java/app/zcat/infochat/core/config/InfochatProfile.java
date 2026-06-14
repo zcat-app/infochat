@@ -1,4 +1,4 @@
-package app.zcat.infochat.provider.config;
+package app.zcat.infochat.core.config;
 
 import io.quarkus.runtime.LaunchMode;
 import io.quarkus.runtime.StartupEvent;
@@ -30,10 +30,6 @@ import java.util.Optional;
  * Introducing a separate key would create two sources of truth for the active
  * profile; this enum reuses the built-in and validates that the active
  * Quarkus profile chain contains one of the four allowed names.
- *
- * <p>This file is duplicated between Collector and Provider in v1.
- * {@code infochat-core} has landed, but this enum was not moved into
- * it; the duplication remains.
  */
 public enum InfochatProfile {
     LAPTOP("laptop"),

@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.config;
 
+import app.zcat.infochat.core.config.InfochatProfile;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
