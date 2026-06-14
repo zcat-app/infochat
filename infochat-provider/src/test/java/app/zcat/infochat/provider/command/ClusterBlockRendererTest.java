@@ -1,10 +1,10 @@
 package app.zcat.infochat.provider.command;
 
 import app.zcat.infochat.provider.bundle.BundleLoader;
-import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.summary.ClusterTraversal.Cluster;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator.ClusterProse;
+import app.zcat.infochat.provider.testsupport.SanitizerTestDoubles;
 import app.zcat.infochat.provider.translation.TranslationPipeline;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -46,7 +46,7 @@ class ClusterBlockRendererTest {
         // TranslationPipeline is never exercised here: all fixtures use degraded
         // prose, which the renderer copies verbatim without touching the pipeline.
         renderer = new ClusterBlockRenderer(
-                new LlmOutputSanitizer(), new TranslationPipeline(), bundleLoader);
+                SanitizerTestDoubles.noAuditSanitizer(), new TranslationPipeline(), bundleLoader);
     }
 
     @Test

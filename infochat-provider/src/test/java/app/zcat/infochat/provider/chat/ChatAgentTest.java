@@ -9,6 +9,7 @@ import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.testsupport.SanitizerTestDoubles;
 import app.zcat.infochat.provider.translation.TranslationPipeline;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -461,7 +462,10 @@ class ChatAgentTest {
             }
         };
 
-        LlmOutputSanitizer sanitizer = new LlmOutputSanitizer() {
+        // Overrides sanitize() outright, so the no-op collaborators exist only
+        // to satisfy the (now mandatory) constructor — they are never invoked.
+        LlmOutputSanitizer sanitizer = new LlmOutputSanitizer(
+                SanitizerTestDoubles.noOpAuditLogWriter(), SanitizerTestDoubles.noOpDataSource()) {
             @Override
             public String sanitize(String input) {
                 sanitizerCalls++;

@@ -431,4 +431,39 @@ class ChatToolDispatcherTest {
 
         assertInstanceOf(ChatToolDispatcher.ToolResult.Success.class, result);
     }
+
+    // --- M1-363: list elements must be a string/list/map. A model-supplied
+    // scalar like {"tags":[123]} must reject as a ValidationError at the
+    // dispatch boundary, not escape as an ArrayStoreException out of
+    // SearchPostsTool's createArrayOf("TEXT", ...); a {"tags":["a","b"]} list
+    // of strings must still dispatch. ---
+
+    @Test
+    void nonStringListElementBecomesValidationError() {
+        ChatToolDispatcher d = dispatcher(Map.of());
+
+        Map<String, Object> args = new HashMap<>();
+        args.put("tags", List.of(123));
+
+        ChatToolDispatcher.ToolResult result =
+                d.dispatch("searchPosts", args, USER_A, "dm", SCOPE_A);
+
+        assertInstanceOf(ChatToolDispatcher.ToolResult.ValidationError.class, result);
+        assertTrue(((ChatToolDispatcher.ToolResult.ValidationError) result)
+                .reason().contains("unsupported element type"));
+    }
+
+    @Test
+    void stringListElementsStillDispatch() {
+        ChatToolDispatcher d = dispatcher(
+                Map.of("searchPosts", (u, sk, si, a) -> "[{\"ok\":1}]"));
+
+        Map<String, Object> args = new HashMap<>();
+        args.put("tags", List.of("a", "b"));
+
+        ChatToolDispatcher.ToolResult result =
+                d.dispatch("searchPosts", args, USER_A, "dm", SCOPE_A);
+
+        assertInstanceOf(ChatToolDispatcher.ToolResult.Success.class, result);
+    }
 }

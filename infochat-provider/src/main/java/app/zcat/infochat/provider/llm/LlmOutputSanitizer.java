@@ -8,7 +8,6 @@ import app.zcat.infochat.core.util.JsonEscaper;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
-import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -16,7 +15,6 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -70,40 +68,20 @@ public class LlmOutputSanitizer {
     // _json) triple plus the row's BIGSERIAL id.
     private static final String AUDIT_TARGET_ID = "sanitizer-output";
 
-    private final @Nullable AuditLogWriter auditLogWriter;
-    private final @Nullable DataSource dataSource;
-
-    // True only for the CDI / production constructor below, where both
-    // audit collaborators are injected. The no-arg seam constructor sets
-    // it false. emitAuditRows() gates on this flag rather than on the
-    // injected fields being null, so a container-built sanitizer can
-    // never silently skip the spec-committed audit emission.
-    private final boolean auditWiringPresent;
+    private final AuditLogWriter auditLogWriter;
+    private final DataSource dataSource;
 
     /**
-     * CDI / production constructor. Both audit collaborators are present,
-     * so {@link #sanitize(String)} ALWAYS emits the per-occurrence
-     * {@code LLM_OUTPUT_SANITIZED} rows the spec commits to — a
-     * container-built instance has no code path that skips the audit.
+     * Sole constructor. Both audit collaborators are non-null and final, so
+     * {@link #sanitize(String)} ALWAYS emits the per-occurrence
+     * {@code LLM_OUTPUT_SANITIZED} rows the spec commits to — there is no
+     * constructor that can build an audit-bypassing instance, so the
+     * durability commitment is structural rather than discipline-enforced.
      */
     @Inject
     public LlmOutputSanitizer(AuditLogWriter auditLogWriter, DataSource dataSource) {
         this.auditLogWriter = auditLogWriter;
         this.dataSource = dataSource;
-        this.auditWiringPresent = true;
-    }
-
-    /**
-     * Explicit test seam: a sanitizer that runs the markdown/closed-list
-     * rewrite and WARN logging WITHOUT emitting audit rows, for plain
-     * unit tests that have no {@link DataSource}. The no-audit opt-out is
-     * THIS constructor — not a null-field guard inside the production emit
-     * path — so the CDI path (above) can never reach the no-audit branch.
-     */
-    public LlmOutputSanitizer() {
-        this.auditLogWriter = null;
-        this.dataSource = null;
-        this.auditWiringPresent = false;
     }
 
     /** Literal that replaces every {@link #CLOSED_LIST} match in the output. */
@@ -185,9 +163,7 @@ public class LlmOutputSanitizer {
      * privileged commands replaced by {@value #REDACTED_COMMAND_REPLACEMENT}
      * and markdown links flattened to {@code text (url)}. Every
      * closed-list match emits one {@code audit_log} row with action
-     * {@code LLM_OUTPUT_SANITIZED} for a CDI-built instance; the no-arg
-     * test seam constructor skips the audit emission and the rewrite
-     * proceeds.
+     * {@code LLM_OUTPUT_SANITIZED}.
      *
      * @throws IllegalStateException if the audit-row INSERT fails
      *         (DB outage, lock contention, role grant revoked, etc.).
@@ -278,25 +254,14 @@ public class LlmOutputSanitizer {
      * reply. Either every row commits or none do and the method
      * throws; the caller's response build aborts.
      *
-     * <p>Audit seam: the no-arg test constructor builds a sanitizer with
-     * {@code auditWiringPresent == false} so plain unit tests
-     * (see {@code LlmOutputSanitizerTest}) exercise the rewrite without a
-     * {@link DataSource}. A CDI-built instance always has the wiring, so
-     * this skip is unreachable in production.
-     *
      * @throws IllegalStateException if any audit-row INSERT fails;
      *         the underlying {@link SQLException} is the cause.
      */
     private void emitAuditRows(List<String> matches) {
-        if (matches.isEmpty() || !auditWiringPresent) {
+        if (matches.isEmpty()) {
             return;
         }
-        // auditWiringPresent implies the @Inject constructor ran, so both
-        // fields are non-null; requireNonNull makes that invariant explicit
-        // for NullAway (the fields are @Nullable only for the no-audit seam).
-        AuditLogWriter writer = Objects.requireNonNull(auditLogWriter);
-        DataSource source = Objects.requireNonNull(dataSource);
-        try (Connection conn = source.getConnection()) {
+        try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             for (String token : matches) {
                 String detailsJson = "{\"match_count\":1,\"match_kind\":\""
@@ -307,7 +272,7 @@ public class LlmOutputSanitizer {
                         .targetId(AUDIT_TARGET_ID)
                         .detailsJson(detailsJson)
                         .build();
-                writer.write(conn, row);
+                auditLogWriter.write(conn, row);
             }
             conn.commit();
         } catch (SQLException e) {

@@ -210,6 +210,18 @@ public class ChatToolDispatcher {
                         "List '" + key + "' exceeds maximum size of " + listMaxSize);
             }
             for (Object item : list) {
+                // A list element must itself be one of the accepted shapes
+                // (string, nested list, or map). A model-supplied scalar like
+                // {"tags":[123]} would otherwise pass this boundary untyped and
+                // surface downstream as an ArrayStoreException out of
+                // SearchPostsTool's createArrayOf — an internal error the model
+                // cannot self-correct on, rather than a ValidationError it can.
+                if (!(item instanceof String
+                        || item instanceof List<?>
+                        || item instanceof Map<?, ?>)) {
+                    return new ToolResult.ValidationError(
+                            "List '" + key + "' contains an unsupported element type");
+                }
                 ToolResult error = validateValue(key, item);
                 if (error != null) return error;
             }

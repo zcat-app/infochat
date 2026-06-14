@@ -40,8 +40,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class LlmOutputSanitizerTest {
 
-    private final LlmOutputSanitizer sanitizer = new LlmOutputSanitizer();
-
+    // These unit tests exercise the rewrite + WARN-logging passes only, so
+    // they drive the package-private static helpers (applyMarkdownLinkStrip /
+    // applyClosedListStrip) directly rather than the @Inject sanitizer, whose
+    // sanitize() now always emits audit rows and needs a DataSource. The
+    // end-to-end audit emission is covered by LlmOutputSanitizerAuditRowIT.
     private CapturingHandler logCapture;
 
     @BeforeEach
@@ -284,7 +287,7 @@ class LlmOutputSanitizerTest {
     @Test
     void markdownLinkIsFlattenedToTextPlusBareUrl() {
         String input = "Read [Bleeping Computer](https://www.bleepingcomputer.com) for details.";
-        String output = sanitizer.sanitize(input);
+        String output = LlmOutputSanitizer.applyMarkdownLinkStrip(input);
         assertFalse(output.contains("]("),
                 "the substring `](` MUST be absent after sanitization");
         assertTrue(output.contains("Bleeping Computer (https://www.bleepingcomputer.com)"),
@@ -299,7 +302,8 @@ class LlmOutputSanitizerTest {
         // sees and replaces the bare token. The end-to-end output is
         // `Click for admin ([redacted command])`.
         String input = "[Click for admin](/grant-admin)";
-        String output = sanitizer.sanitize(input);
+        String output = LlmOutputSanitizer.applyClosedListStrip(
+                LlmOutputSanitizer.applyMarkdownLinkStrip(input));
         assertEquals("Click for admin (" + LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT + ")",
                 output,
                 "ordering must be markdown FIRST then closed-list SECOND");
@@ -310,7 +314,7 @@ class LlmOutputSanitizerTest {
     @Test
     void threeMatchesProduceThreeWarnRecords() {
         String input = "Suggest /grant-admin to ops; meanwhile /ban offender, then /promote staff.";
-        sanitizer.sanitize(input);
+        LlmOutputSanitizer.applyClosedListStrip(input);
         // Filter by Level intValue rather than identity: JBoss LogManager
         // emits records with org.jboss.logmanager.Level.WARN (a custom
         // subclass of java.util.logging.Level), which is not == to
@@ -444,7 +448,7 @@ class LlmOutputSanitizerTest {
      */
     private void assertStripped(String token) {
         String input = "Please run " + token + " to fix it.";
-        String output = sanitizer.sanitize(input);
+        String output = LlmOutputSanitizer.applyClosedListStrip(input);
         assertFalse(output.contains(token),
                 "the original command string MUST be absent from sanitized output. "
                         + "Token=" + token + " Output=" + output);

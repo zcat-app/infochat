@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.translation;
 
 import app.zcat.infochat.messaging.TranslationProvider;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
+import app.zcat.infochat.provider.testsupport.SanitizerTestDoubles;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -16,7 +17,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Plain JUnit 5 (Shape A) tests for {@link TranslationPipeline}.
  * Collaborators: {@link TranslationCache} (real), a counting
  * {@link TranslationProvider} stub, and {@link LlmOutputSanitizer}
- * constructed via {@code new} (null-guarded audit path — no DB).
+ * built with the {@link SanitizerTestDoubles} no-op audit collaborators
+ * (so {@code sanitize()} runs without a DB).
  */
 class TranslationPipelineTest {
 
@@ -151,6 +153,13 @@ class TranslationPipelineTest {
      */
     static final class CountingSanitizer extends LlmOutputSanitizer {
         private final AtomicInteger callCount = new AtomicInteger();
+
+        CountingSanitizer() {
+            // The no-arg sanitizer seam was removed (M1-363); super.sanitize()
+            // below always emits audit rows, so supply the no-op collaborators.
+            super(SanitizerTestDoubles.noOpAuditLogWriter(),
+                  SanitizerTestDoubles.noOpDataSource());
+        }
 
         @Override
         public String sanitize(String llmOutput) {

@@ -1,6 +1,5 @@
 package app.zcat.infochat.provider.digest;
 
-import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.summary.ClusterTraversal;
 import app.zcat.infochat.provider.summary.ClusterTraversal.Cluster;
 import app.zcat.infochat.provider.summary.EligiblePostQuery;
@@ -8,6 +7,7 @@ import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 import app.zcat.infochat.provider.summary.EmptyEdgeSource;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator.ClusterProse;
+import app.zcat.infochat.provider.testsupport.SanitizerTestDoubles;
 import app.zcat.infochat.provider.translation.TranslationCache;
 import app.zcat.infochat.provider.translation.TranslationPipeline;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,7 +37,7 @@ class DigestRendererTest {
         renderer.clusterTraversal = new ClusterTraversal(new EmptyEdgeSource(), 3);
         proseGenerator = new RecordingSummaryProseGenerator();
         renderer.summaryProseGenerator = proseGenerator;
-        renderer.llmOutputSanitizer = new LlmOutputSanitizer();
+        renderer.llmOutputSanitizer = SanitizerTestDoubles.noAuditSanitizer();
         renderer.translationPipeline = newEnShortCircuitPipeline();
     }
 
@@ -84,7 +84,7 @@ class DigestRendererTest {
         java.lang.reflect.Field sanitizerField =
                 TranslationPipeline.class.getDeclaredField("llmOutputSanitizer");
         sanitizerField.setAccessible(true);
-        sanitizerField.set(pipeline, new LlmOutputSanitizer());
+        sanitizerField.set(pipeline, SanitizerTestDoubles.noAuditSanitizer());
         return pipeline;
     }
 

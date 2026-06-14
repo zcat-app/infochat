@@ -18,6 +18,7 @@ import app.zcat.infochat.provider.summary.EligiblePostQuery.Result;
 import app.zcat.infochat.provider.summary.EmptyEdgeSource;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator.ClusterProse;
+import app.zcat.infochat.provider.testsupport.SanitizerTestDoubles;
 import app.zcat.infochat.provider.translation.TranslationPipeline;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
@@ -111,7 +112,7 @@ class SummaryCommandHandlerTest {
         handler.eligiblePostQuery = eligiblePostQuery;
         handler.clusterTraversal = new ClusterTraversal(new EmptyEdgeSource(), 3);
         handler.summaryProseGenerator = proseGenerator;
-        handler.llmOutputSanitizer = new LlmOutputSanitizer();
+        handler.llmOutputSanitizer = SanitizerTestDoubles.noAuditSanitizer();
         handler.translationPipeline = newEnShortCircuitPipeline();
         handler.summaryAnchorRepository = anchorRepository;
         handler.inFlightTracker = tracker;
@@ -541,7 +542,7 @@ class SummaryCommandHandlerTest {
 
         java.lang.reflect.Field sanitizerField = TranslationPipeline.class.getDeclaredField("llmOutputSanitizer");
         sanitizerField.setAccessible(true);
-        sanitizerField.set(pipeline, new LlmOutputSanitizer());
+        sanitizerField.set(pipeline, SanitizerTestDoubles.noAuditSanitizer());
         return pipeline;
     }
 

@@ -9,12 +9,12 @@ import app.zcat.infochat.provider.chat.InFlightTracker;
 import app.zcat.infochat.provider.chat.LlmRateCap;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository.AnchorRow;
-import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.messaging.InboundContext;
 import app.zcat.infochat.provider.summary.ClusterTraversal.Cluster;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator.ClusterProse;
+import app.zcat.infochat.provider.testsupport.SanitizerTestDoubles;
 import app.zcat.infochat.provider.translation.TranslationCache;
 import app.zcat.infochat.provider.translation.TranslationPipeline;
 import org.junit.jupiter.api.BeforeEach;
@@ -77,7 +77,7 @@ class RetryCommandHandlerTest {
                 stubUserAndPostsDataSource(USER_ID, List.of()));
         handler.summaryAnchorRepository = anchorRepo;
         handler.summaryProseGenerator = proseGenerator;
-        handler.llmOutputSanitizer = new LlmOutputSanitizer();
+        handler.llmOutputSanitizer = SanitizerTestDoubles.noAuditSanitizer();
         handler.translationPipeline = newEnShortCircuitPipeline();
         handler.inFlightTracker = tracker;
         handler.llmRateCap = new LlmRateCap(10);
@@ -405,7 +405,7 @@ class RetryCommandHandlerTest {
 
         java.lang.reflect.Field sanitizerField = TranslationPipeline.class.getDeclaredField("llmOutputSanitizer");
         sanitizerField.setAccessible(true);
-        sanitizerField.set(pipeline, new LlmOutputSanitizer());
+        sanitizerField.set(pipeline, SanitizerTestDoubles.noAuditSanitizer());
         return pipeline;
     }
 

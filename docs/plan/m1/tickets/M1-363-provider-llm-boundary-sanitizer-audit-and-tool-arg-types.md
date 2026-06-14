@@ -1,11 +1,16 @@
 ---
 id: M1-363
 title: "provider: remove the audit-bypassing LlmOutputSanitizer constructor; type-check tool-arg list elements at the LLM dispatch boundary"
-status: pending
+status: done
 created: 2026-06-14
 last_updated: 2026-06-14
+clarity_check:
+  date: 2026-06-14
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
-files_budget: 7
+files_budget: 12
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/llm/LlmOutputSanitizer.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatToolDispatcher.java
@@ -37,13 +42,84 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: []
-escalations: []
-revisions: []
+reviews:
+  - round: 1
+    date: 2026-06-14
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 13
+      added: 231
+      removed: 74
+escalations:
+  - date: 2026-06-14
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A — pre-implementation call-site sweep. Acceptance item 1 removes the
+      public no-arg LlmOutputSanitizer() constructor; 6 existing test files
+      construct via that ctor and must each switch to mocked collaborators /
+      static helpers (LlmOutputSanitizerTest, DigestRendererTest,
+      ClusterBlockRendererTest, RetryCommandHandlerTest, SummaryCommandHandlerTest,
+      ChatAgentTest). With the 2 production files (LlmOutputSanitizer,
+      ChatToolDispatcher) and the ChatToolDispatcherTest tags[123] pin
+      (acceptance item 4), the irreducible file count is 9 vs files_budget 7.
+  - date: 2026-06-14
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      N/A — round-1 mvn verify compile failure surfaced a missed 11th file.
+      The round-1 sweep matched `new LlmOutputSanitizer()` (6 files) but missed
+      TranslationPipelineTest's `static final class CountingSanitizer extends
+      LlmOutputSanitizer`: its implicit no-arg super() no longer compiles and its
+      sanitize() calls super.sanitize() (so it needs real collaborators, the
+      SanitizerTestDoubles no-op pair like the others). True firm file count is
+      now 11 (the 10 implemented + TranslationPipelineTest) vs files_budget 10.
+revisions:
+  - date: 2026-06-14
+    reason: budget-breach refine (widen files_budget for the no-arg-ctor test fan-out)
+    snapshot:
+      status: escalated
+      escalation_reason: budget-breach
+      files_budget_at_snapshot: 7
+      note: |
+        Pre-implementation call-site sweep found 9 irreducible files (2 prod +
+        6 no-arg-ctor test files + 1 new tags[123] pin) vs budget 7. Acceptance
+        and out_of_scope unchanged; only files_budget widened 7 -> 10 (9 firm +
+        1 headroom). The two concerns stay one diff at the §7 LLM boundary.
+  - date: 2026-06-14
+    reason: budget-breach refine (widen for the missed extends-subclass call site)
+    snapshot:
+      status: escalated
+      escalation_reason: budget-breach
+      files_budget_at_snapshot: 10
+      note: |
+        Round-1 mvn verify compile-failed on TranslationPipelineTest's
+        `CountingSanitizer extends LlmOutputSanitizer` (an 11th file the round-1
+        `new LlmOutputSanitizer()` sweep missed). Comprehensive re-sweep (new +
+        extends, all modules) confirms it is the only remaining file. Acceptance
+        and out_of_scope unchanged; files_budget widened 10 -> 12 (11 firm + 1
+        headroom).
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-06-14
+    verdict: CLEAN
+    base: be64c431f152eac468d8b20c3aa6a179edb43739
+    head: 3a07ced1ecbccc26398103536d7e52c7f49325b1
+    verdict_file: docs/plan/m1/redteam/M1-363-2026-06-14.md
+    out_of_model_count: 1
+    note: |
+      Pre-merge audit of the committed M1-363 branch (run between
+      /m1-tick commit and /m1-tick merge). No threat-model gaps in the
+      sanitizer single-ctor / audit-always change or the tool-arg
+      element-type guard. One advisory out-of-model observation
+      recorded in the verdict file; no remediation ticket required.
 ---
 
 # M1-363: LLM-boundary hardening (sanitizer + tool-arg types)
