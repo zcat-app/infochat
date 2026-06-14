@@ -8,6 +8,7 @@ import app.zcat.infochat.llm.routing.LlmRouter;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
+import app.zcat.infochat.provider.messaging.InboundContext;
 import app.zcat.infochat.provider.translation.TranslationPipeline;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -504,10 +505,20 @@ class ChatAgentTest {
                 router, sanitizer, pipeline, bundle, noopTrigger, language);
     }
 
-    // Subclass that overrides readScopeLanguage and writeAuditRow
-    // so no JDBC is needed
+    // Builds a test-scoped InboundContext carrying the scope language the
+    // chat turn should localize to — the same seam
+    // InboundRouterChatPersistFailureTest uses, replacing the former
+    // readScopeLanguage(...) override now that ChatAgent reads the language
+    // from the request-scoped InboundContext (M1-333 / D43).
+    private static InboundContext inboundContextWith(String language) {
+        InboundContext context = new InboundContext();
+        context.setEffectiveLanguage(language);
+        return context;
+    }
+
+    // Subclass that overrides writeAuditRow so no JDBC is needed; the scope
+    // language is supplied via the test-scoped InboundContext above.
     class TestChatAgent extends ChatAgent {
-        private final String language;
 
         TestChatAgent(InFlightTracker tracker, ChatPromptBuilder builder,
                       ChatToolDispatcher dispatcher, ChatSessionRepository repo,
@@ -516,13 +527,8 @@ class ChatAgentTest {
                       AutoCompressTrigger autoCompressTrigger,
                       String language) {
             super(tracker, builder, dispatcher, repo, router,
-                    sanitizer, pipeline, bundle, autoCompressTrigger, null, null);
-            this.language = language;
-        }
-
-        @Override
-        String readScopeLanguage(String scopeKind, UUID scopeId) {
-            return language;
+                    sanitizer, pipeline, bundle, autoCompressTrigger, null, null,
+                    inboundContextWith(language));
         }
 
         @Override

@@ -1,9 +1,14 @@
 ---
 id: M1-333
 title: "ChatAgent: consume cached InboundContext.effectiveLanguage instead of re-querying"
-status: pending
+status: done
 created: 2026-06-14
 last_updated: 2026-06-14
+clarity_check:
+  date: 2026-06-14
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
 files_budget: 2
 files_scope:
@@ -31,7 +36,20 @@ test_plan:
 spec_refs: []
 decision_refs:
   - D43
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-14
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 36
+      removed: 42
 escalations: []
 revisions: []
 overrides: []

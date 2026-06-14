@@ -13,6 +13,7 @@ import app.zcat.infochat.llm.routing.LlmRouter;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
+import app.zcat.infochat.provider.messaging.InboundContext;
 import app.zcat.infochat.provider.translation.TranslationPipeline;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -25,8 +26,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -75,9 +74,6 @@ public class ChatAgent {
           + "your final answer as plain text. Do NOT call a tool and provide a "
           + "final answer in the same response.";
 
-    private static final String SELECT_SCOPE_LANGUAGE =
-            "SELECT language FROM scope_preferences WHERE scope_kind = ? AND scope_id = ?";
-
     private final InFlightTracker inFlightTracker;
     private final ChatPromptBuilder promptBuilder;
     private final ChatToolDispatcher toolDispatcher;
@@ -89,6 +85,7 @@ public class ChatAgent {
     private final AutoCompressTrigger autoCompressTrigger;
     private final AuditLogWriter auditLogWriter;
     private final DataSource dataSource;
+    private final InboundContext inboundContext;
 
     @Inject
     public ChatAgent(InFlightTracker inFlightTracker,
@@ -101,7 +98,8 @@ public class ChatAgent {
                      BundleLoader bundleLoader,
                      AutoCompressTrigger autoCompressTrigger,
                      AuditLogWriter auditLogWriter,
-                     DataSource dataSource) {
+                     DataSource dataSource,
+                     InboundContext inboundContext) {
         this.inFlightTracker = inFlightTracker;
         this.promptBuilder = promptBuilder;
         this.toolDispatcher = toolDispatcher;
@@ -113,6 +111,7 @@ public class ChatAgent {
         this.autoCompressTrigger = autoCompressTrigger;
         this.auditLogWriter = auditLogWriter;
         this.dataSource = dataSource;
+        this.inboundContext = inboundContext;
     }
 
     /**
@@ -153,9 +152,11 @@ public class ChatAgent {
      */
     public ChatTurnResult handleTurn(UUID userId, String scopeKind,
                                      UUID scopeId, String userMessage) {
-        // Resolved ahead of the in-flight gate so the contention notice
-        // and the catch-all unavailable reply localize too (D43).
-        String scopeLanguage = readScopeLanguage(scopeKind, scopeId);
+        // Read the cached value the router resolved once at intake
+        // (InboundRouter.onMessage, D43) so the contention notice and the
+        // catch-all unavailable reply localize too — no second
+        // scope_preferences SELECT (and no extra pool connection) per turn.
+        String scopeLanguage = inboundContext.effectiveLanguage();
         InFlightTracker.CancellationHandle slot =
                 inFlightTracker.tryAcquire(userId, scopeKind, scopeId);
         if (slot == null) {
@@ -480,22 +481,6 @@ public class ChatAgent {
             auditLogWriter.write(conn, row);
         } catch (SQLException e) {
             throw new IllegalStateException("ChatAgent.writeAuditRow failed", e);
-        }
-    }
-
-    // Package-private so ChatAgentTest can override with a fixed value
-    // (same pattern as InboundRouter.lookupUser).
-    String readScopeLanguage(String scopeKind, UUID scopeId) {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(SELECT_SCOPE_LANGUAGE)) {
-            ps.setString(1, scopeKind);
-            ps.setObject(2, scopeId);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (!rs.next()) return "en";
-                return rs.getString("language");
-            }
-        } catch (SQLException e) {
-            throw new IllegalStateException("ChatAgent.readScopeLanguage failed", e);
         }
     }
 }
