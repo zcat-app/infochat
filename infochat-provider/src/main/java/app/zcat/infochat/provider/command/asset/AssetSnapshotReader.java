@@ -20,10 +20,14 @@ import java.time.Instant;
  * {@code (asset, sub_verb, vs_currency)} triple. Provider has
  * SELECT-only on {@code price_snapshot} per V17 GRANTs.
  *
- * <p>The stale-marker threshold is {@code 2 * refresh_interval}
- * for the source's host family (per design §10.4). Refresh
- * intervals are per-host, not per-asset, matching the
- * Collector's per-host tick cadence.</p>
+ * <p>Staleness is judged against a single Provider-owned,
+ * profile-driven freshness window (commands.md §Asset commands):
+ * a snapshot is stale once its age exceeds that window. The window
+ * is independent of the Collector's per-host fetch cadence — the
+ * Provider has no fetch loop and no longer mirrors the Collector's
+ * {@code infochat.assets.refresh.*} keys, so tightening the
+ * Collector cadence cannot desync the Provider's staleness contract
+ * (M1-340).</p>
  */
 @ApplicationScoped
 public class AssetSnapshotReader {
@@ -48,36 +52,29 @@ public class AssetSnapshotReader {
     public record SnapshotResult(
             Snapshot snapshot,
             boolean stale,
-            Duration refreshInterval
+            Duration freshnessWindow
     ) {}
 
     @Inject
     DataSource dataSource;
 
-    // Profile-driven cadence keys (design §10.4): no inline defaultValue —
-    // application.properties is the source of truth, matching the collector
-    // AssetSnapshotFetcher / FetchScheduler.java:140 convention. The provider
-    // ships the same base + per-profile values as the collector so the keys
-    // resolve to the same interval in both services under every profile.
-    @ConfigProperty(name = "infochat.assets.refresh.coingecko")
-    Duration coingeckoRefresh;
-
-    @ConfigProperty(name = "infochat.assets.refresh.kraken")
-    Duration krakenRefresh;
-
-    @ConfigProperty(name = "infochat.assets.refresh.bitfinex")
-    Duration bitfinexRefresh;
+    // Provider-owned, profile-driven staleness threshold (commands.md
+    // §Asset commands): a snapshot older than this window renders the stale
+    // marker. No inline defaultValue — application.properties is the source of
+    // truth, matching the FetchScheduler.java:140 profile-driven-key
+    // convention. Deliberately NOT derived from the Collector's per-host
+    // infochat.assets.refresh.* cadence: the Provider window is independent, so
+    // a one-sided Collector-cadence override cannot desync staleness (M1-340).
+    @ConfigProperty(name = "infochat.assets.freshness-window")
+    Duration freshnessWindow;
 
     /** CDI-required no-arg constructor. */
     public AssetSnapshotReader() {}
 
     /** Test constructor — bypasses CDI injection. */
-    AssetSnapshotReader(DataSource dataSource, Duration refreshCoingecko,
-                        Duration refreshKraken, Duration refreshBitfinex) {
+    AssetSnapshotReader(DataSource dataSource, Duration freshnessWindow) {
         this.dataSource = dataSource;
-        this.coingeckoRefresh = refreshCoingecko;
-        this.krakenRefresh = refreshKraken;
-        this.bitfinexRefresh = refreshBitfinex;
+        this.freshnessWindow = freshnessWindow;
     }
 
     /**
@@ -105,10 +102,8 @@ public class AssetSnapshotReader {
                     return null;
                 }
                 Snapshot snapshot = mapRow(rs);
-                Duration interval = refreshIntervalFor(subVerb);
-                boolean stale = Duration.between(snapshot.capturedAt, Instant.now())
-                        .compareTo(interval.multipliedBy(2)) > 0;
-                return new SnapshotResult(snapshot, stale, interval);
+                boolean stale = isStale(snapshot.capturedAt, Instant.now(), freshnessWindow);
+                return new SnapshotResult(snapshot, stale, freshnessWindow);
             }
         } catch (SQLException e) {
             throw new IllegalStateException(
@@ -134,12 +129,12 @@ public class AssetSnapshotReader {
         );
     }
 
-    private Duration refreshIntervalFor(String subVerb) {
-        return switch (subVerb) {
-            case "coingecko" -> coingeckoRefresh;
-            case "kraken" -> krakenRefresh;
-            case "bitfinex" -> bitfinexRefresh;
-            default -> Duration.ofSeconds(90);
-        };
+    /**
+     * A snapshot is stale once its age exceeds the Provider-owned freshness
+     * window. Package-private + static so the window-vs-age decision is unit
+     * testable without a {@code DataSource} (M1-340 acceptance).
+     */
+    static boolean isStale(Instant capturedAt, Instant now, Duration freshnessWindow) {
+        return Duration.between(capturedAt, now).compareTo(freshnessWindow) > 0;
     }
 }

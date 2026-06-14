@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 13 |
+| pending | 12 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 367 |
+| done | 368 |
 | deferred | 5 |
 | **total** | **385** |
 
@@ -27,7 +27,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-330 — LLM providers: redact base-url credentials on parse-failure paths + reject userinfo at config boundary (complexity: medium, risk: low)
 - M1-332 — SignalJsonRpcClient: bounded connect timeout on the daemon socket (complexity: low, risk: medium)
 - M1-336 — Adapter inbound: single-source UTF-8 byte length across codec cap + metric (complexity: medium, risk: medium)
-- M1-340 — Asset freshness: decouple Provider staleness window from the Collector cadence keys (complexity: medium, risk: low)
 - M1-341 — FetchScheduler: exclude stream-shaped kinds + filter due kinds at SQL (complexity: low, risk: low)
 - M1-342 — ReEvaluationJob: bound infra-failure re-judge fan-out to one call per tick during an outage (complexity: low, risk: low)
 - M1-343 — Provider --page parsing: surface a usage error on a malformed page value (complexity: low, risk: low)
@@ -72,6 +71,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-340 | Asset freshness: decouple Provider staleness window from the Collector cadence keys | 2026-06-14 | round 1 APPROVE |
 | M1-339 | Stage1Pipeline: narrow the EscapedEntity suppression to the doc | 2026-06-14 | round 1 APPROVE |
 | M1-338 | AbstractInstanceLockGuard: scope the ownership probe to the gate's lock id | 2026-06-14 | round 1 APPROVE |
 | M1-337 | NotifyOutcome: distinguish degraded-DB persistence-failure from throttle-suppressed | 2026-06-14 | round 1 APPROVE |
@@ -81,7 +81,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-331 | Signal group inbound: coalesce overlapping bot-mention spans + instanceof-guard JSON accessors | 2026-06-14 | round 1 APPROVE |
 | M1-329 | ListSavesTool: aggregate byte budget + title truncation at the LLM tool boundary | 2026-06-14 | round 1 APPROVE |
 | M1-328 | TaggerWorker: cap accepted tag count per post | 2026-06-14 | round 1 APPROVE |
-| M1-327 | EmbeddingWorker: notify-once + skip on non-finite vector components | 2026-06-14 | round 1 APPROVE |
 
 ---
 
@@ -538,7 +537,7 @@ M1-336 (pending) ← runnable
 M1-337 (done)
 M1-338 (done)
 M1-339 (done)
-M1-340 (pending) ← runnable
+M1-340 (done)
 M1-341 (pending) ← runnable
 M1-342 (pending) ← runnable
 M1-343 (pending) ← runnable

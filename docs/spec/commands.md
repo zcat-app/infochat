@@ -295,12 +295,17 @@ Cross-cutting rules for asset commands (D39):
   post outbox.
 - **Freshness contract.** A reply uses the latest snapshot for
   `(asset, sub-verb)` whose age is within a profile-driven freshness
-  window. If no row is within the window — Fetcher hasn't run yet,
-  source is failing, last successful poll is too old — the Provider
-  serves the most recent row available with an explicit "data is N
-  minutes old" line, and degrades to a friendly error only when no
-  row exists at all for that `(asset, sub-verb)`. The freshness
-  window value lives in design notes.
+  window. This window is a **Provider-owned** property, independent
+  of the Collector's per-host refresh cadence above: the Provider has
+  no fetch loop, so it judges staleness against its own window rather
+  than mirroring the Collector's `infochat.assets.refresh.*` keys —
+  an operator tightening one side cannot desync the other. If no row
+  is within the window — Fetcher hasn't run yet, source is failing,
+  last successful poll is too old — the Provider serves the most
+  recent row available with an explicit "data is N minutes old" line,
+  and degrades to a friendly error only when no row exists at all for
+  that `(asset, sub-verb)`. The freshness window value lives in design
+  notes.
 - **Mandatory attribution.** Every reply names the data source in the
   header (e.g. `Zcash (kraken)`) and includes the source URL bare per
   D30. This satisfies per-source ToS attribution and lets the user
