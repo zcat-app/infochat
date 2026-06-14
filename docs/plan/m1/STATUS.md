@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 16 |
+| pending | 15 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 382 |
+| done | 383 |
 | deferred | 5 |
 | **total** | **403** |
 
@@ -28,7 +28,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-352 — assets: Kraken attribution URL must honour the quote currency; drop dead AssetSnapshotFetcher refresh fields (complexity: medium, risk: low)
 - M1-354 — collector eval: load prompt templates via the class's own loader; coalesce pgvector format rejections instead of wedging the batch (complexity: medium, risk: low)
 - M1-355 — ssrf: resolve the close-drain body-cap contradiction on the followed-redirect path and unify the two bounded-read loops (complexity: medium, risk: medium)
-- M1-356 — llm-adapter: stop echoing provider body on 2xx parse-failure; add the remote LLM-task startup disclosure WARN (complexity: medium, risk: low)
 - M1-357 — llm-adapter: SPI-owned task-config exception, one no-providers exception type, symmetric HttpClient seam, non-cloning EmbeddingResult.dimension() (complexity: medium, risk: low)
 - M1-358 — messaging: emit the adapter.inbound.dropped{reason=oversize} counter + WARN; log inbound-handler stack traces (complexity: medium, risk: low)
 - M1-359 — messaging: OutboundRateLimiter sub-millisecond cap rounding + charge a token per wire frame on the Signal edit-failure fallback (complexity: medium, risk: low)
@@ -75,6 +74,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-356 | llm-adapter: stop echoing provider body on 2xx parse-failure; add the remote LLM-task startup disclosure WARN | 2026-06-14 | round 1 APPROVE |
 | M1-353 | collector eval: give ReadyPromoter its own poll-interval and add a partition-scan floor to per-stage pickup queries | 2026-06-14 | round 1 APPROVE |
 | M1-350 | arch: consolidate the duplicated InfochatProfile enum + Validator into infochat-core | 2026-06-14 | round 1 APPROVE |
 | M1-349 | Spec/design: correct the asset-fetch SPI name (AssetDataSource, not the post Fetcher) | 2026-06-14 | — |
@@ -84,7 +84,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-345 | infochat-ssrf: bracket-host IPv6 validation, redirect drain order, IPv6 zero-scan helper reuse | 2026-06-14 | round 1 APPROVE |
 | M1-344 | llm-adapter: single-source per-task config keys and the embedding provider name | 2026-06-14 | round 1 APPROVE |
 | M1-343 | Provider --page parsing: surface a usage error on a malformed page value | 2026-06-14 | round 1 APPROVE |
-| M1-342 | ReEvaluationJob: bound infra-failure re-judge fan-out to one call per tick during an outage | 2026-06-14 | round 1 APPROVE |
 
 ---
 
@@ -557,7 +556,7 @@ M1-352 (pending) ← runnable
 M1-353 (done)
 M1-354 (pending) ← runnable
 M1-355 (pending) ← runnable
-M1-356 (pending) ← runnable
+M1-356 (done)
 M1-357 (pending) ← runnable
 M1-358 (pending) ← runnable
 M1-359 (pending) ← runnable

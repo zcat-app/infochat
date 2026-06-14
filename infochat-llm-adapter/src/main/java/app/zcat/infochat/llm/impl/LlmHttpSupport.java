@@ -31,7 +31,7 @@ import java.util.concurrent.Flow;
  * pass through the {@code infochat-ssrf} guard's {@code readBounded}.
  * Also home to the small shared state and helpers every provider needs:
  * the {@link #JSON} mapper, the {@link #requireHttpBaseUrl} config-boundary
- * validator, {@link #joinPath}, and {@link #preview}.
+ * validator, and {@link #joinPath}.
  *
  * <p>Package-private: the three providers ({@link OpenAiCompatibleProvider},
  * {@link AnthropicProvider}, {@link OpenAiCompatibleEmbeddingProvider})
@@ -188,14 +188,6 @@ final class LlmHttpSupport {
     }
 
     /**
-     * Hard cap on the characters {@link #preview} retains. {@code preview}
-     * bounds the body fragment the chat/embedding providers include when a
-     * 2xx reply fails to parse, so at most this many characters of a
-     * response body can ever reach a log line or exception message.
-     */
-    static final int PREVIEW_MAX_CHARS = 200;
-
-    /**
      * Config-boundary validation of an operator-supplied LLM/embedding
      * base-url: the value must parse as a URI, carry an {@code http} or
      * {@code https} scheme, name a host, and carry no inline credentials
@@ -255,14 +247,6 @@ final class LlmHttpSupport {
             return base.substring(0, base.length() - 1) + path;
         }
         return base + path;
-    }
-
-    /** Truncate a body for log inclusion — never leak the full reply. */
-    static String preview(String s) {
-        if (s.length() <= PREVIEW_MAX_CHARS) {
-            return s;
-        }
-        return s.substring(0, PREVIEW_MAX_CHARS) + "…(" + s.length() + " chars)";
     }
 
     /**

@@ -196,8 +196,7 @@ public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
         JsonNode data = root.path("data");
         if (!data.isArray()) {
             throw new EmbeddingCallFailedException(
-                "OpenAiCompatibleEmbeddingProvider: response missing data[] from " + uri.getHost()
-                    + "; preview: " + LlmHttpSupport.preview(responseBody));
+                "OpenAiCompatibleEmbeddingProvider: response missing data[] from " + uri.getHost());
         }
         List<EmbeddingResult> results = new ArrayList<>(data.size());
         for (int i = 0; i < data.size(); i++) {
@@ -205,7 +204,7 @@ public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
             if (!embedding.isArray()) {
                 throw new EmbeddingCallFailedException(
                     "OpenAiCompatibleEmbeddingProvider: data[" + i + "].embedding missing or not array from "
-                        + uri.getHost() + "; preview: " + LlmHttpSupport.preview(responseBody));
+                        + uri.getHost());
             }
             float[] vector = new float[embedding.size()];
             for (int j = 0; j < embedding.size(); j++) {
@@ -219,8 +218,7 @@ public class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
                 if (!coordinate.isNumber()) {
                     throw new EmbeddingCallFailedException(
                         "OpenAiCompatibleEmbeddingProvider: data[" + i + "].embedding[" + j
-                            + "] is not numeric from " + uri.getHost() + "; preview: "
-                            + LlmHttpSupport.preview(responseBody));
+                            + "] is not numeric from " + uri.getHost());
                 }
                 vector[j] = (float) coordinate.doubleValue();
             }

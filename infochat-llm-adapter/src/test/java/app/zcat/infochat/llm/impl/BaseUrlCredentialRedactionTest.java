@@ -100,4 +100,40 @@ class BaseUrlCredentialRedactionTest {
         assertFalse(ex.getMessage().contains("/chat/completions"),
             "the parse-failure message must NOT carry the full request path; got: " + ex.getMessage());
     }
+
+    @Test
+    void shapeFailureDoesNotEchoResponseBody() {
+        // A 2xx reply that is valid JSON but the wrong shape (no choices[])
+        // drives the shape-failure path that previously appended a body
+        // preview. A hostile/buggy endpoint can reflect prompt or user
+        // content in those JSON fields, so the body must never reach the
+        // exception message — only the host and the named shape failure.
+        String bodyEcho = "REFLECTED-PROMPT-CONTENT-9f3a";
+        mockServer.createContext("/chat/completions", exchange -> {
+            byte[] resp = ("{\"note\":\"" + bodyEcho + "\"}").getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, resp.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(resp);
+            }
+        });
+        mockServer.start();
+
+        String seg = ModelTask.SUMMARIZER.keySegment();
+        OpenAiCompatibleProvider provider = new OpenAiCompatibleProvider(new StubConfig(Map.of(
+            "infochat.llm." + seg + ".base-url", baseUrl,
+            "infochat.llm." + seg + ".api-key", "",
+            "infochat.llm." + seg + ".model", "test-model",
+            "infochat.llm." + seg + ".timeout-ms", "5000")));
+
+        LlmCallFailedException ex = assertThrows(LlmCallFailedException.class,
+            () -> provider.generate(ModelTask.SUMMARIZER, "sys", "usr"),
+            "a 2xx reply missing choices[] must surface as LlmCallFailedException");
+
+        assertTrue(ex.getMessage().contains("localhost"),
+            "the shape-failure message must name the host for triage; got: " + ex.getMessage());
+        assertTrue(ex.getMessage().contains("choices[]"),
+            "the shape-failure message must name the specific shape failure; got: " + ex.getMessage());
+        assertFalse(ex.getMessage().contains(bodyEcho),
+            "the shape-failure message must NOT echo the provider response body; got: " + ex.getMessage());
+    }
 }

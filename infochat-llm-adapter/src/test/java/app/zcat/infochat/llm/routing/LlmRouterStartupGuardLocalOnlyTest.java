@@ -212,6 +212,69 @@ class LlmRouterStartupGuardLocalOnlyTest {
                 + capturer.formattedAll());
     }
 
+    @Test
+    void remoteTaskBaseUrlWithoutLocalOnlyEmitsDisclosureWarn() {
+        // A per-task base-url that resolves off-host means that task's post
+        // bodies leave the host even though the host-neutral provider name
+        // alone wouldn't reveal it — the disclosure WARN (design §5.10) makes
+        // it auditable, symmetric with the remote-embedding WARN.
+        Map<String, String> snapshot = new LinkedHashMap<>();
+        snapshot.put(LlmRouterStartupGuard.CONFIG_KEY_LOCAL_ONLY, "false");
+        snapshot.put("infochat.llm.summarizer.base-url", REMOTE_BASE_URL);
+
+        assertDoesNotThrow(
+            () -> LlmRouterStartupGuard.validateLocalOnlyConfiguration(snapshot),
+            "a remote per-task base-url without local-only is allowed (must NOT throw)");
+
+        List<LogRecord> warns = capturer.recordsAtLevel(Level.WARNING);
+        assertTrue(warns.stream().anyMatch(r -> {
+            String m = CapturingHandler.formatMessage(r);
+            return m.contains("SUMMARIZER") && m.contains(REMOTE_BASE_URL) && m.contains("leave the host");
+        }), "a remote summarizer base-url must emit a per-task disclosure WARN naming the "
+            + "task, the base-url, and that post bodies leave the host; captured: "
+            + capturer.formattedAll());
+    }
+
+    @Test
+    void remoteDefaultProviderWithoutLocalOnlyEmitsDisclosureWarn() {
+        // A cloud-only default provider routes every task without a per-task
+        // override off-host; each such task's effective provider is remote, so
+        // the disclosure WARN must fire naming the cloud provider (design §5.10).
+        Map<String, String> snapshot = new LinkedHashMap<>();
+        snapshot.put(LlmRouterStartupGuard.CONFIG_KEY_LOCAL_ONLY, "false");
+        snapshot.put(LlmRouter.CONFIG_KEY_DEFAULT_PROVIDER, AnthropicProvider.PROVIDER_NAME);
+
+        assertDoesNotThrow(
+            () -> LlmRouterStartupGuard.validateLocalOnlyConfiguration(snapshot),
+            "a remote default provider without local-only is allowed (must NOT throw)");
+
+        List<LogRecord> warns = capturer.recordsAtLevel(Level.WARNING);
+        assertTrue(warns.stream().anyMatch(r -> {
+            String m = CapturingHandler.formatMessage(r);
+            return m.contains("provider=" + AnthropicProvider.PROVIDER_NAME) && m.contains("leave the host");
+        }), "a remote default provider must emit a per-task disclosure WARN naming the cloud "
+            + "provider and that post bodies leave the host; captured: " + capturer.formattedAll());
+    }
+
+    @Test
+    void allLocalWithoutLocalOnlyEmitsNoDisclosureWarn() {
+        // Loopback per-task base-urls + the host-neutral openai-compatible
+        // provider: nothing leaves the host, so no disclosure WARN.
+        Map<String, String> snapshot = new LinkedHashMap<>();
+        snapshot.put(LlmRouterStartupGuard.CONFIG_KEY_LOCAL_ONLY, "false");
+        snapshot.put(LlmRouterStartupGuard.CONFIG_KEY_EMBEDDINGS_BASE_URL, LOOPBACK_BASE_URL);
+        snapshot.put("infochat.llm.summarizer.base-url", LOOPBACK_BASE_URL);
+        snapshot.put(LlmRouter.CONFIG_KEY_DEFAULT_PROVIDER, "openai-compatible");
+
+        assertDoesNotThrow(
+            () -> LlmRouterStartupGuard.validateLocalOnlyConfiguration(snapshot),
+            "an all-local config without local-only must NOT throw");
+
+        assertTrue(capturer.recordsAtLevel(Level.WARNING).isEmpty(),
+            "an all-local config must NOT emit any disclosure WARN; captured: "
+                + capturer.formattedAll());
+    }
+
     static {
         // Quarkus tests can leave WARNING-and-above on the root logger
         // suppressed depending on the LogManager bootstrap order. Pin

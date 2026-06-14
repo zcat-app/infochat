@@ -191,19 +191,20 @@ public class LlmRouterStartupGuard {
         boolean localOnly = "true".equalsIgnoreCase(stripOrEmpty(snapshot.get(CONFIG_KEY_LOCAL_ONLY)));
 
         String embeddingBaseUrl = stripOrEmpty(snapshot.get(CONFIG_KEY_EMBEDDINGS_BASE_URL));
-        boolean embeddingRemote = !embeddingBaseUrl.isEmpty() && !isLoopback(embeddingBaseUrl);
+        boolean embeddingRemote = isRemoteBaseUrl(embeddingBaseUrl);
 
         if (!localOnly) {
             // docs/spec/llm.md §Per-task routing rules: "Switching the
             // embedding provider to a remote service emits an explicit
             // confirmation log line on startup so operators see when post
             // bodies start leaving the host." This is the non-local-only
-            // path — a remote embedding endpoint is allowed, but loud.
+            // path — a remote endpoint is allowed, but loud.
             if (embeddingRemote) {
                 LOG.warnf("LlmRouterStartupGuard: embedding provider is remote (%s=%s); "
                         + "post title+summary will leave the host for embedding generation.",
                     CONFIG_KEY_EMBEDDINGS_BASE_URL, embeddingBaseUrl);
             }
+            warnRemoteLlmTaskRoutes(snapshot);
             return;
         }
 
@@ -217,20 +218,17 @@ public class LlmRouterStartupGuard {
             offenders.add("default key=" + LlmRouter.CONFIG_KEY_DEFAULT_PROVIDER
                 + " provider=" + defaultProvider);
         }
-        for (Map.Entry<ModelTask, String> kv : PER_TASK_BASE_URL_KEYS.entrySet()) {
-            String baseUrl = stripOrEmpty(snapshot.get(kv.getValue()));
-            if (!baseUrl.isEmpty() && !isLoopback(baseUrl)) {
-                offenders.add("task=" + kv.getKey().name()
-                    + " key=" + kv.getValue() + " base-url=" + baseUrl);
+        for (PerTaskRoute route : perTaskRoutes(snapshot)) {
+            if (route.offHostBaseUrl() != null) {
+                offenders.add("task=" + route.task().name()
+                    + " key=" + baseUrlKeyFor(route.task()) + " base-url=" + route.offHostBaseUrl());
             }
             // A per-task provider override naming a cloud-only provider is
             // a conflict regardless of that task's base-url (the operator
             // selected a remote provider while claiming local-only).
-            String providerKey = providerKeyFor(kv.getKey());
-            String providerName = stripOrEmpty(snapshot.get(providerKey)).toLowerCase(Locale.ROOT);
-            if (REMOTE_PROVIDER_NAMES.contains(providerName)) {
-                offenders.add("task=" + kv.getKey().name()
-                    + " key=" + providerKey + " provider=" + providerName);
+            if (REMOTE_PROVIDER_NAMES.contains(route.overrideProvider())) {
+                offenders.add("task=" + route.task().name()
+                    + " key=" + providerKeyFor(route.task()) + " provider=" + route.overrideProvider());
             }
         }
         // A cloud-only provider that declares any non-English language is
@@ -275,6 +273,77 @@ public class LlmRouterStartupGuard {
         String fatal = msg.toString();
         LOG.fatal(fatal);
         throw new LocalOnlyConflictException(fatal);
+    }
+
+    /**
+     * The non-local-only disclosure: one WARN per LLM task whose route is
+     * off-host, so an operator can audit "did I accidentally enable remote?"
+     * — design §5.10. A task routes remote when its per-task base-url is
+     * off-host OR its effective provider (the per-task override, else the
+     * default) is a cloud-only provider; the off-host base-url and
+     * override-cloud detection is the same {@link #perTaskRoutes} the
+     * local-only fatal branch consumes, so the two postures cannot drift on
+     * what "remote" means. The symmetric remote-embedding WARN is emitted by
+     * the caller before this runs.
+     */
+    private static void warnRemoteLlmTaskRoutes(Map<String, String> snapshot) {
+        String defaultProvider = stripOrEmpty(snapshot.get(LlmRouter.CONFIG_KEY_DEFAULT_PROVIDER))
+            .toLowerCase(Locale.ROOT);
+        for (PerTaskRoute route : perTaskRoutes(snapshot)) {
+            // Effective provider = per-task override when set, else the
+            // default the router falls back to. A cloud-only effective
+            // provider makes the task remote even with no per-task base-url.
+            String effectiveProvider = route.overrideProvider().isEmpty()
+                ? defaultProvider : route.overrideProvider();
+            boolean providerRemote = REMOTE_PROVIDER_NAMES.contains(effectiveProvider);
+            if (route.offHostBaseUrl() == null && !providerRemote) {
+                continue;
+            }
+            StringBuilder line = new StringBuilder("LlmRouterStartupGuard: remote LLM task=")
+                .append(route.task().name());
+            if (!effectiveProvider.isEmpty()) {
+                line.append(" provider=").append(effectiveProvider);
+            }
+            if (route.offHostBaseUrl() != null) {
+                line.append(" base-url=").append(route.offHostBaseUrl());
+            }
+            line.append("; post bodies will leave the host.");
+            LOG.warn(line.toString());
+        }
+    }
+
+    /**
+     * The per-task off-host facts both branches reuse, computed once per
+     * task: {@code offHostBaseUrl} is the task's base-url when it resolves
+     * off-host (else null), and {@code overrideProvider} is the per-task
+     * provider override lowercased (empty string when unset — the caller
+     * decides cloud-ness via {@link #REMOTE_PROVIDER_NAMES}). Single-sourcing
+     * this keeps the local-only fatal scan and the non-local-only disclosure
+     * WARN from drifting on what counts as an off-host route.
+     */
+    private record PerTaskRoute(ModelTask task, @Nullable String offHostBaseUrl, String overrideProvider) {
+    }
+
+    private static List<PerTaskRoute> perTaskRoutes(Map<String, String> snapshot) {
+        List<PerTaskRoute> routes = new ArrayList<>();
+        for (Map.Entry<ModelTask, String> kv : PER_TASK_BASE_URL_KEYS.entrySet()) {
+            String baseUrl = stripOrEmpty(snapshot.get(kv.getValue()));
+            String offHostBaseUrl = isRemoteBaseUrl(baseUrl) ? baseUrl : null;
+            String overrideProvider = stripOrEmpty(snapshot.get(providerKeyFor(kv.getKey())))
+                .toLowerCase(Locale.ROOT);
+            routes.add(new PerTaskRoute(kv.getKey(), offHostBaseUrl, overrideProvider));
+        }
+        return routes;
+    }
+
+    /**
+     * The off-host base-url primitive: a non-empty base-url whose host does
+     * not resolve to loopback. Shared by the per-task scan, the embedding
+     * endpoint check, and the disclosure WARN so all three decide "off-host"
+     * identically.
+     */
+    private static boolean isRemoteBaseUrl(String baseUrl) {
+        return !baseUrl.isEmpty() && !isLoopback(baseUrl);
     }
 
     /**
