@@ -7,6 +7,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 import javax.sql.DataSource;
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -28,6 +29,28 @@ public class ListSavesTool implements ChatToolRegistry.ChatTool {
 
     private static final Duration WINDOW_MAX = Duration.ofDays(30);
     private static final int RESULT_LIMIT = 200;
+
+    /**
+     * Aggregate byte budget for the returned JSON array, measured in
+     * UTF-8 bytes. Tool results are reinjected verbatim into the chat
+     * prompt (LLM tool-call outputs are a trust boundary), so up to
+     * {@code RESULT_LIMIT} rows of unbounded titles would otherwise
+     * consume the context window. Mirrors {@link SearchPostsTool#MAX_RESULT_BYTES}
+     * and {@link RecallMemoryTool#MAX_RESULT_BYTES}: entries past the budget
+     * are dropped, newest-first (the {@code ORDER BY saved_at DESC}) ordering
+     * kept.
+     */
+    static final int MAX_RESULT_BYTES = 16 * 1024;
+
+    /**
+     * Per-title byte cap, measured in UTF-8 bytes. {@code snapshot_title} is
+     * external post data, uncapped on the provider side (the save path caps
+     * only {@code personal_tags}), so one pathological title is truncated
+     * before the aggregate budget — otherwise a single oversized title could
+     * push one entry far past a reasonable size. Mirrors
+     * {@link RecallMemoryTool#MAX_SUMMARY_BYTES}.
+     */
+    static final int MAX_TITLE_BYTES = 2 * 1024;
 
     private final DataSource dataSource;
     private final CancellationService cancellationService;
@@ -87,19 +110,38 @@ public class ListSavesTool implements ChatToolRegistry.ChatTool {
             }
             try (ResultSet rs = ps.executeQuery()) {
                 StringBuilder json = new StringBuilder("[");
+                // '[' + ']' — every appended entry adds its own bytes (plus a
+                // joining comma) against MAX_RESULT_BYTES. The result is
+                // reinjected verbatim into the chat prompt (LLM tool-call
+                // outputs are a trust boundary), so the aggregate is bounded
+                // here exactly as the sibling tools bound theirs; entries past
+                // the budget are dropped, newest-first ordering kept.
+                int budgetUsed = 2;
                 boolean first = true;
                 while (rs.next()) {
+                    String[] pTags = (String[]) rs.getArray("personal_tags").getArray();
+                    String title = rs.getString("title");
+                    StringBuilder entry = new StringBuilder();
+                    entry.append("{\"uid\":").append(jsonStr(rs.getString("post_uid")))
+                         .append(",\"saved_at\":").append(jsonStr(
+                                 rs.getTimestamp("saved_at").toInstant().toString()))
+                         .append(",\"personal_tags\":");
+                    appendJsonArray(entry, pTags);
+                    // snapshot_title is external post data, uncapped on the
+                    // provider side, so truncate per-entry before the aggregate
+                    // budget (mirrors RecallMemoryTool's summary handling).
+                    entry.append(",\"snapshot_title\":").append(jsonStr(
+                                 title == null ? null
+                                         : GetPostTool.truncateUtf8(title, MAX_TITLE_BYTES)))
+                         .append(",\"snapshot_url\":").append(jsonStr(rs.getString("url")))
+                         .append('}');
+                    int entryBytes = entry.toString()
+                            .getBytes(StandardCharsets.UTF_8).length + (first ? 0 : 1);
+                    if (budgetUsed + entryBytes > MAX_RESULT_BYTES) break;
+                    budgetUsed += entryBytes;
                     if (!first) json.append(',');
                     first = false;
-                    String[] pTags = (String[]) rs.getArray("personal_tags").getArray();
-                    json.append("{\"uid\":").append(jsonStr(rs.getString("post_uid")))
-                        .append(",\"saved_at\":").append(jsonStr(
-                                rs.getTimestamp("saved_at").toInstant().toString()))
-                        .append(",\"personal_tags\":");
-                    appendJsonArray(json, pTags);
-                    json.append(",\"snapshot_title\":").append(jsonStr(rs.getString("title")))
-                        .append(",\"snapshot_url\":").append(jsonStr(rs.getString("url")))
-                        .append('}');
+                    json.append(entry);
                 }
                 json.append(']');
                 return json.toString();

@@ -1,9 +1,16 @@
 ---
 id: M1-329
 title: "ListSavesTool: aggregate byte budget + title truncation at the LLM tool boundary"
-status: pending
+status: done
 created: 2026-06-14
 last_updated: 2026-06-14
+clarity_check:
+  date: 2026-06-14
+  verdict: WARN
+  warnings:
+    - "Acceptance item 2 uses 'e.g. MAX_TITLE_BYTES = 2 KiB' — the 'e.g.' leaves the per-title cap value open to implementer discretion. Consider hardening to a binding value if the exact constant matters."
+    - "Acceptance item 3 is a rationale sentence, not a distinct testable criterion. Harmless but adds no independently verifiable acceptance surface."
+  blockers: []
 blocked_by: []
 files_budget: 2
 files_scope:
@@ -32,13 +39,38 @@ test_plan:
 spec_refs:
   - docs/spec/security.md §Prompt-injection defenses (LLM call sites)
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-14
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 132
+      removed: 17
 escalations: []
 revisions: []
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-06-14
+    verdict: CLEAN
+    base: main
+    head: "m1/M1-329-listsaves-tool-byte-budget (working tree, uncommitted)"
+    verdict_file: docs/plan/m1/redteam/M1-329-2026-06-14.md
+    out_of_model_count: 0
+    note: |
+      In-progress audit between /m1-tick review (APPROVE r1) and
+      /m1-tick commit. CLEAN: the aggregate byte budget + per-title
+      truncateUtf8 cap deliver §Prompt-injection-defenses' typed/bounded
+      tool-output commitment; no gaps, nothing feeds a remediation ticket.
 ---
 
 # M1-329: ListSavesTool — aggregate byte budget at the LLM tool boundary
