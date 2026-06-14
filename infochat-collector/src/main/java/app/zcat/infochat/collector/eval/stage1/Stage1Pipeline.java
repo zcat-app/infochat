@@ -34,11 +34,11 @@ import java.util.regex.Matcher;
  *   <li><b>HTML entity pre-decode</b> — a single
  *       {@link StringEscapeUtils#unescapeHtml4} pass decodes numeric
  *       (decimal {@code &#NNN;}, hex {@code &#xNN;}, zero-padded
- *       {@code &#0NN;}) and named ({@code &amp;}, {@code &lt;}, …)
+ *       {@code &#0NN;}) and named (&amp;amp;, &amp;lt;, …)
  *       HTML entities to their literal codepoints BEFORE Unicode
  *       normalization and the regex set. Without this step, a payload
- *       like {@code &#105;gnore previous instructions} reaches the
- *       regex set as the literal byte sequence {@code &#105;gnore...}
+ *       like &amp;#105;gnore previous instructions reaches the
+ *       regex set as the literal byte sequence &amp;#105;gnore...
  *       (no {@code ignore} substring; no match); the downstream OWASP
  *       sanitizer then decodes the entity as part of HTML parsing,
  *       producing decoded prompt-injection text in {@code post.body}
@@ -99,7 +99,7 @@ import java.util.regex.Matcher;
  * <ul>
  *   <li><b>OWASP HTML-entity-encodes non-ASCII codepoints.</b> The
  *       library's {@code HtmlStreamRenderer} encodes every char ≥
- *       U+0080 as a numeric entity (e.g. {@code ｉ} → {@code &#65353;}).
+ *       U+0080 as a numeric entity (e.g. {@code ｉ} → &amp;#65353;).
  *       If OWASP runs before NFKC, the normalizer receives entity-
  *       reference text and cannot decompose the original codepoints.
  *       A Unicode-obfuscated injection ({@code ｉｇｎｏｒｅ previous
@@ -168,11 +168,6 @@ import java.util.regex.Matcher;
  * boundary coercion (SQL deserialization), not internal-code
  * defensive code per CLAUDE.md §"No defensive code".
  */
-// EscapedEntity: the class javadoc documents HTML-entity examples
-// ({@code &amp;}, {@code &#105;gnore...}) verbatim — rendering them
-// literally is the intent, so the Error Prone check is suppressed
-// rather than rewritten (a rewrite would corrupt the security rationale).
-@SuppressWarnings("EscapedEntity")
 @ApplicationScoped
 public class Stage1Pipeline {
 
