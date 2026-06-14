@@ -1,5 +1,6 @@
 package app.zcat.infochat.messaging.impl.simplex;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -356,6 +357,41 @@ class SimpleXMessageCodecTest {
         assertEquals(FailureCategory.PERMANENT, assertThrows(MessagingException.class,
                 () -> SimpleXMessageCodec.encodeFinalizeCommand(
                         "corr-1", "chat-item-1 forged", goodDm, "hi")).category());
+    }
+
+    // --- M1-360: outbound cap decision routed through Utf8 ---
+
+    @Test
+    void encodeRejectsOutboundTextExceedingCapByByteLength() {
+        // requireWithinCap's boolean decision now goes through
+        // Utf8.exceedsByteLength (allocation-free, early-exit); the rejection
+        // still names the exact UTF-8 byte count. A 2-byte-per-char string
+        // proves the cap is measured in BYTES, not chars: (cap/2 + 1) chars
+        // stay under the cap as a char count but exceed it as a byte count.
+        int overByChar = SimpleXMessageCodec.MAX_OUTBOUND_TEXT_BYTES / 2 + 1;
+        // U+00E9 (é) encodes to 2 UTF-8 bytes; built via codepoint so the
+        // source stays pure-ASCII regardless of compiler encoding.
+        String twoByteText = Character.toString(0x00E9).repeat(overByChar);
+        int expectedBytes = twoByteText.getBytes(StandardCharsets.UTF_8).length;
+        assertTrue(expectedBytes > SimpleXMessageCodec.MAX_OUTBOUND_TEXT_BYTES,
+                "fixture sanity: must exceed the byte cap");
+        MessagingException ex = assertThrows(MessagingException.class,
+                () -> SimpleXMessageCodec.encodeSendCommand(
+                        "corr-1", new ScopeRef.Dm("contact-abc"), twoByteText));
+        assertEquals(FailureCategory.PERMANENT, ex.category(),
+                "over-cap outbound text is a permanent failure");
+        assertTrue(ex.getMessage().contains(Integer.toString(expectedBytes)),
+                "rejection must name the exact UTF-8 byte count: " + ex.getMessage());
+    }
+
+    @Test
+    void encodeAcceptsOutboundTextAtExactlyCap() {
+        // The cap is inclusive: a text whose UTF-8 length is exactly the cap
+        // still encodes, since Utf8.exceedsByteLength is strictly greater-than.
+        String atCap = "a".repeat(SimpleXMessageCodec.MAX_OUTBOUND_TEXT_BYTES);
+        assertDoesNotThrow(() -> SimpleXMessageCodec.encodeSendCommand(
+                        "corr-1", new ScopeRef.Dm("contact-abc"), atCap),
+                "outbound text at exactly the cap must still encode");
     }
 
     // --- M1-118: inbound text-size cap (Finding 3, DOS) ---

@@ -61,16 +61,33 @@ final class SignalSubprocess {
 
     private static final Logger LOG = Logger.getLogger(SignalSubprocess.class);
 
+    /**
+     * Uptime a child must accumulate before exiting for the
+     * consecutive-restart streak to reset to zero. "Consecutive" means
+     * "without intervening healthy uptime" (design §6.4.6): a long-lived
+     * daemon that exits once after a long session must not climb toward
+     * {@code maxRestarts} over the host's whole lifetime. 30 s is the
+     * conservative threshold from the ticket §Notes — long enough that a
+     * genuine crash-loop (immediate re-exit) never clears it.
+     */
+    static final long DEFAULT_HEALTHY_UPTIME_MILLIS = 30_000L;
+
     private final ProcessBuilder processBuilder;
     private final BackoffPolicy backoff;
     private final int maxRestarts;
     private final InetSocketAddress endpoint;
     private final ScheduledExecutorService scheduler;
     private final boolean ownsScheduler;
+    private final long healthyUptimeNanos;
 
     private final AtomicInteger restartAttempts = new AtomicInteger();
     private final AtomicReference<State> state = new AtomicReference<>(State.NEW);
     private volatile boolean stopping;
+    // System.nanoTime() at the most recent spawn(); onProcessExit() reads it
+    // to measure how long the child lived before exiting (design §6.4.6
+    // healthy-uptime reset). Written on the spawn path, read on the scheduler
+    // thread, so volatile.
+    private volatile long lastSpawnNanos;
     @Nullable private volatile Process current;
     @Nullable private volatile ScheduledFuture<?> nextRestart;
     // Seeded to a no-op (like SignalJsonRpcClient's hungRestartHook) so the
@@ -86,7 +103,7 @@ final class SignalSubprocess {
                      InetSocketAddress endpoint,
                      BackoffPolicy backoff,
                      int maxRestarts) {
-        this(pb, endpoint, backoff, maxRestarts, null);
+        this(pb, endpoint, backoff, maxRestarts, null, DEFAULT_HEALTHY_UPTIME_MILLIS);
     }
 
     /**
@@ -98,6 +115,20 @@ final class SignalSubprocess {
                      BackoffPolicy backoff,
                      int maxRestarts,
                      @Nullable ScheduledExecutorService injectedScheduler) {
+        this(pb, endpoint, backoff, maxRestarts, injectedScheduler, DEFAULT_HEALTHY_UPTIME_MILLIS);
+    }
+
+    /**
+     * Full constructor — {@code healthyUptimeMillis} is injectable so the
+     * consecutive-restart reset test pins it to a few tens of ms rather than
+     * waiting out the 30 s production default.
+     */
+    SignalSubprocess(ProcessBuilder pb,
+                     InetSocketAddress endpoint,
+                     BackoffPolicy backoff,
+                     int maxRestarts,
+                     @Nullable ScheduledExecutorService injectedScheduler,
+                     long healthyUptimeMillis) {
         // ProcessBuilder is shared across restarts (Process is per-spawn);
         // merging stderr into stdout simplifies the drain loop to one
         // background reader.
@@ -106,6 +137,7 @@ final class SignalSubprocess {
         this.endpoint = endpoint;
         this.backoff = backoff;
         this.maxRestarts = maxRestarts;
+        this.healthyUptimeNanos = TimeUnit.MILLISECONDS.toNanos(healthyUptimeMillis);
         if (injectedScheduler == null) {
             this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
                 Thread t = new Thread(r, "signal-subprocess-watchdog");
@@ -143,6 +175,9 @@ final class SignalSubprocess {
     private void spawn() throws IOException {
         Process p = processBuilder.start();
         current = p;
+        // Stamp the spawn time so onProcessExit() can measure the child's
+        // uptime for the healthy-uptime reset (design §6.4.6).
+        lastSpawnNanos = System.nanoTime();
         Thread reader = new Thread(() -> drainAndLog(p), "signal-cli-output");
         reader.setDaemon(true);
         reader.start();
@@ -193,6 +228,13 @@ final class SignalSubprocess {
         if (!state.compareAndSet(State.RUNNING, State.RESTARTING)
                 && !state.compareAndSet(State.STARTING, State.RESTARTING)) {
             return;
+        }
+        // A child that ran past the healthy-uptime threshold before exiting
+        // breaks the streak: "consecutive" means "without intervening healthy
+        // uptime" (design §6.4.6), so the prior restarts are no longer
+        // consecutive with this exit and the count starts fresh.
+        if (System.nanoTime() - lastSpawnNanos >= healthyUptimeNanos) {
+            restartAttempts.set(0);
         }
         int attempt = restartAttempts.incrementAndGet();
         if (attempt > maxRestarts) {

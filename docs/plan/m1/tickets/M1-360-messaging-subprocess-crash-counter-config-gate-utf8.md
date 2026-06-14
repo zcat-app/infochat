@@ -1,11 +1,43 @@
 ---
 id: M1-360
 title: "messaging: reset subprocess consecutive-crash counters on healthy uptime; make the config-bean enablement gate honest; route outbound cap check through Utf8"
-status: pending
+status: done
 created: 2026-06-14
 last_updated: 2026-06-14
+reviews:
+  - round: 1
+    date: 2026-06-14
+    verdict: REWORK
+    checks:
+      scope_drift: FAIL
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 12
+      added: 320
+      removed: 48
+  - round: 2
+    date: 2026-06-14
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 12
+      added: 371
+      removed: 52
+clarity_check:
+  date: 2026-06-14
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
-files_budget: 8
+files_budget: 10
 files_scope:
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXSubprocess.java
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/signal/SignalSubprocess.java
@@ -39,9 +71,28 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: []
-escalations: []
-revisions: []
+escalations:
+  - date: 2026-06-14
+    reason: budget-breach
+    reviewer_verdict_excerpt: |
+      SCOPE-DRIFT-CHECK: FAIL — The ticket sets files_budget: 8, but the diff
+      touches 10 non-lifecycle files. Membership is fine (all 10 match a
+      files_scope entry) and there is no per-line scope drift; the overage is
+      purely the numeric count — the two test-directory globs expand to 4
+      actual test files, so the real total is 6 main + 4 test = 10, not 8.
+      All other checks PASS (test-integrity, out-of-scope, negative-space,
+      acceptance, spec-conformance).
+revisions:
+  - date: 2026-06-14
+    reason: budget-breach refine (round 1 rework)
+    change: |
+      files_budget: 8 -> 10. The original budget counted the two
+      test-directory globs in files_scope as 2 files; they expand to 4 actual
+      test files (SignalConfigTest, SignalSubprocessTest, SimpleXMessageCodecTest,
+      SimpleXSubprocessTest), so the true file total is 6 main + 4 test = 10.
+      No files_scope, out_of_scope, or acceptance change — membership and
+      per-line scope were both clean; only the numeric bound was an accounting
+      step low. Implementation already green on the full suite at round 1.
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -81,3 +132,17 @@ See frontmatter.
 - A conservative healthy-uptime threshold (30–60s) preserves the spec's
   "consecutive" intent without a new tunable; capture supervisor start/exit
   timestamps if `process.info().totalCpuDuration()` proves unreliable.
+
+## Round 1 rework
+
+Reviewer verdict: REWORK (SCOPE-DRIFT-CHECK FAIL — file-count overage only;
+all other checks PASS). Single item:
+
+1. The diff touches 10 non-lifecycle files but `files_budget: 8`. Membership
+   is fine (all 10 match a `files_scope` entry) and there is no per-line scope
+   drift; the overage is purely numeric — the two test-directory globs in
+   `files_scope` expand to 4 actual test files (SignalConfigTest,
+   SignalSubprocessTest, SimpleXMessageCodecTest, SimpleXSubprocessTest), so
+   the real file total is 6 main + 4 test = 10, not the 8 the budget assumed
+   (it counted the two test dirs as 2 files). Resolve by either narrowing the
+   change set or raising `files_budget` via `escalate → refine`.

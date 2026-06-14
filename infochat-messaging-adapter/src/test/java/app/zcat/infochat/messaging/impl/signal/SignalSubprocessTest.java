@@ -2,6 +2,7 @@ package app.zcat.infochat.messaging.impl.signal;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.net.InetSocketAddress;
@@ -108,6 +109,42 @@ class SignalSubprocessTest {
         // stop() against the FAILED state is idempotent.
         sp.stop();
         assertEquals(SignalSubprocess.State.STOPPED, sp.state());
+    }
+
+    @Test
+    void consecutiveRestartCounterResetsAfterHealthyUptime() throws Exception {
+        // opus-47 F2 (design §6.4.6): a child that runs past the
+        // healthy-uptime threshold before exiting breaks the "consecutive"
+        // streak. With a 50 ms threshold and a ~150 ms-lived child every
+        // restart cycle is "healthy", so restartAttempts resets to zero and
+        // re-increments to 1 each cycle and the wrapper never latches FAILED —
+        // even past maxRestarts respawns. The onRestart listener counts cycles
+        // (the cumulative signal restartAttempts no longer provides once it
+        // resets every cycle).
+        ProcessBuilder pb = new ProcessBuilder("/bin/sh", "-c", "sleep 0.15");
+        int maxRestarts = 3;
+        SignalSubprocess sp = new SignalSubprocess(
+                pb, NEVER_PROBED, FAST_BACKOFF, maxRestarts,
+                /* injectedScheduler */ null, /* healthyUptimeMillis */ 50L);
+        AtomicInteger respawns = new AtomicInteger();
+        sp.onRestart(respawns::incrementAndGet);
+        sp.start();
+        try {
+            long deadline = System.nanoTime() + 5_000_000_000L;
+            while (respawns.get() <= maxRestarts && System.nanoTime() < deadline) {
+                Thread.sleep(20);
+            }
+            assertTrue(respawns.get() > maxRestarts,
+                    "expected more respawns (" + respawns.get() + ") than the cap ("
+                            + maxRestarts + "); the healthy-uptime reset must keep the wrapper alive");
+            assertTrue(sp.restartAttempts() <= 1,
+                    "streak must reset on healthy uptime then re-increment to 1, not climb to N; was "
+                            + sp.restartAttempts());
+            assertNotEquals(SignalSubprocess.State.FAILED, sp.state(),
+                    "a healthy-uptime daemon must never latch FAILED from non-consecutive exits");
+        } finally {
+            sp.stop();
+        }
     }
 
     @Test

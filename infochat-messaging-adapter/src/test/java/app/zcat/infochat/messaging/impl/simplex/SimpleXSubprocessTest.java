@@ -2,6 +2,7 @@ package app.zcat.infochat.messaging.impl.simplex;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -95,6 +96,42 @@ class SimpleXSubprocessTest {
             assertEquals(1, notifications.size());
             assertNotNull(notifications.get(0));
             assertTrue(notifications.get(0).contains("simplex-chat"));
+        } finally {
+            sub.stop();
+        }
+    }
+
+    @Test
+    void consecutiveCrashCounterResetsAfterHealthyUptime() throws Exception {
+        // opus-47 F2 (design §6.4.6): a process that runs past the
+        // healthy-uptime threshold before exiting breaks the "consecutive"
+        // streak, so the counter resets to zero and re-increments to 1 each
+        // cycle instead of climbing toward the cap. With a 50 ms threshold and
+        // a ~150 ms-lived process, every supervised run is "healthy"; even
+        // past crashCap restarts the subprocess never reaches FAILED and the
+        // streak stays at 1 (reset then incremented), not N.
+        CopyOnWriteArrayList<String> notifications = new CopyOnWriteArrayList<>();
+        SimpleXSubprocess sub = new SimpleXSubprocess(
+                List.of(SLEEP, "0.15"),
+                Duration.ofMillis(5),
+                Duration.ofMillis(20),
+                /* crashCap */ 3,
+                notifications::add,
+                new Random(0L),
+                /* healthyUptime */ Duration.ofMillis(50));
+        sub.start();
+        try {
+            // More restarts than the cap: without the reset, crashCap
+            // consecutive exits would already have latched FAILED and fired
+            // the admin notifier.
+            awaitRestartCountAtLeast(sub, 4, Duration.ofSeconds(4));
+            assertTrue(sub.consecutiveCrashes() <= 1,
+                    "streak must reset on healthy uptime then re-increment to 1, not climb to N; was "
+                            + sub.consecutiveCrashes());
+            assertNotEquals(SimpleXSubprocess.State.FAILED, sub.state(),
+                    "a healthy-uptime daemon must never latch FAILED from non-consecutive crashes");
+            assertEquals(0, sub.adminNotifications(),
+                    "no admin notification when the cap is never reached");
         } finally {
             sub.stop();
         }

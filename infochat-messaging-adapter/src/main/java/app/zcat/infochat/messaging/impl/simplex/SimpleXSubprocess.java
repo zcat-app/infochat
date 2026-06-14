@@ -50,6 +50,18 @@ final class SimpleXSubprocess {
      */
     static final int DEFAULT_CRASH_CAP = 5;
 
+    /**
+     * Uptime a process must accumulate before a crash for the
+     * consecutive-crash streak to reset to zero. "Consecutive" means
+     * "without intervening healthy uptime" (design §6.4.6): a long-lived
+     * daemon that crashes once after a long session must not latch
+     * monotonically toward {@link #DEFAULT_CRASH_CAP} over the host's whole
+     * lifetime. 30 s is the conservative threshold from the ticket §Notes —
+     * long enough that a genuine crash-loop (immediate re-exit) never clears
+     * it, short enough that any real session does.
+     */
+    static final Duration DEFAULT_HEALTHY_UPTIME = Duration.ofSeconds(30);
+
     /** Grace period between SIGTERM and SIGKILL during {@link #stop()}. */
     static final Duration SHUTDOWN_GRACE = Duration.ofSeconds(5);
 
@@ -73,10 +85,17 @@ final class SimpleXSubprocess {
     private final int crashCap;
     private final Consumer<String> adminNotifier;
     private final Random random;
+    private final Duration healthyUptime;
 
     private final AtomicReference<State> state = new AtomicReference<>(State.NOT_STARTED);
     private final AtomicInteger restartCount = new AtomicInteger(0);
     private final AtomicInteger adminNotifications = new AtomicInteger(0);
+    // "Consecutive" crash streak (design §6.4.6): reset to zero whenever a
+    // process ran past healthyUptime before crashing. A field rather than a
+    // runSupervisor local so the supervisor can reset it from supervise() and
+    // so it is observable via consecutiveCrashes(). Mutated only on the single
+    // supervisor virtual thread; AtomicInteger carries the value to readers.
+    private final AtomicInteger consecutiveCrashes = new AtomicInteger(0);
 
     // Null until start() launches the process and its supervisor thread;
     // every read copies to a local and guards on null before use.
@@ -92,6 +111,20 @@ final class SimpleXSubprocess {
                       int crashCap,
                       Consumer<String> adminNotifier,
                       Random random) {
+        this(command, backoffBase, backoffMax, crashCap, adminNotifier, random,
+                DEFAULT_HEALTHY_UPTIME);
+    }
+
+    // healthyUptime is injectable (package-private) so the consecutive-crash
+    // reset test pins it to a few tens of ms rather than waiting out the
+    // 30 s production default — the same test seam as the Random injection.
+    SimpleXSubprocess(List<String> command,
+                      Duration backoffBase,
+                      Duration backoffMax,
+                      int crashCap,
+                      Consumer<String> adminNotifier,
+                      Random random,
+                      Duration healthyUptime) {
         if (command.isEmpty()) {
             throw new IllegalArgumentException("command must be non-empty");
         }
@@ -101,6 +134,7 @@ final class SimpleXSubprocess {
         this.crashCap = crashCap;
         this.adminNotifier = adminNotifier;
         this.random = random;
+        this.healthyUptime = healthyUptime;
     }
 
     /**
@@ -178,13 +212,22 @@ final class SimpleXSubprocess {
         return restartCount.get();
     }
 
+    /**
+     * Crashes in the current streak — reset to zero whenever a process runs
+     * past {@code healthyUptime} before crashing (design §6.4.6), so this is
+     * "crashes without intervening healthy uptime", not crashes over the
+     * whole host lifetime.
+     */
+    int consecutiveCrashes() {
+        return consecutiveCrashes.get();
+    }
+
     /** How many admin-notification calls fired (one per FAILED transition). */
     int adminNotifications() {
         return adminNotifications.get();
     }
 
     private void runSupervisor() {
-        int consecutiveCrashes = 0;
         // The first launchProcess() attempt belongs to start(); every later
         // iteration (crash-restart or launch-failure-retry) is a restart, and
         // a successful launch there must notify the adapter so it rebuilds
@@ -195,13 +238,15 @@ final class SimpleXSubprocess {
             try {
                 process = launchProcess();
             } catch (IOException e) {
+                // A launch that never produced a live process accumulated no
+                // healthy uptime, so it always counts toward the streak.
                 LOG.warn("simplex-chat launch failed: {}", e.getClass().getSimpleName());
                 restartIteration = true;
-                consecutiveCrashes++;
-                if (handleCrashCap(consecutiveCrashes)) {
+                int crashes = consecutiveCrashes.incrementAndGet();
+                if (handleCrashCap(crashes)) {
                     return;
                 }
-                if (!sleepForBackoff(consecutiveCrashes)) {
+                if (!sleepForBackoff(crashes)) {
                     return;
                 }
                 restartCount.incrementAndGet();
@@ -213,7 +258,7 @@ final class SimpleXSubprocess {
                 notifyRestartListener();
             }
             restartIteration = true;
-            consecutiveCrashes = supervise(process, consecutiveCrashes);
+            supervise(process);
             if (stopping || state.get() == State.FAILED) {
                 return;
             }
@@ -258,28 +303,35 @@ final class SimpleXSubprocess {
         return process;
     }
 
-    private int supervise(Process process, int consecutiveCrashesIn) {
-        int consecutiveCrashes = consecutiveCrashesIn;
+    private void supervise(Process process) {
+        long startNanos = System.nanoTime();
+        int crashes;
         try {
             int exitCode = process.waitFor();
             if (stopping) {
-                return consecutiveCrashes;
+                return;
             }
             LOG.warn("simplex-chat exited unexpectedly with code {}", exitCode);
-            consecutiveCrashes++;
+            // A process that ran past the healthy-uptime threshold before
+            // crashing breaks the streak: "consecutive" means "without
+            // intervening healthy uptime" (design §6.4.6), so the prior
+            // crashes are no longer consecutive with this one.
+            if (System.nanoTime() - startNanos >= healthyUptime.toNanos()) {
+                consecutiveCrashes.set(0);
+            }
+            crashes = consecutiveCrashes.incrementAndGet();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return consecutiveCrashes;
+            return;
         }
-        if (handleCrashCap(consecutiveCrashes)) {
-            return consecutiveCrashes;
+        if (handleCrashCap(crashes)) {
+            return;
         }
         state.set(State.RESTARTING);
-        if (!sleepForBackoff(consecutiveCrashes)) {
-            return consecutiveCrashes;
+        if (!sleepForBackoff(crashes)) {
+            return;
         }
         restartCount.incrementAndGet();
-        return consecutiveCrashes;
     }
 
     private boolean handleCrashCap(int consecutiveCrashes) {

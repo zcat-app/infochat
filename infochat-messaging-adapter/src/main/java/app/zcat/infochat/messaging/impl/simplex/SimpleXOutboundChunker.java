@@ -1,5 +1,7 @@
 package app.zcat.infochat.messaging.impl.simplex;
 
+import app.zcat.infochat.messaging.Utf8;
+
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -46,7 +48,10 @@ final class SimpleXOutboundChunker {
      * unchanged. Never returns an empty list.
      */
     static List<String> chunk(String text) {
-        if (utf8Length(text) <= MAX_BYTES) {
+        // Allocation-free early-exit boolean fits-check via the module's
+        // single UTF-8 length source; the per-line utf8Length() below still
+        // measures exact lengths for packing (reshaping that is out of scope).
+        if (!Utf8.exceedsByteLength(text, MAX_BYTES)) {
             return List.of(text);
         }
         ChunkBuilder builder = new ChunkBuilder();

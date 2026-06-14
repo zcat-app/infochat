@@ -74,4 +74,19 @@ class SignalConfigTest {
         assertTrue(ex.getMessage().contains(SignalConfig.BINARY_KEY),
                 "gated startup must run validate() when signal is enabled: " + ex.getMessage());
     }
+
+    @Test
+    void missingRequiredKeys_constructWithoutThrowing_butValidateNamesKey() {
+        // F5: with Optional<String> injection a CDI-discovered bean whose
+        // signal keys are unset constructs cleanly (Optional.empty()) instead
+        // of throwing NoSuchElementException in the constructor before the
+        // @PostConstruct enablement gate can run. The missing value surfaces
+        // as a keyed IllegalStateException only at validate()-time.
+        SignalConfig config = assertDoesNotThrow(() ->
+                new SignalConfig(Optional.empty(), Optional.empty(), Optional.empty()));
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class, config::validate);
+        assertTrue(ex.getMessage().contains(SignalConfig.BINARY_KEY),
+                "validate() must name the missing key: " + ex.getMessage());
+    }
 }

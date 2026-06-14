@@ -51,8 +51,8 @@ public class SimpleXConfig {
     /** Adapter-selection name whose enablement gates this config's eager validation. */
     static final String ADAPTER_NAME = "simplex";
 
-    private final String binary;
-    private final String dataDir;
+    private final Optional<String> binary;
+    private final Optional<String> dataDir;
     private final int wsPort;
 
     // Field-injected (not a constructor param) so the @Startup gate can read
@@ -62,21 +62,36 @@ public class SimpleXConfig {
     @ConfigProperty(name = ADAPTERS_KEY)
     Optional<String> enabledAdapters = Optional.empty();
 
+    // CDI binds this constructor (the @Inject one). binary/data-dir are
+    // injected as Optional<String> with no defaultValue so a CDI-indexed jar
+    // whose simplex keys are unset constructs cleanly (Optional.empty())
+    // instead of throwing NoSuchElementException before the @PostConstruct
+    // enablement gate runs — the required values are validated at use
+    // (validate()/binary()/dataDir()) for an activated adapter only.
     @Inject
-    public SimpleXConfig(@ConfigProperty(name = BINARY_KEY) String binary,
-                         @ConfigProperty(name = DATA_DIR_KEY) String dataDir,
+    public SimpleXConfig(@ConfigProperty(name = BINARY_KEY) Optional<String> binary,
+                         @ConfigProperty(name = DATA_DIR_KEY) Optional<String> dataDir,
                          @ConfigProperty(name = WS_PORT_KEY, defaultValue = "" + DEFAULT_WS_PORT) int wsPort) {
         this.binary = binary;
         this.dataDir = dataDir;
         this.wsPort = wsPort;
     }
 
+    // Convenience constructor for the programmatic adapter-construction path
+    // (ProductionAdapterBeans) and unit tests, which already hold concrete,
+    // present values. Not @Inject — CDI uses the Optional constructor above.
+    public SimpleXConfig(String binary, String dataDir, int wsPort) {
+        this(Optional.of(binary), Optional.of(dataDir), wsPort);
+    }
+
     public String binary() {
-        return binary;
+        return binary.orElseThrow(() -> new IllegalStateException(
+                BINARY_KEY + " must be set for an activated simplex adapter"));
     }
 
     public String dataDir() {
-        return dataDir;
+        return dataDir.orElseThrow(() -> new IllegalStateException(
+                DATA_DIR_KEY + " must be set for an activated simplex adapter"));
     }
 
     public int wsPort() {
@@ -127,15 +142,20 @@ public class SimpleXConfig {
      *         names the offending property key.
      */
     public void validate() {
-        Path binaryPath = Path.of(binary);
+        // binary()/dataDir() resolve the Optional values and throw naming the
+        // key if it was never set (the validate-at-use half of the CDI
+        // optionality fix).
+        String binaryValue = binary();
+        Path binaryPath = Path.of(binaryValue);
         if (!Files.exists(binaryPath) || !Files.isExecutable(binaryPath)) {
             throw new IllegalStateException(
-                    BINARY_KEY + " must point to an existing, executable simplex-chat binary: " + binary);
+                    BINARY_KEY + " must point to an existing, executable simplex-chat binary: " + binaryValue);
         }
-        Path dataDirPath = Path.of(dataDir);
+        String dataDirValue = dataDir();
+        Path dataDirPath = Path.of(dataDirValue);
         if (!Files.isDirectory(dataDirPath) || !Files.isWritable(dataDirPath)) {
             throw new IllegalStateException(
-                    DATA_DIR_KEY + " must be an existing, writable directory: " + dataDir);
+                    DATA_DIR_KEY + " must be an existing, writable directory: " + dataDirValue);
         }
         if (wsPort < 1 || wsPort > 65535) {
             throw new IllegalStateException(

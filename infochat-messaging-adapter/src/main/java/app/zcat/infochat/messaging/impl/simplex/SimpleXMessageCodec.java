@@ -223,10 +223,12 @@ final class SimpleXMessageCodec {
     }
 
     private static void requireWithinCap(String text) throws MessagingException {
-        int byteLength = text.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
-        if (byteLength > MAX_OUTBOUND_TEXT_BYTES) {
+        // Allocation-free early-exit boolean decision via the module's single
+        // UTF-8 length source (Utf8); the exact byte count is computed only on
+        // the rejection branch, which is off the success hot path.
+        if (Utf8.exceedsByteLength(text, MAX_OUTBOUND_TEXT_BYTES)) {
             throw new MessagingException(FailureCategory.PERMANENT,
-                    "outbound text " + byteLength + " bytes exceeds adapter cap "
+                    "outbound text " + Utf8.byteLength(text) + " bytes exceeds adapter cap "
                             + MAX_OUTBOUND_TEXT_BYTES);
         }
     }

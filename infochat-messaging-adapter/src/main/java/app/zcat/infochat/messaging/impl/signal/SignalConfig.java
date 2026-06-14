@@ -44,9 +44,9 @@ public class SignalConfig {
     /** Adapter-selection name whose enablement gates this config's eager validation. */
     static final String ADAPTER_NAME = "signal";
 
-    private final String binary;
-    private final String dataDir;
-    private final String account;
+    private final Optional<String> binary;
+    private final Optional<String> dataDir;
+    private final Optional<String> account;
 
     // Field-injected (not a constructor param) so the @Startup gate can read
     // it without widening the constructor the adapter-construction path uses.
@@ -55,13 +55,25 @@ public class SignalConfig {
     @ConfigProperty(name = ADAPTERS_KEY)
     Optional<String> enabledAdapters = Optional.empty();
 
+    // CDI binds this constructor (the @Inject one). The required keys are
+    // injected as Optional<String> with no defaultValue so a CDI-indexed jar
+    // whose signal keys are unset constructs cleanly (Optional.empty())
+    // instead of throwing NoSuchElementException before the @PostConstruct
+    // enablement gate runs — the values are validated at use (validate()) for
+    // an activated adapter only.
     @Inject
-    SignalConfig(@ConfigProperty(name = BINARY_KEY) String binary,
-                 @ConfigProperty(name = DATA_DIR_KEY) String dataDir,
-                 @ConfigProperty(name = ACCOUNT_KEY) String account) {
+    SignalConfig(@ConfigProperty(name = BINARY_KEY) Optional<String> binary,
+                 @ConfigProperty(name = DATA_DIR_KEY) Optional<String> dataDir,
+                 @ConfigProperty(name = ACCOUNT_KEY) Optional<String> account) {
         this.binary = binary;
         this.dataDir = dataDir;
         this.account = account;
+    }
+
+    // Convenience constructor for unit tests, which already hold concrete,
+    // present values. Not @Inject — CDI uses the Optional constructor above.
+    SignalConfig(String binary, String dataDir, String account) {
+        this(Optional.of(binary), Optional.of(dataDir), Optional.of(account));
     }
 
     /**
@@ -112,19 +124,30 @@ public class SignalConfig {
      * @throws IllegalStateException if any check fails.
      */
     public void validate() {
-        Path binaryPath = Path.of(binary);
+        // require() resolves each Optional value and throws naming the key if
+        // it was never set (the validate-at-use half of the CDI optionality
+        // fix), so a missing key surfaces as a keyed IllegalStateException
+        // here rather than a NoSuchElementException at construction.
+        String binaryValue = require(binary, BINARY_KEY);
+        Path binaryPath = Path.of(binaryValue);
         if (!Files.exists(binaryPath) || !Files.isExecutable(binaryPath)) {
             throw new IllegalStateException(
-                    BINARY_KEY + " must point to an existing, executable signal-cli binary: " + binary);
+                    BINARY_KEY + " must point to an existing, executable signal-cli binary: " + binaryValue);
         }
-        Path dataDirPath = Path.of(dataDir);
+        String dataDirValue = require(dataDir, DATA_DIR_KEY);
+        Path dataDirPath = Path.of(dataDirValue);
         if (!Files.isDirectory(dataDirPath) || !Files.isWritable(dataDirPath)) {
             throw new IllegalStateException(
-                    DATA_DIR_KEY + " must be an existing, writable directory: " + dataDir);
+                    DATA_DIR_KEY + " must be an existing, writable directory: " + dataDirValue);
         }
-        if (account.isBlank()) {
+        if (require(account, ACCOUNT_KEY).isBlank()) {
             throw new IllegalStateException(
                     ACCOUNT_KEY + " must be a non-empty signal-cli account identifier");
         }
+    }
+
+    private static String require(Optional<String> value, String key) {
+        return value.orElseThrow(() -> new IllegalStateException(
+                key + " must be set for an activated signal adapter"));
     }
 }
