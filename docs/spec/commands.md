@@ -88,8 +88,16 @@ live in `docs/design/03-commands.md`.
 
   Both caps exist before this section's other guarantees apply; an
   oversized message never reaches the parser, the chat agent, the
-  LLM, or any DB query past the rate-limit counter increment. The
-  cap *values* are tuning and live in `docs/design/`.
+  LLM, or any DB *write*. The transport-layer byte cap fires at
+  intake, before any DB connection is borrowed, so a genuinely
+  hostile large payload is dropped query-free. The character-based
+  body caps above are evaluated after the authorization gates'
+  single `users`-row read (and, in group scope, the scope-language
+  and group-approval reads), so the ban / invite / D47-invisibility /
+  per-group reply-bucket precedence is preserved — an oversized
+  banned-user or unapproved-group message still gets the
+  authorization reply, not a body-too-large reply. The cap *values*
+  are tuning and live in `docs/design/`.
 
 ## Command catalogue
 
