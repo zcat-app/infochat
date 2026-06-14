@@ -14,13 +14,17 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.UnknownHostException;
 import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
@@ -980,20 +984,24 @@ class SsrfGuardedHttpClientTest {
     }
 
     // -----------------------------------------------------------------
-    // U-40 bounded redirect-body discard. A redirect hop's body is
-    // drained through discardBounded (a SIZE- and TIME-bounded sibling of
-    // readBounded) rather than close(): close() on an ofInputStream()
-    // body can read-and-discard the whole attacker-controlled body to
-    // ready the connection for reuse. discardBounded reads at most the
-    // cap (plus one buffer) and then stops, AND supervises every read
-    // through the same per-read watchdog + total bodyReadDeadline as
-    // readBounded — so a slow-dribble redirect body that stays under the
-    // size cap still cannot hold the fetcher thread past the deadline.
+    // U-40 / M1-355 bounded redirect-body discard. A followed redirect
+    // hop's body is drained through discardBounded — the SIZE- and
+    // TIME-bounded sink-parameterized sibling of readBounded, sharing the
+    // single supervisedDrain loop. An over-cap redirect body is a policy
+    // violation: discardBounded THROWS BODY_CAP_EXCEEDED (matching the
+    // terminal readBounded path) rather than reading on unbounded, and it
+    // supervises every read through the same per-read watchdog + total
+    // bodyReadDeadline — so a slow-dribble redirect body that stays under
+    // the size cap still cannot hold the fetcher thread past the deadline.
     // -----------------------------------------------------------------
 
     @Test
-    void discardBoundedStopsReadingAtCap() throws IOException, InterruptedException {
-        long cap = 1024;
+    void discardBoundedThrowsBodyCapExceededOnOverCap()
+            throws IOException, InterruptedException {
+        // M1-355: an over-cap followed-redirect body is a policy violation, not
+        // a stop condition. discardBounded must THROW BODY_CAP_EXCEEDED (matching
+        // the terminal readBounded path) rather than returning after a bounded
+        // read — the prior behaviour broke the loop and leaned on close().
         int streamSize = 1024 * 1024;
         AtomicInteger bytesRead = new AtomicInteger();
         InputStream oversizedBody = new InputStream() {
@@ -1021,17 +1029,19 @@ class SsrfGuardedHttpClientTest {
             }
         };
 
-        // testModeClient has a generous readTimeout (5s) and deadline (2min),
-        // so the in-memory fast reads never trip the time watchdog — only the
-        // size cap stops the drain.
-        long discarded = testModeClient().discardBounded(oversizedBody, cap);
-
-        assertTrue(discarded <= cap + 64 * 1024,
-            "the discard must stop within one buffer of the cap; discarded="
-            + discarded);
+        // testModeClient bodyCap is 10 KiB; the 1 MiB body exceeds it. Generous
+        // readTimeout (5s) and deadline (2min) mean the in-memory fast reads
+        // never trip the time watchdog — only the size cap aborts the drain.
+        SsrfGuardedHttpClient client = testModeClient();
+        SsrfPolicyException ex = assertThrows(SsrfPolicyException.class,
+            () -> client.discardBounded(oversizedBody));
+        assertEquals(SsrfPolicyException.Reason.BODY_CAP_EXCEEDED, ex.reason(),
+            "an over-cap redirect-body drain must abort with BODY_CAP_EXCEEDED, "
+            + "matching the terminal readBounded path");
         assertTrue(bytesRead.get() < streamSize,
-            "the discard must NOT read the whole oversized body — it stops at "
-            + "the cap; bytesRead=" + bytesRead.get() + " of " + streamSize);
+            "the drain must NOT read the whole oversized body before aborting — "
+            + "it stops within a buffer of the cap; bytesRead=" + bytesRead.get()
+            + " of " + streamSize);
     }
 
     @Test
@@ -1072,12 +1082,122 @@ class SsrfGuardedHttpClientTest {
         };
 
         SsrfPolicyException ex = assertThrows(SsrfPolicyException.class,
-            () -> client.discardBounded(stallingBody, 10L * 1024));
+            () -> client.discardBounded(stallingBody));
         assertTrue(
             ex.reason() == SsrfPolicyException.Reason.BODY_READ_TIMEOUT
                 || ex.reason() == SsrfPolicyException.Reason.BODY_READ_DEADLINE_EXCEEDED,
             "a stalled redirect-body drain must abort with the typed read "
             + "timeout/deadline reason, not block unbounded; got: " + ex.reason());
+    }
+
+    @Test
+    void overCapFollowedRedirectAbortsWithBodyCapExceeded() {
+        // M1-355: a within-cap 3xx hop (redirectCount 1 <= redirectCap 3) whose
+        // body exceeds bodyCap. The wrapper drains the followed-redirect body
+        // through discardBounded, which must abort the whole get() with
+        // BODY_CAP_EXCEEDED — the over-cap redirect body is never read unbounded.
+        // The throw fires before the Location header is parsed, so /never-reached
+        // is never dialed.
+        byte[] overCapBody = new byte[2 * 1024];
+        for (int i = 0; i < overCapBody.length; i++) {
+            overCapBody[i] = (byte) ('A' + (i % 26));
+        }
+        server.createContext("/redir", exchange -> {
+            exchange.getResponseHeaders().add("Location", "/never-reached");
+            exchange.sendResponseHeaders(302, overCapBody.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(overCapBody);
+            }
+        });
+
+        SsrfGuardedHttpClient client = new SsrfGuardedHttpClient(
+            new LoopbackPermittingBlocklist(),
+            Duration.ofSeconds(2),
+            Duration.ofSeconds(2),
+            Duration.ofSeconds(5),
+            Duration.ofMinutes(2),
+            1024L,
+            3);
+
+        SsrfPolicyException ex = assertThrows(SsrfPolicyException.class,
+            () -> client.get(URI.create("http://127.0.0.1:" + port + "/redir")));
+        assertEquals(SsrfPolicyException.Reason.BODY_CAP_EXCEEDED, ex.reason(),
+            "an over-cap followed-redirect body must abort the call with "
+            + "BODY_CAP_EXCEEDED, not be read unbounded");
+    }
+
+    @Test
+    void ofInputStreamCloseDoesNotDrainPartiallyReadBody() throws Exception {
+        // M1-355 item 1: pin the JDK 25 HttpResponse.BodyHandlers.ofInputStream()
+        // close()-after-partial-read behaviour empirically — the fact the wrapper's
+        // close()/discardBounded comments could not establish by inspection. A
+        // followed (within-cap) 3xx hop serves far more than a body cap's worth of
+        // bytes; we read a little, close the stream, and observe via the server how
+        // much it managed to write. If close() drained, the server completes the
+        // whole body; if close() cancels, TCP backpressure stalls the server write
+        // once the buffers fill and it fails with a connection reset well before the
+        // end. totalSize is far larger than any autotuned socket buffer so the two
+        // outcomes are unambiguous; the un-drained branch never actually transfers
+        // totalSize bytes, so the large size costs nothing.
+        long totalSize = 64L * 1024 * 1024;
+        AtomicLong serverBytesWritten = new AtomicLong();
+        AtomicReference<String> serverOutcome = new AtomicReference<>("incomplete");
+        CountDownLatch serverDone = new CountDownLatch(1);
+        server.createContext("/bigredirect", exchange -> {
+            exchange.getResponseHeaders().add("Location", "/next");
+            exchange.sendResponseHeaders(302, totalSize);
+            byte[] chunk = new byte[64 * 1024];
+            try (OutputStream out = exchange.getResponseBody()) {
+                long written = 0;
+                while (written < totalSize) {
+                    out.write(chunk);
+                    written += chunk.length;
+                    serverBytesWritten.set(written);
+                }
+                serverOutcome.set("completed");
+            } catch (IOException e) {
+                // Client cancelled the body before draining: the connection is
+                // reset, so the proactive write fails partway through.
+                serverOutcome.set("reset");
+            } finally {
+                serverDone.countDown();
+            }
+        });
+
+        HttpClient raw = HttpClient.newBuilder()
+            .followRedirects(HttpClient.Redirect.NEVER)
+            .proxy(HttpClient.Builder.NO_PROXY)
+            .build();
+        HttpRequest request = HttpRequest.newBuilder()
+            .uri(URI.create("http://127.0.0.1:" + port + "/bigredirect"))
+            .GET()
+            .build();
+        HttpResponse<InputStream> response =
+            raw.send(request, HttpResponse.BodyHandlers.ofInputStream());
+        assertEquals(302, response.statusCode(),
+            "the probe fixture must return a followable 3xx hop");
+        InputStream body = response.body();
+        int firstRead = body.read(new byte[1024]);
+        assertTrue(firstRead > 0, "the probe must read at least one body byte");
+        body.close();
+
+        assertTrue(serverDone.await(30, TimeUnit.SECONDS),
+            "the server write must finish (complete or reset) within the timeout");
+
+        // RECORDED FACT (this assertion IS the record, mirrored in the
+        // SsrfGuardedHttpClient close()-drain comments): JDK 25 close() on a
+        // partially-read ofInputStream() body does NOT drain the remainder — it
+        // cancels the subscription and resets the connection, so the server
+        // observes far fewer than totalSize bytes written. discardBounded's
+        // bounded drain therefore exists for connection REUSE on followed hops,
+        // not as a workaround for an unbounded close()-drain.
+        assertEquals("reset", serverOutcome.get(),
+            "JDK 25 ofInputStream() close() must NOT drain a partially-read body "
+            + "(observed outcome=" + serverOutcome.get() + ", bytesWritten="
+            + serverBytesWritten.get() + " of " + totalSize + ")");
+        assertTrue(serverBytesWritten.get() < totalSize,
+            "close() must abandon the connection before the full body is written; "
+            + "bytesWritten=" + serverBytesWritten.get() + " of " + totalSize);
     }
 
     private SsrfGuardedHttpClient testModeClient() {

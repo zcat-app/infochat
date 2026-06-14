@@ -1,9 +1,29 @@
 ---
 id: M1-355
 title: "ssrf: resolve the close-drain body-cap contradiction on the followed-redirect path and unify the two bounded-read loops"
-status: pending
+status: done
 created: 2026-06-14
 last_updated: 2026-06-14
+escalations:
+  - date: 2026-06-14
+    reason: premise-fail
+    reviewer_verdict_excerpt: |
+      N/A — surfaced at start of implementation. Acceptance item 4 asserts
+      "Existing SSRF body-cap and slow-dribble tests stay green," but acceptance
+      item 2 reverses discardBounded's over-cap behaviour from "stop reading and
+      return" to "throw BODY_CAP_EXCEEDED." The existing green test
+      SsrfGuardedHttpClientTest.discardBoundedStopsReadingAtCap
+      (SsrfGuardedHttpClientTest.java:994-1035) pins the OLD return-without-throw
+      behaviour and therefore CANNOT stay green under item 2. The test_plan has no
+      `modifies` field authorising the rewrite. Modifying a green test without
+      test_plan authorisation violates the engineering rules → escalate→refine to
+      add the authorisation.
+clarity_check:
+  date: 2026-06-14
+  verdict: WARN
+  warnings:
+    - "Acceptance item 1's 'result is recorded in a code comment' clause is verifiable only by reading the diff; would be self-verifying if it named the expected comment content (whether close() on an ofInputStream() body drains)."
+  blockers: []
 blocked_by: []
 files_budget: 3
 files_scope:
@@ -23,22 +43,57 @@ acceptance:
   - "An integration test pins the actual JDK 25 HttpResponse.BodyHandlers.ofInputStream() close()-after-partial-read behaviour against a fixture that serves more than bodyCap bytes on a followed (within-cap) 3xx hop, proving whether close() drains; the result is recorded in a code comment so the wrapper's own contradictory comments (the explicit response.body().close() at the redirect-cap path vs the discardBounded javadoc) no longer disagree."
   - "discardBounded no longer relies on an implicit close-drain to bound an over-cap followed-redirect body: once total exceeds cap it treats the hop as a policy violation (throws SsrfPolicyException BODY_CAP_EXCEEDED) rather than breaking the loop and letting try-with-resources close() potentially read the remainder unbounded — matching the terminal readBounded path."
   - "readBounded and discardBounded are expressed through one shared supervised-drain helper parameterized by a per-chunk sink (accumulate vs discard), so the size cap, per-read watchdog, and total deadline have a single point of truth and cannot drift between the terminal and redirect paths."
-  - "Existing SSRF body-cap and slow-dribble tests stay green; a test covers the over-cap followed-redirect hop aborting with BODY_CAP_EXCEEDED."
+  - "All existing SSRF body-cap and slow-dribble tests stay green EXCEPT discardBoundedStopsReadingAtCap, which is converted (see test_plan.modifies) to assert the new over-cap abort because it pinned the exact return-without-throw behaviour item 2 reverses; a test covers the over-cap followed-redirect hop aborting with BODY_CAP_EXCEEDED."
   - "mvn -B clean verify from the repo root exits 0."
 test_plan:
   adds:
     - infochat-ssrf/src/test/java/app/zcat/infochat/ssrf (real-HttpClient over-cap redirect close-behaviour IT + over-cap-redirect abort test)
+  modifies:
+    - "SsrfGuardedHttpClientTest.discardBoundedStopsReadingAtCap (SsrfGuardedHttpClientTest.java:994-1035): rewritten to assert discardBounded now THROWS SsrfPolicyException BODY_CAP_EXCEEDED on an over-cap body, replacing the OLD assertion that it returns and merely stops reading at the cap. The old assertion pinned the precise behaviour acceptance item 2 reverses, so it cannot stay green; this is a behaviour-reversal test update authorised via escalate→refine (premise-fail, 2026-06-14). If the discardBounded(InputStream, long cap) signature loses its now-redundant cap parameter (item 3 unifies on the bodyCap field as the single point of truth), the mechanical call-site update to discardBoundedAbortsWhenRedirectBodyStallsPastReadTimeout (SsrfGuardedHttpClientTest.java:1037-1081) is authorised under the same arm."
   preserves:
-    - all tests currently green on main
+    - all tests currently green on main except those listed under modifies
 spec_refs: []
 decision_refs: []
-reviews: []
-escalations: []
-revisions: []
+reviews:
+  - round: 1
+    date: 2026-06-14
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 270
+      removed: 84
+revisions:
+  - date: 2026-06-14
+    reason: "premise-fail refine — authorise the behaviour-reversal test modification omitted from the original test_plan."
+    snapshot:
+      acceptance_item_4: "Existing SSRF body-cap and slow-dribble tests stay green; a test covers the over-cap followed-redirect hop aborting with BODY_CAP_EXCEEDED."
+      test_plan:
+        adds:
+          - "infochat-ssrf/src/test/java/app/zcat/infochat/ssrf (real-HttpClient over-cap redirect close-behaviour IT + over-cap-redirect abort test)"
+        preserves:
+          - "all tests currently green on main"
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
+redteam_audits:
+  - date: 2026-06-14
+    verdict: CLEAN
+    base: be64c431f152eac468d8b20c3aa6a179edb43739
+    head: working-tree-m1-M1-355
+    verdict_file: docs/plan/m1/redteam/M1-355-2026-06-14.md
+    out_of_model_count: 0
+    note: |
+      Run after review APPROVE (round 1), before /m1-tick commit, against the
+      working-tree implementation (diff vs branch fork point). CLEAN, no
+      out-of-model items. The over-cap followed-redirect abort is a fail-closed
+      tightening of the SSRF body-cap posture; nothing feeds a future ticket.
 ---
 
 # M1-355: SSRF redirect body-cap + bounded-read unification

@@ -428,18 +428,27 @@ public final class SsrfGuardedHttpClient {
                 if (isFollowableRedirect(status)) {
                     redirectCount++;
                     if (redirectCount > redirectCap) {
-                        // Over the cap: this hop will NOT be followed, so do not
-                        // drain the (bodyCap-bounded) body we are about to discard
-                        // (M1-345). Close it explicitly so an ofInputStream()-backed
-                        // body releases its connection without the read-and-discard
-                        // that a drain would perform.
+                        // Over the cap: this hop will NOT be followed, so there is
+                        // nothing to drain (M1-345) — close the body explicitly to
+                        // release the connection. VERIFIED (M1-355,
+                        // SsrfGuardedHttpClientTest#ofInputStreamCloseDoesNotDrainPartiallyReadBody):
+                        // JDK 25 close() on a partially-read ofInputStream() body does
+                        // NOT read-and-discard the remainder — it cancels the
+                        // subscription and resets the connection — so this close()
+                        // performs no attacker-controlled read. This is the resolution
+                        // of the old contradiction with the discardBounded javadoc,
+                        // which wrongly claimed close() could drain the whole body;
+                        // discardBounded's bounded drain exists for connection REUSE on
+                        // FOLLOWED hops, not as a guard against an unbounded close().
                         response.body().close();
                         throw new SsrfPolicyException(
                             SsrfPolicyException.Reason.REDIRECT_CAP_EXCEEDED,
                             "redirect cap exceeded");
                     }
-                    // Drain only the hops we actually follow.
-                    discardBounded(response.body(), bodyCap);
+                    // Drain only the hops we actually follow. An over-cap
+                    // redirect body aborts here with BODY_CAP_EXCEEDED rather
+                    // than being read unbounded (M1-355).
+                    discardBounded(response.body());
                     String location = response.headers().firstValue("Location")
                         .orElseThrow(() -> new SsrfPolicyException(
                             SsrfPolicyException.Reason.REDIRECT_LOCATION_MISSING,
@@ -627,30 +636,15 @@ public final class SsrfGuardedHttpClient {
 
     private byte[] readBounded(HttpResponse<InputStream> response)
             throws IOException, InterruptedException {
-        long bodyReadStartNanos = System.nanoTime();
-        try (InputStream in = response.body();
-             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-            // 64 KiB buffer: each in.read() runs on its own virtual thread
-            // (see supervisedReadChunk), so a larger buffer means ~8x fewer
-            // reads — and ~8x fewer thread spins / FutureTask allocations —
-            // to drain the same body.
-            byte[] buf = new byte[64 * 1024];
-            long total = 0;
-            while (true) {
-                int n = supervisedReadChunk(in, buf, bodyReadStartNanos);
-                if (n == -1) {
-                    break;
-                }
-                total += n;
-                if (total > bodyCap) {
-                    throw new SsrfPolicyException(
-                        SsrfPolicyException.Reason.BODY_CAP_EXCEEDED,
-                        "response body exceeded " + bodyCap + " bytes");
-                }
-                out.write(buf, 0, n);
-            }
-            return out.toByteArray();
-        }
+        // Terminal hop: accumulate the body the caller receives. The size cap,
+        // per-read watchdog, and total deadline all live in supervisedDrain —
+        // the single point of truth shared with the redirect-hop discard
+        // (M1-355) — so this method only supplies the accumulating sink.
+        // ByteArrayOutputStream.close() is a no-op, so it needs no
+        // try-with-resources; supervisedDrain owns closing the InputStream.
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        supervisedDrain(response.body(), (chunk, length) -> out.write(chunk, 0, length));
+        return out.toByteArray();
     }
 
     /**
@@ -737,42 +731,86 @@ public final class SsrfGuardedHttpClient {
     }
 
     /**
-     * Drain a redirect hop's response body through a SIZE- and
-     * TIME-bounded discard and return the number of bytes read. A redirect
-     * carries no payload the wrapper retains, but the body still has to be
-     * consumed (or the connection abandoned) before the next hop; the prior
-     * implementation closed the stream, and {@code close()} on an
-     * {@code ofInputStream()} body can read-and-discard the WHOLE
-     * (attacker-controlled) body to ready the connection for reuse — an
-     * unbounded read on a hostile redirect.
+     * Drain a FOLLOWED redirect hop's response body through the shared
+     * supervised-drain loop and return the number of bytes read. A redirect
+     * carries no payload the wrapper retains, but the body must be consumed to
+     * EOF for the underlying connection to be reusable for the next hop; this
+     * consumes it through the SAME size cap, per-read watchdog, and total
+     * {@code bodyReadDeadline} as the terminal {@link #readBounded}, discarding
+     * each chunk instead of accumulating it.
      *
-     * <p>This reads at most {@code cap} bytes (plus the final buffer) and
-     * then stops, so a redirect body cannot impose more than the body cap's
-     * worth of read work. Crucially it ALSO supervises every read through
-     * {@link #supervisedReadChunk}, so the same per-read watchdog and total
-     * {@code bodyReadDeadline} that bound {@link #readBounded} bound this
-     * drain too: a slow-dribble redirect body that stays under the size cap
-     * still cannot hold the fetcher thread past the deadline — it aborts
-     * with the typed {@code BODY_READ_TIMEOUT} / {@code
+     * <p>Over-cap is a policy violation, not a stop condition (M1-355): a
+     * redirect body that exceeds {@code bodyCap} aborts the call with
+     * {@code BODY_CAP_EXCEEDED} (raised inside {@link #supervisedDrain}) rather
+     * than breaking the loop and leaving the over-cap remainder to the
+     * try-with-resources {@code close()}. A multi-megabyte redirect body is
+     * anomalous; failing closed on it is the correct outbound-SSRF posture and
+     * matches the terminal-body treatment. {@link #supervisedReadChunk} also
+     * bounds the time of every read, so a slow-dribble redirect body that stays
+     * under the size cap still cannot hold the fetcher thread past the deadline
+     * — it aborts with the typed {@code BODY_READ_TIMEOUT} / {@code
      * BODY_READ_DEADLINE_EXCEEDED}. A size-only cap would reopen the M1-025
-     * slow-dribble DoS on the redirect path; the redirect body is thrown
-     * away, but it is not read un-timed.
+     * slow-dribble DoS on the redirect path; the redirect body is thrown away,
+     * but it is not read un-timed.
      */
-    long discardBounded(InputStream body, long cap)
+    long discardBounded(InputStream body)
+            throws IOException, InterruptedException {
+        return supervisedDrain(body, (chunk, length) -> { });
+    }
+
+    /**
+     * The single supervised body-read loop behind both {@link #readBounded}
+     * (terminal hop, accumulating sink) and {@link #discardBounded} (followed
+     * redirect hop, no-op sink). Centralising the loop gives the size cap, the
+     * per-read wall-clock watchdog, and the total {@code bodyReadDeadline}
+     * exactly one definition, so the terminal and redirect paths cannot drift
+     * apart (M1-355) — the two differ only in their {@code sink}.
+     *
+     * <p>Reads {@code body} to EOF, feeding each chunk to {@code sink}, and
+     * returns the total bytes read. Once the running total exceeds
+     * {@code bodyCap} it throws {@code BODY_CAP_EXCEEDED}; it never breaks the
+     * loop and leans on the try-with-resources {@code close()} to bound an
+     * over-cap body (see the verified close()-drain note on the redirect-cap
+     * path in {@link #get(URI, Map)}). The {@code body} stream is always closed
+     * on exit.
+     */
+    private long supervisedDrain(InputStream body, ChunkSink sink)
             throws IOException, InterruptedException {
         long bodyReadStartNanos = System.nanoTime();
         try (InputStream in = body) {
+            // 64 KiB buffer: each in.read() runs on its own virtual thread
+            // (see supervisedReadChunk), so a larger buffer means ~8x fewer
+            // reads — and ~8x fewer thread spins / FutureTask allocations —
+            // to drain the same body.
             byte[] buf = new byte[64 * 1024];
             long total = 0;
-            while (total <= cap) {
+            while (true) {
                 int n = supervisedReadChunk(in, buf, bodyReadStartNanos);
                 if (n == -1) {
                     break;
                 }
                 total += n;
+                if (total > bodyCap) {
+                    throw new SsrfPolicyException(
+                        SsrfPolicyException.Reason.BODY_CAP_EXCEEDED,
+                        "response body exceeded " + bodyCap + " bytes");
+                }
+                sink.accept(buf, n);
             }
             return total;
         }
+    }
+
+    /**
+     * Per-chunk consumer for {@link #supervisedDrain}: accumulate (terminal
+     * hop) or discard (followed redirect hop). {@code chunk[0..length)} holds
+     * the bytes just read; the array is reused across reads, so a sink that
+     * retains bytes must copy them out immediately (the terminal sink writes
+     * them straight into its {@code ByteArrayOutputStream}).
+     */
+    @FunctionalInterface
+    private interface ChunkSink {
+        void accept(byte[] chunk, int length) throws IOException;
     }
 
     /**
