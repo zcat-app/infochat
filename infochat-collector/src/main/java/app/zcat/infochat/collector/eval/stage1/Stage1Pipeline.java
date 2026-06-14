@@ -177,6 +177,14 @@ public class Stage1Pipeline {
     public static final String ERROR_CLASS_REGEX_TIMEOUT = "stage1.regex_timeout";
 
     /**
+     * Canonical error_class for the match-count overflow fail-closed
+     * path. Coalesced on {@code (channel, error_class)} by the future
+     * throttled admin notifier (T2-G), parallel to
+     * {@link #ERROR_CLASS_REGEX_TIMEOUT}.
+     */
+    public static final String ERROR_CLASS_MATCH_OVERFLOW = "stage1.match_overflow";
+
+    /**
      * Canonical error_class for an OWASP sanitizer exception. The
      * future throttled admin notifier (T2-G) coalesces on
      * {@code (channel, error_class)} per
@@ -186,6 +194,14 @@ public class Stage1Pipeline {
 
     /** Rule id used on the watchdog-abort whole-body quarantine row. */
     public static final String REGEX_TIMEOUT_RULE_ID = "regex_timeout";
+
+    /**
+     * Rule id used on the match-overflow fail-closed whole-body
+     * quarantine row. Parallel shape to {@link #REGEX_TIMEOUT_RULE_ID};
+     * downstream admin triage correlates Stage 1 infrastructure
+     * failures by this rule_id.
+     */
+    public static final String MATCH_OVERFLOW_RULE_ID = "match_overflow";
 
     /**
      * Rule id used on the sanitizer-exception fail-closed whole-body
@@ -235,6 +251,18 @@ public class Stage1Pipeline {
     long regexTimeoutMs;
 
     /**
+     * Hard cap on how many {@link Match} tuples may accumulate across
+     * all rules for one body before Stage 1 fails closed. Orthogonal
+     * to {@link #regexTimeoutMs}: the watchdog bounds scan <em>time</em>,
+     * this bounds match <em>volume</em> so a crafted feed body cannot
+     * transiently allocate a huge match list inside the watchdog window.
+     * Default lives in {@code application.properties} per the M1-028
+     * precedent (no inline {@code defaultValue}).
+     */
+    @ConfigProperty(name = "infochat.security.stage1.max-matches")
+    int maxMatches;
+
+    /**
      * Run Stage 1 on one post. The caller supplies the loaded
      * post's identifying tuple plus the body (which may be null —
      * coerced to empty).
@@ -264,6 +292,8 @@ public class Stage1Pipeline {
             return handleSuccess(postId, postUid, postFetchedAt, normalized, matches);
         } catch (RegexInterruptedException ex) {
             return handleWatchdogAbort(postId, postUid, postFetchedAt, normalized);
+        } catch (MatchOverflowException ex) {
+            return handleMatchOverflow(postId, postUid, postFetchedAt, normalized);
         } catch (SanitizerFailedException ex) {
             return handleSanitizerException(postId, postUid, postFetchedAt, normalized, ex.getCause());
         }
@@ -318,6 +348,14 @@ public class Stage1Pipeline {
      * {@link Stage1RegexSet#RULES} affects only the order of equal-
      * start equal-end matches (rare); ties resolve to the
      * earlier-listed rule, which is deterministic across runs.
+     *
+     * <p>The accumulated {@code all} list is hard-capped at
+     * {@link #maxMatches}: as soon as a crafted body would push the
+     * list past the cap, a {@link MatchOverflowException} unwinds the
+     * scan (the dispatcher in {@link #process} routes it to the
+     * fail-closed {@link #handleMatchOverflow} quarantine path). The
+     * throw happens BEFORE the offending match is added, so the list
+     * never allocates past the cap — never silently truncated.
      */
     private List<Match> findAllMatchesUnderWatchdog(String body) {
         long deadlineNanos = System.nanoTime() + (regexTimeoutMs * 1_000_000L);
@@ -327,6 +365,9 @@ public class Stage1Pipeline {
         for (Stage1RegexSet.Rule rule : Stage1RegexSet.RULES) {
             Matcher m = rule.pattern().matcher(wrapper);
             while (m.find()) {
+                if (all.size() >= maxMatches) {
+                    throw new MatchOverflowException();
+                }
                 int start = m.start();
                 int end = m.end();
                 // m.group() reads from the wrapper, but the wrapper's
@@ -448,6 +489,42 @@ public class Stage1Pipeline {
             quarantineDao.insert(conn, new QuarantineDao.QuarantineRow(
                 postId, postUid, postFetchedAt,
                 REGEX_TIMEOUT_RULE_ID, 0, normalized.length(),
+                normalized, placeholderId));
+            updatePostQuarantined(conn, postId, postFetchedAt, placeholderMarker);
+        });
+        return new Stage1Result(normalized, placeholderMarker, true, true);
+    }
+
+    /**
+     * Match-overflow fail-closed: parallel shape to
+     * {@link #handleWatchdogAbort}. The match-count cap
+     * ({@link #maxMatches}, from
+     * {@code infochat.security.stage1.max-matches}) trips when a
+     * crafted feed body produces more regex hits than any legitimate
+     * post would, before the per-character wall-clock watchdog
+     * necessarily fires. Per {@code docs/spec/security.md}
+     * §Failure handling, a Stage 1 infrastructure failure quarantines
+     * the post immediately with NO auto-release: UPDATE
+     * {@code post.status='QUARANTINED'}, write one quarantine row with
+     * {@code rule_id='match_overflow'} spanning the whole body, log at
+     * WARN with the canonical {@link #ERROR_CLASS_MATCH_OVERFLOW}
+     * string. Both writes run in one transaction so a partial commit
+     * cannot leave a QUARANTINED post without its audit row, and the
+     * body is overwritten with a single whole-body placeholder so any
+     * future render cannot leak the unredacted content.
+     */
+    private Stage1Result handleMatchOverflow(UUID postId, String postUid, Instant postFetchedAt,
+                                             String normalized) {
+        LOG.warn("Stage 1 match-count cap exceeded on post_id={} (rule_id={}, error_class={}, cap={})",
+            postId, MATCH_OVERFLOW_RULE_ID, ERROR_CLASS_MATCH_OVERFLOW, maxMatches);
+
+        String placeholderId = PlaceholderIds.next();
+        String placeholderMarker = PlaceholderIds.marker(placeholderId);
+
+        TransactionHelper.inTransaction(dataSource, "Stage1Pipeline", conn -> {
+            quarantineDao.insert(conn, new QuarantineDao.QuarantineRow(
+                postId, postUid, postFetchedAt,
+                MATCH_OVERFLOW_RULE_ID, 0, normalized.length(),
                 normalized, placeholderId));
             updatePostQuarantined(conn, postId, postFetchedAt, placeholderMarker);
         });
@@ -603,6 +680,22 @@ public class Stage1Pipeline {
     static final class RegexInterruptedException extends RuntimeException {
         RegexInterruptedException() {
             super("Stage 1 regex watchdog fired");
+        }
+    }
+
+    /**
+     * Thrown by {@link #findAllMatchesUnderWatchdog} when the
+     * accumulated match list reaches the configured
+     * {@code infochat.security.stage1.max-matches} cap. The outer
+     * dispatcher in {@link #process} catches this and routes to
+     * {@link #handleMatchOverflow} for the fail-closed branch.
+     * Parallel shape to {@link RegexInterruptedException}: a distinct
+     * type the reviewer can grep for, pinning the "too many matches —
+     * fail-closed" semantics to a single exception.
+     */
+    static final class MatchOverflowException extends RuntimeException {
+        MatchOverflowException() {
+            super("Stage 1 match-count cap exceeded");
         }
     }
 

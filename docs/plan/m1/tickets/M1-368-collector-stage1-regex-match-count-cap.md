@@ -1,9 +1,14 @@
 ---
 id: M1-368
 title: "collector: bound Stage 1 regex match collection with a fail-closed match-count cap"
-status: pending
+status: done
 created: 2026-06-14
-last_updated: 2026-06-14
+last_updated: 2026-06-15
+clarity_check:
+  date: 2026-06-14
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
 files_budget: 4
 files_scope:
@@ -30,14 +35,41 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-15
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 323
+      removed: 7
 escalations: []
 revisions: []
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
+redteam_audits:
+  - date: 2026-06-15
+    verdict: CLEAN
+    base: bf6ea2fc
+    head: working-tree (m1/M1-368 branch, pre-commit)
+    verdict_file: docs/plan/m1/redteam/M1-368-2026-06-15.md
+    out_of_model_count: 1
+    note: |
+      Pre-APPROVE adversarial audit (--in-progress) of the Stage 1
+      match-count cap. CLEAN — no critical/high/medium/low findings.
+      The match-overflow path reuses the established fail-closed
+      whole-body quarantine shape (handleWatchdogAbort), so it inherits
+      the same QUARANTINED-never-auto-released guarantee. One advisory
+      out-of-model observation recorded in the verdict file; no
+      remediation required to land the ticket.
 ---
 
 # M1-368: Stage 1 regex match-count cap (fail-closed)

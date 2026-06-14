@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 9 |
+| pending | 8 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 399 |
+| done | 400 |
 | deferred | 5 |
 | **total** | **413** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-368 — collector: bound Stage 1 regex match collection with a fail-closed match-count cap (complexity: low, risk: low)
 - M1-370 — collector: add a per-attempt re-eval cooldown so the fail-open backlog is not re-judged each tick (complexity: medium, risk: low)
 - M1-371 — collector: give stream dispatch keys a distinct type so they cannot collide with FetchScheduler source keys (complexity: medium, risk: low)
 - M1-372 — messaging: align the SimpleX auth-failure design note with the loopback-trusted v1 transport and drop the dead auth.fail meter (complexity: low, risk: low)
@@ -69,6 +68,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-369 | llm-adapter: honor the OpenAI embeddings wire index field instead of trusting positional order | 2026-06-15 | round 1 APPROVE |
+| M1-368 | collector: bound Stage 1 regex match collection with a fail-closed match-count cap | 2026-06-15 | round 1 APPROVE |
 | M1-367 | docs/comments: fix the Stage1RegexSet grammar, the EmbeddingMetadataDao 'defensive' framing, and the SimpleX mention-parser constant-time claim | 2026-06-14 | round 1 APPROVE |
 | M1-366 | provider: extract the InboundRouter.onMessage post-LLM dispatch/commit section into named methods | 2026-06-14 | round 1 APPROVE |
 | M1-365 | provider: batch the tag-vocab upsert into one round-trip; cache asset-snapshot reads within the freshness window | 2026-06-14 | round 1 APPROVE |
@@ -77,7 +77,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-362 | core: cap per-node suppressed-throwable width in SafeLog; tighten isJsonShaped to reject trailing junk | 2026-06-14 | round 1 APPROVE |
 | M1-361 | core: split SQL-only audit verbs out of the writer-facing AuditAction enum; rename the config-baked STARTUP_RELEASE_ON_STAGE2_FAILURE_TRUE verb | 2026-06-14 | round 1 APPROVE |
 | M1-360 | messaging: reset subprocess consecutive-crash counters on healthy uptime; make the config-bean enablement gate honest; route outbound cap check through Utf8 | 2026-06-14 | round 2 APPROVE |
-| M1-359 | messaging: OutboundRateLimiter sub-millisecond cap rounding + charge a token per wire frame on the Signal edit-failure fallback | 2026-06-14 | round 1 APPROVE |
 
 ---
 
@@ -562,7 +561,7 @@ M1-364 (done)
 M1-365 (done)
 M1-366 (done)
 M1-367 (done)
-M1-368 (pending) ← runnable
+M1-368 (done)
 M1-369 (done)
 M1-370 (pending) ← runnable
 M1-371 (pending) ← runnable
