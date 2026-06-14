@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 394 |
+| done | 395 |
 | deferred | 5 |
 | **total** | **403** |
 
@@ -24,7 +24,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-354 — collector eval: load prompt templates via the class's own loader; coalesce pgvector format rejections instead of wedging the batch (complexity: medium, risk: low)
 - M1-360 — messaging: reset subprocess consecutive-crash counters on healthy uptime; make the config-bean enablement gate honest; route outbound cap check through Utf8 (complexity: medium, risk: low)
 - M1-361 — core: split SQL-only audit verbs out of the writer-facing AuditAction enum; rename the config-baked STARTUP_RELEASE_ON_STAGE2_FAILURE_TRUE verb (complexity: medium, risk: medium)
 - M1-366 — provider: extract the InboundRouter.onMessage post-LLM dispatch/commit section into named methods (complexity: low, risk: medium)
@@ -543,7 +542,7 @@ M1-350 (done)
 M1-351 (done)
 M1-352 (done)
 M1-353 (done)
-M1-354 (pending) ← runnable
+M1-354 (done)
 M1-355 (done)
 M1-356 (done)
 M1-357 (done)

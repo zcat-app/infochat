@@ -298,11 +298,18 @@ public class Stage2Worker {
      * never changes at runtime, so reading once at startup is the
      * cheap path.
      */
-    private static String loadPromptTemplate() {
-        ClassLoader cl = Thread.currentThread().getContextClassLoader();
-        if (cl == null) {
-            cl = Stage2Worker.class.getClassLoader();
-        }
+    // Package-private (not private) so a foreign-TCCL test can invoke it
+    // directly to pin the loader choice below.
+    static String loadPromptTemplate() {
+        // Load via the class's OWN loader, never Thread.currentThread()
+        // .getContextClassLoader(): in Quarkus virtual-thread / scheduler /
+        // reactive dispatch contexts the TCCL can be the system loader, so a
+        // stray prompts/security-judge.md on a foreign classpath entry could
+        // shadow the real security-judge prompt and silently weaken the Stage 2
+        // injection check (opus-47 collector F4). The class's own loader is by
+        // construction the one carrying this module's src/main/resources, which
+        // is the only trustworthy source for the prompt.
+        ClassLoader cl = Stage2Worker.class.getClassLoader();
         try (InputStream in = cl.getResourceAsStream(PROMPT_RESOURCE)) {
             if (in == null) {
                 throw new IllegalStateException(

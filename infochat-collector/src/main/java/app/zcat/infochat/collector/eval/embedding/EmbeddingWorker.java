@@ -149,6 +149,27 @@ public class EmbeddingWorker {
      */
     public static final String ERROR_CLASS_EMBEDDING_NONFINITE = "embedding.nonfinite";
 
+    /**
+     * Canonical error class for a pgvector parser rejection of the
+     * {@code ?::vector} literal that survives the in-Java NaN/Infinity and
+     * dimension guards. Used as both the {@code notifyOnce} coalescing key and
+     * the {@code error_class} so repeated per-poll rejections collapse to one
+     * notification per throttle window — same shape as
+     * {@link #ERROR_CLASS_EMBEDDING_NONFINITE} (M1-354 / opus-47 collector F5).
+     */
+    public static final String ERROR_CLASS_EMBEDDING_FORMAT_REJECTED = "embedding.format_rejected";
+
+    /**
+     * SQLState class (first two chars) pgvector raises for every literal-parser
+     * rejection: {@code 22000} (bad/empty/wrong-dimension literal) and
+     * {@code 22003} (component out of range for type vector). Matching on the
+     * class — not a fixed five-char state — keeps the coalesce branch scoped to
+     * data-exception rejections of the vector literal and excludes unrelated
+     * SQLExceptions (connection loss, integrity violations) that must still
+     * propagate as real infrastructure failures.
+     */
+    private static final String PGVECTOR_DATA_EXCEPTION_SQLSTATE_CLASS = "22";
+
     private static final Logger LOG = LoggerFactory.getLogger(EmbeddingWorker.class);
 
     /**
@@ -347,10 +368,48 @@ public class EmbeddingWorker {
                 }
             }
 
-            TransactionHelper.inTransaction(dataSource, "EmbeddingWorker", conn -> {
-                insertEmbeddingRows(conn, batch, results);
-                advanceEmbeddingDoneOnly(conn, batch);
-            });
+            try {
+                TransactionHelper.inTransaction(dataSource, "EmbeddingWorker", conn -> {
+                    insertEmbeddingRows(conn, batch, results);
+                    advanceEmbeddingDoneOnly(conn, batch);
+                });
+            } catch (IllegalStateException e) {
+                // A pgvector literal-parser rejection (SQLState class 22) that
+                // survived the in-Java NaN/Infinity + dimension guards above —
+                // e.g. some future/unforeseen malformed component. Without this
+                // branch the SQLException propagates out of every poll and the
+                // idempotent pickup re-selects the same wedged batch forever
+                // (the same stack-trace-per-poll wedge M1-327 named). Mirror the
+                // non-finite path's OBSERVABLE shape: one coalesced operator
+                // alert + skip with no persisted row. The skip is by rollback,
+                // not a pre-INSERT return: a server-side parser rejection cannot
+                // be detected in-Java before the INSERT, so the narrow
+                // transaction rolls back atomically (no post_embedding row, no
+                // embedding_done advance) and the post resumes automatically
+                // once the provider output normalizes. Any non-pgvector
+                // SQLException is a real infrastructure failure and rethrows.
+                SQLException rejection = pgvectorFormatRejection(e);
+                if (rejection == null) {
+                    throw e;
+                }
+                // Scalar fields only, never the raw Throwable: the PSQLException
+                // message/cause chain can echo the offending ?::vector literal and
+                // any token reachable in it, which would bypass SafeLog's redactor
+                // (docs/spec/security.md §Secrets handling — "the original Throwable
+                // is never passed to the underlying SLF4J logger"). Mirror the
+                // sibling non-finite / dimension-mismatch branches, which log
+                // scalars only. sqlState is the only diagnostic we need here.
+                LOG.error(
+                    "EmbeddingWorker: pgvector rejected a ?::vector literal for the batch "
+                        + "(sqlState={}); embedding halted until the provider output normalizes "
+                        + "(error_class={})",
+                    rejection.getSQLState(), ERROR_CLASS_EMBEDDING_FORMAT_REJECTED);
+                throttledAdminNotifier.notifyOnce(
+                    ERROR_CLASS_EMBEDDING_FORMAT_REJECTED,
+                    ERROR_CLASS_EMBEDDING_FORMAT_REJECTED,
+                    "pgvector rejected an embedding vector literal; "
+                        + "embedding stalled until the provider output normalizes");
+            }
         } finally {
             concurrencyPermits.release();
         }
@@ -493,7 +552,14 @@ public class EmbeddingWorker {
      * binding time. The {@link Float#toString} per element preserves
      * the float's exact textual round-trip.
      */
-    private static PGobject formatVector(float[] vector) {
+    // Package-private and non-static (not private static) so a test can
+    // override it to inject a literal pgvector's parser actually rejects: no
+    // finite, right-dimension vector can trigger that server-side rejection
+    // naturally, so overriding formatVector is the only way to exercise the
+    // defense-in-depth coalesce branch in processBatch. Declares throws
+    // SQLException so a setValue rejection propagates to that branch instead of
+    // being masked as an unrelated IllegalStateException.
+    PGobject formatVector(float[] vector) throws SQLException {
         StringBuilder sb = new StringBuilder(vector.length * 12 + 2);
         sb.append('[');
         for (int i = 0; i < vector.length; i++) {
@@ -504,13 +570,31 @@ public class EmbeddingWorker {
         }
         sb.append(']');
         PGobject pg = new PGobject();
-        try {
-            pg.setType("vector");
-            pg.setValue(sb.toString());
-        } catch (SQLException e) {
-            throw new IllegalStateException("EmbeddingWorker: PGobject formatting failed", e);
-        }
+        pg.setType("vector");
+        pg.setValue(sb.toString());
         return pg;
+    }
+
+    /**
+     * Walk the cause chain for a pgvector literal-parser rejection: a
+     * {@link SQLException} whose SQLState is in the data-exception class
+     * ({@value #PGVECTOR_DATA_EXCEPTION_SQLSTATE_CLASS}).
+     * {@link TransactionHelper#inTransaction} wraps a body SQLException as
+     * {@code IllegalStateException(cause = SQLException)}, so the rejection sits
+     * one hop down the chain. Returns the matching SQLException, or {@code null}
+     * when no cause is a data-exception — i.e. a real infrastructure failure the
+     * caller must rethrow rather than coalesce.
+     */
+    private static @Nullable SQLException pgvectorFormatRejection(Throwable thrown) {
+        for (Throwable t = thrown; t != null; t = t.getCause()) {
+            if (t instanceof SQLException sqle) {
+                String sqlState = sqle.getSQLState();
+                if (sqlState != null && sqlState.startsWith(PGVECTOR_DATA_EXCEPTION_SQLSTATE_CLASS)) {
+                    return sqle;
+                }
+            }
+        }
+        return null;
     }
 
     /** One pending post, populated by {@link #enumeratePending}.

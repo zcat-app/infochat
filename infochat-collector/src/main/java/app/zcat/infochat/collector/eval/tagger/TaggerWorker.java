@@ -536,11 +536,17 @@ public class TaggerWorker {
         return rows;
     }
 
-    private static String loadResource(String path) {
-        ClassLoader cl = Thread.currentThread().getContextClassLoader();
-        if (cl == null) {
-            cl = TaggerWorker.class.getClassLoader();
-        }
+    // Package-private (not private) so a foreign-TCCL test can invoke it
+    // directly to pin the loader choice below.
+    static String loadResource(String path) {
+        // Load via the class's OWN loader, never Thread.currentThread()
+        // .getContextClassLoader(): in Quarkus virtual-thread / scheduler /
+        // reactive dispatch contexts the TCCL can be the system loader, so a
+        // stray prompts/tagger*.md on a foreign classpath entry could shadow
+        // the real tagger prompt (opus-47 collector F4). The class's own loader
+        // is by construction the one carrying this module's src/main/resources,
+        // which is the only trustworthy source for the prompt.
+        ClassLoader cl = TaggerWorker.class.getClassLoader();
         try (InputStream in = cl.getResourceAsStream(path)) {
             if (in == null) {
                 throw new IllegalStateException(
