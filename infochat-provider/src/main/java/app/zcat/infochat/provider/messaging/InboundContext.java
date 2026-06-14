@@ -1,8 +1,13 @@
 package app.zcat.infochat.provider.messaging;
 
+import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.chat.ChatAgent;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.RequestScoped;
 import org.jspecify.annotations.Nullable;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * Per-inbound-dispatch context bean. Carries the originating
@@ -54,6 +59,13 @@ public class InboundContext {
     // seam (dispatchChat) returns only the reply string — its signature
     // is pinned by InboundRouterAcquisitionCountTest's override.
     private ChatAgent.@Nullable PendingCommit pendingChatCommit;
+
+    // Request-end cleanup hooks, keyed by the scope they act on so a scope
+    // touched by several publishes within one dispatch registers its drain
+    // exactly once (M1-334). Run when this dispatch's request scope is
+    // destroyed — see drainAbandonedProgress(). LinkedHashMap keeps the
+    // drain order deterministic (registration order).
+    private final Map<ScopeRef, Runnable> requestEndCleanups = new LinkedHashMap<>();
 
     /**
      * The originating adapter's {@code name()} for the current
@@ -133,5 +145,32 @@ public class InboundContext {
         ChatAgent.PendingCommit pending = this.pendingChatCommit;
         this.pendingChatCommit = null;
         return pending;
+    }
+
+    /**
+     * Register a cleanup to run when this dispatch's request scope is
+     * destroyed, keyed by {@code scope} so repeated registrations for the
+     * same scope collapse to one. Used by {@link StageProgressNotifier} to
+     * guarantee a progress placeholder opened during this dispatch is
+     * finalized even when the handler abandons the operation without a
+     * terminal {@code complete()}/{@code fail()} (M1-334).
+     */
+    void registerProgressCleanup(ScopeRef scope, Runnable cleanup) {
+        requestEndCleanups.putIfAbsent(scope, cleanup);
+    }
+
+    /**
+     * Run every registered request-end cleanup as the request scope is
+     * destroyed. Bound to the CDI lifecycle rather than an explicit call in
+     * the router so it fires exactly once per dispatch regardless of how the
+     * handler exited — a thrown handler still destroys the request context
+     * (M1-334). Each registered cleanup is itself a no-op when its scope
+     * already terminated normally, so this is harmless on the common path.
+     */
+    @PreDestroy
+    void drainAbandonedProgress() {
+        for (Runnable cleanup : requestEndCleanups.values()) {
+            cleanup.run();
+        }
     }
 }

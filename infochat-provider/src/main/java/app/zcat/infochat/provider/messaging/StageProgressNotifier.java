@@ -118,6 +118,13 @@ public class StageProgressNotifier implements ProgressNotifier {
         String text = bundleLoader.get(bundleKeyFor(stage), inboundContext.effectiveLanguage());
         MessagingAdapter adapter = resolveAdapter();
         ScopeState state = states.computeIfAbsent(scope, s -> new ScopeState());
+        // Register the request-end safety net before any outbound work: if
+        // this dispatch abandons the operation without a terminal
+        // complete()/fail(), the @RequestScoped InboundContext's @PreDestroy
+        // drains the scope so the placeholder is finalized and typing turned
+        // off — the publish->terminate lifecycle is never left dangling, not
+        // only the paths that reach terminate() (M1-334). Idempotent per scope.
+        inboundContext.registerProgressCleanup(scope, () -> terminateAbandoned(scope));
         synchronized (state) {
             if (state.handle == null) {
                 // Step 1+2: acquire the placeholder via the outbound
@@ -176,6 +183,23 @@ public class StageProgressNotifier implements ProgressNotifier {
     @Override
     public void fail(ScopeRef scope) {
         terminate(scope, bundleLoader.get(BundleKeys.PROGRESS_FAILED, inboundContext.effectiveLanguage()));
+    }
+
+    /**
+     * Request-end safety net (M1-334): finalize a placeholder this scope
+     * still holds because its dispatch abandoned the operation without a
+     * terminal {@link #complete}/{@link #fail}. Degrades to the documented
+     * {@link #fail} outcome — friendly failed text, typing OFF — so the user
+     * is never left with a perpetual typing indicator and the next operation
+     * in the scope starts clean (no stale {@code handle != null} on its first
+     * publish). A no-op once the scope has terminated normally (its
+     * {@code states} entry is already removed), so the normal lifecycle is
+     * untouched. Invoked by {@link InboundContext#drainAbandonedProgress()}.
+     */
+    void terminateAbandoned(ScopeRef scope) {
+        if (states.containsKey(scope)) {
+            fail(scope);
+        }
     }
 
     /**

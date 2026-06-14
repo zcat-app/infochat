@@ -104,6 +104,51 @@ class StageProgressNotifierTest {
     }
 
     @Test
+    void abandonedPublishIsDrainedAtRequestEndTurningTypingOffAndClearingState() {
+        // The handler published a placeholder but threw / abandoned before a
+        // terminal complete()/fail(). The @RequestScoped InboundContext's
+        // request-end drain must finalize the dangling placeholder with the
+        // failed string and turn typing OFF (M1-334).
+        notifier.publish(SCOPE, ProgressStage.STARTED);
+        assertEquals(1, adapter.sends.size(), "publish sent the placeholder");
+        assertTrue(adapter.typing.get(0).typing(), "publish turned typing ON");
+
+        notifier.inboundContext.drainAbandonedProgress();
+
+        assertEquals(List.of(bundleLoader.get(BundleKeys.PROGRESS_FAILED)), adapter.finalizes,
+                "request-end drain finalizes the abandoned placeholder with the failed string");
+        assertFalse(adapter.typing.get(adapter.typing.size() - 1).typing(),
+                "request-end drain turns typing OFF");
+
+        // The states entry is gone: a subsequent publish in the same scope
+        // sends a FRESH placeholder rather than updating the stale handle.
+        notifier.publish(SCOPE, ProgressStage.STARTED);
+        assertEquals(2, adapter.sends.size(),
+                "next publish after drain sends a fresh placeholder, not an update of the stale handle");
+    }
+
+    @Test
+    void requestEndDrainIsNoopAfterNormalCompleteSoTheLifecycleIsUnchanged() {
+        // A scope that terminated normally is still tracked for cleanup, but
+        // the drain must not re-fire for it — no spurious failed message, no
+        // extra typing toggle (M1-334).
+        notifier.publish(SCOPE, ProgressStage.STARTED);
+        notifier.complete(SCOPE, "REAL SUMMARY");
+        int sendsAfterComplete = adapter.sends.size();
+        int finalizesAfterComplete = adapter.finalizes.size();
+        int typingAfterComplete = adapter.typing.size();
+
+        notifier.inboundContext.drainAbandonedProgress();
+
+        assertEquals(sendsAfterComplete, adapter.sends.size(),
+                "drain must not send a spurious failed message after a normal completion");
+        assertEquals(finalizesAfterComplete, adapter.finalizes.size(),
+                "drain must not re-finalize a scope that already completed normally");
+        assertEquals(typingAfterComplete, adapter.typing.size(),
+                "drain must not toggle typing for an already-completed scope");
+    }
+
+    @Test
     void stageEditsWithinFloorCoalesceToAtMostOneUpdate() {
         // Large floor: the two non-terminal stage events after the
         // placeholder fall inside the window and coalesce.
