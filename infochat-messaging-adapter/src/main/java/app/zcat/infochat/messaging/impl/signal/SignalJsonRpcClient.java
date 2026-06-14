@@ -10,6 +10,7 @@ import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.OutboundMessage;
+import app.zcat.infochat.messaging.OutboundRateLimiter;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 
@@ -21,6 +22,7 @@ import java.io.OutputStreamWriter;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -163,12 +165,29 @@ class SignalJsonRpcClient {
      */
     static final int CONNECT_TIMEOUT_MS = 200;
 
+    /**
+     * Convenience-constructor default cap for the outbound pacer: an
+     * effectively-unpaced rate. Only the non-injecting callers reach it —
+     * the capability-introspection paths and the unit tests that drive the
+     * wire protocol directly; production wiring ({@link SignalAdapter#start()})
+     * injects the capability-derived cap so real §6.3.6 pacing applies. A
+     * cap this high keeps a direct-client test's handful of outbound frames
+     * inside the starting burst, so no real {@link Thread#sleep} pacing fires.
+     */
+    private static final int UNPACED_DEFAULT_CAP = 1_000_000;
+
     private final InetSocketAddress endpoint;
     private final String account;
     private final SignalMessageCodec codec;
     private final Duration responseTimeout;
     private final Runnable hungRestartHook;
     private final int inboundQueueCapacity;
+    // Outbound send pacer (design §6.3.6): one token per outbound wire
+    // frame. The client owns the draw so the §6.3.6 "one token per frame"
+    // contract holds structurally regardless of how many frames a single
+    // SPI call expands into — notably the edit-failure fresh-send fallback,
+    // whose extra frame draws its own token via pacedCall (M1-359).
+    private final OutboundRateLimiter outboundRate;
     // Cumulative count of inbound notifications dropped on queue overflow
     // (distinct from the benign shutdown-time drops in dispatchAsync).
     // Instance-scoped, so it accumulates across reconnects.
@@ -260,19 +279,36 @@ class SignalJsonRpcClient {
     }
 
     // Test seam: a small capacity drives the overflow path deterministically
-    // without flooding the production-default 1000-deep queue.
+    // without flooding the production-default 1000-deep queue. The pacer
+    // defaults to UNPACED_DEFAULT_CAP — direct-client tests are not the
+    // pacing surface, so they run unthrottled.
     SignalJsonRpcClient(InetSocketAddress endpoint,
                         String account,
                         SignalMessageCodec codec,
                         Duration responseTimeout,
                         Runnable hungRestartHook,
                         int inboundQueueCapacity) {
+        this(endpoint, account, codec, responseTimeout, hungRestartHook, inboundQueueCapacity,
+                new OutboundRateLimiter(UNPACED_DEFAULT_CAP, Clock.systemUTC()));
+    }
+
+    // Production seam: SignalAdapter.start() injects the capability-derived
+    // pacer (cap 5) so outbound transmits are paced; the Signal fallback
+    // token-charge test injects a counting pacer to pin the per-frame draw.
+    SignalJsonRpcClient(InetSocketAddress endpoint,
+                        String account,
+                        SignalMessageCodec codec,
+                        Duration responseTimeout,
+                        Runnable hungRestartHook,
+                        int inboundQueueCapacity,
+                        OutboundRateLimiter outboundRate) {
         this.endpoint = endpoint;
         this.account = account;
         this.codec = codec;
         this.responseTimeout = responseTimeout;
         this.hungRestartHook = hungRestartHook;
         this.inboundQueueCapacity = inboundQueueCapacity;
+        this.outboundRate = outboundRate;
     }
 
     void setInboundHandler(MessagingAdapter.InboundHandler handler) {
@@ -394,7 +430,7 @@ class SignalJsonRpcClient {
         String request = scope instanceof ScopeRef.Group
                 ? codec.encodeGroupSend(rpcId, account, destination, msg.text())
                 : codec.encodeSend(rpcId, account, destination, msg.text());
-        SignalMessageCodec.JsonRpcMessage.Response response = call(rpcId, request);
+        SignalMessageCodec.JsonRpcMessage.Response response = pacedCall(rpcId, request);
         long timestamp = extractLong(response.result(), "timestamp", "send");
         long handleSerial = handleIdGen.incrementAndGet();
         MessageHandle handle = new MessageHandle(OPAQUE_PREFIX + handleSerial);
@@ -472,7 +508,10 @@ class SignalJsonRpcClient {
         String request = internal.original().scope() instanceof ScopeRef.Group
                 ? codec.encodeGroupSend(rpcId, account, internal.recipient(), body)
                 : codec.encodeSend(rpcId, account, internal.recipient(), body);
-        call(rpcId, request);
+        // pacedCall, not call: the fresh-send fallback is an extra wire frame
+        // beyond the failed edit, so it draws its own §6.3.6 token — without
+        // this, sustained fallback transmits at 2x maxSendsPerSecond (M1-359).
+        pacedCall(rpcId, request);
         // Switch the stored handle into fallback mode so a subsequent
         // update skips the doomed edit. A concurrent eviction/finalize may
         // have removed it; re-put only if still present.
@@ -518,7 +557,7 @@ class SignalJsonRpcClient {
                         rpcId, account, internal.recipient(), internal.timestamp(), body)
                 : codec.encodeUpdateMessage(
                         rpcId, account, internal.recipient(), internal.timestamp(), body);
-        call(rpcId, request);
+        pacedCall(rpcId, request);
     }
 
     private static String destination(ScopeRef scope) {
@@ -544,6 +583,27 @@ class SignalJsonRpcClient {
                     FailureCategory.PERMANENT, "Signal handle is not open (unknown or already finalized)");
         }
         return internal;
+    }
+
+    /**
+     * A paced outbound wire frame: draw one {@link OutboundRateLimiter}
+     * token, then dispatch via {@link #call}. Co-locating the token draw
+     * with the frame makes the §6.3.6 "one token per wire frame" contract
+     * structurally true regardless of how many frames one SPI call expands
+     * into — {@link #fallbackSend} emits a SECOND frame from a single
+     * {@code update}/{@code finalize}, and routing it here charges that
+     * extra frame its own token (M1-359). The token is drawn BEFORE the
+     * write, so a frame that then fails (e.g. a rejected edit) still counts
+     * against the rate, matching SimpleX's pace-then-transmit shape.
+     *
+     * <p>{@link #setTyping} deliberately bypasses this and calls
+     * {@link #call} directly: typing pulses are best-effort UI hints, not a
+     * paced send/update/finalize transmit (§6.3.6 names those three only).</p>
+     */
+    private SignalMessageCodec.JsonRpcMessage.Response pacedCall(long rpcId, String request)
+            throws MessagingException {
+        outboundRate.acquire();
+        return call(rpcId, request);
     }
 
     /**

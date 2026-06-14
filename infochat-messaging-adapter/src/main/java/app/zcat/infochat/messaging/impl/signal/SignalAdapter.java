@@ -121,7 +121,12 @@ public final class SignalAdapter implements MessagingAdapter {
     // Outbound send pacer (design §6.3.6): bounds transmits to
     // CAPABILITIES.maxSendsPerSecond so the Provider cannot drive
     // signal-cli fast enough to trip Signal's per-account rate limit.
-    // Shared across send / update / finalizeMessage — one token per frame.
+    // Constructed here (capability-derived cap + system clock) and handed
+    // to SignalJsonRpcClient, which draws one token per outbound wire frame
+    // — including the edit-failure fresh-send fallback's extra frame, so a
+    // single update() that falls back charges two tokens (M1-359). The
+    // client owns the per-frame draw, so this class no longer calls
+    // acquire() at the SPI boundary.
     private final OutboundRateLimiter outboundRate =
             new OutboundRateLimiter(CAPABILITIES.maxSendsPerSecond(), Clock.systemUTC());
 
@@ -251,7 +256,7 @@ public final class SignalAdapter implements MessagingAdapter {
         // supervisor to force-restart the subprocess.
         SignalJsonRpcClient c = new SignalJsonRpcClient(
                 daemonEndpoint, account, new SignalMessageCodec(), JSONRPC_RESPONSE_TIMEOUT,
-                sp::restartHung);
+                sp::restartHung, SignalJsonRpcClient.INBOUND_QUEUE_CAPACITY, outboundRate);
         // Attach BEFORE connect: connect() starts the reader thread, and
         // signal-cli can flush queued envelopes the moment the connection
         // opens — a handler wired only after connect loses those envelopes
@@ -415,21 +420,18 @@ public final class SignalAdapter implements MessagingAdapter {
     @Override
     public MessageHandle send(OutboundMessage msg) throws MessagingException {
         SignalJsonRpcClient c = requireConnected("send");
-        outboundRate.acquire();
         return c.send(msg);
     }
 
     @Override
     public void update(MessageHandle handle, String body) throws MessagingException {
         SignalJsonRpcClient c = requireConnected("update");
-        outboundRate.acquire();
         c.update(handle, body);
     }
 
     @Override
     public void finalizeMessage(MessageHandle handle, String body) throws MessagingException {
         SignalJsonRpcClient c = requireConnected("finalizeMessage");
-        outboundRate.acquire();
         c.finalizeHandle(handle, body);
     }
 

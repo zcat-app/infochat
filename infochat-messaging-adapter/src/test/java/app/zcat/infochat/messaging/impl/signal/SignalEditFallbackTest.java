@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.fail;
 import jakarta.json.Json;
 import jakarta.json.JsonObject;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.atomic.AtomicReference;
@@ -15,6 +16,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.OutboundMessage;
+import app.zcat.infochat.messaging.OutboundRateLimiter;
 import app.zcat.infochat.messaging.ScopeRef;
 
 import org.junit.jupiter.api.Test;
@@ -159,6 +161,55 @@ class SignalEditFallbackTest {
                 updater.join(QUEUE_WAIT_MS);
                 assertNull(failure.get(),
                         "the group edit fallback must not surface an exception: " + failure.get());
+            } finally {
+                client.disconnect();
+            }
+        }
+    }
+
+    @Test
+    void fallenBackUpdateDrawsTwoTokens() throws Exception {
+        // §6.3.6 "one token per wire frame": an update() that falls back emits
+        // TWO frames (the rejected edit + the fresh send), so it must draw two
+        // tokens. Pre-M1-359 the client drew none and the adapter charged one
+        // per SPI call, so a sustained-fallback stream transmitted at 2x the
+        // declared maxSendsPerSecond.
+        try (FakeSignalCli fake = new FakeSignalCli()) {
+            // High cap so the starting burst absorbs every draw — this test
+            // counts tokens, it does not exercise real pacing sleeps.
+            OutboundRateLimiter limiter = new OutboundRateLimiter(1_000_000, Clock.systemUTC());
+            SignalJsonRpcClient client = new SignalJsonRpcClient(
+                    fake.endpoint(), "+15551111111", new SignalMessageCodec(), TEST_RESPONSE_TIMEOUT,
+                    () -> { }, SignalJsonRpcClient.INBOUND_QUEUE_CAPACITY, limiter);
+            client.connect();
+            try {
+                MessageHandle handle = sendAndAck(client, fake,
+                        new ScopeRef.Dm(RECIPIENT), "corr-tok", 1700000040000L);
+                assertEquals(1L, limiter.acquiredCount(),
+                        "the placeholder send draws exactly one token");
+
+                AtomicReference<Exception> failure = new AtomicReference<>();
+                Thread updater = runAsync("token-fallback-updater",
+                        () -> client.update(handle, "edited body"), failure);
+
+                // The edit is rejected non-recoverably (PERMANENT), forcing the
+                // fresh-send fallback — a second wire frame.
+                JsonObject editReq = fake.nextOutbound(QUEUE_WAIT_MS);
+                assertEquals("updateMessage", editReq.getString("method"));
+                fake.respondError(editReq.getString("id"), -32602, "edit window expired");
+
+                JsonObject sendReq = fake.nextOutbound(QUEUE_WAIT_MS);
+                assertEquals("send", sendReq.getString("method"),
+                        "an unrecoverable edit must fall back to a fresh send");
+                fake.respondSuccess(sendReq.getString("id"),
+                        Json.createObjectBuilder().add("timestamp", 1700000041000L).build());
+
+                updater.join(QUEUE_WAIT_MS);
+                assertNull(failure.get(), "the edit fallback must not throw: " + failure.get());
+
+                assertEquals(3L, limiter.acquiredCount(),
+                        "a fallen-back update draws two tokens (rejected edit frame + fallback send), "
+                                + "on top of the placeholder send's one");
             } finally {
                 client.disconnect();
             }

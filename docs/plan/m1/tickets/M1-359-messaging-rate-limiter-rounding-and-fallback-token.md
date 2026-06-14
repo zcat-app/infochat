@@ -1,9 +1,14 @@
 ---
 id: M1-359
 title: "messaging: OutboundRateLimiter sub-millisecond cap rounding + charge a token per wire frame on the Signal edit-failure fallback"
-status: pending
+status: done
 created: 2026-06-14
 last_updated: 2026-06-14
+clarity_check:
+  date: 2026-06-14
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
 files_budget: 6
 files_scope:
@@ -36,7 +41,20 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-14
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 266
+      removed: 42
 escalations: []
 revisions: []
 overrides: []
