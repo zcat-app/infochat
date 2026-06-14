@@ -108,6 +108,11 @@ public class QuarantineCommandHandler implements CommandHandler {
     private OutboundMessage handleList(ScopeRef scope, ActorRow actor,
                                        String adapter, String remainder) {
         ListArgs args = ListArgs.parse(remainder);
+        if (args == null) {
+            return reply(scope, MessageFormat.format(
+                    bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT, inboundContext.effectiveLanguage()),
+                    "/quarantine list [--all] [--page N]"));
+        }
         String countSql = args.showAll ? COUNT_ALL_SQL : COUNT_PENDING_SQL;
         String dataSql = args.showAll ? LIST_ALL_SQL : LIST_PENDING_SQL;
 
@@ -326,7 +331,10 @@ public class QuarantineCommandHandler implements CommandHandler {
     record ActorRow(UUID id, String contactId, boolean isAdmin) {}
 
     record ListArgs(boolean showAll, int page) {
-        static ListArgs parse(String remainder) {
+        // A malformed --page value returns null (the parse-failure marker) so the
+        // handler renders ERROR_USAGE_MISSING_ARGUMENT, matching the convention in
+        // BanArgs / AssetHandler rather than silently falling back to page 1 (M1-343).
+        static @Nullable ListArgs parse(String remainder) {
             boolean showAll = false;
             int page = 1;
             List<String> tokens = new ArrayList<>();
@@ -342,12 +350,16 @@ public class QuarantineCommandHandler implements CommandHandler {
                 } else if ("--page".equals(tok) && i + 1 < tokens.size()) {
                     try {
                         page = Math.max(1, Integer.parseInt(tokens.get(i + 1)));
-                    } catch (NumberFormatException ignored) { }
+                    } catch (NumberFormatException e) {
+                        return null;
+                    }
                     i += 2;
                 } else if (tok.startsWith("--page=")) {
                     try {
                         page = Math.max(1, Integer.parseInt(tok.substring("--page=".length())));
-                    } catch (NumberFormatException ignored) { }
+                    } catch (NumberFormatException e) {
+                        return null;
+                    }
                     i++;
                 } else {
                     i++;

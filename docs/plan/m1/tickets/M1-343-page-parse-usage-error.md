@@ -1,9 +1,15 @@
 ---
 id: M1-343
 title: "Provider --page parsing: surface a usage error on a malformed page value"
-status: pending
+status: done
 created: 2026-06-14
 last_updated: 2026-06-14
+clarity_check:
+  date: 2026-06-14
+  verdict: WARN
+  warnings:
+    - "Acceptance item 2 uses operator-facing prose rather than a reviewer-checkable assertion; the core fact (catch blocks removed) is embedded but not foregrounded. Low-risk because item 3 provides the test pin."
+  blockers: []
 blocked_by: []
 files_budget: 4
 files_scope:
@@ -30,7 +36,20 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-14
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 6
+      added: 72
+      removed: 13
 escalations: []
 revisions: []
 overrides: []

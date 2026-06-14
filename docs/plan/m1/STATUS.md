@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 12 |
+| pending | 11 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 368 |
+| done | 369 |
 | deferred | 5 |
 | **total** | **385** |
 
@@ -29,7 +29,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-336 — Adapter inbound: single-source UTF-8 byte length across codec cap + metric (complexity: medium, risk: medium)
 - M1-341 — FetchScheduler: exclude stream-shaped kinds + filter due kinds at SQL (complexity: low, risk: low)
 - M1-342 — ReEvaluationJob: bound infra-failure re-judge fan-out to one call per tick during an outage (complexity: low, risk: low)
-- M1-343 — Provider --page parsing: surface a usage error on a malformed page value (complexity: low, risk: low)
 - M1-344 — llm-adapter: single-source per-task config keys and the embedding provider name (complexity: medium, risk: low)
 - M1-345 — infochat-ssrf: bracket-host IPv6 validation, redirect drain order, IPv6 zero-scan helper reuse (complexity: low, risk: low)
 - M1-346 — infochat-core: schema-test javadoc, audit-denorm IT package, contact-id parity comment (complexity: low, risk: low)
@@ -71,6 +70,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-343 | Provider --page parsing: surface a usage error on a malformed page value | 2026-06-14 | round 1 APPROVE |
 | M1-340 | Asset freshness: decouple Provider staleness window from the Collector cadence keys | 2026-06-14 | round 1 APPROVE |
 | M1-339 | Stage1Pipeline: narrow the EscapedEntity suppression to the doc | 2026-06-14 | round 1 APPROVE |
 | M1-338 | AbstractInstanceLockGuard: scope the ownership probe to the gate's lock id | 2026-06-14 | round 1 APPROVE |
@@ -80,7 +80,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-333 | ChatAgent: consume cached InboundContext.effectiveLanguage instead of re-querying | 2026-06-14 | round 1 APPROVE |
 | M1-331 | Signal group inbound: coalesce overlapping bot-mention spans + instanceof-guard JSON accessors | 2026-06-14 | round 1 APPROVE |
 | M1-329 | ListSavesTool: aggregate byte budget + title truncation at the LLM tool boundary | 2026-06-14 | round 1 APPROVE |
-| M1-328 | TaggerWorker: cap accepted tag count per post | 2026-06-14 | round 1 APPROVE |
 
 ---
 
@@ -540,7 +539,7 @@ M1-339 (done)
 M1-340 (done)
 M1-341 (pending) ← runnable
 M1-342 (pending) ← runnable
-M1-343 (pending) ← runnable
+M1-343 (done)
 M1-344 (pending) ← runnable
 M1-345 (pending) ← runnable
 M1-346 (pending) ← runnable

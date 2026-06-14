@@ -83,6 +83,11 @@ public class AuditCommandHandler implements CommandHandler {
         }
 
         AuditArgs args = AuditArgs.parse(rawText);
+        if (args == null) {
+            return reply(scope, MessageFormat.format(
+                    bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT, inboundContext.effectiveLanguage()),
+                    "/audit [--actor X] [--action Y] [--page N]"));
+        }
 
         if (args.action != null) {
             try {
@@ -258,7 +263,10 @@ public class AuditCommandHandler implements CommandHandler {
     record ActorRow(UUID id, String contactId, boolean isAdmin) {}
 
     record AuditArgs(@Nullable String actor, @Nullable String action, int page) {
-        static AuditArgs parse(String rawText) {
+        // A malformed --page value returns null (the parse-failure marker) so the
+        // handler renders ERROR_USAGE_MISSING_ARGUMENT, matching the convention in
+        // BanArgs / AssetHandler rather than silently falling back to page 1 (M1-343).
+        static @Nullable AuditArgs parse(String rawText) {
             List<String> tokens = CommandTokenizer.tokenize(rawText);
             String actor = null;
             String action = null;
@@ -281,12 +289,16 @@ public class AuditCommandHandler implements CommandHandler {
                 } else if (tok.equals("--page") && i + 1 < tokens.size()) {
                     try {
                         page = Math.max(1, Integer.parseInt(tokens.get(i + 1)));
-                    } catch (NumberFormatException ignored) { }
+                    } catch (NumberFormatException e) {
+                        return null;
+                    }
                     i += 2;
                 } else if (tok.startsWith("--page=")) {
                     try {
                         page = Math.max(1, Integer.parseInt(tok.substring("--page=".length())));
-                    } catch (NumberFormatException ignored) { }
+                    } catch (NumberFormatException e) {
+                        return null;
+                    }
                     i++;
                 } else {
                     i++;

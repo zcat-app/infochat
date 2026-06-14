@@ -198,6 +198,21 @@ class AuditCommandHandlerTest {
                 "page 2 header must show page 2");
     }
 
+    @Test
+    void audit_malformedPage_usageError() throws Exception {
+        String admin = PREFIX + "badpage-admin";
+        seedUser(admin, true, false, "vouched");
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(admin), "/audit --page abc");
+
+        String expected = MessageFormat.format(
+                bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT),
+                "/audit [--actor X] [--action Y] [--page N]");
+        assertEquals(expected, reply.text(),
+                "malformed --page must surface the usage error, not silently fall back to page 1");
+    }
+
     // ---- Audit logging ----
 
     @Test

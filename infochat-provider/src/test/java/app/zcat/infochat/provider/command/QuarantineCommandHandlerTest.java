@@ -319,6 +319,22 @@ class QuarantineCommandHandlerTest {
                 "page 2 must show the remaining rows");
     }
 
+    @Test
+    void list_malformedPage_usageError() throws Exception {
+        String admin = PREFIX + "badpage-admin";
+        seedUser(admin, true, false, "vouched");
+        seedQuarantineRow("PENDING", PREFIX + "badpage-p1");
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(admin), "/quarantine list --page abc");
+
+        String expected = MessageFormat.format(
+                bundleLoader.get(BundleKeys.ERROR_USAGE_MISSING_ARGUMENT),
+                "/quarantine list [--all] [--page N]");
+        assertEquals(expected, reply.text(),
+                "malformed --page must surface the usage error, not silently fall back to page 1");
+    }
+
     // ---- Helpers ----
 
     private UUID seedUser(String contactId, boolean isAdmin, boolean isBanned,
