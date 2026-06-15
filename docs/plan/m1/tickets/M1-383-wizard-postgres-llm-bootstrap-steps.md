@@ -1,9 +1,15 @@
 ---
 id: M1-383
 title: "wizard 6b: 3-postgres + 4-llm + 5-bootstrap subscripts"
-status: pending
+status: done
 created: 2026-06-15
 last_updated: 2026-06-15
+clarity_check:
+  date: 2026-06-15
+  verdict: WARN
+  warnings:
+    - "Acceptance item 2 (4-llm.sh): the clause \"(manual: each branch run reaches a usable model endpoint — commit-message evidence)\" is not a verifiable acceptance criterion — it delegates the key behavioral invariant to trust-the-commit-message rather than a diff/command check. Consider removing it or replacing with a concrete reachability check."
+  blockers: []
 blocked_by:
   - M1-382
   - M1-379
@@ -19,6 +25,7 @@ risk: low
 round_cap: 3
 security_relevant: false
 migration_touch: false
+outline_file: target/m1-tick-outline-M1-383.md
 out_of_scope:
   - The orchestrator and steps 0-2 (M1-382), the adapter step (M1-384), the apps-up/verify steps (M1-385).
   - Declaring compose services — the postgres/ollama/llamacpp services already exist (M1-378/379/380); these subscripts only start them and provision models/data.
@@ -37,7 +44,20 @@ spec_refs:
 decision_refs:
   - D27
   - D38
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-15
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 5
+      added: 344
+      removed: 10
 escalations: []
 revisions: []
 overrides: []
