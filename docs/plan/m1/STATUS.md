@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 13 |
+| pending | 12 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 403 |
+| done | 404 |
 | deferred | 5 |
 | **total** | **421** |
 
@@ -32,7 +32,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-375 — provider: key the per-turn chat-tool cache on clamped args so over-cap duplicates do not double-charge the call budget (complexity: low, risk: low)
 - M1-376 — messaging: deterministic SimpleX adapterMessageId fallback and shared decode-ladder helper (complexity: low, risk: low)
 - M1-377 — collector: replace the re-eval one-element-array transaction workaround and unify the two fail-closed test-seam idioms (complexity: low, risk: low)
-- M1-380 — deploy: add ollama + llama.cpp compose services, profile-gated so only the chosen backend starts (complexity: medium, risk: low)
 - M1-382 — wizard 6a: prod/setup.sh orchestrator + 0-doctor + 1-profile + 2-secrets (complexity: high, risk: low)
 
 ---
@@ -50,7 +49,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-383 — blocked_by: M1-382 (pending), M1-379 (done), M1-380 (pending), M1-381 (done)
+- M1-383 — blocked_by: M1-382 (pending), M1-379 (done), M1-380 (done), M1-381 (done)
 - M1-384 — blocked_by: M1-382 (pending)
 - M1-385 — blocked_by: M1-382 (pending), M1-379 (done)
 
@@ -72,6 +71,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-381 | deploy: commit a default bootstrap-sources.json template under prod/config/ | 2026-06-15 | round 1 APPROVE |
+| M1-380 | deploy: add ollama + llama.cpp compose services, profile-gated so only the chosen backend starts | 2026-06-15 | round 1 APPROVE |
 | M1-379 | deploy: containerize Collector + Provider (Dockerfiles) and add them as prod-profile compose services | 2026-06-15 | round 2 APPROVE |
 | M1-378 | deploy: env-driven service-role passwords via docker/postgres-init.sh + compose wiring | 2026-06-15 | round 1 APPROVE |
 | M1-369 | llm-adapter: honor the OpenAI embeddings wire index field instead of trusting positional order | 2026-06-15 | round 1 APPROVE |
@@ -80,7 +80,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-366 | provider: extract the InboundRouter.onMessage post-LLM dispatch/commit section into named methods | 2026-06-14 | round 1 APPROVE |
 | M1-365 | provider: batch the tag-vocab upsert into one round-trip; cache asset-snapshot reads within the freshness window | 2026-06-14 | round 1 APPROVE |
 | M1-364 | provider: fold probation_until into the per-dispatch UserSnapshot to remove the per-inbound probation queries | 2026-06-14 | round 1 APPROVE |
-| M1-363 | provider: remove the audit-bypassing LlmOutputSanitizer constructor; type-check tool-arg list elements at the LLM dispatch boundary | 2026-06-14 | round 1 APPROVE |
 
 ---
 
@@ -577,7 +576,7 @@ M1-376 (pending) ← runnable
 M1-377 (pending) ← runnable
 M1-378 (done)
   ├── M1-379 (done)
-  │     ├── M1-380 (pending) ← runnable
+  │     ├── M1-380 (done)
   │     │     └── M1-383 (pending)
   │     ├── M1-383 (pending) [see above]
   │     └── M1-385 (pending)

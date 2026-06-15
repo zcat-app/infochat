@@ -105,5 +105,43 @@ services:
       postgres:
         condition: service_healthy
 
+  # --- LLM backend services (M1-380) -----------------------------------------
+  # The operator picks ONE local LLM backend; the §7.7.2 wizard starts the
+  # chosen one alongside `--profile prod` via its Compose profile —
+  # `--profile prod --profile ollama` OR `--profile prod --profile llamacpp`.
+  # Each backend is profile-gated, so a bare `--profile prod` starts NEITHER and
+  # the two never run together (a service starts iff ANY enabled profile
+  # matches). Ollama additionally carries `dev` because the developer inner loop
+  # (quarkus:dev on the host) uses it (07-deployment.md §7.7). The remote-LLM
+  # path needs no service here — the app calls the remote API directly and the
+  # wizard collects only the base-url/key.
+  #
+  # Model provisioning (ollama pull / GGUF download) is the wizard's job
+  # (M1-383): these stanzas declare the containers and their model-cache volumes
+  # only. Images are pinned to explicit tags (M1-004 precedent).
+  ollama:
+    profiles: [dev, ollama]
+    image: ollama/ollama:0.30.8
+    ports:
+      # Loopback only (postgres precedent above): in the `dev` shape the host's
+      # quarkus:dev services reach Ollama at localhost:11434; a bare
+      # "11434:11434" would publish the model server on every interface. Under
+      # `prod` the containerized apps reach it over the compose network instead.
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - infochat-ollama:/root/.ollama
+
+  llamacpp:
+    profiles: [llamacpp]
+    # llama.cpp's HTTP server speaks the OpenAI-compatible API the LLM adapter
+    # already supports (infochat.llm.*.provider=openai-compatible, §7.4). prod
+    # only — the containerized apps reach it over the compose network as
+    # llamacpp:8080, so it needs no host port publish.
+    image: ghcr.io/ggml-org/llama.cpp:server-b5350
+    volumes:
+      - infochat-llamacpp-models:/models
+
 volumes:
   infochat-pgdata:
+  infochat-ollama:
+  infochat-llamacpp-models:
