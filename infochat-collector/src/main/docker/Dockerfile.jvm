@@ -1,0 +1,38 @@
+# Multi-stage JVM image for the Collector (M1-379).
+#
+# Hand-written on purpose: it keeps the pom files untouched, so no Quarkus
+# container-image extension (a dependency that would need explicit approval) is
+# added. The build runs entirely inside the image, so a public-test host needs
+# only Docker — no host JDK 25 / Maven (07-deployment.md §7.7.2).
+#
+# Build context is the repo ROOT (set in docker-compose.yml), so the full
+# multi-module reactor is available to the build stage.
+
+# --- build stage: full JDK 25 + Maven, runs the reactor build ---
+# maven:3.9-eclipse-temurin-25 pins JDK 25 (D1) and the Maven 3.9 line; an
+# explicit tag, never `latest` (M1-004 pinned-tag precedent). A full JDK (not
+# JRE) is required because the NullAway/Error Prone compiler config forks javac
+# with --add-exports/--add-opens into jdk.compiler internals (root pom.xml).
+FROM maven:3.9-eclipse-temurin-25 AS build
+WORKDIR /build
+COPY . .
+# -am builds the Collector's upstream sibling modules too; -DskipTests because
+# @QuarkusTest/*IT spin up Testcontainers/DevServices containers that need a
+# Docker daemon unavailable inside `docker build`. Test integrity is enforced
+# separately by the host `mvn -B verify` gate, not by this image build.
+RUN mvn -B -pl infochat-collector -am clean install -DskipTests
+
+# --- runtime stage: JRE 25 only, runs the Quarkus fast-jar ---
+FROM eclipse-temurin:25-jre
+WORKDIR /app
+# curl is the in-container loopback health probe the compose healthcheck runs:
+# quarkus.http.host=127.0.0.1 binds /q/health to loopback, and the JRE base
+# ships neither curl nor wget.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+# Default Quarkus fast-jar layout: quarkus-run.jar resolves lib/, app/, and
+# quarkus/ relative to itself, so the whole quarkus-app/ dir is copied as a unit.
+COPY --from=build /build/infochat-collector/target/quarkus-app/ ./
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "quarkus-run.jar"]
