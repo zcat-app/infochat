@@ -1,9 +1,14 @@
 ---
 id: M1-385
 title: "wizard 6d: 7-apps.sh (ordered prod up) + 8-verify.sh (health smoke)"
-status: pending
+status: done
 created: 2026-06-15
-last_updated: 2026-06-15
+last_updated: 2026-06-16
+clarity_check:
+  date: 2026-06-16
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by:
   - M1-382
   - M1-379
@@ -34,7 +39,20 @@ spec_refs:
   - docs/spec/deployment.md §Topology
 decision_refs:
   - D41
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-16
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 147
+      removed: 10
 escalations: []
 revisions: []
 overrides: []
