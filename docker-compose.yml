@@ -72,6 +72,20 @@ services:
       # startup fast rather than running with a guessable secret.
       INFOCHAT_COLLECTOR_PASSWORD: ${INFOCHAT_COLLECTOR_PASSWORD:-}
       INFOCHAT_DB_PASSWORD: ${INFOCHAT_DB_PASSWORD:-}
+      # Remote LLM API key (remote-llm profile): the mounted application.properties
+      # references it as ${INFOCHAT_LLM_API_KEY} for the eval-pipeline LLM + the
+      # embeddings provider. Empty pass-through — blank for a local Ollama/llama.cpp
+      # setup where no key is written (§7.7.2 "Runtime config delivery", §7.3).
+      INFOCHAT_LLM_API_KEY: ${INFOCHAT_LLM_API_KEY:-}
+    volumes:
+      # Wizard-generated runtime config (§7.7.2 "Runtime config delivery"): mounted
+      # read-only at config/application.properties relative to the fast-jar working
+      # dir (/app), so Quarkus reads it at the external-config ordinal (260) — above
+      # the image-baked application.properties (250) and below the explicit
+      # environment: overrides above (env vars, 300). Carries quarkus.profile,
+      # infochat.llm.* / infochat.embeddings.*; secrets are referenced as ${VAR} and
+      # arrive via environment: (above), never written into this file (§7.3).
+      - ./prod/runtime/application.properties:/app/config/application.properties:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -96,6 +110,32 @@ services:
       # The Provider never holds owner credentials and does not migrate; only
       # the weak provider role for its default datasource.
       INFOCHAT_PROVIDER_PASSWORD: ${INFOCHAT_PROVIDER_PASSWORD:-}
+      # The mounted application.properties references these secrets as ${VAR}; they
+      # must reach the container env for Quarkus to expand them at boot, or the
+      # Provider fails as the adapter / bootstrap-admin config resolves (§7.7.2
+      # "Runtime config delivery"). Empty pass-throughs — the per-adapter lines and
+      # the api-key line are written only when the wizard configures that adapter /
+      # the remote LLM, so an unset var pairs with an absent property reference and
+      # is inert. Secrets stay in the environment, never in a mounted file (§7.3).
+      INFOCHAT_LLM_API_KEY: ${INFOCHAT_LLM_API_KEY:-}
+      INFOCHAT_SIMPLEX_ADMIN_CONTACT_ID: ${INFOCHAT_SIMPLEX_ADMIN_CONTACT_ID:-}
+      INFOCHAT_SIGNAL_ADMIN_CONTACT_ID: ${INFOCHAT_SIGNAL_ADMIN_CONTACT_ID:-}
+      SIMPLEX_SESSION_TOKEN: ${SIMPLEX_SESSION_TOKEN:-}
+    volumes:
+      # Runtime config — same mount as the Collector (§7.7.2): carries the operator's
+      # quarkus.profile, infochat.llm.*, infochat.adapters, and the per-adapter
+      # blocks. The Provider's image declares NO production infochat.adapters (only
+      # %test), so this mount is what carries that key and lets the Provider boot
+      # past AdapterRegistry gate 1 (§7.12.1). Read-only — the app never writes it.
+      - ./prod/runtime/application.properties:/app/config/application.properties:ro
+      # Adapter identity material captured out-of-band in step 6 (§7.5, §7.7.2):
+      # bind-mounted at the documented default identity-dir paths so the running
+      # adapters read the queue keypair / signal-cli account dir they validate at
+      # startup. Read-write — signal-cli mutates its account directory at runtime
+      # (§7.8.1 ReadWritePaths). Static default locations (operator-overridden paths
+      # would need a wizard-emitted compose variable, out of this ticket's scope).
+      - /var/lib/infochat/simplex:/var/lib/infochat/simplex
+      - /var/lib/infochat/signal-cli:/var/lib/infochat/signal-cli
     depends_on:
       # Only the Collector runs Flyway in production (spec/deployment.md
       # §Topology), so the Provider must not start until the Collector is

@@ -1,9 +1,15 @@
 ---
 id: M1-386
 title: "wizard 6e: orchestrator step wiring (0-8) + container config delivery (compose mounts + secrets.env)"
-status: pending
+status: done
 created: 2026-06-15
 last_updated: 2026-06-15
+clarity_check:
+  date: 2026-06-15
+  verdict: WARN
+  warnings:
+    - "Acceptance item 6 uses 'commit-message evidence' as its verification method for the manual integration smoke test; acceptable for live-infra but not independently reproducible by the reviewer."
+  blockers: []
 blocked_by:
   - M1-382
   - M1-379
@@ -39,14 +45,41 @@ spec_refs:
   - docs/spec/deployment.md §Topology
 decision_refs:
   - D46
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-15
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 87
+      removed: 14
 escalations: []
 revisions: []
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
+redteam_audits:
+  - date: 2026-06-16
+    verdict: CLEAN
+    base: 99de8559956e9d86fae6474d4b81f8d38e54c78b
+    head: 15ec9d9d84345afab8baa29b442112c4d7403a77
+    verdict_file: docs/plan/m1/redteam/M1-386-2026-06-16.md
+    out_of_model_count: 2
+    note: |
+      CLEAN — no gap between the threat model and the config-delivery diff.
+      Confirmed all six sensitive surfaces "(none touched)"; the two model
+      commitments the diff touches (§7.3 secrets-stay-in-env, loopback health
+      bind) are upheld. Two advisory out-of-model notes (secrets.env host
+      file perms; adapter identity bind-mount host paths) are host-side and
+      explicitly out of the documented v1 model (operator infrastructure
+      trusted) — no remediation ticket, no change to the M1-386 commit.
 ---
 
 # M1-386: wizard 6e — orchestrator wiring + container config delivery

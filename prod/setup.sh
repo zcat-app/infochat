@@ -12,15 +12,25 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 RUNTIME_DIR="${INFOCHAT_RUNTIME_DIR:-$SCRIPT_DIR/runtime}"
 STATE_FILE="$RUNTIME_DIR/.setup-state"
+SECRETS_FILE="$RUNTIME_DIR/secrets.env"
 COMPOSE_FILE="$REPO_ROOT/docker-compose.yml"
 
-# Wizard steps implemented in this slice (M1-382), as "subscript:description".
-# Steps 3-8 (postgres/llm/bootstrap/adapter/apps/verify) land in M1-383/384/385
-# and extend this list.
+# Full wizard step sequence (§7.7.2 "Structure"): the orchestrator is the single
+# place the step list is registered — leaf subscripts never self-register, so a
+# step is in the run iff it has an entry here. Adding a step is a two-part change:
+# the script under scripts/ AND its entry in this list. The 7-/8- scripts land
+# with M1-385 (blocked on this ticket); their entries are wired here so the list
+# is complete when those scripts arrive.
 STEPS=(
   "0-doctor.sh:Preflight host checks"
   "1-profile.sh:Select hardware profile"
   "2-secrets.sh:Generate DB-role secrets"
+  "3-postgres.sh:Start Postgres + bootstrap roles"
+  "4-llm.sh:Configure the LLM backend"
+  "5-bootstrap.sh:Install bootstrap sources"
+  "6-adapter.sh:Register messaging adapters"
+  "7-apps.sh:Start Collector then Provider"
+  "8-verify.sh:Health-check the deployment"
 )
 
 usage() {
@@ -51,6 +61,24 @@ print_menu() {
 
 mark_done() { printf '%s\n' "$1" >> "$STATE_FILE"; }
 is_done()   { [[ -f "$STATE_FILE" ]] && grep -qxF "$1" "$STATE_FILE"; }
+
+# Source secrets.env into the orchestrator environment so each subscript's
+# `docker compose up` resolves the compose ${INFOCHAT_*_PASSWORD} /
+# ${INFOCHAT_LLM_API_KEY} interpolations and the apps' mounted
+# application.properties ${VAR} references (§7.7.2 "Runtime config delivery").
+# Re-sourced before every step rather than once up front: a first run has no
+# secrets.env until step 2 mints the DB passwords (and step 6 adds the adapter
+# session token / bootstrap-admin ids), and steps 3/7's compose-up need those
+# freshly written values. `set -a` exports each assignment so child subscripts
+# inherit it; the secrets stay in the environment, never in a container-mounted
+# file (§7.3).
+load_secrets() {
+  [[ -f "$SECRETS_FILE" ]] || return 0
+  set -a
+  # shellcheck source=/dev/null
+  . "$SECRETS_FILE"
+  set +a
+}
 
 do_reset() {
   echo "+ docker compose -f $COMPOSE_FILE --profile prod down"
@@ -83,6 +111,7 @@ print_menu
 echo
 
 for entry in "${STEPS[@]}"; do
+  load_secrets
   script="${entry%%:*}"
   desc="${entry##*:}"
   if is_done "$script"; then
