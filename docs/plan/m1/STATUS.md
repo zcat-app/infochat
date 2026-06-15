@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 12 |
+| pending | 11 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 404 |
+| done | 405 |
 | deferred | 5 |
 | **total** | **421** |
 
@@ -32,7 +32,9 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-375 — provider: key the per-turn chat-tool cache on clamped args so over-cap duplicates do not double-charge the call budget (complexity: low, risk: low)
 - M1-376 — messaging: deterministic SimpleX adapterMessageId fallback and shared decode-ladder helper (complexity: low, risk: low)
 - M1-377 — collector: replace the re-eval one-element-array transaction workaround and unify the two fail-closed test-seam idioms (complexity: low, risk: low)
-- M1-382 — wizard 6a: prod/setup.sh orchestrator + 0-doctor + 1-profile + 2-secrets (complexity: high, risk: low)
+- M1-383 — wizard 6b: 3-postgres + 4-llm + 5-bootstrap subscripts (complexity: high, risk: low)
+- M1-384 — wizard 6c: 6-adapter.sh — SimpleX/Signal registration capture + bootstrap-admin union (complexity: high, risk: medium)
+- M1-385 — wizard 6d: 7-apps.sh (ordered prod up) + 8-verify.sh (health smoke) (complexity: medium, risk: low)
 
 ---
 
@@ -49,9 +51,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-383 — blocked_by: M1-382 (pending), M1-379 (done), M1-380 (done), M1-381 (done)
-- M1-384 — blocked_by: M1-382 (pending)
-- M1-385 — blocked_by: M1-382 (pending), M1-379 (done)
+_(none)_
 
 ---
 
@@ -70,6 +70,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-382 | wizard 6a: prod/setup.sh orchestrator + 0-doctor + 1-profile + 2-secrets | 2026-06-15 | round 1 APPROVE |
 | M1-381 | deploy: commit a default bootstrap-sources.json template under prod/config/ | 2026-06-15 | round 1 APPROVE |
 | M1-380 | deploy: add ollama + llama.cpp compose services, profile-gated so only the chosen backend starts | 2026-06-15 | round 1 APPROVE |
 | M1-379 | deploy: containerize Collector + Provider (Dockerfiles) and add them as prod-profile compose services | 2026-06-15 | round 2 APPROVE |
@@ -79,7 +80,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-367 | docs/comments: fix the Stage1RegexSet grammar, the EmbeddingMetadataDao 'defensive' framing, and the SimpleX mention-parser constant-time claim | 2026-06-14 | round 1 APPROVE |
 | M1-366 | provider: extract the InboundRouter.onMessage post-LLM dispatch/commit section into named methods | 2026-06-14 | round 1 APPROVE |
 | M1-365 | provider: batch the tag-vocab upsert into one round-trip; cache asset-snapshot reads within the freshness window | 2026-06-14 | round 1 APPROVE |
-| M1-364 | provider: fold probation_until into the per-dispatch UserSnapshot to remove the per-inbound probation queries | 2026-06-14 | round 1 APPROVE |
 
 ---
 
@@ -577,12 +577,12 @@ M1-377 (pending) ← runnable
 M1-378 (done)
   ├── M1-379 (done)
   │     ├── M1-380 (done)
-  │     │     └── M1-383 (pending)
+  │     │     └── M1-383 (pending) ← runnable
   │     ├── M1-383 (pending) [see above]
-  │     └── M1-385 (pending)
-  └── M1-382 (pending) ← runnable
+  │     └── M1-385 (pending) ← runnable
+  └── M1-382 (done)
         ├── M1-383 (pending) [see above]
-        ├── M1-384 (pending)
+        ├── M1-384 (pending) ← runnable
         └── M1-385 (pending) [see above]
 M1-381 (done)
   └── M1-383 (pending) [see above]

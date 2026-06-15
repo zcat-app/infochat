@@ -31,3 +31,10 @@ id_ed25519
 *.secret
 secrets.*
 credentials.json
+
+# Wizard runtime directory — generated secrets.env, filled config, .setup-state
+# (§7.7.2). Never commit. The committed secrets.env.example template is
+# re-included below (the `secrets.*` rule above would otherwise swallow it —
+# negation must come after it for gitignore last-match-wins).
+prod/runtime/
+!prod/config/secrets.env.example

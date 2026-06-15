@@ -1,9 +1,15 @@
 ---
 id: M1-382
 title: "wizard 6a: prod/setup.sh orchestrator + 0-doctor + 1-profile + 2-secrets"
-status: pending
+status: done
 created: 2026-06-15
 last_updated: 2026-06-15
+clarity_check:
+  date: 2026-06-15
+  verdict: PASS
+  warnings: []
+  blockers: []
+outline_file: target/m1-tick-outline-M1-382.md
 blocked_by:
   - M1-378
 files_budget: 6
@@ -39,14 +45,40 @@ spec_refs:
   - docs/spec/deployment.md §Operator inputs
 decision_refs:
   - D27
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-06-15
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 334
+      removed: 10
 escalations: []
 revisions: []
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-redteam_audits: []
+redteam_audits:
+  - date: 2026-06-15
+    verdict: CLEAN
+    base: 974bec2d21c178d39871b937fa44a40d28ef0784
+    head: ae649dcefa7271178cf13262695ac81626f39b74
+    verdict_file: docs/plan/m1/redteam/M1-382-2026-06-15.md
+    out_of_model_count: 2
+    note: |
+      Post-commit, pre-merge audit of the wizard scripts. CLEAN — no gaps
+      between the threat model and the diff's secret-handling (openssl rand,
+      0600, skip-if-present), .gitignore coverage, profile, or doctor logic.
+      Two out-of-model advisory observations recorded in the verdict file.
+      Advisory #1 (LLM API key echoed at the terminal) was hardened on this
+      branch within M1-382 per user direction: read -rsp + newline echo.
 ---
 
 # M1-382: wizard 6a — orchestrator + doctor + profile + secrets
