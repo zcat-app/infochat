@@ -515,7 +515,7 @@ So the operator-facing entry point is not buried under developer tooling, script
 ```
 docker-compose.yml        # single file, dev + prod profiles
 docker/
-  postgres-init.sql       # service-role password bootstrap (below)
+  postgres-init.sh        # service-role password bootstrap (below)
 prod/
   setup.sh                # the first-run wizard (§7.7.2) — the one command an operator runs
   scripts/                # wizard subscripts + ops scripts (backup.sh, reembed.sh)
@@ -558,34 +558,41 @@ Every script in both sets obeys the same shape:
 
 The scripts themselves are not implemented in Milestone 0 — they ship at Milestone 1 alongside the modules and compose services they wrap. This subsection is the design commitment to the contract.
 
-### Database role bootstrap — `docker/postgres-init.sql`
+### Database role bootstrap — `docker/postgres-init.sh`
 
-Flyway already creates the application roles and the pgvector extension: `V1__init.sql` runs `CREATE EXTENSION vector`, `V2__roles.sql` creates `infochat_collector` / `infochat_provider` / `infochat_admin`, and `V31` grants `LOGIN` to the two service roles. What Flyway **cannot** do is set the service-role *passwords* — a SQL migration cannot read the container's environment, and the passwords live in env vars (§7.5). `docker/postgres-init.sql` fills exactly that gap. It runs at container init (before the Collector's first Flyway pass), so it creates the roles **with** their passwords; Flyway's `IF NOT EXISTS` role creation then idempotently no-ops and only layers attributes + grants on top.
+Flyway already creates the application roles and the pgvector extension: `V1__init.sql` runs `CREATE EXTENSION vector`, `V2__roles.sql` creates `infochat_collector` / `infochat_provider` / `infochat_admin`, and `V31` grants `LOGIN` to the two service roles. What Flyway **cannot** do is set the service-role *passwords* — a SQL migration cannot read the container's environment, and the passwords live in env vars (§7.5). `docker/postgres-init.sh` fills exactly that gap. It runs at container init (before the Collector's first Flyway pass), so it creates the roles **with** their passwords; Flyway's `V2` `DO`-block `IF NOT EXISTS` role guard then idempotently no-ops, and the `V4`/`V31` `ALTER ROLE … NOLOGIN`/`LOGIN` toggling leaves the password untouched.
 
-**No literal passwords in this file** — the official `postgres` image substitutes `${VAR}` references in `/docker-entrypoint-initdb.d/*.sql` from the container's environment, and the trailing `:?` makes the substitution **fail-loud at container start** if the variable is unset (the container exits non-zero rather than silently creating a role with an empty or default password).
+**Why a `.sh`, not a `.sql`** — the official `postgres` image runs `/docker-entrypoint-initdb.d/*.sql` files through `psql`, which does **not** expand shell `${VAR}` references; only `*.sh` init files are shell-evaluated. A `.sql` would therefore store the literal string `${INFOCHAT_DB_PASSWORD:?…}` as the password and complete init silently. The `.sh` pipes a here-doc to `psql`, so the **shell** performs the `${VAR:?…}` expansion: an unset *or* empty variable (the `:?` colon form fails on both) aborts the script and exits the container non-zero rather than creating an unusable role. (Verified against `pgvector/pgvector:pg16`, M1-378.)
 
-```sql
-CREATE ROLE infochat WITH LOGIN PASSWORD '${INFOCHAT_DB_PASSWORD:?INFOCHAT_DB_PASSWORD is required}' SUPERUSER;
+**No literal passwords in this file.**
+
+```bash
+#!/bin/bash
+set -euo pipefail
+# Role attributes (NOLOGIN/LOGIN) and per-table grants are managed by Flyway
+# migrations V2__roles.sql / V31, run by the Collector as the owner role; this
+# script only creates the owner + roles WITH their env-driven passwords.
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<EOSQL
+CREATE ROLE infochat WITH LOGIN SUPERUSER PASSWORD '${INFOCHAT_DB_PASSWORD:?INFOCHAT_DB_PASSWORD is required}';
 CREATE ROLE infochat_collector WITH LOGIN PASSWORD '${INFOCHAT_COLLECTOR_PASSWORD:?INFOCHAT_COLLECTOR_PASSWORD is required}';
 CREATE ROLE infochat_provider WITH LOGIN PASSWORD '${INFOCHAT_PROVIDER_PASSWORD:?INFOCHAT_PROVIDER_PASSWORD is required}';
 CREATE DATABASE infochat OWNER infochat;
 \c infochat
 CREATE EXTENSION IF NOT EXISTS vector;
-CREATE EXTENSION IF NOT EXISTS pgcrypto;     -- for gen_random_uuid()
--- Role attributes (NOLOGIN/LOGIN) and per-table grants are managed by Flyway
--- migrations V2__roles.sql / V31, run by the Collector as the owner role.
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+EOSQL
 ```
 
-`docker-compose.yml` wires those variables to the Postgres container's environment. For local dev convenience, the compose file uses bash-style defaults that **only** apply in dev — the wizard (which writes a real `secrets.env`) and any production deployment MUST set the variables explicitly:
+`docker-compose.yml` wires those variables to the Postgres container's environment as **empty pass-throughs** — Compose performs no command substitution in `${VAR:-…}` defaults (a `${VAR:-$(openssl rand -hex 24)}` default renders the *literal* `$(openssl rand -hex 24)`, not a random value), and any non-empty compose default would also keep the init script's `${VAR:?}` guard from ever firing:
 
 ```yaml
 environment:
-  INFOCHAT_DB_PASSWORD:        ${INFOCHAT_DB_PASSWORD:-$(openssl rand -hex 24)}
-  INFOCHAT_COLLECTOR_PASSWORD: ${INFOCHAT_COLLECTOR_PASSWORD:-$(openssl rand -hex 24)}
-  INFOCHAT_PROVIDER_PASSWORD:  ${INFOCHAT_PROVIDER_PASSWORD:-$(openssl rand -hex 24)}
+  INFOCHAT_DB_PASSWORD:        ${INFOCHAT_DB_PASSWORD:-}
+  INFOCHAT_COLLECTOR_PASSWORD: ${INFOCHAT_COLLECTOR_PASSWORD:-}
+  INFOCHAT_PROVIDER_PASSWORD:  ${INFOCHAT_PROVIDER_PASSWORD:-}
 ```
 
-Result: a fresh `docker compose up` on a developer laptop generates random per-container passwords (printable in `docker compose logs postgres` once, then irretrievable), while the same compose file with the env vars set (the wizard's `secrets.env`, a secrets manager, or an `EnvironmentFile` mounted at 0600) picks up the operator's chosen secrets. There is no `'changeme'` baked anywhere in the repo — copy-paste cannot leak a known password.
+Result: `docker compose --profile prod up` with the three variables exported (the wizard's `secrets.env`, a secrets manager, or an `EnvironmentFile` mounted at 0600) creates the roles with the operator's chosen secrets; with a variable unset it resolves to empty, the init script's `${VAR:?}` aborts, and the container exits non-zero rather than starting with a guessable credential. There is no `'changeme'` or other known password baked anywhere in the repo — randomness, where wanted, is generated by the wizard's `2-secrets.sh` via `openssl rand` (a shell, where command substitution works), not by the compose file. Developers running `--profile dev up` export the three variables (or keep a local git-ignored `.env`).
 
 **Operator note — `simplex-cli` and `signal-cli` are out-of-band.** v1 does not ship containers for the messaging clients. The `simplex-cli` WebSocket bot client and the `signal-cli` JSON-RPC subprocess each require interactive bot-account registration (queue creation for SimpleX; phone-number/captcha for Signal — [06-messaging.md §6.5.1](06-messaging.md)) that doesn't fit cleanly into compose. Operators — and the wizard's step 6 (§7.7.2) — run them on the host or in their own dedicated containers and point the per-adapter `identity-dir` at the on-disk state directory each tool produces. For a SimpleX-only or Signal-only deployment, omit the other client; for the SimpleX + Signal v1 production shape, run both.
 
@@ -619,7 +626,7 @@ The right-hand column maps each step to the operator inputs enumerated in [../sp
 | 0 | `0-doctor.sh` | Preflight: Linux host; Docker daemon reachable; Compose v2; TCP ports 5432 / 8080 / 8081 (and 11434 for Ollama) free; minimum free disk. Fails fast naming the unmet check. | — |
 | 1 | `1-profile.sh` | Pick `laptop`\|`vps`\|`pi`\|`remote-llm` (§7.2). Default `laptop`. Writes `quarkus.profile`. | 1 (profile) |
 | 2 | `2-secrets.sh` | `openssl rand` the three DB-role passwords; prompt for any LLM API key. Writes the runtime `secrets.env` mode 0600 (§7.3 — secrets never enter a committed file). Skips any value already present. | 5 (DB creds), 6 (API key) |
-| 3 | `3-postgres.sh` | `docker compose --profile prod up -d postgres`; the service-role password bootstrap runs from `docker/postgres-init.sql` (§7.7) on first container init. | 5 (DB creds) |
+| 3 | `3-postgres.sh` | `docker compose --profile prod up -d postgres`; the service-role password bootstrap runs from `docker/postgres-init.sh` (§7.7) on first container init. | 5 (DB creds) |
 | 4 | `4-llm.sh` | Branch on the choice. **Ollama:** start the ollama service and `ollama pull` the profile's chat / security / embedding models. **llama.cpp:** start the llama.cpp service and fetch the configured GGUF. **Remote:** collect base-URL + key only. Writes `infochat.llm.*` and `infochat.embeddings.*` (§7.4). | 6 (LLM config) |
 | 5 | `5-bootstrap.sh` | Copy the `prod/config/bootstrap-sources.json` template into the runtime dir if none exists; optionally enable `bootstrap-assets.json` (§7.6.2). | 3 (sources), 4 (assets) |
 | 6 | `6-adapter.sh` | For each chosen adapter: drive the out-of-band registration (SimpleX queue creation; Signal phone+captcha — §7.7 operator note, [06-messaging.md §6.5.1](06-messaging.md)), capture the resulting `identity-dir` (plus `SIMPLEX_SESSION_TOKEN`), and collect that adapter's `bootstrap-admin-contact-id`. Enforces a non-empty admin union before proceeding (§7.6.3). Writes `infochat.adapters` and the per-adapter blocks (§7.4). | 2 (bootstrap admin), 7 (adapters) |
@@ -644,7 +651,7 @@ The wizard drives but cannot fully eliminate the interactive parts of messaging-
 The wizard is a thin layer over artifacts that must exist first. None are new spec commitments; they are the concrete pieces the wizard orchestrates:
 
 - App container images and the `prod` compose profile carrying Collector and Provider services (§7.7).
-- `docker/postgres-init.sql` setting the service-role passwords from env (§7.7).
+- `docker/postgres-init.sh` setting the service-role passwords from env (§7.7).
 - The default `bootstrap-sources.json` template under `prod/config/` (§7.6.1).
 
 ---
@@ -784,7 +791,7 @@ The same shape applies to messaging-adapter startup ([06-messaging.md §6.7](06-
 
 ## 7.9 Bootstrap & first-run sequence
 
-1. Install Postgres + pgvector. Create roles via `postgres-init.sql`.
+1. Install Postgres + pgvector. Create roles via `postgres-init.sh`.
 2. Install Ollama (or llama.cpp). Pull required models per profile.
 3. Install JDK 25. Verify `/opt/infochat/jdk-25/bin/java -version` reports `25.x`.
 4. Place artifacts in `/opt/infochat/current`.

@@ -7,14 +7,27 @@
 #
 # The default POSTGRES_PASSWORD is for local dev only; production deployments
 # MUST override via the environment.
+#
+# Role/database creation is owned by docker/postgres-init.sh (run once at first
+# container init), not by POSTGRES_USER/POSTGRES_DB — the init script creates the
+# infochat owner + database and the two service roles WITH their env-driven
+# passwords (07-deployment.md §Database role bootstrap).
 
 services:
   postgres:
     image: pgvector/pgvector:pg16
     environment:
-      POSTGRES_USER: infochat
-      POSTGRES_DB: infochat
+      # Bootstrap superuser for the image's own initdb. Nothing connects as this
+      # role after init (apps use infochat_collector/infochat_provider; Flyway
+      # uses the infochat owner) — but the image requires it to be set.
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-infochat-dev}
+      # Service-role passwords consumed by docker/postgres-init.sh. Empty
+      # pass-throughs: an operator's exported value (or a local .env / the
+      # wizard's secrets.env) wins; an unset var resolves to empty and trips the
+      # init script's ${VAR:?} fail-loud guard rather than baking a known secret.
+      INFOCHAT_DB_PASSWORD: ${INFOCHAT_DB_PASSWORD:-}
+      INFOCHAT_COLLECTOR_PASSWORD: ${INFOCHAT_COLLECTOR_PASSWORD:-}
+      INFOCHAT_PROVIDER_PASSWORD: ${INFOCHAT_PROVIDER_PASSWORD:-}
     ports:
       # Bind to loopback only: a bare "5432:5432" publishes the dev DB on
       # every host interface (0.0.0.0), reachable from the LAN with the
@@ -22,6 +35,7 @@ services:
       - "127.0.0.1:5432:5432"
     volumes:
       - infochat-pgdata:/var/lib/postgresql/data
+      - ./docker/postgres-init.sh:/docker-entrypoint-initdb.d/postgres-init.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U infochat -d infochat"]
       interval: 5s
