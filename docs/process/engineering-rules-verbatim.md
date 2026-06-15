@@ -60,7 +60,7 @@ The reviewer's `TEST-INTEGRITY-CHECK` fails if the diff introduces any of the fo
 
 - `@Disabled`, `@Ignore`, `assumeTrue(false)`, JUnit `assumptions` that always skip
 - New `@Test` body that is empty, only contains `assertTrue(true)` / `assertNotNull(null)`-style trivialities, or only logs
-- `mvn ... -DskipTests`, `-Dmaven.test.skip=true`, or `--no-verify` in any committed file (scripts, CI, docs except this one)
+- `mvn ... -DskipTests`, `-Dmaven.test.skip=true`, or `--no-verify` in any committed file (scripts, CI, docs except this one) — **except** a `RUN mvn ... -DskipTests` line inside a multi-stage `Dockerfile` *build stage*, where Testcontainers-backed tests cannot run (no docker-in-docker) and the deployable image is a build artifact, not a test surface. The host `mvn verify` gate stays the sole test authority and is unaffected by the image build, so this skip hides no obstacle. The exception is narrow and grep-shaped (a `Dockerfile` build-stage `RUN` line only); a skip flag anywhere else — scripts, CI, the verify gate — remains forbidden. (M1-379)
 - `git push --force` / `git reset --hard` in any committed script
 
 ### Semantic (only the reviewer can catch these)
