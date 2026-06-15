@@ -6,7 +6,7 @@ Preconditions:
 
 - The ticket exists and `status: in-progress`. (Rework rounds return the ticket to `in-progress` before re-review; the only state from which `review` runs is `in-progress`.)
 - The current branch is the per-ticket branch resolved per the **branch resolution procedure** in [`docs/process/workflow.md`](../../../../docs/process/workflow.md) §"Naming conventions (slug, branch, ticket file)" — typically `m1/M1-NNN-<slug>` derived from the current title, with the documented prefix-glob fallback when `refine` has changed the title since `start`.
-- `mvn verify` was run after the most recent edit and exited zero. (Re-run it if uncertain — the reviewer requires fresh test output.)
+- `mvn verify` is green for the current tree — either run after the most recent edit and exited zero, OR a prior green log reused via the inert-diff gate (SKILL.md §M1 workflow rules "Reuse a still-valid green verify before review"; valid only when no `*.java`/`pom.xml`/`src/**/resources/**` changed since the log and no merge/rebase intervened). (Re-run it if uncertain — the reviewer requires a green log covering the current testable surface.)
 
 Steps:
 
