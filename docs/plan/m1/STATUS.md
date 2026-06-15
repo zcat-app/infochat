@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 9 |
+| pending | 10 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 407 |
 | deferred | 5 |
-| **total** | **421** |
+| **total** | **422** |
 
 ---
 
@@ -32,7 +32,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-375 — provider: key the per-turn chat-tool cache on clamped args so over-cap duplicates do not double-charge the call budget (complexity: low, risk: low)
 - M1-376 — messaging: deterministic SimpleX adapterMessageId fallback and shared decode-ladder helper (complexity: low, risk: low)
 - M1-377 — collector: replace the re-eval one-element-array transaction workaround and unify the two fail-closed test-seam idioms (complexity: low, risk: low)
-- M1-385 — wizard 6d: 7-apps.sh (ordered prod up) + 8-verify.sh (health smoke) (complexity: medium, risk: low)
+- M1-386 — wizard 6e: orchestrator step wiring (0-8) + container config delivery (compose mounts + secrets.env) (complexity: medium, risk: medium)
 
 ---
 
@@ -49,7 +49,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-385 — blocked_by: M1-382 (done), M1-379 (done), M1-386 (pending)
 
 ---
 
@@ -576,12 +576,17 @@ M1-378 (done)
   ├── M1-379 (done)
   │     ├── M1-380 (done)
   │     │     └── M1-383 (done)
+  │     │           └── M1-386 (pending) ← runnable
+  │     │                 └── M1-385 (pending)
   │     ├── M1-383 (done) [see above]
-  │     └── M1-385 (pending) ← runnable
+  │     ├── M1-385 (pending) [see above]
+  │     └── M1-386 (pending) [see above]
   └── M1-382 (done)
         ├── M1-383 (done) [see above]
         ├── M1-384 (done)
-        └── M1-385 (pending) [see above]
+        │     └── M1-386 (pending) [see above]
+        ├── M1-385 (pending) [see above]
+        └── M1-386 (pending) [see above]
 M1-381 (done)
   └── M1-383 (done) [see above]
 ```
