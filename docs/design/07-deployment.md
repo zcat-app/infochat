@@ -251,6 +251,12 @@ infochat.groups.default-timezone=UTC
 # application.properties (see the two blocks below). Setting it here once
 # would collide between collector and provider — they cannot share a port
 # on a single host.
+# Opt-in canonical-composed shape (§7.12.1): a SEPARATE management interface
+# for /q/health + /q/metrics. The v1 containerized wizard does NOT enable this
+# — no metrics backend is wired and the app port serves only the health probes,
+# so it serves health on the main loopback HTTP port instead (§7.7.2 "Runtime
+# config delivery to the containers"). Enable these two only when wiring a
+# metrics backend or an off-host prober.
 quarkus.management.enabled=true                  # /q/health, /q/metrics
 # The management interface binds 0.0.0.0 by Quarkus default — without this
 # pin, enabling it above publishes health + metrics on all interfaces.
@@ -619,6 +625,8 @@ The wizard and the §7.7.1 wrappers serve **different audiences and runtimes** a
 
 The orchestrator `prod/setup.sh` drives a set of single-purpose subscripts under `prod/scripts/` (the `N-name.sh` files below), run in dependency order. It records completed steps in a **git-ignored** `.setup-state` file in the runtime directory, so a re-run resumes from the first incomplete step rather than restarting, and never regenerates a value that already exists.
 
+The orchestrator is the **single place the step sequence is registered**: `prod/setup.sh` enumerates the full list (steps 0–8) itself, and the leaf subscripts under `prod/scripts/` never self-register. A subscript file existing on disk does not put it in the run — the orchestrator's step list does. Adding a step is therefore a two-part change (the script *and* its entry in the orchestrator's list); a change that adds only the script leaves the step orphaned, invoked by nothing.
+
 The right-hand column maps each step to the operator inputs enumerated in [../spec/deployment.md](../spec/deployment.md) §Operator inputs — the table is the audit that the wizard covers all seven and drops none.
 
 | Step | Subscript | Does | Operator input |
@@ -631,7 +639,7 @@ The right-hand column maps each step to the operator inputs enumerated in [../sp
 | 5 | `5-bootstrap.sh` | Copy the `prod/config/bootstrap-sources.json` template into the runtime dir if none exists; optionally enable `bootstrap-assets.json` (§7.6.2). | 3 (sources), 4 (assets) |
 | 6 | `6-adapter.sh` | For each chosen adapter: drive the out-of-band registration (SimpleX queue creation; Signal phone+captcha — §7.7 operator note, [06-messaging.md §6.5.1](06-messaging.md)), capture the resulting `identity-dir` (plus `SIMPLEX_SESSION_TOKEN`), and collect that adapter's `bootstrap-admin-contact-id`. Enforces a non-empty admin union before proceeding (§7.6.3). Writes `infochat.adapters` and the per-adapter blocks (§7.4). | 2 (bootstrap admin), 7 (adapters) |
 | 7 | `7-apps.sh` | `docker compose --profile prod up -d` the Collector (which runs Flyway), wait until it is healthy, then the Provider — encoding the [../spec/deployment.md](../spec/deployment.md) §Topology startup ordering (only the Collector migrates in production). | — |
-| 8 | `8-verify.sh` | Poll `/q/health` on the loopback management bind (§7.4) until ready or timeout; print a green/red summary naming any unhealthy component. | — |
+| 8 | `8-verify.sh` | Poll `/q/health` on each app's **main loopback HTTP port** (collector 8080 / provider 8081; the §7.12.1 shipped-default shape, not a management interface), reached inside the container via `docker compose exec` — the same loopback bind the Collector's own compose healthcheck uses — until ready or timeout; print a green/red summary naming any unhealthy component. | — |
 
 #### Behavior contract
 
@@ -645,6 +653,16 @@ Every subscript obeys the §7.7.1 script shape (`set -euo pipefail`, echoes the 
 #### What stays manual
 
 The wizard drives but cannot fully eliminate the interactive parts of messaging-client registration: SimpleX queue creation and Signal phone-number / captcha enrolment require human steps (§7.7 operator note). The wizard's contribution is to *sequence* those steps, capture their on-disk output into the correct `identity-dir`, and wire the resulting properties — not to remove the human from the loop.
+
+#### Runtime config delivery to the containers
+
+The wizard writes its generated config to the git-ignored runtime directory (above); the containerized Collector and Provider consume it through three seams the `prod` compose profile wires up. All three are **load-bearing — without them the prod stack does not start**: the Provider's `AdapterRegistry` gate 1 fails fast when `infochat.adapters` is unset, and `docker/postgres-init.sh`'s `${VAR:?}` guard aborts the Postgres container when the role passwords are empty.
+
+- **`secrets.env` → process environment.** The orchestrator sources the runtime `secrets.env` into its own environment before running the steps, so every subscript's `docker compose up` resolves the compose file's `${INFOCHAT_*_PASSWORD}` / `${INFOCHAT_LLM_API_KEY}` interpolations (§7.5). Compose auto-loads only a repo-root `.env`, never the runtime-dir `secrets.env`, so the wizard makes the values present explicitly. Secrets stay in the environment, never in a mounted config file (§7.3).
+- **`runtime/application.properties` → mounted at `config/application.properties` in each app container.** The fast-jar runs from the image's working directory, so Quarkus reads `config/application.properties` relative to it at a higher config ordinal than the image-baked per-service defaults and a lower one than the explicit compose `environment:` overrides (datasource URL, role password). This is how the operator's `quarkus.profile`, `infochat.llm.*`, `infochat.adapters`, and the per-adapter blocks reach the running services. The `application.properties` baked into each image carries only the profile-independent defaults — and the Provider's image declares **no production `infochat.adapters`** (only `%test`), so that key MUST arrive via this mount or the Provider refuses to boot.
+- **Adapter `identity-dir`s → bind-mounted into the Provider.** The out-of-band identity material the operator registered in step 6 lives on the host at each adapter's `identity-dir`; the Provider container bind-mounts those paths so the running adapters can read the queue keypair / `signal-cli` account directory they validate at startup (§7.5, [06-messaging.md §6.4.1, §6.5.4](06-messaging.md)).
+
+**Health surface.** The containerized v1 deployment serves `/q/health` on each service's **main HTTP port** (collector 8080 / provider 8081), bound to container loopback (`quarkus.http.host=127.0.0.1`) — the §7.12.1 *shipped per-module defaults* shape, **not** a separate management interface. In v1 the app port serves only the health probes (no other HTTP consumer) and no metrics backend is wired (§7.12.1), so the management interface the §7.4 canonical example shows (`quarkus.management.enabled=true`) buys nothing here; the wizard's generated `application.properties` leaves it unset. `8-verify.sh` therefore probes health with `docker compose exec <service> curl 127.0.0.1:<port>/q/health`, inside the container's loopback namespace — the same bind the Collector's compose healthcheck already uses. A deployment that later wires a metrics backend and an off-host prober opts into the management interface per §7.12.1; the v1 wizard does not.
 
 #### Dependencies
 
