@@ -1,0 +1,58 @@
+[
+  {
+    "kind": "rss",
+    "identifier": "https://www.artificialintelligence-news.com/feed/",
+    "name": "AI News",
+    "category": "news",
+    "tags": ["AI", "Development"]
+  },
+  {
+    "kind": "rss",
+    "identifier": "https://huggingface.co/blog/feed.xml",
+    "name": "Hugging Face",
+    "category": "blog",
+    "tags": ["AI", "Research"]
+  },
+  {
+    "kind": "nitter",
+    "identifier": "https://rss.xcancel.com/aisearchio/rss",
+    "name": "AI Search",
+    "category": "social",
+    "tags": ["AI"]
+  },
+  {
+    "kind": "odysee",
+    "identifier": "https://www.odysee.com/$/rss/@NullSecurityX:0",
+    "name": "NullSecX",
+    "category": "social",
+    "tags": ["Security"]
+  },
+  {
+    "kind": "youtube",
+    "identifier": "https://youtube.com/feeds/videos.xml?channel_id=UCCBVCTuk6uJrN3iFV_3vurg",
+    "name": "Devoxx",
+    "category": "social",
+    "tags": ["Development", "Java", "Video"]
+  },
+  {
+    "kind": "bluesky",
+    "identifier": "https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?actor=langchain4j.dev",
+    "name": "LangChain4j",
+    "category": "social",
+    "tags": ["Java", "Development", "AI"]
+  },
+  {
+    "kind": "nostr",
+    "identifier": "{\"kinds\":[1,6],\"authors\":[\"npub1...\"]}",
+    "name": "Author X notes",
+    "category": "social",
+    "tags": ["Nostr", "Security"],
+    "config": {
+      "relays": [
+        "wss://relay.damus.io",
+        "wss://nos.lol",
+        "wss://relay.nostr.band"
+      ]
+    }
+  }
+]

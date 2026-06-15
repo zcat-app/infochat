@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 16 |
+| pending | 15 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 400 |
+| done | 401 |
 | deferred | 5 |
 | **total** | **421** |
 
@@ -33,7 +33,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-376 — messaging: deterministic SimpleX adapterMessageId fallback and shared decode-ladder helper (complexity: low, risk: low)
 - M1-377 — collector: replace the re-eval one-element-array transaction workaround and unify the two fail-closed test-seam idioms (complexity: low, risk: low)
 - M1-378 — deploy: env-driven service-role passwords via docker/postgres-init.sql + compose wiring (complexity: medium, risk: medium)
-- M1-381 — deploy: commit a default bootstrap-sources.json template under prod/config/ (complexity: low, risk: low)
 
 ---
 
@@ -53,7 +52,7 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 - M1-379 — blocked_by: M1-378 (pending)
 - M1-380 — blocked_by: M1-379 (pending)
 - M1-382 — blocked_by: M1-378 (pending)
-- M1-383 — blocked_by: M1-382 (pending), M1-379 (pending), M1-380 (pending), M1-381 (pending)
+- M1-383 — blocked_by: M1-382 (pending), M1-379 (pending), M1-380 (pending), M1-381 (done)
 - M1-384 — blocked_by: M1-382 (pending)
 - M1-385 — blocked_by: M1-382 (pending), M1-379 (pending)
 
@@ -74,6 +73,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-381 | deploy: commit a default bootstrap-sources.json template under prod/config/ | 2026-06-15 | round 1 APPROVE |
 | M1-369 | llm-adapter: honor the OpenAI embeddings wire index field instead of trusting positional order | 2026-06-15 | round 1 APPROVE |
 | M1-368 | collector: bound Stage 1 regex match collection with a fail-closed match-count cap | 2026-06-15 | round 1 APPROVE |
 | M1-367 | docs/comments: fix the Stage1RegexSet grammar, the EmbeddingMetadataDao 'defensive' framing, and the SimpleX mention-parser constant-time claim | 2026-06-14 | round 1 APPROVE |
@@ -83,7 +83,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-363 | provider: remove the audit-bypassing LlmOutputSanitizer constructor; type-check tool-arg list elements at the LLM dispatch boundary | 2026-06-14 | round 1 APPROVE |
 | M1-362 | core: cap per-node suppressed-throwable width in SafeLog; tighten isJsonShaped to reject trailing junk | 2026-06-14 | round 1 APPROVE |
 | M1-361 | core: split SQL-only audit verbs out of the writer-facing AuditAction enum; rename the config-baked STARTUP_RELEASE_ON_STAGE2_FAILURE_TRUE verb | 2026-06-14 | round 1 APPROVE |
-| M1-360 | messaging: reset subprocess consecutive-crash counters on healthy uptime; make the config-bean enablement gate honest; route outbound cap check through Utf8 | 2026-06-14 | round 2 APPROVE |
 
 ---
 
@@ -588,6 +587,6 @@ M1-378 (pending) ← runnable
         ├── M1-383 (pending) [see above]
         ├── M1-384 (pending)
         └── M1-385 (pending) [see above]
-M1-381 (pending) ← runnable
+M1-381 (done)
   └── M1-383 (pending) [see above]
 ```
